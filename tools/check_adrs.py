@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import sys
 
-FILENAME_RE = re.compile(r"^(?P<number>\d{4})-(?P<slug>[a-z0-9][a-z0-9-]*)\.md$")
+FILENAME_RE = re.compile(r"^(?P<number>\d{4})-(?P<slug>[a-z0-9][a-z0-9.-]*)\.md$")
 HEADING_RE = re.compile(r"^#\s+ADR\s+(?P<number>\d{4})\s*(?:[:—-])\s*\S.+$")
 STATUS_RE = re.compile(r"^\s*-?\s*Status:\s*(?P<status>[A-Za-z]+)\s*$", re.MULTILINE | re.IGNORECASE)
 INDEX_RE = re.compile(
