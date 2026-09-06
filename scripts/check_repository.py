@@ -26,6 +26,7 @@ REQUIRED = [
     "contracts/stability.toml", "tools/check_contract_stability.py", "tests/tooling/test_contract_stability.py",
     "contracts/roadmap.toml", "tools/check_roadmap.py", "tests/tooling/test_roadmap.py",
     "contracts/layering.toml", "tools/check_layering.py", "tests/tooling/test_layering.py",
+    "contracts/components.toml", "tools/check_component_maturity.py", "tests/tooling/test_component_maturity.py",
     "profiles/arch-hyprland-v1.toml",
     "crates/linura-intent/Cargo.toml", "crates/linura-graph/Cargo.toml", "crates/linura-capability-sdk/Cargo.toml",
     "crates/linura-planner/Cargo.toml", "crates/linura-provenance/Cargo.toml", "crates/linura-agent-runtime/Cargo.toml",
@@ -263,6 +264,16 @@ def main() -> int:
     if layering_result.returncode != 0:
         details = layering_result.stderr.strip() or layering_result.stdout.strip()
         failures.append(f"layering contract validation failed: {details}")
+
+    maturity_result = subprocess.run(
+        [sys.executable, str(ROOT / "tools/check_component_maturity.py"), str(ROOT)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if maturity_result.returncode != 0:
+        details = maturity_result.stderr.strip() or maturity_result.stdout.strip()
+        failures.append(f"component maturity validation failed: {details}")
 
     if failures:
         for failure in failures:
