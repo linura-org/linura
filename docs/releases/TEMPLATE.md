@@ -1,6 +1,6 @@
 # vX.Y.Z — implementation theme
 
-**Status:** implementation complete; publication evidence is established only by the protected release lifecycle.
+**Status:** immutable release contract; live publication state is external to this frozen document.
 **Claim class:** Experimental
 **Supported platform profiles:** none
 
@@ -38,7 +38,7 @@ State API/protocol/profile compatibility and any breaking changes.
 
 ## Required acceptance evidence
 
-List the permanent exact-source evidence required before publication.
+List the permanent exact-source evidence required before publication. Phrase requirements as timeless contract conditions rather than temporary live-state assertions.
 
 ## Known limitations and unsupported states
 
@@ -63,7 +63,9 @@ State required binaries, SBOM, checksums, attestations and any version-specific 
 
 ## Publication evidence
 
-Publication evidence exists only after the exact source passes the protected lifecycle, the tag is bound to that source, the exact candidate bytes are promoted, and independent verification succeeds.
+Publication state is intentionally external to this immutable contract. The protected release lifecycle must bind the exact source and sealed bytes to the version tag, publish the immutable GitHub Release, independently verify the published release, and only then record terminal evidence in the version's publication dossier and advance roadmap state.
+
+Do not write temporary live-state phrases such as “release candidate”, “publication pending”, “publication evidence remains pending”, or “not yet released” into this frozen contract. The same bytes may become the immutable GitHub Release body.
 
 ## Next-version handoff
 
