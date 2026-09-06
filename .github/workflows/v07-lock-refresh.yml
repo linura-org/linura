@@ -1,0 +1,24 @@
+name: v0.7 Lockfile Derivation
+
+on:
+  push:
+    branches:
+      - feat/v0.7-local-library
+
+permissions:
+  contents: read
+
+jobs:
+  derive:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Derive exact Cargo.lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo generate-lockfile
+          echo '---BEGIN-CARGO-LOCK-BASE64---'
+          base64 -w0 Cargo.lock
+          echo
+          echo '---END-CARGO-LOCK-BASE64---'
