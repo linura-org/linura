@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -29,28 +30,37 @@ def same_head_body() -> str:
     )
 
 
+def missing_ref_body() -> str:
+    return json.dumps({"message": f"No ref found for: {probe.MISSING_WORKFLOW_REF}"})
+
+
 class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
-    def test_repository_write_capability_is_required(self) -> None:
-        accepted = probe.validate_repository_access_response(
-            status=200,
-            body=json.dumps({"permissions": {"push": True}}),
+    def test_same_head_merge_proves_contents_write_capability(self) -> None:
+        accepted = probe.validate_contents_probe_response(
+            status=204,
             credential_source="github",
         )
         self.assertEqual("repository GITHUB_TOKEN", accepted)
 
-        with self.assertRaisesRegex(probe.AuthorityProbeError, "Contents write authority"):
-            probe.validate_repository_access_response(
-                status=200,
-                body=json.dumps({"permissions": {"push": False}}),
+    def test_github_token_without_contents_write_is_rejected(self) -> None:
+        with self.assertRaisesRegex(probe.AuthorityProbeError, "Contents write"):
+            probe.validate_contents_probe_response(
+                status=403,
                 credential_source="github",
             )
 
     def test_dedicated_token_without_contents_write_is_rejected(self) -> None:
         with self.assertRaisesRegex(probe.AuthorityProbeError, "Contents write"):
-            probe.validate_repository_access_response(
-                status=200,
-                body=json.dumps({"permissions": {"push": False}}),
+            probe.validate_contents_probe_response(
+                status=403,
                 credential_source="dedicated",
+            )
+
+    def test_unexpected_contents_success_is_rejected(self) -> None:
+        with self.assertRaisesRegex(probe.AuthorityProbeError, "unexpectedly changed"):
+            probe.validate_contents_probe_response(
+                status=201,
+                credential_source="github",
             )
 
     def test_exact_same_head_validation_proves_pr_endpoint_authority(self) -> None:
@@ -131,7 +141,7 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
     def test_exact_missing_ref_validation_proves_actions_dispatch_authority(self) -> None:
         accepted = probe.validate_actions_probe_response(
             status=422,
-            body=json.dumps({"message": f"No ref found for: {probe.MISSING_WORKFLOW_REF}"}),
+            body=missing_ref_body(),
             missing_ref=probe.MISSING_WORKFLOW_REF,
             credential_source="github",
         )
@@ -155,6 +165,38 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
                 credential_source="dedicated",
             )
 
+    def test_probe_uses_only_non_mutating_capability_requests(self) -> None:
+        with mock.patch.object(
+            probe,
+            "_request",
+            side_effect=[
+                (204, ""),
+                (422, same_head_body()),
+                (422, missing_ref_body()),
+            ],
+        ) as request:
+            accepted = probe.probe(
+                repository="linura-org/linura",
+                token="token",
+                base="main",
+                head="main",
+                credential_source="github",
+            )
+
+        self.assertEqual("repository GITHUB_TOKEN", accepted)
+        self.assertEqual(3, request.call_count)
+        contents_call, pr_call, actions_call = request.call_args_list
+        self.assertEqual("POST", contents_call.kwargs["method"])
+        self.assertTrue(contents_call.kwargs["url"].endswith("/merges"))
+        self.assertEqual({"base": "main", "head": "main"}, contents_call.kwargs["body"])
+        self.assertEqual("POST", pr_call.kwargs["method"])
+        self.assertTrue(pr_call.kwargs["url"].endswith("/pulls"))
+        self.assertEqual("main", pr_call.kwargs["body"]["base"])
+        self.assertEqual("main", pr_call.kwargs["body"]["head"])
+        self.assertEqual("POST", actions_call.kwargs["method"])
+        self.assertIn("/actions/workflows/", actions_call.kwargs["url"])
+        self.assertEqual({"ref": probe.MISSING_WORKFLOW_REF}, actions_call.kwargs["body"])
+
     def test_probe_requires_identical_base_and_head(self) -> None:
         with self.assertRaisesRegex(probe.AuthorityProbeError, "identical base/head"):
             probe.probe(
@@ -164,6 +206,19 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
                 head="topic",
                 credential_source="github",
             )
+
+    def test_release_contract_docs_require_live_contents_probe(self) -> None:
+        guide = (ROOT / "agents/skills/release.md").read_text(encoding="utf-8")
+        engineering = (ROOT / "docs/release-engineering.md").read_text(encoding="utf-8")
+
+        for text in (guide, engineering):
+            self.assertIn("204", text)
+            self.assertIn("merge", text.casefold())
+        self.assertNotIn("authenticated repository permissions must report push authority", guide)
+        self.assertNotIn(
+            "readiness requires authenticated repository permissions to report push/write authority",
+            engineering,
+        )
 
     def test_release_promotion_isolates_full_closure_authority_before_publication_dispatch(self) -> None:
         workflow = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")

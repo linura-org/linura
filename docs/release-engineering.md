@@ -113,7 +113,7 @@ It is split into three authority stages:
 1. a read-only validation job verifies the exact proof run identity, event, terminal status, success conclusion and source SHA;
 2. validation requires the proven SHA still equals current `main`, validates version/frozen contract again, and refuses a version tag already bound to another source;
 3. an isolated closure-readiness job obtains only the write permissions needed to model future closure (`contents: write`, `pull-requests: write`, `actions: write`) and uses the exact same credential selection as closure;
-4. readiness requires authenticated repository permissions to report push/write authority, covering release-scoped branch push, protected PR merge authority, and branch cleanup capability;
+4. readiness proves Contents/write through GitHub's merge endpoint using identical `main` base/head and accepts only the no-op `204` response, covering the write capability needed for release-scoped branch push, protected PR merge and branch cleanup without creating repository state;
 5. readiness probes pull-request creation with identical `main` base/head and accepts only GitHub's exact same-head validation response, so the probe cannot create repository state;
 6. readiness probes Actions dispatch using an impossible all-zero ref and accepts only a missing-ref validation response, so no workflow run can be created by the probe;
 7. missing Contents, PR, or Actions capability—or any ambiguous response—fails closed before publication;

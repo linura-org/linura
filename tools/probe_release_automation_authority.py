@@ -40,25 +40,30 @@ def _validation_message(base: str, head: str) -> str:
     return f"No commits between {base} and {head}"
 
 
-def validate_repository_access_response(
-    *, status: int, body: str, credential_source: str
-) -> str:
-    if status != 200:
-        raise AuthorityProbeError(
-            f"repository capability probe returned HTTP {status}; cannot prove Contents write authority for {_credential_name(credential_source)}"
-        )
+def validate_contents_probe_response(*, status: int, credential_source: str) -> str:
+    # GitHub's merge endpoint requires Contents: write. With identical base/head
+    # it returns 204 and performs no merge, so this proves the capability without
+    # creating a commit, branch, tag, or other repository state.
+    if status == 204:
+        return _credential_name(credential_source)
 
-    payload = _decode_json(body, "repository capability probe")
-    permissions = payload.get("permissions")
-    if not isinstance(permissions, dict) or permissions.get("push") is not True:
+    if status in {403, 404}:
         if credential_source == "dedicated":
             raise AuthorityProbeError(
-                "RELEASE_AUTOMATION_TOKEN does not have repository write authority; grant Contents write in addition to Pull requests write and Actions write"
+                "RELEASE_AUTOMATION_TOKEN cannot access the repository merge endpoint; grant Contents write in addition to Pull requests write and Actions write"
             )
         raise AuthorityProbeError(
-            "repository GITHUB_TOKEN did not receive Contents write authority required to push/merge closure state; keep contents: write on the isolated readiness/closure job and verify organization/repository Actions policy permits it"
+            "repository GITHUB_TOKEN cannot access the repository merge endpoint with Contents write; keep contents: write on the isolated readiness/closure job and verify organization/repository Actions policy permits it"
         )
-    return _credential_name(credential_source)
+
+    if 200 <= status < 300:
+        raise AuthorityProbeError(
+            "the intentionally non-mutating same-head merge probe unexpectedly changed repository state or returned an unsupported success response"
+        )
+
+    raise AuthorityProbeError(
+        f"Contents-write merge authority probe returned unexpected HTTP status {status}"
+    )
 
 
 def validate_pr_probe_response(
@@ -158,15 +163,19 @@ def probe(*, repository: str, token: str, base: str, head: str, credential_sourc
         raise AuthorityProbeError("credential source must be 'github' or 'dedicated'")
     if base != head:
         raise AuthorityProbeError(
-            "authority probe requires identical base/head so the PR probe cannot create repository state"
+            "authority probe requires identical base/head so its merge and PR checks cannot create repository state"
         )
 
     api_root = f"https://api.github.com/repos/{repository}"
 
-    repo_status, repo_body = _request(method="GET", url=api_root, token=token)
-    validate_repository_access_response(
-        status=repo_status,
-        body=repo_body,
+    contents_status, _contents_body = _request(
+        method="POST",
+        url=f"{api_root}/merges",
+        token=token,
+        body={"base": base, "head": head},
+    )
+    validate_contents_probe_response(
+        status=contents_status,
         credential_source=credential_source,
     )
 
@@ -206,7 +215,7 @@ def probe(*, repository: str, token: str, base: str, head: str, credential_sourc
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Non-mutating proof that the release-automation credential has the repository-write, "
+            "Non-mutating proof that the release-automation credential has the Contents-write, "
             "pull-request-create, and Actions-dispatch capabilities required by protected post-release closure."
         )
     )
