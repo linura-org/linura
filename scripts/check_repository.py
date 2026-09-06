@@ -22,7 +22,8 @@ REQUIRED = [
     "docs/migrations.md", "docs/managed-configuration.md", "docs/hardware-validation.md", "docs/vm-acceptance.md",
     "docs/visual-testing.md", "docs/application-supervision.md", "docs/lifecycle-workflows.md",
     "docs/release-engineering.md", "docs/api-versioning.md", "docs/omarchy-development-lessons.md",
-    "docs/roadmap.md", "docs/system-domains.md", "docs/adr/0017-bounded-probes-context-query.md",
+    "docs/roadmap.md", "docs/system-domains.md", "docs/adr/README.md", "docs/adr/0017-bounded-probes-context-query.md",
+    "tools/check_adrs.py", "tests/tooling/test_adrs.py",
     "contracts/stability.toml", "tools/check_contract_stability.py", "tests/tooling/test_contract_stability.py",
     "contracts/roadmap.toml", "tools/check_roadmap.py", "tests/tooling/test_roadmap.py",
     "contracts/layering.toml", "tools/check_layering.py", "tests/tooling/test_layering.py",
@@ -233,6 +234,16 @@ def main() -> int:
             candidate = (markdown.parent / target).resolve()
             if not candidate.exists():
                 failures.append(f"broken Markdown link: {markdown.relative_to(ROOT)} -> {target}")
+
+    adr_result = subprocess.run(
+        [sys.executable, str(ROOT / "tools/check_adrs.py"), "--root", str(ROOT)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if adr_result.returncode != 0:
+        details = adr_result.stderr.strip() or adr_result.stdout.strip()
+        failures.append(f"ADR governance validation failed: {details}")
 
     contract_result = subprocess.run(
         [sys.executable, str(ROOT / "tools/check_contract_stability.py"), "--root", str(ROOT)],

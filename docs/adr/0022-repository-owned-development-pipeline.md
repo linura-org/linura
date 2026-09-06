@@ -1,4 +1,4 @@
-# ADR 0012: Repository-owned development and system-proof pipeline
+# ADR 0022: Repository-owned development and system-proof pipeline
 
 - Status: accepted
 

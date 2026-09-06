@@ -1,4 +1,4 @@
-# ADR 0014: Native break-glass recovery is an invariant
+# ADR 0024: Native break-glass recovery is an invariant
 
 - Status: accepted
 
