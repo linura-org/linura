@@ -142,8 +142,8 @@ Any external effect in v0.5 qualification is test-fixture evidence for the execu
 
 ## v0.6.0 — complete eleven-stage managed mutation
 
-**Status:** planned  
-**Target claim class:** Experimental
+**Status:** released
+**Claim class:** Experimental
 
 Prove the first complete end-to-end execution of Linura's already-canonical lifecycle for one narrow capability, and only then permit the first bounded Experimental **supported managed external effect**:
 
