@@ -49,6 +49,12 @@ pub struct StoredIntent {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IntentRevisionRef {
+    pub id: IntentId,
+    pub revision: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SetupRevisionRef {
     pub id: SetupId,
     pub revision: u32,
@@ -57,6 +63,7 @@ pub struct SetupRevisionRef {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StoredSetup {
     pub setup: Setup,
+    pub intent_revisions: Vec<IntentRevisionRef>,
     pub included_revisions: Vec<SetupRevisionRef>,
 }
 
@@ -64,6 +71,7 @@ pub struct StoredSetup {
 pub struct StoredProfile {
     pub profile: MachineProfile,
     pub revision: u32,
+    pub intent_revisions: Vec<IntentRevisionRef>,
     pub setup_revisions: Vec<SetupRevisionRef>,
 }
 
@@ -147,7 +155,6 @@ pub enum LibraryError {
     UnsupportedPortableFormat { found: u16, supported: u16 },
     PortableDigestMismatch,
     PortableFormat(String),
-    RestoreTargetOpen,
 }
 
 impl Display for LibraryError {
@@ -181,9 +188,6 @@ impl Display for LibraryError {
             ),
             Self::PortableDigestMismatch => f.write_str("portable Library artifact digest mismatch"),
             Self::PortableFormat(reason) => write!(f, "invalid portable Library artifact: {reason}"),
-            Self::RestoreTargetOpen => f.write_str(
-                "restore requires the destination Library database to be closed by the caller",
-            ),
         }
     }
 }
