@@ -34,6 +34,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN || github.token }}
       GH_REPO: ${{ github.repository }}
+      RELEASE_AUTOMATION_CREDENTIAL_SOURCE: ${{ secrets.RELEASE_AUTOMATION_TOKEN != '' && 'dedicated' || 'github' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -182,85 +183,15 @@ jobs:
           )"
           printf 'state=%s\n' "$state" >> "$GITHUB_OUTPUT"
 
-      - name: Verify closure PR automation authority
+      - name: Prove closure automation capabilities
         if: steps.state.outputs.state == 'pending'
-        env:
-          DEDICATED_AUTOMATION_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN != '' }}
         run: |
           set -euo pipefail
-          # A pull request with identical base/head can never be created. Reaching
-          # the exact same-head/base validation proves the PR-create endpoint is
-          # reachable for this token without mutating repository state. Generic
-          # 422 responses (including abuse/spam protection) are not authority.
-          extract_probe_json() {
-            python3 -c '
-          import json
-          import sys
-
-          text = sys.stdin.read()
-          decoder = json.JSONDecoder()
-          for index, character in enumerate(text):
-              if character != "{":
-                  continue
-              try:
-                  value, _ = decoder.raw_decode(text[index:])
-              except json.JSONDecodeError:
-                  continue
-              if isinstance(value, dict):
-                  print(json.dumps(value, separators=(",", ":")))
-                  raise SystemExit(0)
-          raise SystemExit(1)
-          '
-          }
-
-          set +e
-          probe="$(gh api --include --method POST "repos/$GITHUB_REPOSITORY/pulls" \
-            -f title='Linura release automation authority probe' \
-            -f head='main' \
-            -f base='main' 2>&1)"
-          probe_status=$?
-          set -e
-
-          if [[ "$probe_status" -eq 0 ]]; then
-            echo "::error title=Unsafe release automation probe::The intentionally invalid main-to-main pull request unexpectedly succeeded."
-            exit 2
-          fi
-          if grep -Eq '^HTTP/[0-9.]+ 422 ' <<<"$probe"; then
-            if ! probe_json="$(extract_probe_json <<<"$probe")"; then
-              echo "::error title=Ambiguous release automation probe::PR-create endpoint returned HTTP 422 without a parseable GitHub validation body; refusing to mutate post-release state."
-              printf '%s\n' "$probe" >&2
-              exit 2
-            fi
-            if jq -e '
-              .message == "Validation Failed" and
-              (.errors | type == "array" and length == 1 and
-                .[0].resource == "PullRequest" and
-                .[0].code == "custom" and
-                .[0].message == "No commits between main and main")
-            ' <<<"$probe_json" >/dev/null; then
-              if [[ "$DEDICATED_AUTOMATION_TOKEN" == "true" ]]; then
-                echo "release automation authority: dedicated RELEASE_AUTOMATION_TOKEN accepted by PR-create endpoint"
-              else
-                echo "release automation authority: repository GITHUB_TOKEN accepted by PR-create endpoint"
-              fi
-              exit 0
-            fi
-            echo "::error title=Ambiguous release automation probe::PR-create endpoint returned an unexpected 422 response; refusing to treat validation/abuse responses as PR authority."
-            printf '%s\n' "$probe" >&2
-            exit 2
-          fi
-          if grep -Eq '^HTTP/[0-9.]+ 403 ' <<<"$probe"; then
-            if [[ "$DEDICATED_AUTOMATION_TOKEN" == "true" ]]; then
-              echo "::error title=Release automation token lacks PR authority::RELEASE_AUTOMATION_TOKEN cannot create pull requests. Grant the token Pull requests write, Contents write, and Actions write access to this repository."
-            else
-              echo "::error title=GitHub Actions PR creation disabled::Enable Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests, or configure RELEASE_AUTOMATION_TOKEN with Pull requests, Contents, and Actions write access."
-            fi
-            exit 2
-          fi
-
-          echo "::error title=Release automation authority probe failed::Could not establish PR-create authority before mutating post-release state."
-          printf '%s\n' "$probe" >&2
-          exit 2
+          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          test "$(git rev-parse HEAD)" = "$current_main"
+          python3 tools/probe_release_automation_authority.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --credential-source "$RELEASE_AUTOMATION_CREDENTIAL_SOURCE"
 
       - name: Generate deterministic closure tree
         if: steps.state.outputs.state == 'pending'
