@@ -1,0 +1,20 @@
+[package]
+name = "linura-library"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+linura-core = { path = "../linura-core" }
+linura-intent = { path = "../linura-intent" }
+linura-planner = { path = "../linura-planner" }
+rusqlite = { version = "0.37", features = ["bundled", "functions"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3.27"
+
+[lints]
+workspace = true
