@@ -139,9 +139,12 @@ CREATE TABLE setup_intents (
     setup_id TEXT NOT NULL,
     setup_revision INTEGER NOT NULL,
     intent_id TEXT NOT NULL,
-    PRIMARY KEY (setup_id, setup_revision, intent_id),
+    intent_revision INTEGER NOT NULL CHECK (intent_revision > 0),
+    PRIMARY KEY (setup_id, setup_revision, intent_id, intent_revision),
     FOREIGN KEY (setup_id, setup_revision)
-        REFERENCES setup_revisions(setup_id, revision) ON DELETE RESTRICT
+        REFERENCES setup_revisions(setup_id, revision) ON DELETE RESTRICT,
+    FOREIGN KEY (intent_id, intent_revision)
+        REFERENCES intent_revisions(intent_id, revision) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE TABLE setup_includes (
@@ -212,9 +215,12 @@ CREATE TABLE profile_intents (
     profile_id TEXT NOT NULL,
     profile_revision INTEGER NOT NULL,
     intent_id TEXT NOT NULL,
-    PRIMARY KEY (profile_id, profile_revision, intent_id),
+    intent_revision INTEGER NOT NULL CHECK (intent_revision > 0),
+    PRIMARY KEY (profile_id, profile_revision, intent_id, intent_revision),
     FOREIGN KEY (profile_id, profile_revision)
-        REFERENCES profile_revisions(profile_id, revision) ON DELETE RESTRICT
+        REFERENCES profile_revisions(profile_id, revision) ON DELETE RESTRICT,
+    FOREIGN KEY (intent_id, intent_revision)
+        REFERENCES intent_revisions(intent_id, revision) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE TABLE profile_constraints (
@@ -250,8 +256,8 @@ CREATE INDEX idx_desired_resource_current_lookup
         provider_id, resource_id, capability_id,
         intent_id, intent_revision, generation
     );
-CREATE INDEX idx_setup_intents_intent ON setup_intents(intent_id);
-CREATE INDEX idx_profile_intents_intent ON profile_intents(intent_id);
+CREATE INDEX idx_setup_intents_intent ON setup_intents(intent_id, intent_revision);
+CREATE INDEX idx_profile_intents_intent ON profile_intents(intent_id, intent_revision);
 CREATE INDEX idx_lifecycle_entity ON lifecycle_records(entity_id, sequence);
 "#;
 
