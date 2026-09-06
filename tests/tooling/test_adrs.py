@@ -30,6 +30,9 @@ def write_index(root: Path, entries: list[tuple[str, str]]) -> None:
 
 
 class AdrGovernanceTests(unittest.TestCase):
+    def test_repository_ledger_passes(self) -> None:
+        self.assertEqual(check_adrs.validate(ROOT), [])
+
     def test_valid_ledger_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
