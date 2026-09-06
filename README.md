@@ -4,7 +4,7 @@
 
 **Linura is an intent-driven, agent-native Linux system that turns human goals into declarative, policy-controlled, verified machine state.**
 
-Status: `v0.5.0` released — Experimental first narrow privileged executor and independent verifier. The immutable release is independently verified. `executor_state = "isolated-qualified"`, `managed_mutation_support = "none"`, `complete_lifecycle = false` and `platform_support = "none"` remain the authoritative v0.5.0 boundary. Linura remains Experimental; the next roadmap milestone is `v0.6.0`.
+Status: `v0.6.0` release candidate — Experimental complete bounded managed-mutation lifecycle for canonical `linura-managed-*.service` active/inactive convergence. Publication remains pending the protected proof-first/tag-last lifecycle and independent release verification. `executor_state = "integrated-narrow"`, `managed_mutation_support = "narrow-experimental"`, `complete_lifecycle = true` and `platform_support = "none"` define the candidate boundary. Linura remains Experimental and is not production-ready.
 
 ## The product idea
 
