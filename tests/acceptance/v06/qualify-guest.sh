@@ -10,6 +10,7 @@ executor_dest="org.linura.Executor.Systemd1"
 executor_path="/org/linura/Executor/Systemd1"
 executor_iface="org.linura.Executor.Systemd1"
 dispatch_log="/run/linura-v06-qualification/dispatch.log"
+LAST_FAILURE_OUTPUT=""
 
 stage() {
   printf 'stage=%s\n' "$1"
@@ -57,13 +58,14 @@ expect_failure() {
   shift
   local output rc
   set +e
-  output="$($@ 2>&1)"
+  output="$("$@" 2>&1)"
   rc=$?
   set -e
   if [[ "$rc" -eq 0 ]]; then
     printf '%s unexpectedly succeeded: %s\n' "$label" "$output" >&2
     exit 1
   fi
+  LAST_FAILURE_OUTPUT="$output"
   printf '%s-output=%q\n' "$label" "$output"
 }
 
@@ -177,7 +179,7 @@ test "$(dispatch_count stop)" -eq 1
 stage already-satisfied-no-external-effect
 expect_failure already-satisfied call_authority \
   vm-already-inactive "$unit" inactive "prove no-change is non-mutating"
-grep -F 'already holds' <<<"$already_satisfied_output" || true
+grep -F 'already holds' <<<"$LAST_FAILURE_OUTPUT"
 test "$(dispatch_count start)" -eq 1
 test "$(dispatch_count stop)" -eq 1
 
