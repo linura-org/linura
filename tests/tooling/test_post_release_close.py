@@ -153,6 +153,73 @@ Pending.
             self.assertIn("**Status:** released", milestone)
             self.assertIn("- [x] Protected proof-first/tag-last publication", milestone)
 
+    def test_split_release_gate_closes_each_evidenced_control_criterion(self) -> None:
+        milestone = '''# v0.6.0
+
+## Release gate
+
+v0.6.0 is not releaseable until:
+
+- [ ] canonical CI, Security and CodeQL pass on the exact candidate source;
+- [ ] dedicated v0.6 managed-lifecycle disposable-VM qualification passes on the exact candidate source;
+- [ ] Trusted Release Proof reruns all mandatory inherited v0.4/v0.5 qualifications plus the v0.6 qualification against the exact release authorization;
+- [ ] independent binary reproduction succeeds;
+- [ ] tag-last publication succeeds;
+- [ ] independent published-release verification succeeds;
+- [ ] post-release closure advances machine roadmap state only after immutable publication evidence exists.
+
+## Explicit non-claims
+
+No widened claim.
+'''
+        updated = post_release_close.close_release_control_criteria(milestone, "v0.6.0")
+
+        self.assertNotIn("- [ ]", updated.split("## Explicit non-claims", 1)[0])
+        self.assertEqual(7, updated.count("- [x]"))
+        self.assertIn("- [x] tag-last publication succeeds;", updated)
+        self.assertIn("- [x] independent published-release verification succeeds;", updated)
+        self.assertIn("- [x] post-release closure advances machine roadmap state", updated)
+
+    def test_release_gate_rejects_unmapped_unchecked_criterion(self) -> None:
+        milestone = '''# future
+
+## Release gate
+
+- [ ] tag-last publication succeeds;
+- [ ] independent published-release verification succeeds;
+- [ ] manually rotate an unrelated external credential.
+'''
+        with self.assertRaisesRegex(
+            post_release_close.ClosureError,
+            "unchecked release-gate criteria are not exactly mapped to terminal release evidence",
+        ):
+            post_release_close.close_release_control_criteria(milestone, "v9.9.9")
+
+    def test_release_gate_rejects_misleading_keyword_collision(self) -> None:
+        milestone = '''# future
+
+## Release gate
+
+- [ ] tag-last publication succeeds;
+- [ ] independent published-release verification succeeds;
+- [ ] Security tabletop exercise with external responders is complete.
+'''
+        with self.assertRaisesRegex(
+            post_release_close.ClosureError,
+            "Security tabletop exercise with external responders is complete",
+        ):
+            post_release_close.close_release_control_criteria(milestone, "v9.9.9")
+
+    def test_release_gate_requires_exact_publication_and_verification_mappings(self) -> None:
+        milestone = '''# future
+
+## Release gate
+
+- [ ] Trusted Release Proof succeeds.
+'''
+        with self.assertRaisesRegex(post_release_close.ClosureError, "exactly mapped publication criterion"):
+            post_release_close.close_release_control_criteria(milestone, "v9.9.9")
+
     def test_closure_rejects_non_next_release(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

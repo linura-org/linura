@@ -9,6 +9,26 @@ import tomllib
 
 TAG_RE = re.compile(r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+RELEASE_GATE_HEADINGS = ("Release gate", "Exit criteria")
+RELEASE_CONTROL_CRITERIA: dict[str, frozenset[str]] = {
+    "protected proof-first/tag-last publication and independent release verification complete before roadmap bookkeeping advances to v0.6": frozenset(
+        {"publication", "verification", "closure"}
+    ),
+    "canonical ci, security and codeql pass on the exact candidate source": frozenset({"pre-release-checks"}),
+    "dedicated v0.6 managed-lifecycle disposable-vm qualification passes on the exact candidate source": frozenset(
+        {"qualification"}
+    ),
+    "trusted release proof reruns all mandatory inherited v0.4/v0.5 qualifications plus the v0.6 qualification against the exact release authorization": frozenset(
+        {"proof"}
+    ),
+    "independent binary reproduction succeeds": frozenset({"reproduction"}),
+    "tag-last publication succeeds": frozenset({"publication"}),
+    "independent published-release verification succeeds": frozenset({"verification"}),
+    "post-release closure advances machine roadmap state only after immutable publication evidence exists": frozenset(
+        {"closure"}
+    ),
+}
+CHECKBOX_PATTERN = re.compile(r"^(?P<prefix>[ \t]*-[ \t]+\[)(?P<state>[ xX])(?P<suffix>\][ \t]+(?P<label>.+))$")
 
 
 class ClosureError(RuntimeError):
@@ -85,6 +105,72 @@ def normalize_pending_qualification(text: str, tag: str) -> str:
     return text
 
 
+def normalize_release_control_label(label: str) -> str:
+    normalized = re.sub(r"\s+", " ", label.strip()).rstrip(".;")
+    return normalized.casefold()
+
+
+def close_release_control_criteria(text: str, tag: str) -> str:
+    heading_pattern = "|".join(re.escape(heading) for heading in RELEASE_GATE_HEADINGS)
+    section_pattern = re.compile(
+        rf"(?ms)^## (?:{heading_pattern})[ \t]*\n(?P<body>.*?)(?=^## |\Z)"
+    )
+    sections = list(section_pattern.finditer(text))
+    if len(sections) != 1:
+        raise ClosureError(
+            f"{tag} milestone: expected exactly one release-gate/exit-criteria section, found {len(sections)}"
+        )
+
+    section = sections[0]
+    body = section.group("body")
+    lines = body.splitlines(keepends=True)
+    checkbox_labels: list[str] = []
+    mapped_evidence: set[str] = set()
+    unknown_unchecked: list[str] = []
+    changed = False
+
+    for index, line in enumerate(lines):
+        newline = "\n" if line.endswith("\n") else ""
+        raw = line[:-1] if newline else line
+        if raw.endswith("\r"):
+            raw = raw[:-1]
+            newline = "\r\n" if newline else "\r"
+        match = CHECKBOX_PATTERN.fullmatch(raw)
+        if match is None:
+            continue
+
+        label = match.group("label").strip()
+        checkbox_labels.append(label)
+        evidence = RELEASE_CONTROL_CRITERIA.get(normalize_release_control_label(label))
+        state = match.group("state")
+
+        if evidence is not None:
+            mapped_evidence.update(evidence)
+        if state == " " and evidence is None:
+            unknown_unchecked.append(label)
+            continue
+        if state == " " and evidence is not None:
+            lines[index] = f"{match.group('prefix')}x{match.group('suffix')}{newline}"
+            changed = True
+
+    if not checkbox_labels:
+        raise ClosureError(f"{tag} milestone: release gate contains no checkbox criteria")
+    if "publication" not in mapped_evidence:
+        raise ClosureError(f"{tag} milestone: release gate does not contain an exactly mapped publication criterion")
+    if "verification" not in mapped_evidence:
+        raise ClosureError(f"{tag} milestone: release gate does not contain an exactly mapped verification criterion")
+    if unknown_unchecked:
+        rendered = "; ".join(unknown_unchecked)
+        raise ClosureError(
+            f"{tag} milestone: unchecked release-gate criteria are not exactly mapped to terminal release evidence: {rendered}"
+        )
+    if not changed and any("- [ ]" in line for line in lines):
+        raise ClosureError(f"{tag} milestone: release gate still contains unchecked criteria")
+
+    updated_body = "".join(lines)
+    return text[: section.start("body")] + updated_body + text[section.end("body") :]
+
+
 def terminal_body(args: argparse.Namespace, next_release: str) -> str:
     return f"""Linura {args.tag} completed the repository-defined protected proof-first, tag-last release lifecycle on {args.published_at[:10]}.
 
@@ -95,7 +181,7 @@ def terminal_body(args: argparse.Namespace, next_release: str) -> str:
 - Immutable GitHub Release: `{args.tag}`, release id `{args.release_id}`, published `{args.published_at}`.
 - Independent Release Verification: run `{args.verification_run_id}` — success.
 
-The immutable tag resolves to `{args.source_sha}`. Independent verification ran from the frozen release tag and verified published digests, canonical release metadata, GitHub Release immutability/attestation, and build provenance for every published candidate asset.
+The immutable tag resolves to `{args.source_sha}`. Independent verification checked out the frozen release tag and verified published digests, canonical release metadata, GitHub Release immutability/attestation, and build provenance for every published candidate asset.
 
 Post-publication repository bookkeeping advances the canonical roadmap to `current_release = \"{args.tag}\"` and `next_release = \"{next_release}\"`. The frozen release contract and immutable GitHub Release remain unchanged."""
 
@@ -125,7 +211,7 @@ Linura {args.tag} completed the repository-defined protected proof-first, tag-la
 - Immutable GitHub Release: `{args.tag}`, release id `{args.release_id}`, published `{args.published_at}`.
 - Independent Release Verification: run `{args.verification_run_id}` — success.
 
-Independent verification executed from the frozen `{args.tag}` tag and verified tag/source binding, published evidence and digests, canonical release metadata, GitHub Release immutability/attestation, and build provenance for every published candidate asset.
+Independent verification checked out and verified the frozen `{args.tag}` tag, including tag/source binding, published evidence and digests, canonical release metadata, GitHub Release immutability/attestation, and build provenance for every published candidate asset.
 
 ## Boundary retained
 
@@ -218,18 +304,7 @@ def close_release(args: argparse.Namespace) -> list[str]:
         "**Status:** released",
         f"{args.tag} milestone status",
     )
-    lines = milestone_text.splitlines()
-    candidates = [
-        index
-        for index, line in enumerate(lines)
-        if line.startswith("- [ ]") and "publication" in line.lower() and "verification" in line.lower()
-    ]
-    if len(candidates) != 1:
-        raise ClosureError(
-            f"{args.tag} milestone: expected one unchecked publication/verification exit criterion, found {len(candidates)}"
-        )
-    lines[candidates[0]] = lines[candidates[0]].replace("- [ ]", "- [x]", 1)
-    milestone_text = "\n".join(lines) + ("\n" if milestone_text.endswith("\n") else "")
+    milestone_text = close_release_control_criteria(milestone_text, args.tag)
     write_if_changed(milestone_path, milestone_text, changed, root)
 
     readme_path = root / "README.md"
