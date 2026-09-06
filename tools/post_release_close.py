@@ -9,6 +9,7 @@ import tomllib
 
 TAG_RE = re.compile(r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+REPOSITORY_URL = "https://github.com/linura-org/linura"
 RELEASE_GATE_HEADINGS = ("Release gate", "Exit criteria")
 RELEASE_CONTROL_CRITERIA: dict[str, frozenset[str]] = {
     "protected proof-first/tag-last publication and independent release verification complete before roadmap bookkeeping advances to v0.6": frozenset(
@@ -87,6 +88,41 @@ def replace_heading_section(text: str, heading: str, body: str) -> str:
     return text[: match.start()] + replacement + text[match.end() :]
 
 
+def commit_url(source_sha: str) -> str:
+    if not SHA_RE.fullmatch(source_sha):
+        raise ClosureError("source_sha must be a lowercase 40-character SHA")
+    return f"{REPOSITORY_URL}/commit/{source_sha}"
+
+
+def replace_optional_document_status(text: str, replacement: str, label: str) -> str:
+    pattern = re.compile(r"(?m)^\*\*Status:\*\* .+$")
+    matches = list(pattern.finditer(text))
+    if len(matches) > 1:
+        raise ClosureError(f"{label}: expected at most one Status field, found {len(matches)}")
+    if not matches:
+        return text
+    match = matches[0]
+    return text[: match.start()] + replacement + text[match.end() :]
+
+
+def rename_optional_heading(text: str, old: str, new: str, label: str) -> str:
+    pattern = re.compile(rf"(?m)^{re.escape(old)}$")
+    matches = list(pattern.finditer(text))
+    if len(matches) > 1:
+        raise ClosureError(f"{label}: expected at most one {old!r} heading, found {len(matches)}")
+    if not matches:
+        return text
+    match = matches[0]
+    return text[: match.start()] + new + text[match.end() :]
+
+
+def require_absent(text: str, fragments: tuple[str, ...], label: str) -> None:
+    remaining = [fragment for fragment in fragments if fragment in text]
+    if remaining:
+        rendered = "; ".join(repr(fragment) for fragment in remaining)
+        raise ClosureError(f"{label}: live pre-publication assertions remain after terminal normalization: {rendered}")
+
+
 def normalize_pending_qualification(text: str, tag: str) -> str:
     publication_doc = f"docs/qualification/{tag}-publication.md"
     replacements = (
@@ -102,6 +138,203 @@ def normalize_pending_qualification(text: str, tag: str) -> str:
     for old, new in replacements:
         if old in text:
             text = text.replace(old, new)
+    return text
+
+
+def normalize_terminal_qualification(text: str, tag: str, claim_class: str) -> str:
+    publication_doc = f"docs/qualification/{tag}-publication.md"
+    status = "**Status:** released; terminal publication and independent verification complete."
+    text = replace_optional_document_status(
+        text,
+        status,
+        f"{tag} qualification status",
+    )
+    note = (
+        "**Terminal state note:** Pre-publication requirement language below is retained as a historical "
+        "qualification contract; it does not describe current pending state."
+    )
+    if status in text and note not in text:
+        text = text.replace(status, f"{status}\n{note}", 1)
+
+    text = normalize_pending_qualification(text, tag)
+
+    prepublication_pattern = re.compile(
+        r"The compacted implementation has completed its exact-head and protected-main implementation gates; "
+        r"the later tree-identical release authorization must still regenerate protected release proof\. "
+        r"This is not publication evidence and must not be read as a claim that v\d+\.\d+(?:\.\d+)? is already released\."
+    )
+    completed = (
+        "The compacted implementation completed its exact-head and protected-main implementation gates. "
+        "The pre-publication requirements below are retained as historical qualification criteria; "
+        f"terminal release authorization, publication and independent verification completed successfully and are recorded in `{publication_doc}`."
+    )
+    text, _ = prepublication_pattern.subn(completed, text, count=1)
+
+    text = rename_optional_heading(
+        text,
+        "## Evidence state at release preparation",
+        "## Historical evidence state at release preparation",
+        f"{tag} qualification evidence-state heading",
+    )
+    text = rename_optional_heading(
+        text,
+        "## Exit criterion",
+        "## Historical pre-publication exit criterion",
+        f"{tag} qualification exit heading",
+    )
+    text = text.replace(
+        "The following remain mandatory before publication and must be recorded only after they actually occur:",
+        "The following were mandatory before publication and are retained here as the historical pre-publication checklist:",
+        1,
+    )
+
+    exit_pattern = re.compile(
+        r"This dossier is complete only when the final release source has immutable exact-SHA evidence for every required gate "
+        r"and the frozen release contract accurately records that evidence\. "
+        r"Until then, v\d+\.\d+(?:\.\d+)? remains an implementation candidate, not a published qualified release\."
+    )
+    exit_complete = (
+        "This dossier reached its exit criterion when the final release source gained immutable exact-SHA evidence for every required gate "
+        "and the frozen release contract accurately recorded that evidence. "
+        f"{tag} is now a published, independently verified {claim_class} release within its frozen claim; "
+        f"terminal evidence is recorded in `{publication_doc}` and below."
+    )
+    text, _ = exit_pattern.subn(exit_complete, text, count=1)
+    require_absent(
+        text,
+        (
+            "release-authorization and terminal publication evidence pending",
+            "must still regenerate protected release proof",
+            "not a published qualified release",
+        ),
+        f"{tag} qualification",
+    )
+    return text
+
+
+def normalize_terminal_review(text: str, tag: str) -> str:
+    status = "**Status:** released; terminal publication and independent verification complete."
+    text = replace_optional_document_status(
+        text,
+        status,
+        f"{tag} release-review status",
+    )
+    note = (
+        "**Terminal state note:** Requirement, decision and unchecked-checklist language explicitly labeled historical below "
+        "preserves the pre-publication review snapshot; it is not current pending state."
+    )
+    if status in text and note not in text:
+        text = text.replace(status, f"{status}\n{note}", 1)
+
+    if "This review is the final pre-publication cross-check" in text:
+        text = text.replace(
+            "This review is the final pre-publication cross-check",
+            "This review preserves the final pre-publication cross-check",
+            1,
+        )
+    for old, new in (
+        (
+            "## Frozen release-contract review",
+            "## Frozen release-contract review — historical pre-publication checklist",
+        ),
+        (
+            "## Trusted Release Proof review",
+            "## Trusted Release Proof review — historical pre-publication checklist",
+        ),
+        (
+            "## Publication review",
+            "## Publication review — historical pre-publication checklist",
+        ),
+        (
+            "## Decision",
+            "## Historical pre-publication decision",
+        ),
+    ):
+        text = rename_optional_heading(text, old, new, f"{tag} release-review historical heading")
+
+    text = text.replace(
+        "**Current decision: READY FOR RELEASE PREPARATION; PUBLICATION PENDING.**",
+        "**Decision at release preparation: READY FOR RELEASE PREPARATION; PUBLICATION PENDING.**",
+        1,
+    )
+    text = text.replace(
+        "Publication remains fail-closed behind the release-preparation exact-head gates,",
+        "At release preparation, publication remained fail-closed behind the release-preparation exact-head gates,",
+        1,
+    )
+    text = text.replace(
+        "Unchecked publication items remain intentionally pending until those artifacts actually exist.",
+        "Unchecked items above are retained as the historical pre-publication checklist; the terminal artifacts subsequently completed successfully.",
+        1,
+    )
+    release_preparation_pattern = re.compile(
+        r"Release-preparation changes now advance version/lockfile and freeze candidate-facing evidence "
+        r"without marking (?P<version>v\d+\.\d+(?:\.\d+)?) published\."
+    )
+    text, _ = release_preparation_pattern.subn(
+        lambda match: (
+            "At release preparation, the changes advanced version/lockfile and froze candidate-facing evidence "
+            f"without marking {match.group('version')} published; this sentence records that historical pre-publication state, "
+            "and terminal publication subsequently completed."
+        ),
+        text,
+        count=1,
+    )
+    text = text.replace(
+        "Trusted Release Proof must still rerun it on the later exact release authorization; implementation evidence does not substitute for release proof.",
+        "At release preparation, Trusted Release Proof still had to rerun it on the later exact release authorization; that requirement is historical, and terminal release proof subsequently succeeded.",
+        1,
+    )
+    require_absent(
+        text,
+        (
+            "Release-preparation changes now advance version/lockfile and freeze candidate-facing evidence without marking ",
+            "Trusted Release Proof must still rerun it on the later exact release authorization",
+            "**Current decision:",
+            "Publication remains fail-closed",
+            "Unchecked publication items remain intentionally pending",
+        ),
+        f"{tag} release review",
+    )
+    return text
+
+
+def normalize_terminal_security(text: str, tag: str) -> str:
+    publication_doc = f"docs/qualification/{tag}-publication.md"
+    status = "**Status:** released; terminal release-security evidence complete."
+    text = replace_optional_document_status(
+        text,
+        status,
+        f"{tag} security status",
+    )
+    note = (
+        "**Terminal state note:** Security requirement language below is retained as the pre-publication security contract; "
+        "terminal release evidence is authoritative."
+    )
+    if status in text and note not in text:
+        text = text.replace(status, f"{status}\n{note}", 1)
+
+    old = (
+        "These results close implementation security review only. "
+        "The release authorization must still pass fresh protected-main gates and the complete Trusted Release Proof graph before publication."
+    )
+    new = (
+        "These results closed implementation security review. "
+        "The later release authorization subsequently passed fresh protected-main gates and the complete Trusted Release Proof graph; "
+        f"terminal publication evidence is recorded in `{publication_doc}`."
+    )
+    if old in text:
+        text = text.replace(old, new, 1)
+
+    old = (
+        "Terminal security evidence must be recorded only after final exact-head and release-authorization runs actually succeed."
+    )
+    new = (
+        "Terminal security evidence was recorded only after final exact-head, release-authorization, publication and independent verification runs succeeded; "
+        f"the exact terminal record is `{publication_doc}`."
+    )
+    if old in text:
+        text = text.replace(old, new, 1)
     return text
 
 
@@ -172,21 +405,23 @@ def close_release_control_criteria(text: str, tag: str) -> str:
 
 
 def terminal_body(args: argparse.Namespace, next_release: str) -> str:
+    source_url = commit_url(args.source_sha)
     return f"""Linura {args.tag} completed the repository-defined protected proof-first, tag-last release lifecycle on {args.published_at[:10]}.
 
-- Metadata-only release authorization: `{args.source_sha}`.
+- Metadata-only release authorization: {source_url}.
 - Trusted Release Proof: GitHub Actions run `{args.proof_run_id}` — success.
 - Release Promotion: run `{args.promotion_run_id}` — success.
 - Release publication: run `{args.release_run_id}` — success.
 - Immutable GitHub Release: `{args.tag}`, release id `{args.release_id}`, published `{args.published_at}`.
 - Independent Release Verification: run `{args.verification_run_id}` — success.
 
-The immutable tag resolves to `{args.source_sha}`. Independent verification checked out the frozen release tag and verified published digests, canonical release metadata, GitHub Release immutability/attestation, and build provenance for every published candidate asset.
+The immutable tag resolves to the exact source commit {source_url}. Independent verification checked out the frozen release tag and verified published digests, canonical release metadata, GitHub Release immutability/attestation, and build provenance for every published candidate asset.
 
 Post-publication repository bookkeeping advances the canonical roadmap to `current_release = \"{args.tag}\"` and `next_release = \"{next_release}\"`. The frozen release contract and immutable GitHub Release remain unchanged."""
 
 
 def publication_document(args: argparse.Namespace, milestone: dict[str, object], next_release: str) -> str:
+    source_url = commit_url(args.source_sha)
     boundary = (
         f'executor_state = "{milestone.get("executor_state")}", '
         f'managed_mutation_support = "{milestone.get("managed_mutation_support")}", '
@@ -200,8 +435,8 @@ Linura {args.tag} completed the repository-defined protected proof-first, tag-la
 ## Exact release identity
 
 - Frozen release contract: `docs/releases/{args.tag}.md` (unchanged after publication).
-- Metadata-only release-authorization commit: `{args.source_sha}`.
-- Immutable tag: `{args.tag}` → `{args.source_sha}`.
+- Metadata-only release-authorization commit: {source_url}.
+- Immutable tag: `{args.tag}` → {source_url}.
 
 ## Terminal release evidence
 
@@ -246,6 +481,9 @@ def close_release(args: argparse.Namespace) -> list[str]:
     target = milestones[target_index]
     if target.get("status") != "planned":
         raise ClosureError(f"{args.tag} must still be planned before closure")
+    claim_class = target.get("claim_class")
+    if not isinstance(claim_class, str) or not claim_class.strip():
+        raise ClosureError(f"{args.tag} must declare a non-empty claim_class")
     if contract.get("next_release") != args.tag:
         raise ClosureError(
             f"roadmap next_release must be {args.tag} before closure, found {contract.get('next_release')!r}"
@@ -284,8 +522,8 @@ def close_release(args: argparse.Namespace) -> list[str]:
     def update_roadmap_body(body: str) -> str:
         body = replace_once(body, "**Status:** planned", "**Status:** released", f"{args.tag} roadmap status")
         body = re.sub(r"(?m)^(\*\*Status:\*\* released)[ \t]+$", r"\1", body)
-        target_claim = f'**Target claim class:** {target.get("claim_class")}'
-        claim = f'**Claim class:** {target.get("claim_class")}'
+        target_claim = f'**Target claim class:** {claim_class}'
+        claim = f'**Claim class:** {claim_class}'
         if target_claim in body:
             body = replace_once(body, target_claim, claim, f"{args.tag} roadmap claim class")
         return body
@@ -313,13 +551,13 @@ def close_release(args: argparse.Namespace) -> list[str]:
     if len(status_lines) != 1:
         raise ClosureError(f"README: expected one Status line, found {len(status_lines)}")
     status = (
-        f"Status: `{args.tag}` released — {target.get('claim_class')} {target.get('title')}. "
+        f"Status: `{args.tag}` released — {claim_class} {target.get('title')}. "
         "The immutable release is independently verified. "
-        f"`executor_state = \"{target.get('executor_state')}\"`, "
-        f"`managed_mutation_support = \"{target.get('managed_mutation_support')}\"`, "
+        f'`executor_state = "{target.get("executor_state")}"`, '
+        f'`managed_mutation_support = "{target.get("managed_mutation_support")}"`, '
         f"`complete_lifecycle = {str(target.get('complete_lifecycle')).lower()}` and "
-        f"`platform_support = \"{target.get('platform_support')}\"` remain the authoritative {args.tag} boundary. "
-        f"Linura remains Experimental; the next roadmap milestone is `{next_release}`."
+        f'`platform_support = "{target.get("platform_support")}"` remain the authoritative {args.tag} boundary. '
+        f"The release remains {claim_class}; the next roadmap milestone is `{next_release}`."
     )
     readme_text = replace_once(readme_text, status_lines[0], status, "README status")
     write_if_changed(readme_path, readme_text, changed, root)
@@ -328,7 +566,7 @@ def close_release(args: argparse.Namespace) -> list[str]:
     if not isinstance(qualification_path_value, str):
         raise ClosureError(f"{args.tag} does not name qualification")
     qualification_path = root / qualification_path_value
-    qualification_text = normalize_pending_qualification(read(qualification_path), args.tag)
+    qualification_text = normalize_terminal_qualification(read(qualification_path), args.tag, claim_class)
     qualification_text = replace_heading_section(
         qualification_text,
         "## Terminal publication evidence",
@@ -337,13 +575,23 @@ def close_release(args: argparse.Namespace) -> list[str]:
     write_if_changed(qualification_path, qualification_text, changed, root)
 
     review_path = root / f"docs/qualification/{args.tag}-release-review.md"
-    review_text = read(review_path)
+    review_text = normalize_terminal_review(read(review_path), args.tag)
     review_text = replace_heading_section(
         review_text,
         "## Terminal publication evidence",
         terminal_body(args, next_release),
     )
     write_if_changed(review_path, review_text, changed, root)
+
+    security_path = root / f"docs/qualification/{args.tag}-security.md"
+    if security_path.exists():
+        security_text = normalize_terminal_security(read(security_path), args.tag)
+        security_text = replace_heading_section(
+            security_text,
+            "## Terminal publication evidence",
+            terminal_body(args, next_release),
+        )
+        write_if_changed(security_path, security_text, changed, root)
 
     publication_path = root / f"docs/qualification/{args.tag}-publication.md"
     publication_text = publication_document(args, target, next_release)
