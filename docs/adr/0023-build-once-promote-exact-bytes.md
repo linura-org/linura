@@ -1,4 +1,4 @@
-# ADR 0013: Build once, promote exact release bytes
+# ADR 0023: Build once, promote exact release bytes
 
 - Status: accepted
 

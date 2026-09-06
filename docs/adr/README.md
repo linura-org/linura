@@ -1,6 +1,27 @@
 # Architecture Decision Records
 
-Accepted ADRs are append-only historical decisions. A changed decision is superseded by a new ADR.
+Accepted ADRs are append-only historical decisions. A changed decision is superseded by a new ADR rather than silently rewriting the original record.
+
+## Governance
+
+- ADR filenames use a unique four-digit identifier: `NNNN-short-title.md`.
+- The leading ADR number in the document heading must match the filename identifier.
+- Every ADR file must appear exactly once in this index, and every index entry must resolve to an ADR file.
+- Accepted decisions remain historical records. Material changes are recorded by a later ADR that explicitly supersedes or refines the earlier decision.
+- Status values are case-insensitive but must be one of: `Proposed`, `Accepted`, `Superseded`, `Deprecated`, or `Rejected`.
+- New ADR identifiers are monotonically allocated from the next unused number. Reusing an existing identifier is forbidden.
+
+### Historical identifier normalization
+
+On 2026-09-06, three previously accepted files that collided with already-used identifiers were renumbered without changing their decisions:
+
+- repository-owned development/system-proof pipeline: `0012` → `0022`;
+- build-once/promote-exact-bytes: `0013` → `0023`;
+- native break-glass recovery: `0014` → `0024`.
+
+This repairs the ledger identity while preserving the historical decision text. Future changes to those decisions must use new ADRs rather than another renumbering.
+
+## ADR ledger
 
 - [0001 — Rust 2024 for core/control processes](0001-rust-core.md)
 - [0002 — No privileged monolithic daemon](0002-no-root-monolith.md)
@@ -21,3 +42,10 @@ Accepted ADRs are append-only historical decisions. A changed decision is supers
 - [0017 — Bounded probes and control-plane-owned context queries](0017-bounded-probes-context-query.md)
 - [0018 — Canonical plan-review authority and exact approval binding](0018-canonical-plan-review-authority.md)
 - [0019 — Durable authority transactions with SQLite/WAL persistence](0019-durable-authority-transaction-store.md)
+- [0020 — Durable mutation authority is sealed across Control and persistence](0020-sealed-durable-mutation-authority.md)
+- [0021 — v0.5 qualifies an isolated executor and pure verifier before lifecycle integration](0021-v0.5-isolated-executor-verifier-qualification.md)
+- [0022 — Repository-owned development and system-proof pipeline](0022-repository-owned-development-pipeline.md)
+- [0023 — Build once, promote exact release bytes](0023-build-once-promote-exact-bytes.md)
+- [0024 — Native break-glass recovery is an invariant](0024-native-break-glass-recovery.md)
+- [0025 — Bounded v0.6 managed mutation authority and Authority1 boundary](0025-bounded-v0.6-managed-mutation-authority.md)
+- [0026 — Component maturity and milestone activation are explicit contracts](0026-component-maturity-and-milestone-activation.md)

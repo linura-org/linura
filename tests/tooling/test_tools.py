@@ -161,12 +161,15 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("uses: ./.github/workflows/v04-enospc-recovery-vm.yml", workflow)
         self.assertIn("executor-verifier-qualification:", workflow)
         self.assertIn("uses: ./.github/workflows/v05-executor-verifier-vm.yml", workflow)
+        self.assertIn("managed-lifecycle-qualification:", workflow)
+        self.assertIn("uses: ./.github/workflows/v06-managed-lifecycle-vm.yml", workflow)
+        self.assertIn("source_sha: ${{ github.sha }}", workflow)
         self.assertIn(
-            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification]",
+            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification]",
             workflow,
         )
         self.assertIn(
-            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, build]",
+            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, build]",
             workflow,
         )
         self.assertIn("needs.observation-acceptance.result == 'success'", workflow)
@@ -174,6 +177,7 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("needs.durability-qualification.result == 'success'", workflow)
         self.assertIn("needs.enospc-qualification.result == 'success'", workflow)
         self.assertIn("needs.executor-verifier-qualification.result == 'success'", workflow)
+        self.assertIn("needs.managed-lifecycle-qualification.result == 'success'", workflow)
 
     def test_image_plan_is_available_without_mkarchiso(self) -> None:
         result = self.run_tool("python3", "tools/image.py", "plan")
