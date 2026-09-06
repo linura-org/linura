@@ -20,6 +20,8 @@ Read, in order:
 
 Domain/security/architectural changes require an ADR/RFC when an accepted decision does not already cover them.
 
+Accepted ADRs are append-only historical records. Do not silently rewrite an accepted architectural decision to match newer code. A materially changed decision must be recorded in a new ADR that refines or supersedes the earlier record, and [`docs/adr/README.md`](docs/adr/README.md) must remain a complete, uniquely numbered ledger.
+
 ## Development quality gate
 
 ```bash
@@ -27,6 +29,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 python3 scripts/check_repository.py
+python3 tools/check_adrs.py
 ```
 
 New managed mutation behavior must test allow/deny, unsupported capability, executor failure, verification failure, provenance origin and retry/idempotency semantics.
@@ -41,6 +44,7 @@ Keep changes atomic. Explain:
 - user intent/problem and scope;
 - graph/provenance consequences;
 - architecture/trust-boundary impact;
+- ADR impact (new, refined/superseded, or explicitly none);
 - tests/evidence;
 - migration/rollback/recovery impact;
 - release-note impact.
