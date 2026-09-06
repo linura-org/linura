@@ -194,10 +194,9 @@ def normalize_terminal_qualification(text: str, tag: str, claim_class: str) -> s
         r"Until then, v\d+\.\d+(?:\.\d+)? remains an implementation candidate, not a published qualified release\."
     )
     exit_complete = (
-        "This dossier reached its exit criterion when the final release source gained immutable exact-SHA evidence for every required gate "
-        "and the frozen release contract accurately recorded that evidence. "
-        f"{tag} is now a published, independently verified {claim_class} release within its frozen claim; "
-        f"terminal evidence is recorded in `{publication_doc}` and below."
+        "This dossier reached its exit criterion when the final release source gained immutable exact-SHA evidence for every required gate. "
+        f"The frozen release contract remains the pre-publication claim boundary; terminal release evidence is recorded in `{publication_doc}` and below. "
+        f"{tag} is now a published, independently verified {claim_class} release within its frozen claim."
     )
     text, _ = exit_pattern.subn(exit_complete, text, count=1)
     require_absent(
@@ -206,6 +205,7 @@ def normalize_terminal_qualification(text: str, tag: str, claim_class: str) -> s
             "release-authorization and terminal publication evidence pending",
             "must still regenerate protected release proof",
             "not a published qualified release",
+            "frozen release contract accurately recorded that evidence",
         ),
         f"{tag} qualification",
     )
@@ -336,6 +336,34 @@ def normalize_terminal_security(text: str, tag: str) -> str:
     if old in text:
         text = text.replace(old, new, 1)
     return text
+
+
+def normalize_api_versioning(text: str, tag: str) -> str:
+    section_pattern = re.compile(
+        rf"(?ms)^### {re.escape(tag)}(?P<candidate> candidate)?\n(?P<body>.*?)(?=^### |^## |\Z)"
+    )
+    matches = list(section_pattern.finditer(text))
+    if len(matches) > 1:
+        raise ClosureError(f"API versioning: expected at most one section for {tag}, found {len(matches)}")
+    if not matches:
+        return text
+
+    match = matches[0]
+    body = match.group("body")
+    body = body.replace("The release candidate", "The released version", 1)
+    replacement = f"### {tag}\n{body}"
+    updated = text[: match.start()] + replacement + text[match.end() :]
+
+    updated_match = section_pattern.search(updated)
+    if updated_match is None:
+        raise ClosureError(f"API versioning: normalized section disappeared for {tag}")
+    normalized_section = updated_match.group(0)
+    require_absent(
+        normalized_section,
+        (f"### {tag} candidate", "The release candidate"),
+        f"{tag} API versioning",
+    )
+    return updated
 
 
 def normalize_release_control_label(label: str) -> str:
@@ -561,6 +589,11 @@ def close_release(args: argparse.Namespace) -> list[str]:
     )
     readme_text = replace_once(readme_text, status_lines[0], status, "README status")
     write_if_changed(readme_path, readme_text, changed, root)
+
+    api_versioning_path = root / "docs/api-versioning.md"
+    if api_versioning_path.exists():
+        api_versioning_text = normalize_api_versioning(read(api_versioning_path), args.tag)
+        write_if_changed(api_versioning_path, api_versioning_text, changed, root)
 
     qualification_path_value = target.get("qualification")
     if not isinstance(qualification_path_value, str):
