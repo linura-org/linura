@@ -1,0 +1,8 @@
+[Unit]
+Description=Linura v0.6 managed lifecycle qualification fixture
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'install -d -m 0755 /run/linura-v06-qualification; printf "start\n" >> /run/linura-v06-qualification/dispatch.log'
+ExecStop=/bin/sh -c 'install -d -m 0755 /run/linura-v06-qualification; printf "stop\n" >> /run/linura-v06-qualification/dispatch.log'
+RemainAfterExit=yes
