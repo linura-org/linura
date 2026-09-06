@@ -44,7 +44,7 @@ jobs:
         id: release
         env:
           EVENT_NAME: ${{ github.event_name }}
-          EVENT_TAG: ${{ github.event.workflow_run.head_branch }}
+          EVENT_VERIFICATION_REF: ${{ github.event.workflow_run.head_branch }}
           EVENT_VERIFICATION_RUN_ID: ${{ github.event.workflow_run.id }}
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_VERIFICATION_RUN_ID: ${{ inputs.verification_run_id }}
@@ -53,8 +53,13 @@ jobs:
           git fetch origin main --tags --force
 
           if [[ "$EVENT_NAME" == "workflow_run" ]]; then
-            tag="$EVENT_TAG"
+            verification_ref="$EVENT_VERIFICATION_REF"
             verification_run_id="$EVENT_VERIFICATION_RUN_ID"
+            if [[ "$verification_ref" =~ ^verify-release/(v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$ ]]; then
+              tag="${BASH_REMATCH[1]}"
+            else
+              tag="$verification_ref"
+            fi
           else
             tag="$INPUT_TAG"
             verification_run_id="$INPUT_VERIFICATION_RUN_ID"
@@ -65,10 +70,14 @@ jobs:
           [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
 
           if [[ -z "$verification_run_id" ]]; then
-            verification_runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release-verification.yml/runs?event=workflow_dispatch&per_page=100")"
+            verification_runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release-verification.yml/runs?per_page=100")"
             verification_run_id="$(
-              jq -r --arg tag "$tag" --arg sha "$source_sha" \
-                '[.workflow_runs[] | select(.head_branch == $tag and .head_sha == $sha and .status == "completed" and .conclusion == "success")] | sort_by(.created_at) | last | .id // empty' \
+              jq -r --arg tag "$tag" --arg sha "$source_sha" --arg recovery "verify-release/$tag" \
+                '[.workflow_runs[] | select(
+                    .status == "completed" and .conclusion == "success" and
+                    ((.head_branch == $tag and .head_sha == $sha and (.event == "workflow_dispatch" or .event == "release")) or
+                     (.head_branch == $recovery and .event == "push"))
+                  )] | sort_by(.created_at) | last | .id // empty' \
                 <<<"$verification_runs"
             )"
           fi
@@ -78,8 +87,34 @@ jobs:
           test "$(jq -r .path <<<"$verification")" = ".github/workflows/release-verification.yml"
           test "$(jq -r .status <<<"$verification")" = "completed"
           test "$(jq -r .conclusion <<<"$verification")" = "success"
-          test "$(jq -r .head_sha <<<"$verification")" = "$source_sha"
-          test "$(jq -r .head_branch <<<"$verification")" = "$tag"
+          verification_event="$(jq -r .event <<<"$verification")"
+          verification_head_sha="$(jq -r .head_sha <<<"$verification")"
+          verification_head_branch="$(jq -r .head_branch <<<"$verification")"
+
+          if [[ "$verification_head_branch" == "$tag" ]]; then
+            test "$verification_head_sha" = "$source_sha"
+            case "$verification_event" in
+              workflow_dispatch|release) ;;
+              *) echo "unexpected exact-tag verification event: $verification_event" >&2; exit 1 ;;
+            esac
+          elif [[ "$verification_head_branch" == "verify-release/$tag" ]]; then
+            test "$verification_event" = "push"
+            recovery_ref="$verification_head_branch"
+            git fetch origin "refs/heads/$recovery_ref:refs/remotes/origin/$recovery_ref" --force
+            test "$(git rev-parse "origin/$recovery_ref")" = "$verification_head_sha"
+            parent_line="$(git rev-list --parents -n1 "$verification_head_sha")"
+            test "$(wc -w <<<"$parent_line")" -eq 2
+            recovery_base="$(awk '{print $2}' <<<"$parent_line")"
+            git merge-base --is-ancestor "$recovery_base" origin/main
+            marker_path=".github/release-verification-recovery/$tag"
+            changed_paths="$(git diff --name-only "$recovery_base" "$verification_head_sha")"
+            test "$changed_paths" = "$marker_path"
+            test "$(git rev-parse "$recovery_base:.github/workflows/release-verification.yml")" = \
+              "$(git rev-parse "$verification_head_sha:.github/workflows/release-verification.yml")"
+          else
+            echo "verification run is not bound to exact tag or approved recovery ref: $verification_head_branch" >&2
+            exit 1
+          fi
 
           release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
           test "$(jq -r .tag_name <<<"$release")" = "$tag"
@@ -325,7 +360,7 @@ jobs:
               raise SystemExit("invalid release tag")
           major, minor, _patch = match.groups()
           tokens = (f"v{major}.{minor}", f"v{major}-{minor}", f"v{major}_{minor}", f"v{major}{minor}")
-          prefixes = ("tmp/", "work/", "chore/", "automation/")
+          prefixes = ("tmp/", "work/", "chore/", "automation/", "verify-release/")
           selected = []
           for raw in pathlib.Path(branches_path).read_text(encoding="utf-8").splitlines():
               branch = raw.strip()
