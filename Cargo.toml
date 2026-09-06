@@ -10,6 +10,7 @@ members = [
   "crates/linura-core",
   "crates/linura-graph",
   "crates/linura-intent",
+  "crates/linura-library",
   "crates/linura-observation",
   "crates/linura-observation-control",
   "crates/linura-linux-observation",
