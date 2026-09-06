@@ -123,6 +123,9 @@ managed_mutation_support = "narrow-experimental"
 agent_role = "none"
 platform_support = "none"
 authority_state = "lifecycle-integrated"
+milestone_contract = "docs/milestones/v0.6.0.md"
+release_contract = "docs/releases/v0.6.0.md"
+qualification = "docs/qualification/v0.6.0.md"
 
 [[milestone]]
 version = "v0.7.0"

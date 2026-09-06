@@ -4,6 +4,24 @@ All notable changes to Linura will be documented here. Version entries stay conc
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-06
+
+Experimental complete bounded managed mutation lifecycle for canonical `linura-managed-*.service` active/inactive convergence. Full release contract: [`docs/releases/v0.6.0.md`](docs/releases/v0.6.0.md).
+
+### Added
+- Experimental `org.linura.Authority1.ConvergeSystemdActiveState` managed-authority entry point and dedicated unprivileged `linura-authorityd` composition/runtime service.
+- Complete canonical eleven-stage lifecycle for the exact bounded systemd active-state effect, including durable prepare/handoff/recovery, verified commit, audit and reconciliation.
+- Stable operation/request-digest binding, exact candidate-bound administrator approval, separately authorized narrow root execution, and fresh independent native-systemd verification.
+- Permanent deterministic eleven-case fault/recovery qualification plus disposable-system qualification with real systemd, D-Bus, Polkit and SQLite/WAL.
+
+### Changed
+- Trusted Release Proof now requires the v0.6 managed-lifecycle qualification in addition to inherited observation, plan-preview, v0.4 durability/ENOSPC and v0.5 executor/verifier gates before sealed construction or promotion.
+- Release-artifact governance includes `linura-authorityd` and continues to exclude future `linura-firstboot` scaffolding.
+
+### Boundaries
+- v0.6 remains Experimental and supports only canonical `linura-managed-*.service` active/inactive convergence; no generic apply, shell, arbitrary systemd, package, file, network, storage, firewall, user, container or VM mutation is claimed.
+- No supported distribution, machine class, hardware profile, agent/model execution authority, Stable mutation API or production-readiness claim is introduced.
+
 ## [0.5.0] - 2026-09-05
 
 Experimental isolated privileged systemd executor and independent verifier qualification. Full release contract: [`docs/releases/v0.5.0.md`](docs/releases/v0.5.0.md).
