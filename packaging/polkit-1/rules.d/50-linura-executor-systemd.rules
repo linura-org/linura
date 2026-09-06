@@ -1,0 +1,9 @@
+// Product policy: only the dedicated unprivileged Linura authority service may
+// cross the v0.6 managed executor boundary. Human/admin authorization happens
+// separately at org.linura.Authority1 and is never accepted as executor authority.
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.linura.executor.systemd.set-active-state" &&
+        subject.user === "linura-authority") {
+        return polkit.Result.YES;
+    }
+});

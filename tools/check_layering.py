@@ -42,11 +42,11 @@ EXPECTED_RULE_PACKAGES = {
 POLICY_ORCHESTRATOR = "linura-control"
 POLICY_PACKAGE = "linura-policy"
 TRANSACTION_PACKAGE = "linura-transaction"
-TRANSACTION_CONSUMERS = {"linura-control", "linura-persistence-sqlite"}
+TRANSACTION_CONSUMERS = {"linura-control", "linura-persistence-sqlite", "linura-authorityd"}
 PERSISTENCE_PACKAGE = "linura-persistence-sqlite"
-PERSISTENCE_CONSUMERS: set[str] = set()
+PERSISTENCE_CONSUMERS = {"linura-authorityd"}
 TRANSACTION_PACKAGE = "linura-transaction"
-TRANSACTION_ALLOWED_CONSUMERS = {"linura-control", "linura-persistence-sqlite"}
+TRANSACTION_ALLOWED_CONSUMERS = {"linura-control", "linura-persistence-sqlite", "linura-authorityd"}
 
 
 def resolved_dependency_name(
@@ -194,7 +194,7 @@ def validate(root: Path) -> list[str]:
         )
     if persistence_consumers != PERSISTENCE_CONSUMERS:
         failures.append(
-            "linura-persistence-sqlite has no direct production consumer in v0.4; found: "
+            "linura-persistence-sqlite may be consumed directly only by the trusted v0.6 authority runtime; found: "
             f"{sorted(persistence_consumers)}"
         )
 
@@ -208,8 +208,8 @@ def validate(root: Path) -> list[str]:
     )
     if unexpected_transaction_consumers:
         failures.append(
-            "linura-transaction may be consumed only by linura-control and "
-            "linura-persistence-sqlite; found unexpected consumers: "
+            "linura-transaction may be consumed only by linura-control, "
+            "linura-persistence-sqlite and linura-authorityd; found unexpected consumers: "
             f"{unexpected_transaction_consumers}"
         )
 

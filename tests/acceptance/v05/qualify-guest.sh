@@ -25,6 +25,7 @@ sudo -n install -o root -g root -m 0755 /tmp/linura-executor-systemd /usr/lib/li
 sudo -n install -o root -g root -m 0755 /tmp/v05_binding /usr/libexec/linura/v05-binding
 sudo -n install -o root -g root -m 0755 /tmp/v05_verify /usr/libexec/linura/v05-verify
 sudo -n install -o root -g root -m 0644 /tmp/org.linura.Executor.Systemd1.conf /etc/dbus-1/system.d/org.linura.Executor.Systemd1.conf
+sudo -n install -o root -g root -m 0644 /tmp/49-linura-v05-qualification-dbus.conf /etc/dbus-1/system.d/49-linura-v05-qualification-dbus.conf
 sudo -n install -o root -g root -m 0644 /tmp/org.linura.executor.systemd.policy /usr/share/polkit-1/actions/org.linura.executor.systemd.policy
 sudo -n install -o root -g root -m 0644 /tmp/linura-executor-systemd.service /etc/systemd/system/linura-executor-systemd.service
 sudo -n install -o root -g root -m 0644 /tmp/linura-v05-qualification-restart.service /etc/systemd/system/linura-v05-qualification-restart.service

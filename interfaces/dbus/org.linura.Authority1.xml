@@ -1,0 +1,15 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN" "https://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="org.linura.Authority1">
+    <annotation name="org.linura.ContractId" value="dbus.org.linura.Authority1"/>
+    <annotation name="org.linura.ContractVersion" value="1"/>
+    <annotation name="org.linura.Stability" value="experimental"/>
+    <method name="ConvergeSystemdActiveState">
+      <arg name="operation_id" type="s" direction="in"/>
+      <arg name="unit" type="s" direction="in"/>
+      <arg name="desired_active_state" type="s" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="receipt" type="(sssssssssbas)" direction="out"/>
+    </method>
+  </interface>
+</node>

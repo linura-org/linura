@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Linura</vendor>
+  <vendor_url>https://linura.org</vendor_url>
+
+  <action id="org.linura.authority.manage-systemd-active-state">
+    <description>Approve a narrowly managed Linura systemd active-state convergence</description>
+    <message>Administrator authentication is required to authorize this exact reviewed Linura managed system change</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

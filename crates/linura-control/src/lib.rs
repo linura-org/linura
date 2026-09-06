@@ -2,22 +2,21 @@
 
 //! Linura's unprivileged local authority/control-plane orchestration.
 //!
-//! The current implemented authority surface owns authenticated authoritative
-//! observation and deterministic non-executable plan previews. v0.3 adds
-//! policy/risk review and short-lived exact-bound approval semantics on top of
-//! that canonical plan lineage. v0.4 adds durable prepare/recovery and a sealed
-//! pre-dispatch handoff capability while still exposing no executor or managed
-//! external mutation path.
+//! The authority surface owns authenticated authoritative observation,
+//! deterministic planning, trusted policy/risk review, exact-bound approval and
+//! durable mutation authority. v0.4 established durable prepare/recovery, v0.5
+//! qualified an isolated executor/verifier pair, and v0.6 integrates those
+//! boundaries for one narrowly scoped Experimental managed external effect.
 //!
 //! The superseded 0.0.0 `Provider::plan -> ActionPlan -> ControlPlane::apply`
-//! scaffold was removed rather than preserved as a legacy path. The canonical
-//! eleven-stage lifecycle state machine remains in `linura-lifecycle`, and the
-//! narrow executor package scaffolds remain for v0.5 qualification after v0.4
-//! establishes durable prepare/recovery semantics.
+//! scaffold remains intentionally absent. The canonical eleven-stage lifecycle
+//! is enforced by `linura-lifecycle`; `linura-control` owns its authority
+//! orchestration without importing transport- or executor-specific mechanisms.
 
 mod approval;
 mod approval_review;
 mod durable_authority;
+mod managed_lifecycle;
 mod plan_preview;
 mod policy_review;
 mod review_projection;
@@ -36,7 +35,14 @@ pub use approval_review::{
 };
 pub use durable_authority::{
     DispatchPermit, DurableAuthorityCandidate, DurableAuthorityControl, DurableAuthorityError,
-    DurableRecoveryOutcome, PreparedDurableAuthority,
+    DurableRecoveryOutcome, FreshRecoveryApproval, PreparedDurableAuthority,
+};
+pub use managed_lifecycle::{
+    AuthorizedEffect, AuthorizedEffectExecutor, IndependentManagedVerifier,
+    MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_INTENT_ORIGIN, MANAGED_SYSTEMD_OPERATION,
+    MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_UNIT_PREFIX, ManagedApprovalAuthorizer,
+    ManagedApprovalChallenge, ManagedLifecycleControl, ManagedLifecycleError,
+    ManagedMutationReceipt, TrustedHumanApproval, managed_request_id,
 };
 pub use plan_preview::{
     AuthenticatedPrincipal, MAX_DESIRED_ATTRIBUTES, MAX_ORIGINS_PER_KIND, MAX_PREVIEW_ENTRIES,

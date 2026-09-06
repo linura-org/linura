@@ -21,6 +21,7 @@ BINARIES = {
     "linuractl": "usr/bin/linuractl",
     "linura-update-guard": "usr/lib/linura/linura-update-guard",
     "linura-executor-systemd": "usr/lib/linura/linura-executor-systemd",
+    "linura-authorityd": "usr/lib/linura/linura-authorityd",
 }
 
 

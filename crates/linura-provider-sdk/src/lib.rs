@@ -9,6 +9,9 @@ use sha2::{Digest, Sha256};
 pub const MAX_COMPONENT_TOKEN_BYTES: usize = 256;
 pub const MAX_EFFECT_PAYLOAD_BYTES: usize = 1024;
 pub const SHA256_HEX_BYTES: usize = 64;
+// These domains identify the component-contract schema introduced during v0.5.
+// They remain stable in v0.6 so the now-integrated handoff is compatible with
+// the independently qualified executor/verifier correlation format.
 const EFFECT_DOMAIN: &[u8] = b"linura:v0.5:effect:v1";
 const DISPATCH_DOMAIN: &[u8] = b"linura:v0.5:dispatch-binding:v1";
 
@@ -62,8 +65,8 @@ pub trait Observer: Send + Sync {
     }
 }
 
-/// Fixed-size content identity used by the isolated v0.5 executor/verifier
-/// component contract.
+/// Fixed-size content identity used by the isolated executor/verifier component
+/// contract introduced in v0.5 and consumed by the v0.6 managed handoff.
 ///
 /// A digest is correlation and integrity material. It is never a credential,
 /// approval, durable dispatch permit, or independent source of authority.
@@ -120,7 +123,6 @@ pub enum ComponentContractError {
     TooLong(&'static str),
     ControlCharacter(&'static str),
     MalformedDigest,
-    ZeroGeneration,
     ZeroStateVersion,
     BindingMismatch,
 }
@@ -132,7 +134,6 @@ impl Display for ComponentContractError {
             Self::TooLong(label) => write!(f, "{label} exceeds the component bound"),
             Self::ControlCharacter(label) => write!(f, "{label} contains control characters"),
             Self::MalformedDigest => f.write_str("digest must be exactly 32 bytes / 64 hex digits"),
-            Self::ZeroGeneration => f.write_str("transaction generation must be non-zero"),
             Self::ZeroStateVersion => f.write_str("durable state version must be non-zero"),
             Self::BindingMismatch => {
                 f.write_str("dispatch binding does not match its exact material")
@@ -215,14 +216,16 @@ impl EffectDescriptor {
     }
 }
 
-/// Exact correlation material expected at the v0.5 isolated executor boundary.
+/// Exact executor correlation material.
 ///
 /// This structure intentionally does not depend on `linura-transaction`: the
 /// one-shot `DispatchPermit` remains sealed inside Linura Control and cannot be
-/// serialized, persisted, cloned, or reconstructed. v0.5 qualifies this
-/// executor-side integrity shape only. v0.6 must add an authenticated one-shot
-/// handoff that consumes the real permit rather than treating any field here as
-/// bearer authority.
+/// serialized, persisted, cloned, or reconstructed. v0.5 qualified this
+/// integrity shape; v0.6 consumes the real permit into a one-shot authorized
+/// effect before this correlation material can cross the executor transport.
+///
+/// Durable transaction generation zero is valid and is the first SQLite-backed
+/// generation. `state_version` remains strictly non-zero.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExecutionBinding {
     pub transaction_id: String,
@@ -245,9 +248,6 @@ impl ExecutionBinding {
     ) -> Result<Self, ComponentContractError> {
         let transaction_id = transaction_id.into();
         validate_component_token("transaction id", &transaction_id)?;
-        if generation == 0 {
-            return Err(ComponentContractError::ZeroGeneration);
-        }
         if state_version == 0 {
             return Err(ComponentContractError::ZeroStateVersion);
         }
@@ -274,9 +274,6 @@ impl ExecutionBinding {
 
     pub fn validate_for(&self, effect: &EffectDescriptor) -> Result<(), ComponentContractError> {
         validate_component_token("transaction id", &self.transaction_id)?;
-        if self.generation == 0 {
-            return Err(ComponentContractError::ZeroGeneration);
-        }
         if self.state_version == 0 {
             return Err(ComponentContractError::ZeroStateVersion);
         }
@@ -468,6 +465,21 @@ mod tests {
         assert_ne!(base.digest(), resource.digest());
         assert_ne!(base.digest(), operation.digest());
         assert_ne!(base.digest(), payload.digest());
+    }
+
+    #[test]
+    fn durable_generation_zero_is_valid_executor_correlation_material() {
+        let base_effect = effect("linura-v05-qualification-a.service");
+        let binding = id(ExecutionBinding::new(
+            "tx:zero-generation",
+            0,
+            2,
+            digest(1),
+            digest(2),
+            &base_effect,
+        ));
+        assert_eq!(binding.generation, 0);
+        assert!(binding.validate_for(&base_effect).is_ok());
     }
 
     #[test]

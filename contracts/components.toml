@@ -39,6 +39,18 @@ authority_role = "client"
 scope = "future First Boot application; placeholder only before v0.9.0"
 
 [[component]]
+id = "linura-authorityd"
+path = "apps/linura-authorityd"
+kind = "app"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.6.0"
+release_artifact = true
+binary = "linura-authorityd"
+authority_role = "authority-runtime"
+scope = "unprivileged composition root for the bounded v0.6 managed mutation authority"
+
+[[component]]
 id = "linura-update-guard"
 path = "apps/linura-update-guard"
 kind = "app"
@@ -147,7 +159,7 @@ maturity = "integrated-experimental"
 activation_milestone = "v0.1.0"
 release_artifact = false
 authority_role = "transport"
-scope = "versioned system-bus transport and authenticated caller binding"
+scope = "versioned system-bus transport, caller binding and Authority1 Polkit boundary"
 
 [[component]]
 id = "linura-planner"
@@ -246,7 +258,7 @@ maturity = "integrated-experimental"
 activation_milestone = "v0.1.0"
 release_artifact = false
 authority_role = "control-authority"
-scope = "canonical policy/query orchestration and durable authority coordination"
+scope = "canonical policy/query orchestration and durable managed lifecycle authority"
 
 [[component]]
 id = "linura-bootstrap"
@@ -319,11 +331,11 @@ id = "linura-lifecycle"
 path = "crates/linura-lifecycle"
 kind = "crate"
 workspace_member = true
-maturity = "foundation"
+maturity = "integrated-experimental"
 activation_milestone = "v0.6.0"
 release_artifact = false
 authority_role = "lifecycle-model"
-scope = "canonical mutation-lifecycle model; integrated v0.6 composition remains pending"
+scope = "canonical eleven-stage mutation lifecycle and progress invariants"
 
 [[component]]
 id = "xtask"

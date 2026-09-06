@@ -13,5 +13,17 @@
       <arg name="unit" type="s" direction="in"/>
       <arg name="request_id" type="s" direction="in"/>
     </method>
+    <method name="SetManagedActiveState">
+      <arg name="unit" type="s" direction="in"/>
+      <arg name="desired_active_state" type="s" direction="in"/>
+      <arg name="transaction_id" type="s" direction="in"/>
+      <arg name="generation" type="t" direction="in"/>
+      <arg name="state_version" type="t" direction="in"/>
+      <arg name="authority_binding_digest" type="s" direction="in"/>
+      <arg name="authority_use_digest" type="s" direction="in"/>
+      <arg name="effect_digest" type="s" direction="in"/>
+      <arg name="dispatch_digest" type="s" direction="in"/>
+      <arg name="outcome" type="(sss)" direction="out"/>
+    </method>
   </interface>
 </node>

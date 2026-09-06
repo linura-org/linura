@@ -48,6 +48,17 @@ Additional invariants:
 
 `linura-provider-sdk` separates provider observation/planning from effect execution and independent verification.
 
+## Implementation evolution
+
+This ADR remains the canonical lifecycle decision; later milestones refine how its stages become concrete without replacing or reordering them.
+
+- v0.1–v0.3 established authoritative observation, deterministic planning and policy/approval review without external mutation.
+- v0.4 established durable reviewed-authority preparation, recovery and verified commit semantics.
+- v0.5 qualified an isolated privileged executor and independent verifier without product lifecycle integration; see ADR 0021.
+- v0.6 is the first bounded concrete composition of all eleven stages for one Experimental external effect. Its exact Authority1/process/privilege/recovery boundary is recorded in ADR 0026.
+
+The original `0.0.0` implementation-boundary text above is retained as historical context; it must not be read as the current v0.6 maturity statement.
+
 ## Consequences
 
 - Domain providers must plan from observed state rather than implicit assumptions.

@@ -26,8 +26,8 @@ REQUIRED = [
     "tools/check_adrs.py", "tests/tooling/test_adrs.py",
     "contracts/stability.toml", "tools/check_contract_stability.py", "tests/tooling/test_contract_stability.py",
     "contracts/roadmap.toml", "tools/check_roadmap.py", "tests/tooling/test_roadmap.py",
-    "contracts/components.toml", "tools/check_component_maturity.py", "tests/tooling/test_component_maturity.py",
     "contracts/layering.toml", "tools/check_layering.py", "tests/tooling/test_layering.py",
+    "contracts/components.toml", "tools/check_component_maturity.py", "tests/tooling/test_component_maturity.py",
     "profiles/arch-hyprland-v1.toml",
     "crates/linura-intent/Cargo.toml", "crates/linura-graph/Cargo.toml", "crates/linura-capability-sdk/Cargo.toml",
     "crates/linura-planner/Cargo.toml", "crates/linura-provenance/Cargo.toml", "crates/linura-agent-runtime/Cargo.toml",
@@ -36,7 +36,7 @@ REQUIRED = [
     "crates/linura-config/Cargo.toml", "crates/linura-hardware/Cargo.toml", "crates/linura-testkit/Cargo.toml",
     "crates/linura-lifecycle/Cargo.toml", "apps/linura-update-guard/Cargo.toml", "tools/xtask/Cargo.toml",
     "apps/linura-firstboot/Cargo.toml", "apps/linura-control-center/README.md", "apps/linura-agent-ui/README.md", "apps/linura-shell/README.md",
-    "interfaces/dbus/org.linura.Control1.xml", ".cargo/config.toml",
+    "interfaces/dbus/org.linura.Control1.xml", "interfaces/dbus/org.linura.Authority1.xml", ".cargo/config.toml",
     "scripts/validate_assets.py", "tools/acceptance.py", "tools/vm.py", "tools/image.py", "tools/visual.py",
     "hardware/support-matrix.json", "packaging/arch/archiso/profiledef.sh", "packaging/arch/hooks/95-linura-update-guard.hook",
     "schemas/intent.v1.schema.json", "schemas/intent-proposal.v1.schema.json", "schemas/setup.v1.schema.json", "schemas/portable-profile.v1.schema.json",
@@ -237,7 +237,7 @@ def main() -> int:
                 failures.append(f"broken Markdown link: {markdown.relative_to(ROOT)} -> {target}")
 
     adr_result = subprocess.run(
-        [sys.executable, str(ROOT / "tools/check_adrs.py"), "--root", str(ROOT)],
+        [sys.executable, str(ROOT / "tools/check_adrs.py"), str(ROOT)],
         check=False,
         capture_output=True,
         text=True,
@@ -266,16 +266,6 @@ def main() -> int:
         details = roadmap_result.stderr.strip() or roadmap_result.stdout.strip()
         failures.append(f"roadmap contract validation failed: {details}")
 
-    maturity_result = subprocess.run(
-        [sys.executable, str(ROOT / "tools/check_component_maturity.py"), str(ROOT)],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if maturity_result.returncode != 0:
-        details = maturity_result.stderr.strip() or maturity_result.stdout.strip()
-        failures.append(f"component maturity validation failed: {details}")
-
     layering_result = subprocess.run(
         [sys.executable, str(ROOT / "tools/check_layering.py"), str(ROOT)],
         check=False,
@@ -285,6 +275,16 @@ def main() -> int:
     if layering_result.returncode != 0:
         details = layering_result.stderr.strip() or layering_result.stdout.strip()
         failures.append(f"layering contract validation failed: {details}")
+
+    maturity_result = subprocess.run(
+        [sys.executable, str(ROOT / "tools/check_component_maturity.py"), str(ROOT)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if maturity_result.returncode != 0:
+        details = maturity_result.stderr.strip() or maturity_result.stdout.strip()
+        failures.append(f"component maturity validation failed: {details}")
 
     if failures:
         for failure in failures:

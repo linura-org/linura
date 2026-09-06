@@ -1,6 +1,14 @@
 #![forbid(unsafe_code)]
 
+mod authority;
 mod planning;
+
+pub use authority::{
+    AUTHORITY_CONTRACT_ID, AUTHORITY_CONTRACT_STABILITY, AUTHORITY_CONTRACT_VERSION,
+    AUTHORITY_INTERFACE_NAME, AUTHORITY_OBJECT_PATH, AUTHORITY_SERVICE_NAME, Authority1Context,
+    Authority1Handler, Authority1ManagedRequest, AuthorityReceiptWire,
+    MANAGE_SYSTEMD_ACTIVE_STATE_ACTION, serve_authority1,
+};
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter, Write};
@@ -616,6 +624,11 @@ async fn authenticated_caller(
         .sender()
         .ok_or_else(|| fdo_failed("D-Bus method call has no authenticated sender"))?;
     let unique_bus_name = sender.as_str().to_string();
+    if !unique_bus_name.starts_with(':') || unique_bus_name.chars().any(char::is_control) {
+        return Err(fdo_failed(
+            "D-Bus sender is not a canonical unique bus name",
+        ));
+    }
     let proxy = zbus::Proxy::new(
         connection,
         "org.freedesktop.DBus",

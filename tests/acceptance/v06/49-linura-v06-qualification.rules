@@ -1,0 +1,9 @@
+// Qualification-only rule: the disposable VM's dedicated unprivileged caller
+// stands in for an explicitly approved local administrator at Authority1.
+// Product policy remains unchanged; this file is never installed by Linura.
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.linura.authority.manage-systemd-active-state" &&
+        subject.user === "linura-v06-qualifier") {
+        return polkit.Result.YES;
+    }
+});

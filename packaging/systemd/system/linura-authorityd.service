@@ -1,0 +1,35 @@
+[Unit]
+Description=Linura managed mutation authority
+After=dbus.service linura-executor-systemd.service
+Requires=dbus.service
+Wants=linura-executor-systemd.service
+
+[Service]
+Type=dbus
+BusName=org.linura.Authority1
+ExecStart=/usr/lib/linura/linura-authorityd
+User=linura-authority
+Group=linura-authority
+StateDirectory=linura-authority
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target
