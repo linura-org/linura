@@ -9,6 +9,11 @@ on:
         description: Published release tag to verify
         required: true
         type: string
+  push:
+    branches:
+      - "verify-release/v*"
+    paths:
+      - ".github/release-verification-recovery/**"
 
 permissions:
   contents: read
@@ -16,7 +21,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: release-verification-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+  group: release-verification-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -29,12 +34,21 @@ jobs:
       - name: Resolve tag
         id: tag
         env:
+          EVENT_NAME: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
           EVENT_TAG: ${{ github.event.release.tag_name }}
+          RECOVERY_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${INPUT_TAG:-$EVENT_TAG}"
-          test -n "$tag"
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            case "$RECOVERY_REF" in
+              verify-release/v*) tag="${RECOVERY_REF#verify-release/}" ;;
+              *) echo "invalid release-verification recovery ref: $RECOVERY_REF" >&2; exit 2 ;;
+            esac
+          else
+            tag="${INPUT_TAG:-$EVENT_TAG}"
+          fi
+          [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,7 +65,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$source_sha"
           test "$(cat published/RELEASE_TAG)" = "$RELEASE_TAG"
           test -f published/linura-authorityd
-          test -x published/linura-authorityd
+          # GitHub Release downloads are content blobs; executable mode is not a portable
+          # publication property. Integrity and membership are verified content-addressably below.
           python3 tools/release_contract.py verify --directory published --tag "$RELEASE_TAG" --source-sha "$source_sha"
           python3 tools/release_verify.py published
       - name: Verify GitHub Release metadata equals canonical contract
