@@ -9,13 +9,22 @@ import sys
 
 FILENAME_RE = re.compile(r"^(?P<number>\d{4})-(?P<slug>[a-z0-9][a-z0-9.-]*)\.md$")
 HEADING_RE = re.compile(r"^#\s+ADR\s+(?P<number>\d{4})\s*(?:[:—-])\s*\S.+$")
-STATUS_RE = re.compile(r"^\s*-?\s*Status:\s*(?P<status>[A-Za-z]+)\s*$", re.MULTILINE | re.IGNORECASE)
+STATUS_RE = re.compile(
+    r"^\s*-?\s*(?:\*\*)?Status:(?:\*\*)?\s*(?P<status>[A-Za-z]+)\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
 INDEX_RE = re.compile(
     r"^\s*-\s+\[(?P<number>\d{4})\s+[—-]\s+[^\]]+\]\((?P<path>[^)]+\.md)\)\s*$",
     re.MULTILINE,
 )
-SUPERSEDES_RE = re.compile(r"^\s*-?\s*Supersedes:\s*(?P<value>.+?)\s*$", re.MULTILINE | re.IGNORECASE)
-SUPERSEDED_BY_RE = re.compile(r"^\s*-?\s*Superseded by:\s*(?P<value>.+?)\s*$", re.MULTILINE | re.IGNORECASE)
+SUPERSEDES_RE = re.compile(
+    r"^\s*-?\s*(?:\*\*)?Supersedes:(?:\*\*)?\s*(?P<value>.+?)\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+SUPERSEDED_BY_RE = re.compile(
+    r"^\s*-?\s*(?:\*\*)?Superseded by:(?:\*\*)?\s*(?P<value>.+?)\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
 ADR_REF_RE = re.compile(r"\b(?P<number>\d{4})\b")
 ALLOWED_STATUSES = {"proposed", "accepted", "superseded", "deprecated", "rejected"}
 
