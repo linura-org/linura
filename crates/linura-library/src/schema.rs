@@ -39,6 +39,7 @@ CREATE TABLE intent_supersedes (
 CREATE TABLE intents_current (
     intent_id TEXT PRIMARY KEY,
     revision INTEGER NOT NULL CHECK (revision > 0),
+    causal_generation INTEGER NOT NULL DEFAULT 0 CHECK (causal_generation >= 0),
     causal_complete INTEGER NOT NULL DEFAULT 0 CHECK (causal_complete IN (0, 1)),
     FOREIGN KEY (intent_id, revision)
         REFERENCES intent_revisions(intent_id, revision) ON DELETE RESTRICT
@@ -69,12 +70,14 @@ CREATE TABLE library_operations (
 CREATE TABLE desired_resources (
     intent_id TEXT NOT NULL,
     intent_revision INTEGER NOT NULL,
+    generation INTEGER NOT NULL CHECK (generation > 0),
     provider_id TEXT NOT NULL,
     resource_id TEXT NOT NULL,
     capability_id TEXT NOT NULL,
     ownership_complete INTEGER NOT NULL CHECK (ownership_complete IN (0, 1)),
     PRIMARY KEY (
-        intent_id, intent_revision, provider_id, resource_id, capability_id
+        intent_id, intent_revision, generation,
+        provider_id, resource_id, capability_id
     ),
     FOREIGN KEY (intent_id, intent_revision)
         REFERENCES intent_revisions(intent_id, revision) ON DELETE RESTRICT
@@ -83,37 +86,44 @@ CREATE TABLE desired_resources (
 CREATE TABLE desired_resource_attributes (
     intent_id TEXT NOT NULL,
     intent_revision INTEGER NOT NULL,
+    generation INTEGER NOT NULL,
     provider_id TEXT NOT NULL,
     resource_id TEXT NOT NULL,
     capability_id TEXT NOT NULL,
     key TEXT NOT NULL,
     value TEXT NOT NULL,
     PRIMARY KEY (
-        intent_id, intent_revision, provider_id, resource_id, capability_id, key
+        intent_id, intent_revision, generation,
+        provider_id, resource_id, capability_id, key
     ),
     FOREIGN KEY (
-        intent_id, intent_revision, provider_id, resource_id, capability_id
+        intent_id, intent_revision, generation,
+        provider_id, resource_id, capability_id
     ) REFERENCES desired_resources(
-        intent_id, intent_revision, provider_id, resource_id, capability_id
+        intent_id, intent_revision, generation,
+        provider_id, resource_id, capability_id
     ) ON DELETE RESTRICT
 ) STRICT;
 
 CREATE TABLE desired_resource_origins (
     intent_id TEXT NOT NULL,
     intent_revision INTEGER NOT NULL,
+    generation INTEGER NOT NULL,
     provider_id TEXT NOT NULL,
     resource_id TEXT NOT NULL,
     capability_id TEXT NOT NULL,
     origin_kind TEXT NOT NULL,
     origin_id TEXT NOT NULL,
     PRIMARY KEY (
-        intent_id, intent_revision, provider_id, resource_id, capability_id,
-        origin_kind, origin_id
+        intent_id, intent_revision, generation,
+        provider_id, resource_id, capability_id, origin_kind, origin_id
     ),
     FOREIGN KEY (
-        intent_id, intent_revision, provider_id, resource_id, capability_id
+        intent_id, intent_revision, generation,
+        provider_id, resource_id, capability_id
     ) REFERENCES desired_resources(
-        intent_id, intent_revision, provider_id, resource_id, capability_id
+        intent_id, intent_revision, generation,
+        provider_id, resource_id, capability_id
     ) ON DELETE RESTRICT
 ) STRICT;
 
@@ -236,7 +246,10 @@ CREATE TABLE lifecycle_records (
 ) STRICT;
 
 CREATE INDEX idx_desired_resource_current_lookup
-    ON desired_resources(provider_id, resource_id, capability_id, intent_id, intent_revision);
+    ON desired_resources(
+        provider_id, resource_id, capability_id,
+        intent_id, intent_revision, generation
+    );
 CREATE INDEX idx_setup_intents_intent ON setup_intents(intent_id);
 CREATE INDEX idx_profile_intents_intent ON profile_intents(intent_id);
 CREATE INDEX idx_lifecycle_entity ON lifecycle_records(entity_id, sequence);
