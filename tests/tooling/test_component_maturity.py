@@ -81,6 +81,9 @@ class ComponentMaturityContractTests(unittest.TestCase):
             root = Path(temp_dir)
             self._copy_fixture(root)
             contract = root / "contracts/components.toml"
+            roadmap = tomllib.loads((root / "contracts/roadmap.toml").read_text(encoding="utf-8"))
+            candidate = roadmap["next_release"]
+            self.assertIsInstance(candidate, str)
 
             def activate_early(block: str) -> str:
                 return block.replace(
@@ -92,7 +95,10 @@ class ComponentMaturityContractTests(unittest.TestCase):
             self._replace_component_block(contract, "linura-firstboot", activate_early)
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("integrated component activation v0.9.0 is later than candidate v0.6.0", result.stderr)
+            self.assertIn(
+                f"integrated component activation v0.9.0 is later than candidate {candidate}",
+                result.stderr,
+            )
 
     def test_stable_component_requires_stable_milestone_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
