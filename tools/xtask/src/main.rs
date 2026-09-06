@@ -31,6 +31,10 @@ fn authority_foundation() -> Result<(), String> {
     run("python3", &["tools/check_authority_foundation.py"])
 }
 
+fn component_maturity() -> Result<(), String> {
+    run("python3", &["tools/check_component_maturity.py"])
+}
+
 fn check() -> Result<(), String> {
     run("cargo", &["fmt", "--all", "--check"])?;
     run(
@@ -51,6 +55,7 @@ fn check() -> Result<(), String> {
         &["test", "--workspace", "--all-features", "--locked"],
     )?;
     run("python3", &["scripts/check_repository.py"])?;
+    component_maturity()?;
     authority_foundation()?;
     run("python3", &["scripts/validate_assets.py"])?;
     release_contracts()?;
@@ -71,6 +76,7 @@ fn check() -> Result<(), String> {
 
 fn repo() -> Result<(), String> {
     run("python3", &["scripts/check_repository.py"])?;
+    component_maturity()?;
     authority_foundation()?;
     run("python3", &["scripts/validate_assets.py"])?;
     release_contracts()

@@ -47,3 +47,4 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0022 — Repository-owned development and system-proof pipeline](0022-repository-owned-development-pipeline.md)
 - [0023 — Build once, promote exact release bytes](0023-build-once-promote-exact-bytes.md)
 - [0024 — Native break-glass recovery is an invariant](0024-native-break-glass-recovery.md)
+- [0025 — Component maturity and milestone activation are explicit contracts](0025-component-maturity-and-milestone-activation.md)

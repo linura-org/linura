@@ -26,6 +26,7 @@ REQUIRED = [
     "tools/check_adrs.py", "tests/tooling/test_adrs.py",
     "contracts/stability.toml", "tools/check_contract_stability.py", "tests/tooling/test_contract_stability.py",
     "contracts/roadmap.toml", "tools/check_roadmap.py", "tests/tooling/test_roadmap.py",
+    "contracts/components.toml", "tools/check_component_maturity.py", "tests/tooling/test_component_maturity.py",
     "contracts/layering.toml", "tools/check_layering.py", "tests/tooling/test_layering.py",
     "profiles/arch-hyprland-v1.toml",
     "crates/linura-intent/Cargo.toml", "crates/linura-graph/Cargo.toml", "crates/linura-capability-sdk/Cargo.toml",
@@ -264,6 +265,16 @@ def main() -> int:
     if roadmap_result.returncode != 0:
         details = roadmap_result.stderr.strip() or roadmap_result.stdout.strip()
         failures.append(f"roadmap contract validation failed: {details}")
+
+    maturity_result = subprocess.run(
+        [sys.executable, str(ROOT / "tools/check_component_maturity.py"), str(ROOT)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if maturity_result.returncode != 0:
+        details = maturity_result.stderr.strip() or maturity_result.stdout.strip()
+        failures.append(f"component maturity validation failed: {details}")
 
     layering_result = subprocess.run(
         [sys.executable, str(ROOT / "tools/check_layering.py"), str(ROOT)],

@@ -45,9 +45,10 @@ A second fresh `ubuntu-24.04` job rebuilds the exact source with the same pinned
 
 - `linurad`
 - `linuractl`
-- `linura-firstboot`
 - `linura-update-guard`
 - `linura-executor-systemd`
+
+The current artifact set is governed by `contracts/components.toml`; future scaffolds such as `linura-firstboot` are not distributable merely because they are Cargo workspace members.
 
 A mismatch fails Trusted Release Proof and prevents promotion. Metadata such as the proof receipt and recorded runner environment is intentionally not required to reproduce byte-for-byte; the qualification applies to the distributable binaries.
 
