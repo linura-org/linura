@@ -102,10 +102,15 @@ jobs:
           rm -rf "$PROOF_ROOT"
           mkdir -p "$PAYLOAD_DIR"
           binary_root="target/$RELEASE_TARGET/release"
-          install -m 0755 "$binary_root/linurad" "$PAYLOAD_DIR/linurad"
-          install -m 0755 "$binary_root/linuractl" "$PAYLOAD_DIR/linuractl"
-          install -m 0755 "$binary_root/linura-update-guard" "$PAYLOAD_DIR/linura-update-guard"
-          install -m 0755 "$binary_root/linura-executor-systemd" "$PAYLOAD_DIR/linura-executor-systemd"
+          mapfile -t release_binaries < <(python3 tools/check_component_maturity.py --release-binaries)
+          test "${#release_binaries[@]}" -gt 0
+          binary_artifacts=()
+          evidence_binary_args=()
+          for binary in "${release_binaries[@]}"; do
+            install -m 0755 "$binary_root/$binary" "$PAYLOAD_DIR/$binary"
+            binary_artifacts+=("$PAYLOAD_DIR/$binary")
+            evidence_binary_args+=(--artifact "$PAYLOAD_DIR/$binary")
+          done
           printf '%s\n' "$SOURCE_SHA" > "$PAYLOAD_DIR/SOURCE_SHA"
           printf '%s\n' "$RELEASE_TAG" > "$PAYLOAD_DIR/RELEASE_TAG"
           cp "docs/releases/${RELEASE_TAG}.md" "$PAYLOAD_DIR/RELEASE_NOTES.md"
@@ -150,10 +155,7 @@ jobs:
 
           python3 tools/generate_sbom.py \
             "$PAYLOAD_DIR/linura.spdx.json" \
-            "$PAYLOAD_DIR/linurad" \
-            "$PAYLOAD_DIR/linuractl" \
-            "$PAYLOAD_DIR/linura-update-guard" \
-            "$PAYLOAD_DIR/linura-executor-systemd" \
+            "${binary_artifacts[@]}" \
             --version "$RELEASE_TAG" \
             --source-sha "$SOURCE_SHA"
           python3 tools/release_contract.py evidence \
@@ -161,20 +163,14 @@ jobs:
             --source-sha "$SOURCE_SHA" \
             --notes "$PAYLOAD_DIR/RELEASE_NOTES.md" \
             --output "$PAYLOAD_DIR/RELEASE-EVIDENCE.json" \
-            --artifact "$PAYLOAD_DIR/linurad" \
-            --artifact "$PAYLOAD_DIR/linuractl" \
-            --artifact "$PAYLOAD_DIR/linura-update-guard" \
-            --artifact "$PAYLOAD_DIR/linura-executor-systemd" \
+            "${evidence_binary_args[@]}" \
             --artifact "$PAYLOAD_DIR/linura.spdx.json" \
             --artifact "$PAYLOAD_DIR/BUILD-ENVIRONMENT.json" \
             --artifact "$PAYLOAD_DIR/SOURCE_SHA" \
             --artifact "$PAYLOAD_DIR/RELEASE_TAG"
           python3 tools/make_checksums.py \
             "$PAYLOAD_DIR/SHA256SUMS" \
-            "$PAYLOAD_DIR/linurad" \
-            "$PAYLOAD_DIR/linuractl" \
-            "$PAYLOAD_DIR/linura-update-guard" \
-            "$PAYLOAD_DIR/linura-executor-systemd" \
+            "${binary_artifacts[@]}" \
             "$PAYLOAD_DIR/linura.spdx.json" \
             "$PAYLOAD_DIR/BUILD-ENVIRONMENT.json" \
             "$PAYLOAD_DIR/SOURCE_SHA" \
@@ -185,7 +181,7 @@ jobs:
             --directory "$PAYLOAD_DIR" \
             --tag "$RELEASE_TAG" \
             --source-sha "$SOURCE_SHA"
-          python3 tools/release_verify.py "$PAYLOAD_DIR"
+          python3 tools/release_verify.py "$PAYLOAD_DIR" --component-contract contracts/components.toml
 
           python3 - <<'PY'
           import hashlib
@@ -308,11 +304,9 @@ jobs:
         run: |
           set -euo pipefail
           binary_root="target/$RELEASE_TARGET/release"
-          for binary in \
-            linurad \
-            linuractl \
-            linura-update-guard \
-            linura-executor-systemd; do
+          mapfile -t release_binaries < <(python3 tools/check_component_maturity.py --release-binaries)
+          test "${#release_binaries[@]}" -gt 0
+          for binary in "${release_binaries[@]}"; do
             cmp "$binary_root/$binary" "proven/release-payload/$binary" || {
               sha256sum "$binary_root/$binary" "proven/release-payload/$binary" >&2
               echo "reproducibility mismatch: $binary" >&2

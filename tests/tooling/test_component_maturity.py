@@ -28,6 +28,7 @@ class ComponentMaturityContractTests(unittest.TestCase):
             "contracts/roadmap.toml",
             ".github/workflows/reusable-release-build.yml",
             "tools/image.py",
+            "tools/release_verify.py",
         )
         for rel in paths:
             source = ROOT / rel
@@ -42,6 +43,17 @@ class ComponentMaturityContractTests(unittest.TestCase):
             if component["kind"] == "planned-app":
                 (path / "README.md").write_text("planned\n", encoding="utf-8")
 
+    def _replace_component_block(self, contract: Path, component_id: str, transform) -> None:
+        text = contract.read_text(encoding="utf-8")
+        pattern = re.compile(
+            rf'(?ms)^\[\[component\]\]\nid = "{re.escape(component_id)}"\n.*?(?=^\[\[component\]\]|\Z)'
+        )
+        match = pattern.search(text)
+        self.assertIsNotNone(match)
+        assert match is not None
+        block = transform(match.group(0))
+        contract.write_text(text[: match.start()] + block + text[match.end() :], encoding="utf-8")
+
     def test_repository_component_maturity_contract_is_valid(self) -> None:
         result = self._run_checker(ROOT)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -51,43 +63,82 @@ class ComponentMaturityContractTests(unittest.TestCase):
             root = Path(temp_dir)
             self._copy_fixture(root)
             contract = root / "contracts/components.toml"
-            text = contract.read_text(encoding="utf-8")
-            pattern = re.compile(
-                r'(?ms)^\[\[component\]\]\nid = "linura-firstboot"\n.*?(?=^\[\[component\]\]|\Z)'
-            )
-            match = pattern.search(text)
-            self.assertIsNotNone(match)
-            assert match is not None
-            block = match.group(0).replace(
-                "release_artifact = false\n",
-                'release_artifact = true\nbinary = "linura-firstboot"\n',
-                1,
-            )
-            contract.write_text(text[: match.start()] + block + text[match.end() :], encoding="utf-8")
 
+            def promote(block: str) -> str:
+                return block.replace(
+                    "release_artifact = false\n",
+                    'release_artifact = true\nbinary = "linura-firstboot"\n',
+                    1,
+                )
+
+            self._replace_component_block(contract, "linura-firstboot", promote)
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("roadmap scaffold cannot be a release artifact", result.stderr)
 
-    def test_release_payload_cannot_ship_an_undeclared_future_binary(self) -> None:
+    def test_integrated_component_cannot_activate_after_candidate_milestone(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/components.toml"
+
+            def activate_early(block: str) -> str:
+                return block.replace(
+                    'maturity = "roadmap-scaffold"',
+                    'maturity = "integrated-experimental"',
+                    1,
+                )
+
+            self._replace_component_block(contract, "linura-firstboot", activate_early)
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("integrated component activation v0.9.0 is later than candidate v0.6.0", result.stderr)
+
+    def test_stable_component_requires_stable_milestone_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/components.toml"
+
+            def claim_stable(block: str) -> str:
+                return block.replace(
+                    'maturity = "integrated-experimental"',
+                    'maturity = "stable"',
+                    1,
+                )
+
+            self._replace_component_block(contract, "linurad", claim_stable)
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("stable maturity requires a Stable activation milestone", result.stderr)
+
+    def test_release_builder_must_derive_binaries_from_component_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
             workflow = root / ".github/workflows/reusable-release-build.yml"
             text = workflow.read_text(encoding="utf-8")
-            anchor = 'install -m 0755 "$binary_root/linuractl" "$PAYLOAD_DIR/linuractl"\n'
-            self.assertIn(anchor, text)
-            text = text.replace(
-                anchor,
-                anchor + '          install -m 0755 "$binary_root/linura-firstboot" "$PAYLOAD_DIR/linura-firstboot"\n',
-                1,
-            )
-            workflow.write_text(text, encoding="utf-8")
+            command = "python3 tools/check_component_maturity.py --release-binaries"
+            self.assertGreaterEqual(text.count(command), 2)
+            workflow.write_text(text.replace(command, "printf '%s\\n' linurad", 1), encoding="utf-8")
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("release payload disagrees with component maturity contract", result.stderr)
-            self.assertIn("linura-firstboot", result.stderr)
+            self.assertIn("derive both assembly and reproduction binary sets", result.stderr)
+
+    def test_release_builder_must_validate_complete_payload_membership(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/reusable-release-build.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = 'python3 tools/release_verify.py "$PAYLOAD_DIR" --component-contract contracts/components.toml'
+            self.assertIn(marker, text)
+            workflow.write_text(text.replace(marker, 'python3 tools/release_verify.py "$PAYLOAD_DIR"', 1), encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("verify the complete payload against contracts/components.toml", result.stderr)
 
     def test_workspace_member_cannot_exist_without_maturity_ownership(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -111,23 +162,17 @@ class ComponentMaturityContractTests(unittest.TestCase):
             root = Path(temp_dir)
             self._copy_fixture(root)
             contract = root / "contracts/components.toml"
-            text = contract.read_text(encoding="utf-8")
-            pattern = re.compile(
-                r'(?ms)^\[\[component\]\]\nid = "linura-agent-runtime"\n.*?(?=^\[\[component\]\]|\Z)'
-            )
-            match = pattern.search(text)
-            self.assertIsNotNone(match)
-            assert match is not None
-            block = match.group(0)
-            block = block.replace('maturity = "roadmap-scaffold"', 'maturity = "integrated-experimental"', 1)
-            block = block.replace('activation_milestone = "v0.8.0"', 'activation_milestone = "v0.6.0"', 1)
-            block = block.replace(
-                "release_artifact = false\n",
-                'release_artifact = true\nbinary = "linura-agent-runtime"\n',
-                1,
-            )
-            contract.write_text(text[: match.start()] + block + text[match.end() :], encoding="utf-8")
 
+            def grant_release(block: str) -> str:
+                block = block.replace('maturity = "roadmap-scaffold"', 'maturity = "integrated-experimental"', 1)
+                block = block.replace('activation_milestone = "v0.8.0"', 'activation_milestone = "v0.6.0"', 1)
+                return block.replace(
+                    "release_artifact = false\n",
+                    'release_artifact = true\nbinary = "linura-agent-runtime"\n',
+                    1,
+                )
+
+            self._replace_component_block(contract, "linura-agent-runtime", grant_release)
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("proposal-only component cannot be a release artifact", result.stderr)

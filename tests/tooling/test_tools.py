@@ -190,6 +190,59 @@ class ToolingTests(unittest.TestCase):
             result = self.run_tool("python3", "tools/release_verify.py", str(root))
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_release_manifest_rejects_unchecksummed_payload_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            asset = root / "linurad"
+            asset.write_bytes(b"linura")
+            (root / "untracked").write_bytes(b"unexpected")
+            digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+            (root / "SHA256SUMS").write_text(f"{digest}  linurad\n", encoding="utf-8")
+            result = self.run_tool("python3", "tools/release_verify.py", str(root))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("payload assets missing from checksum manifest", result.stderr)
+
+    def test_release_payload_rejects_checksummed_undeclared_component_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = root / "components.toml"
+            contract.write_text(
+                "schema_version = 1\n\n"
+                "[[component]]\n"
+                'id = "linurad"\n'
+                'release_artifact = true\n'
+                'binary = "linurad"\n',
+                encoding="utf-8",
+            )
+            expected_files = {
+                "linurad": b"binary",
+                "BUILD-ENVIRONMENT.json": b"{}\n",
+                "RELEASE-EVIDENCE.json": b"{}\n",
+                "RELEASE_NOTES.md": b"notes\n",
+                "RELEASE_TAG": b"v0.0.0\n",
+                "SOURCE_SHA": b"0" * 40 + b"\n",
+                "linura.spdx.json": b"{}\n",
+                "surprise-binary": b"unexpected",
+            }
+            for name, content in expected_files.items():
+                (root / name).write_bytes(content)
+            manifest_lines = [
+                f"{hashlib.sha256((root / name).read_bytes()).hexdigest()}  {name}"
+                for name in sorted(expected_files)
+            ]
+            (root / "SHA256SUMS").write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
+
+            result = self.run_tool(
+                "python3",
+                "tools/release_verify.py",
+                str(root),
+                "--component-contract",
+                str(contract),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("payload contains undeclared component/artifact files", result.stderr)
+            self.assertIn("surprise-binary", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
