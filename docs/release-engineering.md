@@ -108,17 +108,20 @@ After build/reproduction succeeds, a narrow dispatch job receives only the permi
 
 Promotion is `workflow_dispatch`-only and cannot create a tag or GitHub Release.
 
-It:
+It is split into three authority stages:
 
-1. verifies the exact proof run identity, event, terminal status, success conclusion and source SHA;
-2. requires the proven SHA still equals current `main`;
-3. validates version/frozen contract again;
-4. refuses a version tag already bound to another source;
-5. avoids duplicate active Release runs;
-6. rechecks current `main` immediately before handoff;
-7. dispatches `Release` on `main` with exact source SHA, proof run ID and version.
+1. a read-only validation job verifies the exact proof run identity, event, terminal status, success conclusion and source SHA;
+2. validation requires the proven SHA still equals current `main`, validates version/frozen contract again, and refuses a version tag already bound to another source;
+3. an isolated closure-readiness job obtains only the write permissions needed to model future closure (`contents: write`, `pull-requests: write`, `actions: write`) and uses the exact same credential selection as closure;
+4. readiness requires authenticated repository permissions to report push/write authority, covering release-scoped branch push, protected PR merge authority, and branch cleanup capability;
+5. readiness probes pull-request creation with identical `main` base/head and accepts only GitHub's exact same-head validation response, so the probe cannot create repository state;
+6. readiness probes Actions dispatch using an impossible all-zero ref and accepts only a missing-ref validation response, so no workflow run can be created by the probe;
+7. missing Contents, PR, or Actions capability—or any ambiguous response—fails closed before publication;
+8. only after validation and readiness succeed does a separate narrow dispatch job avoid duplicate active Release runs, recheck current `main`, and dispatch `Release` with exact source SHA, proof run ID and version.
 
-If `main` moves while the handoff is being resolved, the Release request fails closed rather than silently selecting a different commit.
+The readiness job isolates the broader credential from actual Release dispatch: it does not publish, create a tag, push a branch, open/merge a PR, or dispatch a valid workflow. The final dispatch job returns to the repository `GITHUB_TOKEN` with only `actions: write` and `contents: read`.
+
+If `main` moves while the handoff is being resolved, or if future protected closure is not currently automatable, the Release request fails closed rather than publishing an immutable version that already requires manual bookkeeping recovery.
 
 ## Release validation and source-selection commit point
 
@@ -168,10 +171,21 @@ Independent verification:
 4. verifies `RELEASE-EVIDENCE.json`;
 5. verifies `SHA256SUMS`;
 6. compares GitHub Release body byte-for-byte with published `RELEASE_NOTES.md`;
-7. verifies build provenance for every published payload asset;
-8. verifies the version-specific expected binary/artifact set, including `linura-authorityd` for v0.6.
+7. verifies GitHub Release immutability and every published asset attestation;
+8. verifies build provenance for every published payload asset;
+9. verifies the version-specific expected binary/artifact set, including `linura-authorityd` for v0.6.
+
+GitHub Release downloads are treated as content blobs. Executable mode is not a portable publication property and is not used as release-integrity evidence; file membership, digests, canonical contract verification, release/asset verification and provenance are authoritative.
 
 Publication is incomplete until this independent verification succeeds.
+
+### Emergency verification recovery
+
+The normal release path does not create or require a `verify-release/vX.Y.Z` branch. That namespace is an authenticated emergency path only for an already-immutable release whose frozen verifier is defective after publication.
+
+A recovery run must come from a single-parent marker-only commit under `.github/release-verification-recovery/`, must be based on protected-main ancestry, and must use the verifier definition unchanged from its protected-main recovery base. Post-release closure validates those conditions before accepting recovery verification as terminal evidence and deletes the recovery branch after closure.
+
+Creating or pushing a recovery marker is an explicit repair action; the subsequent workflow run is automatic, but the recovery trigger itself must never be described as automatically created unless repository automation actually created it.
 
 ## Post-release closure
 
@@ -180,8 +194,12 @@ Roadmap/current-release state must advance only after immutable publication and 
 Publication evidence and roadmap closure are therefore ordered:
 
 ```text
-proof → promotion → tag-last publication → independent verification → roadmap/cleanup closure
+proof → promotion/readiness → tag-last publication → independent verification → roadmap/cleanup closure
 ```
+
+On a pending release state, closure re-proves credential readiness before mutation, generates one deterministic closure commit, pushes a release-scoped automation branch, opens a protected PR, dispatches/awaits exact-head CI/Security/CodeQL, squash-merges through the normal `main` ruleset, dispatches/awaits fresh-main CI/Security/CodeQL on the resulting SHA, and only then removes obsolete release-scoped branches not referenced by an open PR.
+
+If the release is already terminally closed, the workflow remains idempotent: it skips state regeneration and still performs safe obsolete release-branch cleanup.
 
 ## Traceability policy
 

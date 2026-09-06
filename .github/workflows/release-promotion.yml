@@ -15,7 +15,6 @@ on:
         type: string
 
 permissions:
-  actions: write
   contents: read
 
 concurrency:
@@ -23,10 +22,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  promote:
-    name: promote proven source
+  validate:
+    name: validate proven source
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -39,7 +44,8 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.source_sha }}
 
-      - name: Verify exact proof and dispatch Release
+      - name: Verify exact proof and release identity
+        id: release
         run: |
           set -euo pipefail
 
@@ -96,7 +102,6 @@ jobs:
           PY
 
           tag="$(sed -n 's/^tag=//p' "$GITHUB_OUTPUT" | tail -1)"
-          version="$(sed -n 's/^version=//p' "$GITHUB_OUTPUT" | tail -1)"
           python3 tools/release_contract.py validate \
             --tag "$tag" \
             --notes "docs/releases/${tag}.md" \
@@ -106,6 +111,61 @@ jobs:
             tag_sha="$(jq -r .object.sha <<<"$tag_payload")"
             test "$tag_sha" = "$SOURCE_SHA"
           fi
+
+  closure-readiness:
+    name: prove automatic post-release closure authority
+    needs: validate
+    if: ${{ needs.validate.result == 'success' && needs.validate.outputs.tag != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN || github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      RELEASE_AUTOMATION_CREDENTIAL_SOURCE: ${{ secrets.RELEASE_AUTOMATION_TOKEN != '' && 'dedicated' || 'github' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ inputs.source_sha }}
+
+      - name: Prove exact closure credential capabilities
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          test "$current" = "$SOURCE_SHA"
+          python3 tools/probe_release_automation_authority.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --credential-source "$RELEASE_AUTOMATION_CREDENTIAL_SOURCE"
+
+  dispatch:
+    name: dispatch immutable publication
+    needs: [validate, closure-readiness]
+    if: ${{ needs.validate.result == 'success' && needs.closure-readiness.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      PROOF_RUN_ID: ${{ inputs.proof_run_id }}
+      RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - name: Dispatch Release on exact proven main
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+          test "$RELEASE_VERSION" = "${RELEASE_TAG#v}"
 
           release_runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?head_sha=$SOURCE_SHA&event=workflow_dispatch&per_page=100")"
           active="$(jq -r '[.workflow_runs[] | select(.head_sha == env.SOURCE_SHA and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested"))] | .[0].id // empty' <<<"$release_runs")"
@@ -123,7 +183,7 @@ jobs:
           gh workflow run release.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
-            -f version="$version" \
+            -f version="$RELEASE_VERSION" \
             -f source_sha="$SOURCE_SHA" \
             -f proof_run_id="$PROOF_RUN_ID"
-          echo "dispatched Release for $tag from exact proven source $SOURCE_SHA"
+          echo "dispatched Release for $RELEASE_TAG from exact proven source $SOURCE_SHA"
