@@ -12,6 +12,7 @@ linura-core = { path = "../linura-core" }
 linura-dbus = { path = "../linura-dbus" }
 linura-graph = { path = "../linura-graph" }
 linura-intent = { path = "../linura-intent" }
+linura-library = { path = "../linura-library" }
 linura-observation = { path = "../linura-observation" }
 linura-protocol = { path = "../linura-protocol" }
 linura-provenance = { path = "../linura-provenance" }
