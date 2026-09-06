@@ -1,0 +1,371 @@
+name: v0.6 managed lifecycle qualification
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify; defaults to the triggering revision
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify; defaults to the dispatch revision
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - ".github/workflows/v06-managed-lifecycle-vm.yml"
+      - ".github/workflows/trusted-release-proof.yml"
+      - "apps/linura-authorityd/**"
+      - "crates/linura-control/**"
+      - "crates/linura-dbus/**"
+      - "crates/linura-lifecycle/**"
+      - "crates/linura-linux-observation/**"
+      - "crates/linura-observation/**"
+      - "crates/linura-observation-control/**"
+      - "crates/linura-persistence-sqlite/**"
+      - "crates/linura-transaction/**"
+      - "executors/linura-executor-systemd/**"
+      - "verifiers/linura-verifier-systemd/**"
+      - "interfaces/dbus/org.linura.Authority1.xml"
+      - "interfaces/dbus/org.linura.Executor.Systemd1.xml"
+      - "packaging/dbus-1/system.d/org.linura.Authority1.conf"
+      - "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf"
+      - "packaging/polkit-1/actions/org.linura.authority.policy"
+      - "packaging/polkit-1/actions/org.linura.executor.systemd.policy"
+      - "packaging/polkit-1/rules.d/50-linura-executor-systemd.rules"
+      - "packaging/systemd/system/linura-authorityd.service"
+      - "packaging/systemd/system/linura-executor-systemd.service"
+      - "tests/acceptance/v06/**"
+      - "tools/vm.py"
+      - "tools/codex/versions.env"
+      - "rust-toolchain.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "docs/milestones/v0.6.0.md"
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+  BASE_IMAGE_URL: https://cloud-images.ubuntu.com/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img
+  BASE_IMAGE_SHA256: d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac
+  VM_ACCELERATION: tcg
+  SSH_PORT: "2222"
+
+jobs:
+  qualification:
+    name: exact-source disposable Authority1 managed mutation qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Initialize exact-source evidence paths
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/linura-v06-managed-lifecycle-artifacts"
+          mkdir -p "$artifact_dir"
+          printf 'ARTIFACT_DIR=%s\n' "$artifact_dir" >> "$GITHUB_ENV"
+
+      - name: Assert exact source and load toolchain contract
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          # shellcheck disable=SC1091
+          source tools/codex/versions.env
+          : "${RUST_VERSION:?}"
+          repo_rust_version="$(python3 - <<'PY'
+          import pathlib
+          import re
+          text = pathlib.Path('rust-toolchain.toml').read_text(encoding='utf-8')
+          match = re.search(r'^channel\s*=\s*"([^"]+)"\s*$', text, re.MULTILINE)
+          if match is None:
+              raise SystemExit('rust-toolchain.toml does not declare a channel')
+          print(match.group(1))
+          PY
+          )"
+          test "$repo_rust_version" = "$RUST_VERSION"
+          printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
+
+      - name: Install pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Run deterministic v0.6 fault matrix on exact source
+        run: cargo test --locked -p linura-authorityd --test v06_qualification -- --test-threads=1
+
+      - name: Build exact-source runtime and guest matrix binaries
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p linura-authorityd -p linura-executor-systemd
+          cargo test --release --locked -p linura-authorityd --test v06_qualification --no-run --message-format=json > "$RUNNER_TEMP/v06-test-build.jsonl"
+          test_executable="$(python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'v06-test-build.jsonl'
+          candidates = []
+          for line in path.read_text(encoding='utf-8').splitlines():
+              try:
+                  event = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if event.get('reason') != 'compiler-artifact':
+                  continue
+              target = event.get('target', {})
+              executable = event.get('executable')
+              if target.get('name') == 'v06_qualification' and executable:
+                  candidates.append(executable)
+          if len(candidates) != 1:
+              raise SystemExit(f'expected one v06 qualification test executable, found {candidates!r}')
+          print(candidates[0])
+          PY
+          )"
+          install -m 0755 "$test_executable" target/release/v06-qualification-matrix
+
+      - name: Install disposable VM dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cloud-image-utils openssh-client qemu-system-x86 qemu-utils
+
+      - name: Download and verify pinned Ubuntu image
+        run: |
+          set -euo pipefail
+          case "$BASE_IMAGE_URL" in
+            https://cloud-images.ubuntu.com/*) ;;
+            *) echo "base image must come from the pinned Ubuntu cloud-image origin" >&2; exit 2 ;;
+          esac
+          [[ "$BASE_IMAGE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          base_image="$RUNNER_TEMP/ubuntu-noble-v06-base.qcow2"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --output "$base_image" "$BASE_IMAGE_URL"
+          printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$base_image" | sha256sum --check --strict
+          qemu-img info "$base_image"
+          printf 'BASE_IMAGE=%s\n' "$base_image" >> "$GITHUB_ENV"
+
+      - name: Create disposable guest identity
+        run: |
+          set -euo pipefail
+          vm_image="$RUNNER_TEMP/linura-v06-managed.qcow2"
+          seed_image="$RUNNER_TEMP/linura-v06-managed-seed.img"
+          ssh_key="$RUNNER_TEMP/linura-v06-managed-key"
+          vm_log="$RUNNER_TEMP/linura-v06-managed-qemu.log"
+          user_data="$RUNNER_TEMP/v06-user-data"
+          meta_data="$RUNNER_TEMP/v06-meta-data"
+          network_config="$RUNNER_TEMP/v06-network-config"
+
+          cp --reflink=auto "$BASE_IMAGE" "$vm_image"
+          ssh-keygen -q -t ed25519 -N '' -f "$ssh_key"
+          public_key="$(cat "$ssh_key.pub")"
+          cat > "$user_data" <<EOF
+          #cloud-config
+          users:
+            - default
+            - name: linura
+              groups: [adm, sudo]
+              shell: /bin/bash
+              sudo:
+                - ALL=(ALL) NOPASSWD:ALL
+              ssh_authorized_keys:
+                - $public_key
+          ssh_pwauth: false
+          disable_root: true
+          package_update: false
+          EOF
+          cat > "$meta_data" <<EOF
+          instance-id: linura-v06-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+          local-hostname: linura-v06-managed
+          EOF
+          cat > "$network_config" <<'EOF'
+          version: 2
+          ethernets:
+            primary:
+              match:
+                name: "en*"
+              dhcp4: true
+          EOF
+          cloud-localds --network-config="$network_config" "$seed_image" "$user_data" "$meta_data"
+          {
+            printf 'VM_IMAGE=%s\n' "$vm_image"
+            printf 'SEED_IMAGE=%s\n' "$seed_image"
+            printf 'SSH_KEY=%s\n' "$ssh_key"
+            printf 'VM_LOG=%s\n' "$vm_log"
+          } >> "$GITHUB_ENV"
+
+      - name: Start disposable snapshot guest
+        run: |
+          set -euo pipefail
+          python3 tools/vm.py start --image "$VM_IMAGE" --seed "$SEED_IMAGE" --ssh-port "$SSH_PORT" --accel "$VM_ACCELERATION" >"$VM_LOG" 2>&1 &
+          printf 'VM_PID=%s\n' "$!" >> "$GITHUB_ENV"
+
+      - name: Qualify complete v0.6 managed lifecycle
+        run: bash tests/acceptance/v06/qualify-host.sh
+
+      - name: Collect authority and executor hardening evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          artifact_dir="${ARTIFACT_DIR:-$RUNNER_TEMP/linura-v06-managed-lifecycle-artifacts}"
+          mkdir -p "$artifact_dir"
+          if [[ -z "${SSH_KEY:-}" || ! -f "${SSH_KEY:-/nonexistent}" ]]; then
+            printf '%s\n' 'guest was not provisioned; hardening evidence unavailable because an earlier phase failed' > "$artifact_dir/service-hardening.txt"
+            exit 0
+          fi
+          ssh_common=(-i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3)
+          {
+            echo '--- linura-authorityd ---'
+            ssh "${ssh_common[@]}" -p "$SSH_PORT" linura@127.0.0.1 \
+              'sudo -n systemctl show linura-authorityd.service -p User -p Group -p NoNewPrivileges -p ProtectSystem -p ProtectHome -p PrivateDevices -p PrivateTmp -p RestrictAddressFamilies -p RestrictNamespaces -p CapabilityBoundingSet -p AmbientCapabilities -p SystemCallArchitectures -p SystemCallFilter' || true
+            echo '--- linura-executor-systemd ---'
+            ssh "${ssh_common[@]}" -p "$SSH_PORT" linura@127.0.0.1 \
+              'sudo -n systemctl show linura-executor-systemd.service -p User -p Group -p NoNewPrivileges -p ProtectSystem -p ProtectHome -p PrivateDevices -p PrivateTmp -p RestrictAddressFamilies -p RestrictNamespaces -p CapabilityBoundingSet -p AmbientCapabilities -p SystemCallArchitectures -p SystemCallFilter' || true
+          } > "$artifact_dir/service-hardening.txt"
+          ssh "${ssh_common[@]}" -p "$SSH_PORT" linura@127.0.0.1 \
+            'systemctl --version; uname -a; /usr/bin/pkcheck --version || true; sqlite3 --version' \
+            > "$artifact_dir/guest-platform.txt" 2>&1 || true
+
+      - name: Record exact-source v0.6 qualification evidence
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          root = pathlib.Path.cwd()
+          artifact_dir = pathlib.Path(os.environ["ARTIFACT_DIR"])
+          files = {
+              "authority_runtime": root / "target/release/linura-authorityd",
+              "executor": root / "target/release/linura-executor-systemd",
+              "fault_matrix": root / "target/release/v06-qualification-matrix",
+              "authority_dbus_contract": root / "interfaces/dbus/org.linura.Authority1.xml",
+              "executor_dbus_contract": root / "interfaces/dbus/org.linura.Executor.Systemd1.xml",
+              "authority_dbus_policy": root / "packaging/dbus-1/system.d/org.linura.Authority1.conf",
+              "executor_dbus_policy": root / "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
+              "authority_polkit_policy": root / "packaging/polkit-1/actions/org.linura.authority.policy",
+              "executor_polkit_policy": root / "packaging/polkit-1/actions/org.linura.executor.systemd.policy",
+              "executor_product_rule": root / "packaging/polkit-1/rules.d/50-linura-executor-systemd.rules",
+              "authority_systemd_unit": root / "packaging/systemd/system/linura-authorityd.service",
+              "executor_systemd_unit": root / "packaging/systemd/system/linura-executor-systemd.service",
+              "qualification_rule": root / "tests/acceptance/v06/49-linura-v06-qualification.rules",
+              "managed_fixture": root / "tests/acceptance/v06/linura-managed-v06-qualification.service",
+              "not_satisfied_fixture": root / "tests/acceptance/v06/linura-managed-v06-notsatisfied.service",
+              "host_protocol": root / "tests/acceptance/v06/qualify-host.sh",
+              "guest_protocol": root / "tests/acceptance/v06/qualify-guest.sh",
+          }
+          def digest(path: pathlib.Path) -> str:
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+          evidence = {
+              "schema_version": 1,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "source_sha": os.environ["SOURCE_SHA"],
+              "result": "passed",
+              "claim": "complete eleven-stage narrow managed systemd active-state lifecycle qualification",
+              "stability": "experimental",
+              "complete_lifecycle": True,
+              "managed_mutation_support": "narrow-experimental",
+              "platform_support": "none",
+              "agent_role": "none",
+              "real_system_boundaries": [
+                  "Ubuntu 24.04 disposable VM",
+                  "systemd system manager",
+                  "system D-Bus",
+                  "Polkit human approval boundary",
+                  "dedicated unprivileged linura-authority runtime",
+                  "separate root executor",
+                  "independent native-systemd verifier",
+                  "SQLite/WAL durable transaction store",
+              ],
+              "qualified_scenarios": [
+                  "inactive-to-active complete lifecycle",
+                  "active-to-inactive complete lifecycle",
+                  "exact retry without duplicate dispatch",
+                  "same operation id with changed request fails closed",
+                  "unapproved human denied before durable authority",
+                  "ordinary and root direct executor callers denied",
+                  "unsupported namespace and state rejected before dispatch",
+                  "verification NotSatisfied does not commit or replay",
+                  "executor loss after handoff becomes durable indeterminate",
+                  "process restart does not reconstruct or blindly replay dispatch authority",
+                  "already-satisfied new request performs no external effect",
+                  "SQLite journal mode is WAL and SQLite integrity_check is clean",
+                  "11-case deterministic stale/failure/recovery/reconciliation matrix passes inside guest",
+              ],
+              "fault_matrix": {
+                  "cases": 11,
+                  "includes": [
+                      "success", "denial", "stale evidence", "executor failure",
+                      "verification failure", "indeterminate execution", "crash/restart",
+                      "NotSatisfied reprepare", "conflicting recovery", "reconciliation",
+                      "durable exact-retry/request-substitution",
+                  ],
+              },
+              "base_image": {
+                  "url": os.environ["BASE_IMAGE_URL"],
+                  "sha256": os.environ["BASE_IMAGE_SHA256"],
+              },
+              "virtualization": {"acceleration": os.environ["VM_ACCELERATION"]},
+              "artifacts": {
+                  name: {
+                      "path": path.relative_to(root).as_posix(),
+                      "sha256": digest(path),
+                      "size": path.stat().st_size,
+                  }
+                  for name, path in files.items()
+              },
+              "toolchain": {
+                  "rustc": subprocess.check_output(["rustc", "-Vv"], text=True).strip(),
+                  "qemu": subprocess.check_output(["qemu-system-x86_64", "--version"], text=True).splitlines()[0],
+              },
+              "workflow": {
+                  "path": ".github/workflows/v06-managed-lifecycle-vm.yml",
+                  "run_id": int(os.environ["GITHUB_RUN_ID"]),
+                  "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+                  "event": os.environ["GITHUB_EVENT_NAME"],
+              },
+          }
+          output = artifact_dir / "V06-MANAGED-LIFECYCLE-EVIDENCE.json"
+          output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          print(f"wrote {output}")
+          PY
+
+      - name: Stop disposable guest
+        if: always()
+        run: |
+          set +e
+          if [[ -n "${VM_PID:-}" ]]; then
+            kill "$VM_PID" 2>/dev/null || true
+            wait "$VM_PID" 2>/dev/null || true
+          fi
+
+      - name: Collect QEMU diagnostics
+        if: always()
+        run: |
+          set -euo pipefail
+          artifact_dir="${ARTIFACT_DIR:-$RUNNER_TEMP/linura-v06-managed-lifecycle-artifacts}"
+          mkdir -p "$artifact_dir"
+          if [[ -n "${VM_LOG:-}" && -f "$VM_LOG" ]]; then
+            cp "$VM_LOG" "$artifact_dir/qemu.log"
+          fi
+
+      - name: Upload qualification evidence and diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-v06-managed-lifecycle-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/linura-v06-managed-lifecycle-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
