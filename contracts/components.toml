@@ -1,0 +1,393 @@
+schema_version = 1
+roadmap_contract = "contracts/roadmap.toml"
+release_workflow = ".github/workflows/reusable-release-build.yml"
+maturity_order = ["roadmap-scaffold", "foundation", "integrated-experimental", "stable"]
+
+[[component]]
+id = "linurad"
+path = "apps/linurad"
+kind = "app"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.1.0"
+release_artifact = true
+binary = "linurad"
+authority_role = "control-service"
+scope = "typed local control service; no privileged executor ownership"
+
+[[component]]
+id = "linuractl"
+path = "apps/linuractl"
+kind = "app"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.1.0"
+release_artifact = true
+binary = "linuractl"
+authority_role = "client"
+scope = "non-privileged CLI over the versioned Linura client boundary"
+
+[[component]]
+id = "linura-firstboot"
+path = "apps/linura-firstboot"
+kind = "app"
+workspace_member = true
+maturity = "roadmap-scaffold"
+activation_milestone = "v0.9.0"
+release_artifact = false
+authority_role = "client"
+scope = "future First Boot application; placeholder only before v0.9.0"
+
+[[component]]
+id = "linura-update-guard"
+path = "apps/linura-update-guard"
+kind = "app"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.0.0"
+release_artifact = true
+binary = "linura-update-guard"
+authority_role = "safety-guard"
+scope = "narrow fail-closed direct-upgrade guard; not the future update coordinator"
+
+[[component]]
+id = "linura-agent-runtime"
+path = "crates/linura-agent-runtime"
+kind = "crate"
+workspace_member = true
+maturity = "roadmap-scaffold"
+activation_milestone = "v0.8.0"
+release_artifact = false
+authority_role = "proposal-only"
+scope = "future agent interpretation substrate with no mutation authority"
+
+[[component]]
+id = "linura-capability-sdk"
+path = "crates/linura-capability-sdk"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.1.0"
+release_artifact = false
+authority_role = "contract"
+scope = "typed capability and composition contracts"
+
+[[component]]
+id = "linura-core"
+path = "crates/linura-core"
+kind = "crate"
+workspace_member = true
+maturity = "foundation"
+activation_milestone = "v0.0.0"
+release_artifact = false
+authority_role = "domain-core"
+scope = "shared identifiers and semantic domain primitives"
+
+[[component]]
+id = "linura-graph"
+path = "crates/linura-graph"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.1.0"
+release_artifact = false
+authority_role = "state-model"
+scope = "observed system graph and evidence relationships"
+
+[[component]]
+id = "linura-intent"
+path = "crates/linura-intent"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.2.0"
+release_artifact = false
+authority_role = "intent-model"
+scope = "typed intent/setup semantics; durable intent lifecycle remains v0.7.0"
+
+[[component]]
+id = "linura-observation"
+path = "crates/linura-observation"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.1.0"
+release_artifact = false
+authority_role = "evidence"
+scope = "canonical authoritative observation envelope and freshness semantics"
+
+[[component]]
+id = "linura-observation-control"
+path = "crates/linura-observation-control"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.1.0"
+release_artifact = false
+authority_role = "observation-control"
+scope = "bounded authoritative observation coordination and retention"
+
+[[component]]
+id = "linura-linux-observation"
+path = "crates/linura-linux-observation"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.1.0"
+release_artifact = false
+authority_role = "observer-adapter"
+scope = "native Linux observation adapters including systemd"
+
+[[component]]
+id = "linura-dbus"
+path = "crates/linura-dbus"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.1.0"
+release_artifact = false
+authority_role = "transport"
+scope = "versioned system-bus transport and authenticated caller binding"
+
+[[component]]
+id = "linura-planner"
+path = "crates/linura-planner"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.2.0"
+release_artifact = false
+authority_role = "planner"
+scope = "deterministic desired-state planning without execution authority"
+
+[[component]]
+id = "linura-policy"
+path = "crates/linura-policy"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.3.0"
+release_artifact = false
+authority_role = "policy"
+scope = "risk, policy and approval requirements"
+
+[[component]]
+id = "linura-protocol"
+path = "crates/linura-protocol"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.1.0"
+release_artifact = false
+authority_role = "protocol"
+scope = "versioned non-privileged protocol contracts"
+
+[[component]]
+id = "linura-sdk"
+path = "crates/linura-sdk"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.1.0"
+release_artifact = false
+authority_role = "client-facade"
+scope = "non-privileged public client facade"
+
+[[component]]
+id = "linura-provenance"
+path = "crates/linura-provenance"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.3.0"
+release_artifact = false
+authority_role = "provenance"
+scope = "semantic why-chain primitives; broader durable provenance remains future work"
+
+[[component]]
+id = "linura-provider-sdk"
+path = "crates/linura-provider-sdk"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.1.0"
+release_artifact = false
+authority_role = "provider-contract"
+scope = "typed provider/executor correlation contracts without policy ownership"
+
+[[component]]
+id = "linura-transaction"
+path = "crates/linura-transaction"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.4.0"
+release_artifact = false
+authority_role = "transaction-authority"
+scope = "durable transaction identities, bindings and authority state model"
+
+[[component]]
+id = "linura-persistence-sqlite"
+path = "crates/linura-persistence-sqlite"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.4.0"
+release_artifact = false
+authority_role = "persistence"
+scope = "qualified SQLite/WAL durability, integrity, recovery and audit persistence"
+
+[[component]]
+id = "linura-control"
+path = "crates/linura-control"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.1.0"
+release_artifact = false
+authority_role = "control-authority"
+scope = "canonical policy/query orchestration and durable authority coordination"
+
+[[component]]
+id = "linura-bootstrap"
+path = "crates/linura-bootstrap"
+kind = "crate"
+workspace_member = true
+maturity = "roadmap-scaffold"
+activation_milestone = "v0.9.0"
+release_artifact = false
+authority_role = "bootstrap-model"
+scope = "future supported-reference-environment bootstrap coordination"
+
+[[component]]
+id = "linura-migrations"
+path = "crates/linura-migrations"
+kind = "crate"
+workspace_member = true
+maturity = "foundation"
+activation_milestone = "v0.4.0"
+release_artifact = false
+authority_role = "migration-model"
+scope = "migration descriptors and ledger foundation; no standalone updater"
+
+[[component]]
+id = "linura-update"
+path = "crates/linura-update"
+kind = "crate"
+workspace_member = true
+maturity = "foundation"
+activation_milestone = "v0.0.0"
+release_artifact = false
+authority_role = "update-model"
+scope = "ordered update policy foundation used by the narrow guard; full coordinator is future"
+
+[[component]]
+id = "linura-config"
+path = "crates/linura-config"
+kind = "crate"
+workspace_member = true
+maturity = "roadmap-scaffold"
+activation_milestone = "v0.10.0"
+release_artifact = false
+authority_role = "configuration-model"
+scope = "future integrated managed-configuration ownership and drift handling"
+
+[[component]]
+id = "linura-hardware"
+path = "crates/linura-hardware"
+kind = "crate"
+workspace_member = true
+maturity = "roadmap-scaffold"
+activation_milestone = "v0.9.0"
+release_artifact = false
+authority_role = "hardware-evidence"
+scope = "future supported reference-environment hardware qualification"
+
+[[component]]
+id = "linura-testkit"
+path = "crates/linura-testkit"
+kind = "crate"
+workspace_member = true
+maturity = "foundation"
+activation_milestone = "v0.0.0"
+release_artifact = false
+authority_role = "test-support"
+scope = "deterministic repository test-support primitives"
+
+[[component]]
+id = "linura-lifecycle"
+path = "crates/linura-lifecycle"
+kind = "crate"
+workspace_member = true
+maturity = "foundation"
+activation_milestone = "v0.6.0"
+release_artifact = false
+authority_role = "lifecycle-model"
+scope = "canonical mutation-lifecycle model; integrated v0.6 composition remains pending"
+
+[[component]]
+id = "xtask"
+path = "tools/xtask"
+kind = "tool"
+workspace_member = true
+maturity = "foundation"
+activation_milestone = "v0.0.0"
+release_artifact = false
+authority_role = "development-tool"
+scope = "canonical local and CI validation orchestrator"
+
+[[component]]
+id = "linura-executor-systemd"
+path = "executors/linura-executor-systemd"
+kind = "executor"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.5.0"
+release_artifact = true
+binary = "linura-executor-systemd"
+authority_role = "privileged-executor"
+scope = "separately hardened root executor for the exact bounded systemd effect"
+
+[[component]]
+id = "linura-verifier-systemd"
+path = "verifiers/linura-verifier-systemd"
+kind = "verifier"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.5.0"
+release_artifact = false
+authority_role = "independent-verifier"
+scope = "independent native-systemd postcondition verification; consumes no executor receipt"
+
+[[component]]
+id = "linura-agent-ui"
+path = "apps/linura-agent-ui"
+kind = "planned-app"
+workspace_member = false
+maturity = "roadmap-scaffold"
+activation_milestone = "v0.8.0"
+release_artifact = false
+authority_role = "proposal-only"
+scope = "future conversational IntentProposal client with no privileged authority"
+
+[[component]]
+id = "linura-control-center"
+path = "apps/linura-control-center"
+kind = "planned-app"
+workspace_member = false
+maturity = "roadmap-scaffold"
+activation_milestone = "v0.10.0"
+release_artifact = false
+authority_role = "client"
+scope = "future graphical protocol client with no distro backend or privileged handle"
+
+[[component]]
+id = "linura-shell"
+path = "apps/linura-shell"
+kind = "planned-app"
+workspace_member = false
+maturity = "roadmap-scaffold"
+activation_milestone = "v0.10.0"
+release_artifact = false
+authority_role = "client"
+scope = "future desktop-shell integration over Linura protocol surfaces"
