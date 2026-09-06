@@ -590,7 +590,7 @@ fn reserve_result(result: io::Result<()>) -> i64 {
 
 fn io_store(error: io::Error) -> TransactionStoreError {
     if error.raw_os_error() == Some(28) {
-        TransactionStoreError::CapacityExceeded
+        TransactionStoreError::Storage(format!("physical storage exhausted (ENOSPC): {error}"))
     } else if error.kind() == io::ErrorKind::InvalidData {
         TransactionStoreError::Corruption(error.to_string())
     } else {
@@ -602,7 +602,7 @@ fn sqlite_store(error: rusqlite::Error) -> TransactionStoreError {
     if let rusqlite::Error::SqliteFailure(code, _) = &error
         && code.code == rusqlite::ErrorCode::DiskFull
     {
-        return TransactionStoreError::CapacityExceeded;
+        return TransactionStoreError::Storage(format!("SQLite physical storage exhausted: {error}"));
     }
     TransactionStoreError::Storage(error.to_string())
 }

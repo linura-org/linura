@@ -1,0 +1,27 @@
+[package]
+name = "linura-authorityd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+linura-control = { path = "../../crates/linura-control" }
+linura-core = { path = "../../crates/linura-core" }
+linura-dbus = { path = "../../crates/linura-dbus" }
+linura-executor-systemd = { path = "../../executors/linura-executor-systemd" }
+linura-linux-observation = { path = "../../crates/linura-linux-observation" }
+linura-observation-control = { path = "../../crates/linura-observation-control" }
+linura-persistence-sqlite = { path = "../../crates/linura-persistence-sqlite" }
+linura-protocol = { path = "../../crates/linura-protocol" }
+linura-provider-sdk = { path = "../../crates/linura-provider-sdk" }
+linura-transaction = { path = "../../crates/linura-transaction" }
+linura-verifier-systemd = { path = "../../verifiers/linura-verifier-systemd" }
+zbus = { version = "=5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
+
+[dev-dependencies]
+linura-observation = { path = "../../crates/linura-observation" }
+
+[lints]
+workspace = true

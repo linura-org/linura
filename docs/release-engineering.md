@@ -1,28 +1,36 @@
 # Release engineering
 
-Linura separates **what a version claims**, **which exact reviewed source is proven**, **how candidate bytes are constructed**, **how that proof is promoted**, **when the immutable version tag is created**, and **how publication is independently verified**.
+Linura separates **what a version claims**, **which exact reviewed source is proven**, **which system qualifications that claim requires**, **how candidate bytes are constructed**, **how proof is promoted**, **when the immutable version tag is created**, and **how publication is independently verified**.
 
-See [Release contracts, claims and evidence](release-contracts.md) for the version-scoped documentation/evidence model and [Trusted release build boundary](release-build-trust.md) / [ADR 0015](adr/0015-isolated-reproducible-release-build.md) for the builder trust boundary and reproducibility model.
+See [Release contracts, claims and evidence](release-contracts.md) for the version-scoped documentation/evidence model and [Trusted release build boundary](release-build-trust.md) / [ADR 0015](adr/0015-isolated-reproducible-release-build.md) / [ADR 0023](adr/0023-build-once-promote-exact-bytes.md) for the build/promotion trust model.
 
-The release control plane is implemented inside Linura. The mature ProdKit release lifecycle is used as a reference design, but Linura does not require `prodkit-workflows` or another repository at release time.
+The release control plane is repository-owned. Linura does not require another repository or external release orchestrator at release time.
 
 ## Release documentation lifecycle
 
 Every planned version starts with a mutable milestone contract at `docs/milestones/vX.Y.Z.md`.
 
-Before release proof starts, implementation closes into a frozen release contract at `docs/releases/vX.Y.Z.md`. The matching release contract is mandatory input to proof and publication and declares the release claim class, supported platform scope, security/authority boundary, migration/recovery boundaries, known unsupported states and PR/commit traceability.
+Before release proof starts, implementation closes into a frozen release contract at `docs/releases/vX.Y.Z.md`. That contract is mandatory input to proof/publication and declares:
 
-The GitHub Release body is not independently generated. The exact `RELEASE_NOTES.md` sealed during Trusted Release Proof is published verbatim.
+- claim class and exact capability boundary;
+- supported/unsupported platform scope;
+- security/authority boundary;
+- migration/recovery boundaries;
+- mandatory qualification workflows/evidence;
+- known unsupported states;
+- human PR/commit traceability where useful.
+
+Qualification dossiers under `docs/qualification/` explain how the implementation maps to the milestone and what evidence is required/obtained. They do not fabricate future run IDs or turn an unexecuted workflow into proof.
+
+The GitHub Release body is not independently generated. The exact `RELEASE_NOTES.md` sealed during Trusted Release Proof is published verbatim from the frozen release contract/notes.
 
 ### Release presentation convention
-
-Linura follows one stable presentation contract across Git, GitHub Releases and frozen release notes:
 
 - Git tag: `vX.Y.Z`.
 - GitHub Release title: `Linura vX.Y.Z`.
 - Frozen release-note first heading: `# vX.Y.Z — <implementation theme>`.
 
-The Git tag deliberately stays product-name-free for SemVer-compatible tooling. The product name belongs in the GitHub Release title, while the frozen note heading carries the version plus a concise implementation theme. GitHub has no separate release subtitle field, so the first Markdown heading is the canonical subtitle-like presentation and is verified as part of the frozen Release body.
+The Git tag stays product-name-free for SemVer-compatible tooling. The product name belongs in the GitHub Release title; the frozen note heading carries version + concise implementation theme.
 
 ## Protected release intent
 
@@ -34,9 +42,9 @@ release: vX.Y.Z — <implementation theme>
 
 That commit does **not** create a tag. It expresses an unpublished release intent for the exact current `main` SHA.
 
-`Release Proof Dispatch` observes completed `CI`, `Security` and `CodeQL` push runs for `main`. It has `contents: read` and `actions: write`, but no permission to create tags or Releases. For a release-intent source it:
+`Release Proof Dispatch` observes completed `CI`, `Security` and `CodeQL` push runs for `main`. It has no tag/Release authority. For a release-intent source it:
 
-1. requires the triggering SHA to still equal current protected `main`;
+1. requires the triggering SHA still equals current protected `main`;
 2. validates the frozen release contract and workspace version;
 3. requires successful exact-SHA `CI`, `Security` and `CodeQL` evidence;
 4. refuses a conflicting existing version tag;
@@ -44,105 +52,147 @@ That commit does **not** create a tag. It expresses an unpublished release inten
 6. rechecks current `main` immediately before dispatch;
 7. dispatches `Trusted Release Proof` at `main`.
 
-This gate observer is the only release-control edge that uses `workflow_run`: it observes independently completed permanent push gates. If `main` advances before proof dispatch, the stale observer run exits without release authority. A later exact-main gate completion evaluates the new state.
+This observer is the only release-control edge using `workflow_run`. If `main` advances before proof dispatch, stale observation exits without release authority.
 
 ## Trusted Release Proof
 
-`Trusted Release Proof` is `workflow_dispatch`-only and starts with `github.sha` as the candidate source. Its authorization job has no repository-content write authority. It:
+`Trusted Release Proof` is `workflow_dispatch`-only and begins with `github.sha` as the candidate source. Its authorization job is read-only with respect to repository contents.
+
+It first:
 
 1. proves checkout `HEAD`, `github.sha` and `origin/main` are the same exact SHA;
 2. validates the `release: vX.Y.Z — …` subject and frozen release contract;
-3. re-verifies successful exact-SHA `CI`, `Security` and `CodeQL` runs;
-4. delegates construction to the repository-owned reusable trusted builder with only the exact source SHA, tag and version;
-5. requires that builder to run canonical validation without mutating tracked source;
-6. requires the builder to construct the release binaries once with locked dependencies inside the pinned deterministic build envelope;
-7. requires the builder to construct `SOURCE_SHA`, `RELEASE_TAG`, frozen `RELEASE_NOTES.md`, `BUILD-ENVIRONMENT.json`, SPDX SBOM and `RELEASE-EVIDENCE.json`;
-8. requires the builder to seal the payload with `SHA256SUMS`, generate the machine-readable proof receipt, verify the complete contract and create GitHub/Sigstore build-provenance attestations;
-9. requires a separate fresh runner to rebuild the same exact source and reproduce all distributable binaries byte-for-byte;
-10. accepts the proof artifact only if construction, source immutability, provenance and independent reproduction all succeed.
+3. re-verifies successful exact-SHA `CI`, `Security` and `CodeQL` runs.
 
-`.github/workflows/reusable-release-build.yml` is therefore a distinct least-privilege build capability, not a publication capability. It cannot write repository contents, create tags, or publish a GitHub Release. The promotable bytes are produced exactly once inside that trusted build and later stages consume those same sealed bytes rather than rebuilding them.
+It then runs the **mandatory exact-source system qualification graph** before construction. The exact graph is version/claim scoped; for v0.6 it includes:
 
-After the trusted build/reproduction proof succeeds, a separate narrow `dispatch-promotion` job receives only `actions: write` and `contents: read`. It rechecks that the proven SHA is still current `main` and explicitly dispatches `Release Promotion` with the exact source SHA and Trusted Release Proof run ID. The job sets explicit GitHub CLI repository context and does not rely on a checkout to infer the repository. This `workflow_dispatch` handoff is intentional: GitHub suppresses recursive workflow triggers for many events created by `GITHUB_TOKEN`, while `workflow_dispatch` is a documented exception.
+- authoritative observation acceptance;
+- Control1 plan-preview acceptance;
+- v0.4 durability fault qualification;
+- v0.4 real filesystem/ENOSPC recovery qualification;
+- v0.5 isolated executor/verifier qualification;
+- v0.6 complete managed-lifecycle disposable-VM qualification.
+
+The v0.6 workflow proves the bounded `Authority1 → linura-authorityd → Control → executor → systemd → independent verifier` path on a disposable real system and runs the deterministic eleven-case v0.6 fault/recovery matrix. Earlier milestone gates remain inherited evidence where the v0.6 design depends on their qualified invariants.
+
+Only after every required qualification succeeds may Trusted Release Proof delegate construction to the repository-owned reusable trusted builder.
+
+The build/proof phase then:
+
+1. constructs release binaries once with locked dependencies inside the pinned deterministic build envelope;
+2. constructs `SOURCE_SHA`, `RELEASE_TAG`, frozen `RELEASE_NOTES.md`, `BUILD-ENVIRONMENT.json`, SPDX SBOM and `RELEASE-EVIDENCE.json`;
+3. seals the payload with `SHA256SUMS` and a machine-readable proof receipt;
+4. verifies the complete contract and creates GitHub/Sigstore build-provenance attestations;
+5. keeps the tracked source tree immutable throughout construction;
+6. uses a separate fresh runner to rebuild the exact source and reproduce every distributable binary byte-for-byte.
+
+For v0.6 the distributable binary set includes `linura-authorityd` and excludes the future `linura-firstboot` scaffold, as governed by `contracts/components.toml` and [ADR 0025](adr/0025-component-maturity-and-milestone-activation.md).
+
+A successful CI run, an earlier PR-head VM run, or a reproducible build cannot individually substitute for the exact-source qualification graph.
+
+### SHA changes invalidate exact-source evidence
+
+Rebase, history compaction, amend, force-update or any other content/history change that produces a new candidate SHA invalidates exact-source release evidence for the old SHA.
+
+This is why final history compaction must occur **before** final exact-head gates and Trusted Release Proof. Old development runs can diagnose behavior, but they are not proof for the compacted source.
+
+## Reusable trusted builder
+
+`.github/workflows/reusable-release-build.yml` is a least-privilege construction capability, not publication authority. It cannot write repository contents, create tags or publish a GitHub Release.
+
+The promotable bytes are produced once in the trusted build and later stages consume those same sealed bytes rather than rebuilding them. See [Trusted release build boundary](release-build-trust.md).
+
+After build/reproduction succeeds, a narrow dispatch job receives only the permissions needed to recheck that the proven SHA is still current `main` and explicitly dispatch `Release Promotion` with the exact source SHA and proof run ID.
 
 ## Release Promotion
 
-A successful `Trusted Release Proof` explicitly dispatches `Release Promotion`. Promotion is `workflow_dispatch`-only; release correctness does not depend on recursive `workflow_run` propagation. Promotion has `contents: read` and `actions: write`; it cannot create a tag or GitHub Release.
+Promotion is `workflow_dispatch`-only and cannot create a tag or GitHub Release.
 
-Because the explicit dispatch can start while the proof workflow's narrow dispatch job is finishing, Promotion first waits a bounded interval for the referenced proof run to reach a terminal state. It then requires that run to be `completed/success` before any release handoff.
+It:
 
-Promotion:
-
-1. verifies the exact proof run identity, event, terminal status, conclusion and source SHA;
-2. requires the proven SHA to still be current `main`;
-3. validates the version/frozen contract again;
+1. verifies the exact proof run identity, event, terminal status, success conclusion and source SHA;
+2. requires the proven SHA still equals current `main`;
+3. validates version/frozen contract again;
 4. refuses a version tag already bound to another source;
 5. avoids duplicate active Release runs;
 6. rechecks current `main` immediately before handoff;
-7. dispatches `Release` on `main` with the exact source SHA, proof run ID and version.
+7. dispatches `Release` on `main` with exact source SHA, proof run ID and version.
 
-The final Release request itself verifies that its `github.sha` equals the exact promoted source. If `main` changes while the handoff is being resolved, the Release request fails closed rather than silently selecting a different commit.
+If `main` moves while the handoff is being resolved, the Release request fails closed rather than silently selecting a different commit.
 
-## Release validation and source commit point
+## Release validation and source-selection commit point
 
-The final `Release` workflow begins read-only. Before any tag/publication authority is used, its validation job:
+The final `Release` workflow begins read-only. Before tag/publication authority is used, validation:
 
-1. requires the workflow to have been dispatched on `main` at the exact promoted source SHA;
-2. requires `origin/main` still to equal that source SHA;
-3. validates the release-intent subject, requested version and frozen release contract;
+1. requires the workflow dispatch on `main` at the exact promoted source SHA;
+2. requires `origin/main` still equals that source SHA;
+3. validates release-intent subject, requested version and frozen contract;
 4. re-verifies permanent exact-SHA gates;
 5. verifies the exact successful Trusted Release Proof run;
 6. downloads the exact proof artifact;
-7. verifies the proof receipt and every sealed payload digest;
-8. re-runs release-contract and payload verification;
+7. verifies proof receipt and every sealed payload digest;
+8. reruns release-contract/payload verification;
 9. verifies build provenance for every payload file;
 10. refuses an existing version tag bound to another source.
 
-Successful completion of this validation stage is the release source-selection commit point. At that point one exact reviewed, gated and proven source has entered the serialized `release-<version>` workflow. Later ordinary `main` development does not change the identity of that already-promoted release attempt.
+Successful completion is the release source-selection commit point. Later ordinary `main` development does not retarget that already-promoted release attempt.
 
-If a correction is required **before** this validation succeeds, merge the correction and let the stale proof/promotion path fail closed. If a correction is discovered after the final Release validation has succeeded, cancel the release before publication or publish a subsequent version; never retarget an immutable version tag.
+If a correction is required **before** validation succeeds, merge the correction and let the stale proof/promotion path fail closed. If a correction is discovered after validation succeeds, cancel before publication or publish a subsequent version; never retarget an immutable version tag.
 
 ## Tag-last publication
 
-Only the `publish` job of the final Release workflow has `contents: write`, and it runs through the `release` GitHub Environment.
+Only the final Release `publish` job receives `contents: write`, behind the `release` GitHub Environment.
 
 Publication:
 
 1. checks out the exact selected source again;
-2. re-downloads the exact Trusted Release Proof artifact;
-3. re-verifies the sealed bytes and their attestations;
+2. redownloads the exact Trusted Release Proof artifact;
+3. reverifies sealed bytes and attestations;
 4. creates `refs/tags/vX.Y.Z` only if absent, or proves an existing tag points to the same selected source;
-5. creates or resumes a draft GitHub Release with title `Linura vX.Y.Z` and the frozen `RELEASE_NOTES.md` body;
+5. creates/resumes a draft GitHub Release with title `Linura vX.Y.Z` and frozen `RELEASE_NOTES.md` body;
 6. reconciles the draft asset set to the sealed proof payload;
 7. verifies every uploaded asset digest;
-8. publishes the draft only after the remote asset set is exact.
+8. publishes only after the remote asset set is exact.
 
-Promotion and publication never rebuild the payload. The immutable version tag is therefore a publication result of a successful proof chain, not the trigger that grants proof authority.
+Promotion/publication never rebuild the payload. The immutable version tag is a publication result of successful proof, not a trigger that grants proof authority.
 
 ## Independent publication verification
 
-Because GitHub suppresses many recursive workflow triggers created by `GITHUB_TOKEN`, Release explicitly dispatches `Verify published release` after publication rather than relying only on the `release.published` event.
+Release explicitly dispatches `Verify published release` after publication rather than depending on recursive event behavior.
 
 Independent verification:
 
-1. resolves and checks out the published tag;
+1. resolves/checks out the published tag;
 2. downloads published assets afresh;
-3. proves the tag commit equals published `SOURCE_SHA`;
+3. proves tag commit equals published `SOURCE_SHA`;
 4. verifies `RELEASE-EVIDENCE.json`;
 5. verifies `SHA256SUMS`;
-6. downloads the GitHub Release body and compares it byte-for-byte with published `RELEASE_NOTES.md`;
-7. verifies GitHub build provenance for every published payload asset.
+6. compares GitHub Release body byte-for-byte with published `RELEASE_NOTES.md`;
+7. verifies build provenance for every published payload asset;
+8. verifies the version-specific expected binary/artifact set, including `linura-authorityd` for v0.6.
 
-Verification is serialized per tag so duplicate publication signals cannot race one another. Publication is incomplete until this independent verification succeeds.
+Publication is incomplete until this independent verification succeeds.
+
+## Post-release closure
+
+Roadmap/current-release state must advance only after immutable publication and independent verification exist. Post-release closure may update machine-readable roadmap status and clean release-temporary branches, but it must not rewrite the published source or tag.
+
+Publication evidence and roadmap closure are therefore ordered:
+
+```text
+proof → promotion → tag-last publication → independent verification → roadmap/cleanup closure
+```
 
 ## Traceability policy
 
-Release notes use PR links as the default human change provenance. For security-sensitive, migration, recovery, release-control or trust-boundary claims, add a full-SHA commit URL when it materially improves immutable provenance.
+Release notes use PR links as default human change provenance. Security-sensitive, migration, recovery, release-control or trust-boundary claims may also include a full-SHA URL where immutable provenance materially improves review.
 
-PR/commit references are provenance, not acceptance evidence. The release's required exact-source tests remain authoritative for correctness/support claims.
+PR/commit references are provenance, not acceptance evidence. Required exact-source tests remain authoritative for correctness/support claims.
 
-## Supported release qualification
+## Claim-scoped qualification
 
-Supported releases additionally require VM/profile/hardware, upgrade, recovery and privilege-boundary evidence appropriate to the declared claim class and capability scope. Release metadata is never a substitute for system acceptance evidence.
+A release must not apply a generic “supported” checklist more strongly than its claim class.
 
-The generic [supported release readiness checklist](operations/release-readiness.md) is applied together with the version-specific frozen release contract.
+v0.6 remains Experimental and explicitly claims no supported distribution, machine class or hardware profile. Therefore it must prove its bounded authority/security/recovery behavior but must **not** manufacture platform-support evidence it does not claim.
+
+Later releases that declare supported platform/profile/hardware scope additionally require the corresponding VM/profile/hardware, upgrade, recovery and privilege-boundary evidence. The generic [release readiness checklist](operations/release-readiness.md) supplements the version-specific frozen release contract; it never replaces it.

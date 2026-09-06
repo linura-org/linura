@@ -191,3 +191,11 @@ kind = "dbus-interface"
 path = "interfaces/dbus/org.linura.Executor.Systemd1.xml"
 version = "1"
 stability = "experimental"
+
+
+[[contract]]
+id = "dbus.org.linura.Authority1"
+kind = "dbus-interface"
+path = "interfaces/dbus/org.linura.Authority1.xml"
+version = "1"
+stability = "experimental"

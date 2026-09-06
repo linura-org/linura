@@ -104,6 +104,33 @@ pub enum DurableRecoveryOutcome {
     StillIndeterminate(TransactionSnapshot),
 }
 
+#[derive(Debug)]
+pub struct FreshRecoveryApproval {
+    request_id: ApprovalRequestId,
+    approver: PolicyAuthenticatedApprover,
+    expires_at_unix_seconds: u64,
+}
+
+impl FreshRecoveryApproval {
+    #[must_use]
+    pub fn new(
+        request_id: ApprovalRequestId,
+        approver: PolicyAuthenticatedApprover,
+        expires_at_unix_seconds: u64,
+    ) -> Self {
+        Self {
+            request_id,
+            approver,
+            expires_at_unix_seconds,
+        }
+    }
+}
+
+enum RecoveryApproval {
+    Existing(Option<ApprovalEvidenceId>),
+    OnDemand(FreshRecoveryApproval),
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RiskProvenance {
     risk: RiskClass,
@@ -484,6 +511,41 @@ where
         request: PlanDesiredStateRequest,
         approval_evidence_id: Option<ApprovalEvidenceId>,
     ) -> Result<DurableRecoveryOutcome, DurableAuthorityError> {
+        self.recover_indeterminate_inner(
+            previews,
+            principal,
+            actor,
+            request,
+            RecoveryApproval::Existing(approval_evidence_id),
+        )
+    }
+
+    /// Recover using approval authority bound to the exact fresh recovery candidate.
+    pub fn recover_indeterminate_with_approver(
+        &mut self,
+        previews: &mut PlanPreviewControl,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: PlanDesiredStateRequest,
+        approval: FreshRecoveryApproval,
+    ) -> Result<DurableRecoveryOutcome, DurableAuthorityError> {
+        self.recover_indeterminate_inner(
+            previews,
+            principal,
+            actor,
+            request,
+            RecoveryApproval::OnDemand(approval),
+        )
+    }
+
+    fn recover_indeterminate_inner(
+        &mut self,
+        previews: &mut PlanPreviewControl,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: PlanDesiredStateRequest,
+        approval: RecoveryApproval,
+    ) -> Result<DurableRecoveryOutcome, DurableAuthorityError> {
         let principal_id = PrincipalId::new(principal.as_str().to_owned())
             .map_err(|error| DurableAuthorityError::Preview(error.to_string()))?;
         let transaction_id = TransactionId::for_namespace(&principal_id, &request.request_id);
@@ -620,6 +682,25 @@ where
                     observation_digest: observation_digest.clone(),
                     review_digest,
                 };
+                let approval_evidence_id = match &approval {
+                    RecoveryApproval::Existing(existing) => existing.clone(),
+                    RecoveryApproval::OnDemand(approval) => match candidate.review.decision() {
+                        PolicyDecision::Allow => None,
+                        PolicyDecision::RequireApproval { .. } => Some(
+                            self.issue_approval(
+                                approval.request_id.clone(),
+                                &candidate,
+                                &approval.approver,
+                                approval.expires_at_unix_seconds,
+                            )?
+                            .id()
+                            .clone(),
+                        ),
+                        PolicyDecision::Deny { .. } | PolicyDecision::Blocked { .. } => {
+                            return Err(DurableAuthorityError::CandidateBlocked);
+                        }
+                    },
+                };
                 let now_unix_ms = self.authority_now_unix_ms()?;
                 let next_binding = self.revalidate_and_bind(
                     &candidate,
@@ -687,6 +768,25 @@ where
             .map_err(Into::into)
     }
 
+    /// Prove that a stable request namespace still carries the exact
+    /// canonical request material sealed into durable authority.
+    pub fn assert_request_matches(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+    ) -> Result<(), DurableAuthorityError> {
+        let principal_id = PrincipalId::new(principal.as_str().to_owned())
+            .map_err(|error| DurableAuthorityError::Preview(error.to_string()))?;
+        let transaction_id = TransactionId::for_namespace(&principal_id, &request.request_id);
+        let anchor = self.transactions.recovery_anchor(&transaction_id)?;
+        if anchor.snapshot.principal != principal_id
+            || anchor.snapshot.request_id != request.request_id
+            || anchor.request_digest != digest_request(request)?
+        {
+            return Err(DurableAuthorityError::RecoveryRequestMismatch);
+        }
+        Ok(())
+    }
     pub fn integrity_check(&self) -> Result<(), DurableAuthorityError> {
         self.transactions.integrity_check().map_err(Into::into)
     }

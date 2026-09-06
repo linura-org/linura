@@ -1,0 +1,6 @@
+[Unit]
+Description=Linura v0.6 verification-not-satisfied fixture
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'install -d -m 0755 /run/linura-v06-qualification; printf "notsatisfied-start\n" >> /run/linura-v06-qualification/dispatch.log'

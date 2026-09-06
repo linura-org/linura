@@ -49,6 +49,7 @@ scp "${ssh_common[@]}" -P "$ssh_port" \
   packaging/systemd/system/linura-executor-systemd.service \
   tests/acceptance/v05/linura-v05-qualification-restart.service \
   tests/acceptance/v05/49-linura-v05-qualification.rules \
+  tests/acceptance/v05/49-linura-v05-qualification-dbus.conf \
   tests/acceptance/v05/qualify-guest.sh \
   linura@127.0.0.1:/tmp/
 

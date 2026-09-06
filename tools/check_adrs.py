@@ -168,14 +168,24 @@ def validate(root: Path) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate Linura ADR ledger governance")
     parser.add_argument(
-        "--root",
+        "root_arg",
+        nargs="?",
         type=Path,
-        default=Path(__file__).resolve().parents[1],
+        help="repository root (positional compatibility form)",
+    )
+    parser.add_argument(
+        "--root",
+        dest="root_option",
+        type=Path,
         help="repository root",
     )
     args = parser.parse_args()
 
-    failures = validate(args.root.resolve())
+    if args.root_arg is not None and args.root_option is not None:
+        parser.error("specify repository root either positionally or with --root, not both")
+    root = args.root_option or args.root_arg or Path(__file__).resolve().parents[1]
+
+    failures = validate(root.resolve())
     if failures:
         for failure in failures:
             print(f"ERROR: {failure}", file=sys.stderr)

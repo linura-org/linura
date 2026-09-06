@@ -15,4 +15,14 @@
       <allow_active>auth_admin</allow_active>
     </defaults>
   </action>
+
+  <action id="org.linura.executor.systemd.set-active-state">
+    <description>Execute an exact Linura-authorized managed systemd active-state effect</description>
+    <message>This operation is reserved for the Linura authority service</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>no</allow_active>
+    </defaults>
+  </action>
 </policyconfig>

@@ -16,16 +16,29 @@ pub const OBJECT_PATH: &str = "/org/linura/Executor/Systemd1";
 pub const INTERFACE_NAME: &str = "org.linura.Executor.Systemd1";
 pub const QUALIFICATION_ACTION_ID: &str = "org.linura.executor.systemd.qualify-restart";
 pub const QUALIFICATION_UNIT_PREFIX: &str = "linura-v05-qualification-";
+pub const MANAGED_ACTION_ID: &str = "org.linura.executor.systemd.set-active-state";
+pub const MANAGED_UNIT_PREFIX: &str = "linura-managed-";
 const QUALIFICATION_OPERATION: &str = "restart-unit";
+const MANAGED_OPERATION: &str = "set-active-state";
 const MAX_WIRE_DETAIL_BYTES: usize = 192;
 const SYSTEMD_METHOD_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub type QualificationOutcomeWire = (String, String, String);
+pub type ExecutionOutcomeWire = (String, String, String);
+pub type QualificationOutcomeWire = ExecutionOutcomeWire;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SystemdOperation {
-    SetUnitEnabled { unit: UnitName, enabled: bool },
-    RestartUnit { unit: UnitName },
+    SetUnitEnabled {
+        unit: UnitName,
+        enabled: bool,
+    },
+    RestartUnit {
+        unit: UnitName,
+    },
+    SetManagedActiveState {
+        unit: ManagedUnitName,
+        state: ManagedActiveState,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -89,23 +102,8 @@ pub struct QualificationUnitName(UnitName);
 impl QualificationUnitName {
     pub fn parse(value: impl Into<String>) -> Result<Self, QualificationUnitError> {
         let unit = UnitName::parse(value).map_err(QualificationUnitError::Unit)?;
-        let Some(suffix) = unit.as_str().strip_prefix(QUALIFICATION_UNIT_PREFIX) else {
-            return Err(QualificationUnitError::WrongNamespace);
-        };
-        let Some(slug) = suffix.strip_suffix(".service") else {
-            return Err(QualificationUnitError::WrongNamespace);
-        };
-        if slug.is_empty()
-            || slug.len() > 96
-            || !slug.chars().all(|character| {
-                character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
-            })
-            || slug.starts_with('-')
-            || slug.ends_with('-')
-            || slug.contains("--")
-        {
-            return Err(QualificationUnitError::InvalidFixtureName);
-        }
+        validate_reserved_unit(unit.as_str(), QUALIFICATION_UNIT_PREFIX)
+            .map_err(|_| QualificationUnitError::InvalidFixtureName)?;
         Ok(Self(unit))
     }
 
@@ -114,8 +112,7 @@ impl QualificationUnitName {
     }
 
     pub fn resource_id(&self) -> Result<ResourceId, ExecutorError> {
-        ResourceId::new(format!("systemd:unit:{}", self.as_str()))
-            .map_err(|error| ExecutorError::Contract(error.to_string()))
+        systemd_resource(self.as_str())
     }
 }
 
@@ -137,6 +134,78 @@ impl Display for QualificationUnitError {
 }
 
 impl std::error::Error for QualificationUnitError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ManagedUnitName(UnitName);
+
+impl ManagedUnitName {
+    pub fn parse(value: impl Into<String>) -> Result<Self, ManagedUnitError> {
+        let unit = UnitName::parse(value).map_err(ManagedUnitError::Unit)?;
+        if !unit.as_str().starts_with(MANAGED_UNIT_PREFIX) {
+            return Err(ManagedUnitError::WrongNamespace);
+        }
+        validate_reserved_unit(unit.as_str(), MANAGED_UNIT_PREFIX)
+            .map_err(|_| ManagedUnitError::InvalidManagedName)?;
+        Ok(Self(unit))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    pub fn resource_id(&self) -> Result<ResourceId, ExecutorError> {
+        systemd_resource(self.as_str())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ManagedUnitError {
+    Unit(UnitNameError),
+    WrongNamespace,
+    InvalidManagedName,
+}
+
+impl Display for ManagedUnitError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unit(error) => write!(f, "{error}"),
+            Self::WrongNamespace => f.write_str("unit is outside the linura-managed- namespace"),
+            Self::InvalidManagedName => f.write_str("managed unit name is not canonical"),
+        }
+    }
+}
+
+impl std::error::Error for ManagedUnitError {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ManagedActiveState {
+    Active,
+    Inactive,
+}
+
+impl ManagedActiveState {
+    pub fn parse(value: &str) -> Result<Self, &'static str> {
+        match value {
+            "active" => Ok(Self::Active),
+            "inactive" => Ok(Self::Inactive),
+            _ => Err("managed active state must be exactly active or inactive"),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Inactive => "inactive",
+        }
+    }
+
+    const fn systemd_method(self) -> &'static str {
+        match self {
+            Self::Active => "StartUnit",
+            Self::Inactive => "StopUnit",
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum ExecutorError {
@@ -160,15 +229,6 @@ pub struct SystemdExecutorService;
 
 #[zbus::interface(name = "org.linura.Executor.Systemd1")]
 impl SystemdExecutorService {
-    /// Qualification-only v0.5 fixture restart.
-    ///
-    /// This is deliberately not a product mutation surface. The supplied
-    /// binding is exact correlation material, not bearer authority. The caller
-    /// must separately be authenticated by the system bus and authorized by
-    /// the dedicated Polkit action.
-    // The qualification-only D-Bus ABI deliberately carries each exact binding field
-    // separately, plus zbus-injected connection/header context. Collapsing these fields
-    // would weaken wire-level reviewability solely to satisfy a local style heuristic.
     #[allow(clippy::too_many_arguments)]
     async fn qualify_restart(
         &self,
@@ -184,7 +244,11 @@ impl SystemdExecutorService {
         #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<QualificationOutcomeWire> {
         let sender = authenticated_sender(&header)?;
-        authorize_qualification_caller(&sender)?;
+        authorize_caller(
+            &sender,
+            QUALIFICATION_ACTION_ID,
+            "v0.5 executor qualification",
+        )?;
 
         let unit = match QualificationUnitName::parse(unit) {
             Ok(unit) => unit,
@@ -210,14 +274,7 @@ impl SystemdExecutorService {
             return Ok(rejected_wire(error.to_string()));
         }
 
-        let proxy = match zbus::Proxy::new(
-            connection,
-            "org.freedesktop.systemd1",
-            "/org/freedesktop/systemd1",
-            "org.freedesktop.systemd1.Manager",
-        )
-        .await
-        {
+        let proxy = match systemd_manager_proxy(connection).await {
             Ok(proxy) => proxy,
             Err(error) => {
                 return Ok(outcome_wire(bounded_outcome(
@@ -233,17 +290,92 @@ impl SystemdExecutorService {
 
         let dispatch: Result<OwnedObjectPath, zbus::Error> =
             proxy.call("RestartUnit", &(unit.as_str(), "replace")).await;
-        match dispatch {
-            Ok(_job) => Ok(outcome_wire(bounded_outcome(
-                ExecutionDisposition::Dispatched,
-                binding.dispatch_digest,
-                "systemd RestartUnit accepted; authoritative verification required",
-            )?)),
-            Err(error) => Ok(outcome_wire(indeterminate_dispatch_outcome(
-                binding.dispatch_digest,
-                &error,
-            )?)),
+        dispatch_result(
+            dispatch,
+            binding.dispatch_digest,
+            "systemd RestartUnit accepted; authoritative verification required",
+        )
+    }
+
+    /// v0.6's first supported managed external effect.
+    ///
+    /// This method is intentionally narrower than generic systemd management:
+    /// only canonical `linura-managed-*.service` units and the exact active or
+    /// inactive postcondition are accepted. Correlation material is independently
+    /// re-derived and checked here, after the trusted caller has consumed
+    /// Control's process-local one-shot dispatch permit.
+    #[allow(clippy::too_many_arguments)]
+    async fn set_managed_active_state(
+        &self,
+        unit: &str,
+        desired_active_state: &str,
+        transaction_id: &str,
+        generation: u64,
+        state_version: u64,
+        authority_binding_digest: &str,
+        authority_use_digest: &str,
+        effect_digest: &str,
+        dispatch_digest: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<ExecutionOutcomeWire> {
+        let sender = authenticated_sender(&header)?;
+        authorize_caller(&sender, MANAGED_ACTION_ID, "v0.6 managed systemd mutation")?;
+
+        let unit = match ManagedUnitName::parse(unit) {
+            Ok(unit) => unit,
+            Err(error) => return Ok(rejected_wire(error.to_string())),
+        };
+        let state = match ManagedActiveState::parse(desired_active_state) {
+            Ok(state) => state,
+            Err(error) => return Ok(rejected_wire(error.into())),
+        };
+        let effect = match managed_active_state_effect(&unit, state) {
+            Ok(effect) => effect,
+            Err(error) => return Ok(rejected_wire(error.to_string())),
+        };
+        let binding = match binding_from_wire(
+            transaction_id,
+            generation,
+            state_version,
+            authority_binding_digest,
+            authority_use_digest,
+            effect_digest,
+            dispatch_digest,
+        ) {
+            Ok(binding) => binding,
+            Err(error) => return Ok(rejected_wire(error)),
+        };
+        if let Err(error) = binding.validate_for(&effect) {
+            return Ok(rejected_wire(error.to_string()));
         }
+
+        let proxy = match systemd_manager_proxy(connection).await {
+            Ok(proxy) => proxy,
+            Err(error) => {
+                return Ok(outcome_wire(bounded_outcome(
+                    ExecutionDisposition::RejectedBeforeDispatch,
+                    binding.dispatch_digest,
+                    &format!(
+                        "systemd proxy unavailable: {}",
+                        bounded_text(&error.to_string())
+                    ),
+                )?));
+            }
+        };
+
+        let dispatch: Result<OwnedObjectPath, zbus::Error> = proxy
+            .call(state.systemd_method(), &(unit.as_str(), "replace"))
+            .await;
+        dispatch_result(
+            dispatch,
+            binding.dispatch_digest,
+            &format!(
+                "systemd {} accepted for {}; independent authoritative verification required",
+                state.systemd_method(),
+                unit.as_str()
+            ),
+        )
     }
 }
 
@@ -263,8 +395,7 @@ pub fn serve() -> Result<(), ExecutorError> {
 }
 
 pub fn restart_effect(unit: &QualificationUnitName) -> Result<EffectDescriptor, ExecutorError> {
-    let provider =
-        ProviderId::new("systemd").map_err(|error| ExecutorError::Contract(error.to_string()))?;
+    let provider = systemd_provider()?;
     let resource = unit.resource_id()?;
     EffectDescriptor::new(
         provider,
@@ -273,6 +404,59 @@ pub fn restart_effect(unit: &QualificationUnitName) -> Result<EffectDescriptor, 
         unit.as_str().as_bytes().to_vec(),
     )
     .map_err(|error| ExecutorError::Contract(error.to_string()))
+}
+
+pub fn managed_active_state_effect(
+    unit: &ManagedUnitName,
+    state: ManagedActiveState,
+) -> Result<EffectDescriptor, ExecutorError> {
+    let provider = systemd_provider()?;
+    let resource = unit.resource_id()?;
+    EffectDescriptor::new(
+        provider,
+        resource,
+        MANAGED_OPERATION,
+        format!("unit={}\nactive_state={}\n", unit.as_str(), state.as_str()).into_bytes(),
+    )
+    .map_err(|error| ExecutorError::Contract(error.to_string()))
+}
+
+fn systemd_provider() -> Result<ProviderId, ExecutorError> {
+    ProviderId::new("systemd").map_err(|error| ExecutorError::Contract(error.to_string()))
+}
+
+fn systemd_resource(unit: &str) -> Result<ResourceId, ExecutorError> {
+    ResourceId::new(format!("systemd:unit:{unit}"))
+        .map_err(|error| ExecutorError::Contract(error.to_string()))
+}
+
+fn validate_reserved_unit(unit: &str, prefix: &str) -> Result<(), ()> {
+    let suffix = unit.strip_prefix(prefix).ok_or(())?;
+    let slug = suffix.strip_suffix(".service").ok_or(())?;
+    if slug.is_empty()
+        || slug.len() > 96
+        || !slug.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+        })
+        || slug.starts_with('-')
+        || slug.ends_with('-')
+        || slug.contains("--")
+    {
+        return Err(());
+    }
+    Ok(())
+}
+
+async fn systemd_manager_proxy(
+    connection: &zbus::Connection,
+) -> Result<zbus::Proxy<'_>, zbus::Error> {
+    zbus::Proxy::new(
+        connection,
+        "org.freedesktop.systemd1",
+        "/org/freedesktop/systemd1",
+        "org.freedesktop.systemd1.Manager",
+    )
+    .await
 }
 
 fn binding_from_wire(
@@ -316,35 +500,48 @@ fn authenticated_sender(header: &Header<'_>) -> zbus::fdo::Result<String> {
     Ok(sender.into())
 }
 
-fn authorize_qualification_caller(sender: &str) -> zbus::fdo::Result<()> {
+fn authorize_caller(sender: &str, action_id: &str, purpose: &str) -> zbus::fdo::Result<()> {
     let status = Command::new("/usr/bin/pkcheck")
-        .args([
-            "--action-id",
-            QUALIFICATION_ACTION_ID,
-            "--system-bus-name",
-            sender,
-        ])
+        .args(["--action-id", action_id, "--system-bus-name", sender])
         .status()
         .map_err(|_| {
-            zbus::fdo::Error::AccessDenied(
-                "qualification authorization service is unavailable".into(),
-            )
+            zbus::fdo::Error::AccessDenied(format!(
+                "{purpose} authorization service is unavailable"
+            ))
         })?;
     if status.success() {
         Ok(())
     } else {
-        Err(zbus::fdo::Error::AccessDenied(
-            "caller is not authorized for v0.5 executor qualification".into(),
-        ))
+        Err(zbus::fdo::Error::AccessDenied(format!(
+            "caller is not authorized for {purpose}"
+        )))
     }
 }
 
-fn rejected_wire(detail: String) -> QualificationOutcomeWire {
+fn rejected_wire(detail: String) -> ExecutionOutcomeWire {
     (
         "rejected-before-dispatch".into(),
         String::new(),
         bounded_text(&detail),
     )
+}
+
+fn dispatch_result(
+    dispatch: Result<OwnedObjectPath, zbus::Error>,
+    dispatch_digest: ComponentDigest,
+    success_detail: &str,
+) -> zbus::fdo::Result<ExecutionOutcomeWire> {
+    match dispatch {
+        Ok(_job) => Ok(outcome_wire(bounded_outcome(
+            ExecutionDisposition::Dispatched,
+            dispatch_digest,
+            success_detail,
+        )?)),
+        Err(error) => Ok(outcome_wire(indeterminate_dispatch_outcome(
+            dispatch_digest,
+            &error,
+        )?)),
+    }
 }
 
 fn indeterminate_dispatch_outcome(
@@ -370,7 +567,7 @@ fn bounded_outcome(
         .map_err(|error| zbus::fdo::Error::Failed(error.to_string()))
 }
 
-fn outcome_wire(outcome: ExecutionOutcome) -> QualificationOutcomeWire {
+fn outcome_wire(outcome: ExecutionOutcome) -> ExecutionOutcomeWire {
     (
         match outcome.disposition {
             ExecutionDisposition::RejectedBeforeDispatch => "rejected-before-dispatch",
@@ -461,6 +658,46 @@ mod tests {
     }
 
     #[test]
+    fn managed_namespace_is_exact_and_canonical() {
+        assert!(ManagedUnitName::parse("linura-managed-web.service").is_ok());
+        for value in [
+            "sshd.service",
+            "linura-managed-.service",
+            "linura-managed--bad.service",
+            "linura-managed-Bad.service",
+            "linura-managed-bad--slug.service",
+        ] {
+            assert!(
+                ManagedUnitName::parse(value).is_err(),
+                "accepted managed unit: {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn managed_effect_matches_control_canonical_payload() {
+        let unit = id(ManagedUnitName::parse("linura-managed-web.service"));
+        let active = id(managed_active_state_effect(
+            &unit,
+            ManagedActiveState::Active,
+        ));
+        let inactive = id(managed_active_state_effect(
+            &unit,
+            ManagedActiveState::Inactive,
+        ));
+        assert_eq!(active.operation, MANAGED_OPERATION);
+        assert_eq!(
+            active.canonical_payload,
+            b"unit=linura-managed-web.service\nactive_state=active\n"
+        );
+        assert_eq!(
+            inactive.canonical_payload,
+            b"unit=linura-managed-web.service\nactive_state=inactive\n"
+        );
+        assert_ne!(active.digest(), inactive.digest());
+    }
+
+    #[test]
     fn exact_binding_rejects_effect_substitution() {
         let first = id(QualificationUnitName::parse(
             "linura-v05-qualification-first.service",
@@ -480,6 +717,35 @@ mod tests {
         ));
         assert!(binding.validate_for(&first_effect).is_ok());
         assert!(binding.validate_for(&second_effect).is_err());
+    }
+
+    #[test]
+    fn managed_binding_rejects_state_and_unit_substitution() {
+        let first = id(ManagedUnitName::parse("linura-managed-first.service"));
+        let second = id(ManagedUnitName::parse("linura-managed-second.service"));
+        let expected = id(managed_active_state_effect(
+            &first,
+            ManagedActiveState::Active,
+        ));
+        let changed_state = id(managed_active_state_effect(
+            &first,
+            ManagedActiveState::Inactive,
+        ));
+        let changed_unit = id(managed_active_state_effect(
+            &second,
+            ManagedActiveState::Active,
+        ));
+        let binding = id(ExecutionBinding::new(
+            "transaction:v1:test",
+            0,
+            2,
+            digest(1),
+            digest(2),
+            &expected,
+        ));
+        assert!(binding.validate_for(&expected).is_ok());
+        assert!(binding.validate_for(&changed_state).is_err());
+        assert!(binding.validate_for(&changed_unit).is_err());
     }
 
     #[test]

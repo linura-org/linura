@@ -50,6 +50,8 @@ jobs:
           source_sha="$(cat published/SOURCE_SHA)"
           test "$(git rev-parse HEAD)" = "$source_sha"
           test "$(cat published/RELEASE_TAG)" = "$RELEASE_TAG"
+          test -f published/linura-authorityd
+          test -x published/linura-authorityd
           python3 tools/release_contract.py verify --directory published --tag "$RELEASE_TAG" --source-sha "$source_sha"
           python3 tools/release_verify.py published
       - name: Verify GitHub Release metadata equals canonical contract

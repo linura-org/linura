@@ -489,6 +489,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "linura-authorityd"
+version = "0.5.0"
+dependencies = [
+ "linura-control",
+ "linura-core",
+ "linura-dbus",
+ "linura-executor-systemd",
+ "linura-linux-observation",
+ "linura-observation",
+ "linura-observation-control",
+ "linura-persistence-sqlite",
+ "linura-protocol",
+ "linura-provider-sdk",
+ "linura-transaction",
+ "linura-verifier-systemd",
+ "zbus",
+]
+
+[[package]]
 name = "linura-bootstrap"
 version = "0.5.0"
 
