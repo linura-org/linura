@@ -19,7 +19,6 @@ DEFAULT_BINARIES = ROOT / "target/release"
 BINARIES = {
     "linurad": "usr/bin/linurad",
     "linuractl": "usr/bin/linuractl",
-    "linura-firstboot": "usr/bin/linura-firstboot",
     "linura-update-guard": "usr/lib/linura/linura-update-guard",
     "linura-executor-systemd": "usr/lib/linura/linura-executor-systemd",
     "linura-authorityd": "usr/lib/linura/linura-authorityd",
