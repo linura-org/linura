@@ -114,11 +114,11 @@ Persisted-state changes have stronger migration/recovery obligations than the Ex
 
 v0.5.0 remains Experimental. `Executor.Systemd1` is qualified as a separately privileged component with a qualification-only restart operation and independent verifier. That does **not** add product mutation semantics to `Control1` or make the executor a public general-purpose API. See ADR 0021.
 
-### v0.6.0 candidate
+### v0.6.0
 
 v0.6 remains Experimental. It introduces `Authority1` generation 1 as the first bounded public managed-mutation transport, limited to converging canonical `linura-managed-*.service` units to `active`/`inactive` through the complete authority lifecycle.
 
-The release candidate makes no Stable compatibility promise for:
+The released milestone makes no Stable compatibility promise for:
 
 - `Authority1` wire shape;
 - `Executor.Systemd1` wire shape;
