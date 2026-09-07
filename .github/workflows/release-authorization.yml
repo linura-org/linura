@@ -1,0 +1,248 @@
+name: Release Authorization
+
+on:
+  workflow_run:
+    workflows: ["CI", "Security", "CodeQL"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: release-authorization-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    name: qualify reviewed release preparation
+    if: "${{ github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_commit.message, 'release: prepare v') }}"
+    runs-on: ubuntu-24.04
+    outputs:
+      ready: ${{ steps.qualify.outputs.ready }}
+      source_sha: ${{ steps.qualify.outputs.source_sha }}
+      tree_sha: ${{ steps.qualify.outputs.tree_sha }}
+      tag: ${{ steps.qualify.outputs.tag }}
+      theme: ${{ steps.qualify.outputs.theme }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Prove exact reviewed release-preparation source
+        id: qualify
+        run: |
+          set -euo pipefail
+          printf 'ready=false\n' >> "$GITHUB_OUTPUT"
+
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          if [[ "$current_main" != "$SOURCE_SHA" ]]; then
+            current_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$current_main")"
+            parent_count="$(jq '.parents | length' <<<"$current_payload")"
+            parent_sha="$(jq -r '.parents[0].sha // empty' <<<"$current_payload")"
+            current_tree="$(jq -r '.tree.sha' <<<"$current_payload")"
+            source_tree="$(git rev-parse "$SOURCE_SHA^{tree}")"
+            current_subject="$(jq -r '.message | split("\n")[0]' <<<"$current_payload")"
+            if [[ "$parent_count" == "1" && "$parent_sha" == "$SOURCE_SHA" && "$current_tree" == "$source_tree" && "$current_subject" == release:\ v* ]]; then
+              echo "release preparation is already followed by a tree-identical authorization: $current_main"
+              exit 0
+            fi
+            echo "stale release-preparation gate ignored: current main is $current_main, trigger was $SOURCE_SHA"
+            exit 0
+          fi
+
+          subject="$(git log -1 --pretty=%s)"
+          python3 - "$subject" "$GITHUB_OUTPUT" <<'PY'
+          import re
+          import sys
+
+          subject, output_path = sys.argv[1], sys.argv[2]
+          match = re.fullmatch(
+              r"release: prepare (?P<tag>v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?) (?P<theme>\S.*)",
+              subject,
+          )
+          if match is None:
+              raise SystemExit(f"invalid release-preparation subject: {subject!r}")
+          with open(output_path, "a", encoding="utf-8") as handle:
+              handle.write(f"tag={match.group('tag')}\n")
+              handle.write(f"theme={match.group('theme')}\n")
+          PY
+
+          tag="$(sed -n 's/^tag=//p' "$GITHUB_OUTPUT" | tail -1)"
+          theme="$(sed -n 's/^theme=//p' "$GITHUB_OUTPUT" | tail -1)"
+          [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$ ]]
+          test -n "$theme"
+
+          python3 - "$tag" "$theme" <<'PY'
+          import pathlib
+          import sys
+          import tomllib
+
+          tag, theme = sys.argv[1:]
+          contract = tomllib.loads(pathlib.Path("contracts/roadmap.toml").read_text(encoding="utf-8"))
+          if contract.get("next_release") != tag:
+              raise SystemExit(f"release preparation is not roadmap next_release: {tag} != {contract.get('next_release')}")
+          milestones = {item["version"]: item for item in contract["milestone"]}
+          milestone = milestones.get(tag)
+          if milestone is None:
+              raise SystemExit(f"release preparation is absent from roadmap: {tag}")
+          if milestone.get("status") != "planned":
+              raise SystemExit(f"release-preparation milestone is not planned: {tag} status={milestone.get('status')}")
+          if milestone.get("title") != theme:
+              raise SystemExit(
+                  f"release-preparation theme does not equal roadmap title: {theme!r} != {milestone.get('title')!r}"
+              )
+          PY
+
+          python3 tools/check_release_publication_stability.py
+          python3 tools/check_roadmap.py .
+          python3 tools/release_contract.py validate \
+            --tag "$tag" \
+            --notes "docs/releases/${tag}.md" \
+            --require-workspace-version
+
+          prs="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/commits/$SOURCE_SHA/pulls")"
+          associated="$(jq -r --arg sha "$SOURCE_SHA" --arg tag "$tag" '
+            [.[] | select(
+              .merged_at != null and
+              .base.ref == "main" and
+              .merge_commit_sha == $sha and
+              (.title | startswith("release: prepare " + $tag + " "))
+            )] | length
+          ' <<<"$prs")"
+          test "$associated" = "1"
+
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "$tag already exists; refusing to create a new release authorization" >&2
+            exit 1
+          fi
+
+          runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SOURCE_SHA&event=push&per_page=100")"
+          deferred=0
+          for workflow in CI Security CodeQL; do
+            state="$(jq -r --arg workflow "$workflow" '
+              [.workflow_runs[] | select(.name == $workflow and .head_sha == env.SOURCE_SHA and .event == "push")]
+              | if any(.[]; .status == "completed" and .conclusion == "success") then "success"
+                elif any(.[]; .status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested") then "active"
+                elif length == 0 then "missing"
+                else "failed" end
+            ' <<<"$runs")"
+            case "$state" in
+              success) echo "$workflow: success" ;;
+              active|missing) deferred=1 ;;
+              *) echo "$workflow failed for reviewed preparation $SOURCE_SHA" >&2; exit 1 ;;
+            esac
+          done
+          if [[ "$deferred" -ne 0 ]]; then
+            echo "release authorization deferred until all exact-main preparation gates complete"
+            exit 0
+          fi
+
+          tree_sha="$(git rev-parse "$SOURCE_SHA^{tree}")"
+          [[ "$tree_sha" =~ ^[0-9a-f]{40}$ ]]
+          {
+            printf 'ready=true\n'
+            printf 'source_sha=%s\n' "$SOURCE_SHA"
+            printf 'tree_sha=%s\n' "$tree_sha"
+          } >> "$GITHUB_OUTPUT"
+
+  authorize:
+    name: create tree-identical metadata-only release authorization
+    needs: qualify
+    if: needs.qualify.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}
+      SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
+      TREE_SHA: ${{ needs.qualify.outputs.tree_sha }}
+      RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
+      RELEASE_THEME: ${{ needs.qualify.outputs.theme }}
+    steps:
+      - name: Require dedicated release-automation credential
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "RELEASE_AUTOMATION_TOKEN is required for release authorization so the main ref update emits the push event consumed by the release-proof pipeline" >&2
+            exit 1
+          fi
+
+      - name: Create and publish exact metadata-only authorization
+        id: authorize
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$TREE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$ ]]
+          test -n "$RELEASE_THEME"
+
+          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          test "$current_main" = "$SOURCE_SHA"
+
+          source="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SOURCE_SHA")"
+          test "$(jq -r .tree.sha <<<"$source")" = "$TREE_SHA"
+
+          message="$(cat <<EOF
+          release: $RELEASE_TAG — $RELEASE_THEME
+
+          Authorize publication of the frozen $RELEASE_TAG release through Linura's protected proof-first, tag-last lifecycle. The reviewed release-preparation tree is unchanged.
+
+          Reviewed-Source: $SOURCE_SHA
+          Reviewed-Tree: $TREE_SHA
+          EOF
+          )"
+
+          payload="$(jq -n \
+            --arg message "$message" \
+            --arg tree "$TREE_SHA" \
+            --arg parent "$SOURCE_SHA" \
+            '{message: $message, tree: $tree, parents: [$parent]}')"
+          authorization="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/commits" --input - <<<"$payload")"
+          authorization_sha="$(jq -r .sha <<<"$authorization")"
+          [[ "$authorization_sha" =~ ^[0-9a-f]{40}$ ]]
+          test "$(jq -r .tree.sha <<<"$authorization")" = "$TREE_SHA"
+          test "$(jq '.parents | length' <<<"$authorization")" = "1"
+          test "$(jq -r .parents[0].sha <<<"$authorization")" = "$SOURCE_SHA"
+
+          ref_payload="$(jq -n --arg sha "$authorization_sha" '{sha: $sha, force: false}')"
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/main" --input - <<<"$ref_payload" >/dev/null
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$authorization_sha"
+
+          printf 'authorization_sha=%s\n' "$authorization_sha" >> "$GITHUB_OUTPUT"
+          echo "published tree-identical release authorization $authorization_sha above $SOURCE_SHA"
+
+      - name: Require authorization push gates to materialize
+        env:
+          AUTHORIZATION_SHA: ${{ steps.authorize.outputs.authorization_sha }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$AUTHORIZATION_SHA&event=push&per_page=100")"
+            present=0
+            for workflow in CI Security CodeQL; do
+              if jq -e --arg workflow "$workflow" --arg sha "$AUTHORIZATION_SHA" '
+                any(.workflow_runs[]; .name == $workflow and .head_sha == $sha and .event == "push")
+              ' <<<"$runs" >/dev/null; then
+                present=$((present + 1))
+              fi
+            done
+            if [[ "$present" -eq 3 ]]; then
+              echo "fresh authorization push gates are materialized for $AUTHORIZATION_SHA"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "authorization ref update succeeded but push-triggered CI/Security/CodeQL did not materialize; verify RELEASE_AUTOMATION_TOKEN is a dedicated credential whose pushes trigger Actions" >&2
+          exit 1
