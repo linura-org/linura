@@ -37,13 +37,14 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
+          RECOVERY_REF: ${{ github.ref_name }}
           WORKFLOW_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == "push" ]]; then
-            case "$WORKFLOW_REF" in
-              verify-release/v*) tag="${WORKFLOW_REF#verify-release/}" ;;
-              *) echo "invalid release-verification recovery ref: $WORKFLOW_REF" >&2; exit 2 ;;
+            case "$RECOVERY_REF" in
+              verify-release/v*) tag="${RECOVERY_REF#verify-release/}" ;;
+              *) echo "invalid release-verification recovery ref: $RECOVERY_REF" >&2; exit 2 ;;
             esac
           elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             tag="$INPUT_TAG"
