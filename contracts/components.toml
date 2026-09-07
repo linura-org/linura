@@ -115,7 +115,7 @@ maturity = "integrated-experimental"
 activation_milestone = "v0.2.0"
 release_artifact = false
 authority_role = "intent-model"
-scope = "typed intent/setup semantics; durable intent lifecycle remains v0.7.0"
+scope = "typed intent/setup semantics integrated with the durable local Library lifecycle at v0.7.0"
 
 [[component]]
 id = "linura-observation"
@@ -237,6 +237,17 @@ activation_milestone = "v0.4.0"
 release_artifact = false
 authority_role = "transaction-authority"
 scope = "durable transaction identities, bindings and authority state model"
+
+[[component]]
+id = "linura-library"
+path = "crates/linura-library"
+kind = "crate"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.7.0"
+release_artifact = false
+authority_role = "declarative-library"
+scope = "local-first durable intent/setup/profile Library and portable adoption; no approval or executor authority"
 
 [[component]]
 id = "linura-persistence-sqlite"

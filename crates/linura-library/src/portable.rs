@@ -954,9 +954,8 @@ fn validate_profile_bundle(bundle: &PortableProfileBundle) -> Result<(), Library
                 reference.revision
             )));
         }
-        validate_reachable_setup_closure(&key, &setup_map, &intent_map)?;
     }
-    Ok(())
+    validate_profile_closure(&bundle.profile, &setup_map, &intent_map)
 }
 
 fn validate_version(version: u16) -> Result<(), LibraryError> {
@@ -1065,6 +1064,55 @@ fn validate_reachable_setup_closure(
     {
         return Err(LibraryError::PortableFormat(
             "setup bundle contains missing or unrelated intent revisions".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_profile_closure(
+    profile: &StoredProfile,
+    setups: &BTreeMap<(String, u32), &StoredSetup>,
+    intents: &BTreeMap<(String, u64), &StoredIntent>,
+) -> Result<(), LibraryError> {
+    let mut pending = profile
+        .setup_revisions
+        .iter()
+        .map(|reference| (reference.id.as_str().to_owned(), reference.revision))
+        .collect::<Vec<_>>();
+    let mut visited = BTreeSet::new();
+    let mut referenced_intents = profile
+        .intent_revisions
+        .iter()
+        .map(|reference| (reference.id.as_str().to_owned(), reference.revision))
+        .collect::<BTreeSet<_>>();
+
+    while let Some(key) = pending.pop() {
+        if !visited.insert(key.clone()) {
+            continue;
+        }
+        let setup = setups.get(&key).ok_or_else(|| {
+            LibraryError::PortableFormat("profile closure contains missing setup revision".into())
+        })?;
+        for reference in &setup.intent_revisions {
+            referenced_intents.insert((reference.id.as_str().to_owned(), reference.revision));
+        }
+        for reference in &setup.included_revisions {
+            pending.push((reference.id.as_str().to_owned(), reference.revision));
+        }
+    }
+
+    if visited.len() != setups.len() {
+        return Err(LibraryError::PortableFormat(
+            "profile bundle contains unrelated setup revisions outside the profile closure".into(),
+        ));
+    }
+    if referenced_intents.len() != intents.len()
+        || referenced_intents
+            .iter()
+            .any(|key| !intents.contains_key(key))
+    {
+        return Err(LibraryError::PortableFormat(
+            "profile bundle contains missing or unrelated intent revisions".into(),
         ));
     }
     Ok(())

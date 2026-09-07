@@ -24,9 +24,10 @@ pub use linura_intent::{
     RequirementKind, Setup, SetupValidationError,
 };
 pub use linura_library::{
-    AdoptionReport, IntentRevisionRef, IntentTransition, LIBRARY_SCHEMA_VERSION, LibraryError,
-    LibrarySettings, LifecycleRecord, LifecycleRecordKind, LocalLibrary, ManagedResourceIdentity,
-    PORTABLE_FORMAT_VERSION, PortableProfileBundle as DurablePortableProfileBundle,
+    AdoptionContext, AdoptionReport, IntentRevisionRef, IntentTransition, LIBRARY_SCHEMA_VERSION,
+    LibraryError, LibrarySettings, LifecycleRecord, LifecycleRecordKind, LocalLibrary,
+    ManagedResourceIdentity, PORTABLE_FORMAT_VERSION,
+    PortableProfileBundle as DurablePortableProfileBundle,
     PortableSetupBundle as DurablePortableSetupBundle, ProfileIdentity, RemovalImpactReport,
     SetupRevisionRef, StoredIntent, StoredProfile, StoredSetup,
     decode_profile_bundle as decode_durable_profile_bundle,

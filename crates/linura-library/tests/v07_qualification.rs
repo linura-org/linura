@@ -243,7 +243,8 @@ fn intent_lifecycle_concurrency_idempotency_and_lineage_are_durable() {
 
 #[test]
 fn causal_ownership_is_shared_or_removable_only_when_proven_complete() {
-    let mut library = LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
+    let mut library =
+        LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
     let left = intent("left", IntentStatus::Active);
     let right = intent("right", IntentStatus::Active);
     library
@@ -311,7 +312,8 @@ fn causal_ownership_is_shared_or_removable_only_when_proven_complete() {
 
 #[test]
 fn setup_and_profile_revisions_are_append_only_and_profile_export_supports_multiple_roots() {
-    let mut library = LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
+    let mut library =
+        LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
     let one = intent("one", IntentStatus::Active);
     let two = intent("two", IntentStatus::Active);
     library
@@ -386,7 +388,8 @@ fn setup_and_profile_revisions_are_append_only_and_profile_export_supports_multi
 
 #[test]
 fn nested_setup_cycles_are_rejected() {
-    let mut library = LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
+    let mut library =
+        LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
     let base_intent = intent("cycle", IntentStatus::Active);
     library
         .create_intent(&request("request:cycle-intent"), &base_intent)
@@ -458,14 +461,24 @@ fn portable_setup_is_deterministic_integrity_bound_and_imports_atomically() {
     let records = target
         .lifecycle_records(bundle.root.id.as_str())
         .unwrap_or_else(|error| unreachable!("{error}"));
-    assert!(records.iter().any(|record| record.payload.contains("authority_restored=false")));
+    assert!(
+        records
+            .iter()
+            .any(|record| record.payload.contains("authority_restored=false"))
+    );
 
     if let Ok(directory) = std::env::var("LINURA_V07_EVIDENCE_DIR") {
         let digest = Sha256::digest(&first);
-        let digest = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        let digest = digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
         fs::create_dir_all(&directory).unwrap_or_else(|error| unreachable!("{error}"));
-        fs::write(format!("{directory}/portable-roundtrip.sha256"), format!("{digest}\n"))
-            .unwrap_or_else(|error| unreachable!("{error}"));
+        fs::write(
+            format!("{directory}/portable-roundtrip.sha256"),
+            format!("{digest}\n"),
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
     }
 }
 
@@ -509,7 +522,13 @@ fn adoption_dry_run_reports_context_without_mutation_and_collisions_fail_closed(
         .unwrap_or_else(|error| unreachable!("{error}"));
     assert!(collision.is_blocked());
     assert!(!collision.collisions.is_empty());
-    assert_eq!(target.intent_history(&bundle.intents[0].intent.id).map(|v| v.len()).unwrap_or_default(), 1);
+    assert_eq!(
+        target
+            .intent_history(&bundle.intents[0].intent.id)
+            .map(|v| v.len())
+            .unwrap_or_default(),
+        1
+    );
 }
 
 #[test]
@@ -520,7 +539,8 @@ fn backup_restore_and_schema_corruption_fail_closed() {
     let destination_path = directory.path().join("destination.db");
 
     let durable_intent = intent("backup", IntentStatus::Active);
-    let mut source = LocalLibrary::open(&source_path).unwrap_or_else(|error| unreachable!("{error}"));
+    let mut source =
+        LocalLibrary::open(&source_path).unwrap_or_else(|error| unreachable!("{error}"));
     source
         .create_intent(&request("request:backup-intent"), &durable_intent)
         .unwrap_or_else(|error| unreachable!("{error}"));
@@ -540,8 +560,7 @@ fn backup_restore_and_schema_corruption_fail_closed() {
         .unwrap_or_else(|error| unreachable!("{error}"));
     drop(source);
 
-    restore_backup(&backup_path, &destination_path)
-        .unwrap_or_else(|error| unreachable!("{error}"));
+    restore_backup(&backup_path, &destination_path).unwrap_or_else(|error| unreachable!("{error}"));
     let restored =
         LocalLibrary::open(&destination_path).unwrap_or_else(|error| unreachable!("{error}"));
     assert_eq!(

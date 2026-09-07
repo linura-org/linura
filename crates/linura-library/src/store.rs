@@ -40,7 +40,7 @@ impl Default for LibrarySettings {
 
 #[derive(Debug)]
 pub struct LocalLibrary {
-    connection: Connection,
+    pub(crate) connection: Connection,
     path: Option<PathBuf>,
 }
 
@@ -1023,7 +1023,7 @@ fn validate_new_intent(intent: &Intent) -> Result<(), LibraryError> {
     Ok(())
 }
 
-fn insert_intent_revision(
+pub(crate) fn insert_intent_revision(
     transaction: &Transaction<'_>,
     intent: &Intent,
     revision: u64,
@@ -1084,7 +1084,7 @@ fn insert_intent_revision(
     Ok(())
 }
 
-fn load_intent_revision(
+pub(crate) fn load_intent_revision(
     connection: &Connection,
     id: &IntentId,
     revision: u64,
@@ -1163,7 +1163,7 @@ fn load_intent_revision(
     })
 }
 
-fn current_intent_state(
+pub(crate) fn current_intent_state(
     connection: &Connection,
     id: &IntentId,
 ) -> Result<Option<(u64, u64, bool)>, LibraryError> {
@@ -1314,7 +1314,7 @@ fn desired_resource_identities(
         .collect()
 }
 
-fn insert_setup_revision(
+pub(crate) fn insert_setup_revision(
     transaction: &Transaction<'_>,
     setup: &Setup,
     intents: &[IntentRevisionRef],
@@ -1378,7 +1378,7 @@ fn insert_setup_revision(
     Ok(())
 }
 
-fn load_setup_revision(
+pub(crate) fn load_setup_revision(
     connection: &Connection,
     id: &SetupId,
     revision: u32,
@@ -1475,7 +1475,7 @@ fn load_setup_revision(
     })
 }
 
-fn insert_profile_revision(
+pub(crate) fn insert_profile_revision(
     transaction: &Transaction<'_>,
     profile: &MachineProfile,
     revision: u32,
@@ -1534,7 +1534,7 @@ fn insert_profile_revision(
     Ok(())
 }
 
-fn load_profile_revision(
+pub(crate) fn load_profile_revision(
     connection: &Connection,
     id: &ProfileId,
     revision: u32,
@@ -1620,7 +1620,7 @@ fn load_profile_revision(
     })
 }
 
-fn latest_setup_revision(
+pub(crate) fn latest_setup_revision(
     connection: &Connection,
     id: &SetupId,
 ) -> Result<Option<u32>, LibraryError> {
@@ -1634,7 +1634,7 @@ fn latest_setup_revision(
         .transpose()
 }
 
-fn latest_profile_revision(
+pub(crate) fn latest_profile_revision(
     connection: &Connection,
     id: &ProfileId,
 ) -> Result<Option<u32>, LibraryError> {
@@ -1819,7 +1819,7 @@ fn load_ordinal_texts(
         .map_err(Into::into)
 }
 
-fn append_lifecycle_record_tx(
+pub(crate) fn append_lifecycle_record_tx(
     transaction: &Transaction<'_>,
     kind: LifecycleRecordKind,
     entity_id: &str,
@@ -1842,7 +1842,7 @@ fn append_lifecycle_record_tx(
     })
 }
 
-fn record_operation(
+pub(crate) fn record_operation(
     transaction: &Transaction<'_>,
     operation_id: &RequestId,
     digest: &str,
@@ -1863,7 +1863,7 @@ fn record_operation(
     Ok(())
 }
 
-fn replay_operation(
+pub(crate) fn replay_operation(
     connection: &Connection,
     operation_id: &RequestId,
     digest: &str,

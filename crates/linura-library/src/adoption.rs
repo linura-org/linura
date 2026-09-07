@@ -225,7 +225,9 @@ fn preflight_profile(
         bundle.profile.revision,
     ) {
         Ok(existing) if existing == bundle.profile => {
-            report.reuse_profiles.insert(bundle.profile.profile.id.clone());
+            report
+                .reuse_profiles
+                .insert(bundle.profile.profile.id.clone());
         }
         Ok(_) => report.collisions.push(format!(
             "profile {}@{} already exists with different content",
@@ -239,7 +241,9 @@ fn preflight_profile(
                     bundle.profile.profile.id.as_str()
                 ));
             } else {
-                report.create_profiles.insert(bundle.profile.profile.id.clone());
+                report
+                    .create_profiles
+                    .insert(bundle.profile.profile.id.clone());
             }
         }
         Err(error) => return Err(error),
@@ -367,7 +371,8 @@ fn classify_setups(
             Ok(_) => {
                 report.collisions.push(format!(
                     "setup {}@{} already exists with different content",
-                    id.as_str(), revision
+                    id.as_str(),
+                    revision
                 ));
                 logical_state.insert(id.as_str().to_owned(), true);
             }
@@ -383,7 +388,8 @@ fn classify_setups(
                 if any_local {
                     report.collisions.push(format!(
                         "setup {} already exists locally without exact revision {}",
-                        id.as_str(), revision
+                        id.as_str(),
+                        revision
                     ));
                 } else {
                     report.create_setups.insert(id.clone());
@@ -482,12 +488,7 @@ fn import_setups(
 ) -> Result<(), LibraryError> {
     let map = setups
         .iter()
-        .map(|setup| {
-            (
-                (setup.setup.id.clone(), setup.setup.revision),
-                setup,
-            )
-        })
+        .map(|setup| ((setup.setup.id.clone(), setup.setup.revision), setup))
         .collect::<BTreeMap<_, _>>();
     let mut permanent = BTreeSet::new();
     let mut temporary = BTreeSet::new();
@@ -510,7 +511,8 @@ fn import_setup_visit(
     if !temporary.insert(key.clone()) {
         return Err(LibraryError::Validation(format!(
             "setup import cycle detected at {}@{}",
-            key.0.as_str(), key.1
+            key.0.as_str(),
+            key.1
         )));
     }
     let setup = map.get(key).ok_or_else(|| {
@@ -666,8 +668,8 @@ mod tests {
 
     #[test]
     fn dry_run_never_mutates_and_reports_missing_secrets() {
-        let mut library = LocalLibrary::open_in_memory()
-            .unwrap_or_else(|error| unreachable!("{error}"));
+        let mut library =
+            LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
         let bundle = setup_bundle();
         let report = library
             .adopt_setup_bundle(
@@ -677,7 +679,11 @@ mod tests {
                 true,
             )
             .unwrap_or_else(|error| unreachable!("{error}"));
-        assert!(report.create_intents.contains(&id(IntentId::new("intent:portable"))));
+        assert!(
+            report
+                .create_intents
+                .contains(&id(IntentId::new("intent:portable")))
+        );
         assert!(report.missing_secret_refs.contains("credential:github"));
         assert!(library.list_intents().unwrap_or_default().is_empty());
         assert!(library.list_setups().unwrap_or_default().is_empty());
@@ -685,8 +691,8 @@ mod tests {
 
     #[test]
     fn import_is_atomic_when_setup_insert_fails() {
-        let mut library = LocalLibrary::open_in_memory()
-            .unwrap_or_else(|error| unreachable!("{error}"));
+        let mut library =
+            LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
         library
             .connection
             .execute_batch(
@@ -701,8 +707,8 @@ mod tests {
 
     #[test]
     fn exact_import_retry_is_idempotent() {
-        let mut library = LocalLibrary::open_in_memory()
-            .unwrap_or_else(|error| unreachable!("{error}"));
+        let mut library =
+            LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
         let operation = request("request:retry");
         let bundle = setup_bundle();
         let first = library
@@ -712,14 +718,23 @@ mod tests {
         let second = library
             .import_setup_bundle(&operation, &bundle)
             .unwrap_or_else(|error| unreachable!("{error}"));
-        assert!(second.reuse_intents.contains(&id(IntentId::new("intent:portable"))));
-        assert_eq!(library.intent_history(&id(IntentId::new("intent:portable"))).map(|v| v.len()), Ok(1));
+        assert!(
+            second
+                .reuse_intents
+                .contains(&id(IntentId::new("intent:portable")))
+        );
+        assert_eq!(
+            library
+                .intent_history(&id(IntentId::new("intent:portable")))
+                .map(|v| v.len()),
+            Ok(1)
+        );
     }
 
     #[test]
     fn operation_id_semantic_substitution_is_rejected() {
-        let mut library = LocalLibrary::open_in_memory()
-            .unwrap_or_else(|error| unreachable!("{error}"));
+        let mut library =
+            LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
         let operation = request("request:substitution");
         let bundle = setup_bundle();
         library
