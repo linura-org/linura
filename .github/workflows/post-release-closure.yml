@@ -31,6 +31,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}
       GH_REPO: ${{ github.repository }}
+      CODEX_BOT_USER_ID: "199175422" # chatgpt-codex-connector[bot]
     steps:
       - name: Require dedicated release automation credential
         run: |
@@ -352,6 +353,24 @@ jobs:
               awk '{ total += $1 } END { print total + 0 }'
           }
 
+          has_exact_codex_review() {
+            gh api --paginate -H 'Accept: application/vnd.github+json' \
+              "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100" \
+              --jq '.[]' |
+              jq -s -r --arg sha "$HEAD_SHA" --argjson bot_id "$CODEX_BOT_USER_ID" '
+                any(.[]; .user.id == $bot_id and .commit_id == $sha)
+              '
+          }
+
+          has_clean_codex_reaction() {
+            gh api --paginate -H 'Accept: application/vnd.github+json' \
+              "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100" \
+              --jq '.[]' |
+              jq -s -r --argjson bot_id "$CODEX_BOT_USER_ID" '
+                any(.[]; .user.id == $bot_id and .content == "+1")
+              '
+          }
+
           for _ in $(seq 1 360); do
             test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
             test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "${{ steps.release.outputs.base_sha }}"
@@ -374,15 +393,8 @@ jobs:
             done
 
             unresolved="$(count_unresolved_threads)"
-
-            reviews="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100")"
-            exact_codex_review="$(jq -r --arg sha "$HEAD_SHA" '
-              any(.[]; (.user.login | startswith("chatgpt-codex-connector")) and .commit_id == $sha)
-            ' <<<"$reviews")"
-            reactions="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions")"
-            codex_clean_reaction="$(jq -r '
-              any(.[]; (.user.login | startswith("chatgpt-codex-connector")) and .content == "+1")
-            ' <<<"$reactions")"
+            exact_codex_review="$(has_exact_codex_review)"
+            codex_clean_reaction="$(has_clean_codex_reaction)"
 
             if [[ "$unresolved" == "0" && ( "$exact_codex_review" == "true" || "$codex_clean_reaction" == "true" ) ]]; then
               review_ready=1
@@ -434,6 +446,24 @@ jobs:
               awk '{ total += $1 } END { print total + 0 }'
           }
 
+          has_exact_codex_review() {
+            gh api --paginate -H 'Accept: application/vnd.github+json' \
+              "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100" \
+              --jq '.[]' |
+              jq -s -r --arg sha "$HEAD_SHA" --argjson bot_id "$CODEX_BOT_USER_ID" '
+                any(.[]; .user.id == $bot_id and .commit_id == $sha)
+              '
+          }
+
+          has_clean_codex_reaction() {
+            gh api --paginate -H 'Accept: application/vnd.github+json' \
+              "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100" \
+              --jq '.[]' |
+              jq -s -r --argjson bot_id "$CODEX_BOT_USER_ID" '
+                any(.[]; .user.id == $bot_id and .content == "+1")
+              '
+          }
+
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"
           pr="$(gh pr view "$PR_NUMBER" --json state,baseRefName,headRefName,headRefOid)"
           test "$(jq -r .state <<<"$pr")" = "OPEN"
@@ -447,14 +477,8 @@ jobs:
           unresolved="$(count_unresolved_threads)"
           test "$unresolved" = "0"
 
-          reviews="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100")"
-          exact_codex_review="$(jq -r --arg sha "$HEAD_SHA" '
-            any(.[]; (.user.login | startswith("chatgpt-codex-connector")) and .commit_id == $sha)
-          ' <<<"$reviews")"
-          reactions="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions")"
-          codex_clean_reaction="$(jq -r '
-            any(.[]; (.user.login | startswith("chatgpt-codex-connector")) and .content == "+1")
-          ' <<<"$reactions")"
+          exact_codex_review="$(has_exact_codex_review)"
+          codex_clean_reaction="$(has_clean_codex_reaction)"
           if [[ "$exact_codex_review" != "true" && "$codex_clean_reaction" != "true" ]]; then
             echo "exact-head Codex review is no longer proven immediately before merge" >&2
             exit 1
@@ -520,7 +544,6 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-          open_heads="$(gh pr list --state open --limit 100 --json headRefName --jq '.[].headRefName')"
           gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '.[].name' > "$RUNNER_TEMP/branches.txt"
           python3 - "$RELEASE_TAG" "$RUNNER_TEMP/branches.txt" "$RUNNER_TEMP/candidates.txt" <<'PY'
           import pathlib
@@ -550,10 +573,20 @@ jobs:
 
           while IFS= read -r branch; do
             [[ -n "$branch" ]] || continue
-            if grep -Fxq "$branch" <<<"$open_heads"; then
+
+            open_pr_count="$(
+              gh api --paginate --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+                -f state=open \
+                -f head="${GITHUB_REPOSITORY%/*}:$branch" \
+                -f per_page=100 \
+                --jq 'length' |
+                awk '{ total += $1 } END { print total + 0 }'
+            )"
+            if [[ "$open_pr_count" -gt 0 ]]; then
               echo "preserving branch used by an open PR: $branch"
               continue
             fi
+
             if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1; then
               gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
               echo "deleted obsolete release branch: $branch"
