@@ -343,7 +343,7 @@ No widened claim.
             with self.assertRaises(post_release_close.ClosureError):
                 post_release_close.close_release(Args(root))
 
-    def test_workflow_pins_protected_dispatch_only_closure_sequence(self) -> None:
+    def test_workflow_pins_reviewed_native_protected_closure_sequence(self) -> None:
         workflow = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
         for marker in (
             "workflow_dispatch:",
@@ -351,21 +351,27 @@ No widened claim.
             'test "$verification_event" = "workflow_dispatch"',
             'test "$verification_event" = "push"',
             "python3 tools/post_release_close.py",
-            'gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"',
-            'wait_for ci.yml canonical-check',
-            'wait_for security.yml dependency-audit',
-            'wait_for codeql.yml analyze',
-            'gh pr merge "$PR_NUMBER" --squash --delete-branch',
-            'gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref main',
-            'Delete obsolete release-scoped branches',
+            "python3 tools/post_release_terminal_sync.py",
+            "RELEASE_AUTOMATION_TOKEN is required",
+            "token: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}",
+            "@codex review",
+            "event=pull_request",
+            "reviewThreads(first:100)",
+            "chatgpt-codex-connector",
+            'pulls/$PR_NUMBER/merge',
+            "event=push",
+            "Delete obsolete release-scoped branches",
         ):
             self.assertIn(marker, workflow)
         self.assertNotIn('workflows: ["Verify published release"]', workflow)
         self.assertNotIn("github.event.workflow_run", workflow)
         self.assertNotIn("git push origin main", workflow)
+        self.assertNotIn('gh pr merge "$PR_NUMBER"', workflow)
+        self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", workflow)
 
         for path in ("ci.yml", "security.yml", "codeql.yml"):
             text = (ROOT / ".github/workflows" / path).read_text(encoding="utf-8")
+            self.assertIn("pull_request:", text)
             self.assertIn("workflow_dispatch:", text)
 
 
