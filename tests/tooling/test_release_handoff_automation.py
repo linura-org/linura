@@ -119,6 +119,12 @@ version = "9.9.9"
         self.assertIn('gh workflow run "$workflow"', preparation)
         self.assertIn('pulls/$PR_NUMBER/merge', preparation)
         self.assertIn("RELEASE_AUTOMATION_TOKEN is required", preparation)
+        self.assertIn("verify_candidate()", preparation)
+        self.assertIn('git diff --name-only "$SOURCE_SHA" "$candidate_sha"', preparation)
+        self.assertIn('git show "$candidate_sha:Cargo.toml" | cmp - Cargo.toml', preparation)
+        self.assertIn('git show "$HEAD_SHA:Cargo.lock" | cmp - Cargo.lock', preparation)
+        self.assertNotIn("active=0", preparation)
+        self.assertNotIn("active=1", preparation)
 
         self.assertIn("release: prepare v", authorization)
         self.assertIn("zero-diff", authorization)
@@ -126,11 +132,21 @@ version = "9.9.9"
         self.assertIn('pulls/$PR_NUMBER/merge', authorization)
         self.assertIn("Reviewed-Source:", authorization)
         self.assertIn("Reviewed-Tree:", authorization)
+        self.assertIn("verify_candidate()", authorization)
+        self.assertIn('test "$(jq -r .changed_files <<<"$pr_payload")" = "0"', authorization)
+        self.assertIn('test "$(jq -r .message <<<"$candidate_payload")" = "$message"', authorization)
         self.assertNotIn('PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/main"', authorization)
 
         self.assertIn("dispatch terminal closure handoff", verification)
+        self.assertIn("manual release verification must run from the exact requested tag", verification)
+        self.assertNotIn("types: [published]", verification)
         self.assertIn("Await exact verification terminal success", handoff)
+        self.assertIn("Dispatch protected post-release closure", handoff)
+        self.assertNotIn("Prefer already-materialized workflow_run closure", handoff)
+        self.assertNotIn("recovery-workflow-run", handoff)
         self.assertIn("post-release-closure.yml", handoff)
+        self.assertNotIn("workflow_run:", closure)
+        self.assertNotIn("github.event.workflow_run", closure)
         self.assertIn("release: v", proof)
         self.assertIn("gh pr merge", closure)
 
@@ -140,6 +156,26 @@ version = "9.9.9"
         self.assertIn("Release Preparation", guide)
         self.assertIn("Release Authorization", guide)
         self.assertIn("metadata-only zero-diff authorization PR", guide)
+
+    def test_release_automation_has_architecture_and_threat_contracts(self) -> None:
+        adr = (ROOT / "docs/adr/0027-protected-release-handoff-automation.md").read_text(encoding="utf-8")
+        threat = (ROOT / "docs/threat-model-release-automation.md").read_text(encoding="utf-8")
+        for marker in (
+            "RELEASE_AUTOMATION_TOKEN",
+            "protected `main`",
+            "zero-diff",
+            "tag-last",
+            "One verification-to-closure path",
+        ):
+            self.assertIn(marker, adr)
+        for marker in (
+            "Candidate substitution and retry tampering",
+            "Event-recursion failure",
+            "Credential compromise",
+            "Rotation, revocation and permission drift",
+            "exact release tag",
+        ):
+            self.assertIn(marker, threat)
 
 
 if __name__ == "__main__":
