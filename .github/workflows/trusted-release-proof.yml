@@ -128,9 +128,18 @@ jobs:
     with:
       source_sha: ${{ github.sha }}
 
+  library-qualification:
+    name: exact-source v0.7 persistent Library qualification
+    needs: validate
+    uses: ./.github/workflows/v07-library-qualification.yml
+    permissions:
+      contents: read
+    with:
+      source_sha: ${{ github.sha }}
+
   build:
     name: isolated build and reproducibility proof
-    needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification]
+    needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification]
     uses: ./.github/workflows/reusable-release-build.yml
     permissions:
       actions: read
@@ -144,8 +153,8 @@ jobs:
 
   dispatch-promotion:
     name: dispatch release promotion
-    needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, build]
-    if: ${{ needs.validate.result == 'success' && needs.observation-acceptance.result == 'success' && needs.plan-preview-acceptance.result == 'success' && needs.durability-qualification.result == 'success' && needs.enospc-qualification.result == 'success' && needs.executor-verifier-qualification.result == 'success' && needs.managed-lifecycle-qualification.result == 'success' && needs.build.result == 'success' }}
+    needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, build]
+    if: ${{ needs.validate.result == 'success' && needs.observation-acceptance.result == 'success' && needs.plan-preview-acceptance.result == 'success' && needs.durability-qualification.result == 'success' && needs.enospc-qualification.result == 'success' && needs.executor-verifier-qualification.result == 'success' && needs.managed-lifecycle-qualification.result == 'success' && needs.library-qualification.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
       actions: write
