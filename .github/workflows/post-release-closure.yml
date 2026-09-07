@@ -1,11 +1,8 @@
 name: Post Release Closure
 
-run-name: Post Release Closure — ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || inputs.tag }}
+run-name: Post Release Closure — ${{ inputs.tag }}
 
 on:
-  workflow_run:
-    workflows: ["Verify published release"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -13,8 +10,8 @@ on:
         required: true
         type: string
       verification_run_id:
-        description: Successful Release Verification run ID; omit to resolve the latest exact-tag success
-        required: false
+        description: Exact successful Release Verification run ID
+        required: true
         type: string
 
 permissions:
@@ -23,12 +20,11 @@ permissions:
   actions: write
 
 concurrency:
-  group: post-release-closure-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || inputs.tag }}
+  group: post-release-closure-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
   close:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -44,45 +40,19 @@ jobs:
       - name: Resolve and verify terminal release evidence
         id: release
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_VERIFICATION_REF: ${{ github.event.workflow_run.head_branch }}
-          EVENT_VERIFICATION_RUN_ID: ${{ github.event.workflow_run.id }}
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_VERIFICATION_RUN_ID: ${{ inputs.verification_run_id }}
         run: |
           set -euo pipefail
           git fetch origin main --tags --force
 
-          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
-            verification_ref="$EVENT_VERIFICATION_REF"
-            verification_run_id="$EVENT_VERIFICATION_RUN_ID"
-            if [[ "$verification_ref" =~ ^verify-release/(v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$ ]]; then
-              tag="${BASH_REMATCH[1]}"
-            else
-              tag="$verification_ref"
-            fi
-          else
-            tag="$INPUT_TAG"
-            verification_run_id="$INPUT_VERIFICATION_RUN_ID"
-          fi
+          tag="$INPUT_TAG"
+          verification_run_id="$INPUT_VERIFICATION_RUN_ID"
           [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$verification_run_id" =~ ^[0-9]+$ ]]
 
           source_sha="$(git rev-list -n1 "$tag")"
           [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
-
-          if [[ -z "$verification_run_id" ]]; then
-            verification_runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release-verification.yml/runs?per_page=100")"
-            verification_run_id="$(
-              jq -r --arg tag "$tag" --arg sha "$source_sha" --arg recovery "verify-release/$tag" \
-                '[.workflow_runs[] | select(
-                    .status == "completed" and .conclusion == "success" and
-                    ((.head_branch == $tag and .head_sha == $sha and (.event == "workflow_dispatch" or .event == "release")) or
-                     (.head_branch == $recovery and .event == "push"))
-                  )] | sort_by(.created_at) | last | .id // empty' \
-                <<<"$verification_runs"
-            )"
-          fi
-          [[ "$verification_run_id" =~ ^[0-9]+$ ]]
 
           verification="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$verification_run_id")"
           test "$(jq -r .path <<<"$verification")" = ".github/workflows/release-verification.yml"
@@ -94,10 +64,7 @@ jobs:
 
           if [[ "$verification_head_branch" == "$tag" ]]; then
             test "$verification_head_sha" = "$source_sha"
-            case "$verification_event" in
-              workflow_dispatch|release) ;;
-              *) echo "unexpected exact-tag verification event: $verification_event" >&2; exit 1 ;;
-            esac
+            test "$verification_event" = "workflow_dispatch"
           elif [[ "$verification_head_branch" == "verify-release/$tag" ]]; then
             test "$verification_event" = "push"
             recovery_ref="$verification_head_branch"
