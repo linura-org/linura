@@ -49,3 +49,4 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0024 — Native break-glass recovery is an invariant](0024-native-break-glass-recovery.md)
 - [0025 — Component maturity and milestone activation are explicit contracts](0025-component-maturity-and-milestone-activation.md)
 - [0026 — Bounded v0.6 managed mutation authority and Authority1 boundary](0026-bounded-v0.6-managed-mutation-authority.md)
+- [0027 — Protected release handoff automation](0027-protected-release-handoff-automation.md)
