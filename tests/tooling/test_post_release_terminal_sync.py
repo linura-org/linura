@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import importlib.util
 from pathlib import Path
 import tempfile
@@ -84,6 +83,36 @@ none
         with self.assertRaisesRegex(sync_tool.TerminalSyncError, "unchecked release-gate criteria"):
             sync_tool.normalize_milestone_terminal_prose(text, "v9.9.9")
 
+    def test_docs_index_moves_old_current_links_without_concatenating_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for relative in (
+                "docs/milestones/v0.7.0.md",
+                "docs/qualification/v0.7.0.md",
+                "docs/releases/v0.7.0.md",
+            ):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("fixture\n", encoding="utf-8")
+            text = """# index
+
+### Current v0.6.0 documentation set
+- [v0.6.0 milestone contract](milestones/v0.6.0.md)
+- [v0.6.0 qualification dossier](qualification/v0.6.0.md)
+
+### Prior release documentation
+- [v0.5.0 milestone contract](milestones/v0.5.0.md)
+
+## More
+"""
+            updated = sync_tool.update_docs_index(text, root, "v0.7.0")
+            self.assertIn("### Current v0.7.0 documentation set", updated)
+            self.assertIn(
+                "- [v0.6.0 qualification dossier](qualification/v0.6.0.md)\n- [v0.5.0 milestone contract]",
+                updated,
+            )
+            self.assertNotIn("v0.6.0.md)- [v0.5.0", updated)
+
     def test_release_workflows_require_dedicated_credential_and_review_before_merge(self) -> None:
         closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
         promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
@@ -97,7 +126,7 @@ none
         self.assertIn("reviewThreads(first:100)", closure)
         self.assertIn("chatgpt-codex-connector", closure)
         self.assertIn('pulls/$PR_NUMBER/merge', closure)
-        self.assertIn('event=push', closure)
+        self.assertIn("event=push", closure)
         self.assertNotIn('gh pr merge "$PR_NUMBER"', closure)
 
         self.assertIn("GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}", promotion)
