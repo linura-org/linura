@@ -313,6 +313,7 @@ jobs:
               esac
             done
 
+            # shellcheck disable=SC2016
             unresolved="$(gh api graphql -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER" -f query='
               query($owner:String!, $name:String!, $number:Int!) {
                 repository(owner:$owner, name:$name) {
