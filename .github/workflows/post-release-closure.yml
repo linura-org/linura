@@ -317,8 +317,11 @@ jobs:
 
           Please review exact post-release closure head \`$HEAD_SHA\` for $RELEASE_TAG. Verify terminal documentation consistency, frozen-contract immutability, review-safe release automation, and that no authority or claim boundary is widened. Report every issue before automatic merge.")"
           comment_id="$(jq -r .id <<<"$payload")"
+          requested_at="$(jq -r .created_at <<<"$payload")"
           [[ "$comment_id" =~ ^[0-9]+$ ]]
+          [[ -n "$requested_at" && "$requested_at" != "null" ]]
           printf 'comment_id=%s\n' "$comment_id" >> "$GITHUB_OUTPUT"
+          printf 'requested_at=%s\n' "$requested_at" >> "$GITHUB_OUTPUT"
 
       - name: Require native exact-head checks and completed clean Codex review
         if: steps.state.outputs.state == 'pending'
@@ -326,6 +329,7 @@ jobs:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
           REVIEW_COMMENT_ID: ${{ steps.review_request.outputs.comment_id }}
+          REVIEW_REQUESTED_AT: ${{ steps.review_request.outputs.requested_at }}
         run: |
           set -euo pipefail
           checks_ready=0
@@ -363,12 +367,20 @@ jobs:
           }
 
           has_clean_codex_reaction() {
-            gh api --paginate -H 'Accept: application/vnd.github+json' \
-              "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100" \
-              --jq '.[]' |
-              jq -s -r --argjson bot_id "$CODEX_BOT_USER_ID" '
-                any(.[]; .user.id == $bot_id and .content == "+1")
-              '
+            {
+              gh api --paginate -H 'Accept: application/vnd.github+json' \
+                "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100" \
+                --jq '.[]'
+              gh api --paginate -H 'Accept: application/vnd.github+json' \
+                "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/reactions?per_page=100" \
+                --jq '.[]'
+            } | jq -s -r --argjson bot_id "$CODEX_BOT_USER_ID" --arg requested_at "$REVIEW_REQUESTED_AT" '
+              any(.[];
+                .user.id == $bot_id and
+                .content == "+1" and
+                (.created_at // "") >= $requested_at
+              )
+            '
           }
 
           for _ in $(seq 1 360); do
@@ -421,6 +433,7 @@ jobs:
           BASE_SHA: ${{ steps.release.outputs.base_sha }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           REVIEW_COMMENT_ID: ${{ steps.review_request.outputs.comment_id }}
+          REVIEW_REQUESTED_AT: ${{ steps.review_request.outputs.requested_at }}
         run: |
           set -euo pipefail
 
@@ -456,12 +469,20 @@ jobs:
           }
 
           has_clean_codex_reaction() {
-            gh api --paginate -H 'Accept: application/vnd.github+json' \
-              "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100" \
-              --jq '.[]' |
-              jq -s -r --argjson bot_id "$CODEX_BOT_USER_ID" '
-                any(.[]; .user.id == $bot_id and .content == "+1")
-              '
+            {
+              gh api --paginate -H 'Accept: application/vnd.github+json' \
+                "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100" \
+                --jq '.[]'
+              gh api --paginate -H 'Accept: application/vnd.github+json' \
+                "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/reactions?per_page=100" \
+                --jq '.[]'
+            } | jq -s -r --argjson bot_id "$CODEX_BOT_USER_ID" --arg requested_at "$REVIEW_REQUESTED_AT" '
+              any(.[];
+                .user.id == $bot_id and
+                .content == "+1" and
+                (.created_at // "") >= $requested_at
+              )
+            '
           }
 
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"
