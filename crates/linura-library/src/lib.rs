@@ -6,6 +6,7 @@
 //! declarative input to fresh local planning/authorization; it never stores or
 //! reconstructs executor authority, approval authority, or privileged tokens.
 
+mod adoption;
 mod portable;
 mod schema;
 mod store;
@@ -17,6 +18,7 @@ use std::path::Path;
 use linura_core::{CapabilityId, IntentId, ProfileId, ProviderId, RequestId, ResourceId, SetupId};
 use linura_intent::{Intent, MachineProfile, Setup};
 
+pub use adoption::AdoptionContext;
 pub use portable::{
     PORTABLE_FORMAT_VERSION, PortableProfileBundle, PortableSetupBundle, decode_profile_bundle,
     decode_setup_bundle, encode_profile_bundle, encode_setup_bundle,
@@ -120,12 +122,17 @@ pub struct LifecycleRecord {
     pub payload: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AdoptionReport {
     pub create_intents: BTreeSet<IntentId>,
     pub reuse_intents: BTreeSet<IntentId>,
     pub create_setups: BTreeSet<SetupId>,
     pub reuse_setups: BTreeSet<SetupId>,
+    pub create_profiles: BTreeSet<ProfileId>,
+    pub reuse_profiles: BTreeSet<ProfileId>,
+    pub proposed_intents: BTreeSet<IntentId>,
+    pub active_intents: BTreeSet<IntentId>,
+    pub unsupported_capabilities: BTreeSet<CapabilityId>,
     pub collisions: Vec<String>,
     pub missing_secret_refs: BTreeSet<String>,
     pub warnings: Vec<String>,
