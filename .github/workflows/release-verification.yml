@@ -1,12 +1,10 @@
 name: Verify published release
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: Published release tag to verify
+        description: Published release tag to verify; workflow ref must be this exact tag
         required: true
         type: string
   push:
@@ -21,7 +19,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: release-verification-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
+  group: release-verification-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -34,31 +32,41 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Resolve tag
+      - name: Resolve and bind exact tag
         id: tag
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
-          EVENT_TAG: ${{ github.event.release.tag_name }}
-          RECOVERY_REF: ${{ github.ref_name }}
+          WORKFLOW_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           if [[ "$EVENT_NAME" == "push" ]]; then
-            case "$RECOVERY_REF" in
-              verify-release/v*) tag="${RECOVERY_REF#verify-release/}" ;;
-              *) echo "invalid release-verification recovery ref: $RECOVERY_REF" >&2; exit 2 ;;
+            case "$WORKFLOW_REF" in
+              verify-release/v*) tag="${WORKFLOW_REF#verify-release/}" ;;
+              *) echo "invalid release-verification recovery ref: $WORKFLOW_REF" >&2; exit 2 ;;
             esac
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag="$INPUT_TAG"
+            [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+            if [[ "$WORKFLOW_REF" != "$tag" ]]; then
+              echo "manual release verification must run from the exact requested tag: ref=$WORKFLOW_REF tag=$tag" >&2
+              exit 2
+            fi
           else
-            tag="${INPUT_TAG:-$EVENT_TAG}"
+            echo "unsupported release-verification event: $EVENT_NAME" >&2
+            exit 2
           fi
           [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.tag.outputs.tag }}
           fetch-depth: 0
+
       - name: Download published assets
         run: gh release download "${{ steps.tag.outputs.tag }}" --dir published
+
       - name: Verify tag, evidence and published digests
         id: evidence
         env:
@@ -73,6 +81,7 @@ jobs:
           python3 tools/release_contract.py verify --directory published --tag "$RELEASE_TAG" --source-sha "$source_sha"
           python3 tools/release_verify.py published
           printf 'source_sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
+
       - name: Verify GitHub Release metadata equals canonical contract
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.tag }}
@@ -90,6 +99,7 @@ jobs:
             expected_prerelease=true
           fi
           test "$(jq -r .isPrerelease release.json)" = "$expected_prerelease"
+
       - name: Verify immutable GitHub Release and release attestation
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.tag }}
@@ -99,6 +109,7 @@ jobs:
           while IFS= read -r -d '' file; do
             gh release verify-asset "$RELEASE_TAG" "$file"
           done < <(find published -maxdepth 1 -type f -print0)
+
       - name: Verify GitHub build provenance for every published candidate asset
         run: |
           set -euo pipefail
