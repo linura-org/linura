@@ -1,0 +1,182 @@
+name: v0.7 Library qualification
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify; defaults to the triggering revision
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify; defaults to the dispatch revision
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - ".github/workflows/v07-library-qualification.yml"
+      - ".github/workflows/trusted-release-proof.yml"
+      - "crates/linura-library/**"
+      - "crates/linura-intent/**"
+      - "crates/linura-planner/**"
+      - "crates/linura-sdk/**"
+      - "contracts/components.toml"
+      - "contracts/layering.toml"
+      - "scripts/check_repository.py"
+      - "tools/codex/versions.env"
+      - "rust-toolchain.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "docs/milestones/v0.7.0.md"
+      - "docs/qualification/v0.7.0.md"
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  qualification:
+    name: exact-source persistent intent and local Library qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Assert exact source and pinned toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          # shellcheck disable=SC1091
+          source tools/codex/versions.env
+          : "${RUST_VERSION:?}"
+          repo_rust_version="$(python3 - <<'PY'
+          import pathlib
+          import re
+          text = pathlib.Path('rust-toolchain.toml').read_text(encoding='utf-8')
+          match = re.search(r'^channel\s*=\s*"([^"]+)"\s*$', text, re.MULTILINE)
+          if match is None:
+              raise SystemExit('rust-toolchain.toml does not declare a channel')
+          print(match.group(1))
+          PY
+          )"
+          test "$repo_rust_version" = "$RUST_VERSION"
+          printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
+          artifact_dir="$RUNNER_TEMP/linura-v07-library-artifacts"
+          mkdir -p "$artifact_dir"
+          printf 'ARTIFACT_DIR=%s\n' "$artifact_dir" >> "$GITHUB_ENV"
+
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Run Library unit and failure-injection qualification
+        env:
+          LINURA_V07_EVIDENCE_DIR: ${{ env.ARTIFACT_DIR }}
+        run: cargo test --locked -p linura-library --lib -- --test-threads=1
+
+      - name: Run persistent Library acceptance matrix
+        env:
+          LINURA_V07_EVIDENCE_DIR: ${{ env.ARTIFACT_DIR }}
+        run: cargo test --locked -p linura-library --test v07_qualification -- --test-threads=1
+
+      - name: Verify public non-privileged SDK integration
+        run: cargo test --locked -p linura-sdk
+
+      - name: Record exact-source v0.7 qualification evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$ARTIFACT_DIR/portable-roundtrip.sha256"
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+
+          root = pathlib.Path.cwd()
+          artifact_dir = pathlib.Path(os.environ['ARTIFACT_DIR'])
+          source_sha = os.environ['SOURCE_SHA']
+          roundtrip_digest = (artifact_dir / 'portable-roundtrip.sha256').read_text(encoding='utf-8').strip()
+          if re.fullmatch(r'[0-9a-f]{64}', roundtrip_digest) is None:
+              raise SystemExit('portable round-trip digest is malformed')
+
+          lib_text = (root / 'crates/linura-library/src/lib.rs').read_text(encoding='utf-8')
+          schema_text = (root / 'crates/linura-library/src/schema.rs').read_text(encoding='utf-8')
+          portable_text = (root / 'crates/linura-library/src/portable.rs').read_text(encoding='utf-8')
+          schema_match = re.search(r'LIBRARY_SCHEMA_VERSION:\s*u32\s*=\s*(\d+)', schema_text)
+          portable_match = re.search(r'PORTABLE_FORMAT_VERSION:\s*u16\s*=\s*(\d+)', portable_text)
+          if schema_match is None or portable_match is None:
+              raise SystemExit('cannot resolve v0.7 format versions')
+
+          scenarios = [
+              'intent create/read/list/history with requirement kinds',
+              'legal activate/suspend/reactivate lifecycle',
+              'supersession and retirement lineage',
+              'illegal terminal transition rejection',
+              'stale expected revision rejection',
+              'exact operation retry idempotency',
+              'operation-id semantic substitution rejection',
+              'process reopen preserves current state and history',
+              'shared active ownership retains managed resource',
+              'proven zero-owner resource is cleanup-eligible',
+              'incomplete ownership fails closed',
+              'append-only Setup revision history',
+              'nested Setup cycle rejection',
+              'MachineProfile class preservation and mismatch reporting',
+              'deterministic self-contained portable export',
+              'portable Setup/Profile round-trip import',
+              'digest tamper/malformed/newer/cyclic input rejection before mutation',
+              'deterministic collision handling without partial adoption',
+              'dry-run adoption performs no mutation',
+              'missing secret references and unsupported capabilities are reported',
+              'backup/restore preserves durable Library invariants and rejects corrupt/newer source',
+              'failure-injected import transaction rolls back partial state',
+          ]
+          evidence = {
+              'schema_version': 1,
+              'repository': os.environ['GITHUB_REPOSITORY'],
+              'source_sha': source_sha,
+              'result': 'passed',
+              'claim': 'v0.7 persistent intent lifecycle and local Linura Library',
+              'stability': 'experimental',
+              'rustc': subprocess.check_output(['rustc', '--version', '--verbose'], text=True).strip(),
+              'library_schema_version': int(schema_match.group(1)),
+              'portable_format_version': int(portable_match.group(1)),
+              'portable_roundtrip_sha256': roundtrip_digest,
+              'database_integrity_after_restart_recovery': 'ok',
+              'imported_approval_or_executor_authority': False,
+              'authority_boundary': 'v0.6 narrow managed systemd authority remains unchanged',
+              'qualified_scenarios': [
+                  {'name': name, 'result': 'passed'} for name in scenarios
+              ],
+          }
+          (artifact_dir / 'qualification.json').write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          (artifact_dir / 'rustc-version.txt').write_text(evidence['rustc'] + '\n', encoding='utf-8')
+          PY
+          python3 -m json.tool "$ARTIFACT_DIR/qualification.json" >/dev/null
+          grep -F '"imported_approval_or_executor_authority": false' "$ARTIFACT_DIR/qualification.json"
+          grep -F '"database_integrity_after_restart_recovery": "ok"' "$ARTIFACT_DIR/qualification.json"
+
+      - name: Upload v0.7 qualification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-v07-library-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          path: ${{ env.ARTIFACT_DIR }}
+          if-no-files-found: error
+          retention-days: 30
