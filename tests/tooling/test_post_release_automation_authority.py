@@ -77,21 +77,42 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         workflow = self._closure_workflow()
         self.assertIn("@codex review", workflow)
         self.assertIn("event=pull_request", workflow)
-        self.assertGreaterEqual(workflow.count("reviewThreads(first:100)"), 2)
+        self.assertGreaterEqual(workflow.count("gh api graphql --paginate"), 2)
+        self.assertGreaterEqual(workflow.count("$endCursor:String"), 2)
+        self.assertGreaterEqual(workflow.count("reviewThreads(first:100, after:$endCursor)"), 2)
+        self.assertGreaterEqual(workflow.count("pageInfo { hasNextPage endCursor }"), 2)
+        self.assertGreaterEqual(
+            workflow.count("awk '{ total += $1 } END { print total + 0 }'"),
+            2,
+        )
         self.assertIn("chatgpt-codex-connector", workflow)
         self.assertIn('pulls/$PR_NUMBER/merge', workflow)
         self.assertNotIn('gh pr merge "$PR_NUMBER"', workflow)
         self.assertIn("event=push", workflow)
 
+        poll = workflow.split(
+            "- name: Require native exact-head checks and completed clean Codex review", 1
+        )[1].split("- name: Re-prove and squash merge exact reviewed closure", 1)[0]
+        self.assertIn("gh api graphql --paginate", poll)
+        self.assertIn("reviewThreads(first:100, after:$endCursor)", poll)
+        self.assertIn("pageInfo { hasNextPage endCursor }", poll)
+        self.assertIn('unresolved="$(count_unresolved_threads)"', poll)
+
         merge = workflow.split("- name: Re-prove and squash merge exact reviewed closure", 1)[1].split(
             "- name: Resolve post-closure protected-main SHA", 1
         )[0]
         self.assertIn("REVIEW_COMMENT_ID", merge)
-        self.assertIn("reviewThreads(first:100)", merge)
+        self.assertIn("gh api graphql --paginate", merge)
+        self.assertIn("reviewThreads(first:100, after:$endCursor)", merge)
+        self.assertIn("pageInfo { hasNextPage endCursor }", merge)
+        self.assertIn('unresolved="$(count_unresolved_threads)"', merge)
         self.assertIn('test "$unresolved" = "0"', merge)
         self.assertIn("exact_codex_review", merge)
         self.assertIn("codex_clean_reaction", merge)
-        self.assertLess(merge.index("reviewThreads(first:100)"), merge.index('pulls/$PR_NUMBER/merge'))
+        self.assertLess(
+            merge.index("reviewThreads(first:100, after:$endCursor)"),
+            merge.index('pulls/$PR_NUMBER/merge'),
+        )
 
     def test_closure_retries_reprove_and_reuse_exact_branch_and_pr(self) -> None:
         workflow = self._closure_workflow()
