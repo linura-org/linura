@@ -212,7 +212,7 @@ jobs:
             esac
           done
 
-      - name: Commit and push one closure commit
+      - name: Commit or re-prove deterministic closure commit
         if: steps.state.outputs.state == 'pending'
         id: commit
         env:
@@ -223,23 +223,40 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$BASE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"
+
           branch="automation/post-release-${RELEASE_TAG}-${VERIFICATION_RUN_ID}"
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1; then
-            echo "closure branch already exists: $branch" >&2
-            exit 1
-          fi
-          git switch -c "$branch"
+          title="chore: close $RELEASE_TAG release state"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add --all
           test -n "$(git diff --cached --name-only)"
-          git commit -m "chore: close $RELEASE_TAG release state"
-          head_sha="$(git rev-parse HEAD)"
-          git push --set-upstream origin "$branch"
+          expected_tree="$(git write-tree)"
+          [[ "$expected_tree" =~ ^[0-9a-f]{40}$ ]]
+
+          if branch_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" 2>/dev/null)"; then
+            head_sha="$(jq -r .object.sha <<<"$branch_payload")"
+            [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" --force
+            test "$(git rev-parse "origin/$branch")" = "$head_sha"
+
+            candidate="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$head_sha")"
+            test "$(jq '.parents | length' <<<"$candidate")" = "1"
+            test "$(jq -r '.parents[0].sha' <<<"$candidate")" = "$BASE_SHA"
+            test "$(jq -r .tree.sha <<<"$candidate")" = "$expected_tree"
+            test "$(jq -r '.message | split("\n")[0]' <<<"$candidate")" = "$title"
+            echo "reusing exact deterministic closure branch $branch at $head_sha"
+          else
+            git switch -c "$branch"
+            git commit -m "$title"
+            head_sha="$(git rev-parse HEAD)"
+            test "$(git rev-parse 'HEAD^{tree}')" = "$expected_tree"
+            git push --set-upstream origin "$branch"
+          fi
+
           printf 'branch=%s\n' "$branch" >> "$GITHUB_OUTPUT"
           printf 'head_sha=%s\n' "$head_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Open protected closure PR
+      - name: Open or re-prove protected closure PR
         if: steps.state.outputs.state == 'pending'
         id: pr
         env:
@@ -249,19 +266,41 @@ jobs:
           VERIFICATION_RUN_ID: ${{ steps.release.outputs.verification_run_id }}
         run: |
           set -euo pipefail
-          cat > "$RUNNER_TEMP/body.md" <<EOF
-          Automatic terminal bookkeeping for independently verified $RELEASE_TAG.
+          title="chore: close $RELEASE_TAG release state"
+          existing="$(gh pr list --state open --base main --head "$BRANCH" --limit 10 --json number,title,headRefName,headRefOid,baseRefName)"
+          count="$(jq 'length' <<<"$existing")"
 
-          - generated only after successful Release Verification run \`$VERIFICATION_RUN_ID\`;
-          - exact closure head: \`$HEAD_SHA\`;
-          - synchronizes roadmap, terminal qualification and current-release documentation;
-          - leaves the frozen release contract and immutable release assets untouched;
-          - merges only after native exact-head CI/Security/CodeQL, a completed clean Codex review, and zero unresolved review threads.
-          EOF
-          url="$(gh pr create --base main --head "$BRANCH" --title "chore: close $RELEASE_TAG release state" --body-file "$RUNNER_TEMP/body.md")"
-          number="${url##*/}"
+          if [[ "$count" == "1" ]]; then
+            number="$(jq -r '.[0].number' <<<"$existing")"
+            test "$(jq -r '.[0].title' <<<"$existing")" = "$title"
+            test "$(jq -r '.[0].headRefName' <<<"$existing")" = "$BRANCH"
+            test "$(jq -r '.[0].headRefOid' <<<"$existing")" = "$HEAD_SHA"
+            test "$(jq -r '.[0].baseRefName' <<<"$existing")" = "main"
+            echo "reusing exact open closure PR #$number"
+          elif [[ "$count" == "0" ]]; then
+            cat > "$RUNNER_TEMP/body.md" <<EOF
+            Automatic terminal bookkeeping for independently verified $RELEASE_TAG.
+
+            - generated only after successful Release Verification run \`$VERIFICATION_RUN_ID\`;
+            - exact closure head: \`$HEAD_SHA\`;
+            - synchronizes roadmap, terminal qualification and current-release documentation;
+            - leaves the frozen release contract and immutable release assets untouched;
+            - merges only after native exact-head CI/Security/CodeQL, a completed clean Codex review, and zero unresolved review threads.
+            EOF
+            url="$(gh pr create --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md")"
+            number="${url##*/}"
+          else
+            echo "multiple open closure PRs unexpectedly match $BRANCH" >&2
+            exit 1
+          fi
+
           [[ "$number" =~ ^[0-9]+$ ]]
-          test "$(gh pr view "$number" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
+          pr="$(gh pr view "$number" --json state,title,baseRefName,headRefName,headRefOid)"
+          test "$(jq -r .state <<<"$pr")" = "OPEN"
+          test "$(jq -r .title <<<"$pr")" = "$title"
+          test "$(jq -r .baseRefName <<<"$pr")" = "main"
+          test "$(jq -r .headRefName <<<"$pr")" = "$BRANCH"
+          test "$(jq -r .headRefOid <<<"$pr")" = "$HEAD_SHA"
           printf 'number=%s\n' "$number" >> "$GITHUB_OUTPUT"
 
       - name: Request exact-head Codex review
@@ -356,11 +395,42 @@ jobs:
           BRANCH: ${{ steps.commit.outputs.branch }}
           BASE_SHA: ${{ steps.release.outputs.base_sha }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          REVIEW_COMMENT_ID: ${{ steps.review_request.outputs.comment_id }}
         run: |
           set -euo pipefail
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"
-          test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
+          pr="$(gh pr view "$PR_NUMBER" --json state,baseRefName,headRefName,headRefOid)"
+          test "$(jq -r .state <<<"$pr")" = "OPEN"
+          test "$(jq -r .baseRefName <<<"$pr")" = "main"
+          test "$(jq -r .headRefName <<<"$pr")" = "$BRANCH"
+          test "$(jq -r .headRefOid <<<"$pr")" = "$HEAD_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)" = "$HEAD_SHA"
+
+          # Discussion/review state can change without moving the head. Re-prove it
+          # immediately before the merge API call instead of trusting the earlier poll.
+          # shellcheck disable=SC2016
+          unresolved="$(gh api graphql -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER" -f query='
+            query($owner:String!, $name:String!, $number:Int!) {
+              repository(owner:$owner, name:$name) {
+                pullRequest(number:$number) {
+                  reviewThreads(first:100) { nodes { isResolved } }
+                }
+              }
+            }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length')"
+          test "$unresolved" = "0"
+
+          reviews="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100")"
+          exact_codex_review="$(jq -r --arg sha "$HEAD_SHA" '
+            any(.[]; (.user.login | startswith("chatgpt-codex-connector")) and .commit_id == $sha)
+          ' <<<"$reviews")"
+          reactions="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions")"
+          codex_clean_reaction="$(jq -r '
+            any(.[]; (.user.login | startswith("chatgpt-codex-connector")) and .content == "+1")
+          ' <<<"$reactions")"
+          if [[ "$exact_codex_review" != "true" && "$codex_clean_reaction" != "true" ]]; then
+            echo "exact-head Codex review is no longer proven immediately before merge" >&2
+            exit 1
+          fi
 
           result="$(gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
             -f merge_method=squash \
@@ -373,10 +443,23 @@ jobs:
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$main_sha"
           printf 'main_sha=%s\n' "$main_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Require native fresh-main CI, Security and CodeQL
-        if: steps.state.outputs.state == 'pending'
+      - name: Resolve post-closure protected-main SHA
+        id: final_main
         env:
-          MAIN_SHA: ${{ steps.merge.outputs.main_sha }}
+          STATE: ${{ steps.state.outputs.state }}
+          MERGED_MAIN_SHA: ${{ steps.merge.outputs.main_sha }}
+        run: |
+          set -euo pipefail
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$STATE" == "pending" ]]; then
+            test "$main_sha" = "$MERGED_MAIN_SHA"
+          fi
+          printf 'main_sha=%s\n' "$main_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Require native fresh-main CI, Security and CodeQL
+        env:
+          MAIN_SHA: ${{ steps.final_main.outputs.main_sha }}
         run: |
           set -euo pipefail
           for _ in $(seq 1 180); do
@@ -422,10 +505,13 @@ jobs:
               raise SystemExit("invalid release tag")
           major, minor, _patch = match.groups()
           tokens = (f"v{major}.{minor}", f"v{major}-{minor}", f"v{major}_{minor}", f"v{major}{minor}")
-          prefixes = ("tmp/", "work/", "chore/", "automation/", "verify-release/")
+          prefixes = ("tmp/", "work/", "chore/", "automation/", "verify-release/", "release/")
           selected = []
           for raw in pathlib.Path(branches_path).read_text(encoding="utf-8").splitlines():
               branch = raw.strip()
+              if branch == "tmp/zero-diff-authorization-probe":
+                  selected.append(branch)
+                  continue
               if not branch.startswith(prefixes):
                   continue
               lower = branch.lower()
