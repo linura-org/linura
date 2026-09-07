@@ -16,6 +16,7 @@ on:
       - ".github/release-verification-recovery/**"
 
 permissions:
+  actions: write
   contents: read
   attestations: read
   id-token: write
@@ -101,3 +102,13 @@ jobs:
           while IFS= read -r -d '' file; do
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
           done < <(find published -maxdepth 1 -type f -print0)
+      - name: Dispatch protected post-release closure
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh workflow run post-release-closure.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f tag="$RELEASE_TAG" \
+            -f verification_run_id="$GITHUB_RUN_ID"
