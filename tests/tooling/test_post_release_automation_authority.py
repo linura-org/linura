@@ -40,8 +40,8 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
 
         preflight = workflow.index("Prove closure automation capabilities")
         generate = workflow.index("Generate deterministic closure tree")
-        commit = workflow.index("Commit and push one closure commit")
-        open_pr = workflow.index("Open protected closure PR")
+        commit = workflow.index("Commit or re-prove deterministic closure commit")
+        open_pr = workflow.index("Open or re-prove protected closure PR")
         self.assertLess(preflight, generate)
         self.assertLess(generate, commit)
         self.assertLess(commit, open_pr)
@@ -77,11 +77,64 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         workflow = self._closure_workflow()
         self.assertIn("@codex review", workflow)
         self.assertIn("event=pull_request", workflow)
-        self.assertIn("reviewThreads(first:100)", workflow)
+        self.assertGreaterEqual(workflow.count("reviewThreads(first:100)"), 2)
         self.assertIn("chatgpt-codex-connector", workflow)
         self.assertIn('pulls/$PR_NUMBER/merge', workflow)
         self.assertNotIn('gh pr merge "$PR_NUMBER"', workflow)
         self.assertIn("event=push", workflow)
+
+        merge = workflow.split("- name: Re-prove and squash merge exact reviewed closure", 1)[1].split(
+            "- name: Resolve post-closure protected-main SHA", 1
+        )[0]
+        self.assertIn("REVIEW_COMMENT_ID", merge)
+        self.assertIn("reviewThreads(first:100)", merge)
+        self.assertIn('test "$unresolved" = "0"', merge)
+        self.assertIn("exact_codex_review", merge)
+        self.assertIn("codex_clean_reaction", merge)
+        self.assertLess(merge.index("reviewThreads(first:100)"), merge.index('pulls/$PR_NUMBER/merge'))
+
+    def test_closure_retries_reprove_and_reuse_exact_branch_and_pr(self) -> None:
+        workflow = self._closure_workflow()
+        commit = workflow.split("- name: Commit or re-prove deterministic closure commit", 1)[1].split(
+            "- name: Open or re-prove protected closure PR", 1
+        )[0]
+        open_pr = workflow.split("- name: Open or re-prove protected closure PR", 1)[1].split(
+            "- name: Request exact-head Codex review", 1
+        )[0]
+
+        self.assertIn('expected_tree="$(git write-tree)"', commit)
+        self.assertIn('branch_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch"', commit)
+        self.assertIn("reusing exact deterministic closure branch", commit)
+        self.assertIn("'.parents | length'", commit)
+        self.assertIn("'.parents[0].sha'", commit)
+        self.assertIn('jq -r .tree.sha', commit)
+        self.assertIn('= "$expected_tree"', commit)
+
+        self.assertIn('gh pr list --state open --base main --head "$BRANCH"', open_pr)
+        self.assertIn("reusing exact open closure PR", open_pr)
+        self.assertIn('test "$(jq -r .headRefOid <<<"$pr")" = "$HEAD_SHA"', open_pr)
+        self.assertIn('test "$(jq -r .baseRefName <<<"$pr")" = "main"', open_pr)
+
+    def test_closed_release_retry_still_requires_fresh_main_before_cleanup(self) -> None:
+        workflow = self._closure_workflow()
+        final_main = workflow.index("Resolve post-closure protected-main SHA")
+        fresh_main = workflow.index("Require native fresh-main CI, Security and CodeQL")
+        cleanup = workflow.index("Delete obsolete release-scoped branches")
+        self.assertLess(final_main, fresh_main)
+        self.assertLess(fresh_main, cleanup)
+
+        fresh_block = workflow.split("- name: Require native fresh-main CI, Security and CodeQL", 1)[1].split(
+            "- name: Delete obsolete release-scoped branches", 1
+        )[0]
+        self.assertNotIn("if: steps.state.outputs.state == 'pending'", fresh_block)
+        self.assertIn("steps.final_main.outputs.main_sha", fresh_block)
+
+    def test_cleanup_covers_release_branches_and_legacy_probe(self) -> None:
+        workflow = self._closure_workflow()
+        cleanup = workflow.split("- name: Delete obsolete release-scoped branches", 1)[1]
+        self.assertIn('"release/"', cleanup)
+        self.assertIn('branch == "tmp/zero-diff-authorization-probe"', cleanup)
+        self.assertIn("preserving branch used by an open PR", cleanup)
 
     def test_legacy_fallback_authority_is_removed(self) -> None:
         workflow = self._closure_workflow()
