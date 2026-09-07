@@ -175,7 +175,7 @@ jobs:
             exit 1
           fi
 
-      - name: Create exact metadata-only authorization branch
+      - name: Create or re-prove exact metadata-only authorization branch
         id: candidate
         run: |
           set -euo pipefail
@@ -188,6 +188,36 @@ jobs:
 
           branch="automation/release-authorization-${RELEASE_TAG}-${SOURCE_SHA:0:12}"
           title="release: authorize $RELEASE_TAG"
+          authorization_subject="release: $RELEASE_TAG — $RELEASE_THEME"
+          message="$(cat <<EOF
+          $authorization_subject
+
+          Authorize publication of the frozen $RELEASE_TAG release through Linura's protected proof-first, tag-last lifecycle. The reviewed release-preparation tree is unchanged.
+
+          Reviewed-Source: $SOURCE_SHA
+          Reviewed-Tree: $TREE_SHA
+          EOF
+          )"
+
+          verify_candidate() {
+            local pr_number="$1"
+            local candidate_sha="$2"
+            [[ "$pr_number" =~ ^[0-9]+$ ]]
+            [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ ]]
+            test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" --jq .object.sha)" = "$candidate_sha"
+            pr_payload="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr_number")"
+            test "$(jq -r .base.sha <<<"$pr_payload")" = "$SOURCE_SHA"
+            test "$(jq -r .head.sha <<<"$pr_payload")" = "$candidate_sha"
+            test "$(jq -r .title <<<"$pr_payload")" = "$title"
+            test "$(jq -r .changed_files <<<"$pr_payload")" = "0"
+
+            candidate_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$candidate_sha")"
+            test "$(jq -r .tree.sha <<<"$candidate_payload")" = "$TREE_SHA"
+            test "$(jq '.parents | length' <<<"$candidate_payload")" = "1"
+            test "$(jq -r '.parents[0].sha' <<<"$candidate_payload")" = "$SOURCE_SHA"
+            test "$(jq -r .message <<<"$candidate_payload")" = "$message"
+          }
+
           existing_json="$(gh pr list --state open --base main --json number,title,headRefName,headRefOid)"
           # shellcheck disable=SC2016
           existing="$(jq -c --arg title "$title" '[.[] | select(.title == $title)] | first // empty' <<<"$existing_json")"
@@ -197,10 +227,13 @@ jobs:
               echo "conflicting release-authorization PR already exists on $existing_branch" >&2
               exit 1
             fi
+            pr_number="$(jq -r .number <<<"$existing")"
+            head_sha="$(jq -r .headRefOid <<<"$existing")"
+            verify_candidate "$pr_number" "$head_sha"
             {
               printf 'branch=%s\n' "$branch"
-              printf 'pr_number=%s\n' "$(jq -r .number <<<"$existing")"
-              printf 'head_sha=%s\n' "$(jq -r .headRefOid <<<"$existing")"
+              printf 'pr_number=%s\n' "$pr_number"
+              printf 'head_sha=%s\n' "$head_sha"
               printf 'created=false\n'
             } >> "$GITHUB_OUTPUT"
             exit 0
@@ -209,16 +242,6 @@ jobs:
           if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1; then
             gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
           fi
-
-          message="$(cat <<EOF
-          release: $RELEASE_TAG — $RELEASE_THEME
-
-          Authorize publication of the frozen $RELEASE_TAG release through Linura's protected proof-first, tag-last lifecycle. The reviewed release-preparation tree is unchanged.
-
-          Reviewed-Source: $SOURCE_SHA
-          Reviewed-Tree: $TREE_SHA
-          EOF
-          )"
 
           commit_payload="$(jq -n \
             --arg message "$message" \
@@ -231,6 +254,7 @@ jobs:
           test "$(jq -r .tree.sha <<<"$authorization")" = "$TREE_SHA"
           test "$(jq '.parents | length' <<<"$authorization")" = "1"
           test "$(jq -r .parents[0].sha <<<"$authorization")" = "$SOURCE_SHA"
+          test "$(jq -r .message <<<"$authorization")" = "$message"
 
           ref_payload="$(jq -n --arg ref "refs/heads/$branch" --arg sha "$head_sha" '{ref:$ref, sha:$sha}')"
           gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" --input - <<<"$ref_payload" >/dev/null
@@ -248,9 +272,7 @@ jobs:
           url="$(gh pr create --base main --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/body.md")"
           pr_number="${url##*/}"
           [[ "$pr_number" =~ ^[0-9]+$ ]]
-
-          changed_files="$(gh pr view "$pr_number" --json changedFiles --jq .changedFiles)"
-          test "$changed_files" = "0"
+          verify_candidate "$pr_number" "$head_sha"
 
           {
             printf 'branch=%s\n' "$branch"
@@ -339,7 +361,7 @@ jobs:
           echo "release-authorization checks/review did not reach a clean terminal state" >&2
           exit 1
 
-      - name: Squash merge exact authorization through protected main
+      - name: Re-prove and squash merge exact authorization through protected main
         id: merge
         env:
           PR_NUMBER: ${{ steps.candidate.outputs.pr_number }}
@@ -348,8 +370,13 @@ jobs:
         run: |
           set -euo pipefail
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
-          test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
-          test "$(gh pr view "$PR_NUMBER" --json changedFiles --jq .changedFiles)" = "0"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)" = "$HEAD_SHA"
+
+          pr_payload="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
+          test "$(jq -r .base.sha <<<"$pr_payload")" = "$SOURCE_SHA"
+          test "$(jq -r .head.sha <<<"$pr_payload")" = "$HEAD_SHA"
+          test "$(jq -r .changed_files <<<"$pr_payload")" = "0"
+          test "$(jq -r .title <<<"$pr_payload")" = "release: authorize $RELEASE_TAG"
 
           commit_title="release: $RELEASE_TAG — $RELEASE_THEME"
           commit_message="$(cat <<EOF
@@ -359,6 +386,15 @@ jobs:
           Reviewed-Tree: $TREE_SHA
           EOF
           )"
+          expected_candidate_message="$commit_title
+
+$commit_message"
+          candidate="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$HEAD_SHA")"
+          test "$(jq -r .tree.sha <<<"$candidate")" = "$TREE_SHA"
+          test "$(jq '.parents | length' <<<"$candidate")" = "1"
+          test "$(jq -r '.parents[0].sha' <<<"$candidate")" = "$SOURCE_SHA"
+          test "$(jq -r .message <<<"$candidate")" = "$expected_candidate_message"
+
           result="$(gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
             -f merge_method=squash \
             -f sha="$HEAD_SHA" \
