@@ -16,8 +16,7 @@ use crate::store::{
     replay_operation,
 };
 use crate::{
-    AdoptionReport, IntentRevisionRef, LibraryError, LifecycleRecordKind, LocalLibrary,
-    SetupRevisionRef, StoredIntent, StoredSetup,
+    AdoptionReport, LibraryError, LifecycleRecordKind, LocalLibrary, StoredIntent, StoredSetup,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -606,6 +605,7 @@ fn adoption_digest(kind: &str, canonical: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{IntentRevisionRef, SetupRevisionRef};
     use linura_core::{Actor, ActorId, ActorKind, ValidationError};
     use linura_intent::{Intent, Setup};
 
@@ -726,8 +726,9 @@ mod tests {
         assert_eq!(
             library
                 .intent_history(&id(IntentId::new("intent:portable")))
-                .map(|v| v.len()),
-            Ok(1)
+                .unwrap_or_else(|error| unreachable!("{error}"))
+                .len(),
+            1
         );
     }
 

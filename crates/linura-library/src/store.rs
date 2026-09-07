@@ -1902,6 +1902,9 @@ fn validate_next_revision(
 ) -> Result<(), LibraryError> {
     match (current, expected_previous) {
         (None, None) if proposed > 0 => Ok(()),
+        (None, None) => Err(LibraryError::Validation(format!(
+            "{kind} revision must be positive"
+        ))),
         (None, Some(expected)) => Err(LibraryError::RevisionConflict {
             expected,
             actual: 0,
