@@ -343,11 +343,13 @@ No widened claim.
             with self.assertRaises(post_release_close.ClosureError):
                 post_release_close.close_release(Args(root))
 
-    def test_workflow_pins_protected_closure_sequence(self) -> None:
+    def test_workflow_pins_protected_dispatch_only_closure_sequence(self) -> None:
         workflow = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
         for marker in (
-            'workflows: ["Verify published release"]',
-            "github.event.workflow_run.conclusion == 'success'",
+            "workflow_dispatch:",
+            "INPUT_VERIFICATION_RUN_ID",
+            'test "$verification_event" = "workflow_dispatch"',
+            'test "$verification_event" = "push"',
             "python3 tools/post_release_close.py",
             'gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"',
             'wait_for ci.yml canonical-check',
@@ -358,6 +360,8 @@ No widened claim.
             'Delete obsolete release-scoped branches',
         ):
             self.assertIn(marker, workflow)
+        self.assertNotIn('workflows: ["Verify published release"]', workflow)
+        self.assertNotIn("github.event.workflow_run", workflow)
         self.assertNotIn("git push origin main", workflow)
 
         for path in ("ci.yml", "security.yml", "codeql.yml"):

@@ -1,0 +1,102 @@
+name: Release Closure Handoff
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Independently verified release tag
+        required: true
+        type: string
+      source_sha:
+        description: Source SHA proven by the verification job from published evidence
+        required: true
+        type: string
+      verification_run_id:
+        description: Verify published release run ID to await and bind
+        required: true
+        type: string
+      verification_event:
+        description: Trigger event of the verification run
+        required: true
+        type: string
+      verification_ref:
+        description: Exact tag ref or authenticated recovery branch used by verification
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: release-closure-handoff-${{ inputs.tag }}-${{ inputs.verification_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    name: await terminal verification and dispatch closure
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      VERIFIED_SOURCE_SHA: ${{ inputs.source_sha }}
+      VERIFICATION_RUN_ID: ${{ inputs.verification_run_id }}
+      VERIFICATION_EVENT: ${{ inputs.verification_event }}
+      VERIFICATION_REF: ${{ inputs.verification_ref }}
+    steps:
+      - name: Await exact verification terminal success
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$VERIFIED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERIFICATION_RUN_ID" =~ ^[0-9]+$ ]]
+          case "$VERIFICATION_EVENT" in
+            workflow_dispatch)
+              test "$VERIFICATION_REF" = "$RELEASE_TAG"
+              ;;
+            push)
+              test "$VERIFICATION_REF" = "verify-release/$RELEASE_TAG"
+              ;;
+            *)
+              echo "unsupported verification event: $VERIFICATION_EVENT" >&2
+              exit 1
+              ;;
+          esac
+
+          verification=""
+          for _ in $(seq 1 120); do
+            verification="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VERIFICATION_RUN_ID")"
+            status="$(jq -r .status <<<"$verification")"
+            case "$status" in
+              completed) break ;;
+              queued|in_progress|pending|waiting|requested) sleep 2 ;;
+              *) echo "unexpected verification status: $status" >&2; exit 1 ;;
+            esac
+          done
+
+          test -n "$verification"
+          test "$(jq -r .path <<<"$verification")" = ".github/workflows/release-verification.yml"
+          test "$(jq -r .status <<<"$verification")" = "completed"
+          test "$(jq -r .conclusion <<<"$verification")" = "success"
+          test "$(jq -r .event <<<"$verification")" = "$VERIFICATION_EVENT"
+          test "$(jq -r .head_branch <<<"$verification")" = "$VERIFICATION_REF"
+
+          tag_source_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          [[ "$tag_source_sha" =~ ^[0-9a-f]{40}$ ]]
+          test "$tag_source_sha" = "$VERIFIED_SOURCE_SHA"
+
+          verification_head_sha="$(jq -r .head_sha <<<"$verification")"
+          if [[ "$VERIFICATION_EVENT" == "workflow_dispatch" ]]; then
+            test "$verification_head_sha" = "$VERIFIED_SOURCE_SHA"
+          fi
+
+      - name: Dispatch protected post-release closure
+        run: |
+          set -euo pipefail
+          gh workflow run post-release-closure.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f tag="$RELEASE_TAG" \
+            -f verification_run_id="$VERIFICATION_RUN_ID"
+          echo "dispatched protected Post Release Closure for $RELEASE_TAG after exact verification run $VERIFICATION_RUN_ID completed successfully"
