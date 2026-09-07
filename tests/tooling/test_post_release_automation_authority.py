@@ -26,17 +26,17 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn("contents: write", workflow)
         self.assertIn("pull-requests: write", workflow)
         self.assertIn("actions: write", workflow)
+        self.assertIn("issues: write", workflow)
         self.assertIn(
-            "GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN || github.token }}",
+            "GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}",
             workflow,
         )
-        self.assertIn(
-            "RELEASE_AUTOMATION_CREDENTIAL_SOURCE: ${{ secrets.RELEASE_AUTOMATION_TOKEN != '' && 'dedicated' || 'github' }}",
-            workflow,
-        )
+        self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", workflow)
+        self.assertIn("RELEASE_AUTOMATION_TOKEN is required", workflow)
         self.assertIn("Prove closure automation capabilities", workflow)
         self.assertIn(PROBE_TOOL, workflow)
-        self.assertIn('--credential-source "$RELEASE_AUTOMATION_CREDENTIAL_SOURCE"', workflow)
+        self.assertIn('--credential-source dedicated', workflow)
+        self.assertIn("token: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}", workflow)
 
         preflight = workflow.index("Prove closure automation capabilities")
         generate = workflow.index("Generate deterministic closure tree")
@@ -59,24 +59,36 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertNotIn("git commit", preflight)
         self.assertNotIn("gh pr create", preflight)
 
-    def test_promotion_and_closure_share_the_same_authority_contract(self) -> None:
+    def test_promotion_and_closure_require_the_same_dedicated_authority(self) -> None:
         closure = self._closure_workflow()
         promotion = PROMOTION_WORKFLOW.read_text(encoding="utf-8")
 
         for workflow in (closure, promotion):
             self.assertIn(PROBE_TOOL, workflow)
             self.assertIn(
-                "GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN || github.token }}",
+                "GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}",
                 workflow,
             )
-            self.assertIn("RELEASE_AUTOMATION_CREDENTIAL_SOURCE", workflow)
+            self.assertIn("RELEASE_AUTOMATION_TOKEN is required", workflow)
+            self.assertIn("--credential-source dedicated", workflow)
+            self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", workflow)
 
-    def test_legacy_pr_only_probe_is_removed(self) -> None:
+    def test_closure_waits_for_native_pr_checks_and_codex_review(self) -> None:
+        workflow = self._closure_workflow()
+        self.assertIn("@codex review", workflow)
+        self.assertIn("event=pull_request", workflow)
+        self.assertIn("reviewThreads(first:100)", workflow)
+        self.assertIn("chatgpt-codex-connector", workflow)
+        self.assertIn('pulls/$PR_NUMBER/merge', workflow)
+        self.assertNotIn('gh pr merge "$PR_NUMBER"', workflow)
+        self.assertIn("event=push", workflow)
+
+    def test_legacy_fallback_authority_is_removed(self) -> None:
         workflow = self._closure_workflow()
 
         self.assertNotIn("Verify closure PR automation authority", workflow)
         self.assertNotIn("DEDICATED_AUTOMATION_TOKEN", workflow)
-        self.assertNotIn("extract_probe_json", workflow)
+        self.assertNotIn("RELEASE_AUTOMATION_CREDENTIAL_SOURCE", workflow)
         self.assertNotIn("Linura release automation authority probe", workflow)
         self.assertNotIn("No commits between main and main", workflow)
 
