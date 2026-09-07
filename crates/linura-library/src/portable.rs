@@ -1221,7 +1221,7 @@ fn hex_text(value: &str) -> String {
 }
 
 fn decode_text(value: &str) -> Result<String, LibraryError> {
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return Err(LibraryError::PortableFormat(
             "hex text contains odd byte count".into(),
         ));

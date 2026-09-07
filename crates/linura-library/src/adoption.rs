@@ -269,8 +269,10 @@ fn base_report(
     intents: &[StoredIntent],
     context: &AdoptionContext,
 ) -> Result<AdoptionReport, LibraryError> {
-    let mut report = AdoptionReport::default();
-    report.unsupported_capabilities = context.unsupported_capabilities.clone();
+    let mut report = AdoptionReport {
+        unsupported_capabilities: context.unsupported_capabilities.clone(),
+        ..AdoptionReport::default()
+    };
     for secret_ref in &context.available_secret_refs {
         validate_secret_ref(secret_ref)?;
     }

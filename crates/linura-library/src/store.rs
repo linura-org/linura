@@ -54,10 +54,10 @@ impl LocalLibrary {
         settings: LibrarySettings,
     ) -> Result<Self, LibraryError> {
         let path = path.as_ref().to_path_buf();
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)?;
         }
         let mut connection = Connection::open(&path)?;
         configure_writable(&connection, settings)?;
@@ -440,28 +440,21 @@ impl LocalLibrary {
                     ],
                 )?;
             }
+            let origin_context = DesiredOriginContext {
+                intent_id,
+                intent_revision: actual_revision,
+                generation,
+                provider_id: desired.provider.as_str(),
+                resource_id: desired.resource.as_str(),
+                capability_id: desired.observation_capability.as_str(),
+            };
             for origin in &desired.reason.intent_ids {
-                insert_desired_origin(
-                    &transaction,
-                    intent_id,
-                    actual_revision,
-                    generation,
-                    desired.provider.as_str(),
-                    desired.resource.as_str(),
-                    desired.observation_capability.as_str(),
-                    "intent",
-                    origin.as_str(),
-                )?;
+                insert_desired_origin(&transaction, &origin_context, "intent", origin.as_str())?;
             }
             for origin in &desired.reason.requirement_ids {
                 insert_desired_origin(
                     &transaction,
-                    intent_id,
-                    actual_revision,
-                    generation,
-                    desired.provider.as_str(),
-                    desired.resource.as_str(),
-                    desired.observation_capability.as_str(),
+                    &origin_context,
                     "requirement",
                     origin.as_str(),
                 )?;
@@ -469,12 +462,7 @@ impl LocalLibrary {
             for origin in &desired.reason.capability_ids {
                 insert_desired_origin(
                     &transaction,
-                    intent_id,
-                    actual_revision,
-                    generation,
-                    desired.provider.as_str(),
-                    desired.resource.as_str(),
-                    desired.observation_capability.as_str(),
+                    &origin_context,
                     "capability",
                     origin.as_str(),
                 )?;
@@ -938,10 +926,10 @@ pub(crate) fn restore_database_file(backup: &Path, destination: &Path) -> Result
             "backup and restore destination must be different files".into(),
         ));
     }
-    if let Some(parent) = destination.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)?;
-        }
+    if let Some(parent) = destination.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)?;
     }
     let file_name = destination
         .file_name()
@@ -1251,26 +1239,30 @@ fn copy_current_causal_state(
     Ok((1, complete))
 }
 
-fn insert_desired_origin(
-    transaction: &Transaction<'_>,
-    intent_id: &IntentId,
+struct DesiredOriginContext<'a> {
+    intent_id: &'a IntentId,
     intent_revision: u64,
     generation: u64,
-    provider_id: &str,
-    resource_id: &str,
-    capability_id: &str,
+    provider_id: &'a str,
+    resource_id: &'a str,
+    capability_id: &'a str,
+}
+
+fn insert_desired_origin(
+    transaction: &Transaction<'_>,
+    context: &DesiredOriginContext<'_>,
     kind: &str,
     origin_id: &str,
 ) -> Result<(), LibraryError> {
     transaction.execute(
         "INSERT INTO desired_resource_origins(intent_id, intent_revision, generation, provider_id, resource_id, capability_id, origin_kind, origin_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
-            intent_id.as_str(),
-            to_i64(intent_revision, "intent revision")?,
-            to_i64(generation, "causal generation")?,
-            provider_id,
-            resource_id,
-            capability_id,
+            context.intent_id.as_str(),
+            to_i64(context.intent_revision, "intent revision")?,
+            to_i64(context.generation, "causal generation")?,
+            context.provider_id,
+            context.resource_id,
+            context.capability_id,
             kind,
             origin_id
         ],
@@ -1745,9 +1737,9 @@ fn collect_setup_closure(
         let stored = load_setup_revision(connection, &reference.id, reference.revision)?;
         for intent_ref in &stored.intent_revisions {
             let intent_key = (intent_ref.id.as_str().to_owned(), intent_ref.revision);
-            if !intents.contains_key(&intent_key) {
+            if let std::collections::btree_map::Entry::Vacant(entry) = intents.entry(intent_key) {
                 let intent = load_intent_revision(connection, &intent_ref.id, intent_ref.revision)?;
-                intents.insert(intent_key, intent);
+                entry.insert(intent);
             }
         }
         for included in &stored.included_revisions {
@@ -2203,10 +2195,10 @@ fn sql_string_literal(path: &Path) -> Result<String, LibraryError> {
 }
 
 fn sync_parent(path: &Path) -> Result<(), LibraryError> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            File::open(parent)?.sync_all()?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        File::open(parent)?.sync_all()?;
     }
     Ok(())
 }
