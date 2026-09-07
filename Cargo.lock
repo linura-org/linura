@@ -591,6 +591,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "linura-library"
+version = "0.6.0"
+dependencies = [
+ "linura-core",
+ "linura-intent",
+ "linura-planner",
+ "rusqlite",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "linura-lifecycle"
 version = "0.6.0"
 
@@ -690,6 +702,7 @@ dependencies = [
  "linura-dbus",
  "linura-graph",
  "linura-intent",
+ "linura-library",
  "linura-observation",
  "linura-protocol",
  "linura-provenance",

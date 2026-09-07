@@ -23,6 +23,19 @@ pub use linura_intent::{
     Intent, IntentProposal, IntentStatus, MachineClass, MachineProfile, Requirement,
     RequirementKind, Setup, SetupValidationError,
 };
+pub use linura_library::{
+    AdoptionContext, AdoptionReport, IntentRevisionRef, IntentTransition, LIBRARY_SCHEMA_VERSION,
+    LibraryError, LibrarySettings, LifecycleRecord, LifecycleRecordKind, LocalLibrary,
+    ManagedResourceIdentity, PORTABLE_FORMAT_VERSION,
+    PortableProfileBundle as DurablePortableProfileBundle,
+    PortableSetupBundle as DurablePortableSetupBundle, ProfileIdentity, RemovalImpactReport,
+    SetupRevisionRef, StoredIntent, StoredProfile, StoredSetup,
+    decode_profile_bundle as decode_durable_profile_bundle,
+    decode_setup_bundle as decode_durable_setup_bundle,
+    encode_profile_bundle as encode_durable_profile_bundle,
+    encode_setup_bundle as encode_durable_setup_bundle, restore_backup as restore_library_backup,
+    validate_backup as validate_library_backup,
+};
 pub use linura_observation::{
     FreshnessState, ObservationAuthority, ObservationEnvelope, ObservationValidationError,
     ObservedValue, ProviderAvailability, ProviderHealth,

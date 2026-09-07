@@ -30,7 +30,7 @@ REQUIRED = [
     "contracts/components.toml", "tools/check_component_maturity.py", "tests/tooling/test_component_maturity.py",
     "profiles/arch-hyprland-v1.toml",
     "crates/linura-intent/Cargo.toml", "crates/linura-graph/Cargo.toml", "crates/linura-capability-sdk/Cargo.toml",
-    "crates/linura-planner/Cargo.toml", "crates/linura-provenance/Cargo.toml", "crates/linura-agent-runtime/Cargo.toml",
+    "crates/linura-planner/Cargo.toml", "crates/linura-provenance/Cargo.toml", "crates/linura-library/Cargo.toml", "crates/linura-agent-runtime/Cargo.toml",
     "crates/linura-control/Cargo.toml", "crates/linura-sdk/Cargo.toml",
     "crates/linura-bootstrap/Cargo.toml", "crates/linura-migrations/Cargo.toml", "crates/linura-update/Cargo.toml",
     "crates/linura-config/Cargo.toml", "crates/linura-hardware/Cargo.toml", "crates/linura-testkit/Cargo.toml",
