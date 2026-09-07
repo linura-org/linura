@@ -1,0 +1,31 @@
+name: v0.7 Format Derivation
+
+on:
+  push:
+    branches:
+      - feat/v0.7-local-library
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: feat/v0.7-local-library
+      - name: Apply repository Rust formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          if git diff --quiet --exit-code; then
+            echo "already formatted"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/linura-library crates/linura-sdk
+          git commit -m 'style(v0.7): apply canonical Rust formatting'
+          git push origin HEAD:feat/v0.7-local-library
