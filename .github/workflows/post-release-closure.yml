@@ -330,6 +330,28 @@ jobs:
           checks_ready=0
           review_ready=0
 
+          count_unresolved_threads() {
+            # shellcheck disable=SC2016
+            gh api graphql --paginate \
+              -f owner="${GITHUB_REPOSITORY%/*}" \
+              -f name="${GITHUB_REPOSITORY#*/}" \
+              -F number="$PR_NUMBER" \
+              -F endCursor=null \
+              -f query='
+                query($owner:String!, $name:String!, $number:Int!, $endCursor:String) {
+                  repository(owner:$owner, name:$name) {
+                    pullRequest(number:$number) {
+                      reviewThreads(first:100, after:$endCursor) {
+                        nodes { isResolved }
+                        pageInfo { hasNextPage endCursor }
+                      }
+                    }
+                  }
+                }' \
+              --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' |
+              awk '{ total += $1 } END { print total + 0 }'
+          }
+
           for _ in $(seq 1 360); do
             test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
             test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "${{ steps.release.outputs.base_sha }}"
@@ -351,15 +373,7 @@ jobs:
               esac
             done
 
-            # shellcheck disable=SC2016
-            unresolved="$(gh api graphql -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER" -f query='
-              query($owner:String!, $name:String!, $number:Int!) {
-                repository(owner:$owner, name:$name) {
-                  pullRequest(number:$number) {
-                    reviewThreads(first:100) { nodes { isResolved } }
-                  }
-                }
-              }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length')"
+            unresolved="$(count_unresolved_threads)"
 
             reviews="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100")"
             exact_codex_review="$(jq -r --arg sha "$HEAD_SHA" '
@@ -397,6 +411,29 @@ jobs:
           REVIEW_COMMENT_ID: ${{ steps.review_request.outputs.comment_id }}
         run: |
           set -euo pipefail
+
+          count_unresolved_threads() {
+            # shellcheck disable=SC2016
+            gh api graphql --paginate \
+              -f owner="${GITHUB_REPOSITORY%/*}" \
+              -f name="${GITHUB_REPOSITORY#*/}" \
+              -F number="$PR_NUMBER" \
+              -F endCursor=null \
+              -f query='
+                query($owner:String!, $name:String!, $number:Int!, $endCursor:String) {
+                  repository(owner:$owner, name:$name) {
+                    pullRequest(number:$number) {
+                      reviewThreads(first:100, after:$endCursor) {
+                        nodes { isResolved }
+                        pageInfo { hasNextPage endCursor }
+                      }
+                    }
+                  }
+                }' \
+              --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' |
+              awk '{ total += $1 } END { print total + 0 }'
+          }
+
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"
           pr="$(gh pr view "$PR_NUMBER" --json state,baseRefName,headRefName,headRefOid)"
           test "$(jq -r .state <<<"$pr")" = "OPEN"
@@ -407,15 +444,7 @@ jobs:
 
           # Discussion/review state can change without moving the head. Re-prove it
           # immediately before the merge API call instead of trusting the earlier poll.
-          # shellcheck disable=SC2016
-          unresolved="$(gh api graphql -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER" -f query='
-            query($owner:String!, $name:String!, $number:Int!) {
-              repository(owner:$owner, name:$name) {
-                pullRequest(number:$number) {
-                  reviewThreads(first:100) { nodes { isResolved } }
-                }
-              }
-            }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length')"
+          unresolved="$(count_unresolved_threads)"
           test "$unresolved" = "0"
 
           reviews="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100")"
