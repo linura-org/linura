@@ -99,6 +99,7 @@ jobs:
         run: |
           set -euo pipefail
           test -s "$ARTIFACT_DIR/portable-roundtrip.sha256"
+          test -s "$ARTIFACT_DIR/process-crash-atomicity.txt"
           python3 - <<'PY'
           import json
           import os
@@ -130,6 +131,7 @@ jobs:
               'exact operation retry idempotency',
               'operation-id semantic substitution rejection',
               'process reopen preserves current state and history',
+              'process crash between persistent history write and projection commit rolls back atomically',
               'shared active ownership retains managed resource',
               'proven zero-owner resource is cleanup-eligible',
               'incomplete ownership fails closed',
@@ -157,6 +159,7 @@ jobs:
               'portable_format_version': int(portable_match.group(1)),
               'portable_roundtrip_sha256': roundtrip_digest,
               'database_integrity_after_restart_recovery': 'ok',
+              'process_crash_atomicity': (artifact_dir / 'process-crash-atomicity.txt').read_text(encoding='utf-8').strip(),
               'imported_approval_or_executor_authority': False,
               'authority_boundary': 'v0.6 narrow managed systemd authority remains unchanged',
               'qualified_scenarios': [
