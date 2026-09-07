@@ -13,6 +13,12 @@ class PostReleaseReviewSecurityTests(unittest.TestCase):
     def _workflow(self) -> str:
         return WORKFLOW.read_text(encoding="utf-8")
 
+    def _request_block(self) -> str:
+        workflow = self._workflow()
+        return workflow.split("- name: Request exact-head Codex review", 1)[1].split(
+            "- name: Require native exact-head checks and completed clean Codex review", 1
+        )[0]
+
     def _poll_block(self) -> str:
         workflow = self._workflow()
         return workflow.split(
@@ -34,12 +40,14 @@ class PostReleaseReviewSecurityTests(unittest.TestCase):
         self.assertNotIn('startswith("chatgpt-codex-connector")', workflow)
 
         for block in (self._poll_block(), self._merge_block()):
-            # Review threads use GraphQL cursor pagination; review submissions and
-            # reactions are two independent REST collections and each must paginate.
+            # Review threads use GraphQL cursor pagination. Review submissions,
+            # request-comment reactions, and PR-level reactions are independent
+            # REST collections and all must paginate before evidence is evaluated.
             self.assertIn("gh api graphql --paginate", block)
-            self.assertGreaterEqual(block.count("gh api --paginate"), 2)
+            self.assertGreaterEqual(block.count("gh api --paginate"), 3)
             self.assertIn("pulls/$PR_NUMBER/reviews?per_page=100", block)
             self.assertIn("issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100", block)
+            self.assertIn("issues/$PR_NUMBER/reactions?per_page=100", block)
             self.assertGreaterEqual(block.count("jq -s -r"), 2)
             self.assertGreaterEqual(block.count('--argjson bot_id "$CODEX_BOT_USER_ID"'), 2)
             self.assertGreaterEqual(block.count(".user.id == $bot_id"), 2)
@@ -53,10 +61,25 @@ class PostReleaseReviewSecurityTests(unittest.TestCase):
                 block,
             )
             self.assertIn(
-                'gh api --paginate -H \'Accept: application/vnd.github+json\' \\\n              "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100"',
+                '"repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100"',
                 block,
             )
-            self.assertGreaterEqual(block.count("--jq '.[]'"), 2)
+            self.assertIn(
+                '"repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/reactions?per_page=100"',
+                block,
+            )
+            self.assertGreaterEqual(block.count("--jq '.[]'"), 3)
+
+    def test_clean_reactions_are_bound_to_this_exact_head_request(self) -> None:
+        request = self._request_block()
+        self.assertIn('requested_at="$(jq -r .created_at <<<"$payload")"', request)
+        self.assertIn("printf 'requested_at=%s\\n'", request)
+
+        for block in (self._poll_block(), self._merge_block()):
+            self.assertIn("REVIEW_REQUESTED_AT: ${{ steps.review_request.outputs.requested_at }}", block)
+            self.assertIn('--arg requested_at "$REVIEW_REQUESTED_AT"', block)
+            self.assertIn('(.created_at // "") >= $requested_at', block)
+            self.assertIn("issues/$PR_NUMBER/reactions?per_page=100", block)
 
     def test_cleanup_queries_each_candidate_for_open_pull_requests(self) -> None:
         cleanup = self._cleanup_block()
