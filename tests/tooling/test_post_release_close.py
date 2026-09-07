@@ -356,13 +356,18 @@ No widened claim.
             "token: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}",
             "@codex review",
             "event=pull_request",
-            "reviewThreads(first:100)",
+            "gh api graphql --paginate",
+            "$endCursor:String",
+            "reviewThreads(first:100, after:$endCursor)",
+            "pageInfo { hasNextPage endCursor }",
             "chatgpt-codex-connector",
             'pulls/$PR_NUMBER/merge',
             "event=push",
             "Delete obsolete release-scoped branches",
         ):
             self.assertIn(marker, workflow)
+        self.assertGreaterEqual(workflow.count("gh api graphql --paginate"), 2)
+        self.assertGreaterEqual(workflow.count("reviewThreads(first:100, after:$endCursor)"), 2)
         self.assertNotIn('workflows: ["Verify published release"]', workflow)
         self.assertNotIn("github.event.workflow_run", workflow)
         self.assertNotIn("git push origin main", workflow)
