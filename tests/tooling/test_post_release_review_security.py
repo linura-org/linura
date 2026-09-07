@@ -34,13 +34,16 @@ class PostReleaseReviewSecurityTests(unittest.TestCase):
         self.assertNotIn('startswith("chatgpt-codex-connector")', workflow)
 
         for block in (self._poll_block(), self._merge_block()):
-            self.assertGreaterEqual(block.count("gh api --paginate"), 3)
+            # Review threads use GraphQL cursor pagination; review submissions and
+            # reactions are two independent REST collections and each must paginate.
+            self.assertIn("gh api graphql --paginate", block)
+            self.assertGreaterEqual(block.count("gh api --paginate"), 2)
             self.assertIn("pulls/$PR_NUMBER/reviews?per_page=100", block)
             self.assertIn("issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100", block)
-            self.assertGreaterEqual(block.count('jq -s -r'), 2)
+            self.assertGreaterEqual(block.count("jq -s -r"), 2)
             self.assertGreaterEqual(block.count('--argjson bot_id "$CODEX_BOT_USER_ID"'), 2)
-            self.assertGreaterEqual(block.count('.user.id == $bot_id'), 2)
-            self.assertIn('.commit_id == $sha', block)
+            self.assertGreaterEqual(block.count(".user.id == $bot_id"), 2)
+            self.assertIn(".commit_id == $sha", block)
             self.assertIn('.content == "+1"', block)
 
     def test_review_and_reaction_completion_sources_are_fully_paginated(self) -> None:
@@ -53,15 +56,15 @@ class PostReleaseReviewSecurityTests(unittest.TestCase):
                 'gh api --paginate -H \'Accept: application/vnd.github+json\' \\\n              "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100"',
                 block,
             )
-            self.assertIn("--jq '.[]'", block)
+            self.assertGreaterEqual(block.count("--jq '.[]'"), 2)
 
     def test_cleanup_queries_each_candidate_for_open_pull_requests(self) -> None:
         cleanup = self._cleanup_block()
         self.assertNotIn("gh pr list --state open --limit 100", cleanup)
         self.assertIn('gh api --paginate --method GET "repos/$GITHUB_REPOSITORY/pulls"', cleanup)
-        self.assertIn('-f state=open', cleanup)
+        self.assertIn("-f state=open", cleanup)
         self.assertIn('-f head="${GITHUB_REPOSITORY%/*}:$branch"', cleanup)
-        self.assertIn('-f per_page=100', cleanup)
+        self.assertIn("-f per_page=100", cleanup)
         self.assertIn("open_pr_count", cleanup)
         self.assertIn("awk '{ total += $1 } END { print total + 0 }'", cleanup)
         self.assertIn("preserving branch used by an open PR", cleanup)
