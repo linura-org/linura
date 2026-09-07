@@ -16,7 +16,6 @@ on:
       - ".github/release-verification-recovery/**"
 
 permissions:
-  actions: write
   contents: read
   attestations: read
   id-token: write
@@ -28,6 +27,8 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -102,11 +103,23 @@ jobs:
           while IFS= read -r -d '' file; do
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
           done < <(find published -maxdepth 1 -type f -print0)
-      - name: Dispatch protected post-release closure
+
+  dispatch-closure:
+    name: dispatch protected post-release closure
+    needs: verify
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Dispatch exact verified release closure
         env:
-          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
         run: |
           set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           gh workflow run post-release-closure.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
