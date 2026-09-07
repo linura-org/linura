@@ -62,7 +62,7 @@ Automation requests Codex review for the exact candidate SHA and requires exact-
 
 ### Verification and closure duplication
 
-Normal Release explicitly dispatches `Verify published release` from the exact immutable tag. Manual `workflow_dispatch` verification is rejected unless its workflow ref equals the requested tag. Emergency verification is accepted only from the authenticated `verify-release/vX.Y.Z` recovery branch with the existing marker-only/single-parent/workflow-definition checks.
+Normal Release explicitly dispatches `Verify published release` from the exact release tag, so the verifier executes the workflow definition frozen in the immutable release source. Manual `workflow_dispatch` verification is rejected unless its workflow ref equals the requested tag. Emergency verification is accepted only from the authenticated `verify-release/vX.Y.Z` recovery branch with the existing marker-only/single-parent/workflow-definition checks.
 
 There is exactly one terminal handoff: successful verification → `Release Closure Handoff` → dispatch-only `Post Release Closure`. The handoff polls the exact verifier run until terminal success and binds its tag/source/event/ref before closure. No legacy `workflow_run` closure trigger competes with it.
 
