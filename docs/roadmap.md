@@ -167,8 +167,8 @@ Only after this milestone is complete should broader system-domain mutation beco
 
 ## v0.7.0 — persistent intent lifecycle and local Linura Library
 
-**Status:** planned  
-**Target claim class:** Experimental
+**Status:** released
+**Claim class:** Experimental
 
 Turn the trustworthy mutation core into durable local user-owned configuration state.
 
