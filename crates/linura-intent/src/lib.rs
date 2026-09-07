@@ -66,6 +66,39 @@ pub enum SetupValidationError {
     EmptyComposition,
     SelfReference,
     EmptySecretReference,
+    InvalidSecretReference,
+}
+
+pub const MAX_SECRET_REFERENCE_BYTES: usize = 256;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SecretReferenceValidationError {
+    Empty,
+    TooLong,
+    InvalidForm,
+    UnsupportedCharacter,
+}
+
+pub fn validate_secret_reference(value: &str) -> Result<(), SecretReferenceValidationError> {
+    if value.trim().is_empty() {
+        return Err(SecretReferenceValidationError::Empty);
+    }
+    if value.len() > MAX_SECRET_REFERENCE_BYTES {
+        return Err(SecretReferenceValidationError::TooLong);
+    }
+    let Some((namespace, name)) = value.split_once(':') else {
+        return Err(SecretReferenceValidationError::InvalidForm);
+    };
+    if namespace.is_empty() || name.is_empty() || name.contains(':') {
+        return Err(SecretReferenceValidationError::InvalidForm);
+    }
+    if !value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
+    {
+        return Err(SecretReferenceValidationError::UnsupportedCharacter);
+    }
+    Ok(())
 }
 
 impl Setup {
@@ -82,12 +115,14 @@ impl Setup {
         if self.included_setup_ids.iter().any(|id| id == &self.id) {
             return Err(SetupValidationError::SelfReference);
         }
-        if self
-            .required_secret_refs
-            .iter()
-            .any(|reference| reference.trim().is_empty())
-        {
-            return Err(SetupValidationError::EmptySecretReference);
+        for reference in &self.required_secret_refs {
+            match validate_secret_reference(reference) {
+                Ok(()) => {}
+                Err(SecretReferenceValidationError::Empty) => {
+                    return Err(SetupValidationError::EmptySecretReference);
+                }
+                Err(_) => return Err(SetupValidationError::InvalidSecretReference),
+            }
         }
         Ok(())
     }
@@ -203,6 +238,40 @@ mod tests {
             hardware_hints: vec![],
         };
         assert_eq!(setup.validate(), Ok(()));
+    }
+
+    #[test]
+    fn setup_rejects_malformed_secret_references() {
+        let mut setup = Setup {
+            id: id(SetupId::new("setup:secret-validation")),
+            name: "Secret validation".into(),
+            description: String::new(),
+            revision: 1,
+            intent_ids: vec![id(IntentId::new("intent:secret-validation"))],
+            included_setup_ids: vec![],
+            portable_constraints: vec![],
+            required_secret_refs: vec!["credential:github".into()],
+            hardware_hints: vec![],
+        };
+        for invalid in [
+            "hunter2",
+            "credential:",
+            ":github",
+            "credential:github:token",
+            "credential:github token",
+        ] {
+            setup.required_secret_refs = vec![invalid.into()];
+            assert_eq!(
+                setup.validate(),
+                Err(SetupValidationError::InvalidSecretReference)
+            );
+        }
+
+        setup.required_secret_refs = vec![format!("credential:{}", "a".repeat(256))];
+        assert_eq!(
+            setup.validate(),
+            Err(SetupValidationError::InvalidSecretReference)
+        );
     }
 
     #[test]
