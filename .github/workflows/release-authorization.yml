@@ -386,9 +386,7 @@ jobs:
           Reviewed-Tree: $TREE_SHA
           EOF
           )"
-          expected_candidate_message="$commit_title
-
-$commit_message"
+          expected_candidate_message="$(printf '%s\n\n%s' "$commit_title" "$commit_message")"
           candidate="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$HEAD_SHA")"
           test "$(jq -r .tree.sha <<<"$candidate")" = "$TREE_SHA"
           test "$(jq '.parents | length' <<<"$candidate")" = "1"
