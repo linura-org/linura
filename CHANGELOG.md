@@ -4,6 +4,25 @@ All notable changes to Linura will be documented here. Version entries stay conc
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-07
+
+Experimental persistent intent lifecycle and local Linura Library. Full release contract: [`docs/releases/v0.7.0.md`](docs/releases/v0.7.0.md).
+
+### Added
+- Durable local intent lifecycle with immutable revisions, legal transition enforcement, optimistic concurrency, exact operation idempotency, lineage, and restart-safe current projections.
+- Local Linura Library with append-only Setup and MachineProfile revisions, deterministic composition, causal ownership/removal-impact evidence, and non-privileged SDK exposure.
+- Deterministic integrity-bound portable Setup/Profile export, import and dry-run adoption with exact revision closure, collision detection, secret-reference validation, machine-class reporting, and all-or-nothing persistence.
+- SQLite schema-v1 persistence with foreign-key enforcement, WAL/FULL durability, integrity checks, forward migration/newer-schema rejection, bounded schema validation, and separate validated backup/restore.
+
+### Changed
+- Trusted Release Proof now incorporates the dedicated exact-source v0.7 Library qualification while retaining all inherited v0.4/v0.5/v0.6 authority, durability, executor/verifier and managed-lifecycle gates.
+- The public SDK can persist and exchange declarative Library state without importing approval, executor, transaction or other mutation authority.
+
+### Boundaries
+- v0.7 remains Experimental. Portable/adopted state is declarative only and never restores approval, executor, transaction authority, secret values or machine-private operational state.
+- The only privileged managed external effect remains the v0.6 canonical `linura-managed-*.service` active/inactive path; no generic package/file/network/systemd/root mutation is added.
+- No supported Linux distribution/profile, hosted/fleet Library authority, agent execution authority, Stable API or production-readiness claim is introduced.
+
 ## [0.6.0] - 2026-09-06
 
 Experimental complete bounded managed mutation lifecycle for canonical `linura-managed-*.service` active/inactive convergence. Full release contract: [`docs/releases/v0.6.0.md`](docs/releases/v0.6.0.md).

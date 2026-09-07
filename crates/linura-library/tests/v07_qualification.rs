@@ -10,9 +10,10 @@ use linura_intent::{
 };
 use linura_library::{
     AdoptionContext, IntentRevisionRef, IntentTransition, LIBRARY_SCHEMA_VERSION, LibraryError,
-    LocalLibrary, PORTABLE_FORMAT_VERSION, PortableProfileBundle, PortableSetupBundle,
-    SetupRevisionRef, StoredIntent, StoredProfile, StoredSetup, decode_profile_bundle,
-    decode_setup_bundle, encode_profile_bundle, encode_setup_bundle, restore_backup,
+    LifecycleRecordKind, LocalLibrary, PORTABLE_FORMAT_VERSION, PortableProfileBundle,
+    PortableSetupBundle, SetupRevisionRef, StoredIntent, StoredProfile, StoredSetup,
+    decode_profile_bundle, decode_setup_bundle, encode_profile_bundle, encode_setup_bundle,
+    restore_backup,
 };
 use linura_planner::{DesiredResource, DesiredState};
 use rusqlite::Connection;
@@ -627,36 +628,165 @@ fn backup_restore_and_schema_corruption_fail_closed() {
     let destination_path = directory.path().join("destination.db");
 
     let durable_intent = intent("backup", IntentStatus::Active);
+    let peer_intent = intent("backup-peer", IntentStatus::Active);
+    let create_operation = request("request:backup-intent");
+    let suspend_operation = request("request:backup-suspend");
+    let reactivate_operation = request("request:backup-reactivate");
+    let shared_resource = "systemd:unit:linura-managed-backup-shared.service";
+
     let mut source =
         LocalLibrary::open(&source_path).unwrap_or_else(|error| unreachable!("{error}"));
     source
-        .create_intent(&request("request:backup-intent"), &durable_intent)
+        .create_intent(&create_operation, &durable_intent)
         .unwrap_or_else(|error| unreachable!("{error}"));
+    source
+        .create_intent(&request("request:backup-peer"), &peer_intent)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    source
+        .transition_intent(
+            &suspend_operation,
+            &durable_intent.id,
+            1,
+            IntentTransition::Suspend,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    let reactivated = source
+        .transition_intent(
+            &reactivate_operation,
+            &durable_intent.id,
+            2,
+            IntentTransition::Activate,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(reactivated.revision, 3);
     source
         .record_desired_state(
             &durable_intent.id,
-            1,
-            &desired(
-                &durable_intent.id,
-                "systemd:unit:linura-managed-backup.service",
-            ),
+            3,
+            &desired(&durable_intent.id, shared_resource),
             true,
         )
         .unwrap_or_else(|error| unreachable!("{error}"));
+    source
+        .record_desired_state(
+            &peer_intent.id,
+            1,
+            &desired(&peer_intent.id, shared_resource),
+            true,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    source
+        .append_lifecycle_record(
+            LifecycleRecordKind::Reconciliation,
+            durable_intent.id.as_str(),
+            "backup-lineage-v1",
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+
+    let setup_v1 = setup("backup", 1, vec![durable_intent.id.clone()], vec![]);
+    source
+        .save_setup(&request("request:backup-setup-v1"), &setup_v1, None)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    let mut setup_v2 = setup_v1.clone();
+    setup_v2.revision = 2;
+    setup_v2.description = "backup setup second immutable revision".into();
+    source
+        .save_setup(&request("request:backup-setup-v2"), &setup_v2, Some(1))
+        .unwrap_or_else(|error| unreachable!("{error}"));
+
+    let profile_v1 = MachineProfile {
+        id: id(ProfileId::new("profile:backup")),
+        name: "Backup profile v1".into(),
+        machine_class: MachineClass::Workstation,
+        setup_ids: vec![setup_v2.id.clone()],
+        intent_ids: vec![],
+        portable_constraints: vec!["local-first".into()],
+        hardware_hints: vec![],
+    };
+    source
+        .save_profile(&request("request:backup-profile-v1"), &profile_v1, 1, None)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    let mut profile_v2 = profile_v1.clone();
+    profile_v2.name = "Backup profile v2".into();
+    source
+        .save_profile(
+            &request("request:backup-profile-v2"),
+            &profile_v2,
+            2,
+            Some(1),
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+
     source
         .backup_to(&backup_path)
         .unwrap_or_else(|error| unreachable!("{error}"));
     drop(source);
 
     restore_backup(&backup_path, &destination_path).unwrap_or_else(|error| unreachable!("{error}"));
-    let restored =
+    let mut restored =
         LocalLibrary::open(&destination_path).unwrap_or_else(|error| unreachable!("{error}"));
+    let restored_current = restored
+        .intent(&durable_intent.id)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(restored_current.revision, 3);
+    assert_eq!(restored_current.intent, durable_intent);
+    let intent_history = restored
+        .intent_history(&durable_intent.id)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(intent_history.len(), 3);
+    assert_eq!(
+        intent_history
+            .into_iter()
+            .map(|entry| entry.intent.status)
+            .collect::<Vec<_>>(),
+        vec![
+            IntentStatus::Active,
+            IntentStatus::Suspended,
+            IntentStatus::Active,
+        ]
+    );
+    let setup_history = restored
+        .setup_history(&setup_v1.id)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(setup_history.len(), 2);
+    assert_eq!(setup_history[0].setup.description, setup_v1.description);
+    assert_eq!(setup_history[1].setup.description, setup_v2.description);
+    let profile_history = restored
+        .profile_history(&profile_v1.id)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(profile_history.len(), 2);
+    assert_eq!(profile_history[0].profile.name, profile_v1.name);
+    assert_eq!(profile_history[1].profile.name, profile_v2.name);
+    let lifecycle = restored
+        .lifecycle_records(durable_intent.id.as_str())
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    assert!(
+        lifecycle
+            .iter()
+            .any(|record| record.payload == "backup-lineage-v1")
+    );
+    let impact = restored
+        .removal_impact(&durable_intent.id)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(impact.retained_shared.len(), 1);
+    assert!(impact.removable.is_empty());
+    assert!(impact.indeterminate.is_empty());
+
+    let replay = restored
+        .transition_intent(
+            &reactivate_operation,
+            &durable_intent.id,
+            2,
+            IntentTransition::Activate,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(replay, restored_current);
     assert_eq!(
         restored
-            .intent(&durable_intent.id)
+            .intent_history(&durable_intent.id)
             .unwrap_or_else(|error| unreachable!("{error}"))
-            .intent,
-        durable_intent
+            .len(),
+        3
     );
     restored
         .integrity_check()
@@ -680,8 +810,15 @@ fn backup_restore_and_schema_corruption_fail_closed() {
         preserved
             .intent(&durable_intent.id)
             .unwrap_or_else(|error| unreachable!("{error}"))
-            .intent,
-        durable_intent
+            .revision,
+        3
+    );
+    assert_eq!(
+        preserved
+            .setup_history(&setup_v1.id)
+            .unwrap_or_else(|error| unreachable!("{error}"))
+            .len(),
+        2
     );
     drop(preserved);
 
@@ -702,10 +839,17 @@ fn backup_restore_and_schema_corruption_fail_closed() {
         LocalLibrary::open(&destination_path).unwrap_or_else(|error| unreachable!("{error}"));
     assert_eq!(
         preserved
-            .intent(&durable_intent.id)
+            .intent_history(&durable_intent.id)
             .unwrap_or_else(|error| unreachable!("{error}"))
-            .intent,
-        durable_intent
+            .len(),
+        3
+    );
+    assert_eq!(
+        preserved
+            .profile_history(&profile_v1.id)
+            .unwrap_or_else(|error| unreachable!("{error}"))
+            .len(),
+        2
     );
     drop(preserved);
 
@@ -717,6 +861,14 @@ fn backup_restore_and_schema_corruption_fail_closed() {
     preserved
         .integrity_check()
         .unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(
+        preserved
+            .removal_impact(&durable_intent.id)
+            .unwrap_or_else(|error| unreachable!("{error}"))
+            .retained_shared
+            .len(),
+        1
+    );
 }
 
 #[test]

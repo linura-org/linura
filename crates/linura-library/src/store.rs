@@ -28,6 +28,34 @@ use crate::{
 const MAX_TEXT_BYTES: usize = 64 * 1024;
 const MAX_COLLECTION_ITEMS: usize = 16_384;
 
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+fn qualification_crash_barrier(label: &str) {
+    use std::io::Write as _;
+
+    let Ok(expected) = std::env::var("LINURA_LIBRARY_TEST_CRASH_BARRIER") else {
+        return;
+    };
+    if expected != label {
+        return;
+    }
+    let marker = std::env::var_os("LINURA_LIBRARY_TEST_CRASH_MARKER")
+        .expect("qualification crash marker path must be configured");
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(marker)
+        .expect("qualification crash marker must be created exactly once");
+    file.write_all(label.as_bytes())
+        .expect("qualification crash marker must be writable");
+    file.sync_all()
+        .expect("qualification crash marker must be durable before blocking");
+
+    loop {
+        std::thread::sleep(Duration::from_secs(60));
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LibrarySettings {
     pub busy_timeout_ms: u64,
@@ -224,6 +252,8 @@ impl LocalLibrary {
         let mut next = current.intent.clone();
         next.status = next_status;
         insert_intent_revision(&transaction, &next, next_revision)?;
+        #[cfg(test)]
+        qualification_crash_barrier("transition-after-history-before-projection");
         let (new_generation, new_complete) = copy_current_causal_state(
             &transaction,
             id,
@@ -2208,4 +2238,163 @@ fn sync_parent(path: &Path) -> Result<(), LibraryError> {
         File::open(parent)?.sync_all()?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+mod crash_qualification_tests {
+    use super::*;
+    use std::process::Command;
+    use std::time::Instant;
+
+    use tempfile::tempdir;
+
+    fn crash_request(value: &str) -> RequestId {
+        RequestId::new(value).unwrap_or_else(|error| unreachable!("{error}"))
+    }
+
+    fn crash_intent() -> Intent {
+        Intent {
+            id: IntentId::new("intent:process-crash-atomicity")
+                .unwrap_or_else(|error| unreachable!("{error}")),
+            actor: Actor {
+                id: ActorId::new("uid:1000").unwrap_or_else(|error| unreachable!("{error}")),
+                kind: ActorKind::Human,
+                interactive: true,
+            },
+            statement: "qualify persistent transaction crash atomicity".into(),
+            status: IntentStatus::Proposed,
+            requirements: vec![],
+            supersedes: vec![],
+        }
+    }
+
+    #[test]
+    #[ignore = "spawned by process_crash_rolls_back_uncommitted_history_and_projection"]
+    fn transition_crash_child() {
+        let path = PathBuf::from(
+            std::env::var_os("LINURA_LIBRARY_TEST_CRASH_DB")
+                .expect("child crash database path must be configured"),
+        );
+        let intent = crash_intent();
+        let mut library = LocalLibrary::open(&path)
+            .unwrap_or_else(|error| panic!("child must open persistent Library: {error}"));
+        let result = library.transition_intent(
+            &crash_request("request:process-crash-transition"),
+            &intent.id,
+            1,
+            IntentTransition::Activate,
+        );
+        panic!("qualification crash barrier did not block transition: {result:?}");
+    }
+
+    #[test]
+    fn process_crash_rolls_back_uncommitted_history_and_projection() {
+        let directory = tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let path = directory.path().join("process-crash.db");
+        let marker = directory.path().join("process-crash.marker");
+        let intent = crash_intent();
+        let create_operation = crash_request("request:process-crash-create");
+        let transition_operation = crash_request("request:process-crash-transition");
+
+        let mut library = LocalLibrary::open(&path).unwrap_or_else(|error| unreachable!("{error}"));
+        library
+            .create_intent(&create_operation, &intent)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        drop(library);
+
+        let executable = std::env::current_exe().expect("test executable must be discoverable");
+        let mut child = Command::new(executable)
+            .arg("transition_crash_child")
+            .arg("--ignored")
+            .arg("--nocapture")
+            .arg("--test-threads=1")
+            .env("LINURA_LIBRARY_TEST_CRASH_DB", &path)
+            .env(
+                "LINURA_LIBRARY_TEST_CRASH_BARRIER",
+                "transition-after-history-before-projection",
+            )
+            .env("LINURA_LIBRARY_TEST_CRASH_MARKER", &marker)
+            .spawn()
+            .expect("crash qualification child must spawn");
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if marker.is_file() {
+                break;
+            }
+            if let Some(status) = child.try_wait().expect("child status must be readable") {
+                panic!("crash qualification child exited before barrier: {status}");
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("crash qualification child did not reach the in-transaction barrier");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        child
+            .kill()
+            .expect("child must be forcibly terminated at the transaction barrier");
+        let status = child.wait().expect("terminated child must be reaped");
+        assert!(!status.success());
+
+        let mut reopened =
+            LocalLibrary::open(&path).unwrap_or_else(|error| unreachable!("{error}"));
+        reopened
+            .integrity_check()
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let current = reopened
+            .intent(&intent.id)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(current.revision, 1);
+        assert_eq!(current.intent.status, IntentStatus::Proposed);
+        assert_eq!(
+            reopened
+                .intent_history(&intent.id)
+                .unwrap_or_else(|error| unreachable!("{error}"))
+                .len(),
+            1
+        );
+
+        let committed = reopened
+            .transition_intent(
+                &transition_operation,
+                &intent.id,
+                1,
+                IntentTransition::Activate,
+            )
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(committed.revision, 2);
+        assert_eq!(committed.intent.status, IntentStatus::Active);
+        let replay = reopened
+            .transition_intent(
+                &transition_operation,
+                &intent.id,
+                1,
+                IntentTransition::Activate,
+            )
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(replay, committed);
+        assert_eq!(
+            reopened
+                .intent_history(&intent.id)
+                .unwrap_or_else(|error| unreachable!("{error}"))
+                .len(),
+            2
+        );
+        reopened
+            .integrity_check()
+            .unwrap_or_else(|error| unreachable!("{error}"));
+
+        if let Ok(evidence_dir) = std::env::var("LINURA_V07_EVIDENCE_DIR") {
+            fs::create_dir_all(&evidence_dir).unwrap_or_else(|error| unreachable!("{error}"));
+            fs::write(
+                Path::new(&evidence_dir).join("process-crash-atomicity.txt"),
+                "passed: child was SIGKILLed after the uncommitted history write and before projection/operation commit; reopen exposed only the old complete state, then an exact retry committed/replayed the new complete state\n",
+            )
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        }
+    }
 }
