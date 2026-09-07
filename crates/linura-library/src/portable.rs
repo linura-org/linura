@@ -912,7 +912,7 @@ fn finalize_profile(builder: ProfileBuilder) -> Result<StoredProfile, LibraryErr
     })
 }
 
-fn validate_setup_bundle(bundle: &PortableSetupBundle) -> Result<(), LibraryError> {
+pub(crate) fn validate_setup_bundle(bundle: &PortableSetupBundle) -> Result<(), LibraryError> {
     validate_version(bundle.format_version)?;
     let setup_map = setup_map(&bundle.setups)?;
     let intent_map = intent_map(&bundle.intents)?;
@@ -926,13 +926,16 @@ fn validate_setup_bundle(bundle: &PortableSetupBundle) -> Result<(), LibraryErro
     validate_reachable_setup_closure(&root_key, &setup_map, &intent_map)
 }
 
-fn validate_profile_bundle(bundle: &PortableProfileBundle) -> Result<(), LibraryError> {
+pub(crate) fn validate_profile_bundle(bundle: &PortableProfileBundle) -> Result<(), LibraryError> {
     validate_version(bundle.format_version)?;
     if bundle.profile.revision == 0 {
         return Err(LibraryError::PortableFormat(
             "profile revision must be positive".into(),
         ));
     }
+    validate_profile_reference_identity(&bundle.profile)?;
+    ensure_unique_intent_refs(&bundle.profile.intent_revisions)?;
+    ensure_unique_setup_refs(&bundle.profile.setup_revisions)?;
     let setup_map = setup_map(&bundle.setups)?;
     let intent_map = intent_map(&bundle.intents)?;
     validate_composition(&setup_map, &intent_map)?;
@@ -1008,6 +1011,14 @@ fn validate_composition(
     intents: &BTreeMap<(String, u64), &StoredIntent>,
 ) -> Result<(), LibraryError> {
     for ((setup_id, setup_revision), setup) in setups {
+        setup.setup.validate().map_err(|error| {
+            LibraryError::PortableFormat(format!(
+                "invalid setup {setup_id}@{setup_revision}: {error:?}"
+            ))
+        })?;
+        validate_setup_reference_identity(setup)?;
+        ensure_unique_intent_refs(&setup.intent_revisions)?;
+        ensure_unique_setup_refs(&setup.included_revisions)?;
         for reference in &setup.intent_revisions {
             if !intents.contains_key(&(reference.id.as_str().to_owned(), reference.revision)) {
                 return Err(LibraryError::PortableFormat(format!(
@@ -1038,7 +1049,10 @@ fn validate_reachable_setup_closure(
     let mut pending = vec![root.clone()];
     let mut visited = BTreeSet::new();
     let mut referenced_intents = BTreeSet::new();
+    let mut logical_setup_revisions = BTreeMap::new();
+    let mut logical_intent_revisions = BTreeMap::new();
     while let Some(key) = pending.pop() {
+        record_logical_setup_revision(&mut logical_setup_revisions, &key.0, key.1)?;
         if !visited.insert(key.clone()) {
             continue;
         }
@@ -1046,6 +1060,11 @@ fn validate_reachable_setup_closure(
             LibraryError::PortableFormat("setup closure contains missing revision".into())
         })?;
         for reference in &setup.intent_revisions {
+            record_logical_intent_revision(
+                &mut logical_intent_revisions,
+                reference.id.as_str(),
+                reference.revision,
+            )?;
             referenced_intents.insert((reference.id.as_str().to_owned(), reference.revision));
         }
         for reference in &setup.included_revisions {
@@ -1085,8 +1104,18 @@ fn validate_profile_closure(
         .iter()
         .map(|reference| (reference.id.as_str().to_owned(), reference.revision))
         .collect::<BTreeSet<_>>();
+    let mut logical_setup_revisions = BTreeMap::new();
+    let mut logical_intent_revisions = BTreeMap::new();
+    for reference in &profile.intent_revisions {
+        record_logical_intent_revision(
+            &mut logical_intent_revisions,
+            reference.id.as_str(),
+            reference.revision,
+        )?;
+    }
 
     while let Some(key) = pending.pop() {
+        record_logical_setup_revision(&mut logical_setup_revisions, &key.0, key.1)?;
         if !visited.insert(key.clone()) {
             continue;
         }
@@ -1094,6 +1123,11 @@ fn validate_profile_closure(
             LibraryError::PortableFormat("profile closure contains missing setup revision".into())
         })?;
         for reference in &setup.intent_revisions {
+            record_logical_intent_revision(
+                &mut logical_intent_revisions,
+                reference.id.as_str(),
+                reference.revision,
+            )?;
             referenced_intents.insert((reference.id.as_str().to_owned(), reference.revision));
         }
         for reference in &setup.included_revisions {
@@ -1154,6 +1188,102 @@ fn visit_setup(
     Ok(())
 }
 
+fn validate_setup_reference_identity(setup: &StoredSetup) -> Result<(), LibraryError> {
+    let mut logical_intent_ids = setup.setup.intent_ids.clone();
+    logical_intent_ids.sort();
+    let mut referenced_intent_ids = setup
+        .intent_revisions
+        .iter()
+        .map(|reference| reference.id.clone())
+        .collect::<Vec<_>>();
+    referenced_intent_ids.sort();
+    if logical_intent_ids != referenced_intent_ids {
+        return Err(LibraryError::PortableFormat(
+            "setup logical intent IDs do not match intent revision references".into(),
+        ));
+    }
+
+    let mut logical_setup_ids = setup.setup.included_setup_ids.clone();
+    logical_setup_ids.sort();
+    let mut referenced_setup_ids = setup
+        .included_revisions
+        .iter()
+        .map(|reference| reference.id.clone())
+        .collect::<Vec<_>>();
+    referenced_setup_ids.sort();
+    if logical_setup_ids != referenced_setup_ids {
+        return Err(LibraryError::PortableFormat(
+            "setup logical include IDs do not match setup revision references".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_profile_reference_identity(profile: &StoredProfile) -> Result<(), LibraryError> {
+    let mut logical_intent_ids = profile.profile.intent_ids.clone();
+    logical_intent_ids.sort();
+    let mut referenced_intent_ids = profile
+        .intent_revisions
+        .iter()
+        .map(|reference| reference.id.clone())
+        .collect::<Vec<_>>();
+    referenced_intent_ids.sort();
+    if logical_intent_ids != referenced_intent_ids {
+        return Err(LibraryError::PortableFormat(
+            "profile logical intent IDs do not match intent revision references".into(),
+        ));
+    }
+
+    let mut logical_setup_ids = profile.profile.setup_ids.clone();
+    logical_setup_ids.sort();
+    let mut referenced_setup_ids = profile
+        .setup_revisions
+        .iter()
+        .map(|reference| reference.id.clone())
+        .collect::<Vec<_>>();
+    referenced_setup_ids.sort();
+    if logical_setup_ids != referenced_setup_ids {
+        return Err(LibraryError::PortableFormat(
+            "profile logical setup IDs do not match setup revision references".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn record_logical_intent_revision(
+    seen: &mut BTreeMap<String, u64>,
+    id: &str,
+    revision: u64,
+) -> Result<(), LibraryError> {
+    match seen.get(id) {
+        Some(existing) if *existing != revision => Err(LibraryError::PortableFormat(format!(
+            "portable closure references multiple revisions of intent {id}"
+        ))),
+        Some(_) => Ok(()),
+        None => {
+            seen.insert(id.to_owned(), revision);
+            Ok(())
+        }
+    }
+}
+
+fn record_logical_setup_revision(
+    seen: &mut BTreeMap<String, u32>,
+    id: &str,
+    revision: u32,
+) -> Result<(), LibraryError> {
+    match seen.get(id) {
+        Some(existing) if *existing != revision => Err(LibraryError::PortableFormat(format!(
+            "portable closure references multiple revisions of setup {id}"
+        ))),
+        Some(_) => Ok(()),
+        None => {
+            seen.insert(id.to_owned(), revision);
+            Ok(())
+        }
+    }
+}
+
 fn ordered_values(values: BTreeMap<usize, String>) -> Result<Vec<String>, LibraryError> {
     let mut output = Vec::with_capacity(values.len());
     for (expected, (ordinal, value)) in values.into_iter().enumerate() {
@@ -1168,12 +1298,13 @@ fn ordered_values(values: BTreeMap<usize, String>) -> Result<Vec<String>, Librar
 }
 
 fn ensure_unique_intent_refs(values: &[IntentRevisionRef]) -> Result<(), LibraryError> {
+    let mut seen = BTreeSet::new();
     if values
-        .windows(2)
-        .any(|window| window[0].id == window[1].id && window[0].revision == window[1].revision)
+        .iter()
+        .any(|reference| !seen.insert(reference.id.clone()))
     {
         Err(LibraryError::PortableFormat(
-            "duplicate intent revision reference".into(),
+            "composition references multiple revisions of the same intent".into(),
         ))
     } else {
         Ok(())
@@ -1181,12 +1312,13 @@ fn ensure_unique_intent_refs(values: &[IntentRevisionRef]) -> Result<(), Library
 }
 
 fn ensure_unique_setup_refs(values: &[SetupRevisionRef]) -> Result<(), LibraryError> {
+    let mut seen = BTreeSet::new();
     if values
-        .windows(2)
-        .any(|window| window[0].id == window[1].id && window[0].revision == window[1].revision)
+        .iter()
+        .any(|reference| !seen.insert(reference.id.clone()))
     {
         Err(LibraryError::PortableFormat(
-            "duplicate setup revision reference".into(),
+            "composition references multiple revisions of the same setup".into(),
         ))
     } else {
         Ok(())
@@ -1385,4 +1517,40 @@ fn parse_machine_class(value: &str) -> Result<MachineClass, LibraryError> {
 
 fn portable_validation(error: linura_core::ValidationError) -> LibraryError {
     LibraryError::PortableFormat(error.to_string())
+}
+
+#[cfg(test)]
+mod composition_revision_tests {
+    use super::*;
+
+    #[test]
+    fn one_composition_cannot_bind_multiple_revisions_of_one_logical_id() -> Result<(), LibraryError>
+    {
+        let intent_id = IntentId::new("intent:conflict").map_err(portable_validation)?;
+        let intent_refs = vec![
+            IntentRevisionRef {
+                id: intent_id.clone(),
+                revision: 1,
+            },
+            IntentRevisionRef {
+                id: intent_id,
+                revision: 2,
+            },
+        ];
+        assert!(ensure_unique_intent_refs(&intent_refs).is_err());
+
+        let setup_id = SetupId::new("setup:conflict").map_err(portable_validation)?;
+        let setup_refs = vec![
+            SetupRevisionRef {
+                id: setup_id.clone(),
+                revision: 1,
+            },
+            SetupRevisionRef {
+                id: setup_id,
+                revision: 2,
+            },
+        ];
+        assert!(ensure_unique_setup_refs(&setup_refs).is_err());
+        Ok(())
+    }
 }

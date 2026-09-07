@@ -14,7 +14,10 @@ use linura_planner::DesiredState;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
-use crate::portable::{PORTABLE_FORMAT_VERSION, PortableProfileBundle, PortableSetupBundle};
+use crate::portable::{
+    PORTABLE_FORMAT_VERSION, PortableProfileBundle, PortableSetupBundle, validate_profile_bundle,
+    validate_setup_bundle,
+};
 use crate::schema::{self, LIBRARY_SCHEMA_VERSION};
 use crate::{
     IntentRevisionRef, IntentTransition, LibraryError, LifecycleRecord, LifecycleRecordKind,
@@ -815,12 +818,14 @@ impl LocalLibrary {
             revision: root_revision,
         };
         let (setups, intents) = collect_setup_closure(&self.connection, &root)?;
-        Ok(PortableSetupBundle {
+        let bundle = PortableSetupBundle {
             format_version: PORTABLE_FORMAT_VERSION,
             root,
             setups,
             intents,
-        })
+        };
+        validate_setup_bundle(&bundle)?;
+        Ok(bundle)
     }
 
     pub fn export_profile(
@@ -863,12 +868,14 @@ impl LocalLibrary {
                 );
             }
         }
-        Ok(PortableProfileBundle {
+        let bundle = PortableProfileBundle {
             format_version: PORTABLE_FORMAT_VERSION,
             profile,
             setups: setup_map.into_values().collect(),
             intents: intent_map.into_values().collect(),
-        })
+        };
+        validate_profile_bundle(&bundle)?;
+        Ok(bundle)
     }
 
     pub fn backup_to(&mut self, destination: impl AsRef<Path>) -> Result<(), LibraryError> {

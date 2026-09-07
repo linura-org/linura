@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use linura_core::{CapabilityId, IntentId, ProfileId, RequestId, SetupId};
-use linura_intent::{IntentStatus, MachineClass};
+use linura_intent::{IntentStatus, MachineClass, validate_secret_reference};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 
@@ -419,35 +419,8 @@ fn collect_secret_refs(
 }
 
 fn validate_secret_ref(value: &str) -> Result<(), LibraryError> {
-    if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
-        return Err(LibraryError::Validation(
-            "secret reference must be a bounded printable token".into(),
-        ));
-    }
-    if value.chars().any(char::is_whitespace) {
-        return Err(LibraryError::Validation(
-            "secret reference must not contain whitespace".into(),
-        ));
-    }
-    let Some((namespace, name)) = value.split_once(':') else {
-        return Err(LibraryError::Validation(
-            "secret reference must use a namespace:name form".into(),
-        ));
-    };
-    if namespace.is_empty() || name.is_empty() || name.contains(':') {
-        return Err(LibraryError::Validation(
-            "secret reference must contain exactly one non-empty namespace and name".into(),
-        ));
-    }
-    if !value
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':'))
-    {
-        return Err(LibraryError::Validation(
-            "secret reference contains unsupported characters".into(),
-        ));
-    }
-    Ok(())
+    validate_secret_reference(value)
+        .map_err(|error| LibraryError::Validation(format!("invalid secret reference: {error:?}")))
 }
 
 fn import_intents(

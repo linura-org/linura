@@ -445,6 +445,53 @@ fn portable_setup_is_deterministic_integrity_bound_and_imports_atomically() {
         Err(LibraryError::UnsupportedPortableFormat { .. })
     ));
 
+    let mut malformed_secret = bundle.clone();
+    malformed_secret.setups[0].setup.required_secret_refs = vec!["hunter2".into()];
+    assert!(matches!(
+        encode_setup_bundle(&malformed_secret),
+        Err(LibraryError::PortableFormat(_))
+    ));
+    let mut direct_target =
+        LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
+    assert!(matches!(
+        direct_target.adopt_setup_bundle(
+            &request("request:malformed-secret-direct"),
+            &malformed_secret,
+            &AdoptionContext::default(),
+            false,
+        ),
+        Err(LibraryError::PortableFormat(_))
+    ));
+
+    let mut conflicting_revisions = bundle.clone();
+    let intent_id = conflicting_revisions.intents[0].intent.id.clone();
+    let mut second_revision = conflicting_revisions.intents[0].clone();
+    second_revision.revision = 2;
+    conflicting_revisions.intents.push(second_revision);
+    conflicting_revisions.setups[0]
+        .intent_revisions
+        .push(IntentRevisionRef {
+            id: intent_id.clone(),
+            revision: 2,
+        });
+    conflicting_revisions.setups[0]
+        .setup
+        .intent_ids
+        .push(intent_id);
+    assert!(matches!(
+        encode_setup_bundle(&conflicting_revisions),
+        Err(LibraryError::PortableFormat(_))
+    ));
+    assert!(matches!(
+        direct_target.adopt_setup_bundle(
+            &request("request:conflicting-revisions-direct"),
+            &conflicting_revisions,
+            &AdoptionContext::default(),
+            false,
+        ),
+        Err(LibraryError::PortableFormat(_))
+    ));
+
     let mut cyclic = bundle.clone();
     cyclic.setups[0]
         .included_revisions
@@ -487,6 +534,40 @@ fn portable_setup_is_deterministic_integrity_bound_and_imports_atomically() {
         )
         .unwrap_or_else(|error| unreachable!("{error}"));
     }
+}
+
+#[test]
+fn paired_reference_identity_is_order_insensitive() {
+    let mut bundle = portable_fixture();
+    let second = StoredIntent {
+        intent: intent("portable-order-second", IntentStatus::Proposed),
+        revision: 1,
+    };
+    let first_id = bundle.intents[0].intent.id.clone();
+    let second_id = second.intent.id.clone();
+    bundle.intents.push(second);
+    bundle.setups[0].intent_revisions.push(IntentRevisionRef {
+        id: second_id.clone(),
+        revision: 1,
+    });
+    bundle.setups[0].setup.intent_ids = vec![second_id, first_id];
+
+    let encoded = encode_setup_bundle(&bundle)
+        .unwrap_or_else(|error| unreachable!("reordered equivalent IDs must encode: {error}"));
+    let decoded = decode_setup_bundle(&encoded)
+        .unwrap_or_else(|error| unreachable!("reordered equivalent IDs must decode: {error}"));
+    assert_eq!(decoded.intents.len(), 2);
+
+    let mut target = LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
+    let report = target
+        .adopt_setup_bundle(
+            &request("request:order-insensitive-pairing"),
+            &bundle,
+            &AdoptionContext::default(),
+            false,
+        )
+        .unwrap_or_else(|error| unreachable!("reordered equivalent IDs must adopt: {error}"));
+    assert!(!report.is_blocked());
 }
 
 #[test]
@@ -604,6 +685,30 @@ fn backup_restore_and_schema_corruption_fail_closed() {
     );
     drop(preserved);
 
+    let alien_path = directory.path().join("alien-v1.db");
+    let alien = Connection::open(&alien_path).unwrap_or_else(|error| unreachable!("{error}"));
+    alien
+        .execute_batch("CREATE TABLE unrelated (id INTEGER PRIMARY KEY) STRICT;")
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    alien
+        .pragma_update(None, "user_version", LIBRARY_SCHEMA_VERSION)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    drop(alien);
+    assert!(matches!(
+        restore_backup(&alien_path, &destination_path),
+        Err(LibraryError::Corrupt(_))
+    ));
+    let preserved =
+        LocalLibrary::open(&destination_path).unwrap_or_else(|error| unreachable!("{error}"));
+    assert_eq!(
+        preserved
+            .intent(&durable_intent.id)
+            .unwrap_or_else(|error| unreachable!("{error}"))
+            .intent,
+        durable_intent
+    );
+    drop(preserved);
+
     let corrupt_path = directory.path().join("corrupt.db");
     fs::write(&corrupt_path, b"not sqlite").unwrap_or_else(|error| unreachable!("{error}"));
     assert!(restore_backup(&corrupt_path, &destination_path).is_err());
@@ -612,6 +717,145 @@ fn backup_restore_and_schema_corruption_fail_closed() {
     preserved
         .integrity_check()
         .unwrap_or_else(|error| unreachable!("{error}"));
+}
+
+#[test]
+fn malformed_secret_reference_is_rejected_before_persistence_or_export() {
+    let mut library =
+        LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
+    let stored_intent = intent("secret-ref", IntentStatus::Proposed);
+    library
+        .create_intent(&request("request:secret-ref-intent"), &stored_intent)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    let mut stored_setup = setup("secret-ref", 1, vec![stored_intent.id.clone()], vec![]);
+    stored_setup.required_secret_refs = vec!["hunter2".into()];
+    assert!(matches!(
+        library.save_setup(&request("request:bad-secret-ref"), &stored_setup, None),
+        Err(LibraryError::Validation(_))
+    ));
+    assert!(library.setup(&stored_setup.id).is_err());
+
+    let directory = tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+    let path = directory.path().join("legacy-secret-ref.db");
+    let persisted_intent = intent("persisted-secret-ref", IntentStatus::Proposed);
+    let persisted_setup = setup(
+        "persisted-secret-ref",
+        1,
+        vec![persisted_intent.id.clone()],
+        vec![],
+    );
+    {
+        let mut persistent =
+            LocalLibrary::open(&path).unwrap_or_else(|error| unreachable!("{error}"));
+        persistent
+            .create_intent(
+                &request("request:persisted-secret-intent"),
+                &persisted_intent,
+            )
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        persistent
+            .save_setup(
+                &request("request:persisted-secret-setup"),
+                &persisted_setup,
+                None,
+            )
+            .unwrap_or_else(|error| unreachable!("{error}"));
+    }
+    let connection = Connection::open(&path).unwrap_or_else(|error| unreachable!("{error}"));
+    connection
+        .execute("UPDATE setup_secret_refs SET value = 'hunter2'", [])
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    drop(connection);
+    let persistent = LocalLibrary::open(&path).unwrap_or_else(|error| unreachable!("{error}"));
+    assert!(matches!(
+        persistent.export_setup(&persisted_setup.id, Some(1)),
+        Err(LibraryError::PortableFormat(_))
+    ));
+}
+
+#[test]
+fn direct_setup_bundle_rejects_mismatched_logical_and_revision_representations() {
+    let bundle = portable_fixture();
+
+    let mut missing_intent_revision = bundle.clone();
+    missing_intent_revision.setups[0].intent_revisions.clear();
+    assert!(matches!(
+        encode_setup_bundle(&missing_intent_revision),
+        Err(LibraryError::PortableFormat(_))
+    ));
+    let mut target = LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
+    assert!(matches!(
+        target.adopt_setup_bundle(
+            &request("request:mismatched-setup-intents"),
+            &missing_intent_revision,
+            &AdoptionContext::default(),
+            false,
+        ),
+        Err(LibraryError::PortableFormat(_))
+    ));
+    assert!(target.list_setups().unwrap_or_default().is_empty());
+
+    let mut phantom_include = bundle;
+    phantom_include.setups[0]
+        .setup
+        .included_setup_ids
+        .push(id(SetupId::new("setup:phantom")));
+    assert!(matches!(
+        encode_setup_bundle(&phantom_include),
+        Err(LibraryError::PortableFormat(_))
+    ));
+}
+
+#[test]
+fn setup_closure_rejects_conflicting_logical_intent_revisions_across_nested_setups() {
+    let mut bundle = portable_fixture();
+    let logical_id = bundle.intents[0].intent.id.clone();
+    let mut later = bundle.intents[0].clone();
+    later.revision = 2;
+    bundle.intents.push(later);
+
+    let child_id = id(SetupId::new("setup:portable-child"));
+    bundle.setups[0]
+        .setup
+        .included_setup_ids
+        .push(child_id.clone());
+    bundle.setups[0].included_revisions.push(SetupRevisionRef {
+        id: child_id.clone(),
+        revision: 1,
+    });
+    bundle.setups.push(StoredSetup {
+        setup: Setup {
+            id: child_id,
+            name: "Portable child".into(),
+            description: "nested conflicting revision".into(),
+            revision: 1,
+            intent_ids: vec![logical_id.clone()],
+            included_setup_ids: vec![],
+            portable_constraints: vec![],
+            required_secret_refs: vec![],
+            hardware_hints: vec![],
+        },
+        intent_revisions: vec![IntentRevisionRef {
+            id: logical_id,
+            revision: 2,
+        }],
+        included_revisions: vec![],
+    });
+
+    assert!(matches!(
+        encode_setup_bundle(&bundle),
+        Err(LibraryError::PortableFormat(_))
+    ));
+    let mut target = LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
+    assert!(matches!(
+        target.adopt_setup_bundle(
+            &request("request:cross-closure-conflict"),
+            &bundle,
+            &AdoptionContext::default(),
+            false,
+        ),
+        Err(LibraryError::PortableFormat(_))
+    ));
 }
 
 #[test]
@@ -669,6 +913,104 @@ fn profile_bundle_with_direct_and_nested_revisions_round_trips_to_empty_store() 
         setups: vec![stored_setup],
         intents: vec![direct, nested],
     };
+    let mut mismatched_profile_intents = bundle.clone();
+    mismatched_profile_intents
+        .profile
+        .profile
+        .intent_ids
+        .clear();
+    assert!(matches!(
+        encode_profile_bundle(&mismatched_profile_intents),
+        Err(LibraryError::PortableFormat(_))
+    ));
+    let mut mismatch_target =
+        LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
+    assert!(matches!(
+        mismatch_target.adopt_profile_bundle(
+            &request("request:mismatched-profile-intents"),
+            &mismatched_profile_intents,
+            &AdoptionContext::default(),
+            false,
+        ),
+        Err(LibraryError::PortableFormat(_))
+    ));
+
+    let mut mismatched_profile_setups = bundle.clone();
+    mismatched_profile_setups.profile.profile.setup_ids.clear();
+    assert!(matches!(
+        encode_profile_bundle(&mismatched_profile_setups),
+        Err(LibraryError::PortableFormat(_))
+    ));
+
+    let mut conflicting_profile = bundle.clone();
+    let direct_id = conflicting_profile.intents[0].intent.id.clone();
+    let mut later_direct = conflicting_profile.intents[0].clone();
+    later_direct.revision += 1;
+    conflicting_profile.intents.push(later_direct);
+    conflicting_profile
+        .profile
+        .intent_revisions
+        .push(IntentRevisionRef {
+            id: direct_id.clone(),
+            revision: conflicting_profile
+                .intents
+                .last()
+                .map_or(0, |intent| intent.revision),
+        });
+    conflicting_profile
+        .profile
+        .profile
+        .intent_ids
+        .push(direct_id);
+    assert!(matches!(
+        encode_profile_bundle(&conflicting_profile),
+        Err(LibraryError::PortableFormat(_))
+    ));
+
+    let mut conflicting_setup_closure = bundle.clone();
+    let shared_v3 = conflicting_setup_closure.setups[0].clone();
+    let shared_id = shared_v3.setup.id.clone();
+    let mut shared_v4 = shared_v3.clone();
+    shared_v4.setup.revision = 4;
+
+    let branch_one_id = id(SetupId::new("setup:branch-one"));
+    let branch_two_id = id(SetupId::new("setup:branch-two"));
+    let branch_one = StoredSetup {
+        setup: setup("branch-one", 1, vec![], vec![shared_id.clone()]),
+        intent_revisions: vec![],
+        included_revisions: vec![SetupRevisionRef {
+            id: shared_id.clone(),
+            revision: 3,
+        }],
+    };
+    let branch_two = StoredSetup {
+        setup: setup("branch-two", 1, vec![], vec![shared_id.clone()]),
+        intent_revisions: vec![],
+        included_revisions: vec![SetupRevisionRef {
+            id: shared_id.clone(),
+            revision: 4,
+        }],
+    };
+    assert_eq!(branch_one.setup.id, branch_one_id);
+    assert_eq!(branch_two.setup.id, branch_two_id);
+    conflicting_setup_closure.setups = vec![shared_v3, shared_v4, branch_one, branch_two];
+    conflicting_setup_closure.profile.profile.setup_ids =
+        vec![branch_one_id.clone(), branch_two_id.clone()];
+    conflicting_setup_closure.profile.setup_revisions = vec![
+        SetupRevisionRef {
+            id: branch_one_id,
+            revision: 1,
+        },
+        SetupRevisionRef {
+            id: branch_two_id,
+            revision: 1,
+        },
+    ];
+    assert!(matches!(
+        encode_profile_bundle(&conflicting_setup_closure),
+        Err(LibraryError::PortableFormat(_))
+    ));
+
     let bytes = encode_profile_bundle(&bundle).unwrap_or_else(|error| unreachable!("{error}"));
     let mut target = LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
     let report = target
@@ -682,4 +1024,60 @@ fn profile_bundle_with_direct_and_nested_revisions_round_trips_to_empty_store() 
             .unwrap_or_else(|error| unreachable!("{error}")),
         bundle.profile
     );
+}
+
+#[test]
+fn backup_schema_metadata_bounds_fail_closed_before_restore() {
+    let directory = tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+    let destination_path = directory.path().join("bounded-destination.db");
+    let destination =
+        LocalLibrary::open(&destination_path).unwrap_or_else(|error| unreachable!("{error}"));
+    destination
+        .integrity_check()
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    drop(destination);
+
+    let oversized_path = directory.path().join("oversized-schema.db");
+    let oversized =
+        Connection::open(&oversized_path).unwrap_or_else(|error| unreachable!("{error}"));
+    let oversized_identifier = "x".repeat(70 * 1024);
+    oversized
+        .execute_batch(&format!(
+            "CREATE TABLE oversized_schema(\"{oversized_identifier}\" TEXT) STRICT;"
+        ))
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    oversized
+        .pragma_update(None, "user_version", LIBRARY_SCHEMA_VERSION)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    drop(oversized);
+
+    assert!(matches!(
+        restore_backup(&oversized_path, &destination_path),
+        Err(LibraryError::Corrupt(_))
+    ));
+    let preserved =
+        LocalLibrary::open(&destination_path).unwrap_or_else(|error| unreachable!("{error}"));
+    preserved
+        .integrity_check()
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    drop(preserved);
+
+    let many_path = directory.path().join("many-schema-objects.db");
+    let many = Connection::open(&many_path).unwrap_or_else(|error| unreachable!("{error}"));
+    for index in 0..129 {
+        many.execute_batch(&format!("CREATE TABLE object_{index}(value TEXT) STRICT;"))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+    }
+    many.pragma_update(None, "user_version", LIBRARY_SCHEMA_VERSION)
+        .unwrap_or_else(|error| unreachable!("{error}"));
+    drop(many);
+    assert!(matches!(
+        restore_backup(&many_path, &destination_path),
+        Err(LibraryError::Corrupt(_))
+    ));
+    let preserved =
+        LocalLibrary::open(&destination_path).unwrap_or_else(|error| unreachable!("{error}"));
+    preserved
+        .integrity_check()
+        .unwrap_or_else(|error| unreachable!("{error}"));
 }
