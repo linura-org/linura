@@ -20,7 +20,7 @@ on:
         required: true
         type: string
       verification_ref:
-        description: Head branch/ref of the verification run
+        description: Exact tag ref or authenticated recovery branch used by verification
         required: true
         type: string
 
@@ -46,15 +46,22 @@ jobs:
       VERIFICATION_REF: ${{ inputs.verification_ref }}
     steps:
       - name: Await exact verification terminal success
-        id: verification
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           [[ "$VERIFIED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$VERIFICATION_RUN_ID" =~ ^[0-9]+$ ]]
           case "$VERIFICATION_EVENT" in
-            workflow_dispatch|release|push) ;;
-            *) echo "unsupported verification event: $VERIFICATION_EVENT" >&2; exit 1 ;;
+            workflow_dispatch)
+              test "$VERIFICATION_REF" = "$RELEASE_TAG"
+              ;;
+            push)
+              test "$VERIFICATION_REF" = "verify-release/$RELEASE_TAG"
+              ;;
+            *)
+              echo "unsupported verification event: $VERIFICATION_EVENT" >&2
+              exit 1
+              ;;
           esac
 
           verification=""
@@ -79,44 +86,12 @@ jobs:
           [[ "$tag_source_sha" =~ ^[0-9a-f]{40}$ ]]
           test "$tag_source_sha" = "$VERIFIED_SOURCE_SHA"
 
-          if [[ "$VERIFICATION_EVENT" == "push" ]]; then
-            test "$VERIFICATION_REF" = "verify-release/$RELEASE_TAG"
-            # Recovery verification already has a safe legacy workflow_run closure
-            # path. Do not create a second closure with a different concurrency key.
-            printf 'mode=recovery-workflow-run\n' >> "$GITHUB_OUTPUT"
-            exit 0
+          verification_head_sha="$(jq -r .head_sha <<<"$verification")"
+          if [[ "$VERIFICATION_EVENT" == "workflow_dispatch" ]]; then
+            test "$verification_head_sha" = "$VERIFIED_SOURCE_SHA"
           fi
 
-          # workflow_dispatch --ref selects the workflow-file revision, not the release
-          # being verified. Binding comes from the verifier's validated tag + SOURCE_SHA
-          # outputs above, so a manual run from main remains valid.
-          printf 'mode=exact-tag\n' >> "$GITHUB_OUTPUT"
-
-      - name: Prefer already-materialized workflow_run closure
-        if: steps.verification.outputs.mode == 'exact-tag'
-        id: existing
-        run: |
-          set -euo pipefail
-          for _ in $(seq 1 10); do
-            runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/post-release-closure.yml/runs?event=workflow_run&branch=$RELEASE_TAG&per_page=20")"
-            existing="$(jq -r '
-              [.workflow_runs[] | select(
-                .event == "workflow_run" and
-                .head_branch == env.RELEASE_TAG and
-                (.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested" or (.status == "completed" and .conclusion == "success"))
-              )] | sort_by(.created_at) | last | .id // empty
-            ' <<<"$runs")"
-            if [[ -n "$existing" ]]; then
-              echo "Post Release Closure already materialized from workflow_run: $existing"
-              printf 'skip=true\n' >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            sleep 2
-          done
-          printf 'skip=false\n' >> "$GITHUB_OUTPUT"
-
-      - name: Dispatch protected post-release closure fallback
-        if: steps.verification.outputs.mode == 'exact-tag' && steps.existing.outputs.skip == 'false'
+      - name: Dispatch protected post-release closure
         run: |
           set -euo pipefail
           gh workflow run post-release-closure.yml \
@@ -124,4 +99,4 @@ jobs:
             --ref main \
             -f tag="$RELEASE_TAG" \
             -f verification_run_id="$VERIFICATION_RUN_ID"
-          echo "dispatched protected Post Release Closure for $RELEASE_TAG after verification run $VERIFICATION_RUN_ID completed successfully"
+          echo "dispatched protected Post Release Closure for $RELEASE_TAG after exact verification run $VERIFICATION_RUN_ID completed successfully"
