@@ -11,10 +11,10 @@ use linura_intent::{
     Intent, IntentStatus, MachineClass, MachineProfile, Requirement, RequirementKind, Setup,
 };
 use linura_planner::DesiredState;
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
-use crate::portable::{PortableProfileBundle, PortableSetupBundle, PORTABLE_FORMAT_VERSION};
+use crate::portable::{PORTABLE_FORMAT_VERSION, PortableProfileBundle, PortableSetupBundle};
 use crate::schema::{self, LIBRARY_SCHEMA_VERSION};
 use crate::{
     IntentRevisionRef, IntentTransition, LibraryError, LifecycleRecord, LifecycleRecordKind,
@@ -132,12 +132,11 @@ impl LocalLibrary {
     }
 
     pub fn intent(&self, id: &IntentId) -> Result<StoredIntent, LibraryError> {
-        let (revision, _, _) = current_intent_state(&self.connection, id)?.ok_or_else(|| {
-            LibraryError::NotFound {
+        let (revision, _, _) =
+            current_intent_state(&self.connection, id)?.ok_or_else(|| LibraryError::NotFound {
                 kind: "intent",
                 id: id.as_str().into(),
-            }
-        })?;
+            })?;
         load_intent_revision(&self.connection, id, revision)
     }
 
@@ -164,7 +163,9 @@ impl LocalLibrary {
         }
         revisions
             .into_iter()
-            .map(|revision| load_intent_revision(&self.connection, id, to_u64(revision, "intent revision")?))
+            .map(|revision| {
+                load_intent_revision(&self.connection, id, to_u64(revision, "intent revision")?)
+            })
             .collect()
     }
 
@@ -173,7 +174,9 @@ impl LocalLibrary {
             .connection
             .prepare("SELECT intent_id, revision FROM intents_current ORDER BY intent_id")?;
         let rows = statement
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter()
             .map(|(id, revision)| {
@@ -266,7 +269,11 @@ impl LocalLibrary {
         successor: &Intent,
     ) -> Result<(StoredIntent, StoredIntent), LibraryError> {
         validate_new_intent(successor)?;
-        if !successor.supersedes.iter().any(|candidate| candidate == old_id) {
+        if !successor
+            .supersedes
+            .iter()
+            .any(|candidate| candidate == old_id)
+        {
             return Err(LibraryError::Validation(format!(
                 "successor {} must explicitly retain supersession lineage to {}",
                 successor.id.as_str(),
@@ -310,7 +317,10 @@ impl LocalLibrary {
             })?;
         ensure_revision(expected_revision, actual_revision)?;
         let old = load_intent_revision(&transaction, old_id, actual_revision)?;
-        if matches!(old.intent.status, IntentStatus::Superseded | IntentStatus::Retired) {
+        if matches!(
+            old.intent.status,
+            IntentStatus::Superseded | IntentStatus::Retired
+        ) {
             return Err(LibraryError::InvalidTransition {
                 from: intent_status_str(old.intent.status).into(),
                 operation: "supersede".into(),
@@ -389,10 +399,12 @@ impl LocalLibrary {
             }
         }
         let transaction = self.connection.transaction()?;
-        let (actual_revision, current_generation, _) = current_intent_state(&transaction, intent_id)?
-            .ok_or_else(|| LibraryError::NotFound {
-                kind: "intent",
-                id: intent_id.as_str().into(),
+        let (actual_revision, current_generation, _) =
+            current_intent_state(&transaction, intent_id)?.ok_or_else(|| {
+                LibraryError::NotFound {
+                    kind: "intent",
+                    id: intent_id.as_str().into(),
+                }
             })?;
         ensure_revision(expected_intent_revision, actual_revision)?;
         let generation = current_generation
@@ -496,18 +508,14 @@ impl LocalLibrary {
     ) -> Result<RemovalImpactReport, LibraryError> {
         let (revision, generation, complete) = current_intent_state(&self.connection, intent_id)?
             .ok_or_else(|| LibraryError::NotFound {
-                kind: "intent",
-                id: intent_id.as_str().into(),
-            })?;
+            kind: "intent",
+            id: intent_id.as_str().into(),
+        })?;
         if generation == 0 {
             return Ok(RemovalImpactReport::default());
         }
-        let resources = desired_resource_identities(
-            &self.connection,
-            intent_id,
-            revision,
-            generation,
-        )?;
+        let resources =
+            desired_resource_identities(&self.connection, intent_id, revision, generation)?;
         let incomplete_active_count: i64 = self.connection.query_row(
             "SELECT COUNT(*) FROM intents_current c JOIN intent_revisions r ON r.intent_id = c.intent_id AND r.revision = c.revision WHERE r.status = 'active' AND c.causal_complete = 0",
             [],
@@ -572,12 +580,7 @@ impl LocalLibrary {
         let intent_refs = resolve_current_intents(&transaction, &setup.intent_ids)?;
         let include_refs = resolve_current_setups(&transaction, &setup.included_setup_ids)?;
         for included in &include_refs {
-            if setup_revision_reaches(
-                &transaction,
-                &included.id,
-                included.revision,
-                &setup.id,
-            )? {
+            if setup_revision_reaches(&transaction, &included.id, included.revision, &setup.id)? {
                 return Err(LibraryError::Validation(format!(
                     "setup composition cycle reaches {} through {}@{}",
                     setup.id.as_str(),
@@ -600,20 +603,15 @@ impl LocalLibrary {
     }
 
     pub fn setup(&self, id: &SetupId) -> Result<StoredSetup, LibraryError> {
-        let revision = latest_setup_revision(&self.connection, id)?.ok_or_else(|| {
-            LibraryError::NotFound {
+        let revision =
+            latest_setup_revision(&self.connection, id)?.ok_or_else(|| LibraryError::NotFound {
                 kind: "setup",
                 id: id.as_str().into(),
-            }
-        })?;
+            })?;
         load_setup_revision(&self.connection, id, revision)
     }
 
-    pub fn setup_revision(
-        &self,
-        id: &SetupId,
-        revision: u32,
-    ) -> Result<StoredSetup, LibraryError> {
+    pub fn setup_revision(&self, id: &SetupId, revision: u32) -> Result<StoredSetup, LibraryError> {
         load_setup_revision(&self.connection, id, revision)
     }
 
@@ -647,7 +645,9 @@ impl LocalLibrary {
             "SELECT setup_id, MAX(revision) FROM setup_revisions GROUP BY setup_id ORDER BY setup_id",
         )?;
         let rows = statement
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter()
             .map(|(id, revision)| {
@@ -751,7 +751,9 @@ impl LocalLibrary {
             "SELECT profile_id, MAX(revision) FROM profile_revisions GROUP BY profile_id ORDER BY profile_id",
         )?;
         let rows = statement
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter()
             .map(|(id, revision)| {
@@ -777,10 +779,7 @@ impl LocalLibrary {
         Ok(record)
     }
 
-    pub fn lifecycle_records(
-        &self,
-        entity_id: &str,
-    ) -> Result<Vec<LifecycleRecord>, LibraryError> {
+    pub fn lifecycle_records(&self, entity_id: &str) -> Result<Vec<LifecycleRecord>, LibraryError> {
         validate_text("lifecycle entity id", entity_id, 256)?;
         let mut statement = self.connection.prepare(
             "SELECT sequence, record_kind, entity_id, content_digest, payload FROM lifecycle_records WHERE entity_id = ?1 ORDER BY sequence",
@@ -854,12 +853,12 @@ impl LocalLibrary {
         let mut setup_map = BTreeMap::new();
         let mut intent_map = BTreeMap::new();
         for intent_ref in &profile.intent_revisions {
-            let stored = load_intent_revision(
-                &self.connection,
-                &intent_ref.id,
-                intent_ref.revision,
-            )?;
-            intent_map.insert((intent_ref.id.as_str().to_owned(), intent_ref.revision), stored);
+            let stored =
+                load_intent_revision(&self.connection, &intent_ref.id, intent_ref.revision)?;
+            intent_map.insert(
+                (intent_ref.id.as_str().to_owned(), intent_ref.revision),
+                stored,
+            );
         }
         for setup_ref in &profile.setup_revisions {
             let (setups, intents) = collect_setup_closure(&self.connection, setup_ref)?;
@@ -898,7 +897,8 @@ impl LocalLibrary {
             ));
         }
         self.integrity_check()?;
-        self.connection.execute_batch("PRAGMA wal_checkpoint(FULL);")?;
+        self.connection
+            .execute_batch("PRAGMA wal_checkpoint(FULL);")?;
         let quoted = sql_string_literal(destination)?;
         self.connection
             .execute_batch(&format!("VACUUM INTO {quoted};"))?;
@@ -1000,7 +1000,11 @@ fn validate_new_intent(intent: &Intent) -> Result<(), LibraryError> {
                 requirement.id.as_str()
             )));
         }
-        validate_text("requirement statement", &requirement.statement, MAX_TEXT_BYTES)?;
+        validate_text(
+            "requirement statement",
+            &requirement.statement,
+            MAX_TEXT_BYTES,
+        )?;
     }
     let mut supersedes = BTreeSet::new();
     for predecessor in &intent.supersedes {
@@ -1045,7 +1049,11 @@ fn insert_intent_revision(
                 requirement.id.as_str()
             )));
         }
-        validate_text("requirement statement", &requirement.statement, MAX_TEXT_BYTES)?;
+        validate_text(
+            "requirement statement",
+            &requirement.statement,
+            MAX_TEXT_BYTES,
+        )?;
         transaction.execute(
             "INSERT INTO intent_requirements(intent_id, intent_revision, requirement_id, kind, statement) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
@@ -1104,13 +1112,16 @@ fn load_intent_revision(
         "SELECT requirement_id, kind, statement FROM intent_requirements WHERE intent_id = ?1 AND intent_revision = ?2 ORDER BY requirement_id",
     )?;
     let requirement_rows = requirements_statement
-        .query_map(params![id.as_str(), to_i64(revision, "intent revision")?], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?
+        .query_map(
+            params![id.as_str(), to_i64(revision, "intent revision")?],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )?
         .collect::<Result<Vec<_>, _>>()?;
     let requirements = requirement_rows
         .into_iter()
@@ -1126,9 +1137,10 @@ fn load_intent_revision(
         "SELECT superseded_intent_id FROM intent_supersedes WHERE intent_id = ?1 AND intent_revision = ?2 ORDER BY superseded_intent_id",
     )?;
     let superseded_rows = supersedes_statement
-        .query_map(params![id.as_str(), to_i64(revision, "intent revision")?], |row| {
-            row.get::<_, String>(0)
-        })?
+        .query_map(
+            params![id.as_str(), to_i64(revision, "intent revision")?],
+            |row| row.get::<_, String>(0),
+        )?
         .collect::<Result<Vec<_>, _>>()?;
     let supersedes = superseded_rows
         .into_iter()
@@ -1336,9 +1348,33 @@ fn insert_setup_revision(
             ],
         )?;
     }
-    insert_ordinal_texts(transaction, "setup_constraints", "setup_id", setup.id.as_str(), "setup_revision", u64::from(setup.revision), &setup.portable_constraints)?;
-    insert_ordinal_texts(transaction, "setup_secret_refs", "setup_id", setup.id.as_str(), "setup_revision", u64::from(setup.revision), &setup.required_secret_refs)?;
-    insert_ordinal_texts(transaction, "setup_hardware_hints", "setup_id", setup.id.as_str(), "setup_revision", u64::from(setup.revision), &setup.hardware_hints)?;
+    insert_ordinal_texts(
+        transaction,
+        "setup_constraints",
+        "setup_id",
+        setup.id.as_str(),
+        "setup_revision",
+        u64::from(setup.revision),
+        &setup.portable_constraints,
+    )?;
+    insert_ordinal_texts(
+        transaction,
+        "setup_secret_refs",
+        "setup_id",
+        setup.id.as_str(),
+        "setup_revision",
+        u64::from(setup.revision),
+        &setup.required_secret_refs,
+    )?;
+    insert_ordinal_texts(
+        transaction,
+        "setup_hardware_hints",
+        "setup_id",
+        setup.id.as_str(),
+        "setup_revision",
+        u64::from(setup.revision),
+        &setup.hardware_hints,
+    )?;
     Ok(())
 }
 
@@ -1401,7 +1437,10 @@ fn load_setup_revision(
             name: row.0,
             description: row.1,
             revision,
-            intent_ids: intent_revisions.iter().map(|value| value.id.clone()).collect(),
+            intent_ids: intent_revisions
+                .iter()
+                .map(|value| value.id.clone())
+                .collect(),
             included_setup_ids: included_revisions
                 .iter()
                 .map(|value| value.id.clone())
@@ -1474,8 +1513,24 @@ fn insert_profile_revision(
             ],
         )?;
     }
-    insert_ordinal_texts(transaction, "profile_constraints", "profile_id", profile.id.as_str(), "profile_revision", u64::from(revision), &profile.portable_constraints)?;
-    insert_ordinal_texts(transaction, "profile_hardware_hints", "profile_id", profile.id.as_str(), "profile_revision", u64::from(revision), &profile.hardware_hints)?;
+    insert_ordinal_texts(
+        transaction,
+        "profile_constraints",
+        "profile_id",
+        profile.id.as_str(),
+        "profile_revision",
+        u64::from(revision),
+        &profile.portable_constraints,
+    )?;
+    insert_ordinal_texts(
+        transaction,
+        "profile_hardware_hints",
+        "profile_id",
+        profile.id.as_str(),
+        "profile_revision",
+        u64::from(revision),
+        &profile.hardware_hints,
+    )?;
     Ok(())
 }
 
@@ -1534,8 +1589,14 @@ fn load_profile_revision(
             id: id.clone(),
             name: row.0,
             machine_class: parse_machine_class(&row.1)?,
-            setup_ids: setup_revisions.iter().map(|value| value.id.clone()).collect(),
-            intent_ids: intent_revisions.iter().map(|value| value.id.clone()).collect(),
+            setup_ids: setup_revisions
+                .iter()
+                .map(|value| value.id.clone())
+                .collect(),
+            intent_ids: intent_revisions
+                .iter()
+                .map(|value| value.id.clone())
+                .collect(),
             portable_constraints: load_ordinal_texts(
                 connection,
                 "profile_constraints",
@@ -1563,12 +1624,11 @@ fn latest_setup_revision(
     connection: &Connection,
     id: &SetupId,
 ) -> Result<Option<u32>, LibraryError> {
-    let revision = connection
-        .query_row(
-            "SELECT MAX(revision) FROM setup_revisions WHERE setup_id = ?1",
-            params![id.as_str()],
-            |row| row.get::<_, Option<i64>>(0),
-        )?;
+    let revision = connection.query_row(
+        "SELECT MAX(revision) FROM setup_revisions WHERE setup_id = ?1",
+        params![id.as_str()],
+        |row| row.get::<_, Option<i64>>(0),
+    )?;
     revision
         .map(|value| to_u32(to_u64(value, "setup revision")?, "setup revision"))
         .transpose()
@@ -1578,12 +1638,11 @@ fn latest_profile_revision(
     connection: &Connection,
     id: &ProfileId,
 ) -> Result<Option<u32>, LibraryError> {
-    let revision = connection
-        .query_row(
-            "SELECT MAX(revision) FROM profile_revisions WHERE profile_id = ?1",
-            params![id.as_str()],
-            |row| row.get::<_, Option<i64>>(0),
-        )?;
+    let revision = connection.query_row(
+        "SELECT MAX(revision) FROM profile_revisions WHERE profile_id = ?1",
+        params![id.as_str()],
+        |row| row.get::<_, Option<i64>>(0),
+    )?;
     revision
         .map(|value| to_u32(to_u64(value, "profile revision")?, "profile revision"))
         .transpose()
@@ -1602,12 +1661,11 @@ fn resolve_current_intents(
                 id.as_str()
             )));
         }
-        let (revision, _, _) = current_intent_state(connection, id)?.ok_or_else(|| {
-            LibraryError::NotFound {
+        let (revision, _, _) =
+            current_intent_state(connection, id)?.ok_or_else(|| LibraryError::NotFound {
                 kind: "intent",
                 id: id.as_str().into(),
-            }
-        })?;
+            })?;
         output.push(IntentRevisionRef {
             id: id.clone(),
             revision,
@@ -1630,12 +1688,11 @@ fn resolve_current_setups(
                 id.as_str()
             )));
         }
-        let revision = latest_setup_revision(connection, id)?.ok_or_else(|| {
-            LibraryError::NotFound {
+        let revision =
+            latest_setup_revision(connection, id)?.ok_or_else(|| LibraryError::NotFound {
                 kind: "included setup",
                 id: id.as_str().into(),
-            }
-        })?;
+            })?;
         output.push(SetupRevisionRef {
             id: id.clone(),
             revision,
@@ -1703,7 +1760,10 @@ fn collect_setup_closure(
             ));
         }
     }
-    Ok((setups.into_values().collect(), intents.into_values().collect()))
+    Ok((
+        setups.into_values().collect(),
+        intents.into_values().collect(),
+    ))
 }
 
 fn insert_ordinal_texts(
@@ -1983,7 +2043,10 @@ fn profile_operation_digest(
 }
 
 fn digest_fields(fields: &[&str]) -> String {
-    let owned = fields.iter().map(|value| (*value).to_owned()).collect::<Vec<_>>();
+    let owned = fields
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect::<Vec<_>>();
     digest_owned_fields(&owned)
 }
 
@@ -2131,9 +2194,7 @@ fn sql_string_literal(path: &Path) -> Result<String, LibraryError> {
         .to_str()
         .ok_or_else(|| LibraryError::Validation("backup path is not valid UTF-8".into()))?;
     if value.contains('\0') {
-        return Err(LibraryError::Validation(
-            "backup path contains NUL".into(),
-        ));
+        return Err(LibraryError::Validation("backup path contains NUL".into()));
     }
     Ok(format!("'{}'", value.replace('\'', "''")))
 }

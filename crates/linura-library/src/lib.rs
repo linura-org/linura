@@ -18,8 +18,8 @@ use linura_core::{CapabilityId, IntentId, ProfileId, ProviderId, RequestId, Reso
 use linura_intent::{Intent, MachineProfile, Setup};
 
 pub use portable::{
-    decode_profile_bundle, decode_setup_bundle, encode_profile_bundle, encode_setup_bundle,
-    PortableProfileBundle, PortableSetupBundle, PORTABLE_FORMAT_VERSION,
+    PORTABLE_FORMAT_VERSION, PortableProfileBundle, PortableSetupBundle, decode_profile_bundle,
+    decode_setup_bundle, encode_profile_bundle, encode_setup_bundle,
 };
 pub use schema::LIBRARY_SCHEMA_VERSION;
 pub use store::{LibrarySettings, LocalLibrary};
@@ -186,8 +186,12 @@ impl Display for LibraryError {
                 f,
                 "portable Library format {found} is newer than supported version {supported}"
             ),
-            Self::PortableDigestMismatch => f.write_str("portable Library artifact digest mismatch"),
-            Self::PortableFormat(reason) => write!(f, "invalid portable Library artifact: {reason}"),
+            Self::PortableDigestMismatch => {
+                f.write_str("portable Library artifact digest mismatch")
+            }
+            Self::PortableFormat(reason) => {
+                write!(f, "invalid portable Library artifact: {reason}")
+            }
         }
     }
 }

@@ -35,7 +35,11 @@ pub fn encode_setup_bundle(bundle: &PortableSetupBundle) -> Result<Vec<u8>, Libr
     let mut body = String::new();
     push_line(
         &mut body,
-        &["LINURA-LIBRARY", &bundle.format_version.to_string(), "setup"],
+        &[
+            "LINURA-LIBRARY",
+            &bundle.format_version.to_string(),
+            "setup",
+        ],
     );
     push_line(
         &mut body,
@@ -55,7 +59,11 @@ pub fn encode_profile_bundle(bundle: &PortableProfileBundle) -> Result<Vec<u8>, 
     let mut body = String::new();
     push_line(
         &mut body,
-        &["LINURA-LIBRARY", &bundle.format_version.to_string(), "profile"],
+        &[
+            "LINURA-LIBRARY",
+            &bundle.format_version.to_string(),
+            "profile",
+        ],
     );
     let profile = &bundle.profile;
     push_line(
@@ -172,8 +180,7 @@ pub fn decode_profile_bundle(bytes: &[u8]) -> Result<PortableProfileBundle, Libr
 fn encode_intents(body: &mut String, intents: &[StoredIntent]) {
     let mut intents = intents.to_vec();
     intents.sort_by(|left, right| {
-        (left.intent.id.as_str(), left.revision)
-            .cmp(&(right.intent.id.as_str(), right.revision))
+        (left.intent.id.as_str(), left.revision).cmp(&(right.intent.id.as_str(), right.revision))
     });
     for stored in intents {
         let intent = &stored.intent;
@@ -390,7 +397,8 @@ fn parse_artifact(bytes: &[u8], expected_kind: &str) -> Result<ParsedArtifact, L
         ));
     }
     let declared_digest = &digest_tail[..digest_tail.len() - 1];
-    if declared_digest.len() != 64 || !declared_digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+    if declared_digest.len() != 64 || !declared_digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
         return Err(LibraryError::PortableFormat(
             "terminal digest is not a SHA-256 hexadecimal value".into(),
         ));
@@ -408,7 +416,9 @@ fn parse_artifact(bytes: &[u8], expected_kind: &str) -> Result<ParsedArtifact, L
         .ok_or_else(|| LibraryError::PortableFormat("missing header".into()))?;
     let header_fields = header.split('\t').collect::<Vec<_>>();
     if header_fields.len() != 3 || header_fields[0] != "LINURA-LIBRARY" {
-        return Err(LibraryError::PortableFormat("invalid artifact header".into()));
+        return Err(LibraryError::PortableFormat(
+            "invalid artifact header".into(),
+        ));
     }
     let version = parse_u16(header_fields[1], "portable format version")?;
     if version > PORTABLE_FORMAT_VERSION {
@@ -482,25 +492,18 @@ fn parse_record(parsed: &mut ParsedArtifact, line: &str) -> Result<(), LibraryEr
         "profile" => parse_profile_base(parsed, &fields)?,
         "profile-intent" => parse_profile_intent(parsed, &fields)?,
         "profile-setup" => parse_profile_setup(parsed, &fields)?,
-        "profile-constraint" => {
-            parse_profile_value(parsed, &fields, ProfileValueKind::Constraint)?
-        }
-        "profile-hardware" => {
-            parse_profile_value(parsed, &fields, ProfileValueKind::Hardware)?
-        }
+        "profile-constraint" => parse_profile_value(parsed, &fields, ProfileValueKind::Constraint)?,
+        "profile-hardware" => parse_profile_value(parsed, &fields, ProfileValueKind::Hardware)?,
         _ => {
             return Err(LibraryError::PortableFormat(format!(
                 "unknown portable record {kind:?}"
-            )))
+            )));
         }
     }
     Ok(())
 }
 
-fn parse_intent_base(
-    parsed: &mut ParsedArtifact,
-    fields: &[&str],
-) -> Result<(), LibraryError> {
+fn parse_intent_base(parsed: &mut ParsedArtifact, fields: &[&str]) -> Result<(), LibraryError> {
     require_fields(fields, 8)?;
     let id = decode_text(fields[1])?;
     let revision = parse_u64(fields[2], "intent revision")?;
@@ -520,10 +523,7 @@ fn parse_intent_base(
     Ok(())
 }
 
-fn parse_requirement(
-    parsed: &mut ParsedArtifact,
-    fields: &[&str],
-) -> Result<(), LibraryError> {
+fn parse_requirement(parsed: &mut ParsedArtifact, fields: &[&str]) -> Result<(), LibraryError> {
     require_fields(fields, 6)?;
     let id = decode_text(fields[1])?;
     let revision = parse_u64(fields[2], "intent revision")?;
@@ -532,14 +532,15 @@ fn parse_requirement(
         .entry((id, revision))
         .or_default()
         .requirements
-        .push((decode_text(fields[3])?, fields[4].into(), decode_text(fields[5])?));
+        .push((
+            decode_text(fields[3])?,
+            fields[4].into(),
+            decode_text(fields[5])?,
+        ));
     Ok(())
 }
 
-fn parse_supersedes(
-    parsed: &mut ParsedArtifact,
-    fields: &[&str],
-) -> Result<(), LibraryError> {
+fn parse_supersedes(parsed: &mut ParsedArtifact, fields: &[&str]) -> Result<(), LibraryError> {
     require_fields(fields, 4)?;
     let id = decode_text(fields[1])?;
     let revision = parse_u64(fields[2], "intent revision")?;
@@ -552,10 +553,7 @@ fn parse_supersedes(
     Ok(())
 }
 
-fn parse_setup_base(
-    parsed: &mut ParsedArtifact,
-    fields: &[&str],
-) -> Result<(), LibraryError> {
+fn parse_setup_base(parsed: &mut ParsedArtifact, fields: &[&str]) -> Result<(), LibraryError> {
     require_fields(fields, 5)?;
     let id = decode_text(fields[1])?;
     let revision = parse_u32(fields[2], "setup revision")?;
@@ -569,10 +567,7 @@ fn parse_setup_base(
     Ok(())
 }
 
-fn parse_setup_intent(
-    parsed: &mut ParsedArtifact,
-    fields: &[&str],
-) -> Result<(), LibraryError> {
+fn parse_setup_intent(parsed: &mut ParsedArtifact, fields: &[&str]) -> Result<(), LibraryError> {
     require_fields(fields, 5)?;
     let id = decode_text(fields[1])?;
     let revision = parse_u32(fields[2], "setup revision")?;
@@ -581,14 +576,14 @@ fn parse_setup_intent(
         .entry((id, revision))
         .or_default()
         .intents
-        .push((decode_text(fields[3])?, parse_u64(fields[4], "intent revision")?));
+        .push((
+            decode_text(fields[3])?,
+            parse_u64(fields[4], "intent revision")?,
+        ));
     Ok(())
 }
 
-fn parse_setup_include(
-    parsed: &mut ParsedArtifact,
-    fields: &[&str],
-) -> Result<(), LibraryError> {
+fn parse_setup_include(parsed: &mut ParsedArtifact, fields: &[&str]) -> Result<(), LibraryError> {
     require_fields(fields, 5)?;
     let id = decode_text(fields[1])?;
     let revision = parse_u32(fields[2], "setup revision")?;
@@ -597,7 +592,10 @@ fn parse_setup_include(
         .entry((id, revision))
         .or_default()
         .includes
-        .push((decode_text(fields[3])?, parse_u32(fields[4], "setup revision")?));
+        .push((
+            decode_text(fields[3])?,
+            parse_u32(fields[4], "setup revision")?,
+        ));
     Ok(())
 }
 
@@ -631,10 +629,7 @@ fn parse_setup_value(
     Ok(())
 }
 
-fn parse_profile_base(
-    parsed: &mut ParsedArtifact,
-    fields: &[&str],
-) -> Result<(), LibraryError> {
+fn parse_profile_base(parsed: &mut ParsedArtifact, fields: &[&str]) -> Result<(), LibraryError> {
     require_fields(fields, 5)?;
     if parsed.profile.is_some() {
         return Err(LibraryError::PortableFormat(
@@ -642,7 +637,10 @@ fn parse_profile_base(
         ));
     }
     parsed.profile = Some(ProfileBuilder {
-        key: Some((decode_text(fields[1])?, parse_u32(fields[2], "profile revision")?)),
+        key: Some((
+            decode_text(fields[1])?,
+            parse_u32(fields[2], "profile revision")?,
+        )),
         name: Some(decode_text(fields[3])?),
         machine_class: Some(fields[4].into()),
         ..ProfileBuilder::default()
@@ -650,10 +648,7 @@ fn parse_profile_base(
     Ok(())
 }
 
-fn parse_profile_intent(
-    parsed: &mut ParsedArtifact,
-    fields: &[&str],
-) -> Result<(), LibraryError> {
+fn parse_profile_intent(parsed: &mut ParsedArtifact, fields: &[&str]) -> Result<(), LibraryError> {
     require_fields(fields, 5)?;
     require_profile_key(parsed, fields)?;
     parsed
@@ -661,14 +656,14 @@ fn parse_profile_intent(
         .as_mut()
         .ok_or_else(|| LibraryError::PortableFormat("profile base must appear first".into()))?
         .intents
-        .push((decode_text(fields[3])?, parse_u64(fields[4], "intent revision")?));
+        .push((
+            decode_text(fields[3])?,
+            parse_u64(fields[4], "intent revision")?,
+        ));
     Ok(())
 }
 
-fn parse_profile_setup(
-    parsed: &mut ParsedArtifact,
-    fields: &[&str],
-) -> Result<(), LibraryError> {
+fn parse_profile_setup(parsed: &mut ParsedArtifact, fields: &[&str]) -> Result<(), LibraryError> {
     require_fields(fields, 5)?;
     require_profile_key(parsed, fields)?;
     parsed
@@ -676,7 +671,10 @@ fn parse_profile_setup(
         .as_mut()
         .ok_or_else(|| LibraryError::PortableFormat("profile base must appear first".into()))?
         .setups
-        .push((decode_text(fields[3])?, parse_u32(fields[4], "setup revision")?));
+        .push((
+            decode_text(fields[3])?,
+            parse_u32(fields[4], "setup revision")?,
+        ));
     Ok(())
 }
 
@@ -828,7 +826,10 @@ fn finalize_setups(
                 name,
                 description,
                 revision,
-                intent_ids: intent_revisions.iter().map(|value| value.id.clone()).collect(),
+                intent_ids: intent_revisions
+                    .iter()
+                    .map(|value| value.id.clone())
+                    .collect(),
                 included_setup_ids: included_revisions
                     .iter()
                     .map(|value| value.id.clone())
@@ -894,8 +895,14 @@ fn finalize_profile(builder: ProfileBuilder) -> Result<StoredProfile, LibraryErr
                     .as_deref()
                     .ok_or_else(|| LibraryError::PortableFormat("machine class missing".into()))?,
             )?,
-            setup_ids: setup_revisions.iter().map(|value| value.id.clone()).collect(),
-            intent_ids: intent_revisions.iter().map(|value| value.id.clone()).collect(),
+            setup_ids: setup_revisions
+                .iter()
+                .map(|value| value.id.clone())
+                .collect(),
+            intent_ids: intent_revisions
+                .iter()
+                .map(|value| value.id.clone())
+                .collect(),
             portable_constraints: ordered_values(builder.constraints)?,
             hardware_hints: ordered_values(builder.hardware_hints)?,
         },
@@ -1052,7 +1059,9 @@ fn validate_reachable_setup_closure(
         ));
     }
     if referenced_intents.len() != intents.len()
-        || referenced_intents.iter().any(|key| !intents.contains_key(key))
+        || referenced_intents
+            .iter()
+            .any(|key| !intents.contains_key(key))
     {
         return Err(LibraryError::PortableFormat(
             "setup bundle contains missing or unrelated intent revisions".into(),
@@ -1061,9 +1070,7 @@ fn validate_reachable_setup_closure(
     Ok(())
 }
 
-fn detect_setup_cycles(
-    setups: &BTreeMap<(String, u32), &StoredSetup>,
-) -> Result<(), LibraryError> {
+fn detect_setup_cycles(setups: &BTreeMap<(String, u32), &StoredSetup>) -> Result<(), LibraryError> {
     let mut permanent = BTreeSet::new();
     let mut temporary = BTreeSet::new();
     for key in setups.keys() {
@@ -1113,9 +1120,10 @@ fn ordered_values(values: BTreeMap<usize, String>) -> Result<Vec<String>, Librar
 }
 
 fn ensure_unique_intent_refs(values: &[IntentRevisionRef]) -> Result<(), LibraryError> {
-    if values.windows(2).any(|window| {
-        window[0].id == window[1].id && window[0].revision == window[1].revision
-    }) {
+    if values
+        .windows(2)
+        .any(|window| window[0].id == window[1].id && window[0].revision == window[1].revision)
+    {
         Err(LibraryError::PortableFormat(
             "duplicate intent revision reference".into(),
         ))
@@ -1125,9 +1133,10 @@ fn ensure_unique_intent_refs(values: &[IntentRevisionRef]) -> Result<(), Library
 }
 
 fn ensure_unique_setup_refs(values: &[SetupRevisionRef]) -> Result<(), LibraryError> {
-    if values.windows(2).any(|window| {
-        window[0].id == window[1].id && window[0].revision == window[1].revision
-    }) {
+    if values
+        .windows(2)
+        .any(|window| window[0].id == window[1].id && window[0].revision == window[1].revision)
+    {
         Err(LibraryError::PortableFormat(
             "duplicate setup revision reference".into(),
         ))
