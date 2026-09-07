@@ -237,8 +237,15 @@ fn intent_lifecycle_concurrency_idempotency_and_lineage_are_durable() {
             .status,
         IntentStatus::Retired
     );
-    assert_eq!(reopened.schema_version(), Ok(LIBRARY_SCHEMA_VERSION));
-    assert_eq!(reopened.integrity_check(), Ok(()));
+    assert_eq!(
+        reopened
+            .schema_version()
+            .unwrap_or_else(|error| unreachable!("{error}")),
+        LIBRARY_SCHEMA_VERSION
+    );
+    reopened
+        .integrity_check()
+        .unwrap_or_else(|error| unreachable!("{error}"));
 }
 
 #[test]
@@ -570,7 +577,9 @@ fn backup_restore_and_schema_corruption_fail_closed() {
             .intent,
         durable_intent
     );
-    assert_eq!(restored.integrity_check(), Ok(()));
+    restored
+        .integrity_check()
+        .unwrap_or_else(|error| unreachable!("{error}"));
     drop(restored);
 
     let newer_path = directory.path().join("newer.db");
@@ -600,7 +609,9 @@ fn backup_restore_and_schema_corruption_fail_closed() {
     assert!(restore_backup(&corrupt_path, &destination_path).is_err());
     let preserved =
         LocalLibrary::open(&destination_path).unwrap_or_else(|error| unreachable!("{error}"));
-    assert_eq!(preserved.integrity_check(), Ok(()));
+    preserved
+        .integrity_check()
+        .unwrap_or_else(|error| unreachable!("{error}"));
 }
 
 #[test]
