@@ -148,7 +148,7 @@ class ToolingTests(unittest.TestCase):
         self.assertIn('kill -0 "$VM_PID"', workflow)
         self.assertIn('"acceleration": os.environ["VM_ACCELERATION"]', workflow)
 
-    def test_trusted_release_proof_requires_all_mandatory_vm_qualification(self) -> None:
+    def test_trusted_release_proof_requires_all_mandatory_qualification(self) -> None:
         workflow = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(encoding="utf-8")
         self.assertEqual(workflow.count("uses: ./.github/workflows/vm-acceptance.yml"), 2)
         self.assertIn("observation-acceptance:", workflow)
@@ -163,13 +163,15 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("uses: ./.github/workflows/v05-executor-verifier-vm.yml", workflow)
         self.assertIn("managed-lifecycle-qualification:", workflow)
         self.assertIn("uses: ./.github/workflows/v06-managed-lifecycle-vm.yml", workflow)
+        self.assertIn("library-qualification:", workflow)
+        self.assertIn("uses: ./.github/workflows/v07-library-qualification.yml", workflow)
         self.assertIn("source_sha: ${{ github.sha }}", workflow)
         self.assertIn(
-            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification]",
+            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification]",
             workflow,
         )
         self.assertIn(
-            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, build]",
+            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, build]",
             workflow,
         )
         self.assertIn("needs.observation-acceptance.result == 'success'", workflow)
@@ -178,6 +180,19 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("needs.enospc-qualification.result == 'success'", workflow)
         self.assertIn("needs.executor-verifier-qualification.result == 'success'", workflow)
         self.assertIn("needs.managed-lifecycle-qualification.result == 'success'", workflow)
+        self.assertIn("needs.library-qualification.result == 'success'", workflow)
+
+    def test_v07_library_qualification_is_exact_source_and_machine_readable(self) -> None:
+        workflow = (ROOT / ".github/workflows/v07-library-qualification.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('SOURCE_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}', workflow)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$SOURCE_SHA"', workflow)
+        self.assertIn("cargo test --locked -p linura-library --lib", workflow)
+        self.assertIn("cargo test --locked -p linura-library --test v07_qualification", workflow)
+        self.assertIn("qualification.json", workflow)
+        self.assertIn("portable-roundtrip.sha256", workflow)
+        self.assertIn("imported_approval_or_executor_authority", workflow)
 
     def test_image_plan_is_available_without_mkarchiso(self) -> None:
         result = self.run_tool("python3", "tools/image.py", "plan")
