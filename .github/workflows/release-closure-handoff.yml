@@ -7,6 +7,10 @@ on:
         description: Independently verified release tag
         required: true
         type: string
+      source_sha:
+        description: Source SHA proven by the verification job from published evidence
+        required: true
+        type: string
       verification_run_id:
         description: Verify published release run ID to await and bind
         required: true
@@ -36,6 +40,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.tag }}
+      VERIFIED_SOURCE_SHA: ${{ inputs.source_sha }}
       VERIFICATION_RUN_ID: ${{ inputs.verification_run_id }}
       VERIFICATION_EVENT: ${{ inputs.verification_event }}
       VERIFICATION_REF: ${{ inputs.verification_ref }}
@@ -45,6 +50,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$VERIFIED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$VERIFICATION_RUN_ID" =~ ^[0-9]+$ ]]
           case "$VERIFICATION_EVENT" in
             workflow_dispatch|release|push) ;;
@@ -69,21 +75,21 @@ jobs:
           test "$(jq -r .event <<<"$verification")" = "$VERIFICATION_EVENT"
           test "$(jq -r .head_branch <<<"$verification")" = "$VERIFICATION_REF"
 
-          source_sha="$(git ls-remote "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$RELEASE_TAG" | awk '{print $1}')"
-          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
-          verification_sha="$(jq -r .head_sha <<<"$verification")"
+          tag_source_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          [[ "$tag_source_sha" =~ ^[0-9a-f]{40}$ ]]
+          test "$tag_source_sha" = "$VERIFIED_SOURCE_SHA"
 
           if [[ "$VERIFICATION_EVENT" == "push" ]]; then
             test "$VERIFICATION_REF" = "verify-release/$RELEASE_TAG"
-            # Recovery verification is already one push -> workflow_run hop, so the
-            # legacy Post Release Closure workflow_run trigger remains canonical here.
-            # Avoid a second explicit closure whose concurrency key would differ.
+            # Recovery verification already has a safe legacy workflow_run closure
+            # path. Do not create a second closure with a different concurrency key.
             printf 'mode=recovery-workflow-run\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          test "$VERIFICATION_REF" = "$RELEASE_TAG"
-          test "$verification_sha" = "$source_sha"
+          # workflow_dispatch --ref selects the workflow-file revision, not the release
+          # being verified. Binding comes from the verifier's validated tag + SOURCE_SHA
+          # outputs above, so a manual run from main remains valid.
           printf 'mode=exact-tag\n' >> "$GITHUB_OUTPUT"
 
       - name: Prefer already-materialized workflow_run closure
