@@ -29,6 +29,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      source_sha: ${{ steps.evidence.outputs.source_sha }}
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -59,18 +60,19 @@ jobs:
       - name: Download published assets
         run: gh release download "${{ steps.tag.outputs.tag }}" --dir published
       - name: Verify tag, evidence and published digests
+        id: evidence
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
           source_sha="$(cat published/SOURCE_SHA)"
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$source_sha"
           test "$(cat published/RELEASE_TAG)" = "$RELEASE_TAG"
           test -f published/linura-authorityd
-          # GitHub Release downloads are content blobs; executable mode is not a portable
-          # publication property. Integrity and membership are verified content-addressably below.
           python3 tools/release_contract.py verify --directory published --tag "$RELEASE_TAG" --source-sha "$source_sha"
           python3 tools/release_verify.py published
+          printf 'source_sha=%s\n' "$source_sha" >> "$GITHUB_OUTPUT"
       - name: Verify GitHub Release metadata equals canonical contract
         env:
           RELEASE_TAG: ${{ steps.tag.outputs.tag }}
@@ -117,15 +119,18 @@ jobs:
       - name: Dispatch verification-aware closure handoff
         env:
           RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+          VERIFIED_SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
           VERIFICATION_EVENT: ${{ github.event_name }}
           VERIFICATION_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$VERIFIED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           gh workflow run release-closure-handoff.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f tag="$RELEASE_TAG" \
+            -f source_sha="$VERIFIED_SOURCE_SHA" \
             -f verification_run_id="$GITHUB_RUN_ID" \
             -f verification_event="$VERIFICATION_EVENT" \
             -f verification_ref="$VERIFICATION_REF"
