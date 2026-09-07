@@ -43,14 +43,23 @@
 - [Update and release](update-release.md)
 - [Release contracts, claims and evidence](release-contracts.md)
 
-### Current v0.6.0 documentation set
+### Current v0.7.0 documentation set
+- [v0.7.0 milestone contract](milestones/v0.7.0.md)
+- [v0.7.0 qualification dossier](qualification/v0.7.0.md)
+- [v0.7.0 security qualification](qualification/v0.7.0-security.md)
+- [v0.7.0 release-preparation review](qualification/v0.7.0-release-review.md)
+- [v0.7.0 publication evidence](qualification/v0.7.0-publication.md)
+- [v0.7.0 frozen release contract](releases/v0.7.0.md)
+- [v0.7.0 terminal release record](releases/published-v0.7.0.md)
+
+### Prior release documentation
 - [v0.6.0 milestone contract](milestones/v0.6.0.md)
 - [v0.6.0 qualification dossier](qualification/v0.6.0.md)
 - [v0.6.0 security qualification](qualification/v0.6.0-security.md)
 - [v0.6.0 release-preparation review](qualification/v0.6.0-release-review.md)
-- [v0.6.0 release contract](releases/v0.6.0.md)
-
-### Prior release documentation
+- [v0.6.0 publication evidence](qualification/v0.6.0-publication.md)
+- [v0.6.0 frozen release contract](releases/v0.6.0.md)
+- [v0.6.0 terminal release record](releases/published-v0.6.0.md)
 - [v0.5.0 milestone contract](milestones/v0.5.0.md)
 - [v0.5.0 qualification dossier](qualification/v0.5.0.md)
 - [v0.5.0 security qualification](qualification/v0.5.0-security.md)
