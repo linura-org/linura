@@ -278,15 +278,14 @@ jobs:
             test "$(jq -r '.[0].baseRefName' <<<"$existing")" = "main"
             echo "reusing exact open closure PR #$number"
           elif [[ "$count" == "0" ]]; then
-            cat > "$RUNNER_TEMP/body.md" <<EOF
-            Automatic terminal bookkeeping for independently verified $RELEASE_TAG.
-
-            - generated only after successful Release Verification run \`$VERIFICATION_RUN_ID\`;
-            - exact closure head: \`$HEAD_SHA\`;
-            - synchronizes roadmap, terminal qualification and current-release documentation;
-            - leaves the frozen release contract and immutable release assets untouched;
-            - merges only after native exact-head CI/Security/CodeQL, a completed clean Codex review, and zero unresolved review threads.
-            EOF
+            {
+              printf 'Automatic terminal bookkeeping for independently verified %s.\n\n' "$RELEASE_TAG"
+              printf '%s\n' "- generated only after successful Release Verification run \`$VERIFICATION_RUN_ID\`;"
+              printf '%s\n' "- exact closure head: \`$HEAD_SHA\`;"
+              printf '%s\n' "- synchronizes roadmap, terminal qualification and current-release documentation;"
+              printf '%s\n' "- leaves the frozen release contract and immutable release assets untouched;"
+              printf '%s\n' "- merges only after native exact-head CI/Security/CodeQL, a completed clean Codex review, and zero unresolved review threads."
+            } > "$RUNNER_TEMP/body.md"
             url="$(gh pr create --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md")"
             number="${url##*/}"
           else
