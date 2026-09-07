@@ -32,6 +32,7 @@ EXPECTED_RULE_PACKAGES = {
     "linura-provenance",
     "linura-transaction",
     "linura-persistence-sqlite",
+    "linura-library",
     "linura-control",
     "linura-sdk",
     "linura-linux-observation",
