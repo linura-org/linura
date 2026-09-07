@@ -1,4 +1,4 @@
-name: Release Authorization
+name: Release Preparation
 
 on:
   push:
@@ -10,18 +10,17 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: release-authorization-${{ github.sha }}
+  group: release-preparation-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
   qualify:
-    name: qualify reviewed release preparation
-    if: "${{ startsWith(github.event.head_commit.message, 'release: prepare v') }}"
+    name: qualify reviewed release readiness
+    if: "${{ startsWith(github.event.head_commit.message, 'release: ready v') }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     outputs:
       source_sha: ${{ steps.qualify.outputs.source_sha }}
-      tree_sha: ${{ steps.qualify.outputs.tree_sha }}
       tag: ${{ steps.qualify.outputs.tag }}
       theme: ${{ steps.qualify.outputs.theme }}
     env:
@@ -34,7 +33,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
 
-      - name: Prove exact reviewed release-preparation source
+      - name: Prove exact protected-main release-readiness source
         id: qualify
         run: |
           set -euo pipefail
@@ -49,11 +48,11 @@ jobs:
 
           subject, output_path = sys.argv[1:]
           match = re.fullmatch(
-              r"release: prepare (?P<tag>v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)) (?P<theme>\S.*)",
+              r"release: ready (?P<tag>v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)) — (?P<theme>\S.*)",
               subject,
           )
           if match is None:
-              raise SystemExit(f"invalid release-preparation subject: {subject!r}")
+              raise SystemExit(f"invalid release-readiness subject: {subject!r}")
           with open(output_path, "a", encoding="utf-8") as handle:
               handle.write(f"source_sha={__import__('os').environ['SOURCE_SHA']}\n")
               handle.write(f"tag={match.group('tag')}\n")
@@ -71,31 +70,40 @@ jobs:
           tag, theme = sys.argv[1:]
           roadmap = tomllib.loads(pathlib.Path("contracts/roadmap.toml").read_text(encoding="utf-8"))
           if roadmap.get("next_release") != tag:
-              raise SystemExit(f"release preparation is not roadmap next_release: {tag} != {roadmap.get('next_release')}")
+              raise SystemExit(f"readiness tag is not roadmap next_release: {tag} != {roadmap.get('next_release')}")
           milestones = {item["version"]: item for item in roadmap["milestone"]}
           milestone = milestones.get(tag)
           if milestone is None or milestone.get("status") != "planned":
-              raise SystemExit(f"release-preparation milestone is not planned: {tag}")
+              raise SystemExit(f"readiness milestone is not planned: {tag}")
           if milestone.get("title") != theme:
               raise SystemExit(
-                  f"release-preparation theme does not equal roadmap title: {theme!r} != {milestone.get('title')!r}"
+                  f"readiness theme does not match roadmap title: {theme!r} != {milestone.get('title')!r}"
               )
+          required = [
+              milestone.get("milestone_contract"),
+              milestone.get("release_contract"),
+              milestone.get("qualification"),
+              f"docs/qualification/{tag}-security.md",
+              f"docs/qualification/{tag}-release-review.md",
+          ]
+          for value in required:
+              if not isinstance(value, str) or not pathlib.Path(value).is_file():
+                  raise SystemExit(f"release-readiness material is missing: {value!r}")
           PY
 
-          python3 tools/check_release_publication_stability.py
           python3 tools/check_roadmap.py .
+          python3 tools/check_release_publication_stability.py
           python3 tools/release_contract.py validate \
             --tag "$tag" \
-            --notes "docs/releases/${tag}.md" \
-            --require-workspace-version
+            --notes "docs/releases/${tag}.md"
 
           prs="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/commits/$SOURCE_SHA/pulls")"
-          pr_number="$(jq -r --arg sha "$SOURCE_SHA" --arg tag "$tag" '
+          pr_number="$(jq -r --arg sha "$SOURCE_SHA" --arg subject "$subject" '
             [.[] | select(
               .merged_at != null and
               .base.ref == "main" and
               .merge_commit_sha == $sha and
-              (.title | startswith("release: prepare " + $tag + " "))
+              .title == $subject
             )]
             | if length == 1 then .[0].number else empty end
           ' <<<"$prs")"
@@ -110,15 +118,6 @@ jobs:
               }
             }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length')"
           test "$unresolved" = "0"
-
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
-            echo "$tag already exists; refusing a new release authorization" >&2
-            exit 1
-          fi
-
-          tree_sha="$(git rev-parse "$SOURCE_SHA^{tree}")"
-          [[ "$tree_sha" =~ ^[0-9a-f]{40}$ ]]
-          printf 'tree_sha=%s\n' "$tree_sha" >> "$GITHUB_OUTPUT"
 
       - name: Require fresh protected-main CI, Security and CodeQL
         run: |
@@ -137,7 +136,7 @@ jobs:
               case "$state" in
                 success) ready=$((ready + 1)) ;;
                 active|missing) ;;
-                *) echo "$workflow failed for reviewed preparation $SOURCE_SHA" >&2; exit 1 ;;
+                *) echo "$workflow failed for release-readiness source $SOURCE_SHA" >&2; exit 1 ;;
               esac
             done
             if [[ "$ready" -eq 3 ]]; then
@@ -145,11 +144,11 @@ jobs:
             fi
             sleep 10
           done
-          echo "release-preparation fresh-main gates did not complete for $SOURCE_SHA" >&2
+          echo "fresh-main readiness gates did not complete for $SOURCE_SHA" >&2
           exit 1
 
-  authorize:
-    name: create, review and merge protected metadata-only authorization
+  prepare:
+    name: create, review and merge mechanical release preparation
     needs: qualify
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -161,7 +160,6 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}
       SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
-      TREE_SHA: ${{ needs.qualify.outputs.tree_sha }}
       RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
       RELEASE_THEME: ${{ needs.qualify.outputs.theme }}
     steps:
@@ -169,29 +167,47 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "$GH_TOKEN" ]]; then
-            echo "RELEASE_AUTOMATION_TOKEN is required so the protected authorization merge emits the push event consumed by release proof" >&2
+            echo "RELEASE_AUTOMATION_TOKEN is required so release-preparation pushes and merges emit downstream Actions events" >&2
             exit 1
           fi
 
-      - name: Create exact metadata-only authorization branch
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.qualify.outputs.source_sha }}
+          token: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}
+
+      - name: Build deterministic mechanical preparation
         id: candidate
         run: |
           set -euo pipefail
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$TREE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
 
-          source="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SOURCE_SHA")"
-          test "$(jq -r .tree.sha <<<"$source")" = "$TREE_SHA"
+          python3 tools/prepare_release.py --tag "$RELEASE_TAG"
+          python3 tools/check_roadmap.py .
+          python3 tools/check_release_publication_stability.py
+          python3 tools/release_contract.py validate \
+            --tag "$RELEASE_TAG" \
+            --notes "docs/releases/${RELEASE_TAG}.md" \
+            --require-workspace-version
+          cargo metadata --locked --no-deps --format-version 1 >/dev/null
+          git diff --check
 
-          branch="automation/release-authorization-${RELEASE_TAG}-${SOURCE_SHA:0:12}"
-          title="release: authorize $RELEASE_TAG"
+          mapfile -t changed < <(git diff --name-only)
+          test "${#changed[@]}" -eq 2
+          test "${changed[0]}" = "Cargo.lock"
+          test "${changed[1]}" = "Cargo.toml"
+
+          branch="automation/release-prep-${RELEASE_TAG}-${SOURCE_SHA:0:12}"
+          title="release: prepare $RELEASE_TAG $RELEASE_THEME"
+
           existing_json="$(gh pr list --state open --base main --json number,title,headRefName,headRefOid)"
           existing="$(jq -c --arg title "$title" '[.[] | select(.title == $title)] | first // empty' <<<"$existing_json")"
           if [[ -n "$existing" ]]; then
             existing_branch="$(jq -r .headRefName <<<"$existing")"
             if [[ "$existing_branch" != "$branch" ]]; then
-              echo "conflicting release-authorization PR already exists on $existing_branch" >&2
+              echo "conflicting release-preparation PR already exists on $existing_branch" >&2
               exit 1
             fi
             printf 'branch=%s\n' "$branch" >> "$GITHUB_OUTPUT"
@@ -204,47 +220,25 @@ jobs:
             gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
           fi
 
-          message="$(cat <<EOF
-          release: $RELEASE_TAG — $RELEASE_THEME
-
-          Authorize publication of the frozen $RELEASE_TAG release through Linura's protected proof-first, tag-last lifecycle. The reviewed release-preparation tree is unchanged.
-
-          Reviewed-Source: $SOURCE_SHA
-          Reviewed-Tree: $TREE_SHA
-          EOF
-          )"
-
-          commit_payload="$(jq -n \
-            --arg message "$message" \
-            --arg tree "$TREE_SHA" \
-            --arg parent "$SOURCE_SHA" \
-            '{message: $message, tree: $tree, parents: [$parent]}')"
-          authorization="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/commits" --input - <<<"$commit_payload")"
-          head_sha="$(jq -r .sha <<<"$authorization")"
-          [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
-          test "$(jq -r .tree.sha <<<"$authorization")" = "$TREE_SHA"
-          test "$(jq '.parents | length' <<<"$authorization")" = "1"
-          test "$(jq -r .parents[0].sha <<<"$authorization")" = "$SOURCE_SHA"
-
-          ref_payload="$(jq -n --arg ref "refs/heads/$branch" --arg sha "$head_sha" '{ref:$ref, sha:$sha}')"
-          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" --input - <<<"$ref_payload" >/dev/null
+          git switch -c "$branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "$title"
+          head_sha="$(git rev-parse HEAD)"
+          git push --set-upstream origin "$branch"
 
           cat > "$RUNNER_TEMP/body.md" <<EOF
-          Protected zero-diff authorization for the exact reviewed release-preparation source \`$SOURCE_SHA\`.
+          Deterministic mechanical preparation for reviewed release-readiness source \`$SOURCE_SHA\`.
 
-          - authorization head: \`$head_sha\`;
-          - reviewed tree: \`$TREE_SHA\`;
-          - exactly one parent: the reviewed release-preparation source;
-          - zero changed files by construction;
-          - merge is allowed only after exact-head canonical checks and a clean Codex review;
-          - the squash result must remain tree-identical and record exact \`Reviewed-Source\` / \`Reviewed-Tree\` trailers.
+          This PR changes exactly \`Cargo.toml\` and \`Cargo.lock\` to advance the workspace to $RELEASE_TAG. Product claims, qualification narratives, authority boundaries and roadmap release state were already reviewed on the preceding \`release: ready\` source and are not authored by this automation.
+
+          Merge is automatic only after exact-head CI/Security/CodeQL and a clean exact-head Codex review. Any review finding or source drift fails closed.
           EOF
+
           url="$(gh pr create --base main --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/body.md")"
           pr_number="${url##*/}"
           [[ "$pr_number" =~ ^[0-9]+$ ]]
-
-          changed_files="$(gh pr view "$pr_number" --json changedFiles --jq .changedFiles)"
-          test "$changed_files" = "0"
 
           printf 'branch=%s\n' "$branch" >> "$GITHUB_OUTPUT"
           printf 'pr_number=%s\n' "$pr_number" >> "$GITHUB_OUTPUT"
@@ -269,7 +263,7 @@ jobs:
           payload="$(gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
             -f body="@codex review
 
-          Please review the exact zero-diff release-authorization head \`$HEAD_SHA\`. Verify that it is metadata-only, single-parent and tree-identical to the reviewed release-preparation source, and that automatic merge remains behind protected-main checks. Report any issue before merge.")"
+          Please review the exact mechanical release-preparation head \`$HEAD_SHA\`. It must change only Cargo.toml/Cargo.lock, preserve the already-reviewed release claim, and keep every release-control boundary fail-closed. Report any issue before automatic merge.")"
           comment_id="$(jq -r .id <<<"$payload")"
           [[ "$comment_id" =~ ^[0-9]+$ ]]
           printf 'comment_id=%s\n' "$comment_id" >> "$GITHUB_OUTPUT"
@@ -283,8 +277,8 @@ jobs:
         run: |
           set -euo pipefail
           for _ in $(seq 1 360); do
-            test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
-            test "$(gh pr view "$PR_NUMBER" --json changedFiles --jq .changedFiles)" = "0"
+            actual_head="$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)"
+            test "$actual_head" = "$HEAD_SHA"
 
             checks_ready=1
             for workflow in ci.yml security.yml codeql.yml; do
@@ -296,7 +290,7 @@ jobs:
               case "$state" in
                 success) ;;
                 failure|cancelled|timed_out|action_required|startup_failure|stale)
-                  echo "$workflow failed for exact authorization head $HEAD_SHA: $state" >&2
+                  echo "$workflow failed for exact preparation head $HEAD_SHA: $state" >&2
                   exit 1
                   ;;
                 *) checks_ready=0 ;;
@@ -311,10 +305,12 @@ jobs:
                   }
                 }
               }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length')"
+
             reviews="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100")"
             exact_codex_review="$(jq -r --arg sha "$HEAD_SHA" '
               any(.[]; (.user.login | startswith("chatgpt-codex-connector")) and .commit_id == $sha)
             ' <<<"$reviews")"
+
             reactions="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions")"
             codex_clean_reaction="$(jq -r '
               any(.[]; (.user.login | startswith("chatgpt-codex-connector")) and .content == "+1")
@@ -325,10 +321,11 @@ jobs:
             fi
             sleep 10
           done
-          echo "release-authorization checks/review did not reach a clean terminal state" >&2
+
+          echo "release-preparation checks/review did not reach a clean terminal state" >&2
           exit 1
 
-      - name: Squash merge exact authorization through protected main
+      - name: Squash merge through protected main at the exact reviewed head
         id: merge
         env:
           PR_NUMBER: ${{ steps.candidate.outputs.pr_number }}
@@ -338,58 +335,43 @@ jobs:
           set -euo pipefail
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
           test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
-          test "$(gh pr view "$PR_NUMBER" --json changedFiles --jq .changedFiles)" = "0"
 
-          commit_title="release: $RELEASE_TAG — $RELEASE_THEME"
-          commit_message="$(cat <<EOF
-          Authorize publication of the frozen $RELEASE_TAG release through Linura's protected proof-first, tag-last lifecycle. The reviewed release-preparation tree is unchanged.
-
-          Reviewed-Source: $SOURCE_SHA
-          Reviewed-Tree: $TREE_SHA
-          EOF
-          )"
+          title="release: prepare $RELEASE_TAG $RELEASE_THEME"
+          body="Mechanical release preparation for reviewed source $SOURCE_SHA. Product claims are unchanged."
           result="$(gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
             -f merge_method=squash \
             -f sha="$HEAD_SHA" \
-            -f commit_title="$commit_title" \
-            -f commit_message="$commit_message")"
+            -f commit_title="$title" \
+            -f commit_message="$body")"
           test "$(jq -r .merged <<<"$result")" = "true"
-          authorization_sha="$(jq -r .sha <<<"$result")"
-          [[ "$authorization_sha" =~ ^[0-9a-f]{40}$ ]]
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$authorization_sha"
-
-          authorization="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$authorization_sha")"
-          test "$(jq -r .tree.sha <<<"$authorization")" = "$TREE_SHA"
-          test "$(jq '.parents | length' <<<"$authorization")" = "1"
-          test "$(jq -r .parents[0].sha <<<"$authorization")" = "$SOURCE_SHA"
-          message="$(jq -r .message <<<"$authorization")"
-          test "$(head -n1 <<<"$message")" = "$commit_title"
-          grep -Fx "Reviewed-Source: $SOURCE_SHA" <<<"$message"
-          grep -Fx "Reviewed-Tree: $TREE_SHA" <<<"$message"
+          main_sha="$(jq -r .sha <<<"$result")"
+          [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$main_sha"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/$main_sha" --jq '.commit.message | split("\n")[0]')" = "$title"
 
           gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" >/dev/null 2>&1 || true
-          printf 'authorization_sha=%s\n' "$authorization_sha" >> "$GITHUB_OUTPUT"
+          printf 'main_sha=%s\n' "$main_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Require authorization push gates to materialize
+      - name: Require fresh-main gates to materialize
         env:
-          AUTHORIZATION_SHA: ${{ steps.merge.outputs.authorization_sha }}
+          MAIN_SHA: ${{ steps.merge.outputs.main_sha }}
         run: |
           set -euo pipefail
           for _ in $(seq 1 30); do
-            runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$AUTHORIZATION_SHA&event=push&per_page=100")"
+            runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$MAIN_SHA&event=push&per_page=100")"
             present=0
             for workflow in CI Security CodeQL; do
-              if jq -e --arg workflow "$workflow" --arg sha "$AUTHORIZATION_SHA" '
+              if jq -e --arg workflow "$workflow" --arg sha "$MAIN_SHA" '
                 any(.workflow_runs[]; .name == $workflow and .head_sha == $sha and .event == "push")
               ' <<<"$runs" >/dev/null; then
                 present=$((present + 1))
               fi
             done
             if [[ "$present" -eq 3 ]]; then
-              echo "fresh authorization push gates materialized for $AUTHORIZATION_SHA"
+              echo "fresh-main preparation gates materialized for $MAIN_SHA"
               exit 0
             fi
             sleep 2
           done
-          echo "authorization merge succeeded but push-triggered CI/Security/CodeQL did not materialize" >&2
+          echo "release-preparation merge succeeded but fresh-main CI/Security/CodeQL did not materialize" >&2
           exit 1
