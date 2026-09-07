@@ -90,6 +90,7 @@ jobs:
             --require-workspace-version
 
           prs="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/commits/$SOURCE_SHA/pulls")"
+          # shellcheck disable=SC2016
           pr_number="$(jq -r --arg sha "$SOURCE_SHA" --arg tag "$tag" '
             [.[] | select(
               .merged_at != null and
@@ -101,6 +102,7 @@ jobs:
           ' <<<"$prs")"
           [[ "$pr_number" =~ ^[0-9]+$ ]]
 
+          # shellcheck disable=SC2016
           unresolved="$(gh api graphql -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F number="$pr_number" -f query='
             query($owner:String!, $name:String!, $number:Int!) {
               repository(owner:$owner, name:$name) {
@@ -187,6 +189,7 @@ jobs:
           branch="automation/release-authorization-${RELEASE_TAG}-${SOURCE_SHA:0:12}"
           title="release: authorize $RELEASE_TAG"
           existing_json="$(gh pr list --state open --base main --json number,title,headRefName,headRefOid)"
+          # shellcheck disable=SC2016
           existing="$(jq -c --arg title "$title" '[.[] | select(.title == $title)] | first // empty' <<<"$existing_json")"
           if [[ -n "$existing" ]]; then
             existing_branch="$(jq -r .headRefName <<<"$existing")"
@@ -194,9 +197,12 @@ jobs:
               echo "conflicting release-authorization PR already exists on $existing_branch" >&2
               exit 1
             fi
-            printf 'branch=%s\n' "$branch" >> "$GITHUB_OUTPUT"
-            printf 'pr_number=%s\n' "$(jq -r .number <<<"$existing")" >> "$GITHUB_OUTPUT"
-            printf 'head_sha=%s\n' "$(jq -r .headRefOid <<<"$existing")" >> "$GITHUB_OUTPUT"
+            {
+              printf 'branch=%s\n' "$branch"
+              printf 'pr_number=%s\n' "$(jq -r .number <<<"$existing")"
+              printf 'head_sha=%s\n' "$(jq -r .headRefOid <<<"$existing")"
+              printf 'created=false\n'
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -246,9 +252,12 @@ jobs:
           changed_files="$(gh pr view "$pr_number" --json changedFiles --jq .changedFiles)"
           test "$changed_files" = "0"
 
-          printf 'branch=%s\n' "$branch" >> "$GITHUB_OUTPUT"
-          printf 'pr_number=%s\n' "$pr_number" >> "$GITHUB_OUTPUT"
-          printf 'head_sha=%s\n' "$head_sha" >> "$GITHUB_OUTPUT"
+          {
+            printf 'branch=%s\n' "$branch"
+            printf 'pr_number=%s\n' "$pr_number"
+            printf 'head_sha=%s\n' "$head_sha"
+            printf 'created=true\n'
+          } >> "$GITHUB_OUTPUT"
 
       - name: Dispatch exact-head canonical checks
         env:
@@ -303,6 +312,7 @@ jobs:
               esac
             done
 
+            # shellcheck disable=SC2016
             unresolved="$(gh api graphql -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER" -f query='
               query($owner:String!, $name:String!, $number:Int!) {
                 repository(owner:$owner, name:$name) {
@@ -312,6 +322,7 @@ jobs:
                 }
               }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length')"
             reviews="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100")"
+            # shellcheck disable=SC2016
             exact_codex_review="$(jq -r --arg sha "$HEAD_SHA" '
               any(.[]; (.user.login | startswith("chatgpt-codex-connector")) and .commit_id == $sha)
             ' <<<"$reviews")"

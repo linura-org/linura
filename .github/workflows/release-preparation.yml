@@ -98,6 +98,7 @@ jobs:
             --notes "docs/releases/${tag}.md"
 
           prs="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/commits/$SOURCE_SHA/pulls")"
+          # shellcheck disable=SC2016
           pr_number="$(jq -r --arg sha "$SOURCE_SHA" --arg subject "$subject" '
             [.[] | select(
               .merged_at != null and
@@ -109,6 +110,7 @@ jobs:
           ' <<<"$prs")"
           [[ "$pr_number" =~ ^[0-9]+$ ]]
 
+          # shellcheck disable=SC2016
           unresolved="$(gh api graphql -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F number="$pr_number" -f query='
             query($owner:String!, $name:String!, $number:Int!) {
               repository(owner:$owner, name:$name) {
@@ -125,6 +127,7 @@ jobs:
           for _ in $(seq 1 180); do
             runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SOURCE_SHA&event=push&per_page=100")"
             ready=0
+            active=0
             for workflow in CI Security CodeQL; do
               state="$(jq -r --arg workflow "$workflow" '
                 [.workflow_runs[] | select(.name == $workflow and .head_sha == env.SOURCE_SHA and .event == "push")]
@@ -135,7 +138,7 @@ jobs:
               ' <<<"$runs")"
               case "$state" in
                 success) ready=$((ready + 1)) ;;
-                active|missing) ;;
+                active|missing) active=1 ;;
                 *) echo "$workflow failed for release-readiness source $SOURCE_SHA" >&2; exit 1 ;;
               esac
             done
@@ -203,6 +206,7 @@ jobs:
           title="release: prepare $RELEASE_TAG $RELEASE_THEME"
 
           existing_json="$(gh pr list --state open --base main --json number,title,headRefName,headRefOid)"
+          # shellcheck disable=SC2016
           existing="$(jq -c --arg title "$title" '[.[] | select(.title == $title)] | first // empty' <<<"$existing_json")"
           if [[ -n "$existing" ]]; then
             existing_branch="$(jq -r .headRefName <<<"$existing")"
@@ -210,9 +214,12 @@ jobs:
               echo "conflicting release-preparation PR already exists on $existing_branch" >&2
               exit 1
             fi
-            printf 'branch=%s\n' "$branch" >> "$GITHUB_OUTPUT"
-            printf 'pr_number=%s\n' "$(jq -r .number <<<"$existing")" >> "$GITHUB_OUTPUT"
-            printf 'head_sha=%s\n' "$(jq -r .headRefOid <<<"$existing")" >> "$GITHUB_OUTPUT"
+            {
+              printf 'branch=%s\n' "$branch"
+              printf 'pr_number=%s\n' "$(jq -r .number <<<"$existing")"
+              printf 'head_sha=%s\n' "$(jq -r .headRefOid <<<"$existing")"
+              printf 'created=false\n'
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -240,9 +247,12 @@ jobs:
           pr_number="${url##*/}"
           [[ "$pr_number" =~ ^[0-9]+$ ]]
 
-          printf 'branch=%s\n' "$branch" >> "$GITHUB_OUTPUT"
-          printf 'pr_number=%s\n' "$pr_number" >> "$GITHUB_OUTPUT"
-          printf 'head_sha=%s\n' "$head_sha" >> "$GITHUB_OUTPUT"
+          {
+            printf 'branch=%s\n' "$branch"
+            printf 'pr_number=%s\n' "$pr_number"
+            printf 'head_sha=%s\n' "$head_sha"
+            printf 'created=true\n'
+          } >> "$GITHUB_OUTPUT"
 
       - name: Dispatch exact-head canonical checks
         env:
@@ -276,6 +286,9 @@ jobs:
           REVIEW_COMMENT_ID: ${{ steps.review_request.outputs.comment_id }}
         run: |
           set -euo pipefail
+
+          checks_ready=0
+          review_ready=0
           for _ in $(seq 1 360); do
             actual_head="$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)"
             test "$actual_head" = "$HEAD_SHA"
@@ -297,6 +310,7 @@ jobs:
               esac
             done
 
+            # shellcheck disable=SC2016
             unresolved="$(gh api graphql -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER" -f query='
               query($owner:String!, $name:String!, $number:Int!) {
                 repository(owner:$owner, name:$name) {
@@ -307,6 +321,7 @@ jobs:
               }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length')"
 
             reviews="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100")"
+            # shellcheck disable=SC2016
             exact_codex_review="$(jq -r --arg sha "$HEAD_SHA" '
               any(.[]; (.user.login | startswith("chatgpt-codex-connector")) and .commit_id == $sha)
             ' <<<"$reviews")"
@@ -316,7 +331,13 @@ jobs:
               any(.[]; (.user.login | startswith("chatgpt-codex-connector")) and .content == "+1")
             ' <<<"$reactions")"
 
-            if [[ "$checks_ready" -eq 1 && "$unresolved" == "0" && ( "$exact_codex_review" == "true" || "$codex_clean_reaction" == "true" ) ]]; then
+            if [[ "$unresolved" == "0" && ( "$exact_codex_review" == "true" || "$codex_clean_reaction" == "true" ) ]]; then
+              review_ready=1
+            else
+              review_ready=0
+            fi
+
+            if [[ "$checks_ready" -eq 1 && "$review_ready" -eq 1 ]]; then
               exit 0
             fi
             sleep 10
@@ -330,7 +351,6 @@ jobs:
         env:
           PR_NUMBER: ${{ steps.candidate.outputs.pr_number }}
           HEAD_SHA: ${{ steps.candidate.outputs.head_sha }}
-          BRANCH: ${{ steps.candidate.outputs.branch }}
         run: |
           set -euo pipefail
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
@@ -349,7 +369,7 @@ jobs:
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$main_sha"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/$main_sha" --jq '.commit.message | split("\n")[0]')" = "$title"
 
-          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" >/dev/null 2>&1 || true
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/${{ steps.candidate.outputs.branch }}" >/dev/null 2>&1 || true
           printf 'main_sha=%s\n' "$main_sha" >> "$GITHUB_OUTPUT"
 
       - name: Require fresh-main gates to materialize
