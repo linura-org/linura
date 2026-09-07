@@ -19,6 +19,8 @@ This document extends the canonical [`threat-model.md`](threat-model.md) for rep
 - modification of an already-open automation PR before a retry reuses it;
 - stale-source races where `main` advances between qualification and mutation;
 - GitHub token-recursion assumptions that silently suppress downstream workflow events;
+- a merge racing an outstanding review that later reports a valid finding;
+- manually dispatched checks being mistaken for the native PR-associated required checks expected by the ruleset;
 - duplicate release-verification/closure triggers racing the same terminal bookkeeping;
 - forged PR title/comment/reaction intended to look like release readiness or review completion;
 - repository automation/operator error that attempts to bypass the protected-main ruleset;
@@ -28,7 +30,7 @@ This document extends the canonical [`threat-model.md`](threat-model.md) for rep
 
 The dedicated release automation credential is a repository-delivery capability, not release-publication authority. Jobs receive it only when they must create/update release-scoped branches, create PRs/comments, dispatch Actions, or merge an already-qualified PR. Read-only qualification, proof and verification stages use narrower credentials.
 
-The credential must not be configured as a protected-main bypass actor. Every preparation, authorization and closure mutation reaches `main` through the normal PR ruleset and required status checks.
+The credential must not be configured as a protected-main bypass actor. Every preparation, authorization and closure mutation reaches `main` through the normal PR ruleset and required status checks/review.
 
 The credential has no direct version-tag/GitHub-Release publication role. Tag-last publication remains isolated in the Release workflow after exact-source Trusted Release Proof and Promotion/readiness succeed.
 
@@ -54,17 +56,23 @@ Every source-bound handoff rechecks current protected `main` immediately before 
 
 ### Event-recursion failure
 
-GitHub's repository `GITHUB_TOKEN` is not treated as a recursive workflow trigger. Preparation/authorization merges use the dedicated credential because their resulting protected-main pushes must emit downstream Actions events. The automation then explicitly requires CI/Security/CodeQL runs for the resulting SHA to materialize. Missing downstream runs are a visible failure.
+GitHub's repository `GITHUB_TOKEN` is not treated as a recursive workflow trigger for any mutation handoff. Preparation/authorization merges and post-release closure branch/PR creation use the dedicated credential because their resulting push or `pull_request` events must emit downstream Actions runs.
 
-### Review spoofing
+Post Release Closure specifically requires native `pull_request` CI/Security/CodeQL runs on the exact closure head before merge. Separately dispatched workflow runs can supplement diagnostics but cannot substitute for those PR-associated required checks. After the protected closure merge, native `push` CI/Security/CodeQL must materialize for the exact new `main` SHA. Missing downstream runs are a visible failure.
 
-Automation requests Codex review for the exact candidate SHA and requires exact-head canonical checks, zero unresolved review threads, and a review/reaction attributable to the configured Codex integration before merge. The candidate SHA and semantic identity are revalidated after review and immediately before merge, preventing a post-review head substitution.
+### Review spoofing and late-review race
+
+Automation requests Codex review for the exact candidate SHA and requires exact-head canonical checks, zero unresolved review threads, and a review/reaction attributable to the configured Codex integration before merge. A green check set is not sufficient while the requested review is still outstanding.
+
+The candidate SHA and semantic identity are revalidated after review and immediately before merge, preventing both post-review head substitution and the late-review race where a PR is merged seconds before a valid finding arrives. Any new candidate commit requires a new exact-head review.
 
 ### Verification and closure duplication
 
 Normal Release explicitly dispatches `Verify published release` from the exact release tag, so the verifier executes the workflow definition frozen in the immutable release source. Manual `workflow_dispatch` verification is rejected unless its workflow ref equals the requested tag. Emergency verification is accepted only from the authenticated `verify-release/vX.Y.Z` recovery branch with the existing marker-only/single-parent/workflow-definition checks.
 
 There is exactly one terminal handoff: successful verification → `Release Closure Handoff` → dispatch-only `Post Release Closure`. The handoff polls the exact verifier run until terminal success and binds its tag/source/event/ref before closure. No legacy `workflow_run` closure trigger competes with it.
+
+Closure synchronizes terminal qualification/current-release documents and the human-facing `docs/releases/published-vX.Y.Z.md` record while preserving the frozen release contract byte-for-byte. Unknown terminal qualification rows or unexpected `docs/releases/` mutations fail closed.
 
 ### Credential compromise
 
@@ -74,7 +82,7 @@ If repository policy accidentally grants the token protected-main bypass or tag/
 
 ### Rotation, revocation and permission drift
 
-Loss or revocation of the credential intentionally stops preparation/authorization/closure at a visible fail-closed boundary. Promotion proves the effective closure credential has the required Contents, PR and Actions capabilities before immutable publication is allowed. Operators must rotate/revoke the token through GitHub secret management rather than embedding credentials in source, logs, artifacts, release evidence, model context, or Linura portable state.
+Loss or revocation of the credential intentionally stops preparation/authorization/closure at a visible fail-closed boundary. Promotion requires the dedicated closure credential and proves its effective Contents, PR and Actions capabilities before immutable publication is allowed. There is no `GITHUB_TOKEN` fallback. Operators must rotate/revoke the token through GitHub secret management rather than embedding credentials in source, logs, artifacts, release evidence, model context, or Linura portable state.
 
 ## Residual risk
 
