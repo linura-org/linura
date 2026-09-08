@@ -40,46 +40,50 @@ class PostReleaseReviewSecurityTests(unittest.TestCase):
         self.assertNotIn('startswith("chatgpt-codex-connector")', workflow)
 
         for block in (self._poll_block(), self._merge_block()):
-            # Review threads use GraphQL cursor pagination. Review submissions,
-            # request-comment reactions, and PR-level reactions are independent
-            # REST collections and all must paginate before evidence is evaluated.
+            # Review threads use GraphQL cursor pagination. Submitted reviews and
+            # clean review comments are independent REST collections and both
+            # must be fully paginated before exact-head evidence is evaluated.
             self.assertIn("gh api graphql --paginate", block)
-            self.assertGreaterEqual(block.count("gh api --paginate"), 3)
+            self.assertGreaterEqual(block.count("gh api --paginate"), 2)
             self.assertIn("pulls/$PR_NUMBER/reviews?per_page=100", block)
-            self.assertIn("issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100", block)
-            self.assertIn("issues/$PR_NUMBER/reactions?per_page=100", block)
+            self.assertIn("issues/$PR_NUMBER/comments?per_page=100", block)
             self.assertGreaterEqual(block.count("jq -s -r"), 2)
             self.assertGreaterEqual(block.count('--argjson bot_id "$CODEX_BOT_USER_ID"'), 2)
             self.assertGreaterEqual(block.count(".user.id == $bot_id"), 2)
             self.assertIn(".commit_id == $sha", block)
-            self.assertIn('.content == "+1"', block)
+            self.assertIn('contains("Codex Review: Didn")', block)
+            self.assertIn('contains("major issues")', block)
 
-    def test_review_and_reaction_completion_sources_are_fully_paginated(self) -> None:
+    def test_review_and_clean_comment_completion_sources_are_fully_paginated(self) -> None:
         for block in (self._poll_block(), self._merge_block()):
             self.assertIn(
                 'gh api --paginate -H \'Accept: application/vnd.github+json\' \\\n              "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100"',
                 block,
             )
             self.assertIn(
-                '"repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100"',
+                'gh api --paginate -H \'Accept: application/vnd.github+json\' \\\n              "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100"',
                 block,
             )
-            self.assertIn(
-                '"repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/reactions?per_page=100"',
-                block,
-            )
-            self.assertGreaterEqual(block.count("--jq '.[]'"), 3)
+            self.assertGreaterEqual(block.count("--jq '.[]'"), 2)
+            self.assertNotIn("/reactions?", block)
 
-    def test_clean_reactions_are_bound_to_this_exact_head_request(self) -> None:
+    def test_clean_comments_are_intrinsically_bound_to_the_exact_head(self) -> None:
         request = self._request_block()
-        self.assertIn('requested_at="$(jq -r .created_at <<<"$payload")"', request)
-        self.assertIn("printf 'requested_at=%s\\n'", request)
+        self.assertIn("@codex review", request)
+        self.assertIn("$HEAD_SHA", request)
+        self.assertNotIn("REVIEW_REQUESTED_AT", request)
+        self.assertNotIn("REVIEW_COMMENT_ID", request)
 
         for block in (self._poll_block(), self._merge_block()):
-            self.assertIn("REVIEW_REQUESTED_AT: ${{ steps.review_request.outputs.requested_at }}", block)
-            self.assertIn('--arg requested_at "$REVIEW_REQUESTED_AT"', block)
-            self.assertIn('(.created_at // "") >= $requested_at', block)
-            self.assertIn("issues/$PR_NUMBER/reactions?per_page=100", block)
+            self.assertIn("has_clean_codex_comment", block)
+            self.assertIn("Reviewed commit:", block)
+            self.assertIn("[0-9a-f]{10,40}", block)
+            self.assertIn("$sha | startswith($prefix)", block)
+            self.assertIn(".user.id == $bot_id", block)
+            self.assertNotIn("REVIEW_REQUESTED_AT", block)
+            self.assertNotIn("REVIEW_COMMENT_ID", block)
+            self.assertNotIn("codex_clean_reaction", block)
+            self.assertNotIn("/reactions?", block)
 
     def test_cleanup_queries_each_candidate_for_open_pull_requests(self) -> None:
         cleanup = self._cleanup_block()
