@@ -10,33 +10,37 @@ v0.7 already provides durable intent and Library state. v0.6 already provides th
 
 ## Decision
 
-Linura represents model-assisted interpretation as a typed, versioned `IntentProposal` that is always untrusted until deterministic validation and explicit acceptance.
+Linura represents model-assisted interpretation as a typed, versioned `IntentProposal` that is always untrusted until deterministic validation and an independently authenticated and authorized acceptance operation.
 
 ### Canonical proposal envelope
 
 The canonical proposal carries only proposal-domain data:
 
 - schema version and stable proposal identity;
-- the actor on whose behalf interpretation was requested;
+- the actor on whose behalf interpretation was requested as provenance, never authentication authority;
 - normalized requested outcome and typed requirements;
 - explicit capability references, assumptions and unresolved questions;
 - bounded confidence/uncertainty metadata;
 - provider, model and adapter identity without credentials;
-- a digest-bound interpretation context containing the authoritative-context revision and semantic input digest;
+- a digest-bound interpretation context containing a Control-minted authority-context revision and semantic input digest;
 - non-authoritative explanation/advisory material;
 - a canonical digest computed from the complete authority-relevant proposal representation.
 
-The proposal cannot carry an approval record, dispatch permit, privileged executor handle, policy decision or unrestricted command/tool request. Text that claims any of those things remains ordinary untrusted text.
+The proposal cannot carry an authenticated principal, approval record, dispatch permit, privileged executor handle, policy decision or unrestricted command/tool request. Text that claims any of those things remains ordinary untrusted text.
 
 ### Context binding and staleness
 
-Interpretation is requested against an explicit `InterpretationContextBinding`. The binding contains a caller-supplied context revision plus a canonical digest over the semantic context projection that was provided to the interpreter. Acceptance must re-prove the same context binding, or reject the proposal as stale.
+Interpretation is requested against an explicit `InterpretationContextBinding` minted by trusted Linura Control from the authoritative revisions used to construct the semantic context projection. The binding contains an opaque Control-owned context revision plus a canonical digest over the minimized semantic projection supplied to the interpreter.
 
-A context revision is an opaque Linura-owned token. Providers may echo it but cannot create authoritative freshness. Provider-local timestamps or confidence scores are not substitutes for the caller-owned binding.
+The agent runtime, client and provider may transport or echo that binding, but none of them may mint or advance authoritative freshness. At acceptance, Linura Control must derive the current authoritative binding again from the current observation, policy, Library, capability-registry and existing-intent revisions relevant to the proposal and require an exact match. Replaying an old but internally consistent revision/digest therefore fails closed when any authority-bearing dependency has changed.
+
+Provider-local timestamps, model confidence, caller-generated revisions and client assertions are not substitutes for the Control-owned binding.
 
 ### Provider-neutral contract
 
-Provider adapters implement a transport-neutral interpretation interface. The request contains bounded semantic input, actor identity, context binding and explicit resource/output budgets. The response contains a structured proposal candidate and provider metadata. Provider-specific HTTP, RPC, model, streaming, tool-call and authentication details do not enter the canonical intent model.
+Provider adapters implement a transport-neutral interpretation interface. The request contains bounded, data-minimized semantic input, actor provenance, the Control-minted context binding and explicit resource/output budgets. The response contains a structured proposal candidate and provider metadata. Provider-specific HTTP, RPC, model, streaming, tool-call and authentication details do not enter the canonical intent model.
+
+Before any adapter receives an interpretation request, Linura must exclude secret values, privileged tokens, authority credentials and other protected secret-bearing fields from the semantic projection. Where semantics require a secret dependency, only a protected reference/handle or explicitly non-secret metadata may cross the provider boundary. A hosted adapter must never receive a secret merely because the caller included it in retrieved context or Library data.
 
 Adapters declare whether they require network access and which interpretation protocol/schema versions they support. Offline mode must never invoke a network-required adapter.
 
@@ -48,7 +52,7 @@ The runtime validates the complete provider result before exposing it as a valid
 
 ### Manual operation
 
-Agent-native does not mean agent-dependent. A deterministic manual interpreter path accepts already-typed user input and constructs the same validated `IntentProposal` contract without a model provider or network dependency.
+Agent-native does not mean agent-dependent. A deterministic manual interpreter path accepts already-typed user input and constructs the same validated `IntentProposal` contract without a model provider or network dependency. Manual construction does not weaken the later authenticated-principal, Control-context, registry or authorization checks.
 
 ### Advice and disagreement
 
@@ -56,26 +60,37 @@ Specialists/advisors return separately attributed advisory records. Advice is ne
 
 ### Acceptance boundary
 
-Acceptance is a separate deterministic operation. It:
+Acceptance is a separate trusted Control operation. Proposal fields are evidence/input only; they do not authenticate or authorize the caller. Acceptance must:
 
-1. validates proposal schema and canonical digest;
-2. re-proves actor and context binding;
-3. validates referenced capabilities against a caller-supplied local capability set;
-4. rejects unsupported, contradictory or stale proposal material;
-5. converts the proposal into a normal `Intent` in `Proposed` state;
-6. hands that typed intent to the existing durable v0.7 persistence/idempotency path.
+1. validate proposal schema, version and canonical digest;
+2. obtain the authenticated `Principal` from the trusted transport/session boundary and verify that principal independently of the proposal's actor provenance;
+3. require the applicable Control-owned human/policy decision authorizing that authenticated principal to create or revise durable intent;
+4. validate the claimed actor provenance against the authenticated request context without treating actor equality as authorization;
+5. derive the current authority-context binding inside Control and require an exact match with the proposal binding;
+6. resolve every capability reference against the current Control-owned local capability registry, failing closed if the registry, capability or support state is unavailable or unsupported;
+7. reject contradictory, ambiguous, stale, substituted or otherwise unsupported proposal material;
+8. convert the accepted proposal into a normal `Intent` in `Proposed` state;
+9. atomically persist the intent transition together with an exact proposal-acceptance record before reporting success.
 
-Acceptance itself grants no approval or execution authority. Any machine mutation still traverses the existing observe → plan → validate → authorize → prepare → execute → verify → commit → audit → reconcile lifecycle.
+The durable acceptance record must bind at least the authenticated principal, proposal ID, canonical proposal digest, accepted Control context binding, durable operation identity, resulting `IntentId` and resulting intent revision. Exact retry of the same acceptance is idempotent and returns the same result. Reuse of the same proposal/operation identity with a different principal, proposal digest, context binding, intent identity or revision fails closed as a conflict. A lost response after commit therefore cannot create a second intent or erase proposal-to-intent provenance.
+
+This requires a dedicated v0.8 acceptance transaction/path built on the v0.7 durable Library/idempotency substrate; calling the pre-existing `create_intent` operation alone is not sufficient evidence of proposal acceptance.
+
+Acceptance itself grants no machine-mutation approval or execution authority. Any later machine mutation still traverses the existing observe → plan → validate → authorize → prepare → execute → verify → commit → audit → reconcile lifecycle.
 
 ### Secret and diagnostic boundary
 
-Provider credentials remain adapter-private. Canonical requests/proposals and public errors contain no credential material. The runtime bounds diagnostics and may expose stable error categories without copying arbitrary provider response bodies into audit/state surfaces.
+Provider credentials remain adapter-private. Secret values, privileged tokens, authority credentials and protected Library/observation fields are excluded before interpretation requests are formed. Only protected references/handles or deliberately non-secret projections may be supplied when needed for semantics.
+
+Canonical requests/proposals and public errors contain no credential material. The runtime bounds diagnostics and exposes stable error categories without copying arbitrary provider response bodies, prompts or secret-bearing context into audit/state surfaces.
 
 ## Consequences
 
 - `linura-intent` owns the canonical proposal types, validation and digest semantics.
-- `linura-agent-runtime` owns deterministic interpretation orchestration and manual operation.
+- `linura-agent-runtime` owns deterministic interpretation orchestration and manual operation, but not freshness, capability-registry or acceptance authority.
 - `linura-provider-sdk` owns provider-neutral adapter contracts, not model authority.
+- Linura Control owns authenticated-principal binding, current authority-context derivation, capability-registry resolution and the applicable acceptance authorization decision.
+- the durable Library acceptance path owns the atomic exact proposal-to-intent idempotency/provenance record while preserving the v0.7 durability model.
 - provider implementations may be local, hosted or enterprise-managed without changing the canonical proposal/authority model.
 - v0.8 can be qualified with deterministic mock/replay adapters without depending on a live external model service.
 - adding autonomous tool or executor authority in a future release requires a new explicit authority decision; it cannot be inferred from this ADR.
