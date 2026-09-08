@@ -312,14 +312,15 @@ Acceptance commits durable intent but the response is lost, a caller reuses a pr
 - the pre-v0.8 generic `create_intent` call alone is not treated as proof of authenticated/authorized proposal acceptance;
 - qualification independently injects inclusive-observation endpoint normalization, decision/approval exact-expiry normalization, normalization overflow/unknown-semantics failure, post-mint observation expiry, post-mint decision/approval expiry, numeric trusted-time rollback, trusted-time reset/rebind and continuity-unknown cases so one case cannot mask another.
 
-### Runtime orchestration takeover or aggregate-budget bypass
-A compromised agent runtime receives one bounded interpretation attempt and tries to become a second orchestration owner by selecting another provider, self-retrying, activating fallback, initiating advisors, resetting aggregate deadlines/budgets, or aggregating/caching/coalescing cross-provider results.
+### Runtime/adapter orchestration takeover or aggregate-budget bypass
+A compromised agent runtime receives one bounded interpretation attempt and tries to become a second orchestration owner by selecting another provider, self-retrying, activating fallback, initiating advisors, resetting aggregate deadlines/budgets, or aggregating/caching/coalescing cross-provider results. A compromised or misbehaving adapter tries to hide retries, reissues or replacement/resume provider requests inside that single admitted attempt after timeout, rate limit, transport failure or partial response.
 - Linura Control exclusively owns provider eligibility/discovery, selection, cross-adapter scheduling, aggregate deadlines/budgets, timeout/cancellation policy, retry/fallback/advisor admission, caching/coalescing and aggregation;
 - the runtime receives an exact Control-admitted attempt descriptor for one selected adapter and may enforce only its bounded attempt-local mechanics;
 - the runtime cannot mint another attempt descriptor, select a second adapter, reset/re-base aggregate budget/deadline state, or turn provider failure into retry/fallback/advisor admission;
-- extra adapter invocation requires a fresh Control admission and is rejected before adapter callback or transport initialization when absent;
+- the adapter owns only the transport mechanics for the single admitted provider invocation and must return timeout, rate-limit, transport-failure or partial-response outcomes without internally repeating it;
+- every extra or repeated provider invocation requires a fresh Control admission against the original aggregate budget/deadline and is rejected before adapter callback or transport initialization when absent;
 - multi-advisor scheduling and deterministic select/combine/reject policy remain in Control while runtime results stay separately attributed;
-- qualification injects runtime self-selection, self-retry, fallback/advisor initiation, budget/deadline reset and aggregation takeover attempts and proves Control remains the sole orchestration owner.
+- qualification injects runtime self-selection/self-retry, adapter-internal repeat invocation, fallback/advisor initiation, budget/deadline reset and aggregation takeover attempts and proves Control remains the sole orchestration owner.
 
 ### Offline-mode network adapter escape
 Offline mode is enabled while a network-required adapter is installed, discovered, selected, health-checked, chosen as fallback or otherwise considered by orchestration, and adapter lifecycle code attempts network-side effects before Linura Control admits a provider attempt.
