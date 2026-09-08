@@ -56,9 +56,9 @@ Adapters declare whether they require network access and which interpretation pr
 
 ### Bounded execution and failure semantics
 
-The runtime owns provider selection, timeout/cancellation policy, retry admission and aggregate budgets over the already-minimized request. A provider receives no implicit retry authority. Provider failure, timeout, cancellation, malformed output or budget exhaustion produces no authoritative intent mutation.
+Linura Control owns provider discovery/eligibility, provider selection, cross-adapter scheduling, aggregate deadlines and budgets, timeout/cancellation policy, retry admission, fallback/advisor scheduling, caching/coalescing and cross-provider aggregation over the already-minimized request. Control issues one bounded per-attempt invocation to the runtime. The runtime may mechanically enforce only that Control-supplied attempt deadline/cancellation/budget, invoke only the Control-selected adapter, and return that attempt's result; it must not autonomously select another adapter, retry, fallback, reset or widen budgets, cache/coalesce across providers, or aggregate provider/advisor results. A provider receives no implicit retry authority. Provider failure, timeout, cancellation, malformed output or budget exhaustion produces no authoritative intent mutation.
 
-The runtime validates the complete provider result before exposing it as a validated proposal. Partial/streaming fragments never become proposals.
+Within one Control-admitted attempt, the runtime validates the complete provider result before returning a proposal candidate. Partial/streaming fragments never become proposals. Canonical proposal validation remains owned by `linura-intent` and trusted admission/aggregation decisions remain owned by Control.
 
 ### Manual operation
 
@@ -66,7 +66,7 @@ Agent-native does not mean agent-dependent. A deterministic manual interpreter p
 
 ### Advice and disagreement
 
-Specialists/advisors return separately attributed advisory records. Advice is never silently merged into authority-bearing proposal fields. If multiple advisors disagree, the conflict remains explicit and reviewable. Agreement between providers is not authorization.
+Specialists/advisors return separately attributed advisory records. Linura Control owns cross-advisor scheduling, selection, aggregate budgets and deterministic combine/select/reject policy; the runtime returns bounded per-attempt advisory results and cannot silently initiate or aggregate additional advisors. Advice is never silently merged into authority-bearing proposal fields. If multiple advisors disagree, the conflict remains explicit and reviewable. Agreement between providers is not authorization.
 
 ### Acceptance boundary
 
@@ -127,9 +127,9 @@ Canonical requests/proposals and public errors contain no credential material. T
 ## Consequences
 
 - `linura-intent` owns the canonical proposal types, validation and digest semantics.
-- `linura-agent-runtime` owns deterministic interpretation orchestration and manual operation over an already-minimized Control-produced projection, but not projection minimization, freshness, capability-registry or acceptance authority.
-- `linura-provider-sdk` owns provider-neutral adapter contracts, not model authority.
-- Linura Control owns authenticated-principal binding, trusted projection construction/minimization, current authority-context derivation, time-based observation-freshness revalidation, capability-registry resolution, exact-bound acceptance authorization, durable acceptance serialization, monotonic trusted-time authority-validity normalization/evaluation and sealed acceptance-capability minting.
+- `linura-agent-runtime` owns bounded single-attempt interpretation execution and manual interpretation over an already-minimized Control-produced projection. It does not own cross-provider discovery/selection/scheduling, deadlines or aggregate budgets, retry/fallback admission, caching/coalescing, aggregation, projection minimization, freshness, capability-registry or acceptance authority.
+- `linura-provider-sdk` owns provider-neutral adapter contracts, not model authority or orchestration policy.
+- Linura Control owns provider discovery/eligibility, cross-provider selection/scheduling, deadlines and aggregate budgets, retry/fallback/advisor admission, caching/coalescing and aggregation, plus authenticated-principal binding, trusted projection construction/minimization, current authority-context derivation, time-based observation-freshness revalidation, capability-registry resolution, exact-bound acceptance authorization, durable acceptance serialization, monotonic trusted-time authority-validity normalization/evaluation and sealed acceptance-capability minting.
 - the Linura Library durable path owns atomic storage of the accepted intent + exact acceptance record and mechanically enforces the sealed trusted-time floor plus normalized exclusive authority-validity deadline at durable linearization, but the proposal-acceptance primitive is authority-internal, requires the sealed Control-minted capability, and is not exposed as a public SDK mutation surface.
 - provider implementations may be local, hosted or enterprise-managed without changing the canonical proposal/authority model.
 - v0.8 can be qualified with deterministic mock/replay adapters without depending on a live external model service.

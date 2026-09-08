@@ -312,10 +312,19 @@ Acceptance commits durable intent but the response is lost, a caller reuses a pr
 - the pre-v0.8 generic `create_intent` call alone is not treated as proof of authenticated/authorized proposal acceptance;
 - qualification independently injects inclusive-observation endpoint normalization, decision/approval exact-expiry normalization, normalization overflow/unknown-semantics failure, post-mint observation expiry, post-mint decision/approval expiry, numeric trusted-time rollback, trusted-time reset/rebind and continuity-unknown cases so one case cannot mask another.
 
+### Runtime orchestration takeover or aggregate-budget bypass
+A compromised agent runtime receives one bounded interpretation attempt and tries to become a second orchestration owner by selecting another provider, self-retrying, activating fallback, initiating advisors, resetting aggregate deadlines/budgets, or aggregating/caching/coalescing cross-provider results.
+- Linura Control exclusively owns provider eligibility/discovery, selection, cross-adapter scheduling, aggregate deadlines/budgets, timeout/cancellation policy, retry/fallback/advisor admission, caching/coalescing and aggregation;
+- the runtime receives an exact Control-admitted attempt descriptor for one selected adapter and may enforce only its bounded attempt-local mechanics;
+- the runtime cannot mint another attempt descriptor, select a second adapter, reset/re-base aggregate budget/deadline state, or turn provider failure into retry/fallback/advisor admission;
+- extra adapter invocation requires a fresh Control admission and is rejected before adapter callback or transport initialization when absent;
+- multi-advisor scheduling and deterministic select/combine/reject policy remain in Control while runtime results stay separately attributed;
+- qualification injects runtime self-selection, self-retry, fallback/advisor initiation, budget/deadline reset and aggregation takeover attempts and proves Control remains the sole orchestration owner.
+
 ### Offline-mode network adapter escape
-Offline mode is enabled while a network-required adapter is installed, discovered, selected, health-checked, chosen as fallback or otherwise considered by orchestration, and adapter lifecycle code attempts network-side effects before the runtime rejects the adapter.
+Offline mode is enabled while a network-required adapter is installed, discovered, selected, health-checked, chosen as fallback or otherwise considered by orchestration, and adapter lifecycle code attempts network-side effects before Linura Control admits a provider attempt.
 - adapter metadata declares network requirement before any adapter callback or transport initialization that could perform I/O;
-- offline policy is evaluated before adapter invocation, provider discovery callbacks, health-check callbacks, fallback activation, provider authentication, DNS resolution, socket creation/connect or transport/client initialization;
+- Linura Control evaluates offline policy before provider admission and before adapter invocation, provider discovery callbacks, health-check callbacks, fallback activation, provider authentication, DNS resolution, socket creation/connect or transport/client initialization; the runtime cannot override that decision;
 - a network-required adapter selected in offline mode is rejected locally with zero adapter-callback, authentication, DNS, socket and transport-initialization side effects;
 - discovery or fallback cannot opportunistically probe a network-required provider while offline merely to decide whether it is usable;
 - deterministic qualification independently exercises explicit selection, provider discovery, health checking and fallback with trap-backed network-required adapters and requires all invocation/authentication/DNS/socket/transport-initialization counters to remain exactly zero for every path;
@@ -327,7 +336,7 @@ A provider or agent runtime emits malformed typed data, authority claims, hidden
 - complete structured output is schema/version/bounds/digest validated before it can become a proposal;
 - partial streaming fragments never become accepted proposal state;
 - prompt/tool/authorization claims embedded in text remain untrusted data;
-- no executor/tool handle exists in the interpretation runtime;
+- no executor/tool handle or cross-provider orchestration authority exists in the interpretation runtime;
 - deterministic Linura Control acceptance independently re-establishes authenticated principal, current authority context/freshness, capability-registry resolution and the exact-bound acceptance decision;
 - negative qualification covers escalation, malformed/oversized output and provider/runtime failure paths.
 
