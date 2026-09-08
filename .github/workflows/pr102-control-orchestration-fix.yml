@@ -1,0 +1,214 @@
+name: PR102 Control orchestration boundary repair
+
+on:
+  push:
+    branches:
+      - docs/v0.8-agent-interpretation-contract
+    paths:
+      - .github/workflows/pr102-control-orchestration-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: docs/v0.8-agent-interpretation-contract
+          fetch-depth: 2
+
+      - name: Verify repair carrier
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "5e3bec2e4675148754de8e31e9fdb2f4a50067b7"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/pr102-control-orchestration-fix.yml"
+
+      - name: Repair orchestration ownership contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one replacement target, found {count}")
+              text = text.replace(old, new)
+              if not text.endswith("\n"):
+                  text += "\n"
+              p.write_text(text)
+
+          # ADR 0028: Control owns cross-provider orchestration; runtime is one bounded attempt substrate.
+          replace_once(
+              "docs/adr/0028-proposal-only-agent-interpretation.md",
+              "The runtime owns provider selection, timeout/cancellation policy, retry admission and aggregate budgets over the already-minimized request. A provider receives no implicit retry authority. Provider failure, timeout, cancellation, malformed output or budget exhaustion produces no authoritative intent mutation.\n\nThe runtime validates the complete provider result before exposing it as a validated proposal. Partial/streaming fragments never become proposals.",
+              "Linura Control owns provider discovery/eligibility, provider selection, cross-adapter scheduling, aggregate deadlines and budgets, timeout/cancellation policy, retry admission, fallback/advisor scheduling, caching/coalescing and cross-provider aggregation over the already-minimized request. Control issues one bounded per-attempt invocation to the runtime. The runtime may mechanically enforce only that Control-supplied attempt deadline/cancellation/budget, invoke only the Control-selected adapter, and return that attempt's result; it must not autonomously select another adapter, retry, fallback, reset or widen budgets, cache/coalesce across providers, or aggregate provider/advisor results. A provider receives no implicit retry authority. Provider failure, timeout, cancellation, malformed output or budget exhaustion produces no authoritative intent mutation.\n\nWithin one Control-admitted attempt, the runtime validates the complete provider result before returning a proposal candidate. Partial/streaming fragments never become proposals. Canonical proposal validation remains owned by `linura-intent` and trusted admission/aggregation decisions remain owned by Control."
+          )
+          replace_once(
+              "docs/adr/0028-proposal-only-agent-interpretation.md",
+              "Specialists/advisors return separately attributed advisory records. Advice is never silently merged into authority-bearing proposal fields. If multiple advisors disagree, the conflict remains explicit and reviewable. Agreement between providers is not authorization.",
+              "Specialists/advisors return separately attributed advisory records. Linura Control owns cross-advisor scheduling, selection, aggregate budgets and deterministic combine/select/reject policy; the runtime returns bounded per-attempt advisory results and cannot silently initiate or aggregate additional advisors. Advice is never silently merged into authority-bearing proposal fields. If multiple advisors disagree, the conflict remains explicit and reviewable. Agreement between providers is not authorization."
+          )
+          replace_once(
+              "docs/adr/0028-proposal-only-agent-interpretation.md",
+              "- `linura-agent-runtime` owns deterministic interpretation orchestration and manual operation over an already-minimized Control-produced projection, but not projection minimization, freshness, capability-registry or acceptance authority.\n- `linura-provider-sdk` owns provider-neutral adapter contracts, not model authority.\n- Linura Control owns authenticated-principal binding, trusted projection construction/minimization, current authority-context derivation, time-based observation-freshness revalidation, capability-registry resolution, exact-bound acceptance authorization, durable acceptance serialization, monotonic trusted-time authority-validity normalization/evaluation and sealed acceptance-capability minting.",
+              "- `linura-agent-runtime` owns bounded single-attempt interpretation execution and manual interpretation over an already-minimized Control-produced projection. It does not own cross-provider discovery/selection/scheduling, deadlines or aggregate budgets, retry/fallback admission, caching/coalescing, aggregation, projection minimization, freshness, capability-registry or acceptance authority.\n- `linura-provider-sdk` owns provider-neutral adapter contracts, not model authority or orchestration policy.\n- Linura Control owns provider discovery/eligibility, cross-provider selection/scheduling, deadlines and aggregate budgets, retry/fallback/advisor admission, caching/coalescing and aggregation, plus authenticated-principal binding, trusted projection construction/minimization, current authority-context derivation, time-based observation-freshness revalidation, capability-registry resolution, exact-bound acceptance authorization, durable acceptance serialization, monotonic trusted-time authority-validity normalization/evaluation and sealed acceptance-capability minting."
+          )
+
+          # Milestone ownership and qualification.
+          replace_once(
+              "docs/milestones/v0.8.0.md",
+              "- `linura-agent-runtime` owns bounded provider selection/orchestration, manual/no-provider operation and explicit advisory disagreement over an already-minimized Control-produced projection, but not secret minimization, acceptance authority, capability-registry authority or authoritative freshness;\n- `linura-provider-sdk` owns provider-neutral interpretation adapter contracts and capability/network declarations, never policy or execution authority;\n- Linura Control owns trusted projection construction/minimization, authenticated-principal binding, current authority-context derivation, time-based observation-freshness revalidation, local capability-registry resolution, the applicable exact-bound human/policy acceptance decision, durable acceptance serialization, monotonic trusted-time authority-validity evaluation and acceptance orchestration;",
+              "- `linura-agent-runtime` owns bounded single-attempt interpretation execution, manual/no-provider interpretation and separately attributed per-attempt advisory results over an already-minimized Control-produced projection; it does not own cross-provider discovery/selection/scheduling, aggregate deadlines/budgets, retry/fallback admission, caching/coalescing, aggregation, secret minimization, acceptance authority, capability-registry authority or authoritative freshness;\n- `linura-provider-sdk` owns provider-neutral interpretation adapter contracts and capability/network declarations, never policy, orchestration or execution authority;\n- Linura Control owns provider discovery/eligibility, cross-provider selection/scheduling, aggregate deadlines/budgets, timeout/cancellation policy, retry/fallback/advisor admission, caching/coalescing and aggregation, plus trusted projection construction/minimization, authenticated-principal binding, current authority-context derivation, time-based observation-freshness revalidation, local capability-registry resolution, the applicable exact-bound human/policy acceptance decision, durable acceptance serialization, monotonic trusted-time authority-validity evaluation and acceptance orchestration;"
+          )
+          replace_once(
+              "docs/milestones/v0.8.0.md",
+              "Provider-specific transport, authentication, tool syntax and streaming behavior stay outside the canonical intent/authority model. Linura Control must construct the bounded data-minimized semantic projection before that projection crosses into the agent runtime.",
+              "Provider-specific transport, authentication, tool syntax and streaming behavior stay outside the canonical intent/authority model. Linura Control owns provider eligibility/discovery, selection, cross-adapter scheduling, aggregate deadlines/budgets, retry/fallback/advisor admission, caching/coalescing and aggregation. The runtime receives only a Control-admitted bounded attempt for one selected adapter and cannot autonomously select, retry, fallback or aggregate providers. Linura Control must construct the bounded data-minimized semantic projection before that projection crosses into the agent runtime."
+          )
+          replace_once(
+              "docs/milestones/v0.8.0.md",
+              "If multiple providers/specialists are supported, disagreement must be represented explicitly rather than averaged into hidden authority. The system should preserve each proposal/advice source, material conflicts and the deterministic rule used to select, combine or reject proposals.",
+              "If multiple providers/specialists are supported, disagreement must be represented explicitly rather than averaged into hidden authority. Linura Control owns the cross-advisor schedule and deterministic rule used to select, combine or reject proposal/advice records; the runtime cannot initiate or aggregate additional advisors on its own. The system preserves each proposal/advice source and material conflict."
+          )
+          replace_once(
+              "docs/milestones/v0.8.0.md",
+              "- provider adapter conformance across deterministic mock/local and hosted-style transports;\n- offline pre-invocation rejection",
+              "- provider adapter conformance across deterministic mock/local and hosted-style transports;\n- Control-owned provider discovery/selection/scheduling, aggregate deadline/budget, retry/fallback/advisor, caching/coalescing and aggregation policy, including negative evidence that the runtime cannot self-select another adapter, self-retry, self-fallback, reset aggregate budgets or aggregate advisors;\n- offline pre-invocation rejection"
+          )
+          replace_once(
+              "docs/milestones/v0.8.0.md",
+              "- [ ] provider-neutral adapter and no-provider/manual paths are qualified, including pre-invocation offline rejection of network-required adapters;",
+              "- [ ] provider-neutral adapter and no-provider/manual paths are qualified, including Control-owned cross-provider orchestration, negative runtime self-orchestration tests, and pre-invocation offline rejection of network-required adapters;"
+          )
+
+          # Frozen release contract.
+          replace_once(
+              "docs/releases/v0.8.0.md",
+              "Provider-specific APIs, authentication, streaming, tool syntax and retry semantics are isolated behind adapters. The proposal contract is provider-neutral and supports deterministic mock/replay qualification plus local/offline, hosted and enterprise-managed implementations as adapters become available.\n\nLinura Control constructs the bounded semantic projection",
+              "Provider-specific APIs, authentication, streaming, tool syntax and retry mechanics are isolated behind adapters. The proposal contract is provider-neutral and supports deterministic mock/replay qualification plus local/offline, hosted and enterprise-managed implementations as adapters become available. Linura Control owns provider eligibility/discovery, selection, cross-adapter scheduling, aggregate deadlines/budgets, timeout/cancellation policy, retry/fallback/advisor admission, caching/coalescing and aggregation. The agent runtime executes only a bounded Control-admitted attempt for one selected adapter and cannot autonomously select, retry, fallback, reset aggregate budgets or aggregate providers/advisors.\n\nLinura Control constructs the bounded semantic projection"
+          )
+          replace_once(
+              "docs/releases/v0.8.0.md",
+              "Where multiple specialist/model outputs are exposed, their provenance and material disagreement remain explicit. Aggregation or consensus never constitutes authorization. Deterministic conflict handling must preserve the evidence needed to explain which proposal was selected, combined, rejected or sent back for clarification.",
+              "Where multiple specialist/model outputs are exposed, their provenance and material disagreement remain explicit. Linura Control owns cross-advisor scheduling, aggregate budgets and deterministic select/combine/reject policy; the runtime returns bounded per-attempt records and cannot silently initiate or aggregate additional advisors. Aggregation or consensus never constitutes authorization. Deterministic conflict handling must preserve the evidence needed to explain which proposal was selected, combined, rejected or sent back for clarification."
+          )
+          replace_once(
+              "docs/releases/v0.8.0.md",
+              "The agent runtime also receives no raw secret-bearing authority context. Linura Control owns projection minimization, authenticated-principal binding, authoritative context/freshness derivation, capability-registry resolution, exact-bound acceptance authorization, durable acceptance serialization, monotonic trusted-time authority-validity normalization/evaluation and sealed acceptance-capability minting.",
+              "The agent runtime also receives no raw secret-bearing authority context and owns no cross-provider orchestration policy. Linura Control owns provider discovery/eligibility, selection/scheduling, deadlines and aggregate budgets, retry/fallback/advisor admission, caching/coalescing and aggregation, plus projection minimization, authenticated-principal binding, authoritative context/freshness derivation, capability-registry resolution, exact-bound acceptance authorization, durable acceptance serialization, monotonic trusted-time authority-validity normalization/evaluation and sealed acceptance-capability minting."
+          )
+          replace_once(
+              "docs/releases/v0.8.0.md",
+              "- dedicated v0.8 proposal/agent qualification covering schema, provider conformance, Control-owned projection minimization,",
+              "- dedicated v0.8 proposal/agent qualification covering schema, provider conformance, Control-owned cross-provider orchestration and negative runtime self-orchestration, Control-owned projection minimization,"
+          )
+
+          # Release review checklist.
+          replace_once(
+              "docs/qualification/v0.8.0-release-review.md",
+              "- [ ] provider adapters share one proposal contract and deterministic conformance fixtures;",
+              "- [ ] provider adapters share one proposal contract and deterministic conformance fixtures;\n- [ ] Linura Control owns provider eligibility/discovery, selection, cross-adapter scheduling, aggregate deadlines/budgets, timeout/cancellation policy, retry/fallback/advisor admission, caching/coalescing and aggregation; the agent runtime can execute only a bounded Control-admitted attempt and cannot autonomously select/retry/fallback/reset budgets/aggregate providers;"
+          )
+          replace_once(
+              "docs/qualification/v0.8.0-release-review.md",
+              "- [ ] dedicated v0.8 proposal/agent qualification succeeds, including Control-owned pre-runtime projection minimization,",
+              "- [ ] dedicated v0.8 proposal/agent qualification succeeds, including Control-owned provider orchestration plus negative runtime self-orchestration/budget-reset tests, Control-owned pre-runtime projection minimization,"
+          )
+
+          # Canonical qualification.
+          replace_once(
+              "docs/qualification/v0.8.0.md",
+              "| Provider-neutral adapters | Adapter conformance suite with deterministic mock/replay provider | Dedicated v0.8 qualification | pending |",
+              "| Provider-neutral adapters | Adapter conformance suite with deterministic mock/replay provider | Dedicated v0.8 qualification | pending |\n| Control-owned provider orchestration | Control owns discovery/eligibility, selection/scheduling, aggregate deadlines/budgets, retry/fallback/advisor admission, caching/coalescing and aggregation; runtime is limited to one Control-admitted bounded attempt and cannot self-orchestrate | Security + dedicated v0.8 qualification | pending |"
+          )
+          replace_once(
+              "docs/qualification/v0.8.0.md",
+              "43. public Library persistence APIs remain usable for their existing v0.7 non-acceptance purposes without becoming an alternate proposal-acceptance authority path.",
+              "43. public Library persistence APIs remain usable for their existing v0.7 non-acceptance purposes without becoming an alternate proposal-acceptance authority path;\n44. Linura Control alone determines provider eligibility/discovery, selected adapter, cross-adapter schedule, aggregate deadline/budget, retry/fallback/advisor admission, caching/coalescing and aggregation policy;\n45. a compromised/misbehaving runtime given one Control-admitted attempt cannot invoke an unselected second adapter, autonomously retry the selected adapter, activate fallback, initiate an additional advisor, or aggregate another provider result; every such attempt is rejected before the extra adapter callback/transport initialization;\n46. aggregate Control deadline/budget state spans sequential provider attempts and cannot be reset, widened or re-based by runtime-local per-attempt state; a runtime attempt that asks for more budget/deadline than Control admitted is rejected/fails closed;\n47. when multi-advisor support ships, Control—not the runtime—owns advisor scheduling and deterministic select/combine/reject aggregation, while per-advisor results remain separately attributed and inspectable."
+          )
+          replace_once(
+              "docs/qualification/v0.8.0.md",
+              "- provider adapter identifiers exercised;\n- deterministic fixture digests;",
+              "- provider adapter identifiers exercised;\n- Control-owned provider-orchestration scenarios/results, including runtime self-selection/retry/fallback/advisor/aggregation rejection and aggregate deadline/budget non-reset evidence;\n- deterministic fixture digests;"
+          )
+          replace_once(
+              "docs/qualification/v0.8.0.md",
+              "- dedicated v0.8 proposal/agent qualification succeeds for the exact release source and covers every hardened acceptance invariant above, including",
+              "- dedicated v0.8 proposal/agent qualification succeeds for the exact release source and covers every hardened acceptance invariant above, including Control-owned cross-provider orchestration and negative runtime self-orchestration/budget-reset evidence,"
+          )
+
+          # Security qualification.
+          replace_once(
+              "docs/qualification/v0.8.0-security.md",
+              "- compromised agent runtime attempting to inspect raw secret-bearing source context;",
+              "- compromised agent runtime attempting to inspect raw secret-bearing source context or to seize provider selection/retry/fallback/advisor/aggregation policy, reset aggregate deadlines/budgets, or invoke unadmitted adapters;"
+          )
+          replace_once(
+              "docs/qualification/v0.8.0-security.md",
+              "- Linura Control constructs/minimizes semantic context before it crosses into the untrusted agent runtime; raw secret-bearing Library/observation/retrieval/user context is never delegated to that runtime for filtering.",
+              "- Linura Control constructs/minimizes semantic context before it crosses into the untrusted agent runtime; raw secret-bearing Library/observation/retrieval/user context is never delegated to that runtime for filtering.\n- Linura Control exclusively owns provider eligibility/discovery, selection, cross-adapter scheduling, aggregate deadlines/budgets, timeout/cancellation policy, retry/fallback/advisor admission, caching/coalescing and aggregation; the runtime can execute only the bounded attempt Control admitted and cannot autonomously widen or continue orchestration."
+          )
+          replace_once(
+              "docs/qualification/v0.8.0-security.md",
+              "32. provider outage/rate-limit/cancellation with no authoritative partial state.",
+              "32. provider outage/rate-limit/cancellation with no authoritative partial state;\n33. runtime orchestration takeover: give the runtime one Control-admitted adapter attempt, then make it try to invoke an unselected adapter, self-retry after failure, activate fallback and initiate another advisor; each extra attempt is rejected before adapter callback/transport initialization and cannot create proposal or authority state;\n34. aggregate budget/deadline bypass: make the runtime try to reset/re-base/widen its per-attempt budget or deadline after one provider attempt; prove the original Control-owned aggregate budget/deadline remains authoritative across attempts and the over-budget/late attempt is not admitted;\n35. aggregation takeover: when multiple advisor fixtures are present, make the runtime try to select/combine/suppress advisor results; prove only Control's deterministic aggregation policy can produce the cross-advisor result and every per-advisor record remains independently attributed."
+          )
+          replace_once(
+              "docs/qualification/v0.8.0-security.md",
+              "- bypass deterministic schema/capability validation;",
+              "- bypass deterministic schema/capability validation;\n- let the agent runtime self-select/retry/fallback/initiate advisors, reset/widen Control-owned aggregate deadlines or budgets, or perform cross-provider caching/coalescing/aggregation outside Linura Control;"
+          )
+
+          # Threat model: make compromised-runtime orchestration takeover explicit and Control-owned.
+          replace_once(
+              "docs/threat-model.md",
+              "### Offline-mode network adapter escape\nOffline mode is enabled while a network-required adapter is installed, discovered, selected, health-checked, chosen as fallback or otherwise considered by orchestration, and adapter lifecycle code attempts network-side effects before the runtime rejects the adapter.",
+              "### Runtime orchestration takeover or aggregate-budget bypass\nA compromised agent runtime receives one bounded interpretation attempt and tries to become a second orchestration owner by selecting another provider, self-retrying, activating fallback, initiating advisors, resetting aggregate deadlines/budgets, or aggregating/caching/coalescing cross-provider results.\n- Linura Control exclusively owns provider eligibility/discovery, selection, cross-adapter scheduling, aggregate deadlines/budgets, timeout/cancellation policy, retry/fallback/advisor admission, caching/coalescing and aggregation;\n- the runtime receives an exact Control-admitted attempt descriptor for one selected adapter and may enforce only its bounded attempt-local mechanics;\n- the runtime cannot mint another attempt descriptor, select a second adapter, reset/re-base aggregate budget/deadline state, or turn provider failure into retry/fallback/advisor admission;\n- extra adapter invocation requires a fresh Control admission and is rejected before adapter callback or transport initialization when absent;\n- multi-advisor scheduling and deterministic select/combine/reject policy remain in Control while runtime results stay separately attributed;\n- qualification injects runtime self-selection, self-retry, fallback/advisor initiation, budget/deadline reset and aggregation takeover attempts and proves Control remains the sole orchestration owner.\n\n### Offline-mode network adapter escape\nOffline mode is enabled while a network-required adapter is installed, discovered, selected, health-checked, chosen as fallback or otherwise considered by orchestration, and adapter lifecycle code attempts network-side effects before Linura Control admits a provider attempt."
+          )
+          replace_once(
+              "docs/threat-model.md",
+              "- offline policy is evaluated before adapter invocation, provider discovery callbacks, health-check callbacks, fallback activation, provider authentication, DNS resolution, socket creation/connect or transport/client initialization;",
+              "- Linura Control evaluates offline policy before provider admission and before adapter invocation, provider discovery callbacks, health-check callbacks, fallback activation, provider authentication, DNS resolution, socket creation/connect or transport/client initialization; the runtime cannot override that decision;"
+          )
+          replace_once(
+              "docs/threat-model.md",
+              "- no executor/tool handle exists in the interpretation runtime;",
+              "- no executor/tool handle or cross-provider orchestration authority exists in the interpretation runtime;"
+          )
+
+          Path(".github/workflows/pr102-control-orchestration-fix.yml").unlink()
+          PY
+
+          python3 scripts/check_repository.py
+          git diff --check
+
+          expected=$(cat <<'EOF'
+          .github/workflows/pr102-control-orchestration-fix.yml
+          docs/adr/0028-proposal-only-agent-interpretation.md
+          docs/milestones/v0.8.0.md
+          docs/qualification/v0.8.0-release-review.md
+          docs/qualification/v0.8.0-security.md
+          docs/qualification/v0.8.0.md
+          docs/releases/v0.8.0.md
+          docs/threat-model.md
+          EOF
+          )
+          actual=$(git diff --name-only | sort)
+          test "$actual" = "$(printf '%s\n' "$expected" | sort)"
+
+      - name: Commit repaired contracts and remove carrier
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "docs(v0.8): keep provider orchestration in Control"
+          git push origin HEAD:docs/v0.8-agent-interpretation-contract
