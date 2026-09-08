@@ -83,13 +83,13 @@ Acceptance is a separate trusted `linura-control` operation. Proposal fields are
 7. reject contradictory, ambiguous, stale, substituted or otherwise unsupported proposal material;
 8. require the applicable `linura-control`-owned human/policy acceptance decision and prove that the decision is exact-bound to the authenticated principal, canonical proposal ID/digest, accepted `linura-control` context binding, durable operation identity, requested create/revise action, and exact create/revise target identity/revision expectation;
 9. convert the accepted proposal into a normal `Intent` in `Proposed` state; and
-10. atomically persist the intent transition together with an exact proposal-acceptance record before reporting success.
+10. call the dedicated `linura-library` acceptance persistence operation so the intent transition and exact proposal-acceptance record commit atomically before reporting success.
 
 The acceptance decision cannot be reused for a different proposal, context, operation or target merely because the principal and high-level action are the same. Changed proposal digest, context binding, operation identity, create/revise target or expected revision requires a new applicable acceptance decision.
 
-The durable acceptance record must bind at least the authenticated principal, acceptance-decision identity and decision-binding digest, proposal ID, canonical proposal digest, accepted `linura-control` context binding, durable operation identity, create/revise action and target identity/revision expectation, resulting `IntentId`, and resulting intent revision. Exact retry of the same acceptance is idempotent and returns the same result. Reuse of the same proposal/operation/decision identity with different bound material fails closed as a conflict. A lost response after commit therefore cannot create a second intent, replay authorization onto substituted proposal content, or erase proposal-to-intent provenance.
+The durable acceptance record persisted by `linura-library` must bind at least the authenticated principal, acceptance-decision identity and decision-binding digest, proposal ID, canonical proposal digest, accepted `linura-control` context binding, durable operation identity, create/revise action and target identity/revision expectation, resulting `IntentId`, and resulting intent revision. Exact retry of the same acceptance is idempotent and returns the same result. Reuse of the same proposal/operation/decision identity with different bound material fails closed as a conflict. A lost response after commit therefore cannot create a second intent, replay authorization onto substituted proposal content, or erase proposal-to-intent provenance.
 
-This requires a dedicated v0.8 acceptance transaction/path built on the v0.7 durable Library/idempotency substrate; calling the pre-existing `create_intent` operation alone is not sufficient evidence of proposal acceptance.
+This requires a dedicated v0.8 `linura-control` acceptance orchestration path backed by a dedicated atomic `linura-library` persistence operation on the v0.7 Library/idempotency substrate; calling the pre-existing `LocalLibrary::create_intent` operation alone is not sufficient evidence of proposal acceptance.
 
 Acceptance itself grants no machine-mutation approval or execution authority. Any later machine mutation still traverses the existing observe → plan → validate → authorize → prepare → execute → verify → commit → audit → reconcile lifecycle.
 
@@ -104,8 +104,8 @@ Canonical requests/proposals and public errors contain no credential material. T
 - `linura-intent` owns the canonical proposal types, validation and digest semantics.
 - `linura-agent-runtime` owns deterministic interpretation orchestration and manual operation over an already-minimized `linura-control`-produced projection, but not projection minimization, freshness, capability-registry or acceptance authority.
 - `linura-provider-sdk` owns provider-neutral adapter contracts, not model authority.
-- `linura-control` owns authenticated-principal binding, trusted projection construction/minimization, current authority-context derivation, time-based observation-freshness revalidation, capability-registry resolution and the applicable exact-bound acceptance authorization decision.
-- the durable Library acceptance path owns the atomic exact proposal/decision-to-intent idempotency/provenance record while preserving the v0.7 durability model.
+- `linura-control` owns authenticated-principal binding, trusted projection construction/minimization, current authority-context derivation, time-based observation-freshness revalidation, capability-registry resolution, exact-bound acceptance authorization and acceptance orchestration.
+- `linura-library` owns the atomic durable acceptance record + resulting intent persistence operation while preserving the v0.7 durability/idempotency model; it does not own policy, approval or executor authority.
 - provider implementations may be local, hosted or enterprise-managed without changing the canonical proposal/authority model.
 - v0.8 can be qualified with deterministic mock/replay adapters without depending on a live external model service.
 - adding autonomous tool or executor authority in a future release requires a new explicit authority decision; it cannot be inferred from this ADR.
