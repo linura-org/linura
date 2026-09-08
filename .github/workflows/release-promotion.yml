@@ -49,8 +49,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The proof's dispatch job starts Promotion before the parent workflow
-          # can report its own terminal state. Wait only for that exact run.
           run=""
           for _ in $(seq 1 30); do
             run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PROOF_RUN_ID")"
@@ -59,13 +57,8 @@ jobs:
               break
             fi
             case "$status" in
-              queued|in_progress|pending|waiting|requested)
-                sleep 2
-                ;;
-              *)
-                echo "unexpected Trusted Release Proof status: $status" >&2
-                exit 1
-                ;;
+              queued|in_progress|pending|waiting|requested) sleep 2 ;;
+              *) echo "unexpected Trusted Release Proof status: $status" >&2; exit 1 ;;
             esac
           done
 
@@ -123,11 +116,18 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN || github.token }}
+      GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}
       GH_REPO: ${{ github.repository }}
       SOURCE_SHA: ${{ inputs.source_sha }}
-      RELEASE_AUTOMATION_CREDENTIAL_SOURCE: ${{ secrets.RELEASE_AUTOMATION_TOKEN != '' && 'dedicated' || 'github' }}
     steps:
+      - name: Require dedicated release automation credential
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "RELEASE_AUTOMATION_TOKEN is required before immutable publication so protected post-release PR events, review and merge can complete automatically" >&2
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -142,7 +142,7 @@ jobs:
           test "$current" = "$SOURCE_SHA"
           python3 tools/probe_release_automation_authority.py \
             --repository "$GITHUB_REPOSITORY" \
-            --credential-source "$RELEASE_AUTOMATION_CREDENTIAL_SOURCE"
+            --credential-source dedicated
 
   dispatch:
     name: dispatch immutable publication

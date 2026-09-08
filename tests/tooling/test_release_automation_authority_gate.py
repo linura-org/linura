@@ -36,32 +36,20 @@ def missing_ref_body() -> str:
 
 class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
     def test_same_head_merge_proves_contents_write_capability(self) -> None:
-        accepted = probe.validate_contents_probe_response(
-            status=204,
-            credential_source="github",
-        )
+        accepted = probe.validate_contents_probe_response(status=204, credential_source="github")
         self.assertEqual("repository GITHUB_TOKEN", accepted)
 
     def test_github_token_without_contents_write_is_rejected(self) -> None:
         with self.assertRaisesRegex(probe.AuthorityProbeError, "Contents write"):
-            probe.validate_contents_probe_response(
-                status=403,
-                credential_source="github",
-            )
+            probe.validate_contents_probe_response(status=403, credential_source="github")
 
     def test_dedicated_token_without_contents_write_is_rejected(self) -> None:
         with self.assertRaisesRegex(probe.AuthorityProbeError, "Contents write"):
-            probe.validate_contents_probe_response(
-                status=403,
-                credential_source="dedicated",
-            )
+            probe.validate_contents_probe_response(status=403, credential_source="dedicated")
 
     def test_unexpected_contents_success_is_rejected(self) -> None:
         with self.assertRaisesRegex(probe.AuthorityProbeError, "unexpectedly changed"):
-            probe.validate_contents_probe_response(
-                status=201,
-                credential_source="github",
-            )
+            probe.validate_contents_probe_response(status=201, credential_source="github")
 
     def test_exact_same_head_validation_proves_pr_endpoint_authority(self) -> None:
         accepted = probe.validate_pr_probe_response(
@@ -220,19 +208,18 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
             engineering,
         )
 
-    def test_release_promotion_isolates_full_closure_authority_before_publication_dispatch(self) -> None:
+    def test_release_promotion_requires_dedicated_full_closure_authority_before_publication(self) -> None:
         workflow = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
         self.assertIn("closure-readiness:", workflow)
         self.assertIn("name: prove automatic post-release closure authority", workflow)
         self.assertIn("actions: write", workflow)
         self.assertIn("contents: write", workflow)
         self.assertIn("pull-requests: write", workflow)
-        self.assertIn(
-            "GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN || github.token }}",
-            workflow,
-        )
+        self.assertIn("GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}", workflow)
+        self.assertIn("RELEASE_AUTOMATION_TOKEN is required", workflow)
+        self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", workflow)
         self.assertIn("tools/probe_release_automation_authority.py", workflow)
-        self.assertIn("RELEASE_AUTOMATION_CREDENTIAL_SOURCE", workflow)
+        self.assertIn("--credential-source dedicated", workflow)
         self.assertIn("needs: [validate, closure-readiness]", workflow)
 
         readiness_index = workflow.index("closure-readiness:")

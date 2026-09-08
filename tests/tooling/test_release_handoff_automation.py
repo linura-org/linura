@@ -148,7 +148,11 @@ version = "9.9.9"
         self.assertNotIn("workflow_run:", closure)
         self.assertNotIn("github.event.workflow_run", closure)
         self.assertIn("release: v", proof)
-        self.assertIn("gh pr merge", closure)
+        self.assertIn("@codex review", closure)
+        self.assertIn("event=pull_request", closure)
+        self.assertIn('pulls/$PR_NUMBER/merge', closure)
+        self.assertNotIn('gh pr merge "$PR_NUMBER"', closure)
+        self.assertIn("RELEASE_AUTOMATION_TOKEN is required", closure)
 
     def test_release_guide_declares_explicit_readiness_and_no_manual_missing_handoff(self) -> None:
         guide = (ROOT / "agents/skills/release.md").read_text(encoding="utf-8")
