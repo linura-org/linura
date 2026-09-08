@@ -73,7 +73,7 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
             self.assertIn("--credential-source dedicated", workflow)
             self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", workflow)
 
-    def test_closure_waits_for_native_pr_checks_and_codex_review(self) -> None:
+    def test_closure_waits_for_native_pr_checks_and_exact_codex_evidence(self) -> None:
         workflow = self._closure_workflow()
         self.assertIn("@codex review", workflow)
         self.assertIn("event=pull_request", workflow)
@@ -85,10 +85,12 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
             workflow.count("awk '{ total += $1 } END { print total + 0 }'"),
             2,
         )
-        self.assertIn("chatgpt-codex-connector", workflow)
+        self.assertIn('CODEX_BOT_USER_ID: "199175422"', workflow)
         self.assertIn('pulls/$PR_NUMBER/merge', workflow)
         self.assertNotIn('gh pr merge "$PR_NUMBER"', workflow)
         self.assertIn("event=push", workflow)
+        self.assertNotIn("REVIEW_REQUESTED_AT", workflow)
+        self.assertNotIn("issues/comments/$REVIEW_COMMENT_ID/reactions", workflow)
 
         poll = workflow.split(
             "- name: Require native exact-head checks and completed clean Codex review", 1
@@ -97,18 +99,31 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn("reviewThreads(first:100, after:$endCursor)", poll)
         self.assertIn("pageInfo { hasNextPage endCursor }", poll)
         self.assertIn('unresolved="$(count_unresolved_threads)"', poll)
+        self.assertIn('pulls/$PR_NUMBER/reviews?per_page=100', poll)
+        self.assertIn('issues/$PR_NUMBER/comments?per_page=100', poll)
+        self.assertIn("has_clean_codex_comment", poll)
+        self.assertIn("Reviewed commit:", poll)
+        self.assertIn("[0-9a-f]{10,40}", poll)
+        self.assertIn("$sha | startswith($prefix)", poll)
+        self.assertIn(".user.id == $bot_id", poll)
+        self.assertNotIn("/reactions?", poll)
 
         merge = workflow.split("- name: Re-prove and squash merge exact reviewed closure", 1)[1].split(
             "- name: Resolve post-closure protected-main SHA", 1
         )[0]
-        self.assertIn("REVIEW_COMMENT_ID", merge)
         self.assertIn("gh api graphql --paginate", merge)
         self.assertIn("reviewThreads(first:100, after:$endCursor)", merge)
         self.assertIn("pageInfo { hasNextPage endCursor }", merge)
         self.assertIn('unresolved="$(count_unresolved_threads)"', merge)
         self.assertIn('test "$unresolved" = "0"', merge)
         self.assertIn("exact_codex_review", merge)
-        self.assertIn("codex_clean_reaction", merge)
+        self.assertIn("codex_clean_comment", merge)
+        self.assertIn('issues/$PR_NUMBER/comments?per_page=100', merge)
+        self.assertIn("Reviewed commit:", merge)
+        self.assertIn("[0-9a-f]{10,40}", merge)
+        self.assertIn("$sha | startswith($prefix)", merge)
+        self.assertIn(".user.id == $bot_id", merge)
+        self.assertNotIn("/reactions?", merge)
         self.assertLess(
             merge.index("reviewThreads(first:100, after:$endCursor)"),
             merge.index('pulls/$PR_NUMBER/merge'),
@@ -136,6 +151,16 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn('test "$(jq -r .headRefOid <<<"$pr")" = "$HEAD_SHA"', open_pr)
         self.assertIn('test "$(jq -r .baseRefName <<<"$pr")" = "main"', open_pr)
 
+    def test_clean_codex_comment_is_intrinsically_exact_head_and_retry_safe(self) -> None:
+        workflow = self._closure_workflow()
+        self.assertGreaterEqual(workflow.count('issues/$PR_NUMBER/comments?per_page=100'), 2)
+        self.assertGreaterEqual(workflow.count("[0-9a-f]{10,40}"), 2)
+        self.assertGreaterEqual(workflow.count("$sha | startswith($prefix)"), 2)
+        self.assertGreaterEqual(workflow.count(".user.id == $bot_id"), 4)
+        self.assertNotIn("REVIEW_REQUESTED_AT", workflow)
+        self.assertNotIn("codex_clean_reaction", workflow)
+        self.assertNotIn("issues/comments/$REVIEW_COMMENT_ID/reactions", workflow)
+
     def test_closed_release_retry_still_requires_fresh_main_before_cleanup(self) -> None:
         workflow = self._closure_workflow()
         final_main = workflow.index("Resolve post-closure protected-main SHA")
@@ -156,6 +181,8 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn('"release/"', cleanup)
         self.assertIn('branch == "tmp/zero-diff-authorization-probe"', cleanup)
         self.assertIn("preserving branch used by an open PR", cleanup)
+        self.assertIn('repos/$GITHUB_REPOSITORY/pulls', cleanup)
+        self.assertIn('-f head="${GITHUB_REPOSITORY%/*}:$branch"', cleanup)
 
     def test_legacy_fallback_authority_is_removed(self) -> None:
         workflow = self._closure_workflow()
