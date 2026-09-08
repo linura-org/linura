@@ -12,8 +12,6 @@ v0.7 already provides durable intent and Library state. v0.6 already provides th
 
 Linura represents model-assisted interpretation as a typed, versioned `IntentProposal` that is always untrusted until deterministic validation and an independently authenticated and authorized acceptance operation.
 
-Implementation-ownership statements in this ADR use concrete package names. `linura-control` is the package implementing the local authority subsystem; “Linura Control” remains the subsystem/product-facing name defined by the repository naming contract.
-
 ### Canonical proposal envelope
 
 The canonical proposal carries only proposal-domain data:
@@ -24,7 +22,7 @@ The canonical proposal carries only proposal-domain data:
 - explicit capability references, assumptions and unresolved questions;
 - bounded confidence/uncertainty metadata;
 - provider, model and adapter identity without credentials;
-- a digest-bound interpretation context containing a `linura-control`-minted authority-context revision and semantic input digest;
+- a digest-bound interpretation context containing a Linura Control-minted authority-context revision and semantic input digest;
 - non-authoritative explanation/advisory material;
 - a canonical digest computed from the complete authority-relevant proposal representation.
 
@@ -32,27 +30,27 @@ The proposal cannot carry an authenticated principal, approval record, dispatch 
 
 ### Context binding and staleness
 
-Interpretation is requested against an explicit `InterpretationContextBinding` minted by trusted `linura-control` from the authoritative state used to construct the semantic context projection. The binding contains an opaque `linura-control`-owned context revision plus a canonical digest over the minimized semantic projection supplied to the interpreter.
+Interpretation is requested against an explicit `InterpretationContextBinding` minted by trusted Linura Control from the authoritative state used to construct the semantic context projection. The binding contains an opaque Control-owned context revision plus a canonical digest over the minimized semantic projection supplied to the interpreter.
 
-`linura-control`, not the agent runtime, constructs that projection. Before the projection crosses into the agent runtime, `linura-control` resolves the allowed semantic inputs, removes secret-bearing fields and values, and records the authority sources/revisions and observation identities required to later revalidate acceptance.
+Linura Control, not the agent runtime, constructs that projection. Before the projection crosses into the agent runtime, Control resolves the allowed semantic inputs, removes secret-bearing fields and values, and records the authority sources/revisions and observation identities required to later revalidate acceptance.
 
-The agent runtime, client and provider may transport or echo that binding, but none of them may mint or advance authoritative freshness. At acceptance, `linura-control` must:
+The agent runtime, client and provider may transport or echo that binding, but none of them may mint or advance authoritative freshness. At acceptance, Linura Control must:
 
 1. re-read or re-resolve every authority-bearing observation, policy, Library object, capability-registry entry and existing-intent dependency relevant to the proposal;
-2. re-check time-based observation freshness using trusted time obtained inside `linura-control`, including provider/resource/capability validity windows that may expire even when no revision changes;
+2. re-check time-based observation freshness using trusted Control time, including provider/resource/capability validity windows that may expire even when no revision changes;
 3. reacquire authoritative observation where required freshness has expired, or fail closed if fresh authoritative evidence cannot be established;
 4. derive the current authority-context binding from that fresh/current material; and
 5. require an exact match with the proposal binding.
 
 An unchanged revision/digest is therefore insufficient when an observation has aged outside its validity window. Replaying an old but internally consistent binding fails closed when any authority-bearing dependency changed or when required observation freshness expired.
 
-Provider-local timestamps, model confidence, caller-generated revisions and client assertions are not substitutes for the `linura-control`-owned binding or `linura-control`-owned freshness evaluation.
+Provider-local timestamps, model confidence, caller-generated revisions and client assertions are not substitutes for the Control-owned binding or Control-owned freshness evaluation.
 
 ### Provider-neutral contract
 
-Provider adapters implement a transport-neutral interpretation interface. The request contains bounded, data-minimized semantic input, actor provenance, the `linura-control`-minted context binding and explicit resource/output budgets. The response contains a structured proposal candidate and provider metadata. Provider-specific HTTP, RPC, model, streaming, tool-call and authentication details do not enter the canonical intent model.
+Provider adapters implement a transport-neutral interpretation interface. The request contains bounded, data-minimized semantic input, actor provenance, the Control-minted context binding and explicit resource/output budgets. The response contains a structured proposal candidate and provider metadata. Provider-specific HTTP, RPC, model, streaming, tool-call and authentication details do not enter the canonical intent model.
 
-The untrusted agent runtime never receives raw secret-bearing Library, observation, retrieval or user context for the purpose of filtering it itself. `linura-control` constructs the complete provider/runtime projection first and excludes secret values, privileged tokens, authority credentials and other protected secret-bearing fields before that projection crosses into the agent runtime. Where semantics require a secret dependency, only a protected reference/handle or explicitly non-secret metadata may cross the runtime/provider boundary. A hosted adapter must never receive a secret merely because the caller included it in retrieved context or Library data.
+The untrusted agent runtime never receives raw secret-bearing Library, observation, retrieval or user context for the purpose of filtering it itself. Linura Control constructs the complete provider/runtime projection first and excludes secret values, privileged tokens, authority credentials and other protected secret-bearing fields before that projection crosses into the agent runtime. Where semantics require a secret dependency, only a protected reference/handle or explicitly non-secret metadata may cross the runtime/provider boundary. A hosted adapter must never receive a secret merely because the caller included it in retrieved context or Library data.
 
 Adapters declare whether they require network access and which interpretation protocol/schema versions they support. Offline mode must never invoke a network-required adapter.
 
@@ -64,7 +62,7 @@ The runtime validates the complete provider result before exposing it as a valid
 
 ### Manual operation
 
-Agent-native does not mean agent-dependent. A deterministic manual interpreter path accepts already-typed user input and constructs the same validated `IntentProposal` contract without a model provider or network dependency. Manual construction does not weaken the later authenticated-principal, `linura-control` context, registry or authorization checks.
+Agent-native does not mean agent-dependent. A deterministic manual interpreter path accepts already-typed user input and constructs the same validated `IntentProposal` contract without a model provider or network dependency. Manual construction does not weaken the later authenticated-principal, Control-context, registry or authorization checks.
 
 ### Advice and disagreement
 
@@ -72,40 +70,51 @@ Specialists/advisors return separately attributed advisory records. Advice is ne
 
 ### Acceptance boundary
 
-Acceptance is a separate trusted `linura-control` operation. Proposal fields are evidence/input only; they do not authenticate or authorize the caller. Acceptance must:
+Acceptance is a separate trusted Linura Control operation. Proposal fields are evidence/input only; they do not authenticate or authorize the caller. Acceptance must:
 
 1. validate proposal schema, version and canonical digest;
 2. obtain the authenticated `Principal` from the trusted transport/session boundary and verify that principal independently of the proposal's actor provenance;
 3. validate the claimed actor provenance against the authenticated request context without treating actor equality as authorization;
-4. re-establish all required current authority material and time-based observation freshness inside `linura-control`, reacquiring authoritative observations where freshness expired;
-5. derive the current authority-context binding inside `linura-control` and require an exact match with the proposal binding;
-6. resolve every capability reference against the current `linura-control`-owned local capability registry, failing closed if the registry, capability or support state is unavailable or unsupported;
+4. re-establish all required current authority material and time-based observation freshness inside Linura Control, reacquiring authoritative observations where freshness expired;
+5. derive the current authority-context binding inside Control and require an exact match with the proposal binding;
+6. resolve every capability reference against the current Control-owned local capability registry, failing closed if the registry, capability or support state is unavailable or unsupported;
 7. reject contradictory, ambiguous, stale, substituted or otherwise unsupported proposal material;
-8. require the applicable `linura-control`-owned human/policy acceptance decision and prove that the decision is exact-bound to the authenticated principal, canonical proposal ID/digest, accepted `linura-control` context binding, durable operation identity, requested create/revise action, and exact create/revise target identity/revision expectation;
-9. convert the accepted proposal into a normal `Intent` in `Proposed` state; and
-10. call the dedicated `linura-library` acceptance persistence operation so the intent transition and exact proposal-acceptance record commit atomically before reporting success.
+8. require the applicable Control-owned human/policy acceptance decision and prove that the decision is exact-bound to the authenticated principal, canonical proposal ID/digest, accepted Control context binding, durable operation identity, requested create/revise action, and exact create/revise target identity/revision expectation;
+9. enter a Control-owned acceptance serialization boundary, revalidate the complete current context/freshness/capability/decision binding at the durable linearization point, and fail closed if any authority generation, target revision, required observation freshness or decision applicability drifted;
+10. while that serialization boundary is still held, mint a sealed exact-bound acceptance-commit capability and consume it through the authority-internal Library acceptance primitive;
+11. atomically persist the resulting normal `Intent` in `Proposed` state together with the exact proposal-acceptance record before reporting success.
+
+The acceptance serialization boundary must cover every locally mutable authority input whose concurrent change could invalidate acceptance. Such changes either participate in the same Control-owned guard or advance a monotonic authority generation checked at the linearization point. Time-based freshness is re-evaluated with trusted Control time immediately before the commit capability is minted; an observation that has expired by that point cannot be accepted merely because its revision is unchanged.
 
 The acceptance decision cannot be reused for a different proposal, context, operation or target merely because the principal and high-level action are the same. Changed proposal digest, context binding, operation identity, create/revise target or expected revision requires a new applicable acceptance decision.
 
-The durable acceptance record persisted by `linura-library` must bind at least the authenticated principal, acceptance-decision identity and decision-binding digest, proposal ID, canonical proposal digest, accepted `linura-control` context binding, durable operation identity, create/revise action and target identity/revision expectation, resulting `IntentId`, and resulting intent revision. Exact retry of the same acceptance is idempotent and returns the same result. Reuse of the same proposal/operation/decision identity with different bound material fails closed as a conflict. A lost response after commit therefore cannot create a second intent, replay authorization onto substituted proposal content, or erase proposal-to-intent provenance.
+### Sealed durable acceptance
 
-This requires a dedicated v0.8 `linura-control` acceptance orchestration path backed by a dedicated atomic `linura-library` persistence operation on the v0.7 Library/idempotency substrate; calling the pre-existing `LocalLibrary::create_intent` operation alone is not sufficient evidence of proposal acceptance.
+The durable Library acceptance primitive is an authority-internal persistence surface, not a new public `LocalLibrary`/SDK mutation API. It must require a sealed acceptance-commit capability minted only by Linura Control after the final exact-bound revalidation above.
+
+The sealed capability is non-user-constructible, non-deserializable from client/provider input, non-cloneable/replayable as a general credential, exact-bound to the acceptance material, and consumed by value for one durable linearization attempt. Public SDK clients, providers and the agent runtime cannot fabricate it or invoke proposal acceptance by supplying a structurally similar request.
+
+The durable acceptance record must bind at least the authenticated principal, acceptance-decision identity and decision-binding digest, proposal ID, canonical proposal digest, accepted Control context binding, durable operation identity, create/revise action and target identity/revision expectation, authority generation/freshness evidence used at linearization, resulting `IntentId`, and resulting intent revision. Exact retry of an already-committed acceptance is idempotent and returns the same result. Reuse of the same proposal/operation/decision identity with different bound material fails closed as a conflict.
+
+If the process fails before commit, no sealed capability is recoverable or reconstructible from public/durable identifiers; the caller must re-enter Linura Control and re-establish current authority. If the commit succeeds but the response is lost, recovery reads the exact durable acceptance record and returns the same result without creating a second intent or replaying authorization over changed material.
+
+Calling the pre-existing public `LocalLibrary::create_intent` operation alone is not sufficient evidence of proposal acceptance and cannot substitute for the sealed authority-internal path.
 
 Acceptance itself grants no machine-mutation approval or execution authority. Any later machine mutation still traverses the existing observe → plan → validate → authorize → prepare → execute → verify → commit → audit → reconcile lifecycle.
 
 ### Secret and diagnostic boundary
 
-Provider credentials remain adapter-private. `linura-control` excludes secret values, privileged tokens, authority credentials and protected Library/observation/retrieval/user fields before an interpretation projection crosses into the agent runtime. Only protected references/handles or deliberately non-secret projections may be supplied when needed for semantics.
+Provider credentials remain adapter-private. Linura Control excludes secret values, privileged tokens, authority credentials and protected Library/observation/retrieval/user fields before an interpretation projection crosses into the agent runtime. Only protected references/handles or deliberately non-secret projections may be supplied when needed for semantics.
 
 Canonical requests/proposals and public errors contain no credential material. The runtime bounds diagnostics and exposes stable error categories without copying arbitrary provider response bodies, prompts or secret-bearing context into audit/state surfaces.
 
 ## Consequences
 
 - `linura-intent` owns the canonical proposal types, validation and digest semantics.
-- `linura-agent-runtime` owns deterministic interpretation orchestration and manual operation over an already-minimized `linura-control`-produced projection, but not projection minimization, freshness, capability-registry or acceptance authority.
+- `linura-agent-runtime` owns deterministic interpretation orchestration and manual operation over an already-minimized Control-produced projection, but not projection minimization, freshness, capability-registry or acceptance authority.
 - `linura-provider-sdk` owns provider-neutral adapter contracts, not model authority.
-- `linura-control` owns authenticated-principal binding, trusted projection construction/minimization, current authority-context derivation, time-based observation-freshness revalidation, capability-registry resolution, exact-bound acceptance authorization and acceptance orchestration.
-- `linura-library` owns the atomic durable acceptance record + resulting intent persistence operation while preserving the v0.7 durability/idempotency model; it does not own policy, approval or executor authority.
+- Linura Control owns authenticated-principal binding, trusted projection construction/minimization, current authority-context derivation, time-based observation-freshness revalidation, capability-registry resolution, exact-bound acceptance authorization, final acceptance serialization and sealed acceptance-capability minting.
+- the Linura Library durable path owns atomic storage of the accepted intent + exact acceptance record, but the proposal-acceptance primitive is authority-internal, requires the sealed Control-minted capability, and is not exposed as a public SDK mutation surface.
 - provider implementations may be local, hosted or enterprise-managed without changing the canonical proposal/authority model.
 - v0.8 can be qualified with deterministic mock/replay adapters without depending on a live external model service.
 - adding autonomous tool or executor authority in a future release requires a new explicit authority decision; it cannot be inferred from this ADR.
