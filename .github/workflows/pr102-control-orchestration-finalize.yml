@@ -1,0 +1,74 @@
+name: PR102 Control orchestration boundary repair finalizer
+
+on:
+  push:
+    branches:
+      - docs/v0.8-agent-interpretation-contract
+    paths:
+      - .github/workflows/pr102-control-orchestration-finalize.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: docs/v0.8-agent-interpretation-contract
+          fetch-depth: 2
+
+      - name: Verify finalizer carrier
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "4c31548c6c7d14bd3f1a421aa604851c4ac31949"
+          test -f .github/workflows/pr102-control-orchestration-fix.yml
+          test -f .github/workflows/pr102-control-orchestration-finalize.yml
+
+      - name: Apply validated repair and run canonical repository check
+        shell: bash
+        run: |
+          set -euo pipefail
+          awk '
+            /python3 - <<.PY./ {capture=1; next}
+            capture && /^          PY$/ {exit}
+            capture {sub(/^          /, ""); print}
+          ' .github/workflows/pr102-control-orchestration-fix.yml \
+            | grep -v 'Path(".github/workflows/pr102-control-orchestration-fix.yml").unlink()' \
+            > /tmp/pr102-repair.py
+
+          test -s /tmp/pr102-repair.py
+          python3 /tmp/pr102-repair.py
+          python3 scripts/check_repository.py
+          git diff --check
+
+      - name: Remove carriers, verify final tree delta, commit and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr102-control-orchestration-fix.yml
+          rm .github/workflows/pr102-control-orchestration-finalize.yml
+          git diff --check
+
+          expected=$(cat <<'EOF'
+          .github/workflows/pr102-control-orchestration-finalize.yml
+          .github/workflows/pr102-control-orchestration-fix.yml
+          docs/adr/0028-proposal-only-agent-interpretation.md
+          docs/milestones/v0.8.0.md
+          docs/qualification/v0.8.0-release-review.md
+          docs/qualification/v0.8.0-security.md
+          docs/qualification/v0.8.0.md
+          docs/releases/v0.8.0.md
+          docs/threat-model.md
+          EOF
+          )
+          actual=$(git diff --name-only | sort)
+          test "$actual" = "$(printf '%s\n' "$expected" | sort)"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "docs(v0.8): keep provider orchestration in Control"
+          git push origin HEAD:docs/v0.8-agent-interpretation-contract
