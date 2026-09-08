@@ -250,6 +250,102 @@ A local client tries to consume unbounded disk/memory with authority or audit re
 - no silent eviction of authority/audit history in v0.4;
 - WAL checkpoint/maintenance may reclaim physical space without changing semantic history.
 
+## v0.8 proposal interpretation and acceptance threats
+
+### Proposal actor spoofing or acceptance-authority laundering
+A compromised client, provider or agent runtime supplies actor fields that appear to identify an authorized user and attempts to convert that provenance directly into durable intent.
+- proposal `Actor` fields are provenance only and never authenticate a caller;
+- the acceptance operation obtains the authenticated `Principal` independently from the trusted transport/session boundary;
+- Linura Control requires the applicable human/policy acceptance decision for that authenticated principal before durable intent creation/revision;
+- that decision is exact-bound to the authenticated principal, proposal ID/digest, accepted Control context binding, durable operation identity, create/revise action and exact target identity/revision expectation;
+- actor/principal relationships are revalidated by Linura Control, and self-asserted proposal data cannot create grants or authorization;
+- acceptance grants no machine-mutation approval, dispatch permit or executor authority.
+
+### Proposal context TOCTOU, pre/post-mint authority expiry or stale-binding replay
+A caller replays an old but internally consistent context revision/digest after observation, policy, Library state, capability registry or relevant existing intent has changed; an observation validity window expires without a revision change; a time-bounded human/policy acceptance decision or approval expires without any authority-generation change; trusted Control time rolls backward, resets/rebinds, or loses monotonic continuity after capability minting; or execution is delayed after final validation/capability minting but before the actual durable write/CAS so previously valid evidence or authorization becomes invalid.
+- the authority-context revision is minted by trusted Linura Control from the authoritative state used for interpretation;
+- the client/runtime/provider may transport the binding but cannot mint or advance it;
+- acceptance re-reads/re-resolves relevant authoritative dependencies inside Linura Control;
+- time-based observation freshness and decision/approval applicability are re-evaluated using trusted Control time independently of revision equality;
+- expired required observation is reacquired before acceptance, while expired decision/approval authority requires fresh applicable authorization; otherwise acceptance fails closed;
+- Linura Control enters the authority-internal durable acceptance transaction and acquires the write/CAS serialization guard before final context/freshness/capability/decision revalidation;
+- while that guard remains held, Linura Control revalidates current authority, samples trusted Control time for the final-revalidation authority-time floor, normalizes every time-limited authority contributor to the same **exclusive first-invalid Linura Control instant** according to that contributor's own validity predicate and clock unit, then computes the earliest normalized authority-validity deadline; observation freshness that remains current at an inclusive expiration endpoint contributes the first representable Control instant after that endpoint, while a decision/approval invalid for `now >= expires_at` contributes `expires_at` itself;
+- unknown endpoint semantics, incompatible/unknown clock units, unit-conversion overflow, successor/endpoint overflow or any inability to derive a deterministic first-invalid Control instant fails closed; such a contributor is never dropped from the deadline set;
+- the sealed transaction-scoped acceptance capability is exact-bound to the durable transaction and carries the final-revalidation authority-time floor, earliest normalized exclusive authority-validity deadline and endpoint/unit-normalization evidence for every contributing time-bounded authority input;
+- the authority-internal Library path consumes the sealed capability without releasing/reacquiring the durable guard and mechanically rechecks trusted Control time at the actual intent+acceptance-record write/CAS linearization, permitting the write only when `time_floor <= now < deadline`;
+- a post-mint sample with `now < time_floor`, a detected clock reset/rollback/rebind, or unknown monotonic continuity fails closed and aborts/rolls back with no durable intent or acceptance record, even if the sampled wall-clock value otherwise satisfies `time_floor <= now < deadline`;
+- any database-lock, scheduling, internal-I/O or retry delay that reaches or passes the sealed normalized deadline aborts/rolls back with no durable intent or acceptance record, regardless of which time-limited authority input expired;
+- Linura Control derives the current authoritative binding from fresh/current material and requires an exact match;
+- provider timestamps, caller-generated revision tokens and model confidence are never freshness or authorization authority.
+
+### Capability-registry substitution or expansion
+A provider/client supplies a matching invented capability definition so an otherwise unknown proposal reference appears supported.
+- proposals carry capability references, not authoritative registry entries;
+- acceptance resolves every reference against the current Control-owned local capability registry;
+- unavailability, unknown capability, unsupported support state or registry revision change fails closed;
+- providers, model output and agent runtimes cannot expand the trusted registry through proposal content.
+
+### Secret exfiltration through interpretation context or diagnostics
+Retrieved context, Library state, observations or user input contain secret values and a compromised agent runtime or hosted/local adapter attempts to receive or log them.
+- Linura Control constructs and data-minimizes the semantic projection before it crosses into the untrusted agent runtime;
+- raw secret-bearing Library, observation, retrieval or user context is never delegated to the runtime for filtering;
+- secret values, privileged tokens, authority credentials and protected secret-bearing fields are excluded before the runtime/provider boundary;
+- only protected references/handles or explicitly non-secret metadata may represent a secret dependency;
+- provider credentials and reusable transport handles remain private to the trusted invocation gate/credential resolver and never enter untrusted runtime/adapter logic;
+- public errors/audit use bounded stable categories and do not copy arbitrary provider response bodies, prompts or secret-bearing source context;
+- qualification injects secret canaries into source context and proves they do not reach runtime/provider input, proposal state, diagnostics or audit surfaces.
+
+### Proposal substitution, authorization replay, direct persistence bypass or lost-response replay
+Acceptance commits durable intent but the response is lost, a caller reuses a proposal/operation/decision identity with changed principal, digest, context, action, target or resulting intent, an untrusted caller attempts to bypass Linura Control by invoking the Library persistence surface directly, a sealed capability is held across blocking long enough for observation freshness or decision/approval applicability to expire before persistence linearizes, or trusted Control time rolls backward, resets/rebinds, or loses monotonic continuity after the capability was minted.
+- Linura Control exact-binds the acceptance decision to authenticated principal + proposal ID/digest + accepted context + durable operation identity + create/revise action + exact target identity/revision expectation;
+- the durable write/CAS serialization guard is acquired before final authority revalidation; sealed capability minting then occurs while that guard remains held, rather than being treated as the durable linearization point itself;
+- the authority-internal Library acceptance primitive requires a sealed exact-bound Control-minted commit capability and is not exposed as a public `LocalLibrary`/SDK proposal-acceptance mutation accepting caller-constructible authority fields;
+- the sealed capability is non-user-constructible, non-deserializable from client/provider input, exact-bound to the durable transaction, final-revalidation authority-time floor, earliest normalized exclusive authority-validity deadline and endpoint/unit-normalization evidence, and consumed for one durable linearization attempt;
+- immediately at the actual intent+acceptance-record write/CAS, the Library path rechecks trusted Control time and permits persistence only when `time_floor <= now < deadline`; rollback/reset/rebind/unknown time continuity, invalid/missing normalization evidence or deadline expiry rolls the transaction back;
+- the durable record binds authenticated principal + acceptance-decision identity/binding + proposal ID/digest + accepted Control context binding + durable operation identity + create/revise action + exact target expectation + authority-generation/freshness evidence + decision/approval validity evidence + enforced authority-time floor + normalized exclusive authority-validity deadline + endpoint/unit-normalization evidence + resulting `IntentId`/revision;
+- exact retry returns the same durable result after process restart;
+- a crash before commit cannot reconstruct the transient sealed capability from public or durable identifiers and must re-enter Linura Control for fresh authority establishment;
+- semantic substitution or conflicting reuse of any bound identity/material fails closed;
+- an acceptance decision for one proposal/context/operation/target cannot authorize another merely because the principal or high-level action are the same;
+- direct public Library/SDK attempts to fabricate proposal acceptance are rejected without durable mutation;
+- the proposal-to-intent lineage remains durable for explanation/audit and cannot be reconstructed from mutable conversation text;
+- the pre-v0.8 generic `create_intent` call alone is not treated as proof of authenticated/authorized proposal acceptance;
+- qualification independently injects inclusive-observation endpoint normalization, decision/approval exact-expiry normalization, normalization overflow/unknown-semantics failure, post-mint observation expiry, post-mint decision/approval expiry, numeric trusted-time rollback, trusted-time reset/rebind and continuity-unknown cases so one case cannot mask another.
+
+### Runtime/adapter orchestration takeover, invocation-gate bypass or aggregate-budget escape
+A compromised agent runtime receives one bounded interpretation attempt and tries to become a second orchestration owner by selecting another provider, self-retrying, activating fallback, initiating advisors, resetting aggregate deadlines/budgets, or aggregating/caching/coalescing cross-provider results. Compromised adapter logic tries to obtain reusable credentials, open direct network/process/session transport, substitute the prepared provider invocation, forge/replay an invocation permit, or hide adapter/transport-library retries, request-producing redirects/authentication replay, uncertain-write replay or stream reconnect/resume inside that single admitted attempt after timeout, rate limit, transport failure, cancellation or partial response.
+- Linura Control exclusively owns provider eligibility/discovery, selection, cross-adapter scheduling, aggregate deadlines/budgets, timeout/cancellation policy, retry/fallback/advisor admission, caching/coalescing and aggregation;
+- the runtime receives an exact Control-admitted attempt descriptor for one selected adapter and may enforce only its bounded attempt-local mechanics;
+- the runtime cannot mint another attempt descriptor, select a second adapter, reset/re-base aggregate budget/deadline state, or turn provider failure into retry/fallback/advisor admission;
+- runtime/adapter logic runs in a production-enforced sandbox without ambient provider network/process/session egress, raw/reusable credentials or dereferenceable credential/transport handles;
+- adapter logic first emits a bounded credential-free `PreparedProviderInvocation`; Control validates it against the selected provider/adapter/endpoint profile and attempt bounds and records its exact canonical digest;
+- every side-effecting hosted/local provider call crosses a separate trusted invocation gate; Control mints an unforgeable single-use permit exact-bound to the canonical interpretation request and prepared-invocation digests plus attempt/provider/adapter/endpoint/network classification/per-attempt bounds and aggregate orchestration state, and only the gate receives that permit through its protected capability channel;
+- the gate verifies the exact prepared invocation and atomically consumes the permit before credential resolution, authentication, DNS, socket, process/session or provider transport initialization; request substitution plus forged, mismatched, expired, replayed or already-used permits fail before any such side effect;
+- one permit authorizes at most one provider invocation and is spent on success, timeout, rate limit, transport failure, cancellation or partial response; adapter logic returns the bounded outcome without internally retrying, reissuing or starting a replacement/resume request;
+- transport-library automatic retries, redirects that initiate a request, authentication-challenge replay, uncertain-write replay and stream reconnect/resume are disabled and each is treated as another provider invocation requiring fresh Control admission;
+- every extra or repeated provider invocation requires a fresh Control admission/permit against the original aggregate budget/deadline; adapter/runtime isolation prevents bypassing the gate;
+- multi-advisor scheduling and deterministic select/combine/reject policy remain in Control while runtime results stay separately attributed;
+- qualification uses the production-equivalent sandbox plus credential/network/process/session/transport traps to exercise runtime self-selection/self-retry, direct-egress and credential access, prepared-invocation substitution, permit forgery/replay/second consumption, adapter/transport-library repeat invocation, fallback/advisor initiation, budget/deadline reset and aggregation takeover; zero forbidden side-effect counters are required.
+
+### Offline-mode network adapter escape
+Offline mode is enabled while a network-required adapter is installed, discovered, selected, health-checked, chosen as fallback or otherwise considered by orchestration, and adapter lifecycle code attempts network-side effects before Linura Control admits a provider attempt.
+- adapter metadata declares network requirement before any adapter callback or transport initialization that could perform I/O;
+- Linura Control evaluates offline policy before provider admission and before adapter invocation, provider discovery callbacks, health-check callbacks, fallback activation, provider authentication, DNS resolution, socket creation/connect or transport/client initialization; the runtime cannot override that decision;
+- a network-required adapter selected in offline mode is rejected locally with zero adapter-callback, authentication, DNS, socket and transport-initialization side effects;
+- discovery or fallback cannot opportunistically probe a network-required provider while offline merely to decide whether it is usable;
+- deterministic qualification independently exercises explicit selection, provider discovery, health checking and fallback with trap-backed network-required adapters and requires all invocation/authentication/DNS/socket/transport-initialization counters to remain exactly zero for every path;
+- manual/no-provider operation remains a separate complete path and does not weaken this pre-invocation isolation rule.
+
+### Compromised adapter/runtime or malicious model output
+A provider or agent runtime emits malformed typed data, authority claims, hidden tool requests or misleading explanations.
+- model/provider/runtime output remains proposal-only and cannot carry authenticated principal, approval evidence, policy decisions, grants, dispatch permits or executor handles;
+- complete structured output is schema/version/bounds/digest validated before it can become a proposal;
+- partial streaming fragments never become accepted proposal state;
+- prompt/tool/authorization claims embedded in text remain untrusted data;
+- no executor/tool handle or cross-provider orchestration authority exists in the interpretation runtime;
+- deterministic Linura Control acceptance independently re-establishes authenticated principal, current authority context/freshness, capability-registry resolution and the exact-bound acceptance decision;
+- negative qualification covers escalation, malformed/oversized output and provider/runtime failure paths.
+
 ## Deferred threats
 
 Fleet/remote orchestration and hosted/shared Library services receive dedicated threat-model extensions before any network control plane or trusted shared catalog is enabled.

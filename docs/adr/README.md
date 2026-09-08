@@ -50,3 +50,4 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0025 — Component maturity and milestone activation are explicit contracts](0025-component-maturity-and-milestone-activation.md)
 - [0026 — Bounded v0.6 managed mutation authority and Authority1 boundary](0026-bounded-v0.6-managed-mutation-authority.md)
 - [0027 — Protected release handoff automation](0027-protected-release-handoff-automation.md)
+- [0028 — Proposal-only agent interpretation](0028-proposal-only-agent-interpretation.md)
