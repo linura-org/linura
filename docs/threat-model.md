@@ -256,40 +256,45 @@ A local client tries to consume unbounded disk/memory with authority or audit re
 A compromised client, provider or agent runtime supplies actor fields that appear to identify an authorized user and attempts to convert that provenance directly into durable intent.
 - proposal `Actor` fields are provenance only and never authenticate a caller;
 - the acceptance operation obtains the authenticated `Principal` independently from the trusted transport/session boundary;
-- Linura Control requires the applicable human/policy decision for that authenticated principal before durable intent creation/revision;
-- actor/principal relationships are revalidated by Control and self-asserted proposal data cannot create grants or authorization;
+- `linura-control` requires the applicable human/policy acceptance decision for that authenticated principal before durable intent creation/revision;
+- that decision is exact-bound to the authenticated principal, proposal ID/digest, accepted `linura-control` context binding, durable operation identity, create/revise action and exact target identity/revision expectation;
+- actor/principal relationships are revalidated by `linura-control`, and self-asserted proposal data cannot create grants or authorization;
 - acceptance grants no machine-mutation approval, dispatch permit or executor authority.
 
-### Proposal context TOCTOU or stale-binding replay
-A caller replays an old but internally consistent context revision/digest after observation, policy, Library state, capability registry or relevant existing intent has changed.
-- the authority-context revision is minted by trusted Linura Control from the authoritative revisions used for interpretation;
+### Proposal context TOCTOU, expiry or stale-binding replay
+A caller replays an old but internally consistent context revision/digest after observation, policy, Library state, capability registry or relevant existing intent has changed, or after an observation validity window expires without a revision change.
+- the authority-context revision is minted by trusted `linura-control` from the authoritative state used for interpretation;
 - the client/runtime/provider may transport the binding but cannot mint or advance it;
-- acceptance derives the relevant current authoritative binding again inside Control and requires an exact match;
-- provider timestamps, caller-generated revision tokens and model confidence are never freshness authority;
-- stale or unavailable authority dependencies fail closed and require a new/revalidated proposal rather than silent reinterpretation.
+- acceptance re-reads/re-resolves relevant authoritative dependencies inside `linura-control`;
+- time-based observation freshness is re-evaluated using trusted time obtained inside `linura-control`, independently of revision equality;
+- expired required observation is reacquired before acceptance, or acceptance fails closed when fresh evidence cannot be established;
+- `linura-control` derives the current authoritative binding from that fresh/current material and requires an exact match;
+- provider timestamps, caller-generated revision tokens and model confidence are never freshness authority.
 
 ### Capability-registry substitution or expansion
 A provider/client supplies a matching invented capability definition so an otherwise unknown proposal reference appears supported.
 - proposals carry capability references, not authoritative registry entries;
-- acceptance resolves every reference against the current Control-owned local capability registry;
+- acceptance resolves every reference against the current `linura-control`-owned local capability registry;
 - unavailability, unknown capability, unsupported support state or registry revision change fails closed;
 - providers, model output and agent runtimes cannot expand the trusted registry through proposal content.
 
 ### Secret exfiltration through interpretation context or diagnostics
-Retrieved context, Library state, observations or user input contain secret values and a hosted/local adapter receives or later logs them.
-- Linura constructs a bounded data-minimized semantic projection before adapter invocation;
-- secret values, privileged tokens, authority credentials and protected secret-bearing fields are excluded before the provider boundary;
+Retrieved context, Library state, observations or user input contain secret values and a compromised agent runtime or hosted/local adapter attempts to receive or log them.
+- `linura-control` constructs and data-minimizes the semantic projection before it crosses into the untrusted agent runtime;
+- raw secret-bearing Library, observation, retrieval or user context is never delegated to the runtime for filtering;
+- secret values, privileged tokens, authority credentials and protected secret-bearing fields are excluded before the runtime/provider boundary;
 - only protected references/handles or explicitly non-secret metadata may represent a secret dependency;
 - provider credentials remain adapter-private;
 - public errors/audit use bounded stable categories and do not copy arbitrary provider response bodies, prompts or secret-bearing source context;
-- qualification injects secret canaries into source context and proves they do not reach provider input, proposal state, diagnostics or audit surfaces.
+- qualification injects secret canaries into source context and proves they do not reach runtime/provider input, proposal state, diagnostics or audit surfaces.
 
-### Proposal substitution, duplicate acceptance or lost-response replay
-Acceptance commits durable intent but the response is lost, or a caller reuses a proposal/operation identity with changed principal, digest, context or resulting intent.
+### Proposal substitution, authorization replay, duplicate acceptance or lost-response replay
+Acceptance commits durable intent but the response is lost, or a caller reuses a proposal/operation/decision identity with changed principal, digest, context, action, target or resulting intent.
 - acceptance atomically persists the resulting intent transition and an exact proposal-acceptance record;
-- the record binds authenticated principal + proposal ID + canonical proposal digest + accepted Control context binding + durable operation identity + resulting `IntentId`/revision;
+- the record binds authenticated principal + acceptance-decision identity/binding + proposal ID/digest + accepted `linura-control` context binding + durable operation identity + create/revise action + exact target expectation + resulting `IntentId`/revision;
 - exact retry returns the same durable result after process restart;
 - semantic substitution or conflicting reuse of any bound identity/material fails closed;
+- an acceptance decision for one proposal/context/operation/target cannot authorize another merely because the principal or high-level action is the same;
 - the proposal-to-intent lineage remains durable for explanation/audit and cannot be reconstructed from mutable conversation text;
 - the pre-v0.8 generic `create_intent` call alone is not treated as proof of authenticated/authorized proposal acceptance.
 
@@ -300,8 +305,8 @@ A provider or agent runtime emits malformed typed data, authority claims, hidden
 - partial streaming fragments never become accepted proposal state;
 - prompt/tool/authorization claims embedded in text remain untrusted data;
 - no executor/tool handle exists in the interpretation runtime;
-- deterministic Control acceptance re-resolves current authority context and capabilities independently of provider claims;
-- negative qualification covers escalation, malformed/oversized output and provider failure paths.
+- deterministic `linura-control` acceptance independently re-establishes authenticated principal, current authority context/freshness, capability-registry resolution and the exact-bound acceptance decision;
+- negative qualification covers escalation, malformed/oversized output and provider/runtime failure paths.
 
 ## Deferred threats
 
