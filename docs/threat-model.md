@@ -261,16 +261,19 @@ A compromised client, provider or agent runtime supplies actor fields that appea
 - actor/principal relationships are revalidated by Linura Control, and self-asserted proposal data cannot create grants or authorization;
 - acceptance grants no machine-mutation approval, dispatch permit or executor authority.
 
-### Proposal context TOCTOU, expiry or stale-binding replay
-A caller replays an old but internally consistent context revision/digest after observation, policy, Library state, capability registry or relevant existing intent has changed, after an observation validity window expires without a revision change, or while one of those authority inputs changes concurrently with acceptance.
+### Proposal context TOCTOU, pre/post-mint expiry or stale-binding replay
+A caller replays an old but internally consistent context revision/digest after observation, policy, Library state, capability registry or relevant existing intent has changed; an observation validity window expires without a revision change; or execution is delayed after final validation/capability minting but before the actual durable write/CAS so previously fresh evidence becomes stale.
 - the authority-context revision is minted by trusted Linura Control from the authoritative state used for interpretation;
 - the client/runtime/provider may transport the binding but cannot mint or advance it;
 - acceptance re-reads/re-resolves relevant authoritative dependencies inside Linura Control;
 - time-based observation freshness is re-evaluated using trusted Control time independently of revision equality;
 - expired required observation is reacquired before acceptance, or acceptance fails closed when fresh evidence cannot be established;
-- immediately before durable acceptance, Linura Control revalidates the full context/freshness/capability/decision binding under a Control-owned serialization/CAS boundary;
-- authority-generation, target-revision, freshness or decision drift at that linearization point fails closed rather than committing stale authorization;
-- Linura Control derives the current authoritative binding from that fresh/current material and requires an exact match;
+- Linura Control enters the authority-internal durable acceptance transaction and acquires the write/CAS serialization guard before final context/freshness/capability/decision revalidation;
+- while that guard remains held, Linura Control revalidates current authority, computes the earliest required observation-freshness deadline and fails closed on authority-generation, target-revision, freshness or decision drift;
+- the sealed transaction-scoped acceptance capability is exact-bound to the durable transaction and carries that earliest freshness deadline;
+- the authority-internal Library path consumes the sealed capability without releasing/reacquiring the durable guard and mechanically rechecks the deadline with trusted Control time at the actual intent+acceptance-record write/CAS linearization;
+- any database-lock, scheduling, internal-I/O or retry delay that crosses the sealed deadline aborts/rolls back with no durable intent or acceptance record;
+- Linura Control derives the current authoritative binding from fresh/current material and requires an exact match;
 - provider timestamps, caller-generated revision tokens and model confidence are never freshness authority.
 
 ### Capability-registry substitution or expansion
@@ -291,12 +294,13 @@ Retrieved context, Library state, observations or user input contain secret valu
 - qualification injects secret canaries into source context and proves they do not reach runtime/provider input, proposal state, diagnostics or audit surfaces.
 
 ### Proposal substitution, authorization replay, direct persistence bypass or lost-response replay
-Acceptance commits durable intent but the response is lost, a caller reuses a proposal/operation/decision identity with changed principal, digest, context, action, target or resulting intent, or an untrusted caller attempts to bypass Linura Control by invoking the Library persistence surface directly.
+Acceptance commits durable intent but the response is lost, a caller reuses a proposal/operation/decision identity with changed principal, digest, context, action, target or resulting intent, an untrusted caller attempts to bypass Linura Control by invoking the Library persistence surface directly, or a sealed capability is held across blocking long enough for its evidence to expire before persistence linearizes.
 - Linura Control exact-binds the acceptance decision to authenticated principal + proposal ID/digest + accepted context + durable operation identity + create/revise action + exact target identity/revision expectation;
-- final authority revalidation and sealed capability minting occur under the Control-owned acceptance serialization boundary at the durable linearization point;
+- the durable write/CAS serialization guard is acquired before final authority revalidation; sealed capability minting then occurs while that guard remains held, rather than being treated as the durable linearization point itself;
 - the authority-internal Library acceptance primitive requires a sealed exact-bound Control-minted commit capability and is not exposed as a public `LocalLibrary`/SDK proposal-acceptance mutation accepting caller-constructible authority fields;
-- the sealed capability is non-user-constructible, non-deserializable from client/provider input and consumed for one durable linearization attempt;
-- the durable record binds authenticated principal + acceptance-decision identity/binding + proposal ID/digest + accepted Control context binding + durable operation identity + create/revise action + exact target expectation + authority-generation/freshness evidence + resulting `IntentId`/revision;
+- the sealed capability is non-user-constructible, non-deserializable from client/provider input, exact-bound to the durable transaction and earliest required freshness deadline, and consumed for one durable linearization attempt;
+- immediately at the actual intent+acceptance-record write/CAS, the Library path rechecks the sealed freshness deadline using trusted Control time and rolls the transaction back if the deadline has been crossed;
+- the durable record binds authenticated principal + acceptance-decision identity/binding + proposal ID/digest + accepted Control context binding + durable operation identity + create/revise action + exact target expectation + authority-generation/freshness evidence + enforced freshness deadline + resulting `IntentId`/revision;
 - exact retry returns the same durable result after process restart;
 - a crash before commit cannot reconstruct the transient sealed capability from public or durable identifiers and must re-enter Linura Control for fresh authority establishment;
 - semantic substitution or conflicting reuse of any bound identity/material fails closed;
