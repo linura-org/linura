@@ -262,17 +262,18 @@ A compromised client, provider or agent runtime supplies actor fields that appea
 - acceptance grants no machine-mutation approval, dispatch permit or executor authority.
 
 ### Proposal context TOCTOU, pre/post-mint authority expiry or stale-binding replay
-A caller replays an old but internally consistent context revision/digest after observation, policy, Library state, capability registry or relevant existing intent has changed; an observation validity window expires without a revision change; a time-bounded human/policy acceptance decision or approval expires without any authority-generation change; or execution is delayed after final validation/capability minting but before the actual durable write/CAS so previously valid evidence or authorization becomes invalid.
+A caller replays an old but internally consistent context revision/digest after observation, policy, Library state, capability registry or relevant existing intent has changed; an observation validity window expires without a revision change; a time-bounded human/policy acceptance decision or approval expires without any authority-generation change; trusted Control time rolls backward or loses monotonic continuity after capability minting; or execution is delayed after final validation/capability minting but before the actual durable write/CAS so previously valid evidence or authorization becomes invalid.
 - the authority-context revision is minted by trusted Linura Control from the authoritative state used for interpretation;
 - the client/runtime/provider may transport the binding but cannot mint or advance it;
 - acceptance re-reads/re-resolves relevant authoritative dependencies inside Linura Control;
 - time-based observation freshness and decision/approval applicability are re-evaluated using trusted Control time independently of revision equality;
 - expired required observation is reacquired before acceptance, while expired decision/approval authority requires fresh applicable authorization; otherwise acceptance fails closed;
 - Linura Control enters the authority-internal durable acceptance transaction and acquires the write/CAS serialization guard before final context/freshness/capability/decision revalidation;
-- while that guard remains held, Linura Control revalidates current authority, computes the earliest required authority-validity deadline across every time-limited authority input—including observation freshness and decision/approval applicability—and fails closed on authority-generation, target-revision, freshness, decision drift or expiry;
-- the sealed transaction-scoped acceptance capability is exact-bound to the durable transaction and carries that earliest authority-validity deadline;
-- the authority-internal Library path consumes the sealed capability without releasing/reacquiring the durable guard and mechanically rechecks the deadline with trusted Control time at the actual intent+acceptance-record write/CAS linearization;
-- any database-lock, scheduling, internal-I/O or retry delay that crosses the sealed deadline aborts/rolls back with no durable intent or acceptance record, regardless of which time-limited authority input expired;
+- while that guard remains held, Linura Control revalidates current authority, samples trusted Control time for the final-revalidation authority-time floor, computes the earliest required authority-validity deadline across every time-limited authority input—including observation freshness and decision/approval applicability—and fails closed on authority-generation, target-revision, freshness, decision drift, expiry or inability to establish monotonic trusted-time continuity;
+- the sealed transaction-scoped acceptance capability is exact-bound to the durable transaction and carries both the final-revalidation authority-time floor and the earliest authority-validity deadline;
+- the authority-internal Library path consumes the sealed capability without releasing/reacquiring the durable guard and mechanically rechecks trusted Control time at the actual intent+acceptance-record write/CAS linearization, permitting the write only when `time_floor <= now < deadline`;
+- a post-mint sample with `now < time_floor`, a detected clock reset/rollback, or unknown monotonic continuity fails closed and aborts/rolls back with no durable intent or acceptance record, even if the sampled wall-clock value is otherwise earlier than the sealed deadline;
+- any database-lock, scheduling, internal-I/O or retry delay that reaches or passes the sealed deadline aborts/rolls back with no durable intent or acceptance record, regardless of which time-limited authority input expired;
 - Linura Control derives the current authoritative binding from fresh/current material and requires an exact match;
 - provider timestamps, caller-generated revision tokens and model confidence are never freshness or authorization authority.
 
@@ -294,13 +295,13 @@ Retrieved context, Library state, observations or user input contain secret valu
 - qualification injects secret canaries into source context and proves they do not reach runtime/provider input, proposal state, diagnostics or audit surfaces.
 
 ### Proposal substitution, authorization replay, direct persistence bypass or lost-response replay
-Acceptance commits durable intent but the response is lost, a caller reuses a proposal/operation/decision identity with changed principal, digest, context, action, target or resulting intent, an untrusted caller attempts to bypass Linura Control by invoking the Library persistence surface directly, or a sealed capability is held across blocking long enough for observation freshness or decision/approval applicability to expire before persistence linearizes.
+Acceptance commits durable intent but the response is lost, a caller reuses a proposal/operation/decision identity with changed principal, digest, context, action, target or resulting intent, an untrusted caller attempts to bypass Linura Control by invoking the Library persistence surface directly, a sealed capability is held across blocking long enough for observation freshness or decision/approval applicability to expire before persistence linearizes, or trusted Control time rolls backward after the capability was minted.
 - Linura Control exact-binds the acceptance decision to authenticated principal + proposal ID/digest + accepted context + durable operation identity + create/revise action + exact target identity/revision expectation;
 - the durable write/CAS serialization guard is acquired before final authority revalidation; sealed capability minting then occurs while that guard remains held, rather than being treated as the durable linearization point itself;
 - the authority-internal Library acceptance primitive requires a sealed exact-bound Control-minted commit capability and is not exposed as a public `LocalLibrary`/SDK proposal-acceptance mutation accepting caller-constructible authority fields;
-- the sealed capability is non-user-constructible, non-deserializable from client/provider input, exact-bound to the durable transaction and earliest required authority-validity deadline, and consumed for one durable linearization attempt;
-- immediately at the actual intent+acceptance-record write/CAS, the Library path rechecks the sealed authority-validity deadline using trusted Control time and rolls the transaction back if the deadline has been crossed;
-- the durable record binds authenticated principal + acceptance-decision identity/binding + proposal ID/digest + accepted Control context binding + durable operation identity + create/revise action + exact target expectation + authority-generation/freshness evidence + decision/approval validity evidence + enforced authority-validity deadline + resulting `IntentId`/revision;
+- the sealed capability is non-user-constructible, non-deserializable from client/provider input, exact-bound to the durable transaction, final-revalidation authority-time floor and earliest required authority-validity deadline, and consumed for one durable linearization attempt;
+- immediately at the actual intent+acceptance-record write/CAS, the Library path rechecks trusted Control time and permits persistence only when `time_floor <= now < deadline`; rollback/reset/unknown time continuity or deadline expiry rolls the transaction back;
+- the durable record binds authenticated principal + acceptance-decision identity/binding + proposal ID/digest + accepted Control context binding + durable operation identity + create/revise action + exact target expectation + authority-generation/freshness evidence + decision/approval validity evidence + enforced authority-time floor + authority-validity deadline + resulting `IntentId`/revision;
 - exact retry returns the same durable result after process restart;
 - a crash before commit cannot reconstruct the transient sealed capability from public or durable identifiers and must re-enter Linura Control for fresh authority establishment;
 - semantic substitution or conflicting reuse of any bound identity/material fails closed;
@@ -308,7 +309,16 @@ Acceptance commits durable intent but the response is lost, a caller reuses a pr
 - direct public Library/SDK attempts to fabricate proposal acceptance are rejected without durable mutation;
 - the proposal-to-intent lineage remains durable for explanation/audit and cannot be reconstructed from mutable conversation text;
 - the pre-v0.8 generic `create_intent` call alone is not treated as proof of authenticated/authorized proposal acceptance;
-- qualification separately injects post-mint observation expiry and post-mint decision/approval expiry so one cannot mask the other.
+- qualification separately injects post-mint observation expiry, post-mint decision/approval expiry and post-mint trusted-time rollback so one case cannot mask another.
+
+### Offline-mode network adapter escape
+Offline mode is enabled while a network-required adapter is installed, discovered, selected, health-checked, chosen as fallback or otherwise considered by orchestration, and adapter lifecycle code attempts network-side effects before the runtime rejects the adapter.
+- adapter metadata declares network requirement before any adapter callback or transport initialization that could perform I/O;
+- offline policy is evaluated before adapter invocation, provider discovery callbacks, health-check callbacks, fallback activation, provider authentication, DNS resolution, socket creation/connect or transport/client initialization;
+- a network-required adapter selected in offline mode is rejected locally with zero adapter-callback, authentication, DNS, socket and transport-initialization side effects;
+- discovery or fallback cannot opportunistically probe a network-required provider while offline merely to decide whether it is usable;
+- deterministic qualification instruments the adapter and transport/network lifecycle and requires all invocation/initialization/network counters to remain exactly zero;
+- manual/no-provider operation remains a separate complete path and does not weaken this pre-invocation isolation rule.
 
 ### Compromised adapter/runtime or malicious model output
 A provider or agent runtime emits malformed typed data, authority claims, hidden tool requests or misleading explanations.
