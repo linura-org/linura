@@ -305,31 +305,22 @@ jobs:
 
       - name: Request exact-head Codex review
         if: steps.state.outputs.state == 'pending'
-        id: review_request
         env:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-          payload="$(gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
             -f body="@codex review
 
-          Please review exact post-release closure head \`$HEAD_SHA\` for $RELEASE_TAG. Verify terminal documentation consistency, frozen-contract immutability, review-safe release automation, and that no authority or claim boundary is widened. Report every issue before automatic merge.")"
-          comment_id="$(jq -r .id <<<"$payload")"
-          requested_at="$(jq -r .created_at <<<"$payload")"
-          [[ "$comment_id" =~ ^[0-9]+$ ]]
-          [[ -n "$requested_at" && "$requested_at" != "null" ]]
-          printf 'comment_id=%s\n' "$comment_id" >> "$GITHUB_OUTPUT"
-          printf 'requested_at=%s\n' "$requested_at" >> "$GITHUB_OUTPUT"
+          Please review exact post-release closure head \`$HEAD_SHA\` for $RELEASE_TAG. Verify terminal documentation consistency, frozen-contract immutability, review-safe release automation, and that no authority or claim boundary is widened. Report every issue before automatic merge." >/dev/null
 
       - name: Require native exact-head checks and completed clean Codex review
         if: steps.state.outputs.state == 'pending'
         env:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
-          REVIEW_COMMENT_ID: ${{ steps.review_request.outputs.comment_id }}
-          REVIEW_REQUESTED_AT: ${{ steps.review_request.outputs.requested_at }}
         run: |
           set -euo pipefail
           checks_ready=0
@@ -366,21 +357,21 @@ jobs:
               '
           }
 
-          has_clean_codex_reaction() {
-            {
-              gh api --paginate -H 'Accept: application/vnd.github+json' \
-                "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100" \
-                --jq '.[]'
-              gh api --paginate -H 'Accept: application/vnd.github+json' \
-                "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/reactions?per_page=100" \
-                --jq '.[]'
-            } | jq -s -r --argjson bot_id "$CODEX_BOT_USER_ID" --arg requested_at "$REVIEW_REQUESTED_AT" '
-              any(.[];
-                .user.id == $bot_id and
-                .content == "+1" and
-                (.created_at // "") >= $requested_at
-              )
-            '
+          has_clean_codex_comment() {
+            gh api --paginate -H 'Accept: application/vnd.github+json' \
+              "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" \
+              --jq '.[]' |
+              jq -s -r --arg sha "$HEAD_SHA" --argjson bot_id "$CODEX_BOT_USER_ID" '
+                any(.[];
+                  .user.id == $bot_id and
+                  ((.body // "") | contains("Codex Review: Didn")) and
+                  ((.body // "") | contains("major issues")) and
+                  (
+                    ((.body // "") | try capture("\\*\\*Reviewed commit:\\*\\* `(?<prefix>[0-9a-f]{10,40})`").prefix catch "") as $prefix
+                    | ($prefix | length) >= 10 and ($sha | startswith($prefix))
+                  )
+                )
+              '
           }
 
           for _ in $(seq 1 360); do
@@ -406,9 +397,9 @@ jobs:
 
             unresolved="$(count_unresolved_threads)"
             exact_codex_review="$(has_exact_codex_review)"
-            codex_clean_reaction="$(has_clean_codex_reaction)"
+            codex_clean_comment="$(has_clean_codex_comment)"
 
-            if [[ "$unresolved" == "0" && ( "$exact_codex_review" == "true" || "$codex_clean_reaction" == "true" ) ]]; then
+            if [[ "$unresolved" == "0" && ( "$exact_codex_review" == "true" || "$codex_clean_comment" == "true" ) ]]; then
               review_ready=1
             else
               review_ready=0
@@ -432,8 +423,6 @@ jobs:
           BRANCH: ${{ steps.commit.outputs.branch }}
           BASE_SHA: ${{ steps.release.outputs.base_sha }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          REVIEW_COMMENT_ID: ${{ steps.review_request.outputs.comment_id }}
-          REVIEW_REQUESTED_AT: ${{ steps.review_request.outputs.requested_at }}
         run: |
           set -euo pipefail
 
@@ -468,21 +457,21 @@ jobs:
               '
           }
 
-          has_clean_codex_reaction() {
-            {
-              gh api --paginate -H 'Accept: application/vnd.github+json' \
-                "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions?per_page=100" \
-                --jq '.[]'
-              gh api --paginate -H 'Accept: application/vnd.github+json' \
-                "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/reactions?per_page=100" \
-                --jq '.[]'
-            } | jq -s -r --argjson bot_id "$CODEX_BOT_USER_ID" --arg requested_at "$REVIEW_REQUESTED_AT" '
-              any(.[];
-                .user.id == $bot_id and
-                .content == "+1" and
-                (.created_at // "") >= $requested_at
-              )
-            '
+          has_clean_codex_comment() {
+            gh api --paginate -H 'Accept: application/vnd.github+json' \
+              "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" \
+              --jq '.[]' |
+              jq -s -r --arg sha "$HEAD_SHA" --argjson bot_id "$CODEX_BOT_USER_ID" '
+                any(.[];
+                  .user.id == $bot_id and
+                  ((.body // "") | contains("Codex Review: Didn")) and
+                  ((.body // "") | contains("major issues")) and
+                  (
+                    ((.body // "") | try capture("\\*\\*Reviewed commit:\\*\\* `(?<prefix>[0-9a-f]{10,40})`").prefix catch "") as $prefix
+                    | ($prefix | length) >= 10 and ($sha | startswith($prefix))
+                  )
+                )
+              '
           }
 
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"
@@ -499,8 +488,8 @@ jobs:
           test "$unresolved" = "0"
 
           exact_codex_review="$(has_exact_codex_review)"
-          codex_clean_reaction="$(has_clean_codex_reaction)"
-          if [[ "$exact_codex_review" != "true" && "$codex_clean_reaction" != "true" ]]; then
+          codex_clean_comment="$(has_clean_codex_comment)"
+          if [[ "$exact_codex_review" != "true" && "$codex_clean_comment" != "true" ]]; then
             echo "exact-head Codex review is no longer proven immediately before merge" >&2
             exit 1
           fi
