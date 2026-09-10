@@ -4,6 +4,26 @@ All notable changes to Linura will be documented here. Version entries stay conc
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-10
+
+Experimental proposal-only agent interpretation and typed `IntentProposal`. Full release contract: [`docs/releases/v0.8.0.md`](docs/releases/v0.8.0.md).
+
+### Added
+- Canonical bounded `IntentProposal` v1 with deterministic validation, digest/context binding, actor/provider attribution, assumptions, uncertainty, typed requirements and explicit capability references.
+- Provider-neutral proposal interpretation with a capabilityless adapter surface, Control-owned provider selection/orchestration, aggregate deadline and response-budget enforcement, single-use exact-bound invocation permits, and complete manual/no-provider operation.
+- Control-owned proposal acceptance that independently binds authenticated principal, complete actor provenance, current authority context, capability registry, exact decision, operation/action/target, trusted time and supersession lineage before durable acceptance.
+- Library-owned durable acceptance/replay with explicitly provisioned verifier authority, transaction-scoped signed handoff, serialized source revalidation, exact idempotent replay, complete time/provenance integrity binding and fail-closed corruption detection.
+
+### Changed
+- Dedicated exact-source v0.8 qualification now covers proposal-only authority boundaries, offline/network isolation, secret minimization, provider failure/retry containment, aggregate budgets/deadlines, stale context/freshness, acceptance serialization, replay integrity and no-authority invariants.
+- Trusted Release Proof includes the v0.8 qualification while retaining inherited v0.4 durability/ENOSPC, v0.5 executor/verifier, v0.6 managed lifecycle and v0.7 Library gates.
+- Public proposal/schema contracts use bounded Rust/JSON semantics, including explicit core-ID wire rules and schema parity checks.
+
+### Boundaries
+- v0.8 remains Experimental: models and agents are untrusted proposers and cannot create policy decisions, approvals, executor authority, mutation authority or unrestricted tool access.
+- The only release-qualified managed external effect remains the inherited narrow v0.6 `linura-managed-*.service` active/inactive convergence path; proposal acceptance creates only a normal typed `Intent` in `Proposed` state.
+- No supported Linux distribution/profile, autonomous-agent authority, generic privileged execution, Stable API or production-readiness claim is introduced.
+
 ## [0.7.0] - 2026-09-07
 
 Experimental persistent intent lifecycle and local Linura Library. Full release contract: [`docs/releases/v0.7.0.md`](docs/releases/v0.7.0.md).
