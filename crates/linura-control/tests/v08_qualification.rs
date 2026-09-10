@@ -18,7 +18,7 @@ use linura_library::{AcceptanceLinearizationClock, LocalLibrary, ProposalAccepta
 use linura_provider_sdk::{
     AdapterDescriptor, CapabilitylessInterpretationAdapter, NetworkAccess,
     PreparedProviderInvocation, ProviderInvocationDeadline, ProviderInvocationOutcome,
-    ProviderInvocationTransport,
+    ProviderInvocationTransport, ProviderResponseBudget,
 };
 use linura_transaction::TransactionAuthorityKey;
 
@@ -109,9 +109,11 @@ impl ProviderInvocationTransport for SequenceTransport {
         &mut self,
         _invocation: &PreparedProviderInvocation,
         deadline: ProviderInvocationDeadline,
+        response_budget: ProviderResponseBudget,
     ) -> ProviderInvocationOutcome {
         assert!(deadline.deadline_unix_ms() > 0);
         assert!(deadline.remaining_ms() > 0);
+        assert!(response_budget.max_bytes() > 0);
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.outcomes.pop_front().unwrap_or_else(|| {
             ProviderInvocationOutcome::TransportFailure("qualification outcome exhausted".into())
@@ -513,6 +515,8 @@ fn concrete_authority_acceptance_is_exact_bound_and_replays_after_authority_chan
                 decision_id: decision_id.clone(),
                 operation_id: operation_id.clone(),
                 target: target.clone(),
+                supersedes: vec![],
+                clock_continuity_generation: clock.continuity_generation(),
                 expires_at_unix_ms: deadline,
                 validity_evidence_digest: ProposalDigest::hash_parts(
                     b"decision-validity",
@@ -593,6 +597,8 @@ fn stale_authority_generation_is_rejected_without_library_mutation() {
                 decision_id: decision_id.clone(),
                 operation_id: operation_id.clone(),
                 target: target.clone(),
+                supersedes: vec![],
+                clock_continuity_generation: clock.continuity_generation(),
                 expires_at_unix_ms: deadline,
                 validity_evidence_digest: ProposalDigest::hash_parts(
                     b"decision-validity",

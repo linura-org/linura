@@ -187,12 +187,7 @@ impl InterpretationRequest {
         if self.projection.digest() != self.context.semantic_input_digest {
             return Err(InterpretationAdapterError::ContextDigestMismatch);
         }
-        if self.max_response_bytes == 0
-            || usize::try_from(self.max_response_bytes)
-                .map_or(true, |value| value > MAX_RESPONSE_BYTES)
-        {
-            return Err(InterpretationAdapterError::InvalidBudget);
-        }
+        ProviderResponseBudget::new(self.max_response_bytes)?;
         if self.attempt_deadline_unix_ms == 0 {
             return Err(InterpretationAdapterError::InvalidBudget);
         }
@@ -387,6 +382,32 @@ impl ProviderInvocationDeadline {
     }
 }
 
+/// Exact Control-admitted response ceiling for one provider invocation.
+///
+/// Trusted transports receive this before initiating I/O and must enforce it
+/// incrementally while reading the provider response. They must not buffer an
+/// unbounded response and rely on Control's post-return defense-in-depth check.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProviderResponseBudget {
+    max_bytes: u32,
+}
+
+impl ProviderResponseBudget {
+    pub fn new(max_bytes: u32) -> Result<Self, InterpretationAdapterError> {
+        if max_bytes == 0
+            || usize::try_from(max_bytes).map_or(true, |value| value > MAX_RESPONSE_BYTES)
+        {
+            return Err(InterpretationAdapterError::InvalidBudget);
+        }
+        Ok(Self { max_bytes })
+    }
+
+    #[must_use]
+    pub const fn max_bytes(self) -> u32 {
+        self.max_bytes
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProviderInvocationOutcome {
     Complete(Vec<u8>),
@@ -401,13 +422,17 @@ pub enum ProviderInvocationOutcome {
 /// internally, but credentials are never parameters or return values. One call
 /// means one provider invocation; retry/reissue/redirect/reconnect loops are not
 /// part of this contract. `deadline.remaining_ms()` is the maximum remaining
-/// Control-admitted wall-clock budget at dispatch; trusted transports must bind
-/// every underlying request/socket/process timeout to no more than that value.
+/// Control-admitted wall-clock budget at dispatch. `response_budget.max_bytes()`
+/// is the exact maximum number of response bytes that may be read. Trusted
+/// transports must bind every underlying request/socket/process timeout to no
+/// more than the deadline and enforce the byte ceiling while reading, before
+/// materializing a `Complete` response.
 pub trait ProviderInvocationTransport: Send {
     fn invoke_once(
         &mut self,
         invocation: &PreparedProviderInvocation,
         deadline: ProviderInvocationDeadline,
+        response_budget: ProviderResponseBudget,
     ) -> ProviderInvocationOutcome;
 }
 
@@ -596,6 +621,21 @@ mod tests {
             .unwrap_or_else(|error| unreachable!("{error}"));
         assert_eq!(deadline.deadline_unix_ms(), 100);
         assert_eq!(deadline.remaining_ms(), 25);
+    }
+
+    #[test]
+    fn provider_response_budget_is_finite_and_exact() {
+        assert_eq!(
+            ProviderResponseBudget::new(0),
+            Err(InterpretationAdapterError::InvalidBudget)
+        );
+        assert_eq!(
+            ProviderResponseBudget::new((MAX_RESPONSE_BYTES + 1) as u32),
+            Err(InterpretationAdapterError::InvalidBudget)
+        );
+        let budget =
+            ProviderResponseBudget::new(4096).unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(budget.max_bytes(), 4096);
     }
 
     #[test]

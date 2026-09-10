@@ -2,7 +2,10 @@ use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
 
 use linura_core::{Actor, CapabilityId, IntentId, PrincipalId, RequestId};
-use linura_intent::{IntentProposal, InterpretationContextBinding, ProposalDigest};
+use linura_intent::{
+    AuthoritySourceKind, AuthoritySourceRevision, IntentProposal, InterpretationContextBinding,
+    ProposalDigest,
+};
 use linura_library::{
     AcceptanceLinearizationClock, AuthorityTimeSample, AuthorityTimeSeal, LocalLibrary,
     ProposalAcceptanceAuthority, ProposalAcceptanceError as LibraryAcceptanceError,
@@ -72,6 +75,32 @@ impl AuthorityValidityContributor {
             evidence_digest,
         }
     }
+
+    pub fn inclusive_observation_unix_ms(
+        source: &AuthoritySourceRevision,
+        valid_through_unix_ms: u64,
+        evidence_digest: ProposalDigest,
+    ) -> Result<Self, ProposalAcceptanceControlError> {
+        ensure_observation_source(source)?;
+        Ok(Self::inclusive_unix_ms(
+            observation_freshness_contributor_id(source),
+            valid_through_unix_ms,
+            evidence_digest,
+        ))
+    }
+
+    pub fn exclusive_observation_unix_ms(
+        source: &AuthoritySourceRevision,
+        first_invalid_unix_ms: u64,
+        evidence_digest: ProposalDigest,
+    ) -> Result<Self, ProposalAcceptanceControlError> {
+        ensure_observation_source(source)?;
+        Ok(Self::exclusive_unix_ms(
+            observation_freshness_contributor_id(source),
+            first_invalid_unix_ms,
+            evidence_digest,
+        ))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -92,6 +121,11 @@ impl AcceptanceAuthoritySnapshot {
         supported_capabilities: BTreeSet<CapabilityId>,
         mut time_validities: Vec<AuthorityValidityContributor>,
     ) -> Result<Self, ProposalAcceptanceControlError> {
+        context.validate().map_err(|error| {
+            ProposalAcceptanceControlError::InvalidAuthoritySnapshot(format!(
+                "authority context is invalid: {error}"
+            ))
+        })?;
         if authority_generation == 0 {
             return Err(ProposalAcceptanceControlError::InvalidAuthoritySnapshot(
                 "authority generation must be non-zero".into(),
@@ -121,6 +155,24 @@ impl AcceptanceAuthoritySnapshot {
                 "duplicate time-limited authority contributor".into(),
             ));
         }
+        for source in context
+            .source_revisions
+            .iter()
+            .filter(|source| source.kind == AuthoritySourceKind::Observation)
+        {
+            let expected_id = observation_freshness_contributor_id(source);
+            if !time_validities
+                .iter()
+                .any(|contributor| contributor.id == expected_id)
+            {
+                return Err(ProposalAcceptanceControlError::InvalidAuthoritySnapshot(
+                    format!(
+                        "observation source {} at revision {} is missing exact freshness evidence",
+                        source.id, source.revision
+                    ),
+                ));
+            }
+        }
         let evidence_digest = snapshot_evidence_digest(
             &context,
             authority_generation,
@@ -148,6 +200,8 @@ pub struct ProposalAcceptanceDecision {
     pub context_digest: ProposalDigest,
     pub operation_id: RequestId,
     pub target: ProposalAcceptanceTarget,
+    pub resulting_intent_digest: ProposalDigest,
+    pub clock_continuity_generation: u64,
     pub expires_at_unix_ms: u64,
     pub authorization_generation: u64,
     pub validity_evidence_digest: ProposalDigest,
@@ -164,13 +218,19 @@ impl ProposalAcceptanceDecision {
         context_digest: ProposalDigest,
         operation_id: RequestId,
         target: ProposalAcceptanceTarget,
+        resulting_intent_digest: ProposalDigest,
+        clock_continuity_generation: u64,
         expires_at_unix_ms: u64,
         authorization_generation: u64,
         validity_evidence_digest: ProposalDigest,
     ) -> Result<Self, ProposalAcceptanceControlError> {
-        if expires_at_unix_ms == 0 || authorization_generation == 0 {
+        if expires_at_unix_ms == 0
+            || authorization_generation == 0
+            || clock_continuity_generation == 0
+        {
             return Err(ProposalAcceptanceControlError::InvalidDecision(
-                "decision expiry and authorization generation must be non-zero".into(),
+                "decision expiry, authorization generation, and clock continuity generation must be non-zero"
+                    .into(),
             ));
         }
         let binding_digest = decision_binding_digest(
@@ -181,6 +241,8 @@ impl ProposalAcceptanceDecision {
             context_digest,
             &operation_id,
             &target,
+            resulting_intent_digest,
+            clock_continuity_generation,
             expires_at_unix_ms,
             authorization_generation,
             validity_evidence_digest,
@@ -193,6 +255,8 @@ impl ProposalAcceptanceDecision {
             context_digest,
             operation_id,
             target,
+            resulting_intent_digest,
+            clock_continuity_generation,
             expires_at_unix_ms,
             authorization_generation,
             validity_evidence_digest,
@@ -206,6 +270,7 @@ impl ProposalAcceptanceDecision {
         proposal: &IntentProposal,
         operation_id: &RequestId,
         target: &ProposalAcceptanceTarget,
+        resulting_intent_digest: ProposalDigest,
     ) -> Result<(), ProposalAcceptanceControlError> {
         let expected = decision_binding_digest(
             &self.decision_id,
@@ -215,6 +280,8 @@ impl ProposalAcceptanceDecision {
             self.context_digest,
             &self.operation_id,
             &self.target,
+            self.resulting_intent_digest,
+            self.clock_continuity_generation,
             self.expires_at_unix_ms,
             self.authorization_generation,
             self.validity_evidence_digest,
@@ -226,6 +293,7 @@ impl ProposalAcceptanceDecision {
             || self.context_digest != proposal.context.digest()
             || &self.operation_id != operation_id
             || &self.target != target
+            || self.resulting_intent_digest != resulting_intent_digest
         {
             return Err(ProposalAcceptanceControlError::DecisionBindingMismatch);
         }
@@ -315,6 +383,7 @@ impl ProposalAcceptanceControl {
                 request.supersedes.clone(),
             )
             .map_err(|error| ProposalAcceptanceControlError::InvalidProposal(error.to_string()))?;
+        let resulting_intent_digest = linura_library::digest_intent(&resulting_intent);
 
         // Lost-response/restart idempotency is resolved before fresh authority
         // is consulted. A completed exact transaction remains replayable even if
@@ -326,7 +395,7 @@ impl ProposalAcceptanceControl {
             decision_id: request.decision_id.clone(),
             operation_id: request.operation_id.clone(),
             target: request.target.clone(),
-            resulting_intent_digest: linura_library::digest_intent(&resulting_intent),
+            resulting_intent_digest,
         };
         if let Some(record) = self
             .library_authority
@@ -381,9 +450,18 @@ impl ProposalAcceptanceControl {
             proposal,
             &request.operation_id,
             &request.target,
+            resulting_intent_digest,
         )?;
         if decision.decision_id != request.decision_id {
             return Err(ProposalAcceptanceControlError::DecisionBindingMismatch);
+        }
+        if decision.authorization_generation != snapshot.authority_generation {
+            return Err(ProposalAcceptanceControlError::InvalidDecision(
+                "acceptance decision belongs to a different final authority generation".into(),
+            ));
+        }
+        if decision.clock_continuity_generation != final_time.continuity_generation {
+            return Err(ProposalAcceptanceControlError::TrustedTimeContinuityLost);
         }
         if final_time.unix_ms >= decision.expires_at_unix_ms {
             return Err(ProposalAcceptanceControlError::DecisionExpired);
@@ -675,6 +753,8 @@ fn decision_binding_digest(
     context_digest: ProposalDigest,
     operation_id: &RequestId,
     target: &ProposalAcceptanceTarget,
+    resulting_intent_digest: ProposalDigest,
+    clock_continuity_generation: u64,
     expires_at_unix_ms: u64,
     authorization_generation: u64,
     validity_evidence_digest: ProposalDigest,
@@ -692,6 +772,8 @@ fn decision_binding_digest(
         target.action().as_str().as_bytes().to_vec(),
         target.intent_id().as_str().as_bytes().to_vec(),
         expected_revision.into_bytes(),
+        resulting_intent_digest.to_hex().into_bytes(),
+        clock_continuity_generation.to_be_bytes().to_vec(),
         expires_at_unix_ms.to_be_bytes().to_vec(),
         authorization_generation.to_be_bytes().to_vec(),
         validity_evidence_digest.to_hex().into_bytes(),
@@ -706,11 +788,36 @@ fn decision_validity_digest(decision: &ProposalAcceptanceDecision) -> ProposalDi
         &[
             decision.decision_id.as_str().as_bytes(),
             decision.binding_digest.to_hex().as_bytes(),
+            decision.resulting_intent_digest.to_hex().as_bytes(),
+            decision.clock_continuity_generation.to_string().as_bytes(),
             decision.expires_at_unix_ms.to_string().as_bytes(),
             decision.authorization_generation.to_string().as_bytes(),
             decision.validity_evidence_digest.to_hex().as_bytes(),
         ],
     )
+}
+
+fn ensure_observation_source(
+    source: &AuthoritySourceRevision,
+) -> Result<(), ProposalAcceptanceControlError> {
+    if source.kind != AuthoritySourceKind::Observation {
+        return Err(ProposalAcceptanceControlError::InvalidAuthoritySnapshot(
+            "observation freshness contributor must bind an observation authority source".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn observation_freshness_contributor_id(source: &AuthoritySourceRevision) -> String {
+    let digest = ProposalDigest::hash_parts(
+        b"linura:observation-freshness-source:v1",
+        &[
+            source.kind.as_str().as_bytes(),
+            source.id.as_bytes(),
+            source.revision.as_bytes(),
+        ],
+    );
+    format!("observation-freshness:{}", digest.to_hex())
 }
 
 #[derive(Debug)]
@@ -768,7 +875,7 @@ impl Display for ProposalAcceptanceControlError {
                 "proposal references a capability not supported by the current Control-owned registry",
             ),
             Self::DecisionBindingMismatch => f.write_str(
-                "acceptance decision is not exact-bound to this principal/proposal/context/operation/action/target",
+                "acceptance decision is not exact-bound to this principal/proposal/context/operation/action/target/resulting-intent lineage",
             ),
             Self::DecisionExpired => {
                 f.write_str("acceptance decision expired before final Control revalidation")
@@ -903,12 +1010,18 @@ mod tests {
             true,
             BTreeSet::new(),
             vec![AuthorityValidityContributor::inclusive_unix_ms(
-                "observation:system",
+                "policy:system",
                 valid_through,
-                ProposalDigest::hash_parts(b"observation", &[b"current"]),
+                ProposalDigest::hash_parts(b"policy", &[b"current"]),
             )],
         )
         .unwrap_or_else(|error| unreachable!("{error}"));
+        let resulting_intent = proposal
+            .to_proposed_intent(
+                request.target.intent_id().clone(),
+                request.supersedes.clone(),
+            )
+            .unwrap_or_else(|error| unreachable!("{error}"));
         let decision = ProposalAcceptanceDecision::exact_bound(
             request.decision_id.clone(),
             principal_id,
@@ -917,8 +1030,10 @@ mod tests {
             proposal.context.digest(),
             request.operation_id.clone(),
             request.target.clone(),
+            linura_library::digest_intent(&resulting_intent),
+            9,
             1_000,
-            3,
+            7,
             ProposalDigest::hash_parts(b"decision-validity", &[b"approved"]),
         )
         .unwrap_or_else(|error| unreachable!("{error}"));
@@ -1039,6 +1154,132 @@ mod tests {
             .unwrap_or_else(|error| unreachable!("{error}"));
         assert_eq!(first, replay);
         assert_eq!(acquisitions.load(Ordering::SeqCst), before);
+    }
+
+    #[test]
+    fn supersession_lineage_substitution_is_rejected_before_mutation() {
+        let proposal = proposal();
+        let principal = AuthenticatedPrincipal::new("principal:uid:1000")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let approved = AcceptProposalRequest {
+            operation_id: id(RequestId::new("operation:v08:lineage")),
+            decision_id: id(RequestId::new("decision:v08:lineage")),
+            target: ProposalAcceptanceTarget::Create {
+                intent_id: id(IntentId::new("intent:v08:lineage")),
+            },
+            supersedes: vec![],
+        };
+        let (snapshot, decision) = fixture(&proposal, &principal, &approved, 200);
+        let substituted = AcceptProposalRequest {
+            supersedes: vec![id(IntentId::new("intent:v08:unapproved-parent"))],
+            ..approved
+        };
+        let mut source = MockSource {
+            snapshot,
+            decision,
+            acquisitions: Arc::new(AtomicUsize::new(0)),
+        };
+        let mut library =
+            LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
+        let control = control(&mut library);
+        let result = control.accept(
+            &mut library,
+            &principal,
+            &proposal,
+            &substituted,
+            &mut source,
+            &mut samples(150),
+        );
+        assert!(matches!(
+            result,
+            Err(ProposalAcceptanceControlError::DecisionBindingMismatch)
+        ));
+        assert!(library.intent(substituted.target.intent_id()).is_err());
+    }
+
+    #[test]
+    fn decision_from_different_clock_continuity_is_rejected() {
+        let proposal = proposal();
+        let principal = AuthenticatedPrincipal::new("principal:uid:1000")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let request = AcceptProposalRequest {
+            operation_id: id(RequestId::new("operation:v08:clock-reset")),
+            decision_id: id(RequestId::new("decision:v08:clock-reset")),
+            target: ProposalAcceptanceTarget::Create {
+                intent_id: id(IntentId::new("intent:v08:clock-reset")),
+            },
+            supersedes: vec![],
+        };
+        let (snapshot, mut decision) = fixture(&proposal, &principal, &request, 200);
+        let resulting_intent = proposal
+            .to_proposed_intent(request.target.intent_id().clone(), vec![])
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        decision = ProposalAcceptanceDecision::exact_bound(
+            decision.decision_id,
+            decision.principal,
+            decision.proposal_id,
+            decision.proposal_digest,
+            decision.context_digest,
+            decision.operation_id,
+            decision.target,
+            linura_library::digest_intent(&resulting_intent),
+            8,
+            decision.expires_at_unix_ms,
+            decision.authorization_generation,
+            decision.validity_evidence_digest,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        let mut source = MockSource {
+            snapshot,
+            decision,
+            acquisitions: Arc::new(AtomicUsize::new(0)),
+        };
+        let mut library =
+            LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
+        let control = control(&mut library);
+        let result = control.accept(
+            &mut library,
+            &principal,
+            &proposal,
+            &request,
+            &mut source,
+            &mut samples(150),
+        );
+        assert!(matches!(
+            result,
+            Err(ProposalAcceptanceControlError::TrustedTimeContinuityLost)
+        ));
+        assert!(library.intent(request.target.intent_id()).is_err());
+    }
+
+    #[test]
+    fn observation_context_requires_exact_freshness_evidence() {
+        let source = AuthoritySourceRevision::new(
+            AuthoritySourceKind::Observation,
+            "observation:system",
+            "revision:42",
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        let context = InterpretationContextBinding::new(
+            "authority:observation-freshness",
+            ProposalDigest::hash_parts(b"semantic", &[b"observation"]),
+            vec![source.clone()],
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(matches!(
+            AcceptanceAuthoritySnapshot::new(context.clone(), 1, true, BTreeSet::new(), vec![],),
+            Err(ProposalAcceptanceControlError::InvalidAuthoritySnapshot(_))
+        ));
+        let freshness = AuthorityValidityContributor::exclusive_observation_unix_ms(
+            &source,
+            1_000,
+            ProposalDigest::hash_parts(b"observation", &[b"freshness"]),
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(
+            AcceptanceAuthoritySnapshot::new(context, 1, true, BTreeSet::new(), vec![freshness],)
+                .is_ok()
+        );
     }
 
     #[test]

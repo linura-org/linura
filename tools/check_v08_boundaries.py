@@ -91,11 +91,46 @@ def validate_schema(root: Path, failures: list[str]) -> None:
         fail("intent proposal schema contains authority-bearing fields", failures)
     if schema.get("x-linura-authority") != "proposal-only":
         fail("intent proposal schema must declare proposal-only authority", failures)
+    if schema.get("x-linura-aggregate-byte-limit") != 512 * 1024:
+        fail("intent proposal schema must document the Rust aggregate byte limit", failures)
 
     for object_field in ("actor", "context", "attribution"):
         child = properties.get(object_field)
         if not isinstance(child, dict) or child.get("additionalProperties") is not False:
             fail(f"intent proposal {object_field} schema must be a closed object", failures)
+
+    defs = schema.get("$defs")
+    if not isinstance(defs, dict):
+        fail("intent proposal schema definitions are missing", failures)
+        return
+    token = defs.get("token")
+    if not isinstance(token, dict) or token.get("type") != "string" or token.get("maxLength") != 256:
+        fail("intent proposal token character bound drifted from Rust", failures)
+    else:
+        patterns = {
+            item.get("pattern")
+            for item in token.get("allOf", [])
+            if isinstance(item, dict) and isinstance(item.get("pattern"), str)
+        }
+        if patterns != {r"\S", r"^[^\u0000-\u001f\u007f-\u009f]+$"}:
+            fail("intent proposal token whitespace/control semantics drifted from Rust", failures)
+    text = defs.get("text")
+    if text != {
+        "type": "string",
+        "maxLength": 16384,
+        "pattern": r"^[^\u0000]*$",
+    }:
+        fail("intent proposal text character/NUL contract drifted from Rust", failures)
+    non_empty_text = defs.get("nonEmptyText")
+    if not isinstance(non_empty_text, dict):
+        fail("intent proposal non-empty text definition is missing", failures)
+    else:
+        all_of = non_empty_text.get("allOf")
+        if all_of != [{"$ref": "#/$defs/text"}, {"pattern": r"\S"}]:
+            fail("intent proposal required-text whitespace contract drifted from Rust", failures)
+    text_list = defs.get("textList")
+    if not isinstance(text_list, dict) or text_list.get("items") != {"$ref": "#/$defs/text"}:
+        fail("intent proposal text-list items must share the canonical text contract", failures)
 
 
 def validate(root: Path) -> list[str]:
@@ -117,6 +152,9 @@ def validate(root: Path) -> list[str]:
         root / "crates/linura-control/src/proposal_acceptance_secure.rs"
     ).read_text(encoding="utf-8")
     control_acceptance_code = rust_code_without_line_comments(control_acceptance)
+    proposal_authority = (root / "crates/linura-control/src/proposal_authority.rs").read_text(
+        encoding="utf-8"
+    )
     secure_acceptance = (
         root / "crates/linura-control/src/secure_proposal_acceptance.rs"
     ).read_text(encoding="utf-8")
@@ -127,6 +165,9 @@ def validate(root: Path) -> list[str]:
     provider_interpretation = (
         root / "crates/linura-provider-sdk/src/interpretation.rs"
     ).read_text(encoding="utf-8")
+    intent_proposal = (root / "crates/linura-intent/src/proposal_v1.rs").read_text(
+        encoding="utf-8"
+    )
     library_lib = (root / "crates/linura-library/src/lib.rs").read_text(encoding="utf-8")
     library_acceptance = (
         root / "crates/linura-library/src/proposal_acceptance_secure.rs"
@@ -236,15 +277,16 @@ def validate(root: Path) -> list[str]:
         "deadline.deadline_unix_ms() != permit.deadline_unix_ms",
         "if now_unix_ms >= permit.deadline_unix_ms",
         "if self.consumed_permits.contains(&permit.nonce)",
+        "ProviderResponseBudget::new(permit.output_budget_bytes)",
         "self.consumed_permits.insert(permit.nonce);",
-        "registered.transport.invoke_once(prepared, deadline)",
+        ".invoke_once(prepared, deadline, response_budget)",
     )
     for marker in gate_markers:
         require(internal_engine, marker, "provider invocation gate", failures)
     consume_at = internal_engine.find("self.consumed_permits.insert(permit.nonce);")
-    transport_at = internal_engine.find("registered.transport.invoke_once(prepared, deadline)")
+    transport_at = internal_engine.find(".invoke_once(prepared, deadline, response_budget)")
     if consume_at < 0 or transport_at < 0 or consume_at >= transport_at:
-        fail("provider invocation permit must be consumed before transport invocation", failures)
+        fail("provider invocation permit must be consumed before bounded transport invocation", failures)
 
     for marker in (
         "struct AttemptDeadline",
@@ -253,26 +295,26 @@ def validate(root: Path) -> list[str]:
         "deadline.ensure_live()?;",
         "deadline.transport_deadline()?",
         "ProviderInvocationDeadline::new(self.deadline_unix_ms, self.remaining_ms()?)",
+        "deadline_started: Option<Instant>",
+        "initial_deadline_remaining_ms: Option<u64>",
+        "self.remaining_deadline_ms(now_unix_ms)?",
+        "effective_now_unix_ms",
     ):
-        require(internal_engine, marker, "cumulative provider attempt deadline", failures)
+        require(internal_engine, marker, "cumulative provider/session deadline", failures)
     if internal_engine.count("deadline.ensure_live()?;") < 3:
         fail(
             "provider attempt deadline must be rechecked across preparation, transport, and decode",
             failures,
         )
 
-    require(
-        provider_interpretation,
-        "pub struct ProviderInvocationDeadline",
-        "provider deadline contract",
-        failures,
-    )
-    require(
-        provider_interpretation,
-        "deadline: ProviderInvocationDeadline",
-        "provider transport deadline",
-        failures,
-    )
+    for marker, label in (
+        ("pub struct ProviderInvocationDeadline", "provider deadline contract"),
+        ("pub struct ProviderResponseBudget", "provider response budget contract"),
+        ("response_budget: ProviderResponseBudget", "provider transport response budget"),
+        ("deadline: ProviderInvocationDeadline", "provider transport deadline"),
+        ("response_budget.max_bytes()", "provider transport response budget documentation"),
+    ):
+        require(provider_interpretation, marker, label, failures)
     transport_match = re.search(
         r"pub trait ProviderInvocationTransport: Send\s*\{(?P<body>.*?)\n\}",
         provider_interpretation,
@@ -297,11 +339,35 @@ def validate(root: Path) -> list[str]:
         "TransactionAuthorityKey",
         "from_authority_key(key: TransactionAuthorityKey)",
         "let (signer, verifier) = key.split();",
+        "resulting_intent_digest",
+        "clock_continuity_generation",
+        "decision.authorization_generation != snapshot.authority_generation",
+        "decision.clock_continuity_generation != final_time.continuity_generation",
+        "AuthoritySourceKind::Observation",
+        "observation_freshness_contributor_id(source)",
         ".signing_challenge(&material, time_seal)",
         ".authorize_handoff(",
         ".bind_signed_handoff(&self.library_authority, challenge, handoff)",
     ):
-        require(control_acceptance_code, marker, "Control acceptance signing authority", failures)
+        require(control_acceptance_code, marker, "Control acceptance signing/binding authority", failures)
+
+    for marker in (
+        "pub supersedes: Vec<IntentId>",
+        "pub clock_continuity_generation: u64",
+        "request.supersedes.clone()",
+        "request.clock_continuity_generation",
+        "linura_library::digest_intent(&resulting_intent)",
+    ):
+        require(proposal_authority, marker, "Control decision issuance binding", failures)
+
+    for marker in (
+        "MAX_TOKEN_CHARS",
+        "MAX_TEXT_CHARS",
+        "value.chars().count() > MAX_TOKEN_CHARS",
+        "value.chars().count() > MAX_TEXT_CHARS",
+        "self.estimated_size() > MAX_PROPOSAL_BYTES",
+    ):
+        require(intent_proposal, marker, "Rust proposal string/aggregate contract", failures)
 
     for marker in (
         "authority: &mut ControlProposalAuthority",

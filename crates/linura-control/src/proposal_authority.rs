@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, MutexGuard};
 
-use linura_core::{Actor, CapabilityId, PrincipalId, RequestId};
+use linura_core::{Actor, CapabilityId, IntentId, PrincipalId, RequestId};
 use linura_intent::{IntentProposal, InterpretationContextBinding, ProposalDigest};
 use linura_library::ProposalAcceptanceTarget;
 
@@ -18,6 +18,8 @@ pub struct ProposalDecisionIssueRequest {
     pub decision_id: RequestId,
     pub operation_id: RequestId,
     pub target: ProposalAcceptanceTarget,
+    pub supersedes: Vec<IntentId>,
+    pub clock_continuity_generation: u64,
     pub expires_at_unix_ms: u64,
     pub validity_evidence_digest: ProposalDigest,
 }
@@ -144,7 +146,8 @@ impl ControlProposalAuthority {
     }
 
     /// Mint and retain one exact-bound acceptance decision from the current
-    /// serialized authority generation.
+    /// serialized authority generation. The decision authorizes one resulting
+    /// proposed-intent lineage and one trusted-clock continuity generation.
     pub fn issue_decision(
         &self,
         principal: &AuthenticatedPrincipal,
@@ -176,8 +179,20 @@ impl ControlProposalAuthority {
         {
             return Err(ProposalAcceptanceControlError::UnsupportedCapability);
         }
+        if request.clock_continuity_generation == 0 {
+            return Err(ProposalAcceptanceControlError::InvalidDecision(
+                "acceptance decision clock continuity generation must be non-zero".into(),
+            ));
+        }
         let principal_id = PrincipalId::new(principal.as_str())
             .map_err(|error| ProposalAcceptanceControlError::InvalidPrincipal(error.to_string()))?;
+        let resulting_intent = proposal
+            .to_proposed_intent(
+                request.target.intent_id().clone(),
+                request.supersedes.clone(),
+            )
+            .map_err(|error| ProposalAcceptanceControlError::InvalidProposal(error.to_string()))?;
+        let resulting_intent_digest = linura_library::digest_intent(&resulting_intent);
         let decision = ProposalAcceptanceDecision::exact_bound(
             request.decision_id.clone(),
             principal_id,
@@ -186,6 +201,8 @@ impl ControlProposalAuthority {
             proposal.context.digest(),
             request.operation_id,
             request.target,
+            resulting_intent_digest,
+            request.clock_continuity_generation,
             request.expires_at_unix_ms,
             state.generation,
             request.validity_evidence_digest,
@@ -388,9 +405,27 @@ mod tests {
         let authority = ControlProposalAuthority::new(context, BTreeSet::new(), vec![])
             .unwrap_or_else(|error| unreachable!("{error}"));
         let target = ProposalAcceptanceTarget::Create {
-            intent_id: id(linura_core::IntentId::new("intent:concrete-source")),
+            intent_id: id(IntentId::new("intent:concrete-source")),
         };
         (principal, proposal, authority, target)
+    }
+
+    fn issue_request(
+        decision_id: RequestId,
+        operation_id: RequestId,
+        target: ProposalAcceptanceTarget,
+        supersedes: Vec<IntentId>,
+        evidence: ProposalDigest,
+    ) -> ProposalDecisionIssueRequest {
+        ProposalDecisionIssueRequest {
+            decision_id,
+            operation_id,
+            target,
+            supersedes,
+            clock_continuity_generation: 11,
+            expires_at_unix_ms: 10_000,
+            validity_evidence_digest: evidence,
+        }
     }
 
     #[test]
@@ -403,16 +438,13 @@ mod tests {
             .issue_decision(
                 &principal,
                 &proposal,
-                ProposalDecisionIssueRequest {
-                    decision_id: id(RequestId::new("decision:concrete-source")),
-                    operation_id: id(RequestId::new("operation:concrete-source")),
+                issue_request(
+                    id(RequestId::new("decision:concrete-source")),
+                    id(RequestId::new("operation:concrete-source")),
                     target,
-                    expires_at_unix_ms: 10_000,
-                    validity_evidence_digest: ProposalDigest::hash_parts(
-                        b"decision",
-                        &[b"validity"],
-                    ),
-                },
+                    vec![],
+                    ProposalDigest::hash_parts(b"decision", &[b"validity"]),
+                ),
             )
             .unwrap_or_else(|error| unreachable!("{error}"));
         authority
@@ -442,26 +474,64 @@ mod tests {
             .issue_decision(
                 &principal,
                 &proposal,
-                ProposalDecisionIssueRequest {
-                    decision_id: decision_id.clone(),
-                    operation_id: id(RequestId::new("operation:first")),
-                    target: target.clone(),
-                    expires_at_unix_ms: 10_000,
-                    validity_evidence_digest: ProposalDigest::hash_parts(b"decision", &[b"first"]),
-                },
+                issue_request(
+                    decision_id.clone(),
+                    id(RequestId::new("operation:first")),
+                    target.clone(),
+                    vec![],
+                    ProposalDigest::hash_parts(b"decision", &[b"first"]),
+                ),
             )
             .unwrap_or_else(|error| unreachable!("{error}"));
         assert!(matches!(
             authority.issue_decision(
                 &principal,
                 &proposal,
-                ProposalDecisionIssueRequest {
+                issue_request(
                     decision_id,
-                    operation_id: id(RequestId::new("operation:second")),
+                    id(RequestId::new("operation:second")),
                     target,
-                    expires_at_unix_ms: 10_000,
-                    validity_evidence_digest: ProposalDigest::hash_parts(b"decision", &[b"second"]),
-                },
+                    vec![],
+                    ProposalDigest::hash_parts(b"decision", &[b"second"]),
+                ),
+            ),
+            Err(ProposalAcceptanceControlError::InvalidDecision(_))
+        ));
+    }
+
+    #[test]
+    fn decision_identity_reuse_with_changed_supersession_fails_closed() {
+        let (principal, proposal, authority, target) = fixture();
+        authority
+            .authorize_actor(&principal, &proposal.actor)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let decision_id = id(RequestId::new("decision:lineage"));
+        let operation_id = id(RequestId::new("operation:lineage"));
+        let evidence = ProposalDigest::hash_parts(b"decision", &[b"lineage"]);
+        authority
+            .issue_decision(
+                &principal,
+                &proposal,
+                issue_request(
+                    decision_id.clone(),
+                    operation_id.clone(),
+                    target.clone(),
+                    vec![],
+                    evidence,
+                ),
+            )
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(matches!(
+            authority.issue_decision(
+                &principal,
+                &proposal,
+                issue_request(
+                    decision_id,
+                    operation_id,
+                    target,
+                    vec![id(IntentId::new("intent:parent"))],
+                    evidence,
+                ),
             ),
             Err(ProposalAcceptanceControlError::InvalidDecision(_))
         ));

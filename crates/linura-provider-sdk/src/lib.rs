@@ -15,5 +15,5 @@ pub use interpretation::{
     AdapterDescriptor, HeaderField, InterpretationAdapter, InterpretationAdapterError,
     InterpretationRequest, MinimizedSemanticProjection, NetworkAccess, PreparedProviderInvocation,
     ProviderInvocationDeadline, ProviderInvocationOutcome, ProviderInvocationTransport,
-    SemanticEntry, SemanticValue,
+    ProviderResponseBudget, SemanticEntry, SemanticValue,
 };

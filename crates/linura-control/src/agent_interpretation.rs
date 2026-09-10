@@ -12,7 +12,7 @@ use linura_provider_sdk::{
     AdapterDescriptor, InterpretationAdapter, InterpretationAdapterError, InterpretationRequest,
     MinimizedSemanticProjection, NetworkAccess, PreparedProviderInvocation,
     ProviderInvocationDeadline, ProviderInvocationOutcome, ProviderInvocationTransport,
-    SemanticEntry, SemanticValue,
+    ProviderResponseBudget, SemanticEntry, SemanticValue,
 };
 
 const MAX_RAW_SEMANTIC_ENTRIES: usize = 512;
@@ -158,13 +158,21 @@ impl InterpretationWork {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Single, non-cloneable aggregate interpretation budget.
+///
+/// The first admission anchors the session's absolute wall-clock deadline to a
+/// process-local monotonic `Instant`. Every later fallback attempt consumes the
+/// same elapsed-time budget; callers cannot reset it by reusing a stale
+/// `now_unix_ms` value.
+#[derive(Debug)]
 pub struct InterpretationSessionBudget {
     session_id: RequestId,
     aggregate_deadline_unix_ms: u64,
     remaining_attempts: u32,
     remaining_output_bytes: u64,
     next_attempt: u32,
+    deadline_started: Option<Instant>,
+    initial_deadline_remaining_ms: Option<u64>,
 }
 
 impl InterpretationSessionBudget {
@@ -188,7 +196,40 @@ impl InterpretationSessionBudget {
             remaining_attempts: max_attempts,
             remaining_output_bytes: aggregate_output_bytes,
             next_attempt: 1,
+            deadline_started: None,
+            initial_deadline_remaining_ms: None,
         })
+    }
+
+    fn remaining_deadline_ms(
+        &mut self,
+        now_unix_ms: u64,
+    ) -> Result<u64, InterpretationControlError> {
+        let wall_remaining = self
+            .aggregate_deadline_unix_ms
+            .checked_sub(now_unix_ms)
+            .filter(|remaining| *remaining > 0)
+            .ok_or(InterpretationControlError::BudgetExhausted)?;
+
+        if self.deadline_started.is_none() {
+            self.deadline_started = Some(Instant::now());
+            self.initial_deadline_remaining_ms = Some(wall_remaining);
+            return Ok(wall_remaining);
+        }
+
+        let started = self
+            .deadline_started
+            .as_ref()
+            .ok_or(InterpretationControlError::InvalidBudget)?;
+        let initial_remaining = self
+            .initial_deadline_remaining_ms
+            .ok_or(InterpretationControlError::InvalidBudget)?;
+        let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let monotonic_remaining = initial_remaining
+            .checked_sub(elapsed_ms)
+            .filter(|remaining| *remaining > 0)
+            .ok_or(InterpretationControlError::BudgetExhausted)?;
+        Ok(monotonic_remaining.min(wall_remaining))
     }
 
     fn admit(
@@ -197,13 +238,13 @@ impl InterpretationSessionBudget {
         now_unix_ms: u64,
         requested_output_bytes: u32,
     ) -> Result<ControlInterpretationAdmission, InterpretationControlError> {
-        if now_unix_ms >= self.aggregate_deadline_unix_ms
-            || self.remaining_attempts == 0
+        if self.remaining_attempts == 0
             || requested_output_bytes == 0
             || u64::from(requested_output_bytes) > self.remaining_output_bytes
         {
             return Err(InterpretationControlError::BudgetExhausted);
         }
+        let remaining_deadline_ms = self.remaining_deadline_ms(now_unix_ms)?;
         let attempt_id = RequestId::new(format!(
             "{}:attempt:{}",
             self.session_id.as_str(),
@@ -224,6 +265,7 @@ impl InterpretationSessionBudget {
                 runtime_output_budget_bytes: MAX_RUNTIME_PREPARED_OUTPUT_BYTES,
             },
             provider_response_budget_bytes: requested_output_bytes,
+            remaining_deadline_ms,
         })
     }
 
@@ -242,6 +284,7 @@ impl InterpretationSessionBudget {
 struct ControlInterpretationAdmission {
     runtime: AdmittedInterpretationAttempt,
     provider_response_budget_bytes: u32,
+    remaining_deadline_ms: u64,
 }
 
 #[derive(Debug)]
@@ -252,11 +295,13 @@ struct AttemptDeadline {
 }
 
 impl AttemptDeadline {
-    fn new(deadline_unix_ms: u64, now_unix_ms: u64) -> Result<Self, InterpretationControlError> {
-        let initial_remaining_ms = deadline_unix_ms
-            .checked_sub(now_unix_ms)
-            .filter(|remaining| *remaining > 0)
-            .ok_or(InterpretationControlError::ProviderTimeout)?;
+    fn new(
+        deadline_unix_ms: u64,
+        initial_remaining_ms: u64,
+    ) -> Result<Self, InterpretationControlError> {
+        if deadline_unix_ms == 0 || initial_remaining_ms == 0 {
+            return Err(InterpretationControlError::ProviderTimeout);
+        }
         Ok(Self {
             deadline_unix_ms,
             initial_remaining_ms,
@@ -398,8 +443,15 @@ impl ControlInterpretationEngine {
             invocation.now_unix_ms,
             invocation.requested_output_bytes,
         )?;
-        let deadline =
-            AttemptDeadline::new(admission.runtime.deadline_unix_ms, invocation.now_unix_ms)?;
+        let effective_now_unix_ms = admission
+            .runtime
+            .deadline_unix_ms
+            .checked_sub(admission.remaining_deadline_ms)
+            .ok_or(InterpretationControlError::InvalidBudget)?;
+        let deadline = AttemptDeadline::new(
+            admission.runtime.deadline_unix_ms,
+            admission.remaining_deadline_ms,
+        )?;
         let request = InterpretationRequest {
             request_id: invocation.work.request_id.clone(),
             actor: invocation.work.actor.clone(),
@@ -417,7 +469,7 @@ impl ControlInterpretationEngine {
             .runtime
             .execute_single_attempt(
                 &admission.runtime,
-                invocation.now_unix_ms,
+                effective_now_unix_ms,
                 || {
                     registered
                         .adapter
@@ -439,7 +491,7 @@ impl ControlInterpretationEngine {
             permit,
             &request,
             &prepared,
-            invocation.now_unix_ms,
+            effective_now_unix_ms,
             deadline.transport_deadline()?,
         )?;
         deadline.ensure_live()?;
@@ -669,12 +721,16 @@ impl ProviderInvocationGate {
         prepared
             .validate()
             .map_err(InterpretationControlError::AdapterContract)?;
+        let response_budget = ProviderResponseBudget::new(permit.output_budget_bytes)
+            .map_err(InterpretationControlError::AdapterContract)?;
         // Atomic logical consumption happens before the trusted transport is
         // allowed to resolve credentials, authenticate, perform DNS/socket
         // setup, or initialize any provider session.
         self.consumed_permits.insert(permit.nonce);
         let _ = &permit.attempt_id;
-        Ok(registered.transport.invoke_once(prepared, deadline))
+        Ok(registered
+            .transport
+            .invoke_once(prepared, deadline, response_budget))
     }
 }
 
@@ -928,6 +984,7 @@ mod tests {
             &mut self,
             _invocation: &PreparedProviderInvocation,
             _deadline: ProviderInvocationDeadline,
+            _response_budget: ProviderResponseBudget,
         ) -> ProviderInvocationOutcome {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.outcome.clone()
@@ -943,11 +1000,33 @@ mod tests {
             &mut self,
             _invocation: &PreparedProviderInvocation,
             deadline: ProviderInvocationDeadline,
+            _response_budget: ProviderResponseBudget,
         ) -> ProviderInvocationOutcome {
             self.calls.fetch_add(1, Ordering::SeqCst);
             std::thread::sleep(std::time::Duration::from_millis(
                 deadline.remaining_ms().saturating_add(10),
             ));
+            ProviderInvocationOutcome::Complete(vec![1])
+        }
+    }
+
+    struct BudgetRecordingTransport {
+        calls: Arc<AtomicUsize>,
+        observed_budget: Arc<AtomicUsize>,
+    }
+
+    impl ProviderInvocationTransport for BudgetRecordingTransport {
+        fn invoke_once(
+            &mut self,
+            _invocation: &PreparedProviderInvocation,
+            _deadline: ProviderInvocationDeadline,
+            response_budget: ProviderResponseBudget,
+        ) -> ProviderInvocationOutcome {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.observed_budget.store(
+                usize::try_from(response_budget.max_bytes()).unwrap_or(usize::MAX),
+                Ordering::SeqCst,
+            );
             ProviderInvocationOutcome::Complete(vec![1])
         }
     }
@@ -986,9 +1065,17 @@ mod tests {
     }
 
     fn descriptor(network_access: NetworkAccess) -> AdapterDescriptor {
+        named_descriptor("adapter:mock", "provider:mock", network_access)
+    }
+
+    fn named_descriptor(
+        adapter_id: &str,
+        provider_id: &str,
+        network_access: NetworkAccess,
+    ) -> AdapterDescriptor {
         AdapterDescriptor {
-            provider: id(ProviderId::new("provider:mock")),
-            adapter_id: "adapter:mock".into(),
+            provider: id(ProviderId::new(provider_id)),
+            adapter_id: adapter_id.into(),
             endpoint_class: "interpretation".into(),
             protocol_version: 1,
             network_access,
@@ -1087,6 +1174,124 @@ mod tests {
             Err(InterpretationControlError::ProviderTimeout)
         ));
         assert_eq!(transport_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn transport_receives_exact_control_admitted_response_budget() {
+        let prepare_calls = Arc::new(AtomicUsize::new(0));
+        let transport_calls = Arc::new(AtomicUsize::new(0));
+        let observed_budget = Arc::new(AtomicUsize::new(0));
+        let descriptor = descriptor(NetworkAccess::None);
+        let mut engine = ControlInterpretationEngine::new();
+        engine
+            .register_adapter(Box::new(CountingAdapter {
+                descriptor: descriptor.clone(),
+                prepare_calls: Arc::clone(&prepare_calls),
+            }))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let mut gate = engine.invocation_gate();
+        gate.register_transport(
+            descriptor,
+            Box::new(BudgetRecordingTransport {
+                calls: Arc::clone(&transport_calls),
+                observed_budget: Arc::clone(&observed_budget),
+            }),
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        let runtime = AgentRuntime::default();
+        let work = work();
+        let mut budget = InterpretationSessionBudget::new(
+            id(RequestId::new("session:response-budget")),
+            1_000,
+            1,
+            4096,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        let mut invocation = InterpretationInvocation {
+            runtime: &runtime,
+            gate: &mut gate,
+            work: &work,
+            offline: false,
+            now_unix_ms: 10,
+            requested_output_bytes: 777,
+            budget: &mut budget,
+        };
+        engine
+            .interpret_with_adapter("adapter:mock", &mut invocation)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(transport_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(observed_budget.load(Ordering::SeqCst), 777);
+    }
+
+    #[test]
+    fn fallback_cannot_reset_elapsed_aggregate_deadline() {
+        let first_descriptor =
+            named_descriptor("adapter:first", "provider:first", NetworkAccess::None);
+        let second_descriptor =
+            named_descriptor("adapter:second", "provider:second", NetworkAccess::None);
+        let prepare_calls = Arc::new(AtomicUsize::new(0));
+        let first_calls = Arc::new(AtomicUsize::new(0));
+        let second_calls = Arc::new(AtomicUsize::new(0));
+        let mut engine = ControlInterpretationEngine::new();
+        engine
+            .register_adapter(Box::new(CountingAdapter {
+                descriptor: first_descriptor.clone(),
+                prepare_calls: Arc::clone(&prepare_calls),
+            }))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        engine
+            .register_adapter(Box::new(CountingAdapter {
+                descriptor: second_descriptor.clone(),
+                prepare_calls: Arc::clone(&prepare_calls),
+            }))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let mut gate = engine.invocation_gate();
+        gate.register_transport(
+            first_descriptor,
+            Box::new(SlowTransport {
+                calls: Arc::clone(&first_calls),
+            }),
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        gate.register_transport(
+            second_descriptor,
+            Box::new(CountingTransport {
+                calls: Arc::clone(&second_calls),
+                outcome: ProviderInvocationOutcome::Complete(vec![1]),
+            }),
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        let runtime = AgentRuntime::default();
+        let work = work();
+        let mut budget = InterpretationSessionBudget::new(
+            id(RequestId::new("session:fallback-deadline")),
+            12,
+            2,
+            2048,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        let result = {
+            let mut invocation = InterpretationInvocation {
+                runtime: &runtime,
+                gate: &mut gate,
+                work: &work,
+                offline: false,
+                now_unix_ms: 10,
+                requested_output_bytes: 1024,
+                budget: &mut budget,
+            };
+            engine.interpret_with_fallback(
+                &["adapter:first".into(), "adapter:second".into()],
+                &mut invocation,
+            )
+        };
+        assert!(matches!(
+            result,
+            Err(InterpretationControlError::BudgetExhausted)
+        ));
+        assert_eq!(first_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(second_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(budget.remaining_attempts(), 1);
     }
 
     #[test]

@@ -31,7 +31,7 @@
         "interactive": { "type": "boolean" }
       }
     },
-    "requested_outcome": { "type": "string", "minLength": 1, "maxLength": 16384 },
+    "requested_outcome": { "$ref": "#/$defs/nonEmptyText" },
     "requirements": {
       "type": "array",
       "maxItems": 256,
@@ -42,7 +42,7 @@
         "properties": {
           "id": { "$ref": "#/$defs/token" },
           "kind": { "enum": ["goal", "constraint", "preference", "prohibition"] },
-          "statement": { "type": "string", "minLength": 1, "maxLength": 16384 }
+          "statement": { "$ref": "#/$defs/nonEmptyText" }
         }
       }
     },
@@ -121,18 +121,32 @@
   "$defs": {
     "token": {
       "type": "string",
-      "minLength": 1,
       "maxLength": 256,
-      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+      "allOf": [
+        { "pattern": "\\S" },
+        { "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$" }
+      ]
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 16384,
+      "pattern": "^[^\\u0000]*$"
+    },
+    "nonEmptyText": {
+      "allOf": [
+        { "$ref": "#/$defs/text" },
+        { "pattern": "\\S" }
+      ]
     },
     "textList": {
       "type": "array",
       "maxItems": 256,
-      "items": { "type": "string", "maxLength": 16384 }
+      "items": { "$ref": "#/$defs/text" }
     },
     "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
   },
   "x-linura-contract-id": "schema.intent-proposal.v1",
   "x-linura-stability": "experimental",
-  "x-linura-authority": "proposal-only"
+  "x-linura-authority": "proposal-only",
+  "x-linura-aggregate-byte-limit": 524288
 }

@@ -8,8 +8,8 @@ use crate::{Intent, IntentStatus, Requirement};
 
 pub const INTENT_PROPOSAL_SCHEMA_VERSION: u16 = 1;
 const PROPOSAL_DIGEST_DOMAIN: &[u8] = b"linura:intent-proposal:v1";
-const MAX_TOKEN_BYTES: usize = 256;
-const MAX_TEXT_BYTES: usize = 16 * 1024;
+const MAX_TOKEN_CHARS: usize = 256;
+const MAX_TEXT_CHARS: usize = 16 * 1024;
 const MAX_COLLECTION_ITEMS: usize = 256;
 const MAX_PROPOSAL_BYTES: usize = 512 * 1024;
 const SHA256_HEX_BYTES: usize = 64;
@@ -491,7 +491,7 @@ fn validate_token(label: &'static str, value: &str) -> Result<(), ProposalValida
     if value.trim().is_empty() {
         return Err(ProposalValidationError::Empty(label));
     }
-    if value.len() > MAX_TOKEN_BYTES {
+    if value.chars().count() > MAX_TOKEN_CHARS {
         return Err(ProposalValidationError::TooLong(label));
     }
     if value.chars().any(char::is_control) {
@@ -508,7 +508,7 @@ fn validate_text(
     if !allow_empty && value.trim().is_empty() {
         return Err(ProposalValidationError::Empty(label));
     }
-    if value.len() > MAX_TEXT_BYTES {
+    if value.chars().count() > MAX_TEXT_CHARS {
         return Err(ProposalValidationError::TooLong(label));
     }
     if value.chars().any(|character| character == '\0') {
@@ -716,6 +716,40 @@ mod tests {
         assert_eq!(
             attribution.validate(),
             Err(ProposalValidationError::InvalidAttribution)
+        );
+    }
+
+    #[test]
+    fn unicode_text_limits_are_character_based_and_keep_byte_aggregate_bound() {
+        let mut value = proposal();
+        value.requested_outcome = "é".repeat(MAX_TEXT_CHARS);
+        value.canonical_digest = value.derive_digest();
+        assert_eq!(value.validate(), Ok(()));
+
+        value.requested_outcome.push('é');
+        value.canonical_digest = value.derive_digest();
+        assert_eq!(
+            value.validate(),
+            Err(ProposalValidationError::TooLong("requested outcome"))
+        );
+    }
+
+    #[test]
+    fn required_text_rejects_whitespace_only_and_all_text_rejects_nul() {
+        let mut whitespace = proposal();
+        whitespace.requested_outcome = " \t\n".into();
+        whitespace.canonical_digest = whitespace.derive_digest();
+        assert_eq!(
+            whitespace.validate(),
+            Err(ProposalValidationError::Empty("requested outcome"))
+        );
+
+        let mut nul = proposal();
+        nul.assumptions = vec!["bad\0value".into()];
+        nul.canonical_digest = nul.derive_digest();
+        assert_eq!(
+            nul.validate(),
+            Err(ProposalValidationError::ControlCharacter("assumption"))
         );
     }
 }
