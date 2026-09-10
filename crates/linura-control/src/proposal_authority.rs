@@ -3,7 +3,9 @@ use std::sync::{Mutex, MutexGuard};
 
 use linura_core::{Actor, CapabilityId, IntentId, PrincipalId, RequestId};
 use linura_intent::{IntentProposal, InterpretationContextBinding, ProposalDigest};
-use linura_library::ProposalAcceptanceTarget;
+use linura_library::{
+    ProposalAcceptanceAuthority as LibraryProposalAcceptanceAuthority, ProposalAcceptanceTarget,
+};
 
 use crate::plan_preview::AuthenticatedPrincipal;
 use crate::proposal_acceptance::{
@@ -186,6 +188,11 @@ impl ControlProposalAuthority {
         }
         let principal_id = PrincipalId::new(principal.as_str())
             .map_err(|error| ProposalAcceptanceControlError::InvalidPrincipal(error.to_string()))?;
+        LibraryProposalAcceptanceAuthority::validate_supersession_lineage(
+            request.target.intent_id(),
+            &request.supersedes,
+        )
+        .map_err(ProposalAcceptanceControlError::Library)?;
         let resulting_intent = proposal
             .to_proposed_intent(
                 request.target.intent_id().clone(),

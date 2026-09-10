@@ -2,7 +2,7 @@ use linura_core::{IntentId, PrincipalId, RequestId};
 use linura_intent::ProposalDigest;
 use rusqlite::{OptionalExtension, params};
 
-use crate::proposal_acceptance::ProposalAcceptanceAuthority;
+use crate::proposal_acceptance::{ProposalAcceptanceAuthority, validate_durable_record};
 use crate::{
     AuthorityTimeSeal, LocalLibrary, ProposalAcceptanceError, ProposalAcceptanceMaterial,
     ProposalAcceptanceRecord, ProposalAcceptanceTarget,
@@ -32,6 +32,7 @@ impl ProposalAcceptanceAuthority {
         library: &LocalLibrary,
         key: &ProposalAcceptanceReplayKey,
     ) -> Result<Option<ProposalAcceptanceRecord>, ProposalAcceptanceError> {
+        self.require_library_binding(library)?;
         let operation = library
             .connection
             .query_row(
@@ -56,15 +57,15 @@ impl ProposalAcceptanceAuthority {
                 id: key.operation_id.as_str().into(),
             });
         }
-        let payload = library
+        let (record_digest, payload) = library
             .connection
             .query_row(
-                "SELECT payload FROM lifecycle_records WHERE entity_id = ?1 AND content_digest = ?2 ORDER BY sequence DESC LIMIT 1",
-                params![
-                    format!("{ACCEPTANCE_RECORD_PREFIX}{}", key.operation_id.as_str()),
-                    semantic_digest,
-                ],
-                |row| row.get::<_, String>(0),
+                "SELECT content_digest, payload FROM lifecycle_records WHERE entity_id = ?1 ORDER BY sequence DESC LIMIT 1",
+                params![format!(
+                    "{ACCEPTANCE_RECORD_PREFIX}{}",
+                    key.operation_id.as_str()
+                )],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?
             .ok_or_else(|| {
@@ -72,6 +73,11 @@ impl ProposalAcceptanceAuthority {
                     "operation exists without durable v0.8 acceptance record".into(),
                 )
             })?;
+        if field(&payload, "version")? != "1" {
+            return Err(ProposalAcceptanceError::Corrupt(
+                "unsupported durable proposal-acceptance record version".into(),
+            ));
+        }
 
         if field(&payload, "principal")? != key.principal.as_str()
             || field(&payload, "proposal_id")? != key.proposal_id.as_str()
@@ -106,7 +112,8 @@ impl ProposalAcceptanceAuthority {
             decision_validity_digest: parse_digest(&payload, "decision_validity_digest")?,
             resulting_intent_digest: parse_digest(&payload, "resulting_intent_digest")?,
         };
-        if material.semantic_digest().to_hex() != semantic_digest {
+        let material_digest = material.semantic_digest();
+        if material_digest.to_hex() != semantic_digest {
             return Err(ProposalAcceptanceError::Corrupt(
                 "durable acceptance material digest does not match operation record".into(),
             ));
@@ -123,7 +130,7 @@ impl ProposalAcceptanceAuthority {
                 "durable acceptance result disagrees with operation record".into(),
             ));
         }
-        Ok(Some(ProposalAcceptanceRecord {
+        let record = ProposalAcceptanceRecord {
             material,
             time_seal: AuthorityTimeSeal {
                 time_floor_unix_ms: parse_u64(&payload, "time_floor_unix_ms")?,
@@ -137,7 +144,9 @@ impl ProposalAcceptanceAuthority {
             resulting_intent_id,
             resulting_revision,
             linearized_at_unix_ms: parse_u64(&payload, "linearized_at_unix_ms")?,
-        }))
+        };
+        validate_durable_record(&record, &record_digest, material_digest)?;
+        Ok(Some(record))
     }
 }
 

@@ -20,13 +20,13 @@
   ],
   "properties": {
     "schema_version": { "const": 1 },
-    "proposal_id": { "$ref": "#/$defs/token" },
+    "proposal_id": { "$ref": "#/$defs/coreId" },
     "actor": {
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "kind", "interactive"],
       "properties": {
-        "id": { "$ref": "#/$defs/token" },
+        "id": { "$ref": "#/$defs/coreId" },
         "kind": { "enum": ["human", "service", "agent", "remote"] },
         "interactive": { "type": "boolean" }
       }
@@ -40,7 +40,7 @@
         "additionalProperties": false,
         "required": ["id", "kind", "statement"],
         "properties": {
-          "id": { "$ref": "#/$defs/token" },
+          "id": { "$ref": "#/$defs/coreId" },
           "kind": { "enum": ["goal", "constraint", "preference", "prohibition"] },
           "statement": { "$ref": "#/$defs/nonEmptyText" }
         }
@@ -50,7 +50,7 @@
       "type": "array",
       "maxItems": 256,
       "uniqueItems": true,
-      "items": { "$ref": "#/$defs/token" }
+      "items": { "$ref": "#/$defs/coreId" }
     },
     "assumptions": { "$ref": "#/$defs/textList" },
     "unresolved_questions": { "$ref": "#/$defs/textList" },
@@ -119,6 +119,12 @@
     "canonical_digest": { "$ref": "#/$defs/digest" }
   },
   "$defs": {
+    "coreId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[ -~]+$"
+    },
     "token": {
       "type": "string",
       "maxLength": 256,

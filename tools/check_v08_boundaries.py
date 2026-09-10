@@ -103,6 +103,33 @@ def validate_schema(root: Path, failures: list[str]) -> None:
     if not isinstance(defs, dict):
         fail("intent proposal schema definitions are missing", failures)
         return
+    core_id = defs.get("coreId")
+    if core_id != {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256,
+        "pattern": r"^[ -~]+$",
+    }:
+        fail("intent proposal core-ID wire contract drifted from Rust", failures)
+    actor = properties.get("actor", {})
+    requirements = properties.get("requirements", {})
+    capability_refs = properties.get("capability_refs", {})
+    if properties.get("proposal_id") != {"$ref": "#/$defs/coreId"}:
+        fail("proposal_id must use the core-ID wire contract", failures)
+    if not isinstance(actor, dict) or actor.get("properties", {}).get("id") != {
+        "$ref": "#/$defs/coreId"
+    }:
+        fail("proposal actor id must use the core-ID wire contract", failures)
+    requirement_items = requirements.get("items", {}) if isinstance(requirements, dict) else {}
+    if requirement_items.get("properties", {}).get("id") != {
+        "$ref": "#/$defs/coreId"
+    }:
+        fail("proposal requirement id must use the core-ID wire contract", failures)
+    if not isinstance(capability_refs, dict) or capability_refs.get("items") != {
+        "$ref": "#/$defs/coreId"
+    }:
+        fail("proposal capability refs must use the core-ID wire contract", failures)
+
     token = defs.get("token")
     if not isinstance(token, dict) or token.get("type") != "string" or token.get("maxLength") != 256:
         fail("intent proposal token character bound drifted from Rust", failures)
@@ -172,6 +199,9 @@ def validate(root: Path) -> list[str]:
     library_acceptance = (
         root / "crates/linura-library/src/proposal_acceptance_secure.rs"
     ).read_text(encoding="utf-8")
+    library_replay = (root / "crates/linura-library/src/proposal_replay.rs").read_text(
+        encoding="utf-8"
+    )
     library_acceptance_code = rust_code_without_line_comments(library_acceptance)
     transaction = (root / "crates/linura-transaction/src/lib.rs").read_text(encoding="utf-8")
     control_toml = (root / "crates/linura-control/Cargo.toml").read_text(encoding="utf-8")
@@ -245,6 +275,22 @@ def validate(root: Path) -> list[str]:
         "capabilityless adapter implementation",
         failures,
     )
+    require(
+        capabilityless,
+        "if !request_prefix.is_empty()",
+        "capabilityless adapter request framing",
+        failures,
+    )
+    adapter_struct = re.search(
+        r"pub struct CapabilitylessInterpretationAdapter\s*\{(?P<body>.*?)\n\}",
+        capabilityless,
+        re.DOTALL,
+    )
+    if adapter_struct is None or "request_prefix" in adapter_struct.group("body"):
+        fail(
+            "capabilityless adapter must not retain arbitrary request-prefix material",
+            failures,
+        )
 
     permit_match = re.search(
         r"#\[derive\((?P<derive>[^)]*)\)\]\s*pub struct ProviderInvocationPermit\s*\{(?P<body>.*?)\n\}",
@@ -352,6 +398,7 @@ def validate(root: Path) -> list[str]:
         require(control_acceptance_code, marker, "Control acceptance signing/binding authority", failures)
 
     for marker in (
+        "LibraryProposalAcceptanceAuthority::validate_supersession_lineage(",
         "pub supersedes: Vec<IntentId>",
         "pub clock_continuity_generation: u64",
         "request.supersedes.clone()",
@@ -362,6 +409,8 @@ def validate(root: Path) -> list[str]:
 
     for marker in (
         "MAX_TOKEN_CHARS",
+        "MAX_CORE_ID_BYTES",
+        "validate_core_id",
         "MAX_TEXT_CHARS",
         "value.chars().count() > MAX_TOKEN_CHARS",
         "value.chars().count() > MAX_TEXT_CHARS",
@@ -390,6 +439,27 @@ def validate(root: Path) -> list[str]:
     )
     if re.search(r"pub\s+fn\s+new\s*\(\s*\)", secure_acceptance_code):
         fail("production proposal acceptance must not mint ephemeral authority", failures)
+
+    for marker in (
+        ".revalidate_context_sources(&proposal.context)",
+        "ProposalAcceptanceAuthority::validate_supersession_lineage(",
+    ):
+        require(control_acceptance_code, marker, "Control durable final revalidation", failures)
+
+    for marker in (
+        "pub fn revalidate_context_sources(",
+        "AuthoritySourceKind::ExistingIntent",
+        "AuthoritySourceKind::Library",
+        "record_integrity_digest",
+        "validate_durable_record",
+        "pub(crate) fn require_library_binding(",
+    ):
+        require(library_acceptance, marker, "Library durable acceptance hardening", failures)
+    for marker in (
+        "self.require_library_binding(library)?;",
+        "validate_durable_record(&record, &record_digest, material_digest)?;",
+    ):
+        require(library_replay, marker, "Library durable replay hardening", failures)
 
     for marker in (
         "TransactionAuthorityVerifier",

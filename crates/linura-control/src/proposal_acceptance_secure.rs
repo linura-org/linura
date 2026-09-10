@@ -377,6 +377,11 @@ impl ProposalAcceptanceControl {
         if request.target.intent_id().as_str().is_empty() {
             return Err(ProposalAcceptanceControlError::InvalidTarget);
         }
+        ProposalAcceptanceAuthority::validate_supersession_lineage(
+            request.target.intent_id(),
+            &request.supersedes,
+        )
+        .map_err(ProposalAcceptanceControlError::Library)?;
         let resulting_intent = proposal
             .to_proposed_intent(
                 request.target.intent_id().clone(),
@@ -410,6 +415,9 @@ impl ProposalAcceptanceControl {
         let session = self
             .library_authority
             .begin(library)
+            .map_err(ProposalAcceptanceControlError::Library)?;
+        session
+            .revalidate_context_sources(&proposal.context)
             .map_err(ProposalAcceptanceControlError::Library)?;
         let mut authority_guard = authority_source.acquire_guard()?;
 

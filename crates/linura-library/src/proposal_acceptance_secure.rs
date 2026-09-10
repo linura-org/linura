@@ -3,7 +3,10 @@ use std::fmt::{Display, Formatter};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use linura_core::{ActorKind, IntentId, PrincipalId, RequestId};
-use linura_intent::{Intent, IntentStatus, ProposalDigest, RequirementKind};
+use linura_intent::{
+    AuthoritySourceKind, Intent, IntentStatus, InterpretationContextBinding, ProposalDigest,
+    RequirementKind,
+};
 use linura_transaction::{
     ContentDigest, HandoffRequest, TransactionAuthorityVerifier, TransactionId,
     TransactionSnapshot, TransactionState, digest_bytes, digest_parts,
@@ -18,6 +21,8 @@ const PROPOSAL_INDEX_PREFIX: &str = "v08:proposal:";
 const DECISION_INDEX_PREFIX: &str = "v08:decision:";
 const AUTHORITY_BINDING_ENTITY_ID: &str = "v08:proposal-acceptance-authority";
 const MAX_RECORD_PAYLOAD_BYTES: usize = 64 * 1024;
+const MAX_ACCEPTANCE_SUPERSEDES: usize = 16_384;
+const MAX_ACCEPTANCE_SUPERSEDES_BYTES: usize = 4 * 1024 * 1024;
 
 static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -237,6 +242,50 @@ impl ProposalAcceptanceAuthority {
         provision_authority_binding(&mut library.connection, &self.verifier)
     }
 
+    /// Validate a proposed supersession lineage before any clone/digest/allocation
+    /// proportional to caller-controlled lineage size. The count matches the normal
+    /// Library collection ceiling; the byte ceiling follows from the core 256-byte ID
+    /// contract but is enforced explicitly at this trust boundary.
+    pub fn validate_supersession_lineage(
+        intent_id: &IntentId,
+        supersedes: &[IntentId],
+    ) -> Result<(), ProposalAcceptanceError> {
+        if supersedes.len() > MAX_ACCEPTANCE_SUPERSEDES {
+            return Err(ProposalAcceptanceError::BindingMismatch(
+                "proposal supersession lineage exceeds the Library collection bound".into(),
+            ));
+        }
+        let mut aggregate_bytes = 0_usize;
+        let mut seen = BTreeSet::new();
+        for predecessor in supersedes {
+            aggregate_bytes = aggregate_bytes
+                .checked_add(predecessor.as_str().len())
+                .ok_or_else(|| {
+                    ProposalAcceptanceError::BindingMismatch(
+                        "proposal supersession lineage byte size overflowed".into(),
+                    )
+                })?;
+            if aggregate_bytes > MAX_ACCEPTANCE_SUPERSEDES_BYTES {
+                return Err(ProposalAcceptanceError::BindingMismatch(
+                    "proposal supersession lineage exceeds the aggregate byte bound".into(),
+                ));
+            }
+            if predecessor == intent_id || !seen.insert(predecessor.as_str()) {
+                return Err(ProposalAcceptanceError::BindingMismatch(
+                    "resulting intent contains invalid duplicate/self supersession lineage".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn require_library_binding(
+        &self,
+        library: &LocalLibrary,
+    ) -> Result<(), ProposalAcceptanceError> {
+        require_authority_binding(&library.connection, &self.verifier)
+    }
+
     pub fn replay_committed(
         &self,
         library: &LocalLibrary,
@@ -337,6 +386,88 @@ impl<'a> ProposalAcceptanceTransaction<'a> {
                 Ok((revision, parse_intent_status(&status)?))
             })
             .transpose()
+    }
+
+    /// Re-read Library-owned authority sources while the durable write/CAS guard
+    /// is held. `ExistingIntent` binds the current immutable intent revision. Generic
+    /// `Library` sources bind an exact lifecycle entity to its latest content digest.
+    /// Missing, malformed, or changed sources fail closed.
+    pub fn revalidate_context_sources(
+        &self,
+        context: &InterpretationContextBinding,
+    ) -> Result<(), ProposalAcceptanceError> {
+        context.validate().map_err(|error| {
+            ProposalAcceptanceError::BindingMismatch(format!(
+                "invalid interpretation context during durable revalidation: {error}"
+            ))
+        })?;
+        for source in &context.source_revisions {
+            match source.kind {
+                AuthoritySourceKind::ExistingIntent => {
+                    let intent_id = IntentId::new(source.id.clone()).map_err(|error| {
+                        ProposalAcceptanceError::BindingMismatch(format!(
+                            "invalid existing-intent authority source id: {error}"
+                        ))
+                    })?;
+                    let expected_revision = source.revision.parse::<u64>().map_err(|_| {
+                        ProposalAcceptanceError::BindingMismatch(format!(
+                            "existing-intent authority source {} has a non-numeric revision",
+                            source.id
+                        ))
+                    })?;
+                    if expected_revision == 0 {
+                        return Err(ProposalAcceptanceError::BindingMismatch(format!(
+                            "existing-intent authority source {} has revision zero",
+                            source.id
+                        )));
+                    }
+                    match self.current_target(&intent_id)? {
+                        Some((actual_revision, _)) if actual_revision == expected_revision => {}
+                        Some((actual_revision, _)) => {
+                            return Err(ProposalAcceptanceError::BindingMismatch(format!(
+                                "existing-intent authority source {} changed from revision {} to {}",
+                                source.id, expected_revision, actual_revision
+                            )));
+                        }
+                        None => {
+                            return Err(ProposalAcceptanceError::BindingMismatch(format!(
+                                "existing-intent authority source {} is no longer present",
+                                source.id
+                            )));
+                        }
+                    }
+                }
+                AuthoritySourceKind::Library => {
+                    let current_digest = self
+                        .transaction
+                        .query_row(
+                            "SELECT content_digest FROM lifecycle_records WHERE entity_id = ?1 ORDER BY sequence DESC LIMIT 1",
+                            params![source.id.as_str()],
+                            |row| row.get::<_, String>(0),
+                        )
+                        .optional()?;
+                    match current_digest {
+                        Some(digest) if digest == source.revision => {}
+                        Some(_) => {
+                            return Err(ProposalAcceptanceError::BindingMismatch(format!(
+                                "Library authority source {} changed after interpretation",
+                                source.id
+                            )));
+                        }
+                        None => {
+                            return Err(ProposalAcceptanceError::BindingMismatch(format!(
+                                "Library authority source {} cannot be re-resolved",
+                                source.id
+                            )));
+                        }
+                    }
+                }
+                AuthoritySourceKind::Observation
+                | AuthoritySourceKind::Policy
+                | AuthoritySourceKind::CapabilityRegistry => {}
+            }
+        }
+        Ok(())
     }
 
     /// Construct exact material for Control to sign after final revalidation.
@@ -586,6 +717,66 @@ fn time_seal_digest(seal: &AuthorityTimeSeal) -> ContentDigest {
     )
 }
 
+fn record_integrity_digest(record: &ProposalAcceptanceRecord) -> ProposalDigest {
+    let material = record.material.semantic_digest().to_hex();
+    let floor = record.time_seal.time_floor_unix_ms.to_string();
+    let deadline = record.time_seal.exclusive_deadline_unix_ms.to_string();
+    let continuity = record.time_seal.continuity_generation.to_string();
+    let normalization = record.time_seal.normalization_evidence_digest.to_hex();
+    let revision = record.resulting_revision.to_string();
+    let linearized = record.linearized_at_unix_ms.to_string();
+    ProposalDigest::hash_parts(
+        b"linura:proposal-acceptance-record:v1",
+        &[
+            material.as_bytes(),
+            floor.as_bytes(),
+            deadline.as_bytes(),
+            continuity.as_bytes(),
+            normalization.as_bytes(),
+            record.resulting_intent_id.as_str().as_bytes(),
+            revision.as_bytes(),
+            linearized.as_bytes(),
+        ],
+    )
+}
+
+pub(crate) fn validate_durable_record(
+    record: &ProposalAcceptanceRecord,
+    stored_record_digest: &str,
+    expected_material_digest: ProposalDigest,
+) -> Result<(), ProposalAcceptanceError> {
+    record.time_seal.validate().map_err(|error| {
+        ProposalAcceptanceError::Corrupt(format!(
+            "invalid durable proposal-acceptance time evidence: {error}"
+        ))
+    })?;
+    if record.material.semantic_digest() != expected_material_digest {
+        return Err(ProposalAcceptanceError::Corrupt(
+            "durable proposal-acceptance material digest changed".into(),
+        ));
+    }
+    if record.resulting_revision == 0
+        || &record.resulting_intent_id != record.material.target.intent_id()
+    {
+        return Err(ProposalAcceptanceError::Corrupt(
+            "durable proposal-acceptance result identity is invalid".into(),
+        ));
+    }
+    if record.linearized_at_unix_ms < record.time_seal.time_floor_unix_ms
+        || record.linearized_at_unix_ms >= record.time_seal.exclusive_deadline_unix_ms
+    {
+        return Err(ProposalAcceptanceError::Corrupt(
+            "durable proposal-acceptance linearization time lies outside the sealed authority window".into(),
+        ));
+    }
+    if record_integrity_digest(record).to_hex() != stored_record_digest {
+        return Err(ProposalAcceptanceError::Corrupt(
+            "durable proposal-acceptance record integrity digest mismatch".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn challenge_matches_session(challenge: &AcceptanceSigningChallenge, session_id: u64) -> bool {
     challenge.snapshot.state == TransactionState::Prepared
         && challenge.snapshot.state_version == session_id
@@ -764,11 +955,42 @@ fn reject_identity_conflicts(
     Ok(())
 }
 
+fn payload_matches_material(
+    payload: &str,
+    material: &ProposalAcceptanceMaterial,
+) -> Result<bool, ProposalAcceptanceError> {
+    let expected_revision = material
+        .target
+        .expected_revision()
+        .map_or_else(|| "none".to_string(), |value| value.to_string());
+    Ok(field_value(payload, "version")? == "1"
+        && field_value(payload, "principal")? == material.principal.as_str()
+        && field_value(payload, "decision_id")? == material.decision_id.as_str()
+        && parse_digest_field(payload, "decision_binding_digest")?
+            == material.decision_binding_digest
+        && field_value(payload, "proposal_id")? == material.proposal_id.as_str()
+        && parse_digest_field(payload, "proposal_digest")? == material.proposal_digest
+        && parse_digest_field(payload, "accepted_context_digest")?
+            == material.accepted_context_digest
+        && field_value(payload, "operation_id")? == material.operation_id.as_str()
+        && field_value(payload, "action")? == material.target.action().as_str()
+        && field_value(payload, "target_intent_id")? == material.target.intent_id().as_str()
+        && field_value(payload, "expected_revision")? == expected_revision
+        && parse_u64_field(payload, "authority_generation")? == material.authority_generation
+        && parse_digest_field(payload, "authority_evidence_digest")?
+            == material.authority_evidence_digest
+        && parse_digest_field(payload, "decision_validity_digest")?
+            == material.decision_validity_digest
+        && parse_digest_field(payload, "resulting_intent_digest")?
+            == material.resulting_intent_digest)
+}
+
 fn replay_committed(
     connection: &rusqlite::Connection,
     material: &ProposalAcceptanceMaterial,
 ) -> Result<Option<ProposalAcceptanceRecord>, ProposalAcceptanceError> {
-    let semantic_digest = material.semantic_digest().to_hex();
+    let material_digest = material.semantic_digest();
+    let semantic_digest = material_digest.to_hex();
     let operation = connection
         .query_row(
             "SELECT semantic_digest, result_kind, result_id, result_revision FROM library_operations WHERE operation_id = ?1",
@@ -792,37 +1014,51 @@ fn replay_committed(
             id: material.operation_id.as_str().into(),
         });
     }
-    let payload = connection
+    let (record_digest, payload) = connection
         .query_row(
-            "SELECT payload FROM lifecycle_records WHERE entity_id = ?1 AND content_digest = ?2 ORDER BY sequence DESC LIMIT 1",
-            params![format!("{ACCEPTANCE_RECORD_PREFIX}{}", material.operation_id.as_str()), semantic_digest],
-            |row| row.get::<_, String>(0),
+            "SELECT content_digest, payload FROM lifecycle_records WHERE entity_id = ?1 ORDER BY sequence DESC LIMIT 1",
+            params![format!("{ACCEPTANCE_RECORD_PREFIX}{}", material.operation_id.as_str())],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()?
-        .ok_or_else(|| ProposalAcceptanceError::Corrupt(
-            "operation exists without durable v0.8 acceptance record".into(),
-        ))?;
+        .ok_or_else(|| {
+            ProposalAcceptanceError::Corrupt(
+                "operation exists without durable v0.8 acceptance record".into(),
+            )
+        })?;
+    if !payload_matches_material(&payload, material)? {
+        return Err(ProposalAcceptanceError::Corrupt(
+            "durable acceptance payload disagrees with exact acceptance material".into(),
+        ));
+    }
     let result_id = IntentId::new(result_id)
         .map_err(|error| ProposalAcceptanceError::Corrupt(error.to_string()))?;
     let result_revision = u64::try_from(result_revision)
         .map_err(|_| ProposalAcceptanceError::Corrupt("invalid durable result revision".into()))?;
-    let time_seal = AuthorityTimeSeal {
-        time_floor_unix_ms: parse_u64_field(&payload, "time_floor_unix_ms")?,
-        exclusive_deadline_unix_ms: parse_u64_field(&payload, "exclusive_deadline_unix_ms")?,
-        continuity_generation: parse_u64_field(&payload, "continuity_generation")?,
-        normalization_evidence_digest: parse_digest_field(
-            &payload,
-            "normalization_evidence_digest",
-        )?,
-    };
-    time_seal.validate()?;
-    Ok(Some(ProposalAcceptanceRecord {
+    if field_value(&payload, "resulting_intent_id")? != result_id.as_str()
+        || parse_u64_field(&payload, "resulting_revision")? != result_revision
+    {
+        return Err(ProposalAcceptanceError::Corrupt(
+            "durable acceptance result disagrees with operation record".into(),
+        ));
+    }
+    let record = ProposalAcceptanceRecord {
         material: material.clone(),
-        time_seal,
+        time_seal: AuthorityTimeSeal {
+            time_floor_unix_ms: parse_u64_field(&payload, "time_floor_unix_ms")?,
+            exclusive_deadline_unix_ms: parse_u64_field(&payload, "exclusive_deadline_unix_ms")?,
+            continuity_generation: parse_u64_field(&payload, "continuity_generation")?,
+            normalization_evidence_digest: parse_digest_field(
+                &payload,
+                "normalization_evidence_digest",
+            )?,
+        },
         resulting_intent_id: result_id,
         resulting_revision: result_revision,
         linearized_at_unix_ms: parse_u64_field(&payload, "linearized_at_unix_ms")?,
-    }))
+    };
+    validate_durable_record(&record, &record_digest, material_digest)?;
+    Ok(Some(record))
 }
 
 fn persist_acceptance_record(
@@ -847,11 +1083,16 @@ fn persist_acceptance_record(
             "durable acceptance record exceeds bounded payload size".into(),
         ));
     }
+    let acceptance_entity_id = format!(
+        "{ACCEPTANCE_RECORD_PREFIX}{}",
+        record.material.operation_id.as_str()
+    );
+    let record_digest = record_integrity_digest(record).to_hex();
+    transaction.execute(
+        "INSERT INTO lifecycle_records(record_kind, entity_id, content_digest, payload) VALUES ('provenance', ?1, ?2, ?3)",
+        params![acceptance_entity_id, record_digest, payload],
+    )?;
     for entity_id in [
-        format!(
-            "{ACCEPTANCE_RECORD_PREFIX}{}",
-            record.material.operation_id.as_str()
-        ),
         format!(
             "{PROPOSAL_INDEX_PREFIX}{}",
             record.material.proposal_id.as_str()
@@ -1018,14 +1259,7 @@ fn validate_proposed_intent(intent: &Intent) -> Result<(), ProposalAcceptanceErr
             ));
         }
     }
-    let mut supersedes = BTreeSet::new();
-    for id in &intent.supersedes {
-        if id == &intent.id || !supersedes.insert(id.as_str()) {
-            return Err(ProposalAcceptanceError::BindingMismatch(
-                "resulting intent contains invalid or duplicate supersedes references".into(),
-            ));
-        }
-    }
+    ProposalAcceptanceAuthority::validate_supersession_lineage(&intent.id, &intent.supersedes)?;
     Ok(())
 }
 

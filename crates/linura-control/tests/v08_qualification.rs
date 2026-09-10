@@ -52,7 +52,7 @@ fn adapter(descriptor: AdapterDescriptor) -> CapabilitylessInterpretationAdapter
     CapabilitylessInterpretationAdapter::new(
         descriptor,
         vec![],
-        b"qualification-v08".to_vec(),
+        vec![],
         Some("deterministic-mock".into()),
     )
     .unwrap_or_else(|error| unreachable!("{error}"))

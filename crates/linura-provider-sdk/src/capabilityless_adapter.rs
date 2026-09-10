@@ -9,7 +9,6 @@ use crate::interpretation::{
 const CAPABILITYLESS_REQUEST_DOMAIN: &[u8] = b"linura:capabilityless-adapter-request:v1";
 const MAX_STATIC_HEADERS: usize = 32;
 const MAX_MODEL_BYTES: usize = 256;
-const MAX_PREFIX_BYTES: usize = 64 * 1024;
 
 /// A capabilityless interpretation adapter whose behavior is entirely described
 /// by bounded data owned by Linura.
@@ -23,7 +22,6 @@ const MAX_PREFIX_BYTES: usize = 64 * 1024;
 pub struct CapabilitylessInterpretationAdapter {
     descriptor: AdapterDescriptor,
     static_headers: Vec<HeaderField>,
-    request_prefix: Vec<u8>,
     model: Option<String>,
 }
 
@@ -40,15 +38,12 @@ impl CapabilitylessInterpretationAdapter {
                 "capabilityless adapter static headers",
             ));
         }
-        if request_prefix.len() > MAX_PREFIX_BYTES {
-            return Err(InterpretationAdapterError::TooLarge(
-                "capabilityless adapter request prefix",
-            ));
-        }
-        if request_prefix.contains(&0) {
-            return Err(InterpretationAdapterError::ControlCharacter(
-                "capabilityless adapter request prefix",
-            ));
+        // Arbitrary prefix bytes are deliberately unsupported: they would create a
+        // second body/query channel for credentials or secret-bearing context outside
+        // Control's minimized semantic projection. The reserved empty framing slot is
+        // retained in the canonical encoding for deterministic compatibility.
+        if !request_prefix.is_empty() {
+            return Err(InterpretationAdapterError::CredentialLikeMaterial);
         }
         if let Some(model_id) = &model
             && (model_id.trim().is_empty()
@@ -72,7 +67,6 @@ impl CapabilitylessInterpretationAdapter {
         Ok(Self {
             descriptor,
             static_headers,
-            request_prefix,
             model,
         })
     }
@@ -90,7 +84,7 @@ impl CapabilitylessInterpretationAdapter {
             self.descriptor.endpoint_class.as_bytes().to_vec(),
             self.descriptor.protocol_version.to_be_bytes().to_vec(),
             self.descriptor.network_access.as_str().as_bytes().to_vec(),
-            self.request_prefix.clone(),
+            Vec::new(),
             self.model.as_deref().unwrap_or("").as_bytes().to_vec(),
         ];
         for header in &self.static_headers {
@@ -104,7 +98,7 @@ impl CapabilitylessInterpretationAdapter {
     fn encode_request(&self, request: &InterpretationRequest) -> Vec<u8> {
         let mut payload = Vec::new();
         push_bytes(&mut payload, CAPABILITYLESS_REQUEST_DOMAIN);
-        push_bytes(&mut payload, &self.request_prefix);
+        push_bytes(&mut payload, b"");
         push_bytes(&mut payload, request.digest().to_hex().as_bytes());
         push_bytes(&mut payload, request.context.digest().to_hex().as_bytes());
         push_bytes(
@@ -286,7 +280,7 @@ mod tests {
                 HeaderField::new("content-type", "application/octet-stream")
                     .unwrap_or_else(|error| unreachable!("{error}")),
             ],
-            b"provider-neutral-prefix".to_vec(),
+            vec![],
             Some("mock-model".into()),
         )
         .unwrap_or_else(|error| unreachable!("{error}"));
@@ -324,6 +318,26 @@ mod tests {
             proposal.attribution.provider.as_deref(),
             Some("provider:capabilityless-test")
         );
+    }
+
+    #[test]
+    fn arbitrary_request_prefix_is_rejected_before_registration() {
+        for prefix in [
+            &b"api_key=secret-canary"[..],
+            &b"?token=secret-canary"[..],
+            &b"provider-neutral-looking-but-untrusted"[..],
+        ] {
+            let result = CapabilitylessInterpretationAdapter::new(
+                descriptor(),
+                vec![],
+                prefix.to_vec(),
+                Some("mock-model".into()),
+            );
+            assert!(matches!(
+                result,
+                Err(InterpretationAdapterError::CredentialLikeMaterial)
+            ));
+        }
     }
 
     #[test]

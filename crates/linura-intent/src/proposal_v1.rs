@@ -9,6 +9,7 @@ use crate::{Intent, IntentStatus, Requirement};
 pub const INTENT_PROPOSAL_SCHEMA_VERSION: u16 = 1;
 const PROPOSAL_DIGEST_DOMAIN: &[u8] = b"linura:intent-proposal:v1";
 const MAX_TOKEN_CHARS: usize = 256;
+const MAX_CORE_ID_BYTES: usize = 256;
 const MAX_TEXT_CHARS: usize = 16 * 1024;
 const MAX_COLLECTION_ITEMS: usize = 256;
 const MAX_PROPOSAL_BYTES: usize = 512 * 1024;
@@ -389,6 +390,8 @@ impl IntentProposal {
                 self.schema_version,
             ));
         }
+        validate_core_id("proposal id", self.proposal_id.as_str())?;
+        validate_core_id("proposal actor id", self.actor.id.as_str())?;
         validate_text("requested outcome", &self.requested_outcome, false)?;
         validate_collection_len("requirements", self.requirements.len())?;
         validate_collection_len("capability references", self.capability_refs.len())?;
@@ -398,6 +401,7 @@ impl IntentProposal {
 
         let mut requirement_ids = BTreeSet::new();
         for requirement in &self.requirements {
+            validate_core_id("proposal requirement id", requirement.id.as_str())?;
             validate_text("requirement statement", &requirement.statement, false)?;
             if !requirement_ids.insert(requirement.id.as_str()) {
                 return Err(ProposalValidationError::DuplicateRequirement);
@@ -405,6 +409,7 @@ impl IntentProposal {
         }
         let mut capabilities = BTreeSet::new();
         for capability in &self.capability_refs {
+            validate_core_id("proposal capability id", capability.as_str())?;
             if !capabilities.insert(capability.as_str()) {
                 return Err(ProposalValidationError::DuplicateCapability);
             }
@@ -483,6 +488,19 @@ fn validate_text_list(
 ) -> Result<(), ProposalValidationError> {
     for value in values {
         validate_text(label, value, true)?;
+    }
+    Ok(())
+}
+
+fn validate_core_id(label: &'static str, value: &str) -> Result<(), ProposalValidationError> {
+    if value.is_empty() {
+        return Err(ProposalValidationError::Empty(label));
+    }
+    if value.len() > MAX_CORE_ID_BYTES {
+        return Err(ProposalValidationError::TooLong(label));
+    }
+    if !value.bytes().all(|byte| (0x20..=0x7e).contains(&byte)) {
+        return Err(ProposalValidationError::InvalidCoreId(label));
     }
     Ok(())
 }
@@ -574,6 +592,7 @@ pub enum ProposalValidationError {
     DuplicateAuthoritySource,
     InvalidConfidence,
     InvalidAttribution,
+    InvalidCoreId(&'static str),
     MalformedDigest,
     DigestMismatch,
     ProposalTooLarge,
@@ -606,6 +625,10 @@ impl Display for ProposalValidationError {
             Self::InvalidAttribution => {
                 f.write_str("proposal attribution is inconsistent with manual/provider mode")
             }
+            Self::InvalidCoreId(label) => write!(
+                f,
+                "{label} must use the proposal-v1 printable-ASCII core-ID wire contract"
+            ),
             Self::MalformedDigest => {
                 f.write_str("proposal digest must be exactly 32 bytes / 64 hex digits")
             }
@@ -688,6 +711,22 @@ mod tests {
             .unwrap_or_else(|error| unreachable!("{error}"));
         assert_eq!(intent.status, IntentStatus::Proposed);
         assert_eq!(intent.actor, proposal.actor);
+    }
+
+    #[test]
+    fn core_id_wire_contract_allows_spaces_but_rejects_non_ascii() {
+        let mut spaces = proposal();
+        spaces.proposal_id = core_id(RequestId::new("   "));
+        spaces.canonical_digest = spaces.derive_digest();
+        assert_eq!(spaces.validate(), Ok(()));
+
+        let mut non_ascii = proposal();
+        non_ascii.proposal_id = core_id(RequestId::new("proposal:é"));
+        non_ascii.canonical_digest = non_ascii.derive_digest();
+        assert!(matches!(
+            non_ascii.validate(),
+            Err(ProposalValidationError::InvalidCoreId("proposal id"))
+        ));
     }
 
     #[test]
