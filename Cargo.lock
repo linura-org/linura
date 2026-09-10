@@ -526,9 +526,11 @@ version = "0.7.0"
 name = "linura-control"
 version = "0.7.0"
 dependencies = [
+ "linura-agent-runtime",
  "linura-core",
  "linura-graph",
  "linura-intent",
+ "linura-library",
  "linura-lifecycle",
  "linura-observation",
  "linura-observation-control",
@@ -588,6 +590,7 @@ name = "linura-intent"
 version = "0.7.0"
 dependencies = [
  "linura-core",
+ "sha2",
 ]
 
 [[package]]
@@ -597,6 +600,7 @@ dependencies = [
  "linura-core",
  "linura-intent",
  "linura-planner",
+ "linura-transaction",
  "rusqlite",
  "sha2",
  "tempfile",
@@ -688,6 +692,7 @@ name = "linura-provider-sdk"
 version = "0.7.0"
 dependencies = [
  "linura-core",
+ "linura-intent",
  "linura-observation",
  "linura-protocol",
  "sha2",

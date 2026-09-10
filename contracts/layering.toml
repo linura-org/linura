@@ -100,7 +100,7 @@ forbid_external = ["zbus"]
 
 [[rules]]
 package = "linura-library"
-forbid_local = ["linura-dbus", "linura-linux-observation", "linura-observation-control", "linura-provider-sdk", "linura-control", "linura-policy", "linura-agent-runtime", "linura-transaction", "linura-persistence-sqlite"]
+forbid_local = ["linura-dbus", "linura-linux-observation", "linura-observation-control", "linura-provider-sdk", "linura-control", "linura-policy", "linura-agent-runtime", "linura-persistence-sqlite"]
 forbid_local_prefixes = ["linura-executor-", "linura-verifier-"]
 forbid_external = ["zbus"]
 

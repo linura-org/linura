@@ -134,7 +134,7 @@ jobs:
           root = pathlib.Path(os.environ["PROOF_DIR"])
           payload = root / "release-payload"
           receipt = json.loads((root / "release-proof.json").read_text(encoding="utf-8"))
-          if receipt.get("schema_version") != 1:
+          if receipt.get("schema_version") != 2:
               raise SystemExit("unsupported release proof schema")
           if receipt.get("repository") != os.environ["GITHUB_REPOSITORY"]:
               raise SystemExit("release proof repository mismatch")
@@ -146,6 +146,73 @@ jobs:
               raise SystemExit("release proof version mismatch")
           if str(receipt.get("run_id")) != os.environ["PROOF_RUN_ID"]:
               raise SystemExit("release proof run mismatch")
+
+          qualifications = receipt.get("qualifications")
+          if not isinstance(qualifications, dict):
+              raise SystemExit("release proof qualification declaration missing")
+          v08 = qualifications.get("v0.8")
+          if not isinstance(v08, dict):
+              raise SystemExit("v0.8 qualification declaration missing")
+          if v08.get("schema_version") != 2:
+              raise SystemExit("unexpected v0.8 qualification schema")
+          if v08.get("result") != "passed":
+              raise SystemExit("v0.8 qualification did not pass")
+          if v08.get("source_sha") != os.environ["SOURCE_SHA"]:
+              raise SystemExit("v0.8 qualification source mismatch")
+          qualification_relpath = v08.get("path")
+          if qualification_relpath != "qualification/v0.8/qualification.json":
+              raise SystemExit("unexpected v0.8 qualification path")
+          declared_qualification = v08.get("files")
+          if not isinstance(declared_qualification, list) or not declared_qualification:
+              raise SystemExit("v0.8 qualification file declaration missing")
+
+          expected_qualification = {}
+          for item in declared_qualification:
+              if not isinstance(item, dict):
+                  raise SystemExit("invalid v0.8 qualification file declaration")
+              name = item.get("name")
+              size = item.get("size")
+              digest = item.get("sha256")
+              if (
+                  not isinstance(name, str)
+                  or pathlib.PurePosixPath(name).name != name
+                  or not isinstance(size, int)
+                  or size < 0
+                  or not isinstance(digest, str)
+                  or len(digest) != 64
+                  or any(char not in "0123456789abcdef" for char in digest)
+                  or name in expected_qualification
+              ):
+                  raise SystemExit("invalid v0.8 qualification file declaration")
+              expected_qualification[name] = (size, digest)
+
+          qualification_root = root / "qualification" / "v0.8"
+          qualification_path = root / qualification_relpath
+          if not qualification_path.is_file() or qualification_path.is_symlink():
+              raise SystemExit("v0.8 qualification evidence is missing")
+          evidence = json.loads(qualification_path.read_text(encoding="utf-8"))
+          if evidence.get("schema_version") != 2:
+              raise SystemExit("unexpected v0.8 qualification evidence schema")
+          if evidence.get("repository") != os.environ["GITHUB_REPOSITORY"]:
+              raise SystemExit("v0.8 qualification evidence repository mismatch")
+          if evidence.get("source_sha") != os.environ["SOURCE_SHA"]:
+              raise SystemExit("v0.8 qualification evidence source mismatch")
+          if evidence.get("result") != "passed":
+              raise SystemExit("v0.8 qualification evidence did not pass")
+
+          actual_qualification = {}
+          for qualification_file in qualification_root.iterdir():
+              if qualification_file.is_symlink() or not qualification_file.is_file():
+                  raise SystemExit(
+                      f"invalid v0.8 qualification entry: {qualification_file.name}"
+                  )
+              actual_qualification[qualification_file.name] = (
+                  qualification_file.stat().st_size,
+                  hashlib.sha256(qualification_file.read_bytes()).hexdigest(),
+              )
+          if actual_qualification != expected_qualification:
+              raise SystemExit("v0.8 qualification evidence does not match proof receipt")
+
           declared = receipt.get("artifacts")
           if not isinstance(declared, list) or not declared:
               raise SystemExit("release proof artifact declaration missing")

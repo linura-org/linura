@@ -165,13 +165,20 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("uses: ./.github/workflows/v06-managed-lifecycle-vm.yml", workflow)
         self.assertIn("library-qualification:", workflow)
         self.assertIn("uses: ./.github/workflows/v07-library-qualification.yml", workflow)
+        self.assertIn("agent-qualification:", workflow)
+        self.assertIn("uses: ./.github/workflows/v08-agent-qualification.yml", workflow)
         self.assertIn("source_sha: ${{ github.sha }}", workflow)
         self.assertIn(
-            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification]",
+            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, agent-qualification]",
             workflow,
         )
+        self.assertIn("aggregate-proof:", workflow)
+        self.assertIn("needs: [validate, agent-qualification, build]", workflow)
+        self.assertIn("linura-v08-agent-${{ github.sha }}", workflow)
+        self.assertIn("receipt['schema_version'] = 2", workflow)
+        self.assertIn("'qualification/v0.8/qualification.json'", workflow)
         self.assertIn(
-            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, build]",
+            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, agent-qualification, build, aggregate-proof]",
             workflow,
         )
         self.assertIn("needs.observation-acceptance.result == 'success'", workflow)
@@ -181,6 +188,16 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("needs.executor-verifier-qualification.result == 'success'", workflow)
         self.assertIn("needs.managed-lifecycle-qualification.result == 'success'", workflow)
         self.assertIn("needs.library-qualification.result == 'success'", workflow)
+        self.assertIn("needs.agent-qualification.result == 'success'", workflow)
+        self.assertIn("needs.aggregate-proof.result == 'success'", workflow)
+
+    def test_release_promotion_verifies_v08_qualification_bound_proof(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn('receipt.get("schema_version") != 2', workflow)
+        self.assertIn('qualifications.get("v0.8")', workflow)
+        self.assertIn('v08.get("result") != "passed"', workflow)
+        self.assertIn('qualification/v0.8/qualification.json', workflow)
+        self.assertIn('actual_qualification != expected_qualification', workflow)
 
     def test_v07_library_qualification_is_exact_source_and_machine_readable(self) -> None:
         workflow = (ROOT / ".github/workflows/v07-library-qualification.yml").read_text(

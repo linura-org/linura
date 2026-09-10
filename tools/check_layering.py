@@ -40,14 +40,23 @@ EXPECTED_RULE_PACKAGES = {
     "linura-executor-systemd",
     "linura-verifier-systemd",
 }
+RETIRED_RULE_PACKAGES = {"linura-control-token"}
 POLICY_ORCHESTRATOR = "linura-control"
 POLICY_PACKAGE = "linura-policy"
 TRANSACTION_PACKAGE = "linura-transaction"
-TRANSACTION_CONSUMERS = {"linura-control", "linura-persistence-sqlite", "linura-authorityd"}
+# v0.8 deliberately splits sealed proposal-acceptance authority: Control owns the
+# signer/minting side, Library owns only the verifier/linearization side. The
+# persistence adapter and trusted authority runtime retain their established
+# transaction dependencies. Any additional consumer is an authority-boundary
+# expansion and must be reviewed explicitly.
+TRANSACTION_CONSUMERS = {
+    "linura-control",
+    "linura-library",
+    "linura-persistence-sqlite",
+    "linura-authorityd",
+}
 PERSISTENCE_PACKAGE = "linura-persistence-sqlite"
 PERSISTENCE_CONSUMERS = {"linura-authorityd"}
-TRANSACTION_PACKAGE = "linura-transaction"
-TRANSACTION_ALLOWED_CONSUMERS = {"linura-control", "linura-persistence-sqlite", "linura-authorityd"}
 
 
 def resolved_dependency_name(
@@ -179,39 +188,29 @@ def validate(root: Path) -> list[str]:
             f"{sorted(policy_consumers)}"
         )
 
-    transaction_consumers: set[str] = set()
-    persistence_consumers: set[str] = set()
-    for package, manifest_path in manifests.items():
-        manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
-        dependencies = dependency_names(manifest, workspace_dependencies)
-        if TRANSACTION_PACKAGE in dependencies:
-            transaction_consumers.add(package)
-        if PERSISTENCE_PACKAGE in dependencies:
-            persistence_consumers.add(package)
-    if transaction_consumers != TRANSACTION_CONSUMERS:
-        failures.append(
-            "linura-transaction may be consumed only by Control and the SQLite adapter; found: "
-            f"{sorted(transaction_consumers)}"
-        )
-    if persistence_consumers != PERSISTENCE_CONSUMERS:
-        failures.append(
-            "linura-persistence-sqlite may be consumed directly only by the trusted v0.6 authority runtime; found: "
-            f"{sorted(persistence_consumers)}"
-        )
-
     transaction_consumers = {
         package
         for package, dependencies in all_dependencies.items()
         if TRANSACTION_PACKAGE in dependencies
     }
-    unexpected_transaction_consumers = sorted(
-        transaction_consumers - TRANSACTION_ALLOWED_CONSUMERS
-    )
-    if unexpected_transaction_consumers:
+    if transaction_consumers != TRANSACTION_CONSUMERS:
+        missing = sorted(TRANSACTION_CONSUMERS - transaction_consumers)
+        unexpected = sorted(transaction_consumers - TRANSACTION_CONSUMERS)
         failures.append(
-            "linura-transaction may be consumed only by linura-control, "
-            "linura-persistence-sqlite and linura-authorityd; found unexpected consumers: "
-            f"{unexpected_transaction_consumers}"
+            "linura-transaction consumer set drifted from the sealed authority boundary; "
+            f"expected {sorted(TRANSACTION_CONSUMERS)}, found {sorted(transaction_consumers)}, "
+            f"missing {missing}, unexpected {unexpected}"
+        )
+
+    persistence_consumers = {
+        package
+        for package, dependencies in all_dependencies.items()
+        if PERSISTENCE_PACKAGE in dependencies
+    }
+    if persistence_consumers != PERSISTENCE_CONSUMERS:
+        failures.append(
+            "linura-persistence-sqlite may be consumed directly only by the trusted authority "
+            f"runtime; expected {sorted(PERSISTENCE_CONSUMERS)}, found {sorted(persistence_consumers)}"
         )
 
     rules = contract.get("rules", [])
@@ -232,6 +231,9 @@ def validate(root: Path) -> list[str]:
             failures.append(f"duplicate layering rule for package {package}")
             continue
         seen_packages.add(package)
+        if package in RETIRED_RULE_PACKAGES:
+            failures.append(f"layering contract reintroduces retired package rule {package}")
+            continue
         manifest_path = manifests.get(package)
         if manifest_path is None:
             failures.append(f"layering rule references unknown workspace package {package}")
@@ -277,7 +279,9 @@ def validate(root: Path) -> list[str]:
             )
 
     missing_rules = sorted(EXPECTED_RULE_PACKAGES - seen_packages)
-    unexpected_rules = sorted(seen_packages - EXPECTED_RULE_PACKAGES)
+    unexpected_rules = sorted(
+        seen_packages - EXPECTED_RULE_PACKAGES - RETIRED_RULE_PACKAGES
+    )
     if missing_rules:
         failures.append(f"layering contract missing required package rules: {missing_rules}")
     if unexpected_rules:

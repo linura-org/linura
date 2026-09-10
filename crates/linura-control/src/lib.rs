@@ -13,15 +13,27 @@
 //! is enforced by `linura-lifecycle`; `linura-control` owns its authority
 //! orchestration without importing transport- or executor-specific mechanisms.
 
+mod agent_interpretation;
 mod approval;
 mod approval_review;
+mod authority_clock;
 mod durable_authority;
 mod managed_lifecycle;
 mod plan_preview;
 mod policy_review;
+#[path = "proposal_acceptance_secure.rs"]
+mod proposal_acceptance;
+mod proposal_authority;
 mod review_projection;
 mod risk_classification;
+mod secure_agent_interpretation;
+mod secure_proposal_acceptance;
 
+pub use agent_interpretation::{
+    InterpretationControlError, InterpretationInvocation, InterpretationSessionBudget,
+    InterpretationWork, ProviderInvocationGate, ProviderInvocationPermit, RawSemanticEntry,
+    RawSemanticProjection, RawSemanticValue,
+};
 pub use approval::{
     ApprovalEvidence, ApprovalIssueError, ApprovalRequirement, ApprovalRevocation,
     ApprovalValidation, AuthenticatedApprover, MAX_APPROVAL_TTL_SECONDS,
@@ -33,6 +45,7 @@ pub use approval_review::{
     PolicyApprovalEvidence, PolicyApprovalIssueError, PolicyApprovalRequirement,
     PolicyAuthenticatedApprover,
 };
+pub use authority_clock::ControlAuthorityClock;
 pub use durable_authority::{
     DispatchPermit, DurableAuthorityCandidate, DurableAuthorityControl, DurableAuthorityError,
     DurableRecoveryOutcome, FreshRecoveryApproval, PreparedDurableAuthority,
@@ -50,3 +63,11 @@ pub use plan_preview::{
     MAX_TOTAL_ORIGINS, PlanPreviewControl, PlanPreviewControlError,
 };
 pub use policy_review::{PolicySubjectError, TrustedPolicyReview, policy_subject_from_plan};
+pub use proposal_acceptance::{
+    AcceptProposalRequest, AcceptanceAuthoritySnapshot, AuthorityClockUnit,
+    AuthorityValidityContributor, AuthorityValidityPredicate, ProposalAcceptanceControlError,
+    ProposalAcceptanceDecision,
+};
+pub use proposal_authority::{ControlProposalAuthority, ProposalDecisionIssueRequest};
+pub use secure_agent_interpretation::{AdapterHealth, ControlInterpretationEngine};
+pub use secure_proposal_acceptance::ProposalAcceptanceControl;

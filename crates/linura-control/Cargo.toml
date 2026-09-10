@@ -7,9 +7,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+linura-agent-runtime = { path = "../linura-agent-runtime" }
 linura-core = { path = "../linura-core" }
 linura-graph = { path = "../linura-graph" }
 linura-intent = { path = "../linura-intent" }
+linura-library = { path = "../linura-library" }
 linura-lifecycle = { path = "../linura-lifecycle" }
 linura-observation = { path = "../linura-observation" }
 linura-observation-control = { path = "../linura-observation-control" }

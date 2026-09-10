@@ -20,7 +20,9 @@ pub use linura_graph::{
     Edge, EdgeKind, Node, NodeId, ObservationRecordOutcome, RemovalImpact, SystemGraph,
 };
 pub use linura_intent::{
-    Intent, IntentProposal, IntentStatus, MachineClass, MachineProfile, Requirement,
+    AuthoritySourceKind, AuthoritySourceRevision, INTENT_PROPOSAL_SCHEMA_VERSION, Intent,
+    IntentProposal, IntentStatus, InterpretationContextBinding, MachineClass, MachineProfile,
+    ProposalAttribution, ProposalConfidence, ProposalDigest, ProposalValidationError, Requirement,
     RequirementKind, Setup, SetupValidationError,
 };
 pub use linura_library::{

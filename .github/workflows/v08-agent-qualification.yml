@@ -1,0 +1,247 @@
+name: v0.8 agent interpretation qualification
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify; defaults to the triggering revision
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify; defaults to the dispatch revision
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - ".github/workflows/v08-agent-qualification.yml"
+      - ".github/workflows/trusted-release-proof.yml"
+      - ".github/workflows/release.yml"
+      - "crates/linura-agent-runtime/**"
+      - "crates/linura-control/**"
+      - "crates/linura-intent/**"
+      - "crates/linura-library/**"
+      - "crates/linura-provider-sdk/**"
+      - "crates/linura-transaction/**"
+      - "schemas/intent-proposal.v1.schema.json"
+      - "tools/check_v08_boundaries.py"
+      - "contracts/components.toml"
+      - "contracts/layering.toml"
+      - "scripts/check_repository.py"
+      - "tools/codex/versions.env"
+      - "rust-toolchain.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "docs/milestones/v0.8.0.md"
+      - "docs/qualification/v0.8.0.md"
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  qualification:
+    name: exact-source proposal-only agent interpretation qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Initialize evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${{ runner.temp }}/linura-v08-agent-artifacts"
+          mkdir -p "$artifact_dir"
+          printf 'ARTIFACT_DIR=%s\n' "$artifact_dir" >> "$GITHUB_ENV"
+          {
+            printf 'state=started\n'
+            printf 'requested_source_sha=%s\n' "$SOURCE_SHA"
+          } > "$artifact_dir/qualification-status.txt"
+
+      - name: Assert exact source and pinned toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          # shellcheck disable=SC1091
+          source tools/codex/versions.env
+          : "${RUST_VERSION:?}"
+          repo_rust_version="$(python3 - <<'PY'
+          import pathlib
+          import re
+          text = pathlib.Path('rust-toolchain.toml').read_text(encoding='utf-8')
+          match = re.search(r'^channel\s*=\s*"([^"]+)"\s*$', text, re.MULTILINE)
+          if match is None:
+              raise SystemExit('rust-toolchain.toml does not declare a channel')
+          print(match.group(1))
+          PY
+          )"
+          test "$repo_rust_version" = "$RUST_VERSION"
+          printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
+          {
+            printf 'exact_source_sha=%s\n' "$SOURCE_SHA"
+            printf 'repository=%s\n' "$GITHUB_REPOSITORY"
+            printf 'rust_version=%s\n' "$RUST_VERSION"
+          } >> "$ARTIFACT_DIR/qualification-status.txt"
+
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Verify v0.8 authority boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/check_v08_boundaries.py | tee "$ARTIFACT_DIR/boundary-check.txt"
+
+      - name: Verify canonical proposal and capabilityless adapter contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p linura-intent 2>&1 | tee "$ARTIFACT_DIR/linura-intent-tests.txt"
+          cargo test --locked -p linura-provider-sdk 2>&1 | tee "$ARTIFACT_DIR/linura-provider-sdk-tests.txt"
+          cargo test --locked -p linura-agent-runtime 2>&1 | tee "$ARTIFACT_DIR/linura-agent-runtime-tests.txt"
+
+      - name: Run Control and Library unit qualification
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p linura-control --lib -- --test-threads=1 2>&1 | tee "$ARTIFACT_DIR/linura-control-unit-tests.txt"
+          cargo test --locked -p linura-library --lib -- --test-threads=1 2>&1 | tee "$ARTIFACT_DIR/linura-library-unit-tests.txt"
+
+      - name: Run v0.8 proposal-agent integration matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked -p linura-control --test v08_qualification -- --test-threads=1 2>&1 | tee "$ARTIFACT_DIR/v08-integration-tests.txt"
+
+      - name: Record exact-source v0.8 qualification evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import subprocess
+
+          artifact_dir = pathlib.Path(os.environ['ARTIFACT_DIR'])
+          source_contracts = [
+              'public Control interpretation registration accepts only CapabilitylessInterpretationAdapter',
+              'capabilityless adapter source has no ambient filesystem/environment/process/network/unsafe host API',
+              'provider invocation permit fields are private and permit is Debug-only, non-clone and non-serializable',
+              'provider invocation permit exact-binds authority/request/prepared/provider/adapter/endpoint/network/deadline/output budget',
+              'provider invocation gate rejects expired and previously consumed permit nonces',
+              'provider invocation gate consumes the permit nonce before trusted transport invocation',
+              'trusted provider transport receives the exact Control-admitted deadline and exposes no retry/resume/reconnect/reissue primitive',
+              'Control enforces one cumulative wall-clock deadline across prepare, transport and decode',
+              'production proposal acceptance requires a caller-supplied persistent TransactionAuthorityKey and keeps the signer in Control',
+              'Library proposal acceptance owns verifier-only authority and fails closed until that verifier is explicitly durably provisioned',
+              'Library emits an exact transaction signing challenge and verifies the signed handoff before durable linearization',
+              'retired linura-control-token and control-internal mechanisms are absent from manifests, lockfile and repository contracts',
+              'agent runtime has no provider-sdk or Library dependency',
+              'IntentProposal v1 JSON schema is closed, version-exact, canonical-field-exact and proposal-only',
+          ]
+          rust_tests = [
+              'proposal_v1::tests::proposal_digest_detects_semantic_substitution',
+              'proposal_v1::tests::proposal_converts_only_to_proposed_intent',
+              'proposal_v1::tests::context_digest_is_order_independent_for_source_revisions',
+              'proposal_v1::tests::provider_attribution_cannot_smuggle_provider_into_manual_mode',
+              'capabilityless_adapter::tests::configuration_is_deterministic_and_credential_free',
+              'capabilityless_adapter::tests::complete_response_decodes_only_to_non_authoritative_proposal',
+              'capabilityless_adapter::tests::credential_like_static_header_is_rejected_before_registration',
+              'tests::expired_attempt_is_rejected_before_callback',
+              'tests::manual_path_produces_same_canonical_proposal_contract',
+              'tests::proposal_acceptance_is_not_a_runtime_surface',
+              'agent_interpretation::tests::transport_cannot_return_success_after_control_deadline',
+              'proposal_acceptance::tests::acceptance_binds_principal_decision_context_and_durable_result',
+              'proposal_acceptance::tests::exact_retry_replays_before_fresh_authority_is_consulted',
+              'proposal_acceptance::tests::inclusive_observation_endpoint_normalizes_to_first_invalid_instant',
+              'proposal_acceptance::tests::inclusive_endpoint_success_and_first_invalid_failure_are_distinct',
+              'proposal_acceptance::tests::unknown_time_semantics_and_inclusive_successor_overflow_fail_closed',
+              'proposal_authority::tests::authority_mutation_invalidates_prior_decision_generation',
+              'proposal_authority::tests::decision_identity_reuse_with_changed_semantics_fails_closed',
+              'proposal_acceptance_tests::unprovisioned_library_fails_closed',
+              'proposal_acceptance_tests::provisioning_is_idempotent_and_cannot_be_rebound',
+              'proposal_acceptance_tests::handoff_signed_by_another_authority_is_rejected',
+              'proposal_acceptance_tests::exact_signed_handoff_commits_and_replays_without_fresh_time',
+              'proposal_acceptance_tests::write_at_exclusive_deadline_fails_without_mutation',
+              'v08_qualification::capabilityless_provider_path_yields_only_a_valid_proposal_and_hides_secret_canary',
+              'v08_qualification::offline_discovery_health_selection_and_fallback_never_initialize_network_transport',
+              'v08_qualification::fallback_shares_one_aggregate_budget_and_cannot_reset_it',
+              'v08_qualification::partial_and_failed_provider_outcomes_never_become_proposals',
+              'v08_qualification::concrete_authority_acceptance_is_exact_bound_and_replays_after_authority_changes',
+              'v08_qualification::stale_authority_generation_is_rejected_without_library_mutation',
+          ]
+          evidence = {
+              'schema_version': 2,
+              'repository': os.environ['GITHUB_REPOSITORY'],
+              'source_sha': os.environ['SOURCE_SHA'],
+              'result': 'passed',
+              'claim': 'v0.8 proposal-only agent interpretation and exact-bound sealed proposal acceptance',
+              'stability': 'experimental',
+              'rustc': subprocess.check_output(['rustc', '--version', '--verbose'], text=True).strip(),
+              'adapter_isolation': 'capabilityless-data-only-public-control-surface',
+              'authority_source': 'ControlProposalAuthority serialized guard',
+              'authority_clock': 'ControlAuthorityClock monotonic continuity generation',
+              'acceptance_authority': 'Control-held signer plus explicitly provisioned Library verifier',
+              'provider_credentials_cross_agent_boundary': False,
+              'agent_can_mint_approval_authority': False,
+              'agent_can_mint_executor_authority': False,
+              'library_acceptance_signing_authority_present': False,
+              'library_acceptance_requires_provisioned_verifier': True,
+              'control_acceptance_persistent_key_required': True,
+              'retired_control_token_present': False,
+              'source_contracts': [
+                  {'name': name, 'result': 'passed'} for name in source_contracts
+              ],
+              'rust_tests': [
+                  {'name': name, 'result': 'passed'} for name in rust_tests
+              ],
+              'evidence_files': [
+                  'boundary-check.txt',
+                  'linura-intent-tests.txt',
+                  'linura-provider-sdk-tests.txt',
+                  'linura-agent-runtime-tests.txt',
+                  'linura-control-unit-tests.txt',
+                  'linura-library-unit-tests.txt',
+                  'v08-integration-tests.txt',
+              ],
+          }
+          (artifact_dir / 'qualification.json').write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+          )
+          (artifact_dir / 'rustc-version.txt').write_text(evidence['rustc'] + '\n', encoding='utf-8')
+          (artifact_dir / 'qualification-status.txt').write_text(
+              f"state=passed\nsource_sha={evidence['source_sha']}\n",
+              encoding='utf-8',
+          )
+          PY
+          python3 -m json.tool "$ARTIFACT_DIR/qualification.json" >/dev/null
+          grep -F '"result": "passed"' "$ARTIFACT_DIR/qualification.json"
+          grep -F '"agent_can_mint_executor_authority": false' "$ARTIFACT_DIR/qualification.json"
+          grep -F '"library_acceptance_signing_authority_present": false' "$ARTIFACT_DIR/qualification.json"
+          grep -F '"library_acceptance_requires_provisioned_verifier": true' "$ARTIFACT_DIR/qualification.json"
+          grep -F '"retired_control_token_present": false' "$ARTIFACT_DIR/qualification.json"
+          test "$(sed -n 's/^source_sha=//p' "$ARTIFACT_DIR/qualification-status.txt")" = "$SOURCE_SHA"
+
+      - name: Upload v0.8 qualification evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-v08-agent-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          path: ${{ env.ARTIFACT_DIR }}
+          if-no-files-found: error
+          retention-days: 30

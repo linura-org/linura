@@ -137,9 +137,18 @@ jobs:
     with:
       source_sha: ${{ github.sha }}
 
+  agent-qualification:
+    name: exact-source v0.8 proposal-only agent qualification
+    needs: validate
+    uses: ./.github/workflows/v08-agent-qualification.yml
+    permissions:
+      contents: read
+    with:
+      source_sha: ${{ github.sha }}
+
   build:
     name: isolated build and reproducibility proof
-    needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification]
+    needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, agent-qualification]
     uses: ./.github/workflows/reusable-release-build.yml
     permissions:
       actions: read
@@ -151,10 +160,121 @@ jobs:
       release_tag: ${{ needs.validate.outputs.tag }}
       release_version: ${{ needs.validate.outputs.version }}
 
+  aggregate-proof:
+    name: bind exact-source qualification into canonical proof
+    needs: [validate, agent-qualification, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      SOURCE_SHA: ${{ github.sha }}
+      RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+      PROOF_ROOT: /tmp/linura-final-proof
+      QUALIFICATION_ROOT: /tmp/linura-v08-qualification
+    steps:
+      - name: Download reproducible build proof
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-trusted-release-proof-${{ github.sha }}
+          path: /tmp/linura-final-proof
+
+      - name: Download exact-source v0.8 qualification evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-v08-agent-${{ github.sha }}
+          path: /tmp/linura-v08-qualification
+
+      - name: Verify and bind v0.8 qualification evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$PROOF_ROOT/release-proof.json"
+          test -d "$PROOF_ROOT/release-payload"
+          test -f "$QUALIFICATION_ROOT/qualification.json"
+          destination="$PROOF_ROOT/qualification/v0.8"
+          rm -rf "$destination"
+          mkdir -p "$destination"
+          cp -a "$QUALIFICATION_ROOT"/. "$destination"/
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+
+          root = pathlib.Path(os.environ['PROOF_ROOT'])
+          qualification_root = root / 'qualification' / 'v0.8'
+          qualification_path = qualification_root / 'qualification.json'
+          evidence = json.loads(qualification_path.read_text(encoding='utf-8'))
+          if evidence.get('schema_version') != 2:
+              raise SystemExit('unexpected v0.8 qualification evidence schema')
+          if evidence.get('repository') != os.environ['GITHUB_REPOSITORY']:
+              raise SystemExit('v0.8 qualification repository mismatch')
+          if evidence.get('source_sha') != os.environ['SOURCE_SHA']:
+              raise SystemExit('v0.8 qualification source mismatch')
+          if evidence.get('result') != 'passed':
+              raise SystemExit('v0.8 qualification did not pass')
+
+          files = []
+          for path in sorted(qualification_root.iterdir()):
+              if path.is_symlink() or not path.is_file():
+                  raise SystemExit(f'invalid v0.8 qualification entry: {path.name}')
+              files.append({
+                  'name': path.name,
+                  'size': path.stat().st_size,
+                  'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+              })
+          if not files:
+              raise SystemExit('v0.8 qualification evidence set is empty')
+
+          receipt_path = root / 'release-proof.json'
+          receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+          if receipt.get('source_sha') != os.environ['SOURCE_SHA']:
+              raise SystemExit('build proof source mismatch')
+          if receipt.get('tag') != os.environ['RELEASE_TAG']:
+              raise SystemExit('build proof tag mismatch')
+          if receipt.get('version') != os.environ['RELEASE_VERSION']:
+              raise SystemExit('build proof version mismatch')
+          receipt['schema_version'] = 2
+          receipt['run_id'] = int(os.environ['GITHUB_RUN_ID'])
+          receipt['run_attempt'] = int(os.environ['GITHUB_RUN_ATTEMPT'])
+          receipt['qualifications'] = {
+              'v0.8': {
+                  'schema_version': evidence['schema_version'],
+                  'result': evidence['result'],
+                  'source_sha': evidence['source_sha'],
+                  'path': 'qualification/v0.8/qualification.json',
+                  'files': files,
+              }
+          }
+          receipt_path.write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + '\n',
+              encoding='utf-8',
+          )
+          PY
+
+      - name: Attest exact-source v0.8 qualification evidence
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: "/tmp/linura-final-proof/qualification/v0.8/*"
+
+      - name: Replace canonical proof with qualification-bound proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-trusted-release-proof-${{ github.sha }}
+          path: /tmp/linura-final-proof/
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
   dispatch-promotion:
     name: dispatch release promotion
-    needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, build]
-    if: ${{ needs.validate.result == 'success' && needs.observation-acceptance.result == 'success' && needs.plan-preview-acceptance.result == 'success' && needs.durability-qualification.result == 'success' && needs.enospc-qualification.result == 'success' && needs.executor-verifier-qualification.result == 'success' && needs.managed-lifecycle-qualification.result == 'success' && needs.library-qualification.result == 'success' && needs.build.result == 'success' }}
+    needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, agent-qualification, build, aggregate-proof]
+    if: ${{ needs.validate.result == 'success' && needs.observation-acceptance.result == 'success' && needs.plan-preview-acceptance.result == 'success' && needs.durability-qualification.result == 'success' && needs.enospc-qualification.result == 'success' && needs.executor-verifier-qualification.result == 'success' && needs.managed-lifecycle-qualification.result == 'success' && needs.library-qualification.result == 'success' && needs.agent-qualification.result == 'success' && needs.build.result == 'success' && needs.aggregate-proof.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
       actions: write
