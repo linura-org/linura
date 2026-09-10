@@ -182,11 +182,11 @@ def validate(root: Path) -> list[str]:
     # The typed intent/profile domain and portable schema must preserve machine
     # class end to end. Documentation alone cannot support cross-class adoption
     # checks because replay must retain the source class as data.
-    intent_path = root / "crates/linura-intent/src/lib.rs"
-    if not intent_path.is_file():
-        failures.append("machine-class intent contract missing: crates/linura-intent/src/lib.rs")
+    intent_model_path = root / "crates/linura-intent/src/model.rs"
+    if not intent_model_path.is_file():
+        failures.append("machine-class intent contract missing: crates/linura-intent/src/model.rs")
     else:
-        intent_text = intent_path.read_text(encoding="utf-8")
+        intent_text = intent_model_path.read_text(encoding="utf-8")
         for marker in (
             "pub enum MachineClass",
             "Workstation,",
