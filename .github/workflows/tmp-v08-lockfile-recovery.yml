@@ -35,25 +35,27 @@ jobs:
           from pathlib import Path
           path = Path('crates/linura-control/src/agent_interpretation.rs')
           text = path.read_text(encoding='utf-8')
-          old = """        let maximum_remaining = permit
-            .deadline_unix_ms
-            .checked_sub(now_unix_ms)
-            .ok_or(InterpretationControlError::InvocationPermitExpired)?;
-        if maximum_remaining == 0 || deadline.remaining_ms() > maximum_remaining {
-            return Err(InterpretationControlError::InvocationPermitExpired);
-        }
-"""
-          new = """        if now_unix_ms >= permit.deadline_unix_ms {
-            return Err(InterpretationControlError::InvocationPermitExpired);
-        }
-        let maximum_remaining = permit
-            .deadline_unix_ms
-            .checked_sub(now_unix_ms)
-            .ok_or(InterpretationControlError::InvocationPermitExpired)?;
-        if deadline.remaining_ms() > maximum_remaining {
-            return Err(InterpretationControlError::InvocationPermitExpired);
-        }
-"""
+          old = "\n".join([
+              "        let maximum_remaining = permit",
+              "            .deadline_unix_ms",
+              "            .checked_sub(now_unix_ms)",
+              "            .ok_or(InterpretationControlError::InvocationPermitExpired)?;",
+              "        if maximum_remaining == 0 || deadline.remaining_ms() > maximum_remaining {",
+              "            return Err(InterpretationControlError::InvocationPermitExpired);",
+              "        }",
+          ]) + "\n"
+          new = "\n".join([
+              "        if now_unix_ms >= permit.deadline_unix_ms {",
+              "            return Err(InterpretationControlError::InvocationPermitExpired);",
+              "        }",
+              "        let maximum_remaining = permit",
+              "            .deadline_unix_ms",
+              "            .checked_sub(now_unix_ms)",
+              "            .ok_or(InterpretationControlError::InvocationPermitExpired)?;",
+              "        if deadline.remaining_ms() > maximum_remaining {",
+              "            return Err(InterpretationControlError::InvocationPermitExpired);",
+              "        }",
+          ]) + "\n"
           if text.count(old) != 1:
               raise SystemExit('expected exactly one invocation deadline block')
           path.write_text(text.replace(old, new), encoding='utf-8')
