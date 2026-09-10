@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 linura-core = { path = "../linura-core" }
+sha2 = "0.10"
 
 [lints]
 workspace = true

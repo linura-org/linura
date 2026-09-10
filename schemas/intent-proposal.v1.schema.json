@@ -5,33 +5,134 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "intent",
-    "interpretation_notes",
-    "ambiguities"
+    "schema_version",
+    "proposal_id",
+    "actor",
+    "requested_outcome",
+    "requirements",
+    "capability_refs",
+    "assumptions",
+    "unresolved_questions",
+    "context",
+    "attribution",
+    "explanation",
+    "canonical_digest"
   ],
   "properties": {
-    "intent": {
-      "$ref": "intent.v1.schema.json"
-    },
-    "interpretation_notes": {
-      "type": "array",
-      "items": {
-        "type": "string"
+    "schema_version": { "const": 1 },
+    "proposal_id": { "$ref": "#/$defs/token" },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "interactive"],
+      "properties": {
+        "id": { "$ref": "#/$defs/token" },
+        "kind": { "enum": ["human", "service", "agent", "remote"] },
+        "interactive": { "type": "boolean" }
       }
     },
-    "ambiguities": {
+    "requested_outcome": { "type": "string", "minLength": 1, "maxLength": 16384 },
+    "requirements": {
       "type": "array",
+      "maxItems": 256,
       "items": {
-        "type": "string"
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "statement"],
+        "properties": {
+          "id": { "$ref": "#/$defs/token" },
+          "kind": { "enum": ["goal", "constraint", "preference", "prohibition"] },
+          "statement": { "type": "string", "minLength": 1, "maxLength": 16384 }
+        }
       }
     },
-    "confidence_basis": {
+    "capability_refs": {
       "type": "array",
-      "items": {
-        "type": "string"
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/token" }
+    },
+    "assumptions": { "$ref": "#/$defs/textList" },
+    "unresolved_questions": { "$ref": "#/$defs/textList" },
+    "confidence": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["permille"],
+      "properties": { "permille": { "type": "integer", "minimum": 0, "maximum": 1000 } }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority_revision", "semantic_input_digest", "source_revisions"],
+      "properties": {
+        "authority_revision": { "$ref": "#/$defs/token" },
+        "semantic_input_digest": { "$ref": "#/$defs/digest" },
+        "source_revisions": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "id", "revision"],
+            "properties": {
+              "kind": { "enum": ["observation", "policy", "library", "capability-registry", "existing-intent"] },
+              "id": { "$ref": "#/$defs/token" },
+              "revision": { "$ref": "#/$defs/token" }
+            }
+          }
+        }
       }
-    }
+    },
+    "attribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "adapter", "manual"],
+      "properties": {
+        "provider": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/token" }
+          ]
+        },
+        "model": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/token" }
+          ]
+        },
+        "adapter": { "$ref": "#/$defs/token" },
+        "manual": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "manual": { "const": true } }, "required": ["manual"] },
+          "then": { "properties": { "provider": { "type": "null" }, "model": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "manual": { "const": false } }, "required": ["manual"] },
+          "then": { "properties": { "provider": { "$ref": "#/$defs/token" } } }
+        }
+      ]
+    },
+    "explanation": { "$ref": "#/$defs/textList" },
+    "canonical_digest": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "textList": {
+      "type": "array",
+      "maxItems": 256,
+      "items": { "type": "string", "maxLength": 16384 }
+    },
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
   },
   "x-linura-contract-id": "schema.intent-proposal.v1",
-  "x-linura-stability": "experimental"
+  "x-linura-stability": "experimental",
+  "x-linura-authority": "proposal-only"
 }

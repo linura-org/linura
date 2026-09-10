@@ -213,7 +213,7 @@ pub struct PlanReview {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IntentCommand {
-    Propose(IntentProposal),
+    Propose(Box<IntentProposal>),
     Activate(IntentId),
     Suspend(IntentId),
     Retire(IntentId),
