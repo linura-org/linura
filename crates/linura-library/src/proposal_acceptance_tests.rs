@@ -12,9 +12,7 @@ fn id<T>(value: Result<T, ValidationError>) -> T {
     value.unwrap_or_else(|error| unreachable!("{error}"))
 }
 
-fn authority_pair(
-    byte: u8,
-) -> (TransactionAuthoritySigner, ProposalAcceptanceAuthority) {
+fn authority_pair(byte: u8) -> (TransactionAuthoritySigner, ProposalAcceptanceAuthority) {
     let key = TransactionAuthorityKey::new(vec![byte; 32])
         .unwrap_or_else(|error| unreachable!("{error}"));
     let (signer, verifier) = key.split();

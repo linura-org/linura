@@ -363,7 +363,10 @@ pub struct ProviderInvocationDeadline {
 }
 
 impl ProviderInvocationDeadline {
-    pub fn new(deadline_unix_ms: u64, remaining_ms: u64) -> Result<Self, InterpretationAdapterError> {
+    pub fn new(
+        deadline_unix_ms: u64,
+        remaining_ms: u64,
+    ) -> Result<Self, InterpretationAdapterError> {
         if deadline_unix_ms == 0 || remaining_ms == 0 {
             return Err(InterpretationAdapterError::InvalidBudget);
         }

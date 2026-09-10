@@ -233,10 +233,7 @@ impl ProposalAcceptanceAuthority {
     /// Provisioning is explicit and idempotent. It never replaces an existing
     /// different binding. Production composition must perform this before the
     /// Library handle is made available to request-processing code.
-    pub fn provision(
-        &self,
-        library: &mut LocalLibrary,
-    ) -> Result<(), ProposalAcceptanceError> {
+    pub fn provision(&self, library: &mut LocalLibrary) -> Result<(), ProposalAcceptanceError> {
         provision_authority_binding(&mut library.connection, &self.verifier)
     }
 
@@ -551,7 +548,10 @@ impl From<rusqlite::Error> for ProposalAcceptanceError {
     }
 }
 
-fn acceptance_snapshot(material: &ProposalAcceptanceMaterial, session_id: u64) -> TransactionSnapshot {
+fn acceptance_snapshot(
+    material: &ProposalAcceptanceMaterial,
+    session_id: u64,
+) -> TransactionSnapshot {
     TransactionSnapshot {
         transaction_id: TransactionId::for_namespace(&material.principal, &material.operation_id),
         principal: material.principal.clone(),
@@ -906,10 +906,7 @@ fn record_payload(record: &ProposalAcceptanceRecord) -> String {
             "resulting_intent_digest={}",
             material.resulting_intent_digest
         ),
-        format!(
-            "time_floor_unix_ms={}",
-            record.time_seal.time_floor_unix_ms
-        ),
+        format!("time_floor_unix_ms={}", record.time_seal.time_floor_unix_ms),
         format!(
             "exclusive_deadline_unix_ms={}",
             record.time_seal.exclusive_deadline_unix_ms

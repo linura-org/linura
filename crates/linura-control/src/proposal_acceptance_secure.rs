@@ -292,10 +292,7 @@ impl ProposalAcceptanceControl {
             .map_err(ProposalAcceptanceControlError::Library)
     }
 
-    pub(crate) fn accept<
-        C: AcceptanceLinearizationClock,
-        S: ProposalAcceptanceAuthoritySource,
-    >(
+    pub(crate) fn accept<C: AcceptanceLinearizationClock, S: ProposalAcceptanceAuthoritySource>(
         &self,
         library: &mut LocalLibrary,
         principal: &AuthenticatedPrincipal,

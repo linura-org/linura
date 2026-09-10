@@ -398,10 +398,8 @@ impl ControlInterpretationEngine {
             invocation.now_unix_ms,
             invocation.requested_output_bytes,
         )?;
-        let deadline = AttemptDeadline::new(
-            admission.runtime.deadline_unix_ms,
-            invocation.now_unix_ms,
-        )?;
+        let deadline =
+            AttemptDeadline::new(admission.runtime.deadline_unix_ms, invocation.now_unix_ms)?;
         let request = InterpretationRequest {
             request_id: invocation.work.request_id.clone(),
             actor: invocation.work.actor.clone(),
@@ -647,11 +645,11 @@ impl ProviderInvocationGate {
         {
             return Err(InterpretationControlError::InvocationBindingMismatch);
         }
-        let maximum_remaining = permit
-            .deadline_unix_ms
-            .checked_sub(now_unix_ms)
-            .ok_or(InterpretationControlError::InvocationPermitExpired)?;
-        if maximum_remaining == 0 || deadline.remaining_ms() > maximum_remaining {
+        if now_unix_ms >= permit.deadline_unix_ms {
+            return Err(InterpretationControlError::InvocationPermitExpired);
+        }
+        let maximum_remaining = permit.deadline_unix_ms - now_unix_ms;
+        if deadline.remaining_ms() > maximum_remaining {
             return Err(InterpretationControlError::InvocationPermitExpired);
         }
         if self.consumed_permits.contains(&permit.nonce) {
