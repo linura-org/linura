@@ -8,6 +8,11 @@
 
 mod adoption;
 mod portable;
+#[path = "proposal_acceptance_secure.rs"]
+mod proposal_acceptance;
+#[cfg(test)]
+mod proposal_acceptance_tests;
+mod proposal_replay;
 mod schema;
 mod store;
 
@@ -23,6 +28,16 @@ pub use portable::{
     PORTABLE_FORMAT_VERSION, PortableProfileBundle, PortableSetupBundle, decode_profile_bundle,
     decode_setup_bundle, encode_profile_bundle, encode_setup_bundle,
 };
+pub use proposal_acceptance::{
+    AcceptanceCommitPermit, AcceptanceSigningChallenge, ProposalAcceptanceAuthority,
+    ProposalAcceptanceTransaction,
+};
+pub use proposal_acceptance::{
+    AcceptanceLinearizationClock, AuthorityTimeSample, AuthorityTimeSeal, ProposalAcceptanceAction,
+    ProposalAcceptanceError, ProposalAcceptanceMaterial, ProposalAcceptanceRecord,
+    ProposalAcceptanceTarget, digest_intent,
+};
+pub use proposal_replay::ProposalAcceptanceReplayKey;
 pub use schema::LIBRARY_SCHEMA_VERSION;
 pub use store::{LibrarySettings, LocalLibrary};
 

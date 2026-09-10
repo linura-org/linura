@@ -10,6 +10,7 @@ repository.workspace = true
 linura-core = { path = "../linura-core" }
 linura-intent = { path = "../linura-intent" }
 linura-planner = { path = "../linura-planner" }
+linura-transaction = { path = "../linura-transaction" }
 rusqlite = { version = "0.37", features = ["bundled", "functions"] }
 sha2 = "0.10"
 
