@@ -8,7 +8,7 @@ on:
       - .github/workflows/tmp-v08-lockfile-recovery.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   regenerate:
@@ -32,14 +32,12 @@ jobs:
 
           path = Path("Cargo.lock")
           text = path.read_text(encoding="utf-8")
-
           required = {
               "linura-control": ["linura-agent-runtime", "linura-library"],
               "linura-intent": ["sha2"],
               "linura-library": ["linura-transaction"],
               "linura-provider-sdk": ["linura-intent"],
           }
-
           for package, additions in required.items():
               pattern = re.compile(
                   rf'(\[\[package\]\]\nname = "{re.escape(package)}"\nversion = "[^"]+"\ndependencies = \[\n)(.*?)(\n\])',
@@ -48,20 +46,14 @@ jobs:
               match = pattern.search(text)
               if match is None:
                   raise SystemExit(f"missing workspace package block: {package}")
-              deps = [
-                  line.strip().strip(',').strip('"')
-                  for line in match.group(2).splitlines()
-                  if line.strip()
-              ]
+              deps = [line.strip().strip(',').strip('"') for line in match.group(2).splitlines() if line.strip()]
               deps = sorted(set(deps).union(additions))
               body = "\n".join(f' "{dep}",' for dep in deps)
-              text = text[: match.start()] + match.group(1) + body + match.group(3) + text[match.end() :]
-
+              text = text[:match.start()] + match.group(1) + body + match.group(3) + text[match.end():]
           path.write_text(text, encoding="utf-8")
           PY
 
           cargo metadata --locked --format-version 1 >/dev/null
-
           git show "${V08_BASE}:Cargo.lock" > /tmp/Cargo.lock.base
           diff -u /tmp/Cargo.lock.base Cargo.lock > /tmp/Cargo.lock.diff || true
           cat /tmp/Cargo.lock.diff
@@ -84,10 +76,16 @@ jobs:
               raise SystemExit(f"expected exactly five dependency additions, got {len(changes)}")
           PY
 
-      - name: Upload minimal lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: v08-minimal-cargo-lock
-          path: Cargo.lock
-          if-no-files-found: error
-          retention-days: 1
+      - name: Commit verified minimal lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          if git diff --cached --quiet; then
+            echo "Cargo.lock is already minimal and valid"
+            exit 0
+          fi
+          git commit -m "chore(v0.8): repair lockfile dependency metadata"
+          git push origin HEAD:feat/v0.8-agent-interpretation-stage2
