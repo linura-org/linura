@@ -247,7 +247,7 @@ maturity = "integrated-experimental"
 activation_milestone = "v0.7.0"
 release_artifact = false
 authority_role = "declarative-library"
-scope = "local-first durable intent/setup/profile Library and portable adoption; no approval or executor authority"
+scope = "local-first durable intent/setup/profile Library and portable adoption; verifier-only sealed acceptance handoff, no approval or executor authority"
 
 [[component]]
 id = "linura-persistence-sqlite"
@@ -269,7 +269,7 @@ maturity = "integrated-experimental"
 activation_milestone = "v0.1.0"
 release_artifact = false
 authority_role = "control-authority"
-scope = "canonical policy/query orchestration and durable managed lifecycle authority"
+scope = "canonical policy/query orchestration, sealed proposal-acceptance signing authority and durable managed lifecycle authority"
 
 [[component]]
 id = "linura-bootstrap"
