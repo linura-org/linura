@@ -100,6 +100,51 @@ class ComponentMaturityContractTests(unittest.TestCase):
                 result.stderr,
             )
 
+    def test_candidate_component_contract_remains_valid_when_candidate_becomes_current(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            roadmap_path = root / "contracts/roadmap.toml"
+            roadmap = tomllib.loads(roadmap_path.read_text(encoding="utf-8"))
+            current = roadmap["current_release"]
+            candidate = roadmap["next_release"]
+            versions = [item["version"] for item in roadmap["milestone"]]
+            candidate_index = versions.index(candidate)
+            self.assertLess(candidate_index + 1, len(versions))
+            following = versions[candidate_index + 1]
+
+            roadmap_text = roadmap_path.read_text(encoding="utf-8")
+            roadmap_text = roadmap_text.replace(
+                f'current_release = "{current}"',
+                f'current_release = "{candidate}"',
+                1,
+            )
+            roadmap_text = roadmap_text.replace(
+                f'next_release = "{candidate}"',
+                f'next_release = "{following}"',
+                1,
+            )
+            roadmap_path.write_text(roadmap_text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_v08_agent_component_maturity_matches_shipped_scope(self) -> None:
+        contract = tomllib.loads((ROOT / "contracts/components.toml").read_text(encoding="utf-8"))
+        components = {item["id"]: item for item in contract["component"]}
+
+        runtime = components["linura-agent-runtime"]
+        self.assertEqual(runtime["maturity"], "integrated-experimental")
+        self.assertEqual(runtime["activation_milestone"], "v0.8.0")
+        self.assertFalse(runtime["release_artifact"])
+        self.assertEqual(runtime["authority_role"], "proposal-only")
+
+        ui = components["linura-agent-ui"]
+        self.assertEqual(ui["kind"], "planned-app")
+        self.assertEqual(ui["maturity"], "roadmap-scaffold")
+        self.assertEqual(ui["activation_milestone"], "v0.10.0")
+        self.assertFalse(ui["release_artifact"])
+
     def test_stable_component_requires_stable_milestone_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
