@@ -343,7 +343,7 @@ No widened claim.
             with self.assertRaises(post_release_close.ClosureError):
                 post_release_close.close_release(Args(root))
 
-    def test_workflow_pins_reviewed_native_protected_closure_sequence(self) -> None:
+    def test_workflow_pins_protected_deterministic_closure_sequence(self) -> None:
         workflow = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
         for marker in (
             "workflow_dispatch:",
@@ -354,20 +354,21 @@ No widened claim.
             "python3 tools/post_release_terminal_sync.py",
             "--credential-source github",
             "token: ${{ github.token }}",
-            "@codex review",
             "event=workflow_dispatch",
             "gh api graphql --paginate",
             "$endCursor:String",
             "reviewThreads(first:100, after:$endCursor)",
             "pageInfo { hasNextPage endCursor }",
-            "chatgpt-codex-connector",
+            'test "$unresolved" = "0"',
             'pulls/$PR_NUMBER/merge',
-            "event=workflow_dispatch",
+            "deterministic closure proof",
             "Delete obsolete release-scoped branches",
         ):
             self.assertIn(marker, workflow)
         self.assertGreaterEqual(workflow.count("gh api graphql --paginate"), 2)
         self.assertGreaterEqual(workflow.count("reviewThreads(first:100, after:$endCursor)"), 2)
+        self.assertNotIn("@codex review", workflow)
+        self.assertNotIn("chatgpt-codex-connector", workflow)
         self.assertNotIn('workflows: ["Verify published release"]', workflow)
         self.assertNotIn("github.event.workflow_run", workflow)
         self.assertNotIn("git push origin main", workflow)

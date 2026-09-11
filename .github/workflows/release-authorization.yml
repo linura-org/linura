@@ -160,7 +160,6 @@ jobs:
       contents: write
       actions: write
       pull-requests: write
-      issues: write
     env:
       GH_TOKEN: ${{ github.token }}
       SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
@@ -274,7 +273,9 @@ jobs:
           - reviewed tree: \`$TREE_SHA\`;
           - exactly one parent: the reviewed release-preparation source;
           - zero changed files by construction;
-          - merge is allowed only after exact-head canonical checks and a clean Codex review;
+          - explicit exact-head CI/Security/CodeQL are the authoritative protected-main checks;
+          - zero unresolved review threads are required;
+          - no conversational reviewer is required for this structurally proven machine-only handoff;
           - the squash result must remain tree-identical and record exact \`Reviewed-Source\` / \`Reviewed-Tree\` trailers.
           EOF
           url="$(gh pr create --base main --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/body.md")"
@@ -311,63 +312,38 @@ jobs:
             --expected-count 3 \
             --timeout-seconds 1800
 
-      - name: Request exact-head Codex review
-        id: review_request
+      - name: Require exact-head checks and zero unresolved review threads
         env:
           PR_NUMBER: ${{ steps.candidate.outputs.pr_number }}
           HEAD_SHA: ${{ steps.candidate.outputs.head_sha }}
         run: |
           set -euo pipefail
-          payload="$(gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-            -f body="@codex review
+          test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
+          test "$(gh pr view "$PR_NUMBER" --json changedFiles --jq .changedFiles)" = "0"
+          python3 tools/release_workflow_dispatch.py verify \
+            --evidence-file "$RUNNER_TEMP/release-authorization-head-runs.jsonl" \
+            --expected-count 3
 
-          Please review the exact zero-diff release-authorization head \`$HEAD_SHA\`. Verify that it is metadata-only, single-parent and tree-identical to the reviewed release-preparation source, and that automatic merge remains behind protected-main checks. Report any issue before merge.")"
-          comment_id="$(jq -r .id <<<"$payload")"
-          [[ "$comment_id" =~ ^[0-9]+$ ]]
-          printf 'comment_id=%s\n' "$comment_id" >> "$GITHUB_OUTPUT"
-
-      - name: Require exact-head checks and completed clean Codex review
-        env:
-          BRANCH: ${{ steps.candidate.outputs.branch }}
-          PR_NUMBER: ${{ steps.candidate.outputs.pr_number }}
-          HEAD_SHA: ${{ steps.candidate.outputs.head_sha }}
-          REVIEW_COMMENT_ID: ${{ steps.review_request.outputs.comment_id }}
-        run: |
-          set -euo pipefail
-          for _ in $(seq 1 360); do
-            test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
-            test "$(gh pr view "$PR_NUMBER" --json changedFiles --jq .changedFiles)" = "0"
-
-            python3 tools/release_workflow_dispatch.py verify \
-              --evidence-file "$RUNNER_TEMP/release-authorization-head-runs.jsonl" \
-              --expected-count 3
-
-            # shellcheck disable=SC2016
-            unresolved="$(gh api graphql -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER" -f query='
-              query($owner:String!, $name:String!, $number:Int!) {
+          # shellcheck disable=SC2016
+          unresolved="$(gh api graphql --paginate \
+            -f owner="${GITHUB_REPOSITORY%/*}" \
+            -f name="${GITHUB_REPOSITORY#*/}" \
+            -F number="$PR_NUMBER" \
+            -F endCursor=null \
+            -f query='
+              query($owner:String!, $name:String!, $number:Int!, $endCursor:String) {
                 repository(owner:$owner, name:$name) {
                   pullRequest(number:$number) {
-                    reviewThreads(first:100) { nodes { isResolved } }
+                    reviewThreads(first:100, after:$endCursor) {
+                      nodes { isResolved }
+                      pageInfo { hasNextPage endCursor }
+                    }
                   }
                 }
-              }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length')"
-            reviews="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100")"
-            # shellcheck disable=SC2016
-            exact_codex_review="$(jq -r --arg sha "$HEAD_SHA" '
-              any(.[]; (.user.login | startswith("chatgpt-codex-connector")) and .commit_id == $sha)
-            ' <<<"$reviews")"
-            reactions="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/issues/comments/$REVIEW_COMMENT_ID/reactions")"
-            codex_clean_reaction="$(jq -r '
-              any(.[]; (.user.login | startswith("chatgpt-codex-connector")) and .content == "+1")
-            ' <<<"$reactions")"
-
-            if [[ "$unresolved" == "0" && ( "$exact_codex_review" == "true" || "$codex_clean_reaction" == "true" ) ]]; then
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "release-authorization checks/review did not reach a clean terminal state" >&2
-          exit 1
+              }' \
+            --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' |
+            awk '{ total += $1 } END { print total + 0 }')"
+          test "$unresolved" = "0"
 
       - name: Re-prove and squash merge exact authorization through protected main
         id: merge
@@ -380,6 +356,28 @@ jobs:
           python3 tools/release_workflow_dispatch.py verify --evidence-file "$RUNNER_TEMP/release-authorization-head-runs.jsonl" --expected-count 3
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)" = "$HEAD_SHA"
+
+          # Discussion state can change without moving the head; fail closed immediately before merge.
+          # shellcheck disable=SC2016
+          unresolved="$(gh api graphql --paginate \
+            -f owner="${GITHUB_REPOSITORY%/*}" \
+            -f name="${GITHUB_REPOSITORY#*/}" \
+            -F number="$PR_NUMBER" \
+            -F endCursor=null \
+            -f query='
+              query($owner:String!, $name:String!, $number:Int!, $endCursor:String) {
+                repository(owner:$owner, name:$name) {
+                  pullRequest(number:$number) {
+                    reviewThreads(first:100, after:$endCursor) {
+                      nodes { isResolved }
+                      pageInfo { hasNextPage endCursor }
+                    }
+                  }
+                }
+              }' \
+            --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' |
+            awk '{ total += $1 } END { print total + 0 }')"
+          test "$unresolved" = "0"
 
           pr_payload="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
           test "$(jq -r .base.sha <<<"$pr_payload")" = "$SOURCE_SHA"
@@ -430,7 +428,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$AUTHORIZATION_SHA"
-          set -euo pipefail
           evidence="$RUNNER_TEMP/release-authorization-main-runs.jsonl"
           rm -f "$evidence"
           for workflow in ci.yml security.yml codeql.yml; do

@@ -17,7 +17,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  issues: write
   actions: write
 
 concurrency:
@@ -31,7 +30,6 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      CODEX_BOT_USER_ID: "199175422" # chatgpt-codex-connector[bot]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -277,7 +275,7 @@ jobs:
               printf '%s\n' "- exact closure head: \`$HEAD_SHA\`;"
               printf '%s\n' "- synchronizes roadmap, terminal qualification and current-release documentation;"
               printf '%s\n' "- leaves the frozen release contract and immutable release assets untouched;"
-              printf '%s\n' "- merges only after explicit exact-head CI/Security/CodeQL, a completed clean Codex review, and zero unresolved review threads."
+              printf '%s\n' "- merges only after explicit exact-head CI/Security/CodeQL, deterministic tree proof, and zero unresolved review threads."
             } > "$RUNNER_TEMP/body.md"
             url="$(gh pr create --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md")"
             number="${url##*/}"
@@ -318,104 +316,42 @@ jobs:
             --expected-count 3 \
             --timeout-seconds 1800
 
-      - name: Request exact-head Codex review
+      - name: Require exact-head checks and zero unresolved review threads
         if: steps.state.outputs.state == 'pending'
         env:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          BASE_SHA: ${{ steps.release.outputs.base_sha }}
         run: |
           set -euo pipefail
-          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-            -f body="@codex review
+          test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"
+          python3 tools/release_workflow_dispatch.py verify \
+            --evidence-file "$RUNNER_TEMP/post-release-closure-head-runs.jsonl" \
+            --expected-count 3
 
-          Please review exact post-release closure head \`$HEAD_SHA\` for $RELEASE_TAG. Verify terminal documentation consistency, frozen-contract immutability, review-safe release automation, and that no authority or claim boundary is widened. Report every issue before automatic merge." >/dev/null
-
-      - name: Require explicit exact-head checks and completed clean Codex review
-        if: steps.state.outputs.state == 'pending'
-        env:
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-          HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
-        run: |
-          set -euo pipefail
-          review_ready=0
-
-          count_unresolved_threads() {
-            # shellcheck disable=SC2016
-            gh api graphql --paginate \
-              -f owner="${GITHUB_REPOSITORY%/*}" \
-              -f name="${GITHUB_REPOSITORY#*/}" \
-              -F number="$PR_NUMBER" \
-              -F endCursor=null \
-              -f query='
-                query($owner:String!, $name:String!, $number:Int!, $endCursor:String) {
-                  repository(owner:$owner, name:$name) {
-                    pullRequest(number:$number) {
-                      reviewThreads(first:100, after:$endCursor) {
-                        nodes { isResolved }
-                        pageInfo { hasNextPage endCursor }
-                      }
+          # shellcheck disable=SC2016
+          unresolved="$(gh api graphql --paginate \
+            -f owner="${GITHUB_REPOSITORY%/*}" \
+            -f name="${GITHUB_REPOSITORY#*/}" \
+            -F number="$PR_NUMBER" \
+            -F endCursor=null \
+            -f query='
+              query($owner:String!, $name:String!, $number:Int!, $endCursor:String) {
+                repository(owner:$owner, name:$name) {
+                  pullRequest(number:$number) {
+                    reviewThreads(first:100, after:$endCursor) {
+                      nodes { isResolved }
+                      pageInfo { hasNextPage endCursor }
                     }
                   }
-                }' \
-              --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' |
-              awk '{ total += $1 } END { print total + 0 }'
-          }
+                }
+              }' \
+            --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' |
+            awk '{ total += $1 } END { print total + 0 }')"
+          test "$unresolved" = "0"
 
-          has_exact_codex_review() {
-            gh api --paginate -H 'Accept: application/vnd.github+json' \
-              "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100" \
-              --jq '.[]' |
-              jq -s -r --arg sha "$HEAD_SHA" --argjson bot_id "$CODEX_BOT_USER_ID" '
-                any(.[]; .user.id == $bot_id and .commit_id == $sha)
-              '
-          }
-
-          has_clean_codex_comment() {
-            gh api --paginate -H 'Accept: application/vnd.github+json' \
-              "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" \
-              --jq '.[]' |
-              jq -s -r --arg sha "$HEAD_SHA" --argjson bot_id "$CODEX_BOT_USER_ID" '
-                any(.[];
-                  .user.id == $bot_id and
-                  ((.body // "") | contains("Codex Review: Didn")) and
-                  ((.body // "") | contains("major issues")) and
-                  (
-                    ((.body // "") | try capture("\\*\\*Reviewed commit:\\*\\* `(?<prefix>[0-9a-f]{10,40})`").prefix catch "") as $prefix
-                    | ($prefix | length) >= 10 and ($sha | startswith($prefix))
-                  )
-                )
-              '
-          }
-
-          for _ in $(seq 1 360); do
-            test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
-            test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "${{ steps.release.outputs.base_sha }}"
-
-            python3 tools/release_workflow_dispatch.py verify \
-              --evidence-file "$RUNNER_TEMP/post-release-closure-head-runs.jsonl" \
-              --expected-count 3
-
-            unresolved="$(count_unresolved_threads)"
-            exact_codex_review="$(has_exact_codex_review)"
-            codex_clean_comment="$(has_clean_codex_comment)"
-
-            if [[ "$unresolved" == "0" && ( "$exact_codex_review" == "true" || "$codex_clean_comment" == "true" ) ]]; then
-              review_ready=1
-            else
-              review_ready=0
-            fi
-
-            if [[ "$review_ready" -eq 1 ]]; then
-              exit 0
-            fi
-            sleep 10
-          done
-
-          echo "closure checks/review did not reach a clean terminal state" >&2
-          exit 1
-
-      - name: Re-prove and squash merge exact reviewed closure
+      - name: Re-prove and squash merge exact deterministic closure
         if: steps.state.outputs.state == 'pending'
         id: merge
         env:
@@ -428,53 +364,26 @@ jobs:
           set -euo pipefail
           python3 tools/release_workflow_dispatch.py verify --evidence-file "$RUNNER_TEMP/post-release-closure-head-runs.jsonl" --expected-count 3
 
-          count_unresolved_threads() {
-            # shellcheck disable=SC2016
-            gh api graphql --paginate \
-              -f owner="${GITHUB_REPOSITORY%/*}" \
-              -f name="${GITHUB_REPOSITORY#*/}" \
-              -F number="$PR_NUMBER" \
-              -F endCursor=null \
-              -f query='
-                query($owner:String!, $name:String!, $number:Int!, $endCursor:String) {
-                  repository(owner:$owner, name:$name) {
-                    pullRequest(number:$number) {
-                      reviewThreads(first:100, after:$endCursor) {
-                        nodes { isResolved }
-                        pageInfo { hasNextPage endCursor }
-                      }
+          # shellcheck disable=SC2016
+          unresolved="$(gh api graphql --paginate \
+            -f owner="${GITHUB_REPOSITORY%/*}" \
+            -f name="${GITHUB_REPOSITORY#*/}" \
+            -F number="$PR_NUMBER" \
+            -F endCursor=null \
+            -f query='
+              query($owner:String!, $name:String!, $number:Int!, $endCursor:String) {
+                repository(owner:$owner, name:$name) {
+                  pullRequest(number:$number) {
+                    reviewThreads(first:100, after:$endCursor) {
+                      nodes { isResolved }
+                      pageInfo { hasNextPage endCursor }
                     }
                   }
-                }' \
-              --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' |
-              awk '{ total += $1 } END { print total + 0 }'
-          }
-
-          has_exact_codex_review() {
-            gh api --paginate -H 'Accept: application/vnd.github+json' \
-              "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100" \
-              --jq '.[]' |
-              jq -s -r --arg sha "$HEAD_SHA" --argjson bot_id "$CODEX_BOT_USER_ID" '
-                any(.[]; .user.id == $bot_id and .commit_id == $sha)
-              '
-          }
-
-          has_clean_codex_comment() {
-            gh api --paginate -H 'Accept: application/vnd.github+json' \
-              "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" \
-              --jq '.[]' |
-              jq -s -r --arg sha "$HEAD_SHA" --argjson bot_id "$CODEX_BOT_USER_ID" '
-                any(.[];
-                  .user.id == $bot_id and
-                  ((.body // "") | contains("Codex Review: Didn")) and
-                  ((.body // "") | contains("major issues")) and
-                  (
-                    ((.body // "") | try capture("\\*\\*Reviewed commit:\\*\\* `(?<prefix>[0-9a-f]{10,40})`").prefix catch "") as $prefix
-                    | ($prefix | length) >= 10 and ($sha | startswith($prefix))
-                  )
-                )
-              '
-          }
+                }
+              }' \
+            --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' |
+            awk '{ total += $1 } END { print total + 0 }')"
+          test "$unresolved" = "0"
 
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"
           pr="$(gh pr view "$PR_NUMBER" --json state,baseRefName,headRefName,headRefOid)"
@@ -484,23 +393,16 @@ jobs:
           test "$(jq -r .headRefOid <<<"$pr")" = "$HEAD_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)" = "$HEAD_SHA"
 
-          # Discussion/review state can change without moving the head. Re-prove it
-          # immediately before the merge API call instead of trusting the earlier poll.
-          unresolved="$(count_unresolved_threads)"
-          test "$unresolved" = "0"
-
-          exact_codex_review="$(has_exact_codex_review)"
-          codex_clean_comment="$(has_clean_codex_comment)"
-          if [[ "$exact_codex_review" != "true" && "$codex_clean_comment" != "true" ]]; then
-            echo "exact-head Codex review is no longer proven immediately before merge" >&2
-            exit 1
-          fi
+          candidate="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$HEAD_SHA")"
+          test "$(jq '.parents | length' <<<"$candidate")" = "1"
+          test "$(jq -r '.parents[0].sha' <<<"$candidate")" = "$BASE_SHA"
+          test "$(jq -r '.message | split("\n")[0]' <<<"$candidate")" = "chore: close $RELEASE_TAG release state"
 
           result="$(gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
             -f merge_method=squash \
             -f sha="$HEAD_SHA" \
             -f commit_title="chore: close $RELEASE_TAG release state" \
-            -f commit_message="Terminal bookkeeping for independently verified $RELEASE_TAG after exact-head checks and Codex review.")"
+            -f commit_message="Terminal bookkeeping for independently verified $RELEASE_TAG after exact-head checks and deterministic closure proof.")"
           test "$(jq -r .merged <<<"$result")" = "true"
           main_sha="$(jq -r .sha <<<"$result")"
           [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
@@ -527,7 +429,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"
-          set -euo pipefail
           evidence="$RUNNER_TEMP/post-release-closure-main-runs.jsonl"
           rm -f "$evidence"
           for workflow in ci.yml security.yml codeql.yml; do
@@ -548,34 +449,73 @@ jobs:
       - name: Delete obsolete release-scoped branches
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          MAIN_SHA: ${{ steps.final_main.outputs.main_sha }}
         run: |
           set -euo pipefail
+          [[ "$MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          # Fresh-main qualification above is the cleanup authorization commit
+          # point. From here cleanup is bound to this immutable commit SHA, not
+          # to a mutable branch ref. Later main development cannot retarget this
+          # already-authorized transaction; it applies to subsequent closures.
+          git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main" --force
+          git cat-file -e "$MAIN_SHA^{commit}"
+          git merge-base --is-ancestor "$MAIN_SHA" refs/remotes/origin/main
+          git show "$MAIN_SHA:contracts/release-branch-cleanup.toml" > "$RUNNER_TEMP/release-branch-cleanup.toml"
+
           gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '.[].name' > "$RUNNER_TEMP/branches.txt"
-          python3 - "$RELEASE_TAG" "$RUNNER_TEMP/branches.txt" "$RUNNER_TEMP/candidates.txt" <<'PY'
+          python3 - "$RELEASE_TAG" "$RUNNER_TEMP/branches.txt" "$RUNNER_TEMP/release-branch-cleanup.toml" "$RUNNER_TEMP/candidates.tsv" <<'PY'
           import pathlib
           import re
           import sys
+          import tomllib
 
-          tag, branches_path, output = sys.argv[1:]
-          match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag)
-          if match is None:
+          tag, branches_path, cleanup_path, output = sys.argv[1:]
+          if re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", tag) is None:
               raise SystemExit("invalid release tag")
+
           release_owned = (
               re.compile(rf"automation/release-prep-{re.escape(tag)}-[0-9a-f]{{12}}"),
+              re.compile(rf"automation/release-reprepare-{re.escape(tag)}-[0-9a-f]{{12}}"),
               re.compile(rf"automation/release-authorization-{re.escape(tag)}-[0-9a-f]{{12}}"),
               re.compile(rf"automation/post-release-{re.escape(tag)}-[0-9]+"),
               re.compile(rf"verify-release/{re.escape(tag)}"),
           )
-          selected = []
+
+          cleanup_contract = tomllib.loads(pathlib.Path(cleanup_path).read_text(encoding="utf-8"))
+          if cleanup_contract.get("schema_version") != 1:
+              raise SystemExit("unsupported release branch cleanup schema")
+          legacy = {}
+          for item in cleanup_contract.get("legacy_branch", []):
+              if item.get("release") != tag:
+                  continue
+              name = item.get("name")
+              expected_sha = item.get("expected_sha")
+              if not isinstance(name, str) or not name.startswith("tmp/"):
+                  raise SystemExit(f"invalid legacy cleanup branch name: {name!r}")
+              if not isinstance(expected_sha, str) or re.fullmatch(r"[0-9a-f]{40}", expected_sha) is None:
+                  raise SystemExit(f"invalid legacy cleanup SHA for {name!r}")
+              if name in legacy:
+                  raise SystemExit(f"duplicate legacy cleanup branch: {name}")
+              legacy[name] = expected_sha
+
+          selected = {}
           for raw in pathlib.Path(branches_path).read_text(encoding="utf-8").splitlines():
               branch = raw.strip()
-              if branch == "tmp/zero-diff-authorization-probe" or any(pattern.fullmatch(branch) for pattern in release_owned):
-                  selected.append(branch)
-          pathlib.Path(output).write_text("".join(f"{branch}\n" for branch in sorted(set(selected))), encoding="utf-8")
+              if any(pattern.fullmatch(branch) for pattern in release_owned):
+                  selected[branch] = "automation-owned"
+              elif branch in legacy:
+                  selected[branch] = legacy[branch]
+
+          pathlib.Path(output).write_text(
+              "".join(f"{branch}\t{expected}\n" for branch, expected in sorted(selected.items())),
+              encoding="utf-8",
+          )
           PY
 
-          while IFS= read -r branch; do
+          while IFS=$'\t' read -r branch expected_sha; do
             [[ -n "$branch" ]] || continue
+            git check-ref-format --branch "$branch" >/dev/null
 
             open_pr_count="$(
               gh api --paginate --method GET "repos/$GITHUB_REPOSITORY/pulls" \
@@ -590,8 +530,73 @@ jobs:
               continue
             fi
 
-            if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1; then
-              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
-              echo "deleted obsolete release branch: $branch"
+            ref="refs/heads/$branch"
+            lookup_err="$RUNNER_TEMP/cleanup-ls-remote.err"
+            : > "$lookup_err"
+            set +e
+            remote_line="$(git ls-remote --exit-code --refs origin "$ref" 2>"$lookup_err")"
+            lookup_status=$?
+            set -e
+            case "$lookup_status" in
+              0)
+                test "$(printf '%s\n' "$remote_line" | sed '/^$/d' | wc -l)" -eq 1
+                IFS=$'\t' read -r current_sha returned_ref <<< "$remote_line"
+                [[ "$current_sha" =~ ^[0-9a-f]{40}$ ]]
+                test "$returned_ref" = "$ref"
+                ;;
+              2)
+                echo "release branch already absent before cleanup: $branch"
+                continue
+                ;;
+              *)
+                cat "$lookup_err" >&2
+                echo "failed to resolve release branch before cleanup: $branch (git ls-remote exit $lookup_status)" >&2
+                exit 1
+                ;;
+            esac
+
+            lease_sha="$current_sha"
+            if [[ "$expected_sha" != "automation-owned" ]]; then
+              lease_sha="$expected_sha"
+              if [[ "$current_sha" != "$lease_sha" ]]; then
+                echo "preserving legacy branch whose ref moved after cleanup provenance was reviewed: $branch ($current_sha != $lease_sha)" >&2
+                continue
+              fi
             fi
-          done < "$RUNNER_TEMP/candidates.txt"
+
+            if git push --force-with-lease="$ref:$lease_sha" origin ":$ref"; then
+              echo "deleted obsolete release branch under immutable cleanup authority and exact SHA lease: $branch@$lease_sha"
+              continue
+            fi
+
+            : > "$lookup_err"
+            set +e
+            latest_line="$(git ls-remote --exit-code --refs origin "$ref" 2>"$lookup_err")"
+            latest_status=$?
+            set -e
+            case "$latest_status" in
+              0)
+                test "$(printf '%s\n' "$latest_line" | sed '/^$/d' | wc -l)" -eq 1
+                IFS=$'\t' read -r latest_sha returned_ref <<< "$latest_line"
+                [[ "$latest_sha" =~ ^[0-9a-f]{40}$ ]]
+                test "$returned_ref" = "$ref"
+                ;;
+              2)
+                echo "release branch disappeared during leased cleanup: $branch"
+                continue
+                ;;
+              *)
+                cat "$lookup_err" >&2
+                echo "failed to resolve release branch after rejected leased deletion: $branch (git ls-remote exit $latest_status)" >&2
+                exit 1
+                ;;
+            esac
+
+            if [[ "$latest_sha" != "$lease_sha" ]]; then
+              echo "preserving branch moved during cleanup lease: $branch ($latest_sha != $lease_sha)" >&2
+              continue
+            fi
+
+            echo "failed to delete unchanged release branch under exact SHA lease: $branch@$lease_sha" >&2
+            exit 1
+          done < "$RUNNER_TEMP/candidates.tsv"

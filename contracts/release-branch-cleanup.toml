@@ -1,0 +1,29 @@
+schema_version = 1
+
+# Legacy non-namespaced branches are never selected by pattern. They are eligible
+# for terminal cleanup only when both the release tag and exact current ref SHA
+# match this reviewed ledger. New release automation must use automation/*.
+
+[[legacy_branch]]
+release = "v0.8.0"
+name = "tmp/v0.8-final-hardening-validation"
+expected_sha = "1a05a325f0bea3855b40602cf42fe3286a40e286"
+reason = "v0.8 final hardening validation branch superseded by protected main"
+
+[[legacy_branch]]
+release = "v0.8.0"
+name = "tmp/v08-github-token-probe"
+expected_sha = "a45a4a479537e3c6fa542c2f8b5a17ba698e4dc7"
+reason = "temporary repository-token release-authority probe"
+
+[[legacy_branch]]
+release = "v0.8.0"
+name = "tmp/v08-release-prep-materialize"
+expected_sha = "29ddd8a6bd6405b0719caf912a6acf2b056a03a9"
+reason = "temporary deterministic v0.8 release-metadata materialization branch"
+
+[[legacy_branch]]
+release = "v0.8.0"
+name = "tmp/v08-review-hardening"
+expected_sha = "a3d370a47fa8cd76d06d5121c37f9f25a1535543"
+reason = "temporary v0.8 review-hardening validator branch superseded by protected main"

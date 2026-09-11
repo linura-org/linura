@@ -113,7 +113,7 @@ none
             )
             self.assertNotIn("v0.6.0.md)- [v0.5.0", updated)
 
-    def test_release_workflows_require_dedicated_credential_and_review_before_merge(self) -> None:
+    def test_release_workflows_require_repository_authority_and_deterministic_closure(self) -> None:
         closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
         promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
 
@@ -121,15 +121,16 @@ none
         self.assertIn("--credential-source github", closure)
         self.assertIn("token: ${{ github.token }}", closure)
         self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", closure)
-        self.assertIn("@codex review", closure)
+        self.assertNotIn("@codex review", closure)
+        self.assertNotIn("chatgpt-codex-connector", closure)
         self.assertIn("event=workflow_dispatch", closure)
         self.assertGreaterEqual(closure.count("gh api graphql --paginate"), 2)
         self.assertGreaterEqual(closure.count("$endCursor:String"), 2)
         self.assertGreaterEqual(closure.count("reviewThreads(first:100, after:$endCursor)"), 2)
         self.assertGreaterEqual(closure.count("pageInfo { hasNextPage endCursor }"), 2)
-        self.assertIn("chatgpt-codex-connector", closure)
+        self.assertIn('test "$unresolved" = "0"', closure)
+        self.assertIn("deterministic closure proof", closure)
         self.assertIn('pulls/$PR_NUMBER/merge', closure)
-        self.assertIn("event=workflow_dispatch", closure)
         self.assertNotIn('gh pr merge "$PR_NUMBER"', closure)
 
         self.assertIn("GH_TOKEN: ${{ github.token }}", promotion)
