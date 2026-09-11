@@ -1,0 +1,75 @@
+name: Temporary v0.8 component maturity regression fix
+
+on:
+  push:
+    branches:
+      - fix/v08-post-release-component-maturity
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repair branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/v08-post-release-component-maturity
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Mint repository-scoped Release App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.LINURA_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.LINURA_RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Pin v0.8 closure simulation regression
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/tooling/test_component_maturity.py")
+          text = path.read_text(encoding="utf-8")
+
+          old_negative = '''    def test_integrated_component_cannot_activate_after_candidate_milestone(self) -> None:\n        with tempfile.TemporaryDirectory() as temp_dir:\n            root = Path(temp_dir)\n            self._copy_fixture(root)\n            contract = root / "contracts/components.toml"\n            roadmap = tomllib.loads((root / "contracts/roadmap.toml").read_text(encoding="utf-8"))\n            candidate = roadmap["next_release"]\n            self.assertIsInstance(candidate, str)\n\n            def activate_early(block: str) -> str:\n                return block.replace(\n                    'maturity = "roadmap-scaffold"',\n                    'maturity = "integrated-experimental"',\n                    1,\n                )\n\n            self._replace_component_block(contract, "linura-firstboot", activate_early)\n            result = self._run_checker(root)\n            self.assertNotEqual(result.returncode, 0)\n            self.assertIn(\n                f"integrated component activation v0.9.0 is later than candidate {candidate}",\n                result.stderr,\n            )\n\n'''
+          new_negative = '''    def test_integrated_component_cannot_activate_after_candidate_milestone(self) -> None:\n        with tempfile.TemporaryDirectory() as temp_dir:\n            root = Path(temp_dir)\n            self._copy_fixture(root)\n            contract = root / "contracts/components.toml"\n            roadmap = tomllib.loads((root / "contracts/roadmap.toml").read_text(encoding="utf-8"))\n            candidate = roadmap["next_release"]\n            self.assertIsInstance(candidate, str)\n            versions = [item["version"] for item in roadmap["milestone"]]\n            candidate_index = versions.index(candidate)\n            self.assertLess(candidate_index + 1, len(versions))\n            later = versions[candidate_index + 1]\n\n            def activate_too_late(block: str) -> str:\n                block = block.replace(\n                    'maturity = "roadmap-scaffold"',\n                    'maturity = "integrated-experimental"',\n                    1,\n                )\n                return re.sub(\n                    r'^activation_milestone = "v[0-9]+\\.[0-9]+\\.[0-9]+"$',\n                    f'activation_milestone = "{later}"',\n                    block,\n                    count=1,\n                    flags=re.MULTILINE,\n                )\n\n            self._replace_component_block(contract, "linura-firstboot", activate_too_late)\n            result = self._run_checker(root)\n            self.assertNotEqual(result.returncode, 0)\n            self.assertIn(\n                f"integrated component activation {later} is later than candidate {candidate}",\n                result.stderr,\n            )\n\n'''
+
+          old_transition = '''    def test_candidate_component_contract_remains_valid_when_candidate_becomes_current(self) -> None:\n        with tempfile.TemporaryDirectory() as temp_dir:\n            root = Path(temp_dir)\n            self._copy_fixture(root)\n            roadmap_path = root / "contracts/roadmap.toml"\n            roadmap = tomllib.loads(roadmap_path.read_text(encoding="utf-8"))\n            current = roadmap["current_release"]\n            candidate = roadmap["next_release"]\n            versions = [item["version"] for item in roadmap["milestone"]]\n            candidate_index = versions.index(candidate)\n            self.assertLess(candidate_index + 1, len(versions))\n            following = versions[candidate_index + 1]\n\n            roadmap_text = roadmap_path.read_text(encoding="utf-8")\n            roadmap_text = roadmap_text.replace(\n                f'current_release = "{current}"',\n                f'current_release = "{candidate}"',\n                1,\n            )\n            roadmap_text = roadmap_text.replace(\n                f'next_release = "{candidate}"',\n                f'next_release = "{following}"',\n                1,\n            )\n            roadmap_path.write_text(roadmap_text, encoding="utf-8")\n\n            result = self._run_checker(root)\n            self.assertEqual(result.returncode, 0, result.stderr)\n\n'''
+          new_transition = '''    def test_v08_component_contract_remains_valid_after_post_release_transition(self) -> None:\n        with tempfile.TemporaryDirectory() as temp_dir:\n            root = Path(temp_dir)\n            self._copy_fixture(root)\n            roadmap_path = root / "contracts/roadmap.toml"\n            roadmap = tomllib.loads(roadmap_path.read_text(encoding="utf-8"))\n            versions = [item["version"] for item in roadmap["milestone"]]\n            self.assertIn("v0.8.0", versions)\n            self.assertIn("v0.9.0", versions)\n\n            roadmap_text = roadmap_path.read_text(encoding="utf-8")\n            roadmap_text, current_count = re.subn(\n                r'^current_release = "v[0-9]+\\.[0-9]+\\.[0-9]+"$',\n                'current_release = "v0.8.0"',\n                roadmap_text,\n                count=1,\n                flags=re.MULTILINE,\n            )\n            roadmap_text, next_count = re.subn(\n                r'^next_release = "v[0-9]+\\.[0-9]+\\.[0-9]+"$',\n                'next_release = "v0.9.0"',\n                roadmap_text,\n                count=1,\n                flags=re.MULTILINE,\n            )\n            self.assertEqual(current_count, 1)\n            self.assertEqual(next_count, 1)\n            roadmap_path.write_text(roadmap_text, encoding="utf-8")\n\n            result = self._run_checker(root)\n            self.assertEqual(result.returncode, 0, result.stderr)\n\n'''
+
+          if text.count(old_negative) != 1:
+              raise SystemExit(f"expected one negative-test block, found {text.count(old_negative)}")
+          if text.count(old_transition) != 1:
+              raise SystemExit(f"expected one transition-test block, found {text.count(old_transition)}")
+          text = text.replace(old_negative, new_negative, 1)
+          text = text.replace(old_transition, new_transition, 1)
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          python3 -m py_compile tests/tooling/test_component_maturity.py
+          python3 -m unittest discover -s tests/tooling -p 'test_component_maturity.py'
+          python3 tools/check_component_maturity.py
+          git diff --check
+
+      - name: Commit tested regression fix and remove bootstrap workflow
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_APP_SLUG: astupdt
+        run: |
+          set -euo pipefail
+          rm .github/workflows/tmp-v08-component-maturity-test-fix.yml
+          app_user_id="$(gh api "users/${RELEASE_APP_SLUG}[bot]" --jq .id)"
+          [[ "$app_user_id" =~ ^[0-9]+$ ]]
+          git config user.name "${RELEASE_APP_SLUG}[bot]"
+          git config user.email "${app_user_id}+${RELEASE_APP_SLUG}[bot]@users.noreply.github.com"
+          git add --all
+          git diff --cached --check
+          test "$(git diff --cached --name-only | sort)" = $'.github/workflows/tmp-v08-component-maturity-test-fix.yml\ntests/tooling/test_component_maturity.py'
+          git commit -m "test(release): pin v0.8 closure maturity simulation"
+          gh auth setup-git
+          git push origin "HEAD:refs/heads/$GITHUB_REF_NAME"
