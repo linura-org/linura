@@ -87,7 +87,7 @@ There is exactly one terminal handoff: successful verification → `Release Clos
 
 Closure synchronizes terminal qualification/current-release documents and the human-facing `docs/releases/published-vX.Y.Z.md` record while preserving the frozen release contract byte-for-byte. Unknown terminal qualification rows or unexpected `docs/releases/` mutations fail closed.
 
-Terminal cleanup is deliberately narrow: release-owned preparation/reprepare/authorization/closure/recovery branches plus version-scoped temporary release-work namespaces are eligible only after fresh-main closure checks, and a candidate referenced by an open PR is preserved.
+Terminal cleanup is ownership-scoped. New release automation may delete only its release-owned `automation/...` or recovery refs. Legacy non-namespaced temporary refs are eligible only through `contracts/release-branch-cleanup.toml`, which binds the exact release, branch name and reviewed current SHA. Cleanup runs only after fresh-main closure checks, preserves any ref used by an open PR, and preserves a legacy ref if its SHA moved after the ledger was reviewed.
 
 ### Credential compromise
 
