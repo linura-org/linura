@@ -452,33 +452,58 @@ jobs:
         run: |
           set -euo pipefail
           gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '.[].name' > "$RUNNER_TEMP/branches.txt"
-          python3 - "$RELEASE_TAG" "$RUNNER_TEMP/branches.txt" "$RUNNER_TEMP/candidates.txt" <<'PY'
+          python3 - "$RELEASE_TAG" "$RUNNER_TEMP/branches.txt" "$RUNNER_TEMP/candidates.tsv" <<'PY'
           import pathlib
           import re
           import sys
+          import tomllib
 
           tag, branches_path, output = sys.argv[1:]
-          match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", tag)
-          if match is None:
+          if re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", tag) is None:
               raise SystemExit("invalid release tag")
-          series = f"v{match.group(1)}.{match.group(2)}"
+
           release_owned = (
               re.compile(rf"automation/release-prep-{re.escape(tag)}-[0-9a-f]{{12}}"),
               re.compile(rf"automation/release-reprepare-{re.escape(tag)}-[0-9a-f]{{12}}"),
               re.compile(rf"automation/release-authorization-{re.escape(tag)}-[0-9a-f]{{12}}"),
               re.compile(rf"automation/post-release-{re.escape(tag)}-[0-9]+"),
               re.compile(rf"verify-release/{re.escape(tag)}"),
-              re.compile(rf"tmp/{re.escape(series)}-(cleanup|compact|minimal|review|release)-[A-Za-z0-9._-]+"),
           )
-          selected = []
+
+          cleanup_contract = tomllib.loads(
+              pathlib.Path("contracts/release-branch-cleanup.toml").read_text(encoding="utf-8")
+          )
+          if cleanup_contract.get("schema_version") != 1:
+              raise SystemExit("unsupported release branch cleanup schema")
+          legacy = {}
+          for item in cleanup_contract.get("legacy_branch", []):
+              if item.get("release") != tag:
+                  continue
+              name = item.get("name")
+              expected_sha = item.get("expected_sha")
+              if not isinstance(name, str) or not name.startswith("tmp/"):
+                  raise SystemExit(f"invalid legacy cleanup branch name: {name!r}")
+              if not isinstance(expected_sha, str) or re.fullmatch(r"[0-9a-f]{40}", expected_sha) is None:
+                  raise SystemExit(f"invalid legacy cleanup SHA for {name!r}")
+              if name in legacy:
+                  raise SystemExit(f"duplicate legacy cleanup branch: {name}")
+              legacy[name] = expected_sha
+
+          selected = {}
           for raw in pathlib.Path(branches_path).read_text(encoding="utf-8").splitlines():
               branch = raw.strip()
-              if branch == "tmp/zero-diff-authorization-probe" or any(pattern.fullmatch(branch) for pattern in release_owned):
-                  selected.append(branch)
-          pathlib.Path(output).write_text("".join(f"{branch}\n" for branch in sorted(set(selected))), encoding="utf-8")
+              if any(pattern.fullmatch(branch) for pattern in release_owned):
+                  selected[branch] = "automation-owned"
+              elif branch in legacy:
+                  selected[branch] = legacy[branch]
+
+          pathlib.Path(output).write_text(
+              "".join(f"{branch}\t{expected}\n" for branch, expected in sorted(selected.items())),
+              encoding="utf-8",
+          )
           PY
 
-          while IFS= read -r branch; do
+          while IFS=$'\t' read -r branch expected_sha; do
             [[ -n "$branch" ]] || continue
 
             open_pr_count="$(
@@ -494,8 +519,17 @@ jobs:
               continue
             fi
 
-            if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1; then
-              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
-              echo "deleted obsolete release branch: $branch"
+            if ! ref_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" 2>/dev/null)"; then
+              continue
             fi
-          done < "$RUNNER_TEMP/candidates.txt"
+            current_sha="$(jq -r .object.sha <<<"$ref_payload")"
+            [[ "$current_sha" =~ ^[0-9a-f]{40}$ ]]
+
+            if [[ "$expected_sha" != "automation-owned" && "$current_sha" != "$expected_sha" ]]; then
+              echo "preserving legacy branch whose ref moved after cleanup provenance was reviewed: $branch ($current_sha != $expected_sha)" >&2
+              continue
+            fi
+
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
+            echo "deleted obsolete release branch: $branch"
+          done < "$RUNNER_TEMP/candidates.tsv"
