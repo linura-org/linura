@@ -84,46 +84,60 @@ class ComponentMaturityContractTests(unittest.TestCase):
             roadmap = tomllib.loads((root / "contracts/roadmap.toml").read_text(encoding="utf-8"))
             candidate = roadmap["next_release"]
             self.assertIsInstance(candidate, str)
+            versions = [item["version"] for item in roadmap["milestone"]]
+            candidate_index = versions.index(candidate)
+            self.assertLess(candidate_index + 1, len(versions))
+            later = versions[candidate_index + 1]
 
-            def activate_early(block: str) -> str:
-                return block.replace(
+            def activate_too_late(block: str) -> str:
+                block = block.replace(
                     'maturity = "roadmap-scaffold"',
                     'maturity = "integrated-experimental"',
                     1,
                 )
+                return re.sub(
+                    r'^activation_milestone = "v[0-9]+\.[0-9]+\.[0-9]+"$',
+                    f'activation_milestone = "{later}"',
+                    block,
+                    count=1,
+                    flags=re.MULTILINE,
+                )
 
-            self._replace_component_block(contract, "linura-firstboot", activate_early)
+            self._replace_component_block(contract, "linura-firstboot", activate_too_late)
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
-                f"integrated component activation v0.9.0 is later than candidate {candidate}",
+                f"integrated component activation {later} is later than candidate {candidate}",
                 result.stderr,
             )
 
-    def test_candidate_component_contract_remains_valid_when_candidate_becomes_current(self) -> None:
+    def test_v08_component_contract_remains_valid_after_post_release_transition(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
             roadmap_path = root / "contracts/roadmap.toml"
             roadmap = tomllib.loads(roadmap_path.read_text(encoding="utf-8"))
-            current = roadmap["current_release"]
-            candidate = roadmap["next_release"]
             versions = [item["version"] for item in roadmap["milestone"]]
-            candidate_index = versions.index(candidate)
-            self.assertLess(candidate_index + 1, len(versions))
-            following = versions[candidate_index + 1]
+            self.assertIn("v0.8.0", versions)
+            self.assertIn("v0.9.0", versions)
 
             roadmap_text = roadmap_path.read_text(encoding="utf-8")
-            roadmap_text = roadmap_text.replace(
-                f'current_release = "{current}"',
-                f'current_release = "{candidate}"',
-                1,
+            roadmap_text, current_count = re.subn(
+                r'^current_release = "v[0-9]+\.[0-9]+\.[0-9]+"$',
+                'current_release = "v0.8.0"',
+                roadmap_text,
+                count=1,
+                flags=re.MULTILINE,
             )
-            roadmap_text = roadmap_text.replace(
-                f'next_release = "{candidate}"',
-                f'next_release = "{following}"',
-                1,
+            roadmap_text, next_count = re.subn(
+                r'^next_release = "v[0-9]+\.[0-9]+\.[0-9]+"$',
+                'next_release = "v0.9.0"',
+                roadmap_text,
+                count=1,
+                flags=re.MULTILINE,
             )
+            self.assertEqual(current_count, 1)
+            self.assertEqual(next_count, 1)
             roadmap_path.write_text(roadmap_text, encoding="utf-8")
 
             result = self._run_checker(root)
