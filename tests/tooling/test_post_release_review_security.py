@@ -62,7 +62,7 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
         self.assertIn('pulls/$PR_NUMBER/merge', merge)
         self.assertIn("deterministic closure proof", merge)
 
-    def test_cleanup_requires_owned_namespace_or_exact_legacy_ledger_and_sha_lease(self) -> None:
+    def test_cleanup_requires_owned_namespace_exact_ledger_target_lease_and_final_main_authority(self) -> None:
         cleanup = self._cleanup_block()
         self.assertIn("automation/release-prep-", cleanup)
         self.assertIn("automation/release-reprepare-", cleanup)
@@ -70,6 +70,11 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
         self.assertIn("automation/post-release-", cleanup)
         self.assertIn("verify-release/", cleanup)
         self.assertIn("contracts/release-branch-cleanup.toml", cleanup)
+        self.assertIn('MAIN_SHA: ${{ steps.final_main.outputs.main_sha }}', cleanup)
+        self.assertIn('git show "$MAIN_SHA:contracts/release-branch-cleanup.toml"', cleanup)
+        self.assertIn('test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"', cleanup)
+        self.assertIn('authority_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"', cleanup)
+        self.assertIn('test "$authority_sha" = "$MAIN_SHA"', cleanup)
         self.assertIn('cleanup_contract.get("schema_version") != 1', cleanup)
         self.assertIn('item.get("release") != tag', cleanup)
         self.assertIn('name.startswith("tmp/")', cleanup)
@@ -89,6 +94,17 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
         self.assertIn("preserving branch used by an open PR", cleanup)
         self.assertNotIn('"fix/"', cleanup)
         self.assertNotIn('"release/"', cleanup)
+
+    def test_cleanup_distinguishes_absence_from_lookup_failure(self) -> None:
+        cleanup = self._cleanup_block()
+        self.assertGreaterEqual(cleanup.count('git ls-remote --exit-code --refs origin "$ref"'), 2)
+        self.assertIn('case "$lookup_status" in', cleanup)
+        self.assertIn('case "$latest_status" in', cleanup)
+        self.assertIn('release branch already absent before cleanup', cleanup)
+        self.assertIn('failed to resolve release branch before cleanup', cleanup)
+        self.assertIn('failed to resolve release branch after rejected leased deletion', cleanup)
+        self.assertIn('git ls-remote exit $lookup_status', cleanup)
+        self.assertIn('git ls-remote exit $latest_status', cleanup)
 
 
 if __name__ == "__main__":
