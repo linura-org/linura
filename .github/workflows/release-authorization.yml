@@ -103,6 +103,8 @@ jobs:
           ' <<<"$prs")"
           [[ "$pr_number" =~ ^[0-9]+$ ]]
 
+          # GraphQL variables are intentionally literal inside the single-quoted query.
+          # shellcheck disable=SC2016
           unresolved="$(gh api graphql --paginate \
             -f owner="${GITHUB_REPOSITORY%/*}" \
             -f name="${GITHUB_REPOSITORY#*/}" \
