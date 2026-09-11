@@ -165,7 +165,8 @@ version = "9.9.9"
         self.assertNotIn('gh pr merge "$PR_NUMBER"', closure)
         self.assertIn("--credential-source github", closure)
         self.assertIn("automation/release-reprepare-", closure)
-        self.assertIn("(cleanup|compact|minimal|review|release)", closure)
+        self.assertIn("contracts/release-branch-cleanup.toml", closure)
+        self.assertNotIn("(cleanup|compact|minimal|review|release)", closure)
 
     def test_release_guide_declares_explicit_readiness_and_no_manual_missing_handoff(self) -> None:
         guide = (ROOT / "agents/skills/release.md").read_text(encoding="utf-8")
