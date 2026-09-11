@@ -26,16 +26,12 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn("contents: write", workflow)
         self.assertIn("pull-requests: write", workflow)
         self.assertIn("actions: write", workflow)
-        self.assertIn("issues: write", workflow)
-        self.assertIn(
-            "GH_TOKEN: ${{ github.token }}",
-            workflow,
-        )
+        self.assertNotIn("issues: write", workflow)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", workflow)
         self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", workflow)
         self.assertIn("--credential-source github", workflow)
         self.assertIn("Prove closure automation capabilities", workflow)
         self.assertIn(PROBE_TOOL, workflow)
-        self.assertIn('--credential-source github', workflow)
         self.assertIn("token: ${{ github.token }}", workflow)
 
         preflight = workflow.index("Prove closure automation capabilities")
@@ -59,71 +55,51 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertNotIn("git commit", preflight)
         self.assertNotIn("gh pr create", preflight)
 
-    def test_promotion_and_closure_require_the_same_dedicated_authority(self) -> None:
+    def test_promotion_and_closure_require_same_repository_scoped_authority(self) -> None:
         closure = self._closure_workflow()
         promotion = PROMOTION_WORKFLOW.read_text(encoding="utf-8")
 
         for workflow in (closure, promotion):
             self.assertIn(PROBE_TOOL, workflow)
-            self.assertIn(
-                "GH_TOKEN: ${{ github.token }}",
-                workflow,
-            )
-            self.assertIn("--credential-source github", workflow)
+            self.assertIn("GH_TOKEN: ${{ github.token }}", workflow)
             self.assertIn("--credential-source github", workflow)
             self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", workflow)
 
-    def test_closure_waits_for_native_pr_checks_and_exact_codex_evidence(self) -> None:
+    def test_closure_uses_explicit_exact_head_checks_without_conversational_gate(self) -> None:
         workflow = self._closure_workflow()
-        self.assertIn("@codex review", workflow)
+        self.assertNotIn("@codex review", workflow)
+        self.assertNotIn("CODEX_BOT_USER_ID", workflow)
+        self.assertNotIn("issues/$PR_NUMBER/comments", workflow)
+        self.assertNotIn("has_clean_codex_comment", workflow)
+        self.assertNotIn("has_exact_codex_review", workflow)
         self.assertIn("event=workflow_dispatch", workflow)
-        self.assertGreaterEqual(workflow.count("gh api graphql --paginate"), 2)
-        self.assertGreaterEqual(workflow.count("$endCursor:String"), 2)
-        self.assertGreaterEqual(workflow.count("reviewThreads(first:100, after:$endCursor)"), 2)
-        self.assertGreaterEqual(workflow.count("pageInfo { hasNextPage endCursor }"), 2)
-        self.assertGreaterEqual(
-            workflow.count("awk '{ total += $1 } END { print total + 0 }'"),
-            2,
-        )
-        self.assertIn('CODEX_BOT_USER_ID: "199175422"', workflow)
         self.assertIn('pulls/$PR_NUMBER/merge', workflow)
         self.assertNotIn('gh pr merge "$PR_NUMBER"', workflow)
-        self.assertIn("event=workflow_dispatch", workflow)
-        self.assertNotIn("REVIEW_REQUESTED_AT", workflow)
-        self.assertNotIn("issues/comments/$REVIEW_COMMENT_ID/reactions", workflow)
 
-        poll = workflow.split(
-            "- name: Require explicit exact-head checks and completed clean Codex review", 1
-        )[1].split("- name: Re-prove and squash merge exact reviewed closure", 1)[0]
-        self.assertIn("gh api graphql --paginate", poll)
-        self.assertIn("reviewThreads(first:100, after:$endCursor)", poll)
-        self.assertIn("pageInfo { hasNextPage endCursor }", poll)
-        self.assertIn('unresolved="$(count_unresolved_threads)"', poll)
-        self.assertIn('pulls/$PR_NUMBER/reviews?per_page=100', poll)
-        self.assertIn('issues/$PR_NUMBER/comments?per_page=100', poll)
-        self.assertIn("has_clean_codex_comment", poll)
-        self.assertIn("Reviewed commit:", poll)
-        self.assertIn("[0-9a-f]{10,40}", poll)
-        self.assertIn("$sha | startswith($prefix)", poll)
-        self.assertIn(".user.id == $bot_id", poll)
-        self.assertNotIn("/reactions?", poll)
+        gate = workflow.split("- name: Require exact-head checks and zero unresolved review threads", 1)[1].split(
+            "- name: Re-prove and squash merge exact deterministic closure", 1
+        )[0]
+        self.assertIn("release_workflow_dispatch.py verify", gate)
+        self.assertIn("post-release-closure-head-runs.jsonl", gate)
+        self.assertIn("gh api graphql --paginate", gate)
+        self.assertIn("reviewThreads(first:100, after:$endCursor)", gate)
+        self.assertIn("pageInfo { hasNextPage endCursor }", gate)
+        self.assertIn('unresolved="$(gh api graphql --paginate', gate)
+        self.assertIn('test "$unresolved" = "0"', gate)
+        self.assertIn('test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"', gate)
 
-        merge = workflow.split("- name: Re-prove and squash merge exact reviewed closure", 1)[1].split(
+        merge = workflow.split("- name: Re-prove and squash merge exact deterministic closure", 1)[1].split(
             "- name: Resolve post-closure protected-main SHA", 1
         )[0]
+        self.assertIn("release_workflow_dispatch.py verify", merge)
         self.assertIn("gh api graphql --paginate", merge)
         self.assertIn("reviewThreads(first:100, after:$endCursor)", merge)
-        self.assertIn("pageInfo { hasNextPage endCursor }", merge)
-        self.assertIn('unresolved="$(count_unresolved_threads)"', merge)
         self.assertIn('test "$unresolved" = "0"', merge)
-        self.assertIn("exact_codex_review", merge)
-        self.assertIn("codex_clean_comment", merge)
-        self.assertIn('issues/$PR_NUMBER/comments?per_page=100', merge)
-        self.assertIn("Reviewed commit:", merge)
-        self.assertIn("[0-9a-f]{10,40}", merge)
-        self.assertIn("$sha | startswith($prefix)", merge)
-        self.assertIn(".user.id == $bot_id", merge)
-        self.assertNotIn("/reactions?", merge)
+        self.assertIn('test "$(jq -r .headRefOid <<<"$pr")" = "$HEAD_SHA"', merge)
+        self.assertIn("'.parents | length'", merge)
+        self.assertIn("'.parents[0].sha'", merge)
+        self.assertIn('= "$BASE_SHA"', merge)
+        self.assertIn("deterministic closure proof", merge)
         self.assertLess(
             merge.index("reviewThreads(first:100, after:$endCursor)"),
             merge.index('pulls/$PR_NUMBER/merge'),
@@ -135,7 +111,7 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
             "- name: Open or re-prove protected closure PR", 1
         )[0]
         open_pr = workflow.split("- name: Open or re-prove protected closure PR", 1)[1].split(
-            "- name: Request exact-head Codex review", 1
+            "- name: Dispatch and require exact-head closure checks", 1
         )[0]
 
         self.assertIn('expected_tree="$(git write-tree)"', commit)
@@ -150,16 +126,7 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn("reusing exact open closure PR", open_pr)
         self.assertIn('test "$(jq -r .headRefOid <<<"$pr")" = "$HEAD_SHA"', open_pr)
         self.assertIn('test "$(jq -r .baseRefName <<<"$pr")" = "main"', open_pr)
-
-    def test_clean_codex_comment_is_intrinsically_exact_head_and_retry_safe(self) -> None:
-        workflow = self._closure_workflow()
-        self.assertGreaterEqual(workflow.count('issues/$PR_NUMBER/comments?per_page=100'), 2)
-        self.assertGreaterEqual(workflow.count("[0-9a-f]{10,40}"), 2)
-        self.assertGreaterEqual(workflow.count("$sha | startswith($prefix)"), 2)
-        self.assertGreaterEqual(workflow.count(".user.id == $bot_id"), 4)
-        self.assertNotIn("REVIEW_REQUESTED_AT", workflow)
-        self.assertNotIn("codex_clean_reaction", workflow)
-        self.assertNotIn("issues/comments/$REVIEW_COMMENT_ID/reactions", workflow)
+        self.assertIn("deterministic tree proof", open_pr)
 
     def test_closed_release_retry_still_requires_fresh_main_before_cleanup(self) -> None:
         workflow = self._closure_workflow()
@@ -180,13 +147,16 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertNotIn("dispatch-boundaries.tsv", fresh_block)
         self.assertNotIn(".id > $boundary", fresh_block)
 
-    def test_cleanup_is_limited_to_release_owned_branches_and_legacy_probe(self) -> None:
+    def test_cleanup_is_limited_to_release_owned_and_version_scoped_temp_branches(self) -> None:
         workflow = self._closure_workflow()
         cleanup = workflow.split("- name: Delete obsolete release-scoped branches", 1)[1]
         self.assertIn("automation/release-prep-", cleanup)
+        self.assertIn("automation/release-reprepare-", cleanup)
         self.assertIn("automation/release-authorization-", cleanup)
         self.assertIn("automation/post-release-", cleanup)
         self.assertIn("verify-release/", cleanup)
+        self.assertIn("series = f\"v{match.group(1)}.{match.group(2)}\"", cleanup)
+        self.assertIn("(cleanup|compact|minimal|review|release)", cleanup)
         self.assertNotIn('"fix/"', cleanup)
         self.assertNotIn('"release/"', cleanup)
         self.assertIn('branch == "tmp/zero-diff-authorization-probe"', cleanup)
