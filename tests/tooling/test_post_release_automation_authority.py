@@ -156,6 +156,8 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn("automation/post-release-", cleanup)
         self.assertIn("verify-release/", cleanup)
         self.assertIn("contracts/release-branch-cleanup.toml", cleanup)
+        self.assertIn('MAIN_SHA: ${{ steps.final_main.outputs.main_sha }}', cleanup)
+        self.assertIn('git show "$MAIN_SHA:contracts/release-branch-cleanup.toml"', cleanup)
         self.assertIn('item.get("release") != tag', cleanup)
         self.assertIn('name.startswith("tmp/")', cleanup)
         self.assertIn('re.fullmatch(r"[0-9a-f]{40}", expected_sha)', cleanup)
@@ -164,6 +166,8 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn("preserving legacy branch whose ref moved", cleanup)
         self.assertIn('git check-ref-format --branch "$branch"', cleanup)
         self.assertIn('git push --force-with-lease="$ref:$lease_sha" origin ":$ref"', cleanup)
+        self.assertIn('authority_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"', cleanup)
+        self.assertIn('test "$authority_sha" = "$MAIN_SHA"', cleanup)
         self.assertIn("preserving branch moved during cleanup lease", cleanup)
         self.assertIn("failed to delete unchanged release branch under exact SHA lease", cleanup)
         self.assertNotIn('gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"', cleanup)
@@ -175,6 +179,15 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn("preserving branch used by an open PR", cleanup)
         self.assertIn('repos/$GITHUB_REPOSITORY/pulls', cleanup)
         self.assertIn('-f head="${GITHUB_REPOSITORY%/*}:$branch"', cleanup)
+
+    def test_cleanup_ref_resolution_fails_closed_except_exact_absence(self) -> None:
+        cleanup = self._closure_workflow().split("- name: Delete obsolete release-scoped branches", 1)[1]
+        self.assertGreaterEqual(cleanup.count('git ls-remote --exit-code --refs origin "$ref"'), 2)
+        self.assertIn('case "$lookup_status" in', cleanup)
+        self.assertIn('case "$latest_status" in', cleanup)
+        self.assertIn('release branch already absent before cleanup', cleanup)
+        self.assertIn('failed to resolve release branch before cleanup', cleanup)
+        self.assertIn('failed to resolve release branch after rejected leased deletion', cleanup)
 
     def test_legacy_fallback_authority_is_removed(self) -> None:
         workflow = self._closure_workflow()
