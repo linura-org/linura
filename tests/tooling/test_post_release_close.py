@@ -233,6 +233,63 @@ Terminal security evidence must be recorded only after final exact-head and rele
             self.assertIn("**Status:** released", milestone)
             self.assertIn("- [x] Protected proof-first/tag-last publication", milestone)
 
+    def test_closure_normalizes_evolved_pre_release_milestone_status_projection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._fixture(root)
+            milestone = root / "docs/milestones/v0.5.0.md"
+            text = milestone.read_text(encoding="utf-8")
+            milestone.write_text(
+                text.replace(
+                    "**Status:** release candidate; publication pending",
+                    "**Status:** implementation qualified; release-readiness finalization complete; terminal publication evidence remains controlled by the protected release lifecycle",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            post_release_close.close_release(Args(root))
+
+            updated = milestone.read_text(encoding="utf-8")
+            self.assertIn("**Status:** released", updated)
+            self.assertNotIn("release-readiness finalization complete", updated)
+
+    def test_closure_rejects_multiple_milestone_status_projection_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._fixture(root)
+            milestone = root / "docs/milestones/v0.5.0.md"
+            text = milestone.read_text(encoding="utf-8")
+            status = "**Status:** release candidate; publication pending"
+            milestone.write_text(text.replace(status, f"{status}\n{status}", 1), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                post_release_close.ClosureError,
+                "expected exactly one Status field, found 2",
+            ):
+                post_release_close.close_release(Args(root))
+
+    def test_closure_rejects_released_milestone_projection_when_machine_state_is_pending(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._fixture(root)
+            milestone = root / "docs/milestones/v0.5.0.md"
+            text = milestone.read_text(encoding="utf-8")
+            milestone.write_text(
+                text.replace(
+                    "**Status:** release candidate; publication pending",
+                    "**Status:** released",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                post_release_close.ClosureError,
+                "already released while machine roadmap still requires closure",
+            ):
+                post_release_close.close_release(Args(root))
+
     def test_terminal_provenance_uses_full_canonical_commit_url(self) -> None:
         args = Args(Path("."))
         url = f"https://github.com/linura-org/linura/commit/{args.source_sha}"
