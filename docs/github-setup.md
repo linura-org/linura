@@ -52,12 +52,10 @@ Prefer organization teams as CODEOWNERS once they exist, for example `@linura-or
 ## Actions
 
 - Set workflow permissions to read-only by default; grant writes per job only when the job requires them.
-- Do not allow unreviewed forks to obtain repository or environment secrets.
+- Do not allow unreviewed forks to obtain repository or App private-key secrets.
 - Keep every third-party action pinned to an immutable full commit SHA. Repository validation fails if a workflow introduces a floating action ref.
-- Create an environment named `release` before publishing supported artifacts.
-- In the automatic proof-first release mode, **do not configure required reviewers on the `release` environment**. The reviewed `release: ready` merge is the final semantic/manual gate; Trusted Release Proof plus Promotion are the machine-verifiable publication gate.
-- Restrict the `release` environment to the protected default branch and keep any publication credentials scoped to that environment and unavailable to ordinary CI or pull-request jobs.
-- If a future policy requires a second human approval immediately before publication, treat that as an explicit change to the release contract and to the "automatic after readiness" claim rather than silently adding an environment reviewer.
+- The automatic Release job deliberately has **no GitHub Environment dependency**. This prevents a repository-environment reviewer from becoming a hidden manual gate after reviewed readiness.
+- If a future publication credential requires an Environment, introduce it only together with an explicit release-contract change proving the environment has no human reviewer in automatic mode, or acknowledge that the lifecycle is no longer automatic after readiness.
 
 ## Dedicated Linura Release GitHub App
 
@@ -102,7 +100,7 @@ Before any public Linura release:
 - each downloaded asset must pass `gh release verify-asset` in addition to Linura's own checksum/evidence and build-provenance checks;
 - the release tag must remain bound to the verified candidate source;
 - rollback/recovery acceptance testing must satisfy the version's declared claim class;
-- when automatic proof-first publication is enabled, the `release` environment must not require a reviewer after the reviewed readiness merge.
+- there must be no environment/reviewer approval between Promotion and automatic publication.
 
 Do not treat successful upload/publication as release completion. If GitHub reports the published release as non-immutable, or independent verification does not complete successfully, the version has not satisfied Linura's publication contract.
 
