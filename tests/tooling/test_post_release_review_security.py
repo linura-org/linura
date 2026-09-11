@@ -9,6 +9,7 @@ CLOSURE = ROOT / ".github/workflows/post-release-closure.yml"
 CLEANUP = ROOT / ".github/workflows/post-release-cleanup.yml"
 CLEANUP_TOOL = ROOT / "tools/release_branch_cleanup.py"
 NATIVE_GATE_TOOL = ROOT / "tools/release_native_gates.py"
+CI = ROOT / ".github/workflows/ci.yml"
 
 
 class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
@@ -51,6 +52,7 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
         )[1].split("- name: Confirm event-driven terminal cleanup handoff", 1)[0]
         self.assertIn("tools/release_native_gates.py", merge)
         self.assertIn("--timeout-seconds 0", merge)
+        self.assertIn('test "$BRANCH" = "automation/post-release-${RELEASE_TAG}-${HEAD_SHA}"', merge)
         self.assertIn('test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)" = "$HEAD_SHA"', merge)
         self.assertIn("'.parents | length'", merge)
         self.assertIn("'.parents[0].sha'", merge)
@@ -70,6 +72,11 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
         self.assertIn("tools/release_native_gates.py", cleanup)
         self.assertIn("commit --event push", cleanup)
 
+    def test_main_ci_does_not_cancel_exact_closure_gate_runs(self) -> None:
+        ci = CI.read_text(encoding="utf-8")
+        self.assertIn("group: ci-${{ github.ref }}", ci)
+        self.assertIn("cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}", ci)
+
     def test_cleanup_authority_is_immutable_closure_commit_and_ancestry(self) -> None:
         cleanup = self._cleanup()
         self.assertIn('CLOSURE_SHA: ${{ github.event.workflow_run.head_sha }}', cleanup)
@@ -79,7 +86,7 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
         self.assertIn('git show "$CLOSURE_SHA:contracts/release-branch-cleanup.toml"', cleanup)
         self.assertNotIn('test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$CLOSURE_SHA"', cleanup)
 
-    def test_cleanup_uses_narrow_app_token_and_exact_ref_leases(self) -> None:
+    def test_cleanup_uses_narrow_app_token_and_atomic_exact_ref_leases(self) -> None:
         workflow = self._cleanup()
         self.assertIn("Mint cleanup-scoped Release App token", workflow)
         self.assertIn("permission-contents: write", workflow)
@@ -93,16 +100,18 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
             "automation/release-reprepare-",
             "automation/release-authorization-",
             "automation/post-release-",
-            "verify-release/",
         ):
             self.assertIn(marker, tool)
-        self.assertIn('name.startswith("tmp/")', tool)
+        self.assertNotIn("verify-release/", tool)
         self.assertIn("expected_sha", tool)
+        self.assertIn("sha-addressed-automation", tool)
+        self.assertIn("explicit-ledger", tool)
         self.assertIn("_open_pr_count", tool)
         self.assertIn("preserved open-PR branch", tool)
-        self.assertIn("preserved moved legacy branch", tool)
+        self.assertIn("preserved moved branch", tool)
         self.assertIn("preserved concurrently moved branch", tool)
-        self.assertGreaterEqual(tool.count("_ref_sha(repository, candidate.name, token)"), 2)
+        self.assertIn("--force-with-lease=", tool)
+        self.assertIn("_atomic_delete", tool)
         self.assertNotIn("tmp/{re.escape(series)}", tool)
         self.assertNotIn("cleanup|compact|minimal|review|release", tool)
         self.assertNotIn('"fix/"', tool)
