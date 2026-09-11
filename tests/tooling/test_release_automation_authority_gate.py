@@ -186,14 +186,15 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
                 credential_source="github-app",
             )
 
-    def test_release_contract_docs_require_live_contents_probe(self) -> None:
+    def test_release_contract_docs_require_live_non_mutating_authority_probe(self) -> None:
         guide = (ROOT / "agents/skills/release.md").read_text(encoding="utf-8")
         engineering = (ROOT / "docs/release-engineering.md").read_text(encoding="utf-8")
         for text in (guide, engineering):
-            self.assertIn("204", text)
-            self.assertIn("merge", text.casefold())
             self.assertIn("LINURA_RELEASE_APP_CLIENT_ID", text)
             self.assertIn("LINURA_RELEASE_APP_PRIVATE_KEY", text)
+            self.assertIn("non-mutating", text)
+        self.assertIn("204", engineering)
+        self.assertIn("merge", engineering.casefold())
 
     def test_release_promotion_preflights_release_app_before_publication(self) -> None:
         workflow = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
@@ -227,6 +228,12 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
         self.assertNotIn("actions/create-github-app-token", dispatch)
         self.assertNotIn("contents: write", dispatch)
         self.assertNotIn("pull-requests: write", dispatch)
+
+    def test_publication_has_no_hidden_environment_approval(self) -> None:
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        publish = workflow.split("\n  publish:", 1)[1].split("\n  verification-dispatch:", 1)[0]
+        self.assertIn("contents: write", publish)
+        self.assertNotIn("environment:", publish)
 
     def test_normal_publication_still_dispatches_exact_tag_verification(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
