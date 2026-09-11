@@ -86,6 +86,8 @@ For v0.6 the distributable binary set includes `linura-authorityd` and excludes 
 
 A successful CI run, an earlier PR-head VM run, or a reproducible build cannot individually substitute for the exact-source qualification graph.
 
+Canonical-gate discovery binds CI, Security and CodeQL evidence by the immutable workflow file path plus exact source SHA, event and terminal conclusion. GitHub's run `name` is display metadata and may be replaced by `run-name` (including the nonce-correlated titles used by release-owned dispatches), so it is never treated as workflow identity.
+
 ### SHA changes invalidate exact-source evidence
 
 Rebase, history compaction, amend, force-update or any other content/history change that produces a new candidate SHA invalidates exact-source release evidence for the old SHA.
