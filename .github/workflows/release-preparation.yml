@@ -99,6 +99,7 @@ jobs:
             --notes "docs/releases/${tag}.md"
 
           prs="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/commits/$SOURCE_SHA/pulls")"
+          # shellcheck disable=SC2016
           pr_number="$(jq -r --arg sha "$SOURCE_SHA" --arg subject "$subject" '
             [.[] | select(
               .merged_at != null and
@@ -184,7 +185,7 @@ jobs:
             --timeout-seconds 1800 \
             commit --event push
 
-      - name: Build or re-prove deterministic mechanical preparation
+      - name: Build or re-prove SHA-addressed mechanical preparation
         id: candidate
         env:
           GH_TOKEN: ${{ steps.release_app.outputs.token }}
@@ -209,19 +210,30 @@ jobs:
           test "${changed[0]}" = "Cargo.lock"
           test "${changed[1]}" = "Cargo.toml"
 
-          branch="automation/release-prep-${RELEASE_TAG}-${SOURCE_SHA:0:12}"
           title="release: prepare $RELEASE_TAG $RELEASE_THEME"
+          existing_json="$(gh pr list --state open --base main --json number,title,headRefName,headRefOid)"
+          # shellcheck disable=SC2016
+          existing="$(jq -c --arg title "$title" '[.[] | select(.title == $title)] | first // empty' <<<"$existing_json")"
 
           verify_candidate() {
-            local candidate_sha="$1"
+            local pr_number="$1"
+            local candidate_sha="$2"
+            local candidate_branch="$3"
+            [[ "$pr_number" =~ ^[0-9]+$ ]]
             [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ ]]
-            test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" --jq .object.sha)" = "$candidate_sha"
-            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" --force
-            test "$(git rev-parse "refs/remotes/origin/$branch")" = "$candidate_sha"
+            test "$candidate_branch" = "automation/release-prep-${RELEASE_TAG}-${candidate_sha}"
+            test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$candidate_branch" --jq .object.sha)" = "$candidate_sha"
+            pr_payload="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr_number")"
+            test "$(jq -r .base.sha <<<"$pr_payload")" = "$SOURCE_SHA"
+            test "$(jq -r .head.sha <<<"$pr_payload")" = "$candidate_sha"
+            test "$(jq -r .head.ref <<<"$pr_payload")" = "$candidate_branch"
+            test "$(jq -r .title <<<"$pr_payload")" = "$title"
+            test "$(jq -r .changed_files <<<"$pr_payload")" = "2"
             candidate_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$candidate_sha")"
             test "$(jq '.parents | length' <<<"$candidate_payload")" = "1"
             test "$(jq -r '.parents[0].sha' <<<"$candidate_payload")" = "$SOURCE_SHA"
             test "$(jq -r '.message | split("\n")[0]' <<<"$candidate_payload")" = "$title"
+            git fetch origin "refs/heads/$candidate_branch:refs/remotes/origin/$candidate_branch" --force
             mapfile -t candidate_changed < <(git diff --name-only "$SOURCE_SHA" "$candidate_sha")
             test "${#candidate_changed[@]}" -eq 2
             test "${candidate_changed[0]}" = "Cargo.lock"
@@ -230,19 +242,13 @@ jobs:
             git show "$candidate_sha:Cargo.lock" | cmp - Cargo.lock
           }
 
-          existing_json="$(gh pr list --state open --base main --json number,title,headRefName,headRefOid)"
-          existing="$(jq -c --arg title "$title" '[.[] | select(.title == $title)] | first // empty' <<<"$existing_json")"
           if [[ -n "$existing" ]]; then
-            test "$(jq -r .headRefName <<<"$existing")" = "$branch"
             pr_number="$(jq -r .number <<<"$existing")"
             head_sha="$(jq -r .headRefOid <<<"$existing")"
-            verify_candidate "$head_sha"
-            test "$(gh pr view "$pr_number" --json changedFiles --jq .changedFiles)" = "2"
+            branch="$(jq -r .headRefName <<<"$existing")"
+            verify_candidate "$pr_number" "$head_sha" "$branch"
           else
-            if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1; then
-              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
-            fi
-            git switch -c "$branch"
+            git switch --detach "$SOURCE_SHA"
             app_user_id="$(gh api "users/${RELEASE_APP_SLUG}[bot]" --jq .id)"
             [[ "$app_user_id" =~ ^[0-9]+$ ]]
             git config user.name "${RELEASE_APP_SLUG}[bot]"
@@ -250,9 +256,10 @@ jobs:
             git add Cargo.toml Cargo.lock
             git commit -m "$title"
             head_sha="$(git rev-parse HEAD)"
+            [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+            branch="automation/release-prep-${RELEASE_TAG}-${head_sha}"
             gh auth setup-git
-            git push --set-upstream origin "$branch"
-            verify_candidate "$head_sha"
+            git push origin "HEAD:refs/heads/$branch"
 
             cat > "$RUNNER_TEMP/body.md" <<EOF
           Deterministic mechanical preparation for reviewed release-readiness source \`$SOURCE_SHA\`.
@@ -263,8 +270,7 @@ jobs:
           EOF
             url="$(gh pr create --base main --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/body.md")"
             pr_number="${url##*/}"
-            [[ "$pr_number" =~ ^[0-9]+$ ]]
-            test "$(gh pr view "$pr_number" --json changedFiles --jq .changedFiles)" = "2"
+            verify_candidate "$pr_number" "$head_sha" "$branch"
           fi
 
           {
@@ -300,6 +306,7 @@ jobs:
           BRANCH: ${{ steps.candidate.outputs.branch }}
         run: |
           set -euo pipefail
+          test "$BRANCH" = "automation/release-prep-${RELEASE_TAG}-${HEAD_SHA}"
           python3 tools/release_native_gates.py \
             --repository "$GITHUB_REPOSITORY" \
             --head-sha "$HEAD_SHA" \
@@ -311,8 +318,6 @@ jobs:
             --expected-changed-files 2
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)" = "$HEAD_SHA"
-          git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" --force
-          test "$(git rev-parse "refs/remotes/origin/$BRANCH")" = "$HEAD_SHA"
 
           candidate_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$HEAD_SHA")"
           test "$(jq '.parents | length' <<<"$candidate_payload")" = "1"
@@ -323,8 +328,6 @@ jobs:
           test "${#candidate_changed[@]}" -eq 2
           test "${candidate_changed[0]}" = "Cargo.lock"
           test "${candidate_changed[1]}" = "Cargo.toml"
-          git show "$HEAD_SHA:Cargo.toml" | cmp - Cargo.toml
-          git show "$HEAD_SHA:Cargo.lock" | cmp - Cargo.lock
           candidate_tree="$(jq -r .tree.sha <<<"$candidate_payload")"
 
           result="$(gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
@@ -342,7 +345,6 @@ jobs:
           test "$(jq -r '.parents[0].sha' <<<"$merged")" = "$SOURCE_SHA"
           test "$(jq -r .tree.sha <<<"$merged")" = "$candidate_tree"
           test "$(jq -r '.message | split("\n")[0]' <<<"$merged")" = "$title"
-          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" >/dev/null 2>&1 || true
           printf 'main_sha=%s\n' "$main_sha" >> "$GITHUB_OUTPUT"
 
       - name: Confirm event-driven authorization handoff
