@@ -227,48 +227,51 @@ jobs:
             --head main \
             --credential-source github-app
 
-      - name: Commit or re-prove deterministic closure commit
+      - name: Commit or re-prove SHA-addressed deterministic closure
         if: steps.state.outputs.state == 'pending'
         id: commit
         env:
           GH_TOKEN: ${{ steps.release_app.outputs.token }}
           RELEASE_APP_SLUG: ${{ steps.release_app.outputs.app-slug }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          VERIFICATION_RUN_ID: ${{ steps.release.outputs.verification_run_id }}
           BASE_SHA: ${{ steps.release.outputs.base_sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$BASE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"
 
-          branch="automation/post-release-${RELEASE_TAG}-${VERIFICATION_RUN_ID}"
           title="chore: close $RELEASE_TAG release state"
           git add --all
           test -n "$(git diff --cached --name-only)"
           expected_tree="$(git write-tree)"
           [[ "$expected_tree" =~ ^[0-9a-f]{40}$ ]]
 
-          if branch_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" 2>/dev/null)"; then
-            head_sha="$(jq -r .object.sha <<<"$branch_payload")"
+          existing_json="$(gh pr list --state open --base main --json number,title,headRefName,headRefOid)"
+          # shellcheck disable=SC2016
+          existing="$(jq -c --arg title "$title" '[.[] | select(.title == $title)] | first // empty' <<<"$existing_json")"
+          if [[ -n "$existing" ]]; then
+            head_sha="$(jq -r .headRefOid <<<"$existing")"
+            branch="$(jq -r .headRefName <<<"$existing")"
             [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
-            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" --force
-            test "$(git rev-parse "origin/$branch")" = "$head_sha"
+            test "$branch" = "automation/post-release-${RELEASE_TAG}-${head_sha}"
             candidate="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$head_sha")"
             test "$(jq '.parents | length' <<<"$candidate")" = "1"
             test "$(jq -r '.parents[0].sha' <<<"$candidate")" = "$BASE_SHA"
             test "$(jq -r .tree.sha <<<"$candidate")" = "$expected_tree"
             test "$(jq -r '.message | split("\n")[0]' <<<"$candidate")" = "$title"
           else
-            git switch -c "$branch"
+            git switch --detach "$BASE_SHA"
             app_user_id="$(gh api "users/${RELEASE_APP_SLUG}[bot]" --jq .id)"
             [[ "$app_user_id" =~ ^[0-9]+$ ]]
             git config user.name "${RELEASE_APP_SLUG}[bot]"
             git config user.email "${app_user_id}+${RELEASE_APP_SLUG}[bot]@users.noreply.github.com"
             git commit -m "$title"
             head_sha="$(git rev-parse HEAD)"
+            [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
             test "$(git rev-parse 'HEAD^{tree}')" = "$expected_tree"
+            branch="automation/post-release-${RELEASE_TAG}-${head_sha}"
             gh auth setup-git
-            git push --set-upstream origin "$branch"
+            git push origin "HEAD:refs/heads/$branch"
           fi
 
           printf 'branch=%s\n' "$branch" >> "$GITHUB_OUTPUT"
@@ -285,6 +288,7 @@ jobs:
           VERIFICATION_RUN_ID: ${{ steps.release.outputs.verification_run_id }}
         run: |
           set -euo pipefail
+          test "$BRANCH" = "automation/post-release-${RELEASE_TAG}-${HEAD_SHA}"
           title="chore: close $RELEASE_TAG release state"
           existing="$(gh pr list --state open --base main --head "$BRANCH" --limit 10 --json number,title,headRefName,headRefOid,baseRefName)"
           count="$(jq 'length' <<<"$existing")"
@@ -322,6 +326,8 @@ jobs:
           BASE_SHA: ${{ steps.release.outputs.base_sha }}
         run: |
           set -euo pipefail
+          changed_files="$(gh pr view "$PR_NUMBER" --json changedFiles --jq .changedFiles)"
+          [[ "$changed_files" =~ ^[1-9][0-9]*$ ]]
           python3 tools/release_native_gates.py \
             --repository "$GITHUB_REPOSITORY" \
             --head-sha "$HEAD_SHA" \
@@ -330,7 +336,7 @@ jobs:
             pr \
             --pr-number "$PR_NUMBER" \
             --base-sha "$BASE_SHA" \
-            --expected-changed-files "$(gh pr view "$PR_NUMBER" --json changedFiles --jq .changedFiles)"
+            --expected-changed-files "$changed_files"
 
       - name: Re-prove and squash merge exact deterministic closure
         if: steps.state.outputs.state == 'pending'
@@ -344,6 +350,7 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
+          test "$BRANCH" = "automation/post-release-${RELEASE_TAG}-${HEAD_SHA}"
           changed_files="$(gh pr view "$PR_NUMBER" --json changedFiles --jq .changedFiles)"
           [[ "$changed_files" =~ ^[1-9][0-9]*$ ]]
           python3 tools/release_native_gates.py \
@@ -377,7 +384,6 @@ jobs:
           test "$(jq '.parents | length' <<<"$merged")" = "1"
           test "$(jq -r '.parents[0].sha' <<<"$merged")" = "$BASE_SHA"
           test "$(jq -r .tree.sha <<<"$merged")" = "$candidate_tree"
-          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" >/dev/null 2>&1 || true
           printf 'main_sha=%s\n' "$main_sha" >> "$GITHUB_OUTPUT"
 
       - name: Confirm event-driven terminal cleanup handoff
