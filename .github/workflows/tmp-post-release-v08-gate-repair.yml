@@ -37,21 +37,20 @@ jobs:
 
           source = Path("tools/post_release_close.py")
           text = source.read_text(encoding="utf-8")
-          anchor = '''    "trusted release proof reruns all mandatory inherited v0.4/v0.5 qualifications plus the v0.6 qualification against the exact release authorization": frozenset(
-              {"proof"}
-          ),
-          '''
-          replacement = anchor + '''    "trusted release proof includes v0.8 qualification and succeeds": frozenset({"proof", "qualification"}),
-              "metadata-only release authorization preserves the reviewed implementation tree": frozenset({"authorization"}),
-          '''
+          anchor = '    "independent binary reproduction succeeds": frozenset({"reproduction"}),\n'
+          additions = (
+              '    "trusted release proof includes v0.8 qualification and succeeds": '
+              'frozenset({"proof", "qualification"}),\n'
+              '    "metadata-only release authorization preserves the reviewed implementation tree": '
+              'frozenset({"authorization"}),\n'
+          )
           if text.count(anchor) != 1:
               raise SystemExit(f"expected one release-control mapping anchor, found {text.count(anchor)}")
-          source.write_text(text.replace(anchor, replacement, 1), encoding="utf-8")
+          source.write_text(text.replace(anchor, additions + anchor, 1), encoding="utf-8")
 
           tests = Path("tests/tooling/test_post_release_close.py")
           test_text = tests.read_text(encoding="utf-8")
-          marker = '''    def test_terminal_provenance_uses_full_canonical_commit_url(self) -> None:
-          '''
+          marker = '    def test_terminal_provenance_uses_full_canonical_commit_url(self) -> None:\n'
           insertion = '''    def test_actual_v08_release_gate_maps_all_terminal_evidence_criteria(self) -> None:
               milestone = (ROOT / "docs/milestones/v0.8.0.md").read_text(encoding="utf-8")
               updated = post_release_close.close_release_control_criteria(milestone, "v0.8.0")
