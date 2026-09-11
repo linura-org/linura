@@ -290,6 +290,21 @@ Terminal security evidence must be recorded only after final exact-head and rele
             ):
                 post_release_close.close_release(Args(root))
 
+    def test_actual_v08_release_gate_maps_all_terminal_evidence_criteria(self) -> None:
+        milestone = (ROOT / "docs/milestones/v0.8.0.md").read_text(encoding="utf-8")
+        updated = post_release_close.close_release_control_criteria(milestone, "v0.8.0")
+        gate = updated.split("## Release gate", 1)[1].split("## ", 1)[0]
+
+        self.assertNotIn("- [ ]", gate)
+        self.assertIn("- [x] Trusted Release Proof includes v0.8 qualification and succeeds;", gate)
+        self.assertIn(
+            "- [x] metadata-only release authorization preserves the reviewed implementation tree;",
+            gate,
+        )
+        self.assertIn("- [x] tag-last publication succeeds;", gate)
+        self.assertIn("- [x] independent published-release verification succeeds;", gate)
+        self.assertIn("- [x] post-release closure advances machine roadmap state", gate)
+
     def test_terminal_provenance_uses_full_canonical_commit_url(self) -> None:
         args = Args(Path("."))
         url = f"https://github.com/linura-org/linura/commit/{args.source_sha}"

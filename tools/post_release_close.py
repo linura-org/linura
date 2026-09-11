@@ -22,6 +22,8 @@ RELEASE_CONTROL_CRITERIA: dict[str, frozenset[str]] = {
     "trusted release proof reruns all mandatory inherited v0.4/v0.5 qualifications plus the v0.6 qualification against the exact release authorization": frozenset(
         {"proof"}
     ),
+    "trusted release proof includes v0.8 qualification and succeeds": frozenset({"proof", "qualification"}),
+    "metadata-only release authorization preserves the reviewed implementation tree": frozenset({"authorization"}),
     "independent binary reproduction succeeds": frozenset({"reproduction"}),
     "tag-last publication succeeds": frozenset({"publication"}),
     "independent published-release verification succeeds": frozenset({"verification"}),
