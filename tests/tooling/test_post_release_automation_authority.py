@@ -147,7 +147,7 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertNotIn("dispatch-boundaries.tsv", fresh_block)
         self.assertNotIn(".id > $boundary", fresh_block)
 
-    def test_cleanup_is_limited_to_owned_namespaces_and_exact_legacy_provenance(self) -> None:
+    def test_cleanup_is_limited_to_owned_namespaces_exact_legacy_provenance_and_atomic_leases(self) -> None:
         workflow = self._closure_workflow()
         cleanup = workflow.split("- name: Delete obsolete release-scoped branches", 1)[1]
         self.assertIn("automation/release-prep-", cleanup)
@@ -159,8 +159,14 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn('item.get("release") != tag', cleanup)
         self.assertIn('name.startswith("tmp/")', cleanup)
         self.assertIn('re.fullmatch(r"[0-9a-f]{40}", expected_sha)', cleanup)
-        self.assertIn('current_sha" != "$expected_sha"', cleanup)
+        self.assertIn('lease_sha="$expected_sha"', cleanup)
+        self.assertIn('current_sha" != "$lease_sha"', cleanup)
         self.assertIn("preserving legacy branch whose ref moved", cleanup)
+        self.assertIn('git check-ref-format --branch "$branch"', cleanup)
+        self.assertIn('git push --force-with-lease="$ref:$lease_sha" origin ":$ref"', cleanup)
+        self.assertIn("preserving branch moved during cleanup lease", cleanup)
+        self.assertIn("failed to delete unchanged release branch under exact SHA lease", cleanup)
+        self.assertNotIn('gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"', cleanup)
         self.assertNotIn("series =", cleanup)
         self.assertNotIn("(cleanup|compact|minimal|review|release)", cleanup)
         self.assertNotIn('branch == "tmp/zero-diff-authorization-probe"', cleanup)
