@@ -161,15 +161,25 @@ def prepare(root: Path, tag: str) -> list[str]:
     current_version = workspace_package.get("version")
     if not isinstance(current_version, str):
         raise PreparationError("workspace.package.version must be a string")
+
+    package_names = _workspace_package_names(root, workspace)
+    lock_text = lock_path.read_text(encoding="utf-8")
+
+    # Release preparation is deliberately idempotent. A retry/recovery may start from
+    # an exact reviewed tree whose workspace metadata was already advanced by an
+    # earlier preparation attempt. In that case we still fully validate Cargo.lock
+    # coherence and return a zero-change result; the workflow records a zero-diff,
+    # SHA-addressed preparation handoff instead of mutating the reviewed tree.
     if current_version == target_version:
-        raise PreparationError(f"workspace is already at release version {target_version}")
+        lock_verified = _rewrite_lock(lock_text, package_names, target_version, target_version)
+        if lock_verified != lock_text:
+            raise PreparationError("idempotent release preparation unexpectedly changed Cargo.lock")
+        return []
+
     if _version_tuple(target_version) <= _version_tuple(current_version):
         raise PreparationError(
             f"release version must advance monotonically: {current_version} -> {target_version}"
         )
-
-    package_names = _workspace_package_names(root, workspace)
-    lock_text = lock_path.read_text(encoding="utf-8")
 
     cargo_updated = _replace_workspace_version(cargo_text, current_version, target_version)
     lock_updated = _rewrite_lock(lock_text, package_names, current_version, target_version)
@@ -189,7 +199,10 @@ def prepare(root: Path, tag: str) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Apply Linura's deterministic mechanical release-preparation version bump."
+        description=(
+            "Apply Linura's deterministic release-preparation version bump, or validate an "
+            "already-prepared target version idempotently."
+        )
     )
     parser.add_argument("--tag", required=True)
     parser.add_argument("--root", default=".")
