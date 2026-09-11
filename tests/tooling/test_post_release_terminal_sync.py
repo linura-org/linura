@@ -113,29 +113,31 @@ none
             )
             self.assertNotIn("v0.6.0.md)- [v0.5.0", updated)
 
-    def test_release_workflows_require_repository_authority_and_deterministic_closure(self) -> None:
+    def test_release_workflows_require_release_app_native_gates_and_deterministic_closure(self) -> None:
         closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
+        cleanup = (ROOT / ".github/workflows/post-release-cleanup.yml").read_text(encoding="utf-8")
         promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
 
         self.assertIn("tools/post_release_terminal_sync.py", closure)
-        self.assertIn("--credential-source github", closure)
-        self.assertIn("token: ${{ github.token }}", closure)
-        self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", closure)
+        self.assertIn("--credential-source github-app", closure)
+        self.assertIn("actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1", closure)
+        self.assertIn("tools/release_native_gates.py", closure)
         self.assertNotIn("@codex review", closure)
         self.assertNotIn("chatgpt-codex-connector", closure)
-        self.assertIn("event=workflow_dispatch", closure)
-        self.assertGreaterEqual(closure.count("gh api graphql --paginate"), 2)
-        self.assertGreaterEqual(closure.count("$endCursor:String"), 2)
-        self.assertGreaterEqual(closure.count("reviewThreads(first:100, after:$endCursor)"), 2)
-        self.assertGreaterEqual(closure.count("pageInfo { hasNextPage endCursor }"), 2)
-        self.assertIn('test "$unresolved" = "0"', closure)
-        self.assertIn("deterministic closure proof", closure)
+        self.assertNotIn("release_workflow_dispatch.py", closure)
         self.assertIn('pulls/$PR_NUMBER/merge', closure)
         self.assertNotIn('gh pr merge "$PR_NUMBER"', closure)
+        self.assertIn("post-release-cleanup.yml", closure)
 
-        self.assertIn("GH_TOKEN: ${{ github.token }}", promotion)
-        self.assertIn("--credential-source github", promotion)
-        self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", promotion)
+        self.assertIn("workflow_run:", cleanup)
+        self.assertIn("tools/release_native_gates.py", cleanup)
+        self.assertIn("tools/release_branch_cleanup.py", cleanup)
+        self.assertIn("permission-contents: write", cleanup)
+        self.assertIn("permission-pull-requests: read", cleanup)
+
+        self.assertIn("actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1", promotion)
+        self.assertIn("--credential-source github-app", promotion)
+        self.assertIn("prove Release App closure authority before publication", promotion)
 
 
 if __name__ == "__main__":
