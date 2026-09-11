@@ -62,7 +62,7 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
         self.assertIn('pulls/$PR_NUMBER/merge', merge)
         self.assertIn("deterministic closure proof", merge)
 
-    def test_cleanup_requires_owned_namespace_exact_ledger_target_lease_and_final_main_authority(self) -> None:
+    def test_cleanup_requires_owned_namespace_exact_ledger_target_lease_and_immutable_final_main_authority(self) -> None:
         cleanup = self._cleanup_block()
         self.assertIn("automation/release-prep-", cleanup)
         self.assertIn("automation/release-reprepare-", cleanup)
@@ -71,10 +71,13 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
         self.assertIn("verify-release/", cleanup)
         self.assertIn("contracts/release-branch-cleanup.toml", cleanup)
         self.assertIn('MAIN_SHA: ${{ steps.final_main.outputs.main_sha }}', cleanup)
+        self.assertIn('git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main" --force', cleanup)
+        self.assertIn('git cat-file -e "$MAIN_SHA^{commit}"', cleanup)
+        self.assertIn('git merge-base --is-ancestor "$MAIN_SHA" refs/remotes/origin/main', cleanup)
         self.assertIn('git show "$MAIN_SHA:contracts/release-branch-cleanup.toml"', cleanup)
-        self.assertIn('test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"', cleanup)
-        self.assertIn('authority_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"', cleanup)
-        self.assertIn('test "$authority_sha" = "$MAIN_SHA"', cleanup)
+        self.assertNotIn('test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"', cleanup)
+        self.assertNotIn('authority_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"', cleanup)
+        self.assertNotIn('test "$authority_sha" = "$MAIN_SHA"', cleanup)
         self.assertIn('cleanup_contract.get("schema_version") != 1', cleanup)
         self.assertIn('item.get("release") != tag', cleanup)
         self.assertIn('name.startswith("tmp/")', cleanup)
