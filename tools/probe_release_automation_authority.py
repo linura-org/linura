@@ -19,10 +19,31 @@ class AuthorityProbeError(RuntimeError):
 
 
 def _credential_name(credential_source: str) -> str:
+    names = {
+        "github": "repository GITHUB_TOKEN",
+        "github-app": "dedicated Linura Release GitHub App token",
+        "dedicated": "dedicated RELEASE_AUTOMATION_TOKEN",
+    }
+    try:
+        return names[credential_source]
+    except KeyError as error:
+        raise AuthorityProbeError(f"unsupported credential source: {credential_source!r}") from error
+
+
+def _missing_permission_guidance(credential_source: str, permission: str) -> str:
+    if credential_source == "github-app":
+        return (
+            f"Linura Release GitHub App lacks {permission}; grant only Actions write, Contents write, "
+            "and Pull requests write to the repository installation, then approve the installation permission update"
+        )
+    if credential_source == "dedicated":
+        return (
+            f"RELEASE_AUTOMATION_TOKEN lacks {permission}; grant Pull requests write, Contents write, "
+            "and Actions write access to this repository"
+        )
     return (
-        "dedicated RELEASE_AUTOMATION_TOKEN"
-        if credential_source == "dedicated"
-        else "repository GITHUB_TOKEN"
+        f"repository GITHUB_TOKEN lacks {permission}; keep the corresponding isolated job permission and verify "
+        "the repository/organization Actions policy permits it"
     )
 
 
@@ -48,12 +69,8 @@ def validate_contents_probe_response(*, status: int, credential_source: str) -> 
         return _credential_name(credential_source)
 
     if status in {403, 404}:
-        if credential_source == "dedicated":
-            raise AuthorityProbeError(
-                "RELEASE_AUTOMATION_TOKEN cannot access the repository merge endpoint; grant Contents write in addition to Pull requests write and Actions write"
-            )
         raise AuthorityProbeError(
-            "repository GITHUB_TOKEN cannot access the repository merge endpoint with Contents write; keep contents: write on the isolated readiness/closure job and verify organization/repository Actions policy permits it"
+            _missing_permission_guidance(credential_source, "Contents write")
         )
 
     if 200 <= status < 300:
@@ -84,12 +101,12 @@ def validate_pr_probe_response(
         )
 
     if status == 403:
-        if credential_source == "dedicated":
+        if credential_source == "github":
             raise AuthorityProbeError(
-                "RELEASE_AUTOMATION_TOKEN cannot create pull requests; grant Pull requests write, Contents write, and Actions write access to this repository"
+                "GitHub Actions cannot create pull requests with repository GITHUB_TOKEN; release mutation PRs must use the dedicated Linura Release GitHub App so native PR workflows run without approval"
             )
         raise AuthorityProbeError(
-            "GitHub Actions cannot create pull requests; enable Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests, or configure RELEASE_AUTOMATION_TOKEN with Pull requests, Contents, and Actions write access"
+            _missing_permission_guidance(credential_source, "Pull requests write")
         )
 
     if 200 <= status < 300:
@@ -113,12 +130,8 @@ def validate_actions_probe_response(
         )
 
     if status in {403, 404}:
-        if credential_source == "dedicated":
-            raise AuthorityProbeError(
-                "RELEASE_AUTOMATION_TOKEN cannot dispatch repository workflows; grant Actions write in addition to Pull requests write and Contents write"
-            )
         raise AuthorityProbeError(
-            "repository GITHUB_TOKEN cannot dispatch repository workflows with the requested readiness permissions; keep actions: write on the readiness/closure job and verify Actions policy permits it"
+            _missing_permission_guidance(credential_source, "Actions write")
         )
 
     if 200 <= status < 300:
@@ -159,8 +172,10 @@ def probe(*, repository: str, token: str, base: str, head: str, credential_sourc
         raise AuthorityProbeError("repository must be in owner/name form")
     if not token:
         raise AuthorityProbeError("GH_TOKEN is required")
-    if credential_source not in {"github", "dedicated"}:
-        raise AuthorityProbeError("credential source must be 'github' or 'dedicated'")
+    if credential_source not in {"github", "github-app", "dedicated"}:
+        raise AuthorityProbeError(
+            "credential source must be 'github', 'github-app', or 'dedicated'"
+        )
     if base != head:
         raise AuthorityProbeError(
             "authority probe requires identical base/head so its merge and PR checks cannot create repository state"
@@ -216,7 +231,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Non-mutating proof that the release-automation credential has the Contents-write, "
-            "pull-request-create, and Actions-dispatch capabilities required by protected post-release closure."
+            "pull-request-create, and Actions-dispatch capabilities required by the protected release lifecycle."
         )
     )
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
@@ -224,9 +239,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--head", default="main")
     parser.add_argument(
         "--credential-source",
-        choices=("github", "dedicated"),
+        choices=("github", "github-app", "dedicated"),
         required=True,
-        help="Which credential supplied GH_TOKEN: repository GITHUB_TOKEN or dedicated RELEASE_AUTOMATION_TOKEN.",
+        help=(
+            "Which credential supplied GH_TOKEN: repository GITHUB_TOKEN, dedicated Linura Release GitHub App, "
+            "or legacy dedicated RELEASE_AUTOMATION_TOKEN."
+        ),
     )
     return parser.parse_args()
 

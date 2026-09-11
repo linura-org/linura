@@ -1,32 +1,133 @@
 # Release task guide
 
-Linura treats a release as a bounded claim plus exact-source evidence. Build candidate bytes once, prove them, then promote those same bytes and frozen notes. Release handoff authority is defined by [ADR 0027](../../docs/adr/0027-protected-release-handoff-automation.md) and its [release-automation threat-model extension](../../docs/threat-model-release-automation.md).
+Linura treats a release as a bounded claim plus exact-source evidence. Build candidate bytes once, prove them, promote those same bytes, publish tag-last, independently verify the publication, then close bookkeeping and clean only exact release-owned temporary refs. Release handoff authority is defined by [ADR 0027](../../docs/adr/0027-protected-release-handoff-automation.md) and its [release-automation threat model](../../docs/threat-model-release-automation.md).
+
+## One-time repository setup
+
+The automatic release control plane requires a dedicated **Linura Release GitHub App** installed only on `linura-org/linura`. It is the identity that creates and merges machine-owned release PRs so GitHub emits ordinary native `pull_request` and `push` workflow events instead of approval-gating recursive repository-`GITHUB_TOKEN` activity.
+
+Configure:
+
+- repository variable `LINURA_RELEASE_APP_CLIENT_ID` = the GitHub App client ID;
+- repository secret `LINURA_RELEASE_APP_PRIVATE_KEY` = the App private key;
+- installation repository access = only `linura-org/linura`;
+- repository permissions = **Actions: write**, **Contents: write**, **Pull requests: write**;
+- no organization administration permission, no secrets permission, no environment permission, and **no ruleset bypass**;
+- default-branch ruleset required approval count = **0** while App-created mechanical release PRs are part of the normal automatic path;
+- `release` environment has **no required reviewer** in automatic mode. It may still restrict deployment to protected `main` and hold publication-scoped credentials.
+
+The workflows mint short-lived installation tokens with `actions/create-github-app-token` pinned to an immutable commit. Cleanup requests a narrower token (`Contents: write`, `Pull requests: read`). The App private key is never passed to scripts or shell commands; only the token-minting action receives it.
+
+Every machine mutation phase proves the minted token non-mutatingly before use. Missing, ambiguous or under-permissioned authority fails closed. The App never bypasses protected `main`.
+
+## Semantic boundary
 
 - Start each version with `docs/milestones/vX.Y.Z.md`; close implementation and semantic release material before release preparation.
-- The final implementation-completion PR that is eligible to begin release machinery must merge with subject `release: ready vX.Y.Z — <implementation theme>`. That subject is explicit reviewed release-readiness authority; ordinary feature merges never self-promote into a release.
-- Before using the readiness subject, freeze `docs/releases/vX.Y.Z.md` with claim class, scope, security/authority boundary, migration/recovery compatibility, limitations and explicit non-goals, and provide the version qualification, security and release-review dossiers.
-- `Release Preparation` is automatic after the exact `release: ready ...` merge reaches protected `main` and fresh-main CI/Security/CodeQL succeed. It may change only `Cargo.toml` and `Cargo.lock`, opens `release: prepare vX.Y.Z <implementation theme>`, dispatches exact-head canonical checks, requests Codex review, and merges only after the exact head is green and review-complete. This is the last semantic review boundary before machine-only handoffs.
-- A retried/reused Release Preparation PR is not trusted by title or branch name. Its exact head is re-proved before reuse and immediately before merge as a single-parent child of the readiness source with exactly the two expected paths and byte-identical deterministic Cargo metadata.
-- `Release Authorization` is automatic after the reviewed `release: prepare ...` merge and fresh-main gates. It creates a single-parent metadata-only commit on a release-scoped branch, opens a protected metadata-only zero-diff authorization PR, explicitly dispatches exact-head canonical checks, requires zero unresolved review threads, and squash-merges with the exact `release: vX.Y.Z — <implementation theme>` subject plus `Reviewed-Source` / `Reviewed-Tree` trailers. Because the authorization PR is zero-diff and tree-identical to the already-reviewed preparation source, it does not require a conversational reviewer. It must never PATCH protected `main` directly or use branch-protection bypass authority.
-- A retried/reused authorization PR is re-proved before reuse and immediately before merge for exact base/head/branch, zero changed files, one exact parent, identical reviewed tree, exact authorization message/trailers, exact-head dispatched checks and zero unresolved review threads.
-- The resulting authorization commit must have exactly one parent (the reviewed preparation source), the identical Git tree, and exact reviewed-source/tree trailers. Any mismatch fails closed before proof.
-- After Release Authorization merges the exact authorization source, the authorization workflow explicitly dispatches and binds fresh exact-main CI/Security/CodeQL for that attempt, then directly dispatches Trusted Release Proof for the unchanged exact current `main`. `Release Proof Dispatch` is retained only as a duplicate-safe compatibility observer for independently emitted native push-gate events; it is not a required edge of the job-scoped `GITHUB_TOKEN` normal path. No manual proof handoff is part of the normal path.
-- Use canonical PR links for change provenance. Add full 40-character commit URLs when exact immutable provenance matters for security, migration, recovery, release control or trust-boundary changes.
-- Never treat a PR/commit link as correctness evidence; exact-source tests and acceptance evidence remain required.
-- Tag exact verified source only after the release contract exists and workspace/tag versions agree.
-- Candidate workflow must produce `SOURCE_SHA`, `RELEASE_TAG`, frozen `RELEASE_NOTES.md`, `RELEASE-EVIDENCE.json`, SPDX SBOM, `SHA256SUMS`, and provenance.
-- Promotion must verify the successful candidate run ID, exact SHA, tag, evidence and checksums; do not rebuild.
-- Before Promotion may dispatch irreversible publication, an isolated readiness job must use the job-scoped repository `GITHUB_TOKEN` and prove that it has the repository/Contents, pull-request and Actions capabilities terminal closure requires. The probes are non-mutating: an identical base/head repository merge must reach GitHub's no-op `204` response through the Contents-write-protected merge endpoint, an identical base/head PR must reach GitHub's exact same-head validation, and a dispatch against an impossible all-zero ref must reach exact missing-ref validation. Missing or ambiguous capability fails closed before publication. The token is intentionally used with explicit exact-SHA workflow dispatches; release automation never relies on its branch/PR/push mutations recursively emitting native workflow events.
-- GitHub Release notes come from `RELEASE_NOTES.md`; do not generate an independent release narrative.
-- Release explicitly dispatches `Verify published release` from the exact immutable tag. Normal verification is `workflow_dispatch`-only and rejects a workflow ref that is not the requested tag; the sole alternate trigger is the authenticated `verify-release/vX.Y.Z` emergency recovery branch.
-- Post-publication verification redownloads assets and validates tag/source binding, evidence, checksums, Release-body identity and provenance. Downloaded GitHub Release files are content blobs; do not infer or require executable mode from the download transport.
-- A successful independent verifier dispatches `Release Closure Handoff`. That handoff waits for the exact verification run to become terminal-successful, binds exact tag/source/event/ref identity, and then dispatches `Post Release Closure`. Post Release Closure is dispatch-only: there is no competing `workflow_run` closure path.
-- Closure deterministically synchronizes roadmap/current-next state, terminal qualification, publication evidence, documentation indexes and `docs/releases/published-vX.Y.Z.md`, while preserving the frozen `docs/releases/vX.Y.Z.md` bytes. It pushes one release-scoped bookkeeping commit using the job-scoped repository `GITHUB_TOKEN`, opens a protected PR, explicitly dispatches exact-head CI/Security/CodeQL, requires zero unresolved review threads, re-proves branch/head/base/parent/message identity immediately before merge, and merges the exact deterministic head through the normal `main` ruleset. It explicitly dispatches and waits for fresh-main CI/Security/CodeQL before cleanup. Native PR/push runs may supplement this evidence when they exist, but token-recursive native events are not a release dependency.
-- Approval-gated or otherwise redundant ordinary `pull_request` workflow attempts created around automation-owned PRs are non-authoritative. The authoritative release checks are nonce-bound explicit `workflow_dispatch` attempts whose workflow path, ref, SHA, display title and run ID are persisted and revalidated. Their `canonical-check`, `dependency-audit` and `analyze` contexts satisfy the protected-main ruleset.
-- A human review finding is always blocking until resolved, but machine-only zero-diff authorization and deterministic terminal closure do not manufacture a mandatory conversational-review dependency. A changed head invalidates prior structural evidence and must be re-proved and rechecked.
-- The normal path is therefore `release: ready` → automatic Release Preparation PR/review/merge → automatic protected zero-diff Release Authorization PR/check/merge → exact-main proof → promotion/readiness → tag-last publication → exact-tag independent verification → verification-aware handoff → deterministic protected closure PR/check/merge → fresh-main qualification → cleanup. After the reviewed preparation boundary, expected stops are only unresolved findings, failed checks, source/policy drift, missing release-automation authority, or other fail-closed defects.
-- A `verify-release/vX.Y.Z` marker branch remains an authenticated emergency recovery mechanism for an already-immutable release whose frozen verifier is defective; it is not a normal release trigger.
-- Post-release closure may advance roadmap/current-next status and terminal evidence only. It must never mutate the frozen release contract, immutable release tag, published release body, or published assets.
-- Terminal cleanup is ownership-scoped and fail-closed. The exact final `MAIN_SHA` whose fresh CI/Security/CodeQL succeeds is the cleanup authorization commit point. Cleanup fetches protected `main`, requires that immutable `MAIN_SHA` still exist in its ancestry, and reads `contracts/release-branch-cleanup.toml` from that exact commit rather than from mutable current `main`. New automation may remove only release-owned `automation/...` and recovery refs. Legacy non-namespaced temporary refs are eligible only when that exact-commit ledger names the release, branch and reviewed SHA. Every deletion uses `--force-with-lease=<ref>:<expected-sha>`; a moved target ref is preserved. Ref lookup distinguishes exact absence from authentication/network/server failure, and ambiguous failures stop closure rather than silently skipping cleanup. Branches referenced by open PRs are preserved. Later `main` commits govern subsequent closure transactions and do not retroactively retarget this already-authorized cleanup transaction.
-- The job-scoped repository `GITHUB_TOKEN` is required for automatic preparation, authorization and post-release closure mutation handoffs. Because GitHub may suppress recursive events for token-authenticated mutations, each owning workflow explicitly dispatches the required exact-head or fresh-main checks and the next release stage. The token must satisfy the normal ruleset and least-privilege capability probes; do not grant or depend on branch-protection bypass. Revocation or permission drift stops the release rather than degrading to a long-lived credential or bypass.
-- Supported release claims additionally require system/profile/hardware/upgrade/recovery evidence appropriate to the declared claim class.
+- The final implementation-completion PR eligible to begin the release machinery must merge with subject `release: ready vX.Y.Z — <implementation theme>`.
+- Before that merge, freeze `docs/releases/vX.Y.Z.md` with claim class, scope, security/authority boundary, migration/recovery compatibility, limitations and explicit non-goals, and complete the version qualification, security and release-review dossiers.
+- **`release: ready` is the last semantic/manual review boundary.** Human/Codex findings on that PR remain blocking until resolved. Every later PR is mechanically or structurally constrained and is verified by exact source/tree/path/message contracts plus protected native GitHub checks.
+
+A blanket approving-review requirement or a required reviewer on the `release` environment would contradict the automatic-after-readiness contract. If that policy is intentionally introduced later, the release contract must explicitly acknowledge the new manual boundary instead of silently stalling automation.
+
+## Automatic machine handoff
+
+After the reviewed readiness merge, the normal path is:
+
+`release: ready` → Release Preparation → protected mechanical preparation PR → Release Authorization → protected zero-diff authorization PR → native exact-main gates → Trusted Release Proof → Promotion → tag-last Release → exact-tag independent Release Verification → Release Closure Handoff → protected deterministic Post Release Closure PR → native closure-main gates → terminal leased cleanup.
+
+No conversational review, environment approval, workflow approval, branch push, proof dispatch, release dispatch, closure dispatch, or cleanup command is part of the normal path after the reviewed readiness boundary.
+
+### Release Preparation
+
+`Release Preparation` triggers from the exact `release: ready ...` merge on protected `main`.
+
+- It first requires native `push` CI/Security/CodeQL on that exact readiness SHA.
+- It deterministically runs `tools/prepare_release.py`; the candidate may change only `Cargo.toml` and `Cargo.lock` and must be a one-parent child of the readiness source.
+- The Release App creates `automation/release-prep-vX.Y.Z-<full-candidate-sha>` and opens `release: prepare vX.Y.Z <implementation theme>`.
+- The full candidate SHA in the branch name is part of cleanup authority: a branch whose tip does not equal the embedded SHA is never an automatic cleanup target.
+- **Native `pull_request` CI/Security/CodeQL are the ruleset-authoritative gates.** The controller waits for those exact PR runs, zero unresolved review threads, and GitHub `mergeable_state=clean`.
+- `workflow_dispatch` checks are supplemental evidence only; they do **not** substitute for native PR gates.
+- Immediately before merge, the controller re-proves exact base/head/branch, one parent, the two permitted changed files and deterministic bytes, then squash-merges through the normal protected-main ruleset.
+- A retry reuses only an exact open candidate passing the same proof. An orphaned SHA-addressed branch is safe to leave for terminal cleanup.
+
+The Release App-originated merge produces a normal `push` event, which automatically starts Release Authorization.
+
+### Release Authorization
+
+`Release Authorization` triggers from the exact `release: prepare ...` main commit.
+
+- It requires native `push` CI/Security/CodeQL on the exact prepared SHA.
+- It constructs a single-parent, tree-identical metadata-only candidate carrying the exact `release: vX.Y.Z — <implementation theme>` message and `Reviewed-Source` / `Reviewed-Tree` trailers.
+- The candidate branch is `automation/release-authorization-vX.Y.Z-<full-candidate-sha>`.
+- The Release App opens a protected zero-diff authorization PR.
+- The controller waits for native PR CI/Security/CodeQL, zero unresolved review threads and clean ruleset state. Native runs ending in `action_required` are hard failures; successful `workflow_dispatch` copies are not accepted as replacements.
+- Immediately before merge, it re-proves the native gate state, protected-main source, branch head, one parent, identical tree and exact message/trailers, then squash-merges normally.
+- It never PATCHes protected `main` and never uses ruleset bypass.
+
+After authorization merge, ordinary main `push` CI/Security/CodeQL run. `Release Proof Dispatch` observes those native completions. Once all three exact authorization-source push gates are successful, it idempotently dispatches Trusted Release Proof. The permanent main CI workflow does not cancel an in-progress main run when a later main commit appears, so exact-source proof handoffs cannot lose their gate evidence through concurrency cancellation.
+
+### Proof, promotion and publication
+
+Trusted Release Proof binds the exact authorization source and all required qualification/build/reproducibility/provenance evidence. Promotion validates the successful proof run and exact source; it does not rebuild the release payload.
+
+Before Promotion may dispatch the irreversible Release workflow, closure-readiness mints a fresh Release App installation token and proves the full closure authority contract. Missing or under-permissioned App configuration therefore fails **before** tag creation or GitHub Release publication.
+
+Release remains tag-last:
+
+- validate exact current-main release source;
+- download and reverify the sealed proof payload;
+- validate checksums, SBOM/provenance and release contract;
+- create or verify the immutable version tag only after proof succeeds;
+- publish the exact sealed assets and canonical `RELEASE_NOTES.md` body;
+- dispatch independent verification from the exact immutable tag.
+
+The `release` environment is an isolation boundary, not a second human gate in automatic mode. Required environment reviewers must be disabled for this mode.
+
+### Independent verification and closure
+
+`Verify published release` runs from the exact immutable tag in the normal path. The authenticated `verify-release/vX.Y.Z` branch is an emergency recovery mechanism only and is **not** pattern-deleted by terminal cleanup; exceptional recovery refs require an explicit exact-SHA ledger entry if cleanup is desired.
+
+A successful verifier dispatches `Release Closure Handoff`, which binds the exact verification run/tag/source/event/ref and dispatches `Post Release Closure`.
+
+Post Release Closure:
+
+- re-proves immutable publication and exact successful proof/promotion/release/verification evidence;
+- deterministically advances roadmap/current-next state and terminal qualification/publication documentation;
+- preserves `docs/releases/vX.Y.Z.md` byte-for-byte;
+- creates or reuses a single-parent `automation/post-release-vX.Y.Z-<full-candidate-sha>` commit;
+- opens the PR with the Release App;
+- waits for **native PR** CI/Security/CodeQL, zero unresolved review threads and clean ruleset state;
+- re-proves the exact candidate immediately before protected squash merge;
+- stops after merge. It does not perform cleanup inline.
+
+Separating closure merge from cleanup is intentional: an already-successful irreversible merge must not be reported as a failed closure merely because a later cleanup/network step had trouble.
+
+## Terminal cleanup
+
+`Post Release Cleanup` is event-driven from native `push` CI/Security/CodeQL on the exact `chore: close vX.Y.Z release state` commit. It waits until all three native main gates are successful, then freezes cleanup authority to that immutable closure SHA. The closure SHA must still be an ancestor of current protected `main`; later development may advance `main` without retargeting the already-qualified cleanup transaction.
+
+Cleanup reads `contracts/release-branch-cleanup.toml` from the exact qualified closure commit and may select only:
+
+- SHA-addressed `automation/release-prep-vX.Y.Z-<40hex>` refs;
+- SHA-addressed `automation/release-reprepare-vX.Y.Z-<40hex>` refs;
+- SHA-addressed `automation/release-authorization-vX.Y.Z-<40hex>` refs;
+- SHA-addressed `automation/post-release-vX.Y.Z-<40hex>` refs;
+- exceptional/legacy refs only when the exact ledger records release + full branch name + reviewed 40-hex SHA.
+
+The embedded/ledger SHA is the deletion lease. Branches referenced by open PRs are preserved. A ref whose current SHA differs from its lease is preserved. Deletion uses atomic Git `--force-with-lease=<ref>:<expected-sha>`; there is no REST read-then-unconditional-delete race. Exact absence is idempotent. Authentication/network/server or ambiguous lookup failures fail closed rather than being treated as absence.
+
+Cleanup uses a narrower Release App token and is a separate retryable transaction. The immutable tag, Release body/assets, frozen release contract and protected main history are never cleanup targets.
+
+## Ruleset and credential invariants
+
+- Protected `main` remains the authority boundary. Do not add a release-bot ruleset bypass.
+- Required native contexts remain `canonical-check`, `dependency-audit` and `analyze` from GitHub Actions under the repository ruleset.
+- The automatic release-mode default-branch ruleset must not require approving reviews on machine-only post-readiness PRs. Semantic review is completed before the `release: ready` merge.
+- Machine PRs must be created by the Linura Release GitHub App, not repository `GITHUB_TOKEN`, because `GITHUB_TOKEN`-created PR activity may produce approval-gated `action_required` native runs.
+- Native PR checks are authoritative for PR merge. Explicit `workflow_dispatch` runs are supplemental exact-SHA evidence/recovery, never a substitute for the ruleset's native PR instances.
+- Read-only qualification/proof jobs continue using the narrower repository `GITHUB_TOKEN` where recursion is irrelevant. Workflow-to-workflow `workflow_dispatch` is acceptable for proof/promotion/release/verification/closure handoffs.
+- Every irreversible mutation is preceded by exact identity and evidence checks; retries re-prove state instead of assuming the previous attempt stopped before mutation.
+- A changed head invalidates prior structural evidence.
+- Permission drift, missing App configuration, unresolved findings, failed gates, source drift or policy drift stop the release rather than degrading to bypass or manual normal-path intervention.
+
+Supported release claims additionally require system/profile/hardware/upgrade/recovery evidence appropriate to the declared claim class.

@@ -345,6 +345,7 @@ No widened claim.
 
     def test_workflow_pins_protected_deterministic_closure_sequence(self) -> None:
         workflow = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
+        cleanup = (ROOT / ".github/workflows/post-release-cleanup.yml").read_text(encoding="utf-8")
         for marker in (
             "workflow_dispatch:",
             "INPUT_VERIFICATION_RUN_ID",
@@ -352,28 +353,27 @@ No widened claim.
             'test "$verification_event" = "push"',
             "python3 tools/post_release_close.py",
             "python3 tools/post_release_terminal_sync.py",
-            "--credential-source github",
-            "token: ${{ github.token }}",
-            "event=workflow_dispatch",
-            "gh api graphql --paginate",
-            "$endCursor:String",
-            "reviewThreads(first:100, after:$endCursor)",
-            "pageInfo { hasNextPage endCursor }",
-            'test "$unresolved" = "0"',
+            "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+            "--credential-source github-app",
+            "tools/release_native_gates.py",
             'pulls/$PR_NUMBER/merge',
-            "deterministic closure proof",
-            "Delete obsolete release-scoped branches",
+            "post-release-cleanup.yml",
         ):
             self.assertIn(marker, workflow)
-        self.assertGreaterEqual(workflow.count("gh api graphql --paginate"), 2)
-        self.assertGreaterEqual(workflow.count("reviewThreads(first:100, after:$endCursor)"), 2)
         self.assertNotIn("@codex review", workflow)
         self.assertNotIn("chatgpt-codex-connector", workflow)
+        self.assertNotIn("release_workflow_dispatch.py", workflow)
+        self.assertNotIn("Delete obsolete release-scoped branches", workflow)
         self.assertNotIn('workflows: ["Verify published release"]', workflow)
         self.assertNotIn("github.event.workflow_run", workflow)
         self.assertNotIn("git push origin main", workflow)
         self.assertNotIn('gh pr merge "$PR_NUMBER"', workflow)
         self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", workflow)
+
+        self.assertIn("workflow_run:", cleanup)
+        self.assertIn("tools/release_native_gates.py", cleanup)
+        self.assertIn("tools/release_branch_cleanup.py", cleanup)
+        self.assertIn('git merge-base --is-ancestor "$CLOSURE_SHA" refs/remotes/origin/main', cleanup)
 
         for path in ("ci.yml", "security.yml", "codeql.yml"):
             text = (ROOT / ".github/workflows" / path).read_text(encoding="utf-8")

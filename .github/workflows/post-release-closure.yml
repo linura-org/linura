@@ -15,9 +15,9 @@ on:
         type: string
 
 permissions:
-  contents: write
-  pull-requests: write
-  actions: write
+  actions: read
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: post-release-closure-${{ inputs.tag }}
@@ -26,20 +26,21 @@ concurrency:
 jobs:
   close:
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
+    timeout-minutes: 55
+    outputs:
+      state: ${{ steps.state.outputs.state }}
+      main_sha: ${{ steps.merge.outputs.main_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
           ref: main
-          token: ${{ github.token }}
 
       - name: Resolve and verify terminal release evidence
         id: release
         env:
+          GH_TOKEN: ${{ github.token }}
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_VERIFICATION_RUN_ID: ${{ inputs.verification_run_id }}
         run: |
@@ -151,16 +152,6 @@ jobs:
           )"
           printf 'state=%s\n' "$state" >> "$GITHUB_OUTPUT"
 
-      - name: Prove closure automation capabilities
-        if: steps.state.outputs.state == 'pending'
-        run: |
-          set -euo pipefail
-          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
-          test "$(git rev-parse HEAD)" = "$current_main"
-          python3 tools/probe_release_automation_authority.py \
-            --repository "$GITHUB_REPOSITORY" \
-            --credential-source github
-
       - name: Generate deterministic closure tree
         if: steps.state.outputs.state == 'pending'
         env:
@@ -176,7 +167,6 @@ jobs:
           set -euo pipefail
           frozen="docs/releases/$RELEASE_TAG.md"
           frozen_before="$(sha256sum "$frozen" | awk '{print $1}')"
-
           common=(
             --tag "$RELEASE_TAG"
             --source-sha "$SOURCE_SHA"
@@ -192,7 +182,6 @@ jobs:
           python3 tools/check_roadmap.py .
           python3 tools/check_machine_classes.py .
           git diff --check
-
           test "$(sha256sum "$frozen" | awk '{print $1}')" = "$frozen_before"
           test -z "$(git diff --name-only -- "$frozen")"
           mapfile -t release_doc_changes < <(git diff --name-only -- docs/releases/)
@@ -203,45 +192,86 @@ jobs:
             esac
           done
 
-      - name: Commit or re-prove deterministic closure commit
+      - name: Require dedicated Release App configuration
+        if: steps.state.outputs.state == 'pending'
+        env:
+          RELEASE_APP_CLIENT_ID: ${{ vars.LINURA_RELEASE_APP_CLIENT_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.LINURA_RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_APP_CLIENT_ID" || { echo "missing repository variable LINURA_RELEASE_APP_CLIENT_ID" >&2; exit 2; }
+          test -n "$RELEASE_APP_PRIVATE_KEY" || { echo "missing repository secret LINURA_RELEASE_APP_PRIVATE_KEY" >&2; exit 2; }
+
+      - name: Mint repository-scoped Release App token
+        if: steps.state.outputs.state == 'pending'
+        id: release_app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.LINURA_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.LINURA_RELEASE_APP_PRIVATE_KEY }}
+          permission-actions: write
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Prove Release App closure authority
+        if: steps.state.outputs.state == 'pending'
+        env:
+          GH_TOKEN: ${{ steps.release_app.outputs.token }}
+          BASE_SHA: ${{ steps.release.outputs.base_sha }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"
+          python3 tools/probe_release_automation_authority.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --base main \
+            --head main \
+            --credential-source github-app
+
+      - name: Commit or re-prove SHA-addressed deterministic closure
         if: steps.state.outputs.state == 'pending'
         id: commit
         env:
+          GH_TOKEN: ${{ steps.release_app.outputs.token }}
+          RELEASE_APP_SLUG: ${{ steps.release_app.outputs.app-slug }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          VERIFICATION_RUN_ID: ${{ steps.release.outputs.verification_run_id }}
           BASE_SHA: ${{ steps.release.outputs.base_sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$BASE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"
 
-          branch="automation/post-release-${RELEASE_TAG}-${VERIFICATION_RUN_ID}"
           title="chore: close $RELEASE_TAG release state"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add --all
           test -n "$(git diff --cached --name-only)"
           expected_tree="$(git write-tree)"
           [[ "$expected_tree" =~ ^[0-9a-f]{40}$ ]]
 
-          if branch_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" 2>/dev/null)"; then
-            head_sha="$(jq -r .object.sha <<<"$branch_payload")"
+          existing_json="$(gh pr list --state open --base main --json number,title,headRefName,headRefOid)"
+          # shellcheck disable=SC2016
+          existing="$(jq -c --arg title "$title" '[.[] | select(.title == $title)] | first // empty' <<<"$existing_json")"
+          if [[ -n "$existing" ]]; then
+            head_sha="$(jq -r .headRefOid <<<"$existing")"
+            branch="$(jq -r .headRefName <<<"$existing")"
             [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
-            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" --force
-            test "$(git rev-parse "origin/$branch")" = "$head_sha"
-
+            test "$branch" = "automation/post-release-${RELEASE_TAG}-${head_sha}"
             candidate="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$head_sha")"
             test "$(jq '.parents | length' <<<"$candidate")" = "1"
             test "$(jq -r '.parents[0].sha' <<<"$candidate")" = "$BASE_SHA"
             test "$(jq -r .tree.sha <<<"$candidate")" = "$expected_tree"
             test "$(jq -r '.message | split("\n")[0]' <<<"$candidate")" = "$title"
-            echo "reusing exact deterministic closure branch $branch at $head_sha"
           else
-            git switch -c "$branch"
+            git switch --detach "$BASE_SHA"
+            app_user_id="$(gh api "users/${RELEASE_APP_SLUG}[bot]" --jq .id)"
+            [[ "$app_user_id" =~ ^[0-9]+$ ]]
+            git config user.name "${RELEASE_APP_SLUG}[bot]"
+            git config user.email "${app_user_id}+${RELEASE_APP_SLUG}[bot]@users.noreply.github.com"
             git commit -m "$title"
             head_sha="$(git rev-parse HEAD)"
+            [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
             test "$(git rev-parse 'HEAD^{tree}')" = "$expected_tree"
-            git push --set-upstream origin "$branch"
+            branch="automation/post-release-${RELEASE_TAG}-${head_sha}"
+            gh auth setup-git
+            git push origin "HEAD:refs/heads/$branch"
           fi
 
           printf 'branch=%s\n' "$branch" >> "$GITHUB_OUTPUT"
@@ -251,31 +281,31 @@ jobs:
         if: steps.state.outputs.state == 'pending'
         id: pr
         env:
+          GH_TOKEN: ${{ steps.release_app.outputs.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           BRANCH: ${{ steps.commit.outputs.branch }}
           HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
           VERIFICATION_RUN_ID: ${{ steps.release.outputs.verification_run_id }}
         run: |
           set -euo pipefail
+          test "$BRANCH" = "automation/post-release-${RELEASE_TAG}-${HEAD_SHA}"
           title="chore: close $RELEASE_TAG release state"
           existing="$(gh pr list --state open --base main --head "$BRANCH" --limit 10 --json number,title,headRefName,headRefOid,baseRefName)"
           count="$(jq 'length' <<<"$existing")"
-
           if [[ "$count" == "1" ]]; then
             number="$(jq -r '.[0].number' <<<"$existing")"
             test "$(jq -r '.[0].title' <<<"$existing")" = "$title"
             test "$(jq -r '.[0].headRefName' <<<"$existing")" = "$BRANCH"
             test "$(jq -r '.[0].headRefOid' <<<"$existing")" = "$HEAD_SHA"
             test "$(jq -r '.[0].baseRefName' <<<"$existing")" = "main"
-            echo "reusing exact open closure PR #$number"
           elif [[ "$count" == "0" ]]; then
             {
               printf 'Automatic terminal bookkeeping for independently verified %s.\n\n' "$RELEASE_TAG"
               printf '%s\n' "- generated only after successful Release Verification run \`$VERIFICATION_RUN_ID\`;"
               printf '%s\n' "- exact closure head: \`$HEAD_SHA\`;"
-              printf '%s\n' "- synchronizes roadmap, terminal qualification and current-release documentation;"
               printf '%s\n' "- leaves the frozen release contract and immutable release assets untouched;"
-              printf '%s\n' "- merges only after explicit exact-head CI/Security/CodeQL, deterministic tree proof, and zero unresolved review threads."
+              printf '%s\n' "- native PR CI/Security/CodeQL are the ruleset-authoritative gates;"
+              printf '%s\n' "- terminal branch cleanup is a separate event-driven transaction after native main push gates."
             } > "$RUNNER_TEMP/body.md"
             url="$(gh pr create --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md")"
             number="${url##*/}"
@@ -283,78 +313,36 @@ jobs:
             echo "multiple open closure PRs unexpectedly match $BRANCH" >&2
             exit 1
           fi
-
           [[ "$number" =~ ^[0-9]+$ ]]
-          pr="$(gh pr view "$number" --json state,title,baseRefName,headRefName,headRefOid)"
-          test "$(jq -r .state <<<"$pr")" = "OPEN"
-          test "$(jq -r .title <<<"$pr")" = "$title"
-          test "$(jq -r .baseRefName <<<"$pr")" = "main"
-          test "$(jq -r .headRefName <<<"$pr")" = "$BRANCH"
-          test "$(jq -r .headRefOid <<<"$pr")" = "$HEAD_SHA"
           printf 'number=%s\n' "$number" >> "$GITHUB_OUTPUT"
 
-      - name: Dispatch and require exact-head closure checks
+      - name: Require GitHub-native closure PR gates and clean ruleset state
         if: steps.state.outputs.state == 'pending'
         env:
-          BRANCH: ${{ steps.commit.outputs.branch }}
-          HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
-        run: |
-          set -euo pipefail
-          evidence="$RUNNER_TEMP/post-release-closure-head-runs.jsonl"
-          rm -f "$evidence"
-          for workflow in ci.yml security.yml codeql.yml; do
-            python3 tools/release_workflow_dispatch.py dispatch \
-              --repository "$GITHUB_REPOSITORY" \
-              --workflow "$workflow" \
-              --ref "$BRANCH" \
-              --head-sha "$HEAD_SHA" \
-              --phase "post-release-closure-head" \
-              --evidence-file "$evidence"
-          done
-          python3 tools/release_workflow_dispatch.py wait \
-            --evidence-file "$evidence" \
-            --expected-count 3 \
-            --timeout-seconds 1800
-
-      - name: Require exact-head checks and zero unresolved review threads
-        if: steps.state.outputs.state == 'pending'
-        env:
+          GH_TOKEN: ${{ steps.release_app.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
+          BRANCH: ${{ steps.commit.outputs.branch }}
           BASE_SHA: ${{ steps.release.outputs.base_sha }}
         run: |
           set -euo pipefail
-          test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"
-          python3 tools/release_workflow_dispatch.py verify \
-            --evidence-file "$RUNNER_TEMP/post-release-closure-head-runs.jsonl" \
-            --expected-count 3
-
-          # shellcheck disable=SC2016
-          unresolved="$(gh api graphql --paginate \
-            -f owner="${GITHUB_REPOSITORY%/*}" \
-            -f name="${GITHUB_REPOSITORY#*/}" \
-            -F number="$PR_NUMBER" \
-            -F endCursor=null \
-            -f query='
-              query($owner:String!, $name:String!, $number:Int!, $endCursor:String) {
-                repository(owner:$owner, name:$name) {
-                  pullRequest(number:$number) {
-                    reviewThreads(first:100, after:$endCursor) {
-                      nodes { isResolved }
-                      pageInfo { hasNextPage endCursor }
-                    }
-                  }
-                }
-              }' \
-            --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' |
-            awk '{ total += $1 } END { print total + 0 }')"
-          test "$unresolved" = "0"
+          changed_files="$(gh pr view "$PR_NUMBER" --json changedFiles --jq .changedFiles)"
+          [[ "$changed_files" =~ ^[1-9][0-9]*$ ]]
+          python3 tools/release_native_gates.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --head-sha "$HEAD_SHA" \
+            --head-branch "$BRANCH" \
+            --timeout-seconds 1800 \
+            pr \
+            --pr-number "$PR_NUMBER" \
+            --base-sha "$BASE_SHA" \
+            --expected-changed-files "$changed_files"
 
       - name: Re-prove and squash merge exact deterministic closure
         if: steps.state.outputs.state == 'pending'
         id: merge
         env:
+          GH_TOKEN: ${{ steps.release_app.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ steps.commit.outputs.head_sha }}
           BRANCH: ${{ steps.commit.outputs.branch }}
@@ -362,241 +350,54 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-          python3 tools/release_workflow_dispatch.py verify --evidence-file "$RUNNER_TEMP/post-release-closure-head-runs.jsonl" --expected-count 3
-
-          # shellcheck disable=SC2016
-          unresolved="$(gh api graphql --paginate \
-            -f owner="${GITHUB_REPOSITORY%/*}" \
-            -f name="${GITHUB_REPOSITORY#*/}" \
-            -F number="$PR_NUMBER" \
-            -F endCursor=null \
-            -f query='
-              query($owner:String!, $name:String!, $number:Int!, $endCursor:String) {
-                repository(owner:$owner, name:$name) {
-                  pullRequest(number:$number) {
-                    reviewThreads(first:100, after:$endCursor) {
-                      nodes { isResolved }
-                      pageInfo { hasNextPage endCursor }
-                    }
-                  }
-                }
-              }' \
-            --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' |
-            awk '{ total += $1 } END { print total + 0 }')"
-          test "$unresolved" = "0"
-
+          test "$BRANCH" = "automation/post-release-${RELEASE_TAG}-${HEAD_SHA}"
+          changed_files="$(gh pr view "$PR_NUMBER" --json changedFiles --jq .changedFiles)"
+          [[ "$changed_files" =~ ^[1-9][0-9]*$ ]]
+          python3 tools/release_native_gates.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --head-sha "$HEAD_SHA" \
+            --head-branch "$BRANCH" \
+            --timeout-seconds 0 \
+            pr \
+            --pr-number "$PR_NUMBER" \
+            --base-sha "$BASE_SHA" \
+            --expected-changed-files "$changed_files"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"
-          pr="$(gh pr view "$PR_NUMBER" --json state,baseRefName,headRefName,headRefOid)"
-          test "$(jq -r .state <<<"$pr")" = "OPEN"
-          test "$(jq -r .baseRefName <<<"$pr")" = "main"
-          test "$(jq -r .headRefName <<<"$pr")" = "$BRANCH"
-          test "$(jq -r .headRefOid <<<"$pr")" = "$HEAD_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)" = "$HEAD_SHA"
 
           candidate="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$HEAD_SHA")"
           test "$(jq '.parents | length' <<<"$candidate")" = "1"
           test "$(jq -r '.parents[0].sha' <<<"$candidate")" = "$BASE_SHA"
           test "$(jq -r '.message | split("\n")[0]' <<<"$candidate")" = "chore: close $RELEASE_TAG release state"
+          candidate_tree="$(jq -r .tree.sha <<<"$candidate")"
 
           result="$(gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
             -f merge_method=squash \
             -f sha="$HEAD_SHA" \
             -f commit_title="chore: close $RELEASE_TAG release state" \
-            -f commit_message="Terminal bookkeeping for independently verified $RELEASE_TAG after exact-head checks and deterministic closure proof.")"
+            -f commit_message="Terminal bookkeeping for independently verified $RELEASE_TAG after native protected PR gates and deterministic closure proof.")"
           test "$(jq -r .merged <<<"$result")" = "true"
           main_sha="$(jq -r .sha <<<"$result")"
           [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$main_sha"
+          merged="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$main_sha")"
+          test "$(jq '.parents | length' <<<"$merged")" = "1"
+          test "$(jq -r '.parents[0].sha' <<<"$merged")" = "$BASE_SHA"
+          test "$(jq -r .tree.sha <<<"$merged")" = "$candidate_tree"
           printf 'main_sha=%s\n' "$main_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve post-closure protected-main SHA
-        id: final_main
-        env:
-          STATE: ${{ steps.state.outputs.state }}
-          MERGED_MAIN_SHA: ${{ steps.merge.outputs.main_sha }}
+      - name: Confirm event-driven terminal cleanup handoff
+        if: steps.state.outputs.state == 'pending'
         run: |
           set -euo pipefail
-          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
-          [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
-          if [[ "$STATE" == "pending" ]]; then
-            test "$main_sha" = "$MERGED_MAIN_SHA"
-          fi
-          printf 'main_sha=%s\n' "$main_sha" >> "$GITHUB_OUTPUT"
+          test -f .github/workflows/post-release-cleanup.yml
+          echo "closure merged at ${{ steps.merge.outputs.main_sha }}; native main push gates now own terminal leased cleanup"
 
-      - name: Dispatch and require explicit fresh-main CI, Security and CodeQL
-        env:
-          MAIN_SHA: ${{ steps.final_main.outputs.main_sha }}
-        run: |
-          set -euo pipefail
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"
-          evidence="$RUNNER_TEMP/post-release-closure-main-runs.jsonl"
-          rm -f "$evidence"
-          for workflow in ci.yml security.yml codeql.yml; do
-            python3 tools/release_workflow_dispatch.py dispatch \
-              --repository "$GITHUB_REPOSITORY" \
-              --workflow "$workflow" \
-              --ref "main" \
-              --head-sha "$MAIN_SHA" \
-              --phase "post-release-closure-main" \
-              --evidence-file "$evidence"
-          done
-          python3 tools/release_workflow_dispatch.py wait \
-            --evidence-file "$evidence" \
-            --expected-count 3 \
-            --timeout-seconds 1800
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"
-
-      - name: Delete obsolete release-scoped branches
+      - name: Confirm idempotent already-closed state
+        if: steps.state.outputs.state == 'closed'
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          MAIN_SHA: ${{ steps.final_main.outputs.main_sha }}
         run: |
           set -euo pipefail
-          [[ "$MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]
-
-          # Fresh-main qualification above is the cleanup authorization commit
-          # point. From here cleanup is bound to this immutable commit SHA, not
-          # to a mutable branch ref. Later main development cannot retarget this
-          # already-authorized transaction; it applies to subsequent closures.
-          git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main" --force
-          git cat-file -e "$MAIN_SHA^{commit}"
-          git merge-base --is-ancestor "$MAIN_SHA" refs/remotes/origin/main
-          git show "$MAIN_SHA:contracts/release-branch-cleanup.toml" > "$RUNNER_TEMP/release-branch-cleanup.toml"
-
-          gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '.[].name' > "$RUNNER_TEMP/branches.txt"
-          python3 - "$RELEASE_TAG" "$RUNNER_TEMP/branches.txt" "$RUNNER_TEMP/release-branch-cleanup.toml" "$RUNNER_TEMP/candidates.tsv" <<'PY'
-          import pathlib
-          import re
-          import sys
-          import tomllib
-
-          tag, branches_path, cleanup_path, output = sys.argv[1:]
-          if re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", tag) is None:
-              raise SystemExit("invalid release tag")
-
-          release_owned = (
-              re.compile(rf"automation/release-prep-{re.escape(tag)}-[0-9a-f]{{12}}"),
-              re.compile(rf"automation/release-reprepare-{re.escape(tag)}-[0-9a-f]{{12}}"),
-              re.compile(rf"automation/release-authorization-{re.escape(tag)}-[0-9a-f]{{12}}"),
-              re.compile(rf"automation/post-release-{re.escape(tag)}-[0-9]+"),
-              re.compile(rf"verify-release/{re.escape(tag)}"),
-          )
-
-          cleanup_contract = tomllib.loads(pathlib.Path(cleanup_path).read_text(encoding="utf-8"))
-          if cleanup_contract.get("schema_version") != 1:
-              raise SystemExit("unsupported release branch cleanup schema")
-          legacy = {}
-          for item in cleanup_contract.get("legacy_branch", []):
-              if item.get("release") != tag:
-                  continue
-              name = item.get("name")
-              expected_sha = item.get("expected_sha")
-              if not isinstance(name, str) or not name.startswith("tmp/"):
-                  raise SystemExit(f"invalid legacy cleanup branch name: {name!r}")
-              if not isinstance(expected_sha, str) or re.fullmatch(r"[0-9a-f]{40}", expected_sha) is None:
-                  raise SystemExit(f"invalid legacy cleanup SHA for {name!r}")
-              if name in legacy:
-                  raise SystemExit(f"duplicate legacy cleanup branch: {name}")
-              legacy[name] = expected_sha
-
-          selected = {}
-          for raw in pathlib.Path(branches_path).read_text(encoding="utf-8").splitlines():
-              branch = raw.strip()
-              if any(pattern.fullmatch(branch) for pattern in release_owned):
-                  selected[branch] = "automation-owned"
-              elif branch in legacy:
-                  selected[branch] = legacy[branch]
-
-          pathlib.Path(output).write_text(
-              "".join(f"{branch}\t{expected}\n" for branch, expected in sorted(selected.items())),
-              encoding="utf-8",
-          )
-          PY
-
-          while IFS=$'\t' read -r branch expected_sha; do
-            [[ -n "$branch" ]] || continue
-            git check-ref-format --branch "$branch" >/dev/null
-
-            open_pr_count="$(
-              gh api --paginate --method GET "repos/$GITHUB_REPOSITORY/pulls" \
-                -f state=open \
-                -f head="${GITHUB_REPOSITORY%/*}:$branch" \
-                -f per_page=100 \
-                --jq 'length' |
-                awk '{ total += $1 } END { print total + 0 }'
-            )"
-            if [[ "$open_pr_count" -gt 0 ]]; then
-              echo "preserving branch used by an open PR: $branch"
-              continue
-            fi
-
-            ref="refs/heads/$branch"
-            lookup_err="$RUNNER_TEMP/cleanup-ls-remote.err"
-            : > "$lookup_err"
-            set +e
-            remote_line="$(git ls-remote --exit-code --refs origin "$ref" 2>"$lookup_err")"
-            lookup_status=$?
-            set -e
-            case "$lookup_status" in
-              0)
-                test "$(printf '%s\n' "$remote_line" | sed '/^$/d' | wc -l)" -eq 1
-                IFS=$'\t' read -r current_sha returned_ref <<< "$remote_line"
-                [[ "$current_sha" =~ ^[0-9a-f]{40}$ ]]
-                test "$returned_ref" = "$ref"
-                ;;
-              2)
-                echo "release branch already absent before cleanup: $branch"
-                continue
-                ;;
-              *)
-                cat "$lookup_err" >&2
-                echo "failed to resolve release branch before cleanup: $branch (git ls-remote exit $lookup_status)" >&2
-                exit 1
-                ;;
-            esac
-
-            lease_sha="$current_sha"
-            if [[ "$expected_sha" != "automation-owned" ]]; then
-              lease_sha="$expected_sha"
-              if [[ "$current_sha" != "$lease_sha" ]]; then
-                echo "preserving legacy branch whose ref moved after cleanup provenance was reviewed: $branch ($current_sha != $lease_sha)" >&2
-                continue
-              fi
-            fi
-
-            if git push --force-with-lease="$ref:$lease_sha" origin ":$ref"; then
-              echo "deleted obsolete release branch under immutable cleanup authority and exact SHA lease: $branch@$lease_sha"
-              continue
-            fi
-
-            : > "$lookup_err"
-            set +e
-            latest_line="$(git ls-remote --exit-code --refs origin "$ref" 2>"$lookup_err")"
-            latest_status=$?
-            set -e
-            case "$latest_status" in
-              0)
-                test "$(printf '%s\n' "$latest_line" | sed '/^$/d' | wc -l)" -eq 1
-                IFS=$'\t' read -r latest_sha returned_ref <<< "$latest_line"
-                [[ "$latest_sha" =~ ^[0-9a-f]{40}$ ]]
-                test "$returned_ref" = "$ref"
-                ;;
-              2)
-                echo "release branch disappeared during leased cleanup: $branch"
-                continue
-                ;;
-              *)
-                cat "$lookup_err" >&2
-                echo "failed to resolve release branch after rejected leased deletion: $branch (git ls-remote exit $latest_status)" >&2
-                exit 1
-                ;;
-            esac
-
-            if [[ "$latest_sha" != "$lease_sha" ]]; then
-              echo "preserving branch moved during cleanup lease: $branch ($latest_sha != $lease_sha)" >&2
-              continue
-            fi
-
-            echo "failed to delete unchanged release branch under exact SHA lease: $branch@$lease_sha" >&2
-            exit 1
-          done < "$RUNNER_TEMP/candidates.tsv"
+          python3 tools/check_roadmap.py .
+          echo "$RELEASE_TAG is already closed; no duplicate closure mutation required"

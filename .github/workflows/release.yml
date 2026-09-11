@@ -258,7 +258,6 @@ jobs:
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: release
     permissions:
       contents: write
       actions: read

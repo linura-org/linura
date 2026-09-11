@@ -106,18 +106,14 @@ jobs:
           fi
 
   closure-readiness:
-    name: prove automatic post-release closure authority
+    name: prove Release App closure authority before publication
     needs: validate
     if: ${{ needs.validate.result == 'success' && needs.validate.outputs.tag != '' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
-      actions: write
-      contents: write
-      pull-requests: write
+      contents: read
     env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
       SOURCE_SHA: ${{ inputs.source_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -126,7 +122,28 @@ jobs:
           fetch-depth: 1
           ref: ${{ inputs.source_sha }}
 
-      - name: Prove exact closure credential capabilities
+      - name: Require dedicated Release App configuration
+        env:
+          RELEASE_APP_CLIENT_ID: ${{ vars.LINURA_RELEASE_APP_CLIENT_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.LINURA_RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_APP_CLIENT_ID" || { echo "missing repository variable LINURA_RELEASE_APP_CLIENT_ID" >&2; exit 2; }
+          test -n "$RELEASE_APP_PRIVATE_KEY" || { echo "missing repository secret LINURA_RELEASE_APP_PRIVATE_KEY" >&2; exit 2; }
+
+      - name: Mint repository-scoped Release App token
+        id: release_app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.LINURA_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.LINURA_RELEASE_APP_PRIVATE_KEY }}
+          permission-actions: write
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Prove exact Release App closure capabilities
+        env:
+          GH_TOKEN: ${{ steps.release_app.outputs.token }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
@@ -134,7 +151,9 @@ jobs:
           test "$current" = "$SOURCE_SHA"
           python3 tools/probe_release_automation_authority.py \
             --repository "$GITHUB_REPOSITORY" \
-            --credential-source github
+            --base main \
+            --head main \
+            --credential-source github-app
 
   dispatch:
     name: dispatch immutable publication
