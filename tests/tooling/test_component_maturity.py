@@ -84,21 +84,80 @@ class ComponentMaturityContractTests(unittest.TestCase):
             roadmap = tomllib.loads((root / "contracts/roadmap.toml").read_text(encoding="utf-8"))
             candidate = roadmap["next_release"]
             self.assertIsInstance(candidate, str)
+            versions = [item["version"] for item in roadmap["milestone"]]
+            candidate_index = versions.index(candidate)
+            self.assertLess(candidate_index + 1, len(versions))
+            later = versions[candidate_index + 1]
 
-            def activate_early(block: str) -> str:
-                return block.replace(
+            def activate_too_late(block: str) -> str:
+                block = block.replace(
                     'maturity = "roadmap-scaffold"',
                     'maturity = "integrated-experimental"',
                     1,
                 )
+                return re.sub(
+                    r'^activation_milestone = "v[0-9]+\.[0-9]+\.[0-9]+"$',
+                    f'activation_milestone = "{later}"',
+                    block,
+                    count=1,
+                    flags=re.MULTILINE,
+                )
 
-            self._replace_component_block(contract, "linura-firstboot", activate_early)
+            self._replace_component_block(contract, "linura-firstboot", activate_too_late)
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
-                f"integrated component activation v0.9.0 is later than candidate {candidate}",
+                f"integrated component activation {later} is later than candidate {candidate}",
                 result.stderr,
             )
+
+    def test_v08_component_contract_remains_valid_after_post_release_transition(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            roadmap_path = root / "contracts/roadmap.toml"
+            roadmap = tomllib.loads(roadmap_path.read_text(encoding="utf-8"))
+            versions = [item["version"] for item in roadmap["milestone"]]
+            self.assertIn("v0.8.0", versions)
+            self.assertIn("v0.9.0", versions)
+
+            roadmap_text = roadmap_path.read_text(encoding="utf-8")
+            roadmap_text, current_count = re.subn(
+                r'^current_release = "v[0-9]+\.[0-9]+\.[0-9]+"$',
+                'current_release = "v0.8.0"',
+                roadmap_text,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            roadmap_text, next_count = re.subn(
+                r'^next_release = "v[0-9]+\.[0-9]+\.[0-9]+"$',
+                'next_release = "v0.9.0"',
+                roadmap_text,
+                count=1,
+                flags=re.MULTILINE,
+            )
+            self.assertEqual(current_count, 1)
+            self.assertEqual(next_count, 1)
+            roadmap_path.write_text(roadmap_text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_v08_agent_component_maturity_matches_shipped_scope(self) -> None:
+        contract = tomllib.loads((ROOT / "contracts/components.toml").read_text(encoding="utf-8"))
+        components = {item["id"]: item for item in contract["component"]}
+
+        runtime = components["linura-agent-runtime"]
+        self.assertEqual(runtime["maturity"], "integrated-experimental")
+        self.assertEqual(runtime["activation_milestone"], "v0.8.0")
+        self.assertFalse(runtime["release_artifact"])
+        self.assertEqual(runtime["authority_role"], "proposal-only")
+
+        ui = components["linura-agent-ui"]
+        self.assertEqual(ui["kind"], "planned-app")
+        self.assertEqual(ui["maturity"], "roadmap-scaffold")
+        self.assertEqual(ui["activation_milestone"], "v0.10.0")
+        self.assertFalse(ui["release_artifact"])
 
     def test_stable_component_requires_stable_milestone_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

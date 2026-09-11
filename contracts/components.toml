@@ -67,11 +67,11 @@ id = "linura-agent-runtime"
 path = "crates/linura-agent-runtime"
 kind = "crate"
 workspace_member = true
-maturity = "roadmap-scaffold"
+maturity = "integrated-experimental"
 activation_milestone = "v0.8.0"
 release_artifact = false
 authority_role = "proposal-only"
-scope = "future agent interpretation substrate with no mutation authority"
+scope = "bounded proposal-only agent interpretation runtime integrated at v0.8.0 with no mutation authority"
 
 [[component]]
 id = "linura-capability-sdk"
@@ -388,7 +388,7 @@ path = "apps/linura-agent-ui"
 kind = "planned-app"
 workspace_member = false
 maturity = "roadmap-scaffold"
-activation_milestone = "v0.8.0"
+activation_milestone = "v0.10.0"
 release_artifact = false
 authority_role = "proposal-only"
 scope = "future conversational IntentProposal client with no privileged authority"
