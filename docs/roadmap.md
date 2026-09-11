@@ -184,8 +184,8 @@ Target capabilities:
 
 ## v0.8.0 — agent interpretation / IntentProposal
 
-**Status:** planned  
-**Target claim class:** Experimental
+**Status:** released
+**Claim class:** Experimental
 
 Add provider-neutral model/agent interpretation only after the deterministic authority and lifecycle foundation exists.
 
