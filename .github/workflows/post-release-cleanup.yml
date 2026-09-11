@@ -1,0 +1,118 @@
+name: Post Release Cleanup
+
+on:
+  workflow_run:
+    workflows: ["CI", "Security", "CodeQL"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: post-release-cleanup-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: terminal leased cleanup
+    if: "${{ github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_commit.message, 'chore: close v') }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CLOSURE_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Bind exact released closure state
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CLOSURE_SHA"
+          subject="$(git log -1 --pretty=%s)"
+          python3 - "$subject" "$GITHUB_OUTPUT" <<'PY'
+          import re
+          import sys
+
+          subject, output_path = sys.argv[1:]
+          match = re.fullmatch(
+              r"chore: close (?P<tag>v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)) release state",
+              subject,
+          )
+          if match is None:
+              raise SystemExit(f"invalid post-release closure subject: {subject!r}")
+          with open(output_path, "a", encoding="utf-8") as handle:
+              handle.write(f"tag={match.group('tag')}\n")
+          PY
+          tag="$(sed -n 's/^tag=//p' "$GITHUB_OUTPUT" | tail -1)"
+          python3 - "$tag" <<'PY'
+          import pathlib
+          import sys
+          import tomllib
+
+          tag = sys.argv[1]
+          roadmap = tomllib.loads(pathlib.Path("contracts/roadmap.toml").read_text(encoding="utf-8"))
+          milestones = {item["version"]: item for item in roadmap["milestone"]}
+          milestone = milestones.get(tag)
+          if roadmap.get("current_release") != tag or not milestone or milestone.get("status") != "released":
+              raise SystemExit(f"closure commit is not terminal released roadmap state for {tag}")
+          PY
+          python3 tools/check_roadmap.py .
+
+      - name: Require all native protected-main gates on closure commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 tools/release_native_gates.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --head-sha "$CLOSURE_SHA" \
+            --head-branch main \
+            --timeout-seconds 1800 \
+            commit --event push
+
+      - name: Freeze cleanup authority to exact qualified closure commit
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main" --force
+          git cat-file -e "$CLOSURE_SHA^{commit}"
+          git merge-base --is-ancestor "$CLOSURE_SHA" refs/remotes/origin/main
+          git show "$CLOSURE_SHA:contracts/release-branch-cleanup.toml" > "$RUNNER_TEMP/release-branch-cleanup.toml"
+          cmp "$RUNNER_TEMP/release-branch-cleanup.toml" contracts/release-branch-cleanup.toml
+
+      - name: Require dedicated Release App configuration
+        env:
+          RELEASE_APP_CLIENT_ID: ${{ vars.LINURA_RELEASE_APP_CLIENT_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.LINURA_RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_APP_CLIENT_ID" || { echo "missing repository variable LINURA_RELEASE_APP_CLIENT_ID" >&2; exit 2; }
+          test -n "$RELEASE_APP_PRIVATE_KEY" || { echo "missing repository secret LINURA_RELEASE_APP_PRIVATE_KEY" >&2; exit 2; }
+
+      - name: Mint cleanup-scoped Release App token
+        id: release_app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.LINURA_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.LINURA_RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: read
+
+      - name: Delete only exact release-owned branches under ref leases
+        env:
+          GH_TOKEN: ${{ steps.release_app.outputs.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 tools/release_branch_cleanup.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" \
+            --contract "$RUNNER_TEMP/release-branch-cleanup.toml"
