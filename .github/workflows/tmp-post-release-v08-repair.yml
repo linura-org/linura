@@ -163,7 +163,7 @@ jobs:
           git config user.email "${app_user_id}+${RELEASE_APP_SLUG}[bot]@users.noreply.github.com"
           git add --all
           git diff --cached --check
-          test "$(git diff --cached --name-only | sort)" = $'tests/tooling/test_post_release_close.py\ntools/post_release_close.py'
+          test "$(git diff --cached --name-only | sort)" = $'.github/workflows/tmp-post-release-v08-repair.yml\ntests/tooling/test_post_release_close.py\ntools/post_release_close.py'
           git commit -m "fix(release): normalize post-release milestone status structurally"
           gh auth setup-git
           git push origin "HEAD:refs/heads/$GITHUB_REF_NAME"
