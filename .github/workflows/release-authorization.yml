@@ -131,7 +131,7 @@ jobs:
             ready=0
             for workflow in CI Security CodeQL; do
               state="$(jq -r --arg workflow "$workflow" '
-                [.workflow_runs[] | select(.name == $workflow and .head_sha == env.SOURCE_SHA and (.event == "push" or .event == "workflow_dispatch"))]
+                [.workflow_runs[] | select(.path == (".github/workflows/" + ($workflow | ascii_downcase) + ".yml") and .head_sha == env.SOURCE_SHA and (.event == "push" or .event == "workflow_dispatch"))]
                 | if any(.[]; .status == "completed" and .conclusion == "success") then "success"
                   elif any(.[]; .status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested") then "active"
                   elif length == 0 then "missing"
