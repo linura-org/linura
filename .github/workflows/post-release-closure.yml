@@ -452,9 +452,15 @@ jobs:
           MAIN_SHA: ${{ steps.final_main.outputs.main_sha }}
         run: |
           set -euo pipefail
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"
           [[ "$MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          # Fresh-main qualification above is the cleanup authorization commit
+          # point. From here cleanup is bound to this immutable commit SHA, not
+          # to a mutable branch ref. Later main development cannot retarget this
+          # already-authorized transaction; it applies to subsequent closures.
+          git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main" --force
           git cat-file -e "$MAIN_SHA^{commit}"
+          git merge-base --is-ancestor "$MAIN_SHA" refs/remotes/origin/main
           git show "$MAIN_SHA:contracts/release-branch-cleanup.toml" > "$RUNNER_TEMP/release-branch-cleanup.toml"
 
           gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '.[].name' > "$RUNNER_TEMP/branches.txt"
@@ -558,16 +564,8 @@ jobs:
               fi
             fi
 
-            # Bind deletion authority to the exact post-closure main whose fresh
-            # canonical gates just succeeded. A later main revision must restart
-            # cleanup from its own checked-in policy instead of inheriting stale
-            # deletion authority from this run.
-            authority_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
-            test "$authority_sha" = "$MAIN_SHA"
-
             if git push --force-with-lease="$ref:$lease_sha" origin ":$ref"; then
-              test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"
-              echo "deleted obsolete release branch under exact main authority and SHA lease: $branch@$lease_sha"
+              echo "deleted obsolete release branch under immutable cleanup authority and exact SHA lease: $branch@$lease_sha"
               continue
             fi
 
@@ -584,7 +582,6 @@ jobs:
                 test "$returned_ref" = "$ref"
                 ;;
               2)
-                test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"
                 echo "release branch disappeared during leased cleanup: $branch"
                 continue
                 ;;
