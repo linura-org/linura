@@ -449,16 +449,22 @@ jobs:
       - name: Delete obsolete release-scoped branches
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          MAIN_SHA: ${{ steps.final_main.outputs.main_sha }}
         run: |
           set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"
+          [[ "$MAIN_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "$MAIN_SHA^{commit}"
+          git show "$MAIN_SHA:contracts/release-branch-cleanup.toml" > "$RUNNER_TEMP/release-branch-cleanup.toml"
+
           gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '.[].name' > "$RUNNER_TEMP/branches.txt"
-          python3 - "$RELEASE_TAG" "$RUNNER_TEMP/branches.txt" "$RUNNER_TEMP/candidates.tsv" <<'PY'
+          python3 - "$RELEASE_TAG" "$RUNNER_TEMP/branches.txt" "$RUNNER_TEMP/release-branch-cleanup.toml" "$RUNNER_TEMP/candidates.tsv" <<'PY'
           import pathlib
           import re
           import sys
           import tomllib
 
-          tag, branches_path, output = sys.argv[1:]
+          tag, branches_path, cleanup_path, output = sys.argv[1:]
           if re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", tag) is None:
               raise SystemExit("invalid release tag")
 
@@ -470,9 +476,7 @@ jobs:
               re.compile(rf"verify-release/{re.escape(tag)}"),
           )
 
-          cleanup_contract = tomllib.loads(
-              pathlib.Path("contracts/release-branch-cleanup.toml").read_text(encoding="utf-8")
-          )
+          cleanup_contract = tomllib.loads(pathlib.Path(cleanup_path).read_text(encoding="utf-8"))
           if cleanup_contract.get("schema_version") != 1:
               raise SystemExit("unsupported release branch cleanup schema")
           legacy = {}
@@ -520,11 +524,30 @@ jobs:
               continue
             fi
 
-            if ! ref_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" 2>/dev/null)"; then
-              continue
-            fi
-            current_sha="$(jq -r .object.sha <<<"$ref_payload")"
-            [[ "$current_sha" =~ ^[0-9a-f]{40}$ ]]
+            ref="refs/heads/$branch"
+            lookup_err="$RUNNER_TEMP/cleanup-ls-remote.err"
+            : > "$lookup_err"
+            set +e
+            remote_line="$(git ls-remote --exit-code --refs origin "$ref" 2>"$lookup_err")"
+            lookup_status=$?
+            set -e
+            case "$lookup_status" in
+              0)
+                test "$(printf '%s\n' "$remote_line" | sed '/^$/d' | wc -l)" -eq 1
+                IFS=$'\t' read -r current_sha returned_ref <<< "$remote_line"
+                [[ "$current_sha" =~ ^[0-9a-f]{40}$ ]]
+                test "$returned_ref" = "$ref"
+                ;;
+              2)
+                echo "release branch already absent before cleanup: $branch"
+                continue
+                ;;
+              *)
+                cat "$lookup_err" >&2
+                echo "failed to resolve release branch before cleanup: $branch (git ls-remote exit $lookup_status)" >&2
+                exit 1
+                ;;
+            esac
 
             lease_sha="$current_sha"
             if [[ "$expected_sha" != "automation-owned" ]]; then
@@ -535,18 +558,43 @@ jobs:
               fi
             fi
 
-            ref="refs/heads/$branch"
+            # Bind deletion authority to the exact post-closure main whose fresh
+            # canonical gates just succeeded. A later main revision must restart
+            # cleanup from its own checked-in policy instead of inheriting stale
+            # deletion authority from this run.
+            authority_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+            test "$authority_sha" = "$MAIN_SHA"
+
             if git push --force-with-lease="$ref:$lease_sha" origin ":$ref"; then
-              echo "deleted obsolete release branch under exact SHA lease: $branch@$lease_sha"
+              test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"
+              echo "deleted obsolete release branch under exact main authority and SHA lease: $branch@$lease_sha"
               continue
             fi
 
-            if ! latest_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" 2>/dev/null)"; then
-              echo "release branch disappeared during leased cleanup: $branch"
-              continue
-            fi
-            latest_sha="$(jq -r .object.sha <<<"$latest_payload")"
-            [[ "$latest_sha" =~ ^[0-9a-f]{40}$ ]]
+            : > "$lookup_err"
+            set +e
+            latest_line="$(git ls-remote --exit-code --refs origin "$ref" 2>"$lookup_err")"
+            latest_status=$?
+            set -e
+            case "$latest_status" in
+              0)
+                test "$(printf '%s\n' "$latest_line" | sed '/^$/d' | wc -l)" -eq 1
+                IFS=$'\t' read -r latest_sha returned_ref <<< "$latest_line"
+                [[ "$latest_sha" =~ ^[0-9a-f]{40}$ ]]
+                test "$returned_ref" = "$ref"
+                ;;
+              2)
+                test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"
+                echo "release branch disappeared during leased cleanup: $branch"
+                continue
+                ;;
+              *)
+                cat "$lookup_err" >&2
+                echo "failed to resolve release branch after rejected leased deletion: $branch (git ls-remote exit $latest_status)" >&2
+                exit 1
+                ;;
+            esac
+
             if [[ "$latest_sha" != "$lease_sha" ]]; then
               echo "preserving branch moved during cleanup lease: $branch ($latest_sha != $lease_sha)" >&2
               continue
