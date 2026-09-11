@@ -22,6 +22,8 @@ RELEASE_CONTROL_CRITERIA: dict[str, frozenset[str]] = {
     "trusted release proof reruns all mandatory inherited v0.4/v0.5 qualifications plus the v0.6 qualification against the exact release authorization": frozenset(
         {"proof"}
     ),
+    "trusted release proof includes v0.8 qualification and succeeds": frozenset({"proof", "qualification"}),
+    "metadata-only release authorization preserves the reviewed implementation tree": frozenset({"authorization"}),
     "independent binary reproduction succeeds": frozenset({"reproduction"}),
     "tag-last publication succeeds": frozenset({"publication"}),
     "independent published-release verification succeeds": frozenset({"verification"}),
@@ -564,11 +566,26 @@ def close_release(args: argparse.Namespace) -> list[str]:
         raise ClosureError(f"{args.tag} does not name milestone_contract")
     milestone_path = root / milestone_path_value
     milestone_text = read(milestone_path)
-    milestone_text = replace_once(
-        milestone_text,
-        "**Status:** release candidate; publication pending",
-        "**Status:** released",
-        f"{args.tag} milestone status",
+    # The machine roadmap plus verified immutable release evidence are authoritative.
+    # The Markdown status is a human-facing projection whose pre-release wording may
+    # legitimately evolve between milestones; require exactly one projection field
+    # and normalize it structurally instead of coupling closure to historical prose.
+    status_pattern = re.compile(r"(?m)^\*\*Status:\*\* (?P<value>[^\n]+)$")
+    status_matches = list(status_pattern.finditer(milestone_text))
+    if len(status_matches) != 1:
+        raise ClosureError(
+            f"{args.tag} milestone status: expected exactly one Status field, found {len(status_matches)}"
+        )
+    status_match = status_matches[0]
+    status_value = status_match.group("value").strip()
+    if status_value.casefold().startswith("released"):
+        raise ClosureError(
+            f"{args.tag} milestone status is already released while machine roadmap still requires closure"
+        )
+    milestone_text = (
+        milestone_text[: status_match.start()]
+        + "**Status:** released"
+        + milestone_text[status_match.end() :]
     )
     milestone_text = close_release_control_criteria(milestone_text, args.tag)
     write_if_changed(milestone_path, milestone_text, changed, root)
