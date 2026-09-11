@@ -3,6 +3,7 @@ name: Release Preparation
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,7 +17,7 @@ concurrency:
 jobs:
   qualify:
     name: qualify reviewed release readiness
-    if: "${{ startsWith(github.event.head_commit.message, 'release: ready v') }}"
+    if: "${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release: ready v') }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     outputs:
@@ -121,63 +122,76 @@ jobs:
             }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length')"
           test "$unresolved" = "0"
 
-      - name: Require fresh protected-main CI, Security and CodeQL
+  fresh-main:
+    name: require current-attempt protected-main canonical gates
+    needs: qualify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ needs.qualify.outputs.source_sha }}
+
+      - name: Dispatch and require exact readiness-main canonical gates
         run: |
           set -euo pipefail
-          for _ in $(seq 1 180); do
-            runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SOURCE_SHA&event=push&per_page=100")"
-            ready=0
-            for workflow in CI Security CodeQL; do
-              state="$(jq -r --arg workflow "$workflow" '
-                [.workflow_runs[] | select(.name == $workflow and .head_sha == env.SOURCE_SHA and .event == "push")]
-                | if any(.[]; .status == "completed" and .conclusion == "success") then "success"
-                  elif any(.[]; .status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested") then "active"
-                  elif length == 0 then "missing"
-                  else "failed" end
-              ' <<<"$runs")"
-              case "$state" in
-                success) ready=$((ready + 1)) ;;
-                active|missing) ;;
-                *) echo "$workflow failed for release-readiness source $SOURCE_SHA" >&2; exit 1 ;;
-              esac
-            done
-            if [[ "$ready" -eq 3 ]]; then
-              exit 0
-            fi
-            sleep 10
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
+          evidence="$RUNNER_TEMP/release-preparation-readiness-main-runs.jsonl"
+          rm -f "$evidence"
+          for workflow in ci.yml security.yml codeql.yml; do
+            python3 tools/release_workflow_dispatch.py dispatch \
+              --repository "$GITHUB_REPOSITORY" \
+              --workflow "$workflow" \
+              --ref main \
+              --head-sha "$SOURCE_SHA" \
+              --phase release-preparation-readiness-main \
+              --evidence-file "$evidence"
           done
-          echo "fresh-main readiness gates did not complete for $SOURCE_SHA" >&2
-          exit 1
+          python3 tools/release_workflow_dispatch.py wait \
+            --evidence-file "$evidence" \
+            --expected-count 3 \
+            --timeout-seconds 1800
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
 
   prepare:
     name: create, review and merge mechanical release preparation
-    needs: qualify
+    needs: [qualify, fresh-main]
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 180
     permissions:
       contents: write
       actions: write
       pull-requests: write
       issues: write
     env:
-      GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
       SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
       RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
       RELEASE_THEME: ${{ needs.qualify.outputs.theme }}
     steps:
-      - name: Require dedicated release automation credential
-        run: |
-          set -euo pipefail
-          if [[ -z "$GH_TOKEN" ]]; then
-            echo "RELEASE_AUTOMATION_TOKEN is required so release-preparation pushes and merges emit downstream Actions events" >&2
-            exit 1
-          fi
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ needs.qualify.outputs.source_sha }}
-          token: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}
+          token: ${{ github.token }}
+
+      - name: Prove repository release automation authority
+        run: |
+          set -euo pipefail
+          python3 tools/probe_release_automation_authority.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --base main \
+            --head main \
+            --credential-source github
 
       - name: Build or re-prove deterministic mechanical preparation
         id: candidate
@@ -278,14 +292,27 @@ jobs:
             printf 'created=true\n'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Dispatch exact-head canonical checks
+      - name: Dispatch and require exact-head canonical checks
         env:
           BRANCH: ${{ steps.candidate.outputs.branch }}
+          HEAD_SHA: ${{ steps.candidate.outputs.head_sha }}
         run: |
           set -euo pipefail
+          evidence="$RUNNER_TEMP/release-preparation-head-runs.jsonl"
+          rm -f "$evidence"
           for workflow in ci.yml security.yml codeql.yml; do
-            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+            python3 tools/release_workflow_dispatch.py dispatch \
+              --repository "$GITHUB_REPOSITORY" \
+              --workflow "$workflow" \
+              --ref "$BRANCH" \
+              --head-sha "$HEAD_SHA" \
+              --phase "release-preparation-head" \
+              --evidence-file "$evidence"
           done
+          python3 tools/release_workflow_dispatch.py wait \
+            --evidence-file "$evidence" \
+            --expected-count 3 \
+            --timeout-seconds 1800
 
       - name: Request exact-head Codex review
         id: review_request
@@ -311,28 +338,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          checks_ready=0
           review_ready=0
+          python3 tools/release_workflow_dispatch.py verify \
+            --evidence-file "$RUNNER_TEMP/release-preparation-head-runs.jsonl" \
+            --expected-count 3
           for _ in $(seq 1 360); do
             actual_head="$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)"
             test "$actual_head" = "$HEAD_SHA"
-
-            checks_ready=1
-            for workflow in ci.yml security.yml codeql.yml; do
-              payload="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=workflow_dispatch&branch=$BRANCH&per_page=20")"
-              state="$(jq -r --arg sha "$HEAD_SHA" '
-                [.workflow_runs[] | select(.head_sha == $sha)] | sort_by(.created_at) | last
-                | if . == null then "missing" elif .status != "completed" then .status else .conclusion end
-              ' <<<"$payload")"
-              case "$state" in
-                success) ;;
-                failure|cancelled|timed_out|action_required|startup_failure|stale)
-                  echo "$workflow failed for exact preparation head $HEAD_SHA: $state" >&2
-                  exit 1
-                  ;;
-                *) checks_ready=0 ;;
-              esac
-            done
 
             # shellcheck disable=SC2016
             unresolved="$(gh api graphql -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER" -f query='
@@ -361,7 +373,7 @@ jobs:
               review_ready=0
             fi
 
-            if [[ "$checks_ready" -eq 1 && "$review_ready" -eq 1 ]]; then
+            if [[ "$review_ready" -eq 1 ]]; then
               exit 0
             fi
             sleep 10
@@ -378,6 +390,7 @@ jobs:
           BRANCH: ${{ steps.candidate.outputs.branch }}
         run: |
           set -euo pipefail
+          python3 tools/release_workflow_dispatch.py verify --evidence-file "$RUNNER_TEMP/release-preparation-head-runs.jsonl" --expected-count 3
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
           test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
           test "$(gh pr view "$PR_NUMBER" --json changedFiles --jq .changedFiles)" = "2"
@@ -418,26 +431,34 @@ jobs:
           gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" >/dev/null 2>&1 || true
           printf 'main_sha=%s\n' "$main_sha" >> "$GITHUB_OUTPUT"
 
-      - name: Require fresh-main gates to materialize
+      - name: Dispatch and require exact-main canonical gates
         env:
           MAIN_SHA: ${{ steps.merge.outputs.main_sha }}
         run: |
           set -euo pipefail
-          for _ in $(seq 1 30); do
-            runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$MAIN_SHA&event=push&per_page=100")"
-            present=0
-            for workflow in CI Security CodeQL; do
-              if jq -e --arg workflow "$workflow" --arg sha "$MAIN_SHA" '
-                any(.workflow_runs[]; .name == $workflow and .head_sha == $sha and .event == "push")
-              ' <<<"$runs" >/dev/null; then
-                present=$((present + 1))
-              fi
-            done
-            if [[ "$present" -eq 3 ]]; then
-              echo "fresh-main preparation gates materialized for $MAIN_SHA"
-              exit 0
-            fi
-            sleep 2
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/release-preparation-main-runs.jsonl"
+          rm -f "$evidence"
+          for workflow in ci.yml security.yml codeql.yml; do
+            python3 tools/release_workflow_dispatch.py dispatch \
+              --repository "$GITHUB_REPOSITORY" \
+              --workflow "$workflow" \
+              --ref "main" \
+              --head-sha "$MAIN_SHA" \
+              --phase "release-preparation-main" \
+              --evidence-file "$evidence"
           done
-          echo "release-preparation merge succeeded but fresh-main CI/Security/CodeQL did not materialize" >&2
-          exit 1
+          python3 tools/release_workflow_dispatch.py wait \
+            --evidence-file "$evidence" \
+            --expected-count 3 \
+            --timeout-seconds 1800
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"
+
+      - name: Dispatch release authorization from exact prepared main
+        env:
+          MAIN_SHA: ${{ steps.merge.outputs.main_sha }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$MAIN_SHA"
+          gh workflow run release-authorization.yml --repo "$GITHUB_REPOSITORY" --ref main

@@ -116,18 +116,10 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       SOURCE_SHA: ${{ inputs.source_sha }}
     steps:
-      - name: Require dedicated release automation credential
-        run: |
-          set -euo pipefail
-          if [[ -z "$GH_TOKEN" ]]; then
-            echo "RELEASE_AUTOMATION_TOKEN is required before immutable publication so protected post-release PR events, review and merge can complete automatically" >&2
-            exit 1
-          fi
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -142,7 +134,7 @@ jobs:
           test "$current" = "$SOURCE_SHA"
           python3 tools/probe_release_automation_authority.py \
             --repository "$GITHUB_REPOSITORY" \
-            --credential-source dedicated
+            --credential-source github
 
   dispatch:
     name: dispatch immutable publication

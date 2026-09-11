@@ -1,10 +1,18 @@
 name: CI
 
+run-name: '${{ github.workflow }} :: ${{ inputs.dispatch_nonce || github.sha }}'
+
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      dispatch_nonce:
+        description: Optional release-control correlation nonce
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read

@@ -6,12 +6,12 @@ See [ADR 0015 — Isolated and independently reproducible release builds](adr/00
 
 ## Deterministic stage graph
 
-The release control plane uses one permanent-gate observation boundary followed by explicit authenticated release-stage dispatches:
+The release control plane uses explicit authenticated release-stage dispatches and exact-attempt evidence binding:
 
 ```text
-protected main release intent
-  → exact-SHA CI / Security / CodeQL
-  → Release Proof Dispatch              # workflow_run observer only
+protected main release authorization
+  → explicitly dispatched exact-SHA CI / Security / CodeQL
+  → direct authorization handoff
   → Trusted Release Proof               # explicit workflow_dispatch
        → exact-source observation acceptance
        → exact-source Control1 plan-preview acceptance
@@ -26,9 +26,11 @@ protected main release intent
   → Verify published release            # explicit workflow_dispatch
 ```
 
+`Release Proof Dispatch` remains an optional `workflow_run` compatibility observer for independently emitted native push-gate events. It is not the mandatory authorization-to-proof edge on the job-scoped repository-token path.
+
 The v0.6 gate is mandatory only for a source/release contract that includes the v0.6 managed-lifecycle claim; on the v0.6 release path it is a direct dependency of the trusted builder and promotion handoff.
 
-`workflow_run` is used only to observe independently completed permanent gates (`CI`, `Security`, `CodeQL`) and wake Release Proof Dispatch. It is not an implicit message bus between release-authority stages. After proof authorization begins, each receiver gets an explicit typed handoff and independently validates source SHA, parent run identity, release contract and current repository state before granting the next capability.
+`workflow_run` is retained only for the compatibility Release Proof Dispatch observer of independently completed native permanent gates (`CI`, `Security`, `CodeQL`). The normal automation-owned authorization-to-proof edge is an explicit dispatch after current-attempt exact-SHA gates succeed. `workflow_run` is not an implicit message bus between release-authority stages. Each receiver gets an explicit typed handoff and independently validates source SHA, parent run identity, release contract and current repository state before granting the next capability.
 
 ## Exact-source qualification before build
 

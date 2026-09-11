@@ -72,7 +72,7 @@ class ReleaseWorkflowDispatchTests(unittest.TestCase):
         self.assertIn('git merge-base --is-ancestor "$recovery_base" origin/main', closure_workflow)
         self.assertIn('marker_path=".github/release-verification-recovery/$tag"', closure_workflow)
         self.assertIn('test "$changed_paths" = "$marker_path"', closure_workflow)
-        self.assertIn('"verify-release/"', closure_workflow)
+        self.assertIn('re.compile(rf"verify-release/{re.escape(tag)}")', closure_workflow)
 
 
 if __name__ == "__main__":

@@ -28,15 +28,15 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn("actions: write", workflow)
         self.assertIn("issues: write", workflow)
         self.assertIn(
-            "GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}",
+            "GH_TOKEN: ${{ github.token }}",
             workflow,
         )
         self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", workflow)
-        self.assertIn("RELEASE_AUTOMATION_TOKEN is required", workflow)
+        self.assertIn("--credential-source github", workflow)
         self.assertIn("Prove closure automation capabilities", workflow)
         self.assertIn(PROBE_TOOL, workflow)
-        self.assertIn('--credential-source dedicated', workflow)
-        self.assertIn("token: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}", workflow)
+        self.assertIn('--credential-source github', workflow)
+        self.assertIn("token: ${{ github.token }}", workflow)
 
         preflight = workflow.index("Prove closure automation capabilities")
         generate = workflow.index("Generate deterministic closure tree")
@@ -66,17 +66,17 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         for workflow in (closure, promotion):
             self.assertIn(PROBE_TOOL, workflow)
             self.assertIn(
-                "GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}",
+                "GH_TOKEN: ${{ github.token }}",
                 workflow,
             )
-            self.assertIn("RELEASE_AUTOMATION_TOKEN is required", workflow)
-            self.assertIn("--credential-source dedicated", workflow)
+            self.assertIn("--credential-source github", workflow)
+            self.assertIn("--credential-source github", workflow)
             self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", workflow)
 
     def test_closure_waits_for_native_pr_checks_and_exact_codex_evidence(self) -> None:
         workflow = self._closure_workflow()
         self.assertIn("@codex review", workflow)
-        self.assertIn("event=pull_request", workflow)
+        self.assertIn("event=workflow_dispatch", workflow)
         self.assertGreaterEqual(workflow.count("gh api graphql --paginate"), 2)
         self.assertGreaterEqual(workflow.count("$endCursor:String"), 2)
         self.assertGreaterEqual(workflow.count("reviewThreads(first:100, after:$endCursor)"), 2)
@@ -88,12 +88,12 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn('CODEX_BOT_USER_ID: "199175422"', workflow)
         self.assertIn('pulls/$PR_NUMBER/merge', workflow)
         self.assertNotIn('gh pr merge "$PR_NUMBER"', workflow)
-        self.assertIn("event=push", workflow)
+        self.assertIn("event=workflow_dispatch", workflow)
         self.assertNotIn("REVIEW_REQUESTED_AT", workflow)
         self.assertNotIn("issues/comments/$REVIEW_COMMENT_ID/reactions", workflow)
 
         poll = workflow.split(
-            "- name: Require native exact-head checks and completed clean Codex review", 1
+            "- name: Require explicit exact-head checks and completed clean Codex review", 1
         )[1].split("- name: Re-prove and squash merge exact reviewed closure", 1)[0]
         self.assertIn("gh api graphql --paginate", poll)
         self.assertIn("reviewThreads(first:100, after:$endCursor)", poll)
@@ -164,21 +164,31 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
     def test_closed_release_retry_still_requires_fresh_main_before_cleanup(self) -> None:
         workflow = self._closure_workflow()
         final_main = workflow.index("Resolve post-closure protected-main SHA")
-        fresh_main = workflow.index("Require native fresh-main CI, Security and CodeQL")
+        fresh_main = workflow.index("Dispatch and require explicit fresh-main CI, Security and CodeQL")
         cleanup = workflow.index("Delete obsolete release-scoped branches")
         self.assertLess(final_main, fresh_main)
         self.assertLess(fresh_main, cleanup)
 
-        fresh_block = workflow.split("- name: Require native fresh-main CI, Security and CodeQL", 1)[1].split(
+        fresh_block = workflow.split("- name: Dispatch and require explicit fresh-main CI, Security and CodeQL", 1)[1].split(
             "- name: Delete obsolete release-scoped branches", 1
         )[0]
         self.assertNotIn("if: steps.state.outputs.state == 'pending'", fresh_block)
         self.assertIn("steps.final_main.outputs.main_sha", fresh_block)
+        self.assertIn("post-release-closure-main-runs.jsonl", fresh_block)
+        self.assertIn("tools/release_workflow_dispatch.py dispatch", fresh_block)
+        self.assertIn("tools/release_workflow_dispatch.py wait", fresh_block)
+        self.assertNotIn("dispatch-boundaries.tsv", fresh_block)
+        self.assertNotIn(".id > $boundary", fresh_block)
 
-    def test_cleanup_covers_release_branches_and_legacy_probe(self) -> None:
+    def test_cleanup_is_limited_to_release_owned_branches_and_legacy_probe(self) -> None:
         workflow = self._closure_workflow()
         cleanup = workflow.split("- name: Delete obsolete release-scoped branches", 1)[1]
-        self.assertIn('"release/"', cleanup)
+        self.assertIn("automation/release-prep-", cleanup)
+        self.assertIn("automation/release-authorization-", cleanup)
+        self.assertIn("automation/post-release-", cleanup)
+        self.assertIn("verify-release/", cleanup)
+        self.assertNotIn('"fix/"', cleanup)
+        self.assertNotIn('"release/"', cleanup)
         self.assertIn('branch == "tmp/zero-diff-authorization-probe"', cleanup)
         self.assertIn("preserving branch used by an open PR", cleanup)
         self.assertIn('repos/$GITHUB_REPOSITORY/pulls', cleanup)

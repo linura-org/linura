@@ -16,13 +16,13 @@ class PostReleaseReviewSecurityTests(unittest.TestCase):
     def _request_block(self) -> str:
         workflow = self._workflow()
         return workflow.split("- name: Request exact-head Codex review", 1)[1].split(
-            "- name: Require native exact-head checks and completed clean Codex review", 1
+            "- name: Require explicit exact-head checks and completed clean Codex review", 1
         )[0]
 
     def _poll_block(self) -> str:
         workflow = self._workflow()
         return workflow.split(
-            "- name: Require native exact-head checks and completed clean Codex review", 1
+            "- name: Require explicit exact-head checks and completed clean Codex review", 1
         )[1].split("- name: Re-prove and squash merge exact reviewed closure", 1)[0]
 
     def _merge_block(self) -> str:
