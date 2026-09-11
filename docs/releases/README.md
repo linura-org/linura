@@ -10,10 +10,9 @@ A frozen contract is therefore **not the live release-status authority**. For a 
 
 | Version | Live status | Frozen contract | Terminal release record | Terminal evidence |
 | --- | --- | --- | --- | --- |
-| `v0.7.0` | **Released — Experimental; independently verified** | [`v0.7.0.md`](v0.7.0.md) | [`published-v0.7.0.md`](published-v0.7.0.md) | [`../qualification/v0.7.0-publication.md`](../qualification/v0.7.0-publication.md) |
+| `v0.8.0` | **Released — Experimental; independently verified** | [`v0.8.0.md`](v0.8.0.md) | [`published-v0.8.0.md`](published-v0.8.0.md) | [`../qualification/v0.8.0-publication.md`](../qualification/v0.8.0-publication.md) |
 
-The immutable GitHub Release for `v0.7.0` is bound to the frozen publication-stable contract. The terminal record [`published-v0.7.0.md`](published-v0.7.0.md), the publication-evidence dossier, and `contracts/roadmap.toml` are the live current-state authorities.
-
+The immutable GitHub Release for `v0.8.0` is bound to the frozen publication-stable contract. The terminal record [`published-v0.8.0.md`](published-v0.8.0.md), the publication-evidence dossier, and `contracts/roadmap.toml` are the live current-state authorities.
 ## Publication-stable contracts from v0.7 onward
 
 Starting with `v0.7.0`, release contracts must use **publication-stable lifecycle wording**. A contract may state immutable scope, evidence requirements, and the fact that publication/verification are externally recorded, but it must not encode temporary live-state assertions such as:
