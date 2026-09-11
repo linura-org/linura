@@ -42,13 +42,17 @@ release: vX.Y.Z — <implementation theme>
 
 That commit does **not** create a tag. It expresses an unpublished release intent for the exact current `main` SHA.
 
+The semantic review boundary precedes that intent: Release Preparation freezes the mechanical version metadata on top of already-reviewed readiness. Release Authorization then transports that reviewed state through protected `main` as a zero-diff, tree-identical machine handoff. Authorization does not require a conversational reviewer; it requires exact parent/tree/message identity, zero changed files, zero unresolved review threads, explicit exact-head canonical checks, and the repository ruleset.
+
 After the protected Release Authorization merge creates the exact `release: vX.Y.Z — <implementation theme>` source, the owning `Release Authorization` workflow explicitly dispatches `CI`, `Security` and `CodeQL` for that exact protected-`main` SHA, binds acceptance to the current dispatch attempt, waits for all three to succeed, rechecks that `main` is unchanged, and then directly dispatches `Trusted Release Proof` for that source.
 
 `Release Proof Dispatch` remains a non-authoritative compatibility observer for independently emitted native `push`-driven permanent-gate events. When such events exist it may wake and duplicate-safely dispatch proof only after independently revalidating exact source, contract, version, gate success, tag absence and current `main`. It is **not** a mandatory edge of the job-scoped `GITHUB_TOKEN` normal path, because token-authored mutations are not relied on to recursively emit native push workflows. If either the direct handoff or compatibility observer sees source drift, it exits without release authority.
 
+Automation-authored PRs may also surface approval-gated or otherwise redundant ordinary `pull_request` runs. Those are not release-control evidence. The authoritative machine evidence is the nonce-bound explicit `workflow_dispatch` set, whose workflow path, exact SHA/ref, display title and immutable run ID are recorded and revalidated. Their check contexts satisfy the protected-main ruleset.
+
 ## Release-stage timeout budget
 
-Release mutation jobs must reserve more wall-clock time than the sum of their explicit bounded waits. In particular, candidate-gate resolution/wait, exact-head Codex review polling, and post-merge exact-main gates must fit before the job deadline with operational margin. A job timeout must never be able to strand the lifecycle after a protected-main merge but before the next durable handoff is dispatched. The executable tooling contract pins the current release-preparation, release-authorization, and post-release-closure budgets accordingly.
+Release mutation jobs must reserve more wall-clock time than the sum of their explicit bounded waits. Candidate-gate resolution/wait, any semantic preparation-review polling, deterministic structural re-proofs, and post-merge exact-main gates must fit before the job deadline with operational margin. A job timeout must never be able to strand the lifecycle after a protected-main merge but before the next durable handoff is dispatched. The executable tooling contract pins the current release-preparation, release-authorization, and post-release-closure budgets accordingly.
 
 ## Trusted Release Proof
 
@@ -195,9 +199,11 @@ Publication evidence and roadmap closure are therefore ordered:
 proof → promotion/readiness → tag-last publication → independent verification → roadmap/cleanup closure
 ```
 
-On a pending release state, closure re-proves credential readiness before mutation, generates one deterministic closure commit, pushes a release-scoped automation branch, opens a protected PR, dispatches/awaits exact-head CI/Security/CodeQL, squash-merges through the normal `main` ruleset, dispatches/awaits fresh-main CI/Security/CodeQL on the resulting SHA, and only then removes obsolete release-scoped branches not referenced by an open PR.
+On a pending release state, closure re-proves repository-token capability before mutation, generates one deterministic closure tree, verifies that the frozen release contract is byte-identical and that only approved terminal documentation surfaces change, creates or re-proves a single-parent release-scoped closure commit, opens or reuses the exact protected PR, explicitly dispatches/awaits exact-head CI/Security/CodeQL, requires zero unresolved review threads, and immediately before merge re-proves base/head/branch/parent/message identity. It then squash-merges through the normal `main` ruleset, explicitly dispatches/awaits fresh-main CI/Security/CodeQL on the resulting SHA, and only then removes obsolete release-owned and narrowly version-scoped temporary branches not referenced by an open PR.
 
-If the release is already terminally closed, the workflow remains idempotent: it skips state regeneration and still performs safe obsolete release-branch cleanup.
+Post Release Closure is therefore a deterministic machine handoff, not a second semantic review phase. Any human review finding remains blocking if present, but the automation does not depend on a bot-authored `@codex` request that cannot authenticate as the connected human reviewer.
+
+If the release is already terminally closed, the workflow remains idempotent: it skips state regeneration and still performs fresh-main qualification plus safe obsolete release-branch cleanup.
 
 ## Traceability policy
 
