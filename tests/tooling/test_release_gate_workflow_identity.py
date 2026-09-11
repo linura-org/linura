@@ -69,12 +69,18 @@ class ReleaseGateWorkflowIdentityTests(unittest.TestCase):
         )
         self.assert_count_gate_contract(block, PUSH_OR_DISPATCH)
 
-    def test_release_authorization_gate_is_step_scoped_and_fail_closed(self) -> None:
+    def test_release_authorization_requires_exact_native_main_push_gates(self) -> None:
         block = step_block(
             "release-authorization.yml",
-            "Require fresh protected-main CI, Security and CodeQL",
+            "Require native protected-main gates on prepared source",
         )
-        self.assert_state_gate_contract(block, PUSH_OR_DISPATCH)
+        self.assertIn("python3 tools/release_native_gates.py", block)
+        self.assertIn('--head-sha "$SOURCE_SHA"', block)
+        self.assertIn("--head-branch main", block)
+        self.assertIn("--timeout-seconds 1800", block)
+        self.assertIn("commit --event push", block)
+        self.assertNotIn("release_workflow_dispatch.py", block)
+        self.assertNotIn("workflow_dispatch", block)
 
     def test_canonical_gate_workflows_keep_nonce_run_names(self) -> None:
         for name, workflow in (
