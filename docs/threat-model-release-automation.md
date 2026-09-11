@@ -24,7 +24,7 @@ This document extends the canonical [`threat-model.md`](threat-model.md) for rep
 - duplicate release-verification/closure triggers racing the same terminal bookkeeping;
 - forged PR title/comment/reaction intended to look like release readiness or review completion;
 - a cleanup target ref moving between provenance validation and deletion;
-- protected `main` moving after fresh closure gates but before cleanup mutation, thereby changing the policy that authorizes cleanup;
+- cleanup accidentally reading authority from mutable current `main` instead of the exact fresh-qualified closure commit;
 - authentication, rate-limit, network or server errors being mistaken for an absent cleanup ref;
 - a bot-to-bot conversational-review dependency that cannot authenticate as the connected human reviewer and therefore deadlocks an otherwise proven machine handoff;
 - repository automation/operator error that attempts to bypass the protected-main ruleset;
@@ -60,7 +60,9 @@ A matching PR title or branch name is never sufficient evidence.
 
 ### Stale source and replay
 
-Every source-bound handoff rechecks current protected `main` immediately before mutation/dispatch. Stale runs exit or fail without authority. A conflicting existing version tag is rejected before authorization. Trusted Release Proof, Promotion and Release independently revalidate exact current source identity and the frozen release contract, so an old automation run cannot retarget a later source.
+Before a handoff reaches its explicit commit point, every source-bound transition rechecks current protected `main` immediately before mutation or dispatch. Stale runs exit or fail without authority. A conflicting existing version tag is rejected before authorization. Trusted Release Proof, Promotion and Release independently revalidate exact current source identity and the frozen release contract, so an old automation run cannot retarget a later source.
+
+Terminal cleanup has a deliberate later commit point: after the deterministic closure PR has merged, the exact resulting `MAIN_SHA` must pass freshly dispatched CI/Security/CodeQL while it is current protected `main`. Successful completion of those exact gates commits cleanup authority to that immutable SHA. From that point, ordinary later `main` commits do not retroactively revoke or retarget the already-authorized cleanup transaction; the run must instead prove that `MAIN_SHA` is still an ancestor of protected `main` and read the cleanup policy directly from `MAIN_SHA`. Later commits govern later closure transactions. This avoids pretending that a separate current-main read and a target-ref deletion can form an atomic cross-ref lease.
 
 ### Event-recursion failure
 
@@ -90,7 +92,7 @@ There is exactly one terminal handoff: successful verification → `Release Clos
 
 Closure synchronizes terminal qualification/current-release documents and the human-facing `docs/releases/published-vX.Y.Z.md` record while preserving the frozen release contract byte-for-byte. Unknown terminal qualification rows or unexpected `docs/releases/` mutations fail closed.
 
-Terminal cleanup is ownership-scoped and fail-closed. Its authority is the exact final `main` SHA produced by terminal closure and then proven by fresh CI/Security/CodeQL; the cleanup ledger is read from that commit rather than from an earlier working-tree snapshot. Immediately before every ref deletion, the workflow rechecks that protected `main` still equals that authorizing SHA. New release automation may select only its release-owned `automation/...` or recovery refs. Legacy non-namespaced temporary refs are eligible only through that exact-main `contracts/release-branch-cleanup.toml`, which binds the release, branch name and reviewed target SHA. The target ref is removed using `git push --force-with-lease=<ref>:<expected-sha> origin :<ref>`, so a moved target is preserved. Ref discovery uses `git ls-remote --exit-code`: only the explicit no-match status is treated as absence; authentication, network, rate-limit or server failures stop cleanup. A deletion failure against an unchanged ref also fails closed instead of being silently ignored.
+Terminal cleanup is ownership-scoped and fail-closed. Its authority is the exact final `MAIN_SHA` produced by terminal closure and then proven, while current protected `main`, by fresh CI/Security/CodeQL; that successful fresh-main qualification is the cleanup authorization commit point. Before reading policy, the workflow fetches protected `main`, proves the immutable `MAIN_SHA` object exists locally and remains an ancestor, and reads `contracts/release-branch-cleanup.toml` from that exact commit rather than from the mutable current branch or an earlier working-tree snapshot. New release automation may select only its release-owned `automation/...` or recovery refs. Legacy non-namespaced temporary refs are eligible only through that exact-commit ledger, which binds the release, branch name and reviewed target SHA. The target ref is removed using `git push --force-with-lease=<ref>:<expected-sha> origin :<ref>`, so a moved target is preserved. Ref discovery uses `git ls-remote --exit-code`: only the explicit no-match status is treated as absence; authentication, network, rate-limit or server failures stop cleanup. A deletion failure against an unchanged ref also fails closed instead of being silently ignored. A later protected-main commit cannot change the policy of this already-committed cleanup transaction; it applies to subsequent closure transactions instead.
 
 ### Credential compromise
 
