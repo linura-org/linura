@@ -505,6 +505,7 @@ jobs:
 
           while IFS=$'\t' read -r branch expected_sha; do
             [[ -n "$branch" ]] || continue
+            git check-ref-format --branch "$branch" >/dev/null
 
             open_pr_count="$(
               gh api --paginate --method GET "repos/$GITHUB_REPOSITORY/pulls" \
@@ -525,11 +526,32 @@ jobs:
             current_sha="$(jq -r .object.sha <<<"$ref_payload")"
             [[ "$current_sha" =~ ^[0-9a-f]{40}$ ]]
 
-            if [[ "$expected_sha" != "automation-owned" && "$current_sha" != "$expected_sha" ]]; then
-              echo "preserving legacy branch whose ref moved after cleanup provenance was reviewed: $branch ($current_sha != $expected_sha)" >&2
+            lease_sha="$current_sha"
+            if [[ "$expected_sha" != "automation-owned" ]]; then
+              lease_sha="$expected_sha"
+              if [[ "$current_sha" != "$lease_sha" ]]; then
+                echo "preserving legacy branch whose ref moved after cleanup provenance was reviewed: $branch ($current_sha != $lease_sha)" >&2
+                continue
+              fi
+            fi
+
+            ref="refs/heads/$branch"
+            if git push --force-with-lease="$ref:$lease_sha" origin ":$ref"; then
+              echo "deleted obsolete release branch under exact SHA lease: $branch@$lease_sha"
               continue
             fi
 
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
-            echo "deleted obsolete release branch: $branch"
+            if ! latest_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" 2>/dev/null)"; then
+              echo "release branch disappeared during leased cleanup: $branch"
+              continue
+            fi
+            latest_sha="$(jq -r .object.sha <<<"$latest_payload")"
+            [[ "$latest_sha" =~ ^[0-9a-f]{40}$ ]]
+            if [[ "$latest_sha" != "$lease_sha" ]]; then
+              echo "preserving branch moved during cleanup lease: $branch ($latest_sha != $lease_sha)" >&2
+              continue
+            fi
+
+            echo "failed to delete unchanged release branch under exact SHA lease: $branch@$lease_sha" >&2
+            exit 1
           done < "$RUNNER_TEMP/candidates.tsv"
