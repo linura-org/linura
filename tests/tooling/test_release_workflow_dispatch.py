@@ -6,6 +6,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
+CLEANUP_TOOL = ROOT / "tools" / "release_branch_cleanup.py"
 
 
 class ReleaseWorkflowDispatchTests(unittest.TestCase):
@@ -67,12 +68,15 @@ class ReleaseWorkflowDispatchTests(unittest.TestCase):
 
     def test_post_release_closure_authenticates_recovery_ref(self) -> None:
         closure_workflow = (WORKFLOWS / "post-release-closure.yml").read_text(encoding="utf-8")
+        cleanup_tool = CLEANUP_TOOL.read_text(encoding="utf-8")
         self.assertIn('verification_head_branch" == "verify-release/$tag"', closure_workflow)
         self.assertIn('test "$verification_event" = "push"', closure_workflow)
         self.assertIn('git merge-base --is-ancestor "$recovery_base" origin/main', closure_workflow)
         self.assertIn('marker_path=".github/release-verification-recovery/$tag"', closure_workflow)
         self.assertIn('test "$changed_paths" = "$marker_path"', closure_workflow)
-        self.assertIn('re.compile(rf"verify-release/{re.escape(tag)}")', closure_workflow)
+        self.assertNotIn("verify-release/", cleanup_tool)
+        self.assertIn("sha-addressed-automation", cleanup_tool)
+        self.assertIn("explicit-ledger", cleanup_tool)
 
 
 if __name__ == "__main__":
