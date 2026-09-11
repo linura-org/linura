@@ -21,9 +21,7 @@ Target the default branch (`main`) and require:
 - a pull request before merge;
 - all permanent required status checks to pass;
 - resolution of all review conversations;
-- dismissal of stale approvals when code changes once approving reviews are required;
-- at least one approving review as soon as a second trusted reviewer exists; until then, do not configure an approval count that makes the repository impossible for its maintainer to merge through the protected workflow;
-- two approving reviews for security-sensitive or privileged-code changes once a suitable reviewer team exists;
+- **zero repository-wide required approving reviews** in the default-branch ruleset while Linura uses App-created mechanical release PRs;
 - these exact required status-check contexts, proven by the permanent workflows:
   - `canonical-check`;
   - `dependency-audit`;
@@ -33,9 +31,13 @@ Target the default branch (`main`) and require:
 - signed commits and tags when the organization signing policy is established;
 - force-pushes and branch deletion disabled.
 
-Do not add one-time/bootstrap workflow checks to the ruleset. Required checks must be produced by permanent workflows on both pull requests and the protected branch where appropriate. Keep bypass permissions restricted to deliberate recovery/administration rather than ordinary development.
+The zero approval count is deliberate, not a relaxation of release review. Linura's semantic review boundary is the user-authored `release: ready vX.Y.Z — <theme>` PR. That PR must receive the required human/Codex review under the release policy before a maintainer merges it. After that merge, Release Preparation, Release Authorization, publication, terminal closure, and cleanup are structurally constrained machine handoffs and must not acquire a second hidden human-approval gate.
 
-Protect these paths with CODEOWNERS review once teams exist:
+If the organization later wants repository-enforced approving reviews for ordinary development, use a ruleset design that explicitly excludes or separately handles the mechanically constrained release handoff PRs. Do not turn on a blanket approval count that makes App-created release PRs wait for a human after the reviewed readiness boundary. Do not grant the Release App a ruleset bypass merely to work around that contradiction.
+
+Do not add one-time/bootstrap workflow checks to the ruleset. Required checks must be produced by permanent workflows on both pull requests and the protected branch where appropriate. Keep bypass permissions restricted to deliberate recovery/administration rather than ordinary development or normal releases.
+
+Protect these paths with CODEOWNERS ownership metadata once teams exist:
 
 - `executors/**`
 - `polkit/**`
@@ -45,15 +47,31 @@ Protect these paths with CODEOWNERS review once teams exist:
 - `docs/threat-model.md`
 - `.github/workflows/**`
 
-Prefer organization teams as CODEOWNERS once they exist, for example `@linura-org/maintainers` for ordinary ownership and `@linura-org/security` for security-sensitive paths. Do not use the bare organization handle as a CODEOWNER.
+Prefer organization teams as CODEOWNERS once they exist, for example `@linura-org/maintainers` for ordinary ownership and `@linura-org/security` for security-sensitive paths. CODEOWNERS may request the appropriate reviewers, but do not enable a repository-wide required CODEOWNER approval rule that blocks structurally constrained post-readiness release PRs unless those PRs have an explicit automatic-safe exception path.
 
 ## Actions
 
 - Set workflow permissions to read-only by default; grant writes per job only when the job requires them.
 - Do not allow unreviewed forks to obtain repository or environment secrets.
 - Keep every third-party action pinned to an immutable full commit SHA. Repository validation fails if a workflow introduces a floating action ref.
-- Create an environment named `release` before publishing supported artifacts; require reviewer approval for release promotion when a second trusted reviewer exists, and otherwise use a deliberate maintainer-controlled release gate that does not expose credentials to ordinary CI.
-- Keep release credentials scoped to the `release` environment and unavailable to ordinary CI or pull-request jobs.
+- Create an environment named `release` before publishing supported artifacts.
+- In the automatic proof-first release mode, **do not configure required reviewers on the `release` environment**. The reviewed `release: ready` merge is the final semantic/manual gate; Trusted Release Proof plus Promotion are the machine-verifiable publication gate.
+- Restrict the `release` environment to the protected default branch and keep any publication credentials scoped to that environment and unavailable to ordinary CI or pull-request jobs.
+- If a future policy requires a second human approval immediately before publication, treat that as an explicit change to the release contract and to the "automatic after readiness" claim rather than silently adding an environment reviewer.
+
+## Dedicated Linura Release GitHub App
+
+Create and install a dedicated repository-scoped **Linura Release GitHub App** for machine release handoffs.
+
+Required repository configuration:
+
+- repository variable `LINURA_RELEASE_APP_CLIENT_ID` = the App client ID;
+- repository secret `LINURA_RELEASE_APP_PRIVATE_KEY` = the App private key in PEM form;
+- install the App only on `linura-org/linura` unless a later ADR deliberately widens scope;
+- App repository permissions: **Actions: write**, **Contents: write**, **Pull requests: write**;
+- do not add the App as a ruleset bypass actor.
+
+The App identity is required because PRs created by the repository `GITHUB_TOKEN` produce approval-gated native `pull_request` workflow runs. App-created PRs must receive the ordinary native CI/Security/CodeQL runs that the `main` ruleset recognizes. Explicit `workflow_dispatch` runs may provide additional exact-SHA evidence, but they must never substitute for the ruleset-authoritative native PR runs.
 
 ## Security features
 
@@ -84,7 +102,7 @@ Before any public Linura release:
 - each downloaded asset must pass `gh release verify-asset` in addition to Linura's own checksum/evidence and build-provenance checks;
 - the release tag must remain bound to the verified candidate source;
 - rollback/recovery acceptance testing must satisfy the version's declared claim class;
-- release-environment approval or an equivalent deliberate maintainer-controlled gate must be configured until a second trusted reviewer exists.
+- when automatic proof-first publication is enabled, the `release` environment must not require a reviewer after the reviewed readiness merge.
 
 Do not treat successful upload/publication as release completion. If GitHub reports the published release as non-immutable, or independent verification does not complete successfully, the version has not satisfied Linura's publication contract.
 
