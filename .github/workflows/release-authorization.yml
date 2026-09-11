@@ -91,6 +91,7 @@ jobs:
             --require-workspace-version
 
           prs="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/commits/$SOURCE_SHA/pulls")"
+          # shellcheck disable=SC2016
           pr_number="$(jq -r --arg sha "$SOURCE_SHA" --arg tag "$tag" '
             [.[] | select(
               .merged_at != null and
@@ -202,7 +203,6 @@ jobs:
           source="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SOURCE_SHA")"
           test "$(jq -r .tree.sha <<<"$source")" = "$TREE_SHA"
 
-          branch="automation/release-authorization-${RELEASE_TAG}-${SOURCE_SHA:0:12}"
           title="release: authorize $RELEASE_TAG"
           authorization_subject="release: $RELEASE_TAG — $RELEASE_THEME"
           message="$(cat <<EOF
@@ -218,12 +218,15 @@ jobs:
           verify_candidate() {
             local pr_number="$1"
             local candidate_sha="$2"
+            local candidate_branch="$3"
             [[ "$pr_number" =~ ^[0-9]+$ ]]
             [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ ]]
-            test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" --jq .object.sha)" = "$candidate_sha"
+            test "$candidate_branch" = "automation/release-authorization-${RELEASE_TAG}-${candidate_sha}"
+            test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$candidate_branch" --jq .object.sha)" = "$candidate_sha"
             pr_payload="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr_number")"
             test "$(jq -r .base.sha <<<"$pr_payload")" = "$SOURCE_SHA"
             test "$(jq -r .head.sha <<<"$pr_payload")" = "$candidate_sha"
+            test "$(jq -r .head.ref <<<"$pr_payload")" = "$candidate_branch"
             test "$(jq -r .title <<<"$pr_payload")" = "$title"
             test "$(jq -r .changed_files <<<"$pr_payload")" = "0"
             candidate_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$candidate_sha")"
@@ -234,16 +237,14 @@ jobs:
           }
 
           existing_json="$(gh pr list --state open --base main --json number,title,headRefName,headRefOid)"
+          # shellcheck disable=SC2016
           existing="$(jq -c --arg title "$title" '[.[] | select(.title == $title)] | first // empty' <<<"$existing_json")"
           if [[ -n "$existing" ]]; then
-            test "$(jq -r .headRefName <<<"$existing")" = "$branch"
             pr_number="$(jq -r .number <<<"$existing")"
             head_sha="$(jq -r .headRefOid <<<"$existing")"
-            verify_candidate "$pr_number" "$head_sha"
+            branch="$(jq -r .headRefName <<<"$existing")"
+            verify_candidate "$pr_number" "$head_sha" "$branch"
           else
-            if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1; then
-              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
-            fi
             commit_payload="$(jq -n \
               --arg message "$message" \
               --arg tree "$TREE_SHA" \
@@ -256,8 +257,14 @@ jobs:
             test "$(jq '.parents | length' <<<"$authorization")" = "1"
             test "$(jq -r .parents[0].sha <<<"$authorization")" = "$SOURCE_SHA"
             test "$(jq -r .message <<<"$authorization")" = "$message"
-            ref_payload="$(jq -n --arg ref "refs/heads/$branch" --arg sha "$head_sha" '{ref:$ref, sha:$sha}')"
-            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" --input - <<<"$ref_payload" >/dev/null
+            branch="automation/release-authorization-${RELEASE_TAG}-${head_sha}"
+
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" >/dev/null 2>&1; then
+              test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" --jq .object.sha)" = "$head_sha"
+            else
+              ref_payload="$(jq -n --arg ref "refs/heads/$branch" --arg sha "$head_sha" '{ref:$ref, sha:$sha}')"
+              gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" --input - <<<"$ref_payload" >/dev/null
+            fi
 
             cat > "$RUNNER_TEMP/body.md" <<EOF
           Protected zero-diff authorization for the exact reviewed release-preparation source \`$SOURCE_SHA\`.
@@ -273,8 +280,7 @@ jobs:
           EOF
             url="$(gh pr create --base main --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/body.md")"
             pr_number="${url##*/}"
-            [[ "$pr_number" =~ ^[0-9]+$ ]]
-            verify_candidate "$pr_number" "$head_sha"
+            verify_candidate "$pr_number" "$head_sha" "$branch"
           fi
 
           {
@@ -310,6 +316,7 @@ jobs:
           BRANCH: ${{ steps.candidate.outputs.branch }}
         run: |
           set -euo pipefail
+          test "$BRANCH" = "automation/release-authorization-${RELEASE_TAG}-${HEAD_SHA}"
           python3 tools/release_native_gates.py \
             --repository "$GITHUB_REPOSITORY" \
             --head-sha "$HEAD_SHA" \
@@ -353,8 +360,6 @@ jobs:
           test "$(head -n1 <<<"$merged_message")" = "$commit_title"
           grep -Fx "Reviewed-Source: $SOURCE_SHA" <<<"$merged_message"
           grep -Fx "Reviewed-Tree: $TREE_SHA" <<<"$merged_message"
-
-          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" >/dev/null 2>&1 || true
           printf 'authorization_sha=%s\n' "$authorization_sha" >> "$GITHUB_OUTPUT"
 
       - name: Confirm event-driven proof handoff is installed
