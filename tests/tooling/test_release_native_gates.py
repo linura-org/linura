@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import sys
 import unittest
 from unittest import mock
 
@@ -11,6 +12,7 @@ MODULE_PATH = ROOT / "tools/release_native_gates.py"
 SPEC = importlib.util.spec_from_file_location("release_native_gates", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 gates = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = gates
 SPEC.loader.exec_module(gates)
 
 
