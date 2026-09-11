@@ -103,7 +103,7 @@ version = "9.9.9"
             with self.assertRaises(prepare_release.PreparationError):
                 prepare_release.prepare(root, "v0.8.0")
 
-    def test_machine_prs_use_release_app_and_native_ruleset_gates(self) -> None:
+    def test_machine_prs_use_release_app_native_ruleset_gates_and_full_sha_names(self) -> None:
         preparation = (ROOT / ".github/workflows/release-preparation.yml").read_text(encoding="utf-8")
         authorization = (ROOT / ".github/workflows/release-authorization.yml").read_text(encoding="utf-8")
         closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
@@ -121,6 +121,8 @@ version = "9.9.9"
 
         self.assertIn("release: ready v", preparation)
         self.assertIn("python3 tools/prepare_release.py --tag", preparation)
+        self.assertIn("automation/release-prep-${RELEASE_TAG}-${head_sha}", preparation)
+        self.assertIn('test "$candidate_branch" = "automation/release-prep-${RELEASE_TAG}-${candidate_sha}"', preparation)
         self.assertIn("--expected-changed-files 2", preparation)
         self.assertIn('pulls/$PR_NUMBER/merge', preparation)
         self.assertIn("event-driven authorization handoff", preparation)
@@ -130,13 +132,16 @@ version = "9.9.9"
         self.assertIn("zero-diff", authorization)
         self.assertIn("Reviewed-Source:", authorization)
         self.assertIn("Reviewed-Tree:", authorization)
+        self.assertIn("automation/release-authorization-${RELEASE_TAG}-${head_sha}", authorization)
+        self.assertIn('test "$candidate_branch" = "automation/release-authorization-${RELEASE_TAG}-${candidate_sha}"', authorization)
         self.assertIn("--expected-changed-files 0", authorization)
         self.assertIn('pulls/$PR_NUMBER/merge', authorization)
         self.assertIn("release-proof-dispatch.yml", authorization)
         self.assertIn("workflow_dispatch checks are not used as substitutes", authorization)
         self.assertNotIn('PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/main"', authorization)
 
-        self.assertIn("deterministic closure", closure)
+        self.assertIn("SHA-addressed deterministic closure", closure)
+        self.assertIn("automation/post-release-${RELEASE_TAG}-${head_sha}", closure)
         self.assertIn("post-release-cleanup.yml", closure)
         self.assertIn("event-driven terminal cleanup handoff", closure)
         self.assertIn('pulls/$PR_NUMBER/merge', closure)
@@ -146,6 +151,7 @@ version = "9.9.9"
         authorization = (ROOT / ".github/workflows/release-authorization.yml").read_text(encoding="utf-8")
         proof_dispatch = (ROOT / ".github/workflows/release-proof-dispatch.yml").read_text(encoding="utf-8")
         cleanup = (ROOT / ".github/workflows/post-release-cleanup.yml").read_text(encoding="utf-8")
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 
         self.assertIn("push:", authorization)
         self.assertIn("branches: [main]", authorization)
@@ -155,6 +161,7 @@ version = "9.9.9"
         self.assertIn('startsWith(github.event.workflow_run.head_commit.message, \'chore: close v\')', cleanup)
         self.assertIn("tools/release_native_gates.py", cleanup)
         self.assertIn("tools/release_branch_cleanup.py", cleanup)
+        self.assertIn("cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}", ci)
 
     def test_semantic_review_stops_at_release_ready_boundary(self) -> None:
         preparation = (ROOT / ".github/workflows/release-preparation.yml").read_text(encoding="utf-8")
@@ -162,10 +169,18 @@ version = "9.9.9"
         closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
         guide = (ROOT / "agents/skills/release.md").read_text(encoding="utf-8")
         self.assertIn("release: ready vX.Y.Z — <implementation theme>", guide)
-        self.assertIn("last semantic review boundary", guide)
+        self.assertIn("last semantic/manual review boundary", guide)
         for workflow in (preparation, authorization, closure):
             self.assertNotIn("@codex review", workflow)
             self.assertNotIn("chatgpt-codex-connector", workflow)
+
+    def test_release_chain_has_no_environment_or_manual_gate_after_readiness(self) -> None:
+        promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("prove Release App closure authority before publication", promotion)
+        self.assertNotIn("environment:", release)
+        self.assertNotIn("required reviewers", release.casefold())
+        self.assertNotIn("@codex review", release)
 
     def test_release_chain_preserves_proof_publication_and_verification_handoffs(self) -> None:
         proof = (ROOT / ".github/workflows/release-proof-dispatch.yml").read_text(encoding="utf-8")
@@ -196,6 +211,7 @@ version = "9.9.9"
             "tag-last",
             "One verification-to-closure path",
             "Linura Release GitHub App",
+            "--force-with-lease",
         ):
             self.assertIn(marker, adr)
         for marker in (
@@ -205,6 +221,7 @@ version = "9.9.9"
             "Rotation, revocation and permission drift",
             "exact release tag",
             "native PR",
+            "--force-with-lease",
         ):
             self.assertIn(marker, threat)
 
