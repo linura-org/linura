@@ -39,7 +39,12 @@ class ReleaseDispatchIdentityTests(unittest.TestCase):
             {**expected, "id": 105, "path": ".github/workflows/security.yml"},
         ]
         matches = module.matching_runs(
-            distractors + [expected], boundary=100, head_sha="a" * 40, ref="main", title="CI :: secret-nonce", workflow="ci.yml"
+            distractors + [expected],
+            boundary=100,
+            head_sha="a" * 40,
+            ref="main",
+            title="CI :: secret-nonce",
+            workflow="ci.yml",
         )
         self.assertEqual([101], [run["id"] for run in matches])
 
@@ -59,62 +64,79 @@ class ReleaseDispatchIdentityTests(unittest.TestCase):
             "display_title": "CI :: secret-nonce",
             "path": ".github/workflows/ci.yml",
         }
-        module.validate_run(valid, evidence)
-        for key, value in (("id", 102), ("head_sha", "b" * 40), ("head_branch", "other"), ("display_title", "CI :: other")):
+        for key, value in (
+            ("id", 102),
+            ("head_sha", "b" * 40),
+            ("head_branch", "other"),
+            ("display_title", "CI :: other"),
+        ):
             with self.subTest(key=key):
                 with self.assertRaises(RuntimeError):
                     module.validate_run({**valid, key: value}, evidence)
+        module.validate_run(valid, evidence)
 
-    def test_release_preparation_has_dedicated_fresh_main_gate(self) -> None:
+    def test_release_preparation_requires_native_exact_main_push_gates(self) -> None:
         text = (WORKFLOWS / "release-preparation.yml").read_text(encoding="utf-8")
-        self.assertIn("fresh-main:", text)
-        self.assertIn("name: require current-attempt protected-main canonical gates", text)
-        self.assertIn("needs: [qualify, fresh-main]", text)
-        self.assertIn("release-preparation-readiness-main-runs.jsonl", text)
-        self.assertNotIn("if any(.[]; .status == \"completed\" and .conclusion == \"success\")", text)
+        authority = text.split("- name: Prove Release App automation authority", 1)[1].split(
+            "- name: Build or re-prove SHA-addressed mechanical preparation", 1
+        )[0]
+        self.assertIn("python3 tools/release_native_gates.py", authority)
+        self.assertIn('--head-sha "$SOURCE_SHA"', authority)
+        self.assertIn("--head-branch main", authority)
+        self.assertIn("--timeout-seconds 1800", authority)
+        self.assertIn("commit --event push", authority)
+        self.assertNotIn("release_workflow_dispatch.py", authority)
 
-    def test_all_release_owned_canonical_gate_dispatches_use_exact_evidence_files(self) -> None:
+    def test_machine_handoffs_use_native_gate_tool_not_dispatched_gate_evidence(self) -> None:
         expected = {
-            "release-preparation.yml": (
-                "release-preparation-readiness-main-runs.jsonl",
-                "release-preparation-head-runs.jsonl",
-                "release-preparation-main-runs.jsonl",
-            ),
-            "release-authorization.yml": (
-                "release-authorization-head-runs.jsonl",
-                "release-authorization-main-runs.jsonl",
-            ),
-            "post-release-closure.yml": (
-                "post-release-closure-head-runs.jsonl",
-                "post-release-closure-main-runs.jsonl",
-            ),
+            "release-preparation.yml": ("commit --event push", "--expected-changed-files 2"),
+            "release-authorization.yml": ("commit --event push", "--expected-changed-files 0"),
+            "post-release-closure.yml": ("--expected-changed-files", "--timeout-seconds 0"),
         }
-        for filename, evidence_files in expected.items():
+        for filename, markers in expected.items():
             text = (WORKFLOWS / filename).read_text(encoding="utf-8")
-            for evidence in evidence_files:
-                self.assertIn(evidence, text, f"{filename}: {evidence}")
+            self.assertIn("tools/release_native_gates.py", text, filename)
+            for marker in markers:
+                self.assertIn(marker, text, f"{filename}: {marker}")
+            self.assertNotIn("release_workflow_dispatch.py", text, filename)
             self.assertNotIn("dispatch-boundaries.tsv", text, filename)
-            self.assertNotIn("sort_by([.created_at, .id]) | last", text, filename)
 
     def test_helper_persists_and_rechecks_exact_run_identity(self) -> None:
         text = HELPER.read_text(encoding="utf-8")
         self.assertIn('"run_id": selected["id"]', text)
-        self.assertIn('display_title', text)
-        self.assertIn('len(matches) > 1', text)
-        self.assertIn('/actions/runs/{record[\'run_id\']}', text)
-        self.assertIn('validate_run(payload, record)', text)
+        self.assertIn("display_title", text)
+        self.assertIn("len(matches) > 1", text)
+        self.assertIn("/actions/runs/{record['run_id']}", text)
+        self.assertIn("validate_run(payload, record)", text)
 
-    def test_release_stage_timeouts_cover_bounded_gate_and_review_windows(self) -> None:
+    def test_release_stage_timeouts_cover_bounded_native_gate_windows(self) -> None:
         preparation = (WORKFLOWS / "release-preparation.yml").read_text(encoding="utf-8")
         authorization = (WORKFLOWS / "release-authorization.yml").read_text(encoding="utf-8")
         closure = (WORKFLOWS / "post-release-closure.yml").read_text(encoding="utf-8")
 
-        self.assertIn("fresh-main:\n    name: require current-attempt protected-main canonical gates\n    needs: qualify\n    runs-on: ubuntu-24.04\n    timeout-minutes: 45", preparation)
-        self.assertIn("prepare:\n    name: create, review and merge mechanical release preparation\n    needs: [qualify, fresh-main]\n    runs-on: ubuntu-24.04\n    timeout-minutes: 180", preparation)
+        self.assertIn(
+            "qualify:\n    name: qualify reviewed release readiness\n"
+            "    if:",
+            preparation,
+        )
+        self.assertIn("timeout-minutes: 20", preparation.split("  prepare:", 1)[0])
+        self.assertIn(
+            "prepare:\n    name: create and merge deterministic mechanical preparation\n"
+            "    needs: qualify\n    runs-on: ubuntu-24.04\n    timeout-minutes: 55",
+            preparation,
+        )
+        self.assertIn("--timeout-seconds 1800", preparation)
+
         self.assertIn("qualify:\n    name: qualify reviewed release preparation", authorization)
-        self.assertIn("runs-on: ubuntu-24.04\n    timeout-minutes: 45", authorization.split("authorize:", 1)[0])
-        self.assertIn("authorize:\n    name: create, review and merge protected metadata-only authorization\n    needs: qualify\n    runs-on: ubuntu-24.04\n    timeout-minutes: 180", authorization)
-        self.assertIn("close:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 180", closure)
+        self.assertIn("timeout-minutes: 20", authorization.split("  authorize:", 1)[0])
+        self.assertIn(
+            "authorize:\n    name: create and merge protected metadata-only authorization\n"
+            "    needs: qualify\n    runs-on: ubuntu-24.04\n    timeout-minutes: 55",
+            authorization,
+        )
+        self.assertIn("--timeout-seconds 1800", authorization)
+        self.assertIn("close:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 55", closure)
+        self.assertIn("--timeout-seconds 1800", closure)
 
 
 if __name__ == "__main__":
