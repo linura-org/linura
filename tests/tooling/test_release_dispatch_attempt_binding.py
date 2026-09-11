@@ -89,7 +89,7 @@ class ReleaseDispatchIdentityTests(unittest.TestCase):
 
     def test_machine_handoffs_use_native_gate_tool_not_dispatched_gate_evidence(self) -> None:
         expected = {
-            "release-preparation.yml": ("commit --event push", "--expected-changed-files 2"),
+            "release-preparation.yml": ("commit --event push", '--expected-changed-files "$EXPECTED_CHANGED_FILES"'),
             "release-authorization.yml": ("commit --event push", "--expected-changed-files 0"),
             "post-release-closure.yml": ("--expected-changed-files", "--timeout-seconds 0"),
         }
@@ -100,6 +100,11 @@ class ReleaseDispatchIdentityTests(unittest.TestCase):
                 self.assertIn(marker, text, f"{filename}: {marker}")
             self.assertNotIn("release_workflow_dispatch.py", text, filename)
             self.assertNotIn("dispatch-boundaries.tsv", text, filename)
+
+        preparation = (WORKFLOWS / "release-preparation.yml").read_text(encoding="utf-8")
+        self.assertIn('[[ "$EXPECTED_CHANGED_FILES" = "0" || "$EXPECTED_CHANGED_FILES" = "2" ]]', preparation)
+        self.assertIn("expected_changed_files=0", preparation)
+        self.assertIn("expected_changed_files=2", preparation)
 
     def test_helper_persists_and_rechecks_exact_run_identity(self) -> None:
         text = HELPER.read_text(encoding="utf-8")
