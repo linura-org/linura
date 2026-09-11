@@ -17,8 +17,9 @@ The repository must configure:
 - App installation scoped only to `linura-org/linura`;
 - App repository permissions: Actions write, Contents write, Pull requests write;
 - no ruleset bypass actor;
-- zero blanket required approving reviews on the default-branch ruleset while machine-only post-readiness PRs are in the automatic path;
-- no required reviewer on the `release` environment in automatic mode.
+- zero blanket required approving reviews on the default-branch ruleset while machine-only post-readiness PRs are in the automatic path.
+
+The automatic Release workflow deliberately has no GitHub Environment dependency. Trusted Release Proof plus Promotion/closure-readiness are the pre-publication machine gates. Adding an Environment with a required reviewer would be an explicit lifecycle-contract change, not a transparent implementation detail.
 
 The private key is consumed only by `actions/create-github-app-token`, pinned by immutable action SHA. Jobs request the narrowest installation-token permissions needed for that phase. Terminal cleanup requests Contents write plus Pull requests read, not the full mutation permission set.
 
@@ -34,7 +35,7 @@ The final semantic/reviewed transition is a protected-main merge whose exact sub
 release: ready vX.Y.Z — <implementation theme>
 ```
 
-That **readiness merge is the last semantic review boundary**. Human or Codex findings are resolved there. Everything after it is deterministic/mechanical and must be provable by source/tree/path/message invariants plus native protected GitHub checks. Machine-only PRs do not create a bot-to-bot conversational-review requirement, and publication must not add an environment-review approval after readiness.
+That **readiness merge is the last semantic review boundary**. Human or Codex findings are resolved there. Everything after it is deterministic/mechanical and must be provable by source/tree/path/message invariants plus native protected GitHub checks. Machine-only PRs do not create a bot-to-bot conversational-review requirement, and publication does not add an environment-review approval after readiness.
 
 The later release-intent source still has exact subject:
 
@@ -118,7 +119,7 @@ If App configuration is missing, its installation permissions were not approved,
 
 Release validation requires the exact promoted current-main source, exact successful proof run, frozen contract, permanent exact-SHA gates, sealed proof payload, checksums and provenance. Success is the release source-selection commit point.
 
-Only the final `publish` job receives `contents: write`, behind the `release` GitHub Environment. In automatic mode that environment is an isolation/protection boundary, **not a reviewer gate**; required reviewers must be disabled. It:
+Only the final `publish` job receives `contents: write`. It has no GitHub Environment dependency in automatic mode; the proof/Promotion boundary is the publication authorization. The job:
 
 1. rechecks exact selected source;
 2. redownloads and reverifies the sealed proof;
@@ -169,7 +170,7 @@ Normal automatic cleanup selects only SHA-addressed release-owned refs matching 
 - `automation/release-authorization-vX.Y.Z-<40hex>`;
 - `automation/post-release-vX.Y.Z-<40hex>`.
 
-Older or exceptional refs are eligible only from an exact release + branch name + reviewed 40-hex SHA ledger entry. Branches referenced by open PRs are preserved. Each candidate must still point to its embedded/ledger SHA. Deletion is performed atomically with Git `--force-with-lease=<ref>:<expected-sha>`; a concurrent move therefore cannot be deleted by a stale check. Exact absence is idempotent, while authentication/network/server/ambiguous lookup failures fail closed.
+Older or exceptional refs are eligible only from an exact release + branch name + reviewed 40-hex SHA ledger entry. Branches referenced by open PRs are preserved. Each candidate must still point to its embedded/ledger SHA. Deletion is performed atomically with Git `--force-with-lease=<ref>:<expected-sha>`; a concurrent move therefore cannot be deleted by stale evidence. Exact absence is idempotent, while authentication/network/server/ambiguous lookup failures fail closed.
 
 Cleanup uses a narrower Release App token (`Contents: write`, `Pull requests: read`) and never targets protected main, immutable tags, frozen contracts or published assets.
 
