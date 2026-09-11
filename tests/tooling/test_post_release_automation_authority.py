@@ -55,13 +55,14 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn(NATIVE_GATES, workflow)
         self.assertIn("--expected-changed-files", workflow)
         self.assertIn('pulls/$PR_NUMBER/merge', workflow)
+        self.assertIn("automation/post-release-${RELEASE_TAG}-${head_sha}", workflow)
         self.assertNotIn("@codex review", workflow)
         self.assertNotIn("release_workflow_dispatch.py", workflow)
         self.assertNotIn("Delete obsolete release-scoped branches", workflow)
 
-    def test_closure_retry_reuses_exact_deterministic_branch_and_pr(self) -> None:
+    def test_closure_retry_reuses_exact_sha_addressed_branch_and_pr(self) -> None:
         workflow = self._closure()
-        commit = workflow.split("- name: Commit or re-prove deterministic closure commit", 1)[1].split(
+        commit = workflow.split("- name: Commit or re-prove SHA-addressed deterministic closure", 1)[1].split(
             "- name: Open or re-prove protected closure PR", 1
         )[0]
         open_pr = workflow.split("- name: Open or re-prove protected closure PR", 1)[1].split(
@@ -69,7 +70,8 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         )[0]
 
         self.assertIn('expected_tree="$(git write-tree)"', commit)
-        self.assertIn('branch_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch"', commit)
+        self.assertIn('existing_json="$(gh pr list --state open --base main', commit)
+        self.assertIn('test "$branch" = "automation/post-release-${RELEASE_TAG}-${head_sha}"', commit)
         self.assertIn("'.parents | length'", commit)
         self.assertIn("'.parents[0].sha'", commit)
         self.assertIn('jq -r .tree.sha', commit)
@@ -84,6 +86,7 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         )[0]
         self.assertIn(NATIVE_GATES, merge)
         self.assertIn("--timeout-seconds 0", merge)
+        self.assertIn('test "$BRANCH" = "automation/post-release-${RELEASE_TAG}-${HEAD_SHA}"', merge)
         self.assertIn('test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$BASE_SHA"', merge)
         self.assertIn('test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)" = "$HEAD_SHA"', merge)
         self.assertIn("'.parents | length'", merge)
@@ -122,21 +125,22 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertNotIn("permission-actions: write", token_block)
         self.assertNotIn("permission-pull-requests: write", token_block)
 
-    def test_cleanup_tool_contract_has_owned_namespaces_and_sha_leases(self) -> None:
+    def test_cleanup_tool_contract_has_sha_addressed_namespaces_and_atomic_leases(self) -> None:
         tool = (ROOT / "tools/release_branch_cleanup.py").read_text(encoding="utf-8")
         for marker in (
             "automation/release-prep-",
             "automation/release-reprepare-",
             "automation/release-authorization-",
             "automation/post-release-",
-            "verify-release/",
-            "legacy-ledger",
+            "sha-addressed-automation",
+            "explicit-ledger",
             "expected_sha",
             "preserved concurrently moved branch",
             "preserved open-PR branch",
+            "--force-with-lease=",
         ):
             self.assertIn(marker, tool)
-        self.assertIn('name.startswith("tmp/")', tool)
+        self.assertNotIn("verify-release/", tool)
         self.assertNotIn("series =", tool)
         self.assertNotIn("(cleanup|compact|minimal|review|release)", tool)
         self.assertNotIn('"fix/"', tool)
