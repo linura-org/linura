@@ -1,8 +1,22 @@
 schema_version = 1
 
-# Legacy non-namespaced branches are never selected by pattern. They are eligible
-# for terminal cleanup only when both the release tag and exact current ref SHA
-# match this reviewed ledger. New release automation must use automation/*.
+# Exact reviewed exceptions for release refs created before SHA-addressed automation
+# became the normal contract. Pattern selection is reserved for new automation/*
+# branches whose full expected commit SHA is embedded in the branch name. Any
+# older or exceptional ref is eligible only when both its exact name and current
+# SHA match this reviewed ledger. A moved ref is preserved.
+
+[[legacy_branch]]
+release = "v0.8.0"
+name = "automation/release-authorization-v0.8.0-a0144dadb2c8"
+expected_sha = "a247267c65761afa749a938bf06c7fba12514057"
+reason = "pre-SHA-addressed v0.8 authorization branch from the superseded controller"
+
+[[legacy_branch]]
+release = "v0.8.0"
+name = "automation/release-authorization-v0.8.0-b15f42a316f2"
+expected_sha = "7d0a200c31651383eae4f933acecd4b9026113e7"
+reason = "pre-SHA-addressed App-migration authorization branch blocked by native PR gate semantics"
 
 [[legacy_branch]]
 release = "v0.8.0"
