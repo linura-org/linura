@@ -44,19 +44,19 @@ A reused authorization PR is re-proved for exact branch/head/base identity, zero
 
 No workflow directly updates protected `main`; preparation, authorization, and post-release bookkeeping merge only through the repository ruleset and exact-head checks/review.
 
-### Dedicated credential and least privilege
+### Repository-scoped operator and least privilege
 
-`RELEASE_AUTOMATION_TOKEN` is required for preparation, authorization, and post-release closure mutations whose branch pushes, PR creation and protected-main merges must create native GitHub events. There is no `GITHUB_TOKEN` fallback for these mutation handoffs. The dedicated credential is exposed only to jobs that need repository/PR/Actions mutation. Read-only qualification and proof jobs continue to use narrower repository credentials.
+Release handoff mutation jobs use the ephemeral repository `GITHUB_TOKEN`, with job-scoped `contents: write`, `pull-requests: write`, and `actions: write` only where those capabilities are required. Every mutation job proves those capabilities non-mutatingly before changing release state. Read-only qualification and proof jobs retain narrower permissions.
 
-The token may create/delete release-scoped branches, create PRs/comments, merge an already-qualified protected PR, and dispatch workflows as required by the handoff. It does **not** receive release-tag or GitHub Release publication authority. Final tag creation and publication remain isolated in the Release workflow behind its existing environment and exact proof/source checks.
+The operator may create/delete release-scoped branches, create PRs/comments, merge an already-qualified protected PR, and explicitly dispatch the next exact-SHA workflow. It does **not** receive release-tag or GitHub Release publication authority outside the isolated Release workflow. Final tag creation and publication remain behind the release environment, exact proof/source checks, and tag-last invariant.
 
-Promotion independently requires the dedicated closure credential and proves its Contents, pull-request and Actions capabilities before immutable publication is allowed to begin. A missing, rotated or permission-reduced credential blocks publication rather than allowing a release that cannot close itself safely.
+Promotion independently proves that the repository token can perform the later protected closure operations before immutable publication begins. Permission reduction or repository-policy drift blocks publication rather than allowing a release that cannot close safely.
 
 ### Event and replay semantics
 
-The dedicated credential is used because a `GITHUB_TOKEN`-authenticated push or PR creation cannot be treated as a reliable recursive workflow trigger. Release Preparation and Authorization require downstream push events to materialize. Post Release Closure is stricter: its PR must produce native `pull_request` CI/Security/CodeQL runs on the exact closure SHA so the repository ruleset sees the same check contexts as an ordinary protected PR.
+GitHub intentionally suppresses recursive workflow triggering for many mutations authenticated by `GITHUB_TOKEN`. Linura therefore does not treat native-event recursion as a release primitive. After an automation-owned protected merge, the owning workflow explicitly dispatches CI, Security, and CodeQL on the exact resulting `main` SHA, waits for those exact workflow-dispatch runs to succeed, and then explicitly dispatches the next release stage.
 
-Manually dispatched checks may be useful diagnostic evidence, but they are not a substitute for native PR-associated required checks. Missing downstream events are a hard failure, not an assumed success.
+Native push events remain valid evidence when a human or external GitHub App performs a protected merge. Exact-source validators accept only successful gates bound to the same SHA and to either the native `push` event or the explicit `workflow_dispatch` event. Missing, stale, cancelled, or failed gates remain hard failures.
 
 Release handoffs are source-bound and fail closed when `main` moves. Existing version tags are rejected before new authorization. Deterministic branch/title namespaces make retries discoverable, but discovery never substitutes for exact candidate revalidation.
 
@@ -74,18 +74,18 @@ Normal immutable publication explicitly dispatches `Verify published release` fr
 
 A successful verifier dispatches `Release Closure Handoff`. The handoff waits until that exact verification run is terminal and successful, binds the tag to the source SHA proven from published evidence, validates exact-tag or authenticated recovery-ref identity, and then dispatches `Post Release Closure`. `Post Release Closure` is dispatch-only, so no competing `workflow_run` closure exists.
 
-Terminal closure generates deterministic roadmap/qualification/current-release documentation, including the human-facing terminal release record, while preserving the frozen `docs/releases/vX.Y.Z.md` contract byte-for-byte. It opens a native-event-producing protected PR, waits for exact-head CI/Security/CodeQL plus completed clean review, merges through the normal ruleset using the exact reviewed SHA, waits for native fresh-main gates, and only then removes obsolete version-scoped release branches.
+Terminal closure generates deterministic roadmap/qualification/current-release documentation, including the human-facing terminal release record, while preserving the frozen `docs/releases/vX.Y.Z.md` contract byte-for-byte. It opens a protected PR, explicitly dispatches exact-head CI/Security/CodeQL, requires completed clean review, merges through the normal ruleset using the exact reviewed SHA, explicitly dispatches fresh-main gates, and only then removes obsolete version-scoped release branches.
 
 ## Threat analysis
 
-Compromise of `RELEASE_AUTOMATION_TOKEN` could create release-scoped branches/PRs, post review comments, dispatch Actions, or attempt protected PR merges. It cannot by itself create a valid release authorization or publish a version because source/parent/tree/message identity, protected rules, exact-head checks/review, fresh-main gates, release-contract validation, Trusted Release Proof, Promotion readiness, Release source selection, and tag-last publication are independent gates. Repository rules must not grant this credential protected-main bypass authority.
+Compromise of a job-scoped repository token is constrained by GitHub's per-job permissions and short lifetime. A mutation job still cannot create a valid release authorization or publish a version without satisfying source/parent/tree/message identity, protected rules, exact-head checks/review, fresh-main gates, release-contract validation, Trusted Release Proof, Promotion readiness, Release source selection, and tag-last publication. Repository rules must not grant Actions protected-main bypass authority.
 
-A stolen token may cause denial of service or noisy invalid automation attempts. Invalid/replayed candidates fail closed, and rotation/revocation intentionally stops release handoffs before immutable publication rather than degrading to an unreviewed/manual bypass. Operators rotate or revoke the token through repository secret management; no credential material is stored in the repository, release evidence, artifacts, logs, model context, or portable Linura state.
+Permission or policy drift is detected by the non-mutating capability probe and stops release handoffs before immutable publication. No long-lived release credential is stored in repository secrets, release evidence, artifacts, logs, model context, or portable Linura state.
 
-The release credential is repository delivery infrastructure only. It does not change Linura runtime principal, policy, approval, executor, systemd, agent/model, Library, or managed-mutation authority.
+The release operator is repository delivery infrastructure only. It does not change Linura runtime principal, policy, approval, executor, systemd, agent/model, Library, or managed-mutation authority.
 
 ## Consequences
 
-A future release requires an explicit reviewed readiness merge but no undocumented manual branch/commit/dispatch step after that point. Review findings, source drift, token loss, event-recursion failure, candidate tampering, proof failure, publication failure, verification failure, or closure failure remain visible terminal failures rather than being silently bypassed.
+A future release requires an explicit reviewed readiness merge but no undocumented manual branch/commit/dispatch step after that point. Review findings, source drift, permission drift, explicit-dispatch failure, candidate tampering, proof failure, publication failure, verification failure, or closure failure remain visible terminal failures rather than being silently bypassed.
 
 The automation is intentionally more conservative than a conventional release bot: it can advance a release only by proving exact previously reviewed state through every existing protected trust boundary.

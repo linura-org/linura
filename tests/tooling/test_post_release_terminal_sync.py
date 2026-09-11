@@ -118,22 +118,22 @@ none
         promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
 
         self.assertIn("tools/post_release_terminal_sync.py", closure)
-        self.assertIn("RELEASE_AUTOMATION_TOKEN is required", closure)
-        self.assertIn("token: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}", closure)
+        self.assertIn("--credential-source github", closure)
+        self.assertIn("token: ${{ github.token }}", closure)
         self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", closure)
         self.assertIn("@codex review", closure)
-        self.assertIn("event=pull_request", closure)
+        self.assertIn("event=workflow_dispatch", closure)
         self.assertGreaterEqual(closure.count("gh api graphql --paginate"), 2)
         self.assertGreaterEqual(closure.count("$endCursor:String"), 2)
         self.assertGreaterEqual(closure.count("reviewThreads(first:100, after:$endCursor)"), 2)
         self.assertGreaterEqual(closure.count("pageInfo { hasNextPage endCursor }"), 2)
         self.assertIn("chatgpt-codex-connector", closure)
         self.assertIn('pulls/$PR_NUMBER/merge', closure)
-        self.assertIn("event=push", closure)
+        self.assertIn("event=workflow_dispatch", closure)
         self.assertNotIn('gh pr merge "$PR_NUMBER"', closure)
 
-        self.assertIn("GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}", promotion)
-        self.assertIn("RELEASE_AUTOMATION_TOKEN is required", promotion)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", promotion)
+        self.assertIn("--credential-source github", promotion)
         self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", promotion)
 
 

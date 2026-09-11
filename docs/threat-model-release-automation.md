@@ -10,29 +10,29 @@ This document extends the canonical [`threat-model.md`](threat-model.md) for rep
 - immutable version tag and GitHub Release assets/body;
 - independent verification evidence;
 - terminal roadmap/publication bookkeeping and release-scoped branch hygiene;
-- `RELEASE_AUTOMATION_TOKEN` and GitHub Actions dispatch authority.
+- the job-scoped repository `GITHUB_TOKEN` and GitHub Actions dispatch authority.
 
 ## Adversaries and failures
 
-- compromise or accidental disclosure of `RELEASE_AUTOMATION_TOKEN`;
+- compromise or accidental disclosure of the job-scoped repository `GITHUB_TOKEN`;
 - replay of an old readiness/preparation/authorization workflow run;
 - modification of an already-open automation PR before a retry reuses it;
 - stale-source races where `main` advances between qualification and mutation;
 - GitHub token-recursion assumptions that silently suppress downstream workflow events;
 - a merge racing an outstanding review that later reports a valid finding;
-- manually dispatched checks being mistaken for the native PR-associated required checks expected by the ruleset;
+- stale, wrong-ref, or wrong-event dispatched checks being mistaken for the exact-SHA gates required by release automation;
 - duplicate release-verification/closure triggers racing the same terminal bookkeeping;
 - forged PR title/comment/reaction intended to look like release readiness or review completion;
 - repository automation/operator error that attempts to bypass the protected-main ruleset;
-- credential rotation/revocation or permission drift during an in-progress release.
+- repository workflow-permission or policy drift during an in-progress release.
 
 ## Trust boundary
 
-The dedicated release automation credential is a repository-delivery capability, not release-publication authority. Jobs receive it only when they must create/update release-scoped branches, create PRs/comments, dispatch Actions, or merge an already-qualified PR. Read-only qualification, proof and verification stages use narrower credentials.
+The job-scoped repository `GITHUB_TOKEN` is a repository-delivery capability, not release-publication authority. Mutation jobs receive only the least-privilege `contents: write`, `pull-requests: write`, and `actions: write` capabilities needed to create/update release-scoped branches, create PRs/comments, explicitly dispatch Actions, or merge an already-qualified PR. Read-only qualification, proof and verification stages use narrower permissions.
 
-The credential must not be configured as a protected-main bypass actor. Every preparation, authorization and closure mutation reaches `main` through the normal PR ruleset and required status checks/review.
+The repository token must not be configured as a protected-main bypass actor. Every preparation, authorization and closure mutation reaches `main` through the normal PR ruleset and required exact-head status checks/review.
 
-The credential has no direct version-tag/GitHub-Release publication role. Tag-last publication remains isolated in the Release workflow after exact-source Trusted Release Proof and Promotion/readiness succeed.
+The repository token has no direct version-tag/GitHub-Release publication role outside the isolated Release workflow. Tag-last publication remains isolated after exact-source Trusted Release Proof and Promotion/readiness succeed.
 
 ## Mitigations
 
@@ -56,9 +56,11 @@ Every source-bound handoff rechecks current protected `main` immediately before 
 
 ### Event-recursion failure
 
-GitHub's repository `GITHUB_TOKEN` is not treated as a recursive workflow trigger for any mutation handoff. Preparation/authorization merges and post-release closure branch/PR creation use the dedicated credential because their resulting push or `pull_request` events must emit downstream Actions runs.
+GitHub's repository `GITHUB_TOKEN` is deliberately **not** treated as a recursive workflow-event primitive. Automation-owned branch, PR, and merge mutations may suppress ordinary `pull_request` or `push` workflow triggers, so release handoffs do not require those events to materialize.
 
-Post Release Closure specifically requires native `pull_request` CI/Security/CodeQL runs on the exact closure head before merge. Separately dispatched workflow runs can supplement diagnostics but cannot substitute for those PR-associated required checks. After the protected closure merge, native `push` CI/Security/CodeQL must materialize for the exact new `main` SHA. Missing downstream runs are a visible failure.
+Instead, the owning workflow explicitly dispatches CI, Security, and CodeQL against the exact candidate or resulting `main` SHA and waits for those exact `workflow_dispatch` runs to succeed before the next protected transition. Native `pull_request`/`push` runs remain acceptable supplemental evidence when a human or external GitHub App causes the event, but they are not required for token-authenticated handoffs. Validators bind accepted runs to the expected SHA, workflow identity, event class allowed for that transition, and successful terminal conclusion; stale, cancelled, wrong-ref, wrong-event, or failed runs fail closed.
+
+Post Release Closure follows the same rule. The automation-created closure PR receives explicitly dispatched exact-head CI/Security/CodeQL plus exact-head review before merge. After the protected closure merge, the closure workflow explicitly dispatches fresh-main CI/Security/CodeQL on the exact new `main` SHA and waits for success before cleanup. Native PR/push runs may coexist but cannot substitute for an incorrectly bound explicit dispatch.
 
 ### Review spoofing and late-review race
 
@@ -76,16 +78,18 @@ Closure synchronizes terminal qualification/current-release documents and the hu
 
 ### Credential compromise
 
-A compromised token can attempt repository write/PR/Actions operations and can create denial-of-service/noise. It cannot alone satisfy exact source/parent/tree/message invariants, protected rules, exact-head checks/review, frozen contract validation, permanent main gates, Trusted Release Proof, Promotion, release-environment publication, immutable asset verification, or independent Release Verification.
+A compromised job-scoped repository token can attempt repository write/PR/Actions operations during that job and can create denial-of-service/noise. It cannot alone satisfy exact source/parent/tree/message invariants, protected rules, exact-head checks/review, frozen contract validation, permanent main gates, Trusted Release Proof, Promotion, release-environment publication, immutable asset verification, or independent Release Verification.
 
-If repository policy accidentally grants the token protected-main bypass or tag/publication authority, this threat model no longer holds; capability probes and review must treat such policy drift as a release-control defect.
+If repository policy accidentally grants the token protected-main bypass or broader publication authority than the release design expects, this threat model no longer holds; capability probes and review must treat such policy drift as a release-control defect.
 
 ### Rotation, revocation and permission drift
 
-Loss or revocation of the credential intentionally stops preparation/authorization/closure at a visible fail-closed boundary. Promotion requires the dedicated closure credential and proves its effective Contents, PR and Actions capabilities before immutable publication is allowed. There is no `GITHUB_TOKEN` fallback. Operators must rotate/revoke the token through GitHub secret management rather than embedding credentials in source, logs, artifacts, release evidence, model context, or Linura portable state.
+There is no long-lived release PAT to rotate or fall back to in the normal release path. Each mutation job receives a short-lived repository `GITHUB_TOKEN` from GitHub with explicitly declared permissions. If GitHub revokes the token, repository policy removes a required capability, or workflow permissions drift, the current handoff intentionally stops at a visible fail-closed boundary.
+
+Promotion proves the effective Contents, pull-request, and Actions capabilities needed for terminal closure before immutable publication begins. Operators correct repository/workflow policy rather than embedding alternate credentials in source, logs, artifacts, release evidence, model context, or Linura portable state. A retry obtains a fresh job-scoped token and must re-prove all source and capability invariants.
 
 ## Residual risk
 
-The dedicated credential remains a high-value repository automation secret and may cause denial of service or repository noise if compromised. GitHub organization/repository administration and secret-management compromise are outside Linura runtime authority and require platform-level controls, audit, rotation and account security.
+The short-lived job-scoped repository credential remains a high-value repository automation capability while its job is active and may cause denial of service or repository noise if compromised. GitHub organization/repository administration and workflow-policy compromise are outside Linura runtime authority and require platform-level controls, audit and account security.
 
 No release-automation credential is accepted as evidence about Linux system state, user intent, policy approval, executor authority, agent authority, Library adoption, or managed mutation.

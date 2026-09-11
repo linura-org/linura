@@ -71,9 +71,9 @@ jobs:
       - name: Verify permanent exact-SHA gates
         run: |
           set -euo pipefail
-          runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SOURCE_SHA&event=push&per_page=100")"
+          runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SOURCE_SHA&per_page=100")"
           for workflow in CI Security CodeQL; do
-            count="$(jq -r --arg workflow "$workflow" '[.workflow_runs[] | select(.name == $workflow and .head_sha == env.SOURCE_SHA and .event == "push" and .status == "completed" and .conclusion == "success")] | length' <<<"$runs")"
+            count="$(jq -r --arg workflow "$workflow" '[.workflow_runs[] | select(.name == $workflow and .head_sha == env.SOURCE_SHA and (.event == "push" or .event == "workflow_dispatch") and .status == "completed" and .conclusion == "success")] | length' <<<"$runs")"
             if [[ "$count" -lt 1 ]]; then
               echo "missing successful exact-SHA gate: $workflow" >&2
               exit 1

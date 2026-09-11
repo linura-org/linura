@@ -42,17 +42,13 @@ release: vX.Y.Z — <implementation theme>
 
 That commit does **not** create a tag. It expresses an unpublished release intent for the exact current `main` SHA.
 
-`Release Proof Dispatch` observes completed `CI`, `Security` and `CodeQL` push runs for `main`. It has no tag/Release authority. For a release-intent source it:
+After the protected Release Authorization merge creates the exact `release: vX.Y.Z — <implementation theme>` source, the owning `Release Authorization` workflow explicitly dispatches `CI`, `Security` and `CodeQL` for that exact protected-`main` SHA, binds acceptance to the current dispatch attempt, waits for all three to succeed, rechecks that `main` is unchanged, and then directly dispatches `Trusted Release Proof` for that source.
 
-1. requires the triggering SHA still equals current protected `main`;
-2. validates the frozen release contract and workspace version;
-3. requires successful exact-SHA `CI`, `Security` and `CodeQL` evidence;
-4. refuses a conflicting existing version tag;
-5. avoids duplicate proof dispatches;
-6. rechecks current `main` immediately before dispatch;
-7. dispatches `Trusted Release Proof` at `main`.
+`Release Proof Dispatch` remains a non-authoritative compatibility observer for independently emitted native `push`-driven permanent-gate events. When such events exist it may wake and duplicate-safely dispatch proof only after independently revalidating exact source, contract, version, gate success, tag absence and current `main`. It is **not** a mandatory edge of the job-scoped `GITHUB_TOKEN` normal path, because token-authored mutations are not relied on to recursively emit native push workflows. If either the direct handoff or compatibility observer sees source drift, it exits without release authority.
 
-This observer is the only release-control edge using `workflow_run`. If `main` advances before proof dispatch, stale observation exits without release authority.
+## Release-stage timeout budget
+
+Release mutation jobs must reserve more wall-clock time than the sum of their explicit bounded waits. In particular, candidate-gate resolution/wait, exact-head Codex review polling, and post-merge exact-main gates must fit before the job deadline with operational margin. A job timeout must never be able to strand the lifecycle after a protected-main merge but before the next durable handoff is dispatched. The executable tooling contract pins the current release-preparation, release-authorization, and post-release-closure budgets accordingly.
 
 ## Trusted Release Proof
 

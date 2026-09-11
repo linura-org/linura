@@ -116,9 +116,13 @@ version = "9.9.9"
         self.assertIn("release: ready v", preparation)
         self.assertIn("python3 tools/prepare_release.py --tag", preparation)
         self.assertIn("@codex review", preparation)
-        self.assertIn('gh workflow run "$workflow"', preparation)
+        self.assertIn("tools/release_workflow_dispatch.py dispatch", preparation)
+        self.assertIn("release-preparation-head-runs.jsonl", preparation)
+        self.assertIn("release-preparation-main-runs.jsonl", preparation)
         self.assertIn('pulls/$PR_NUMBER/merge', preparation)
-        self.assertIn("RELEASE_AUTOMATION_TOKEN is required", preparation)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", preparation)
+        self.assertIn("--credential-source github", preparation)
+        self.assertIn("release-authorization.yml", preparation)
         self.assertIn("verify_candidate()", preparation)
         self.assertIn('git diff --name-only "$SOURCE_SHA" "$candidate_sha"', preparation)
         self.assertIn('git show "$candidate_sha:Cargo.toml" | cmp - Cargo.toml', preparation)
@@ -136,6 +140,8 @@ version = "9.9.9"
         self.assertIn('test "$(jq -r .changed_files <<<"$pr_payload")" = "0"', authorization)
         self.assertIn('test "$(jq -r .message <<<"$candidate_payload")" = "$message"', authorization)
         self.assertNotIn('PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/main"', authorization)
+        self.assertIn("GH_TOKEN: ${{ github.token }}", authorization)
+        self.assertIn("trusted-release-proof.yml", authorization)
 
         self.assertIn("dispatch terminal closure handoff", verification)
         self.assertIn("manual release verification must run from the exact requested tag", verification)
@@ -149,10 +155,10 @@ version = "9.9.9"
         self.assertNotIn("github.event.workflow_run", closure)
         self.assertIn("release: v", proof)
         self.assertIn("@codex review", closure)
-        self.assertIn("event=pull_request", closure)
+        self.assertIn("event=workflow_dispatch", closure)
         self.assertIn('pulls/$PR_NUMBER/merge', closure)
         self.assertNotIn('gh pr merge "$PR_NUMBER"', closure)
-        self.assertIn("RELEASE_AUTOMATION_TOKEN is required", closure)
+        self.assertIn("--credential-source github", closure)
 
     def test_release_guide_declares_explicit_readiness_and_no_manual_missing_handoff(self) -> None:
         guide = (ROOT / "agents/skills/release.md").read_text(encoding="utf-8")
@@ -165,7 +171,7 @@ version = "9.9.9"
         adr = (ROOT / "docs/adr/0027-protected-release-handoff-automation.md").read_text(encoding="utf-8")
         threat = (ROOT / "docs/threat-model-release-automation.md").read_text(encoding="utf-8")
         for marker in (
-            "RELEASE_AUTOMATION_TOKEN",
+            "Repository-scoped operator",
             "protected `main`",
             "zero-diff",
             "tag-last",

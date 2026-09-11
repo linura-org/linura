@@ -22,7 +22,7 @@ Linura adopts a repository-owned reusable trusted-build boundary:
 7. the builder constructs the promotable payload once and creates build-provenance attestations for that exact payload;
 8. a separate fresh runner rebuilds the same source and must reproduce every distributable binary byte-for-byte before Trusted Release Proof may succeed;
 9. the reusable builder has no repository-content write, tag, or GitHub Release publication authority;
-10. release-stage handoffs after proof use explicit authenticated `workflow_dispatch` messages. `workflow_run` remains only at the permanent-gate observer boundary (`CI`/`Security`/`CodeQL` → Release Proof Dispatch), where it observes independently completed push gates rather than chaining release authority.
+10. release-stage handoffs use explicit authenticated `workflow_dispatch` messages. The normal Release Authorization → Trusted Release Proof edge explicitly dispatches and binds exact-SHA permanent gates before directly dispatching proof. `workflow_run` remains only as a compatibility observer boundary (`CI`/`Security`/`CodeQL` → Release Proof Dispatch) for independently emitted native push gates; it is not required for token-authored automation handoffs and never chains release authority implicitly.
 
 This decision intentionally makes **no SLSA Build Level 3 claim**. The reusable builder definition is stored in and loaded from the same reviewed source revision as the release candidate. It therefore improves capability separation, provenance, determinism and reproducibility, but it is not an independently governed immutable builder definition. A future SLSA Level 3-oriented design would require that stronger governance boundary to be specified and reviewed separately.
 
