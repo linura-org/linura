@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
-import time
 import tomllib
 import urllib.error
 import urllib.parse
@@ -17,6 +18,7 @@ from typing import Any
 
 API_VERSION = "2022-11-28"
 USER_AGENT = "linura-release-branch-cleanup"
+FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 
 class CleanupError(RuntimeError):
@@ -26,7 +28,7 @@ class CleanupError(RuntimeError):
 @dataclass(frozen=True)
 class Candidate:
     name: str
-    expected_sha: str | None
+    expected_sha: str
     source: str
 
 
@@ -74,11 +76,10 @@ def _request(
 def _branch_patterns(tag: str) -> tuple[re.Pattern[str], ...]:
     escaped = re.escape(tag)
     return (
-        re.compile(rf"automation/release-prep-{escaped}-[0-9a-f]{{12}}"),
-        re.compile(rf"automation/release-reprepare-{escaped}-[0-9a-f]{{12}}"),
-        re.compile(rf"automation/release-authorization-{escaped}-[0-9a-f]{{12}}"),
-        re.compile(rf"automation/post-release-{escaped}-[0-9]+"),
-        re.compile(rf"verify-release/{escaped}"),
+        re.compile(rf"automation/release-prep-{escaped}-(?P<sha>[0-9a-f]{{40}})"),
+        re.compile(rf"automation/release-reprepare-{escaped}-(?P<sha>[0-9a-f]{{40}})"),
+        re.compile(rf"automation/release-authorization-{escaped}-(?P<sha>[0-9a-f]{{40}})"),
+        re.compile(rf"automation/post-release-{escaped}-(?P<sha>[0-9a-f]{{40}})"),
     )
 
 
@@ -92,29 +93,43 @@ def load_legacy(path: pathlib.Path, tag: str) -> dict[str, str]:
             continue
         name = item.get("name")
         expected_sha = item.get("expected_sha")
-        if not isinstance(name, str) or not name.startswith("tmp/"):
-            raise CleanupError(f"invalid legacy cleanup branch name: {name!r}")
         if (
-            not isinstance(expected_sha, str)
-            or re.fullmatch(r"[0-9a-f]{40}", expected_sha) is None
+            not isinstance(name, str)
+            or not name
+            or name == "main"
+            or name.startswith("refs/")
+            or ".." in name
+            or name.startswith("/")
+            or name.endswith("/")
         ):
-            raise CleanupError(f"invalid legacy cleanup SHA for {name!r}")
+            raise CleanupError(f"invalid explicit cleanup branch name: {name!r}")
+        if not isinstance(expected_sha, str) or FULL_SHA_RE.fullmatch(expected_sha) is None:
+            raise CleanupError(f"invalid cleanup SHA for {name!r}")
         if name in legacy:
-            raise CleanupError(f"duplicate legacy cleanup branch: {name}")
+            raise CleanupError(f"duplicate cleanup branch: {name}")
         legacy[name] = expected_sha
     return legacy
 
 
-def select_candidates(branches: list[str], tag: str, legacy: dict[str, str]) -> list[Candidate]:
+def select_candidates(
+    branches: list[str], tag: str, legacy: dict[str, str]
+) -> list[Candidate]:
     patterns = _branch_patterns(tag)
     selected: list[Candidate] = []
     for branch in sorted(set(branches)):
         if branch == "main":
             continue
-        if any(pattern.fullmatch(branch) for pattern in patterns):
-            selected.append(Candidate(branch, None, "automation-owned"))
+        matched = None
+        for pattern in patterns:
+            matched = pattern.fullmatch(branch)
+            if matched is not None:
+                break
+        if matched is not None:
+            selected.append(
+                Candidate(branch, matched.group("sha"), "sha-addressed-automation")
+            )
         elif branch in legacy:
-            selected.append(Candidate(branch, legacy[branch], "legacy-ledger"))
+            selected.append(Candidate(branch, legacy[branch], "explicit-ledger"))
     return selected
 
 
@@ -152,7 +167,7 @@ def _ref_sha(repository: str, branch: str, token: str) -> str | None:
     if not isinstance(payload, dict):
         raise CleanupError(f"invalid ref payload for {branch}")
     sha = (payload.get("object") or {}).get("sha")
-    if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+    if not isinstance(sha, str) or FULL_SHA_RE.fullmatch(sha) is None:
         raise CleanupError(f"invalid ref SHA for {branch}: {sha!r}")
     return sha
 
@@ -172,45 +187,81 @@ def _open_pr_count(repository: str, branch: str, token: str) -> int:
     return len(payload)
 
 
+def _atomic_delete(
+    repository: str, branch: str, expected_sha: str, token: str
+) -> subprocess.CompletedProcess[str]:
+    credential = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    env = os.environ.copy()
+    env.update(
+        {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+            "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {credential}",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+    )
+    ref = f"refs/heads/{branch}"
+    return subprocess.run(
+        [
+            "git",
+            "push",
+            "--porcelain",
+            f"--force-with-lease={ref}:{expected_sha}",
+            f"https://github.com/{repository}.git",
+            f":{ref}",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
+
+
 def delete_candidate(repository: str, candidate: Candidate, token: str) -> str:
     if candidate.name == "main":
         raise CleanupError("refusing to delete main")
+    if FULL_SHA_RE.fullmatch(candidate.expected_sha) is None:
+        raise CleanupError(f"invalid cleanup lease for {candidate.name}")
     if _open_pr_count(repository, candidate.name, token) != 0:
         return f"preserved open-PR branch {candidate.name}"
 
-    first = _ref_sha(repository, candidate.name, token)
-    if first is None:
+    current = _ref_sha(repository, candidate.name, token)
+    if current is None:
         return f"already absent {candidate.name}"
-    lease = candidate.expected_sha or first
-    if candidate.expected_sha is not None and first != candidate.expected_sha:
+    if current != candidate.expected_sha:
         return (
-            f"preserved moved legacy branch {candidate.name}: "
-            f"current={first} reviewed={candidate.expected_sha}"
+            f"preserved moved branch {candidate.name}: "
+            f"current={current} reviewed={candidate.expected_sha}"
         )
 
-    # Re-read immediately before deletion. This is the deletion lease: a branch
-    # that moved after selection is preserved rather than deleting new work.
-    second = _ref_sha(repository, candidate.name, token)
-    if second is None:
-        return f"already absent {candidate.name}"
-    if second != lease:
-        return f"preserved concurrently moved branch {candidate.name}: {lease} -> {second}"
-
-    encoded = urllib.parse.quote(candidate.name, safe="")
-    status, _ = _request(
-        "DELETE",
-        f"https://api.github.com/repos/{repository}/git/refs/heads/{encoded}",
-        token=token,
-        expected={204, 404},
+    result = _atomic_delete(
+        repository, candidate.name, candidate.expected_sha, token
     )
-    if status == 404:
+    if result.returncode == 0:
+        return f"deleted {candidate.name} at {candidate.expected_sha}"
+
+    after = _ref_sha(repository, candidate.name, token)
+    if after is None:
         return f"already absent {candidate.name}"
-    return f"deleted {candidate.name} at {lease}"
+    if after != candidate.expected_sha:
+        return (
+            f"preserved concurrently moved branch {candidate.name}: "
+            f"{candidate.expected_sha} -> {after}"
+        )
+    detail = (result.stderr or result.stdout).strip()
+    raise CleanupError(
+        f"atomic leased deletion failed for {candidate.name} at "
+        f"{candidate.expected_sha}: {detail}"
+    )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Delete only release-owned branches under exact-SHA leases after terminal release qualification."
+        description=(
+            "Delete only release-owned SHA-addressed branches or exact ledger "
+            "entries using atomic ref leases after terminal release qualification."
+        )
     )
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--tag", required=True)
@@ -227,7 +278,10 @@ def main() -> int:
     try:
         if not args.repository or args.repository.count("/") != 1:
             raise CleanupError("repository must be in owner/name form")
-        if re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", args.tag) is None:
+        if re.fullmatch(
+            r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
+            args.tag,
+        ) is None:
             raise CleanupError("invalid release tag")
         token = os.environ.get("GH_TOKEN", "")
         if not token:
@@ -237,11 +291,7 @@ def main() -> int:
         candidates = select_candidates(branches, args.tag, legacy)
         print(f"selected {len(candidates)} cleanup candidate(s) for {args.tag}")
         for candidate in candidates:
-            result = delete_candidate(args.repository, candidate, token)
-            print(result)
-            # Small spacing makes an accidental rapid ref churn less likely to
-            # collapse both lease reads into the same remote observation window.
-            time.sleep(0.05)
+            print(delete_candidate(args.repository, candidate, token))
     except CleanupError as error:
         print(f"release branch cleanup failed: {error}", file=sys.stderr)
         return 2
