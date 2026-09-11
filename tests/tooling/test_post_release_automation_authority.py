@@ -147,7 +147,7 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertNotIn("dispatch-boundaries.tsv", fresh_block)
         self.assertNotIn(".id > $boundary", fresh_block)
 
-    def test_cleanup_is_limited_to_release_owned_and_version_scoped_temp_branches(self) -> None:
+    def test_cleanup_is_limited_to_owned_namespaces_and_exact_legacy_provenance(self) -> None:
         workflow = self._closure_workflow()
         cleanup = workflow.split("- name: Delete obsolete release-scoped branches", 1)[1]
         self.assertIn("automation/release-prep-", cleanup)
@@ -155,11 +155,17 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         self.assertIn("automation/release-authorization-", cleanup)
         self.assertIn("automation/post-release-", cleanup)
         self.assertIn("verify-release/", cleanup)
-        self.assertIn("series = f\"v{match.group(1)}.{match.group(2)}\"", cleanup)
-        self.assertIn("(cleanup|compact|minimal|review|release)", cleanup)
+        self.assertIn("contracts/release-branch-cleanup.toml", cleanup)
+        self.assertIn('item.get("release") != tag', cleanup)
+        self.assertIn('name.startswith("tmp/")', cleanup)
+        self.assertIn('re.fullmatch(r"[0-9a-f]{40}", expected_sha)', cleanup)
+        self.assertIn('current_sha" != "$expected_sha"', cleanup)
+        self.assertIn("preserving legacy branch whose ref moved", cleanup)
+        self.assertNotIn("series =", cleanup)
+        self.assertNotIn("(cleanup|compact|minimal|review|release)", cleanup)
+        self.assertNotIn('branch == "tmp/zero-diff-authorization-probe"', cleanup)
         self.assertNotIn('"fix/"', cleanup)
         self.assertNotIn('"release/"', cleanup)
-        self.assertIn('branch == "tmp/zero-diff-authorization-probe"', cleanup)
         self.assertIn("preserving branch used by an open PR", cleanup)
         self.assertIn('repos/$GITHUB_REPOSITORY/pulls', cleanup)
         self.assertIn('-f head="${GITHUB_REPOSITORY%/*}:$branch"', cleanup)
