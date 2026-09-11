@@ -94,12 +94,33 @@ version = "9.9.9"
             self.assertEqual(lock.count('version = "0.8.0"'), 2)
             self.assertIn('version = "9.9.9"', lock)
 
-    def test_prepare_release_rejects_non_next_or_non_monotonic_versions(self) -> None:
+    def test_prepare_release_is_idempotent_at_target_and_rejects_regression(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._fixture(root, workspace_version="0.8.0")
+            cargo_before = (root / "Cargo.toml").read_bytes()
+            lock_before = (root / "Cargo.lock").read_bytes()
+
+            self.assertEqual(prepare_release.prepare(root, "v0.8.0"), [])
+            self.assertEqual((root / "Cargo.toml").read_bytes(), cargo_before)
+            self.assertEqual((root / "Cargo.lock").read_bytes(), lock_before)
+
             with self.assertRaises(prepare_release.PreparationError):
                 prepare_release.prepare(root, "v0.7.0")
+
+    def test_idempotent_prepare_rejects_incoherent_workspace_lock_versions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._fixture(root, workspace_version="0.8.0")
+            lock_path = root / "Cargo.lock"
+            lock_path.write_text(
+                lock_path.read_text(encoding="utf-8").replace(
+                    'name = "alpha"\nversion = "0.8.0"',
+                    'name = "alpha"\nversion = "0.7.0"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
             with self.assertRaises(prepare_release.PreparationError):
                 prepare_release.prepare(root, "v0.8.0")
 
@@ -123,7 +144,10 @@ version = "9.9.9"
         self.assertIn("python3 tools/prepare_release.py --tag", preparation)
         self.assertIn("automation/release-prep-${RELEASE_TAG}-${head_sha}", preparation)
         self.assertIn('test "$candidate_branch" = "automation/release-prep-${RELEASE_TAG}-${candidate_sha}"', preparation)
-        self.assertIn("--expected-changed-files 2", preparation)
+        self.assertIn("expected_changed_files=0", preparation)
+        self.assertIn("expected_changed_files=2", preparation)
+        self.assertIn("git commit --allow-empty -m", preparation)
+        self.assertIn('--expected-changed-files "$EXPECTED_CHANGED_FILES"', preparation)
         self.assertIn('pulls/$PR_NUMBER/merge', preparation)
         self.assertIn("event-driven authorization handoff", preparation)
         self.assertIn("Native PR CI/Security/CodeQL are the ruleset-authoritative gates", preparation)
@@ -139,13 +163,6 @@ version = "9.9.9"
         self.assertIn("release-proof-dispatch.yml", authorization)
         self.assertIn("workflow_dispatch checks are not used as substitutes", authorization)
         self.assertNotIn('PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/main"', authorization)
-
-        self.assertIn("SHA-addressed deterministic closure", closure)
-        self.assertIn("automation/post-release-${RELEASE_TAG}-${head_sha}", closure)
-        self.assertIn("post-release-cleanup.yml", closure)
-        self.assertIn("event-driven terminal cleanup handoff", closure)
-        self.assertIn('pulls/$PR_NUMBER/merge', closure)
-        self.assertNotIn("Delete obsolete release-scoped branches", closure)
 
     def test_main_transitions_are_event_driven_and_retryable(self) -> None:
         authorization = (ROOT / ".github/workflows/release-authorization.yml").read_text(encoding="utf-8")

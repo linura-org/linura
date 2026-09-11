@@ -208,9 +208,20 @@ jobs:
           git diff --check
 
           mapfile -t changed < <(git diff --name-only)
-          test "${#changed[@]}" -eq 2
-          test "${changed[0]}" = "Cargo.lock"
-          test "${changed[1]}" = "Cargo.toml"
+          case "${#changed[@]}" in
+            0)
+              expected_changed_files=0
+              ;;
+            2)
+              test "${changed[0]}" = "Cargo.lock"
+              test "${changed[1]}" = "Cargo.toml"
+              expected_changed_files=2
+              ;;
+            *)
+              echo "release preparation must be zero-diff recovery or change exactly Cargo.lock and Cargo.toml; got: ${changed[*]-}" >&2
+              exit 2
+              ;;
+          esac
 
           title="release: prepare $RELEASE_TAG $RELEASE_THEME"
           existing_json="$(gh pr list --state open --base main --json number,title,headRefName,headRefOid)"
@@ -221,8 +232,10 @@ jobs:
             local pr_number="$1"
             local candidate_sha="$2"
             local candidate_branch="$3"
+            local expected="$4"
             [[ "$pr_number" =~ ^[0-9]+$ ]]
             [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$expected" = "0" || "$expected" = "2" ]]
             test "$candidate_branch" = "automation/release-prep-${RELEASE_TAG}-${candidate_sha}"
             test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$candidate_branch" --jq .object.sha)" = "$candidate_sha"
             pr_payload="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr_number")"
@@ -230,16 +243,20 @@ jobs:
             test "$(jq -r .head.sha <<<"$pr_payload")" = "$candidate_sha"
             test "$(jq -r .head.ref <<<"$pr_payload")" = "$candidate_branch"
             test "$(jq -r .title <<<"$pr_payload")" = "$title"
-            test "$(jq -r .changed_files <<<"$pr_payload")" = "2"
+            test "$(jq -r .changed_files <<<"$pr_payload")" = "$expected"
             candidate_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$candidate_sha")"
             test "$(jq '.parents | length' <<<"$candidate_payload")" = "1"
             test "$(jq -r '.parents[0].sha' <<<"$candidate_payload")" = "$SOURCE_SHA"
             test "$(jq -r '.message | split("\n")[0]' <<<"$candidate_payload")" = "$title"
             git fetch origin "refs/heads/$candidate_branch:refs/remotes/origin/$candidate_branch" --force
             mapfile -t candidate_changed < <(git diff --name-only "$SOURCE_SHA" "$candidate_sha")
-            test "${#candidate_changed[@]}" -eq 2
-            test "${candidate_changed[0]}" = "Cargo.lock"
-            test "${candidate_changed[1]}" = "Cargo.toml"
+            test "${#candidate_changed[@]}" -eq "$expected"
+            if [[ "$expected" = "2" ]]; then
+              test "${candidate_changed[0]}" = "Cargo.lock"
+              test "${candidate_changed[1]}" = "Cargo.toml"
+            else
+              test "$(git rev-parse "$candidate_sha^{tree}")" = "$(git rev-parse "$SOURCE_SHA^{tree}")"
+            fi
             git show "$candidate_sha:Cargo.toml" | cmp - Cargo.toml
             git show "$candidate_sha:Cargo.lock" | cmp - Cargo.lock
           }
@@ -248,7 +265,7 @@ jobs:
             pr_number="$(jq -r .number <<<"$existing")"
             head_sha="$(jq -r .headRefOid <<<"$existing")"
             branch="$(jq -r .headRefName <<<"$existing")"
-            verify_candidate "$pr_number" "$head_sha" "$branch"
+            verify_candidate "$pr_number" "$head_sha" "$branch" "$expected_changed_files"
           else
             git switch --detach "$SOURCE_SHA"
             app_user_id="$(gh api "users/${RELEASE_APP_SLUG}[bot]" --jq .id)"
@@ -256,29 +273,35 @@ jobs:
             git config user.name "${RELEASE_APP_SLUG}[bot]"
             git config user.email "${app_user_id}+${RELEASE_APP_SLUG}[bot]@users.noreply.github.com"
             git add Cargo.toml Cargo.lock
-            git commit -m "$title"
+            git commit --allow-empty -m "$title"
             head_sha="$(git rev-parse HEAD)"
             [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
             branch="automation/release-prep-${RELEASE_TAG}-${head_sha}"
             gh auth setup-git
             git push origin "HEAD:refs/heads/$branch"
 
+            if [[ "$expected_changed_files" = "0" ]]; then
+              preparation_description="This is an idempotent recovery handoff: the reviewed workspace is already exactly at $RELEASE_TAG, Cargo.lock coherence was re-proved, and the candidate intentionally changes zero files."
+            else
+              preparation_description="This PR changes exactly Cargo.toml and Cargo.lock to advance the workspace to $RELEASE_TAG."
+            fi
             cat > "$RUNNER_TEMP/body.md" <<EOF
           Deterministic mechanical preparation for reviewed release-readiness source \`$SOURCE_SHA\`.
 
-          This PR changes exactly \`Cargo.toml\` and \`Cargo.lock\` to advance the workspace to $RELEASE_TAG. Product claims, qualification narratives, authority boundaries and roadmap release state were already reviewed on the preceding \`release: ready\` source.
+          $preparation_description Product claims, qualification narratives, authority boundaries and roadmap release state were already reviewed on the preceding \`release: ready\` source.
 
           Native PR CI/Security/CodeQL are the ruleset-authoritative gates. No conversational review is required for this structurally constrained mechanical handoff.
           EOF
             url="$(gh pr create --base main --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/body.md")"
             pr_number="${url##*/}"
-            verify_candidate "$pr_number" "$head_sha" "$branch"
+            verify_candidate "$pr_number" "$head_sha" "$branch" "$expected_changed_files"
           fi
 
           {
             printf 'branch=%s\n' "$branch"
             printf 'pr_number=%s\n' "$pr_number"
             printf 'head_sha=%s\n' "$head_sha"
+            printf 'expected_changed_files=%s\n' "$expected_changed_files"
           } >> "$GITHUB_OUTPUT"
 
       - name: Require GitHub-native PR gates and clean ruleset state
@@ -287,8 +310,10 @@ jobs:
           PR_NUMBER: ${{ steps.candidate.outputs.pr_number }}
           HEAD_SHA: ${{ steps.candidate.outputs.head_sha }}
           BRANCH: ${{ steps.candidate.outputs.branch }}
+          EXPECTED_CHANGED_FILES: ${{ steps.candidate.outputs.expected_changed_files }}
         run: |
           set -euo pipefail
+          [[ "$EXPECTED_CHANGED_FILES" = "0" || "$EXPECTED_CHANGED_FILES" = "2" ]]
           python3 tools/release_native_gates.py \
             --repository "$GITHUB_REPOSITORY" \
             --head-sha "$HEAD_SHA" \
@@ -297,7 +322,7 @@ jobs:
             pr \
             --pr-number "$PR_NUMBER" \
             --base-sha "$SOURCE_SHA" \
-            --expected-changed-files 2
+            --expected-changed-files "$EXPECTED_CHANGED_FILES"
 
       - name: Re-prove and squash merge exact mechanical preparation
         id: merge
@@ -306,8 +331,10 @@ jobs:
           PR_NUMBER: ${{ steps.candidate.outputs.pr_number }}
           HEAD_SHA: ${{ steps.candidate.outputs.head_sha }}
           BRANCH: ${{ steps.candidate.outputs.branch }}
+          EXPECTED_CHANGED_FILES: ${{ steps.candidate.outputs.expected_changed_files }}
         run: |
           set -euo pipefail
+          [[ "$EXPECTED_CHANGED_FILES" = "0" || "$EXPECTED_CHANGED_FILES" = "2" ]]
           test "$BRANCH" = "automation/release-prep-${RELEASE_TAG}-${HEAD_SHA}"
           python3 tools/release_native_gates.py \
             --repository "$GITHUB_REPOSITORY" \
@@ -317,7 +344,7 @@ jobs:
             pr \
             --pr-number "$PR_NUMBER" \
             --base-sha "$SOURCE_SHA" \
-            --expected-changed-files 2
+            --expected-changed-files "$EXPECTED_CHANGED_FILES"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)" = "$HEAD_SHA"
 
@@ -327,16 +354,20 @@ jobs:
           title="release: prepare $RELEASE_TAG $RELEASE_THEME"
           test "$(jq -r '.message | split("\n")[0]' <<<"$candidate_payload")" = "$title"
           mapfile -t candidate_changed < <(git diff --name-only "$SOURCE_SHA" "$HEAD_SHA")
-          test "${#candidate_changed[@]}" -eq 2
-          test "${candidate_changed[0]}" = "Cargo.lock"
-          test "${candidate_changed[1]}" = "Cargo.toml"
+          test "${#candidate_changed[@]}" -eq "$EXPECTED_CHANGED_FILES"
+          if [[ "$EXPECTED_CHANGED_FILES" = "2" ]]; then
+            test "${candidate_changed[0]}" = "Cargo.lock"
+            test "${candidate_changed[1]}" = "Cargo.toml"
+          else
+            test "$(git rev-parse "$HEAD_SHA^{tree}")" = "$(git rev-parse "$SOURCE_SHA^{tree}")"
+          fi
           candidate_tree="$(jq -r .tree.sha <<<"$candidate_payload")"
 
           result="$(gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
             -f merge_method=squash \
             -f sha="$HEAD_SHA" \
             -f commit_title="$title" \
-            -f commit_message="Mechanical release preparation for reviewed source $SOURCE_SHA. Product claims are unchanged.")"
+            -f commit_message="Deterministic release preparation for reviewed source $SOURCE_SHA. Product claims are unchanged.")"
           test "$(jq -r .merged <<<"$result")" = "true"
           main_sha="$(jq -r .sha <<<"$result")"
           [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
