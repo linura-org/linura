@@ -62,7 +62,7 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
         self.assertIn('pulls/$PR_NUMBER/merge', merge)
         self.assertIn("deterministic closure proof", merge)
 
-    def test_cleanup_requires_owned_namespace_or_exact_legacy_ledger(self) -> None:
+    def test_cleanup_requires_owned_namespace_or_exact_legacy_ledger_and_sha_lease(self) -> None:
         cleanup = self._cleanup_block()
         self.assertIn("automation/release-prep-", cleanup)
         self.assertIn("automation/release-reprepare-", cleanup)
@@ -74,8 +74,14 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
         self.assertIn('item.get("release") != tag', cleanup)
         self.assertIn('name.startswith("tmp/")', cleanup)
         self.assertIn('re.fullmatch(r"[0-9a-f]{40}", expected_sha)', cleanup)
-        self.assertIn('current_sha" != "$expected_sha"', cleanup)
+        self.assertIn('lease_sha="$expected_sha"', cleanup)
+        self.assertIn('current_sha" != "$lease_sha"', cleanup)
         self.assertIn("preserving legacy branch whose ref moved", cleanup)
+        self.assertIn('git check-ref-format --branch "$branch"', cleanup)
+        self.assertIn('git push --force-with-lease="$ref:$lease_sha" origin ":$ref"', cleanup)
+        self.assertIn("preserving branch moved during cleanup lease", cleanup)
+        self.assertIn("failed to delete unchanged release branch under exact SHA lease", cleanup)
+        self.assertNotIn('gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"', cleanup)
         self.assertNotIn("tmp/{re.escape(series)}", cleanup)
         self.assertNotIn("cleanup|compact|minimal|review|release", cleanup)
         self.assertIn('gh api --paginate --method GET "repos/$GITHUB_REPOSITORY/pulls"', cleanup)
