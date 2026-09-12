@@ -1,0 +1,202 @@
+name: v0.9 qualification-environment qualification
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify; defaults to selected ref
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - ".github/workflows/v09-qualification.yml"
+      - ".github/workflows/vm-acceptance.yml"
+      - ".github/workflows/trusted-release-proof.yml"
+      - "apps/linura-firstboot/**"
+      - "crates/linura-bootstrap/**"
+      - "crates/linura-hardware/**"
+      - "crates/linura-linux-observation/**"
+      - "crates/linura-observation/**"
+      - "crates/linura-observation-control/**"
+      - "crates/linura-planner/**"
+      - "crates/linura-protocol/**"
+      - "contracts/components.toml"
+      - "contracts/roadmap.toml"
+      - "hardware/support-matrix.json"
+      - "docs/adr/0029-v09-first-boot-reference-and-provisioning-boundary.md"
+      - "docs/first-boot.md"
+      - "docs/hardware-validation.md"
+      - "docs/machine-profiles.md"
+      - "docs/platform-profiles.md"
+      - "docs/milestones/v0.9.0.md"
+      - "docs/qualification/v0.9.0.md"
+      - "tests/acceptance/002-firstboot-offline.json"
+      - "tests/tooling/test_component_maturity.py"
+      - "tests/tooling/test_roadmap.py"
+      - "tools/check_machine_classes.py"
+      - "tools/image.py"
+      - "tools/codex/versions.env"
+      - "rust-toolchain.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: v09-qualification-environment-${{ github.event.pull_request.number || inputs.source_sha || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  contract:
+    name: v0.9 First Boot contract
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Assert exact source and load toolchain contract
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          # shellcheck disable=SC1091
+          source tools/codex/versions.env
+          : "${RUST_VERSION:?}"
+          printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
+
+      - name: Install pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Verify candidate component, roadmap and support-scope contracts
+        run: |
+          set -euo pipefail
+          python3 tools/check_component_maturity.py
+          python3 tools/check_roadmap.py
+          python3 tools/check_machine_classes.py
+          python3 -m unittest tests.tooling.test_roadmap
+
+      - name: Test First Boot, bootstrap and hardware contracts
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo test --locked -p linura-firstboot -p linura-bootstrap -p linura-hardware
+          cargo build --locked --release -p linura-firstboot
+          ./target/release/linura-firstboot --self-check
+          ./target/release/linura-firstboot --qualification-environment | grep -Fx 'id=qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless'
+          ./target/release/linura-firstboot --qualification-environment | grep -Fx 'kind=qualification-environment'
+          ./target/release/linura-firstboot --qualification-environment | grep -Fx 'status=candidate-not-yet-release-supported'
+
+  offline-reference:
+    name: v0.9 offline QualificationEnvironment VM
+    needs: contract
+    uses: ./.github/workflows/vm-acceptance.yml
+    permissions:
+      contents: read
+    with:
+      scenario: firstboot-offline
+      source_sha: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+  qualification-proof:
+    name: bind v0.9 qualification evidence
+    needs: [contract, offline-reference]
+    runs-on: ubuntu-24.04
+    env:
+      EVIDENCE_ROOT: /tmp/linura-v09-vm
+      QUALIFICATION_ROOT: /tmp/linura-v09-qualification
+    steps:
+      - name: Download exact-source VM evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-vm-acceptance-firstboot-offline-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/linura-v09-vm
+
+      - name: Validate and bind qualification evidence
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import shutil
+
+          evidence_root = pathlib.Path(os.environ["EVIDENCE_ROOT"])
+          qualification_root = pathlib.Path(os.environ["QUALIFICATION_ROOT"])
+          qualification_root.mkdir(parents=True, exist_ok=True)
+          evidence_path = evidence_root / "VM-ACCEPTANCE-EVIDENCE.json"
+          checksum_path = evidence_root / "VM-ACCEPTANCE-EVIDENCE.sha256"
+          if not evidence_path.is_file() or not checksum_path.is_file():
+              raise SystemExit("v0.9 VM evidence or checksum is missing")
+
+          evidence_bytes = evidence_path.read_bytes()
+          evidence_sha = hashlib.sha256(evidence_bytes).hexdigest()
+          expected_checksum = f"{evidence_sha}  {evidence_path.name}"
+          if checksum_path.read_text(encoding="utf-8").strip() != expected_checksum:
+              raise SystemExit("v0.9 VM evidence checksum mismatch")
+
+          evidence = json.loads(evidence_bytes)
+          source_sha = os.environ["SOURCE_SHA"]
+          if evidence.get("schema_version") != 2:
+              raise SystemExit("unexpected v0.9 VM evidence schema")
+          if evidence.get("repository") != os.environ["GITHUB_REPOSITORY"]:
+              raise SystemExit("v0.9 VM evidence repository mismatch")
+          if evidence.get("source_sha") != source_sha:
+              raise SystemExit("v0.9 VM evidence source mismatch")
+          if evidence.get("result") != "passed":
+              raise SystemExit("v0.9 VM qualification did not pass")
+          if evidence.get("scenario", {}).get("id") != "firstboot-offline":
+              raise SystemExit("v0.9 VM evidence scenario mismatch")
+          qualification_environment = evidence.get("qualification_environment", {})
+          if qualification_environment.get("id") != "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless":
+              raise SystemExit("v0.9 QualificationEnvironment identity mismatch")
+          if evidence.get("virtualization", {}).get("requested_acceleration") != "tcg":
+              raise SystemExit("v0.9 virtualization mode mismatch")
+          if evidence.get("base_image", {}).get("sha256") != "d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac":
+              raise SystemExit("v0.9 base image digest mismatch")
+
+          shutil.copy2(evidence_path, qualification_root / evidence_path.name)
+          shutil.copy2(checksum_path, qualification_root / checksum_path.name)
+          receipt = {
+              "schema_version": 2,
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "source_sha": source_sha,
+              "result": "passed",
+              "qualification_environment": qualification_environment,
+              "vm_evidence": {
+                  "path": evidence_path.name,
+                  "sha256": evidence_sha,
+                  "size": len(evidence_bytes),
+                  "workflow_run_id": evidence.get("workflow", {}).get("run_id"),
+                  "workflow_run_attempt": evidence.get("workflow", {}).get("run_attempt"),
+              },
+          }
+          (qualification_root / "qualification.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload exact-source v0.9 qualification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-v09-qualification-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/linura-v09-qualification/
+          if-no-files-found: error
+          retention-days: 30

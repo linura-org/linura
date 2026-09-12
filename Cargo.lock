@@ -510,6 +510,10 @@ dependencies = [
 [[package]]
 name = "linura-bootstrap"
 version = "0.8.0"
+dependencies = [
+ "sha2",
+ "tempfile",
+]
 
 [[package]]
 name = "linura-capability-sdk"
@@ -572,6 +576,19 @@ dependencies = [
 [[package]]
 name = "linura-firstboot"
 version = "0.8.0"
+dependencies = [
+ "linura-bootstrap",
+ "linura-core",
+ "linura-hardware",
+ "linura-library",
+ "linura-linux-observation",
+ "linura-observation",
+ "linura-observation-control",
+ "linura-planner",
+ "linura-protocol",
+ "sha2",
+ "tempfile",
+]
 
 [[package]]
 name = "linura-graph"

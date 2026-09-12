@@ -126,11 +126,13 @@ Agents may propose saving/adopting setups, but Library operations and adoption r
 
 ## Phase 9 — First Boot + supported Experimental reference environment (target v0.9.0)
 
-Implement the signature flow: "What do you want this computer to become?" including offline/default/library/import paths, hardware discovery, plan review, approval, snapshot and recovery escape hatches.
+Implement the signature flow: "What do you want this computer to become?" over the exact ADR 0029 Ubuntu 24.04 server/amd64/QEMU-TCG/headless QualificationEnvironment, while `arch-hyprland-v1` remains the first interactive workstation PlatformProfile.
 
-A user can start from fresh intent, a saved Setup, or a whole MachineProfile; all paths converge on target observation and fresh planning.
+Support interactive-owner, prepare-for-another-owner and unattended-local entry modes. Fresh intent, default profiles, local Library material, portable Setup/MachineProfile imports and bounded Provisioning Manifest input all remain declarative and converge on local QualificationEnvironment discovery, fresh authoritative observation, fresh planning, verified recovery readiness and a non-authorizing submission to Control. First Boot never accepts caller-manufactured policy approval or execution authority.
 
-Declare the first bounded Experimental reference environment only when installation, update/recovery and the essential domain capabilities needed by that environment have version-specific acceptance evidence.
+Make provisioning restart-safe and idempotent; keep remote access deny-by-default; separate bounded bootstrap networking from final managed networking; keep hardware adaptation typed/reviewable rather than script-authoritative; and qualify migration/backup/restore, update interruption, native recovery and exact guest-installed binary identity.
+
+The v0.9 claim is Linura installation/adoption on the pinned Linux base, not a general bare-metal/full-disk/dual-boot OS installer or desktop experience. Declare the first Experimental reference support only when all version-specific acceptance evidence exists.
 
 ## Phase 10 — meaningful end-user Experimental Linura (target v0.10.0)
 

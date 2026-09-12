@@ -32,11 +32,12 @@ id = "linura-firstboot"
 path = "apps/linura-firstboot"
 kind = "app"
 workspace_member = true
-maturity = "roadmap-scaffold"
+maturity = "integrated-experimental"
 activation_milestone = "v0.9.0"
-release_artifact = false
+release_artifact = true
+binary = "linura-firstboot"
 authority_role = "client"
-scope = "future First Boot application; placeholder only before v0.9.0"
+scope = "non-privileged First Boot orchestration client for the bounded v0.9 QualificationEnvironment; prepares exact source/observation/plan/review/recovery handoff and owns no execution authority"
 
 [[component]]
 id = "linura-authorityd"
@@ -276,11 +277,11 @@ id = "linura-bootstrap"
 path = "crates/linura-bootstrap"
 kind = "crate"
 workspace_member = true
-maturity = "roadmap-scaffold"
+maturity = "integrated-experimental"
 activation_milestone = "v0.9.0"
 release_artifact = false
 authority_role = "bootstrap-model"
-scope = "future supported-reference-environment bootstrap coordination"
+scope = "v0.9 bootstrap/recovery sequencing model with monotonic stages and fail-closed First Boot readiness"
 
 [[component]]
 id = "linura-migrations"
@@ -320,11 +321,11 @@ id = "linura-hardware"
 path = "crates/linura-hardware"
 kind = "crate"
 workspace_member = true
-maturity = "roadmap-scaffold"
+maturity = "integrated-experimental"
 activation_milestone = "v0.9.0"
 release_artifact = false
 authority_role = "hardware-evidence"
-scope = "future supported reference-environment hardware qualification"
+scope = "v0.9 QualificationEnvironment identity, platform drift detection and hardware evidence qualification"
 
 [[component]]
 id = "linura-testkit"

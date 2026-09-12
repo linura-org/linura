@@ -67,11 +67,11 @@ class ComponentMaturityContractTests(unittest.TestCase):
             def promote(block: str) -> str:
                 return block.replace(
                     "release_artifact = false\n",
-                    'release_artifact = true\nbinary = "linura-firstboot"\n',
+                    'release_artifact = true\nbinary = "linura-config"\n',
                     1,
                 )
 
-            self._replace_component_block(contract, "linura-firstboot", promote)
+            self._replace_component_block(contract, "linura-config", promote)
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("roadmap scaffold cannot be a release artifact", result.stderr)
@@ -90,11 +90,6 @@ class ComponentMaturityContractTests(unittest.TestCase):
             later = versions[candidate_index + 1]
 
             def activate_too_late(block: str) -> str:
-                block = block.replace(
-                    'maturity = "roadmap-scaffold"',
-                    'maturity = "integrated-experimental"',
-                    1,
-                )
                 return re.sub(
                     r'^activation_milestone = "v[0-9]+\.[0-9]+\.[0-9]+"$',
                     f'activation_milestone = "{later}"',
@@ -158,6 +153,29 @@ class ComponentMaturityContractTests(unittest.TestCase):
         self.assertEqual(ui["maturity"], "roadmap-scaffold")
         self.assertEqual(ui["activation_milestone"], "v0.10.0")
         self.assertFalse(ui["release_artifact"])
+
+    def test_v09_candidate_component_maturity_matches_implementation_scope(self) -> None:
+        contract = tomllib.loads((ROOT / "contracts/components.toml").read_text(encoding="utf-8"))
+        components = {item["id"]: item for item in contract["component"]}
+
+        firstboot = components["linura-firstboot"]
+        self.assertEqual(firstboot["maturity"], "integrated-experimental")
+        self.assertEqual(firstboot["activation_milestone"], "v0.9.0")
+        self.assertTrue(firstboot["release_artifact"])
+        self.assertEqual(firstboot["binary"], "linura-firstboot")
+        self.assertEqual(firstboot["authority_role"], "client")
+
+        for component_id in ("linura-bootstrap", "linura-hardware"):
+            component = components[component_id]
+            self.assertEqual(component["maturity"], "integrated-experimental")
+            self.assertEqual(component["activation_milestone"], "v0.9.0")
+            self.assertFalse(component["release_artifact"])
+
+        for component_id in ("linura-agent-ui", "linura-control-center", "linura-shell"):
+            component = components[component_id]
+            self.assertEqual(component["maturity"], "roadmap-scaffold")
+            self.assertEqual(component["activation_milestone"], "v0.10.0")
+            self.assertFalse(component["release_artifact"])
 
     def test_stable_component_requires_stable_milestone_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -229,7 +247,6 @@ class ComponentMaturityContractTests(unittest.TestCase):
             contract = root / "contracts/components.toml"
 
             def grant_release(block: str) -> str:
-                block = block.replace('maturity = "roadmap-scaffold"', 'maturity = "integrated-experimental"', 1)
                 block = block.replace('activation_milestone = "v0.8.0"', 'activation_milestone = "v0.6.0"', 1)
                 return block.replace(
                     "release_artifact = false\n",

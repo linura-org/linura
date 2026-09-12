@@ -205,18 +205,20 @@ A model never receives direct executor, policy-admin or unrestricted system auth
 **Status:** planned  
 **Target claim class:** Experimental
 
-Prove a coherent install/adoption/recovery path on an explicitly bounded Experimental reference environment.
+Prove a coherent Linura installation/adoption/recovery path on one explicitly bounded Experimental reference environment. ADR 0029 defines the exact QualificationEnvironment and provisioning boundary while ADR 0003 remains active for the first interactive workstation PlatformProfile.
 
 Target capabilities:
 
-- First Boot with offline/default/Library/import paths;
-- installation, update and native recovery integration;
-- first explicitly supported Experimental machine class + distribution/desktop-or-headless/hardware profile boundary;
-- essential service/network/audio/power/package/security capabilities needed by the reference experience;
-- initial Control Center and shell surfaces where the chosen reference profile is interactive;
-- upgrade/migration qualification for persistent Linura state.
+- First Boot with offline/default/Library/import and unattended-local provisioning paths;
+- interactive-owner and prepare-for-another-owner flows with deterministic deferred enrollment;
+- versioned, bounded, integrity-bound declarative Provisioning Manifest input that carries no authority;
+- exact Ubuntu 24.04 LTS server / amd64 / QEMU-TCG / headless QualificationEnvironment qualification;
+- exact-source Linura installation, update/migration and native recovery integration on that base environment;
+- bounded bootstrap networking with default-deny remote exposure and no implicit SSH enablement;
+- typed hardware/reference discovery and reviewable adaptation with no generic vendor-script authority path;
+- persistent-state migration/backup/restore qualification and restart-safe First Boot/provisioning state.
 
-The first reference profile does not imply support for every workstation, server or edge configuration.
+v0.9 does not claim a general-purpose full-disk/dual-boot/bare-metal Linux installer or a desktop/workstation experience. The pinned Ubuntu image is the base QualificationEnvironment; broader installer/PlatformProfile support and Control Center/shell/desktop surfaces require later explicit activation and evidence.
 
 ## v0.10.0 — meaningful end-user Experimental Linura
 

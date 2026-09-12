@@ -103,6 +103,7 @@ def validate(root: Path) -> list[str]:
             failures.append(f"canonical roadmap missing machine-class invariant: {marker}")
 
     required_profile_markers = (
+        "## MachineProfile is not PlatformProfile or QualificationEnvironment",
         "## Target machine classes",
         "**workstation**",
         "**server**",
@@ -134,6 +135,29 @@ def validate(root: Path) -> list[str]:
         if domain_text and marker not in domain_text:
             failures.append(f"system domain map missing machine-class invariant: {marker}")
 
+    qualification_environments = support.get("qualification_environments") if support else None
+    release_qualified_environments: list[str] = []
+    if not isinstance(qualification_environments, dict):
+        failures.append("hardware support matrix must define qualification_environments as an object")
+    else:
+        values = qualification_environments.get("release_qualified")
+        if not isinstance(values, list) or not all(
+            isinstance(value, str) and value.strip() for value in values
+        ):
+            failures.append(
+                "qualification_environments.release_qualified must be an array of non-empty strings"
+            )
+        elif len(values) != len(set(values)):
+            failures.append("qualification_environments.release_qualified contains duplicates")
+        else:
+            release_qualified_environments = values
+            for value in values:
+                if not value.startswith("qualification/"):
+                    failures.append(
+                        "release-qualified QualificationEnvironment IDs must use the qualification/ namespace: "
+                        f"{value}"
+                    )
+
     support_classes = support.get("machine_classes") if support else None
     if not isinstance(support_classes, dict):
         failures.append("hardware support matrix must define machine_classes as an object")
@@ -161,6 +185,11 @@ def validate(root: Path) -> list[str]:
                 continue
             if len(profiles) != len(set(profiles)):
                 failures.append(f"machine class {machine_class} release_qualified_profiles contains duplicates")
+            for profile in profiles:
+                if profile.startswith("qualification/"):
+                    failures.append(
+                        f"{machine_class}: QualificationEnvironment {profile} must not be encoded as a PlatformProfile"
+                    )
 
     milestones = contract.get("milestone")
     current_release = contract.get("current_release")
@@ -171,13 +200,29 @@ def validate(root: Path) -> list[str]:
                 current_platform_support = milestone.get("platform_support")
                 break
 
-    if current_platform_support == "none" and isinstance(support_classes, dict):
-        for machine_class in EXPECTED_MACHINE_CLASSES:
-            entry = support_classes.get(machine_class)
-            if isinstance(entry, dict) and entry.get("release_qualified_profiles"):
-                failures.append(
-                    f"{machine_class}: current release has platform_support=none, so release_qualified_profiles must remain empty"
-                )
+    if current_platform_support == "none":
+        if isinstance(support_classes, dict):
+            for machine_class in EXPECTED_MACHINE_CLASSES:
+                entry = support_classes.get(machine_class)
+                if isinstance(entry, dict) and entry.get("release_qualified_profiles"):
+                    failures.append(
+                        f"{machine_class}: current release has platform_support=none, so release_qualified_profiles must remain empty"
+                    )
+        if release_qualified_environments:
+            failures.append(
+                "current release has platform_support=none, so qualification_environments.release_qualified must remain empty"
+            )
+
+    if current_platform_support == "reference-experimental" and isinstance(support_classes, dict):
+        has_profile = any(
+            isinstance(support_classes.get(machine_class), dict)
+            and bool(support_classes[machine_class].get("release_qualified_profiles"))
+            for machine_class in EXPECTED_MACHINE_CLASSES
+        )
+        if not has_profile and not release_qualified_environments:
+            failures.append(
+                "reference-experimental platform support requires at least one release-qualified PlatformProfile or QualificationEnvironment"
+            )
 
     # The typed intent/profile domain and portable schema must preserve machine
     # class end to end. Documentation alone cannot support cross-class adoption
@@ -253,7 +298,7 @@ def main(argv: list[str]) -> int:
         for failure in failures:
             print(f"ERROR: {failure}", file=sys.stderr)
         return 1
-    print("machine-class contract checks passed")
+    print("machine-class and qualification-environment contract checks passed")
     return 0
 
 

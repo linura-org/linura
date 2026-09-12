@@ -8,6 +8,10 @@ on:
         required: false
         default: authoritative-observation
         type: string
+      source_sha:
+        description: Exact source SHA to qualify
+        required: false
+        type: string
   workflow_dispatch:
     inputs:
       scenario:
@@ -15,12 +19,20 @@ on:
         required: true
         default: authoritative-observation
         type: string
+      source_sha:
+        description: Exact source SHA to qualify; defaults to selected ref
+        required: false
+        type: string
   pull_request:
     paths:
       - ".github/workflows/vm-acceptance.yml"
       - ".github/workflows/trusted-release-proof.yml"
+      - ".github/workflows/v09-qualification.yml"
       - "apps/linurad/**"
       - "apps/linuractl/**"
+      - "apps/linura-firstboot/**"
+      - "crates/linura-bootstrap/**"
+      - "crates/linura-hardware/**"
       - "crates/linura-dbus/**"
       - "crates/linura-linux-observation/**"
       - "crates/linura-observation/**"
@@ -33,17 +45,21 @@ on:
       - "rust-toolchain.toml"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "contracts/components.toml"
+      - "docs/milestones/v0.9.0.md"
+      - "docs/qualification/v0.9.0.md"
       - "docs/releases/**"
 
 permissions:
   contents: read
 
 env:
-  SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  SOURCE_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
   BASE_IMAGE_URL: https://cloud-images.ubuntu.com/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img
   BASE_IMAGE_SHA256: d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac
   ACCEPTANCE_SCENARIO: ${{ inputs.scenario || 'authoritative-observation' }}
   VM_ACCELERATION: tcg
+  QUALIFICATION_ENVIRONMENT_ID: qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless
 
 jobs:
   vm:
@@ -55,7 +71,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
 
       - name: Assert exact source and load toolchain contract
         run: |
@@ -85,7 +101,7 @@ jobs:
           rustup default "$RUST_VERSION"
 
       - name: Build exact-source acceptance clients
-        run: cargo build --release --locked -p linurad -p linuractl
+        run: cargo build --release --locked -p linurad -p linuractl -p linura-firstboot
 
       - name: Install disposable VM harness dependencies
         run: |
@@ -212,10 +228,42 @@ jobs:
           ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 \
             'cloud-init status --wait --long'
           scp "${ssh_common[@]}" -P 2222 \
-            target/release/linurad target/release/linuractl \
+            target/release/linurad target/release/linuractl target/release/linura-firstboot \
             linura@127.0.0.1:/tmp/
           ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 \
-            'sudo -n install -o root -g root -m 0755 /tmp/linurad /usr/local/bin/linurad && sudo -n install -o root -g root -m 0755 /tmp/linuractl /usr/local/bin/linuractl && rm -f /tmp/linurad /tmp/linuractl'
+            'sudo -n install -o root -g root -m 0755 /tmp/linurad /usr/local/bin/linurad && sudo -n install -o root -g root -m 0755 /tmp/linuractl /usr/local/bin/linuractl && sudo -n install -o root -g root -m 0755 /tmp/linura-firstboot /usr/local/bin/linura-firstboot && rm -f /tmp/linurad /tmp/linuractl /tmp/linura-firstboot'
+
+          # Installation success is not identity evidence. Hash and size the
+          # installed guest bytes independently and require exact equality with
+          # the SOURCE_SHA host build before any scenario can pass.
+          : > "$ARTIFACT_DIR/installed-binaries.tsv"
+          for name in linurad linuractl linura-firstboot; do
+            host_path="target/release/$name"
+            host_sha="$(sha256sum "$host_path" | cut -c1-64)"
+            host_size="$(stat -c %s "$host_path")"
+            guest_sha="$(ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 "sha256sum /usr/local/bin/$name | cut -c1-64")"
+            guest_size="$(ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 "stat -c %s /usr/local/bin/$name")"
+            test "$host_sha" = "$guest_sha"
+            test "$host_size" = "$guest_size"
+            printf '%s\t%s\t%s\t%s\t%s\n' \
+              "$name" "$host_sha" "$host_size" "$guest_sha" "$guest_size" \
+              >> "$ARTIFACT_DIR/installed-binaries.tsv"
+          done
+
+          guest_arch="$(ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 'uname -m')"
+          guest_virtualization="$(ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 'systemd-detect-virt')"
+          guest_os_id="$(ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 "sed -n 's/^ID=//p' /etc/os-release | tr -d '\"'")"
+          guest_os_version="$(ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 "sed -n 's/^VERSION_ID=//p' /etc/os-release | tr -d '\"'")"
+          test "$guest_arch" = x86_64
+          test "$guest_virtualization" = qemu
+          test "$guest_os_id" = ubuntu
+          test "$guest_os_version" = 24.04
+          {
+            printf 'architecture=%s\n' "$guest_arch"
+            printf 'virtualization=%s\n' "$guest_virtualization"
+            printf 'distribution_id=%s\n' "$guest_os_id"
+            printf 'distribution_version=%s\n' "$guest_os_version"
+          } > "$ARTIFACT_DIR/guest-environment.env"
 
       - name: Run repository acceptance scenario
         run: |
@@ -252,9 +300,39 @@ jobs:
               return hashlib.sha256(path.read_bytes()).hexdigest()
 
           binaries = {}
-          for name in ("linurad", "linuractl"):
-              path = root / "target/release" / name
-              binaries[name] = {"sha256": digest(path), "size": path.stat().st_size}
+          identity_path = artifact_dir / "installed-binaries.tsv"
+          if not identity_path.is_file():
+              raise SystemExit("guest binary identity evidence is missing")
+          for line in identity_path.read_text(encoding="utf-8").splitlines():
+              name, host_sha, host_size, guest_sha, guest_size = line.split("\t")
+              if host_sha != guest_sha or int(host_size) != int(guest_size):
+                  raise SystemExit(f"installed binary identity mismatch for {name}")
+              host_path = root / "target/release" / name
+              if digest(host_path) != host_sha or host_path.stat().st_size != int(host_size):
+                  raise SystemExit(f"host binary changed after guest identity proof for {name}")
+              binaries[name] = {
+                  "host_build": {"sha256": host_sha, "size": int(host_size)},
+                  "guest_installed": {"sha256": guest_sha, "size": int(guest_size)},
+                  "identity_match": True,
+              }
+
+          guest_environment = {}
+          guest_environment_path = artifact_dir / "guest-environment.env"
+          if not guest_environment_path.is_file():
+              raise SystemExit("guest QualificationEnvironment evidence is missing")
+          for line in guest_environment_path.read_text(encoding="utf-8").splitlines():
+              key, value = line.split("=", 1)
+              guest_environment[key] = value
+          expected_guest = {
+              "architecture": "x86_64",
+              "virtualization": "qemu",
+              "distribution_id": "ubuntu",
+              "distribution_version": "24.04",
+          }
+          if guest_environment != expected_guest:
+              raise SystemExit(
+                  f"guest QualificationEnvironment mismatch: expected {expected_guest}, got {guest_environment}"
+              )
 
           package_versions = {}
           for package in ("cloud-image-utils", "qemu-system-x86", "qemu-utils"):
@@ -264,7 +342,7 @@ jobs:
               package_versions[package] = value
 
           evidence = {
-              "schema_version": 1,
+              "schema_version": 2,
               "repository": os.environ["GITHUB_REPOSITORY"],
               "source_sha": os.environ["SOURCE_SHA"],
               "scenario": {
@@ -272,12 +350,21 @@ jobs:
                   "path": scenario_path.relative_to(root).as_posix(),
                   "sha256": digest(scenario_path),
               },
+              "qualification_environment": {
+                  "id": os.environ["QUALIFICATION_ENVIRONMENT_ID"],
+                  "machine_class_context": "server",
+                  "interaction": "headless",
+                  "init_system": "systemd",
+                  "guest_observation": guest_environment,
+              },
               "base_image": {
                   "url": os.environ["BASE_IMAGE_URL"],
                   "sha256": os.environ["BASE_IMAGE_SHA256"],
               },
               "virtualization": {
-                  "acceleration": os.environ["VM_ACCELERATION"],
+                  "requested_acceleration": os.environ["VM_ACCELERATION"],
+                  "guest_detected": guest_environment["virtualization"],
+                  "harness": "q35,accel=tcg; cpu=max; snapshot=true",
               },
               "binaries": binaries,
               "toolchain": {
@@ -290,12 +377,18 @@ jobs:
                   "run_id": int(os.environ["GITHUB_RUN_ID"]),
                   "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
                   "event": os.environ["GITHUB_EVENT_NAME"],
+                  "workflow_ref": os.environ.get("GITHUB_WORKFLOW_REF", ""),
+                  "repository_ref": os.environ.get("GITHUB_REF", ""),
+                  "server_url": os.environ.get("GITHUB_SERVER_URL", "https://github.com"),
               },
               "result": "passed",
           }
           output = artifact_dir / "VM-ACCEPTANCE-EVIDENCE.json"
           output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          checksum = artifact_dir / "VM-ACCEPTANCE-EVIDENCE.sha256"
+          checksum.write_text(f"{digest(output)}  {output.name}\n", encoding="utf-8")
           print(f"wrote {output}")
+          print(f"wrote {checksum}")
           PY
 
       - name: Stop disposable guest
@@ -321,7 +414,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: linura-vm-acceptance-${{ inputs.scenario || 'authoritative-observation' }}-${{ github.event.pull_request.head.sha || github.sha }}
+          name: linura-vm-acceptance-${{ inputs.scenario || 'authoritative-observation' }}-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/linura-vm-artifacts/
           if-no-files-found: warn
           retention-days: 30

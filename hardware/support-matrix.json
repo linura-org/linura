@@ -1,6 +1,9 @@
 {
   "schema_version": 1,
   "evidence_tiers": ["unknown", "fixture_only", "virtual_machine", "community_hardware", "maintainer_hardware", "release_qualified"],
+  "qualification_environments": {
+    "release_qualified": []
+  },
   "machine_classes": {
     "workstation": {
       "release_qualified_profiles": []
@@ -23,5 +26,5 @@
     "amd_gpu": "fixture_only",
     "nvidia_gpu": "fixture_only"
   },
-  "note": "Development evidence only. Workstation, server and edge are target machine classes, but no machine-class profile or physical hardware is release-qualified at bootstrap."
+  "note": "Development evidence only. No QualificationEnvironment and no workstation/server/edge PlatformProfile is release-qualified while the current release has platform_support=none."
 }

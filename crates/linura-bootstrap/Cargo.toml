@@ -6,5 +6,16 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# Internal test-only fixture support. Release builds refuse to compile with this
+# feature enabled so production recovery evidence cannot use caller-owned files.
+test-support = []
+
+[dependencies]
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3.27"
+
 [lints]
 workspace = true
