@@ -51,3 +51,4 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0026 — Bounded v0.6 managed mutation authority and Authority1 boundary](0026-bounded-v0.6-managed-mutation-authority.md)
 - [0027 — Protected release handoff automation](0027-protected-release-handoff-automation.md)
 - [0028 — Proposal-only agent interpretation](0028-proposal-only-agent-interpretation.md)
+- [0029 — v0.9 First Boot qualification environment and provisioning boundary](0029-v09-first-boot-reference-and-provisioning-boundary.md)

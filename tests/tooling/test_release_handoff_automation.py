@@ -195,7 +195,10 @@ version = "9.9.9"
         promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("prove Release App closure authority before publication", promotion)
-        self.assertNotIn("environment:", release)
+        self.assertFalse(
+            any(line.startswith("    environment:") for line in release.splitlines()),
+            "release jobs must not use a GitHub Environment/manual-approval gate",
+        )
         self.assertNotIn("required reviewers", release.casefold())
         self.assertNotIn("@codex review", release)
 

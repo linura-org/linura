@@ -6,5 +6,23 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[dependencies]
+linura-bootstrap = { path = "../../crates/linura-bootstrap" }
+linura-core = { path = "../../crates/linura-core" }
+linura-hardware = { path = "../../crates/linura-hardware" }
+linura-library = { path = "../../crates/linura-library" }
+linura-linux-observation = { path = "../../crates/linura-linux-observation" }
+linura-observation = { path = "../../crates/linura-observation" }
+linura-observation-control = { path = "../../crates/linura-observation-control" }
+linura-planner = { path = "../../crates/linura-planner" }
+linura-protocol = { path = "../../crates/linura-protocol" }
+sha2 = "0.10"
+
+[dev-dependencies]
+# Unit tests may synthesize recovery artifacts, but production dependencies never
+# enable this feature and release builds of linura-bootstrap reject it.
+linura-bootstrap = { path = "../../crates/linura-bootstrap", features = ["test-support"] }
+tempfile = "3.27"
+
 [lints]
 workspace = true

@@ -361,6 +361,36 @@ class RoadmapContractTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("current release has platform_support=none", result.stderr)
 
+    def test_current_release_cannot_claim_qualification_environment_without_platform_support(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            matrix = root / "hardware/support-matrix.json"
+            payload = json.loads(matrix.read_text(encoding="utf-8"))
+            payload["qualification_environments"]["release_qualified"] = [
+                "qualification/example"
+            ]
+            matrix.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+            result = self._run_machine_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("qualification_environments.release_qualified must remain empty", result.stderr)
+
+    def test_qualification_environment_cannot_masquerade_as_platform_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            matrix = root / "hardware/support-matrix.json"
+            payload = json.loads(matrix.read_text(encoding="utf-8"))
+            payload["machine_classes"]["server"]["release_qualified_profiles"] = [
+                "qualification/example"
+            ]
+            matrix.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+            result = self._run_machine_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must not be encoded as a PlatformProfile", result.stderr)
+
     def test_hardware_matrix_cannot_encode_fleet_as_machine_class(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

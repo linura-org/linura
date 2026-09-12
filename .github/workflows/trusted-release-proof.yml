@@ -88,6 +88,7 @@ jobs:
       contents: read
     with:
       scenario: authoritative-observation
+      source_sha: ${{ github.sha }}
 
   plan-preview-acceptance:
     name: exact-source Control1 plan-preview qualification
@@ -97,6 +98,7 @@ jobs:
       contents: read
     with:
       scenario: control1-plan-preview
+      source_sha: ${{ github.sha }}
 
   durability-qualification:
     name: exact-source v0.4 durability fault qualification
@@ -146,9 +148,19 @@ jobs:
     with:
       source_sha: ${{ github.sha }}
 
+  firstboot-qualification:
+    name: exact-source v0.9 First Boot QualificationEnvironment
+    needs: validate
+    uses: ./.github/workflows/v09-qualification.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      source_sha: ${{ github.sha }}
+
   build:
     name: isolated build and reproducibility proof
-    needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, agent-qualification]
+    needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, agent-qualification, firstboot-qualification]
     uses: ./.github/workflows/reusable-release-build.yml
     permissions:
       actions: read
@@ -162,7 +174,7 @@ jobs:
 
   aggregate-proof:
     name: bind exact-source qualification into canonical proof
-    needs: [validate, agent-qualification, build]
+    needs: [validate, agent-qualification, firstboot-qualification, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -176,6 +188,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.validate.outputs.version }}
       PROOF_ROOT: /tmp/linura-final-proof
       QUALIFICATION_ROOT: /tmp/linura-v08-qualification
+      V09_QUALIFICATION_ROOT: /tmp/linura-v09-qualification
     steps:
       - name: Download reproducible build proof
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -188,6 +201,12 @@ jobs:
         with:
           name: linura-v08-agent-${{ github.sha }}
           path: /tmp/linura-v08-qualification
+
+      - name: Download exact-source v0.9 qualification evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-v09-qualification-${{ github.sha }}
+          path: /tmp/linura-v09-qualification
 
       - name: Verify and bind v0.8 qualification evidence
         shell: bash
@@ -257,10 +276,79 @@ jobs:
           )
           PY
 
+      - name: Verify and bind v0.9 qualification evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$V09_QUALIFICATION_ROOT/qualification.json"
+          destination="$PROOF_ROOT/qualification/v0.9"
+          rm -rf "$destination"
+          mkdir -p "$destination"
+          cp -a "$V09_QUALIFICATION_ROOT"/. "$destination"/
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+
+          root = pathlib.Path(os.environ['PROOF_ROOT'])
+          qualification_root = root / 'qualification' / 'v0.9'
+          qualification_path = qualification_root / 'qualification.json'
+          evidence = json.loads(qualification_path.read_text(encoding='utf-8'))
+          if evidence.get('schema_version') != 2:
+              raise SystemExit('unexpected v0.9 qualification evidence schema')
+          if evidence.get('repository') != os.environ['GITHUB_REPOSITORY']:
+              raise SystemExit('v0.9 qualification repository mismatch')
+          if evidence.get('source_sha') != os.environ['SOURCE_SHA']:
+              raise SystemExit('v0.9 qualification source mismatch')
+          if evidence.get('result') != 'passed':
+              raise SystemExit('v0.9 qualification did not pass')
+          environment = evidence.get('qualification_environment', {})
+          if environment.get('id') != 'qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless':
+              raise SystemExit('v0.9 QualificationEnvironment identity mismatch')
+
+          files = []
+          for path in sorted(qualification_root.iterdir()):
+              if path.is_symlink() or not path.is_file():
+                  raise SystemExit(f'invalid v0.9 qualification entry: {path.name}')
+              files.append({
+                  'name': path.name,
+                  'size': path.stat().st_size,
+                  'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+              })
+          if not files:
+              raise SystemExit('v0.9 qualification evidence set is empty')
+
+          receipt_path = root / 'release-proof.json'
+          receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+          if receipt.get('source_sha') != os.environ['SOURCE_SHA']:
+              raise SystemExit('build proof source mismatch before v0.9 binding')
+          qualifications = receipt.setdefault('qualifications', {})
+          if 'v0.8' not in qualifications:
+              raise SystemExit('v0.8 qualification binding disappeared before v0.9 binding')
+          qualifications['v0.9'] = {
+              'schema_version': evidence['schema_version'],
+              'result': evidence['result'],
+              'source_sha': evidence['source_sha'],
+              'qualification_environment': environment['id'],
+              'path': 'qualification/v0.9/qualification.json',
+              'files': files,
+          }
+          receipt_path.write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + '\n',
+              encoding='utf-8',
+          )
+          PY
+
       - name: Attest exact-source v0.8 qualification evidence
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: "/tmp/linura-final-proof/qualification/v0.8/*"
+
+      - name: Attest exact-source v0.9 qualification evidence
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: "/tmp/linura-final-proof/qualification/v0.9/*"
 
       - name: Replace canonical proof with qualification-bound proof
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -273,8 +361,8 @@ jobs:
 
   dispatch-promotion:
     name: dispatch release promotion
-    needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, agent-qualification, build, aggregate-proof]
-    if: ${{ needs.validate.result == 'success' && needs.observation-acceptance.result == 'success' && needs.plan-preview-acceptance.result == 'success' && needs.durability-qualification.result == 'success' && needs.enospc-qualification.result == 'success' && needs.executor-verifier-qualification.result == 'success' && needs.managed-lifecycle-qualification.result == 'success' && needs.library-qualification.result == 'success' && needs.agent-qualification.result == 'success' && needs.build.result == 'success' && needs.aggregate-proof.result == 'success' }}
+    needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, agent-qualification, firstboot-qualification, build, aggregate-proof]
+    if: ${{ needs.validate.result == 'success' && needs.observation-acceptance.result == 'success' && needs.plan-preview-acceptance.result == 'success' && needs.durability-qualification.result == 'success' && needs.enospc-qualification.result == 'success' && needs.executor-verifier-qualification.result == 'success' && needs.managed-lifecycle-qualification.result == 'success' && needs.library-qualification.result == 'success' && needs.agent-qualification.result == 'success' && needs.firstboot-qualification.result == 'success' && needs.build.result == 'success' && needs.aggregate-proof.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
       actions: write

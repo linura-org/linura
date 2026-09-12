@@ -120,10 +120,18 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("cargo build --release --locked -p linurad -p linuractl", workflow)
         self.assertIn("VM-ACCEPTANCE-EVIDENCE.json", workflow)
 
-    def test_vm_acceptance_artifacts_are_scenario_scoped(self) -> None:
+    def test_vm_acceptance_artifacts_are_scenario_and_source_scoped(self) -> None:
         workflow = (ROOT / ".github/workflows/vm-acceptance.yml").read_text(encoding="utf-8")
         self.assertIn(
-            "name: linura-vm-acceptance-${{ inputs.scenario || 'authoritative-observation' }}-${{ github.event.pull_request.head.sha || github.sha }}",
+            "name: linura-vm-acceptance-${{ inputs.scenario || 'authoritative-observation' }}-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}",
+            workflow,
+        )
+        self.assertIn(
+            "SOURCE_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}",
+            workflow,
+        )
+        self.assertIn(
+            "ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}",
             workflow,
         )
         self.assertNotIn(
@@ -146,7 +154,8 @@ class ToolingTests(unittest.TestCase):
         self.assertRegex(workflow, r"(?m)^\s*VM_ACCELERATION:\s*tcg\s*$")
         self.assertIn('--accel "$VM_ACCELERATION"', workflow)
         self.assertIn('kill -0 "$VM_PID"', workflow)
-        self.assertIn('"acceleration": os.environ["VM_ACCELERATION"]', workflow)
+        self.assertIn('"requested_acceleration": os.environ["VM_ACCELERATION"]', workflow)
+        self.assertIn("VM-ACCEPTANCE-EVIDENCE.sha256", workflow)
 
     def test_trusted_release_proof_requires_all_mandatory_qualification(self) -> None:
         workflow = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(encoding="utf-8")
@@ -167,18 +176,23 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("uses: ./.github/workflows/v07-library-qualification.yml", workflow)
         self.assertIn("agent-qualification:", workflow)
         self.assertIn("uses: ./.github/workflows/v08-agent-qualification.yml", workflow)
+        self.assertIn("firstboot-qualification:", workflow)
+        self.assertIn("uses: ./.github/workflows/v09-qualification.yml", workflow)
         self.assertIn("source_sha: ${{ github.sha }}", workflow)
         self.assertIn(
-            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, agent-qualification]",
+            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, agent-qualification, firstboot-qualification]",
             workflow,
         )
         self.assertIn("aggregate-proof:", workflow)
-        self.assertIn("needs: [validate, agent-qualification, build]", workflow)
+        self.assertIn("needs: [validate, agent-qualification, firstboot-qualification, build]", workflow)
         self.assertIn("linura-v08-agent-${{ github.sha }}", workflow)
+        self.assertIn("linura-v09-qualification-${{ github.sha }}", workflow)
         self.assertIn("receipt['schema_version'] = 2", workflow)
         self.assertIn("'qualification/v0.8/qualification.json'", workflow)
+        self.assertIn("'qualification/v0.9/qualification.json'", workflow)
+        self.assertIn("qualifications['v0.9']", workflow)
         self.assertIn(
-            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, agent-qualification, build, aggregate-proof]",
+            "needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, agent-qualification, firstboot-qualification, build, aggregate-proof]",
             workflow,
         )
         self.assertIn("needs.observation-acceptance.result == 'success'", workflow)
@@ -189,15 +203,22 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("needs.managed-lifecycle-qualification.result == 'success'", workflow)
         self.assertIn("needs.library-qualification.result == 'success'", workflow)
         self.assertIn("needs.agent-qualification.result == 'success'", workflow)
+        self.assertIn("needs.firstboot-qualification.result == 'success'", workflow)
         self.assertIn("needs.aggregate-proof.result == 'success'", workflow)
 
-    def test_release_promotion_verifies_v08_qualification_bound_proof(self) -> None:
+    def test_release_promotion_verifies_v09_qualification_bound_proof(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn('receipt.get("schema_version") != 2', workflow)
-        self.assertIn('qualifications.get("v0.8")', workflow)
-        self.assertIn('v08.get("result") != "passed"', workflow)
-        self.assertIn('qualification/v0.8/qualification.json', workflow)
-        self.assertIn('actual_qualification != expected_qualification', workflow)
+        self.assertIn('def verify_qualification(version, expected_path, expected_environment=None):', workflow)
+        self.assertIn('verify_qualification("v0.8", "qualification/v0.8/qualification.json")', workflow)
+        self.assertIn('"v0.9",', workflow)
+        self.assertIn('"qualification/v0.9/qualification.json",', workflow)
+        self.assertIn('expected_environment="qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"', workflow)
+        self.assertIn('actual_files != expected_files', workflow)
+        self.assertEqual(
+            workflow.count('find "$PROOF_DIR/qualification" -mindepth 2 -maxdepth 2 -type f -print0'),
+            2,
+        )
 
     def test_v07_library_qualification_is_exact_source_and_machine_readable(self) -> None:
         workflow = (ROOT / ".github/workflows/v07-library-qualification.yml").read_text(
