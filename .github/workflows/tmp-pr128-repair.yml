@@ -1,0 +1,57 @@
+name: Temporary PR128 repair validation
+
+on:
+  push:
+    branches:
+      - tmp/pr128-recovery-record-repair
+
+permissions:
+  contents: write
+
+jobs:
+  repair-and-validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact temporary repair head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Load repository toolchain contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          source tools/codex/versions.env
+          printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
+
+      - name: Install pinned Rust formatting and lint toolchain
+        shell: bash
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy
+
+      - name: Apply bounded PR128 repair and format before validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/tmp_pr128_repair.py
+          cargo +"$RUST_VERSION" fmt --all
+
+      - name: Run canonical validation before any source push
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +"$RUST_VERSION" xtask check
+          python3 tests/tooling/test_v09_recovery_qualification.py
+
+      - name: Commit validated formatted repair to isolated branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "linura-repair-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add crates/linura-migrations/src/lib.rs crates/linura-update/src/lib.rs docs/threat-model-v0.9-update-migration.md tests/tooling/test_v09_recovery_qualification.py
+          if git diff --cached --quiet; then
+            echo "No source repair changes remain"
+            exit 0
+          fi
+          git commit -m "fix(v0.9): persist exact migration recovery checkpoint"
+          git push origin HEAD:tmp/pr128-recovery-record-repair
