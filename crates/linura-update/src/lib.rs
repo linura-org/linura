@@ -426,17 +426,19 @@ impl TrustedUpdateEvidenceVerifier {
             expected_attempt_generation.to_owned(),
         )?;
         let evidence = self.read_receipt(&receipt_id)?;
-        let attempt_generation = evidence
-            .dispatch_generation
-            .as_deref()
-            .ok_or(UpdateError::EvidenceBindingMismatch(
-                "snapshot receipt lacks update-attempt generation binding",
-            ))?;
-        let issued_unix_ms = evidence
-            .issued_unix_ms
-            .ok_or(UpdateError::EvidenceBindingMismatch(
-                "snapshot receipt lacks issuance freshness",
-            ))?;
+        let attempt_generation =
+            evidence
+                .dispatch_generation
+                .as_deref()
+                .ok_or(UpdateError::EvidenceBindingMismatch(
+                    "snapshot receipt lacks update-attempt generation binding",
+                ))?;
+        let issued_unix_ms =
+            evidence
+                .issued_unix_ms
+                .ok_or(UpdateError::EvidenceBindingMismatch(
+                    "snapshot receipt lacks issuance freshness",
+                ))?;
         if evidence.kind != EvidenceKind::Snapshot
             || evidence.update_id != expected_update_id
             || evidence.target_id != expected_target_id
@@ -480,17 +482,19 @@ impl TrustedUpdateEvidenceVerifier {
             expected_dispatch_generation.to_owned(),
         )?;
         let evidence = self.read_receipt(&receipt_id)?;
-        let dispatch_generation = evidence
-            .dispatch_generation
-            .as_deref()
-            .ok_or(UpdateError::EvidenceBindingMismatch(
-                "package verification receipt lacks dispatch-generation binding",
-            ))?;
-        let issued_unix_ms = evidence
-            .issued_unix_ms
-            .ok_or(UpdateError::EvidenceBindingMismatch(
-                "package verification receipt lacks issuance freshness",
-            ))?;
+        let dispatch_generation =
+            evidence
+                .dispatch_generation
+                .as_deref()
+                .ok_or(UpdateError::EvidenceBindingMismatch(
+                    "package verification receipt lacks dispatch-generation binding",
+                ))?;
+        let issued_unix_ms =
+            evidence
+                .issued_unix_ms
+                .ok_or(UpdateError::EvidenceBindingMismatch(
+                    "package verification receipt lacks issuance freshness",
+                ))?;
         if evidence.kind != EvidenceKind::PackageVerification
             || evidence.update_id != expected_update_id
             || evidence.target_id != expected_target_id
