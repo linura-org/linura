@@ -1,17 +1,20 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::fmt::{Display, Formatter};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const LEDGER_MAGIC: &str = "linura-migration-ledger-v1";
-const RECOVERY_MAGIC: &str = "linura-migration-recovery-v1";
+const RECOVERY_MAGIC: &str = "linura-migration-recovery-v2";
 const MAX_LEDGER_BYTES: u64 = 1024 * 1024;
 const MAX_RECOVERY_MARKER_BYTES: u64 = 16 * 1024;
+const MAX_RECOVERY_PATH_BYTES: usize = 4096;
 const FNV_OFFSET: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000001b3;
 const O_NOFOLLOW: i32 = 0o400000;
@@ -127,6 +130,172 @@ pub struct ValidatedBackup {
     backup_inode: u64,
     size: u64,
     integrity_tag: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MigrationRecoveryRecord {
+    migration_id: String,
+    checkpoint: Option<MigrationRecoveryCheckpoint>,
+}
+
+impl MigrationRecoveryRecord {
+    fn new(
+        migration_id: impl Into<String>,
+        checkpoint: Option<MigrationRecoveryCheckpoint>,
+    ) -> Result<Self, MigrationError> {
+        let migration_id = migration_id.into();
+        if !valid_identifier(&migration_id, 128) {
+            return Err(MigrationError::CorruptRecoveryMarker(
+                "recovery record contains an invalid migration id".into(),
+            ));
+        }
+        if let Some(checkpoint) = &checkpoint {
+            checkpoint.validate_descriptor()?;
+        }
+        Ok(Self {
+            migration_id,
+            checkpoint,
+        })
+    }
+
+    #[must_use]
+    pub fn migration_id(&self) -> &str {
+        &self.migration_id
+    }
+
+    #[must_use]
+    pub fn checkpoint(&self) -> Option<&MigrationRecoveryCheckpoint> {
+        self.checkpoint.as_ref()
+    }
+
+    /// Revalidates only the durable recovery artifact. The migration target is
+    /// intentionally not required to retain its pre-migration bytes after a
+    /// crash because the purpose of this record is to recover from that case.
+    pub fn revalidate_recovery_backup(&self) -> Result<(), MigrationError> {
+        let checkpoint = self.checkpoint.as_ref().ok_or_else(|| {
+            MigrationError::RecoveryCheckpointUnavailable(self.migration_id.clone())
+        })?;
+        checkpoint.revalidate_backup()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MigrationRecoveryCheckpoint {
+    target_path: PathBuf,
+    backup_path: PathBuf,
+    target_device: u64,
+    target_inode: u64,
+    backup_device: u64,
+    backup_inode: u64,
+    size: u64,
+    integrity_tag: u64,
+}
+
+impl MigrationRecoveryCheckpoint {
+    fn from_validated_backup(backup: &ValidatedBackup) -> Result<Self, MigrationError> {
+        let checkpoint = Self {
+            target_path: backup.source_path.clone(),
+            backup_path: backup.backup_path.clone(),
+            target_device: backup.source_device,
+            target_inode: backup.source_inode,
+            backup_device: backup.backup_device,
+            backup_inode: backup.backup_inode,
+            size: backup.size,
+            integrity_tag: backup.integrity_tag,
+        };
+        checkpoint.validate_descriptor()?;
+        Ok(checkpoint)
+    }
+
+    fn validate_descriptor(&self) -> Result<(), MigrationError> {
+        if self.target_path == self.backup_path
+            || !self.target_path.is_absolute()
+            || !self.backup_path.is_absolute()
+            || self.target_path.as_os_str().as_bytes().is_empty()
+            || self.backup_path.as_os_str().as_bytes().is_empty()
+            || self.target_path.as_os_str().as_bytes().len() > MAX_RECOVERY_PATH_BYTES
+            || self.backup_path.as_os_str().as_bytes().len() > MAX_RECOVERY_PATH_BYTES
+            || self.size == 0
+        {
+            return Err(MigrationError::CorruptRecoveryMarker(
+                "recovery checkpoint descriptor is invalid".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn revalidate_backup(&self) -> Result<(), MigrationError> {
+        self.validate_descriptor()?;
+        let path_metadata = fs::symlink_metadata(&self.backup_path).map_err(io_error)?;
+        if path_metadata.file_type().is_symlink()
+            || !path_metadata.file_type().is_file()
+            || path_metadata.dev() != self.backup_device
+            || path_metadata.ino() != self.backup_inode
+            || path_metadata.len() != self.size
+            || path_metadata.nlink() != 1
+            || path_metadata.permissions().mode() & 0o022 != 0
+        {
+            return Err(MigrationError::UntrustedBackupArtifact);
+        }
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(O_NOFOLLOW)
+            .open(&self.backup_path)
+            .map_err(io_error)?;
+        let opened_metadata = file.metadata().map_err(io_error)?;
+        if opened_metadata.dev() != self.backup_device
+            || opened_metadata.ino() != self.backup_inode
+            || opened_metadata.len() != self.size
+            || opened_metadata.nlink() != 1
+        {
+            return Err(MigrationError::UntrustedBackupArtifact);
+        }
+        let (size, integrity_tag) = file_integrity(&mut file)?;
+        if size != self.size || integrity_tag != self.integrity_tag {
+            return Err(MigrationError::BackupMismatch);
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn target_path(&self) -> &Path {
+        &self.target_path
+    }
+
+    #[must_use]
+    pub fn backup_path(&self) -> &Path {
+        &self.backup_path
+    }
+
+    #[must_use]
+    pub const fn target_device(&self) -> u64 {
+        self.target_device
+    }
+
+    #[must_use]
+    pub const fn target_inode(&self) -> u64 {
+        self.target_inode
+    }
+
+    #[must_use]
+    pub const fn backup_device(&self) -> u64 {
+        self.backup_device
+    }
+
+    #[must_use]
+    pub const fn backup_inode(&self) -> u64 {
+        self.backup_inode
+    }
+
+    #[must_use]
+    pub const fn size(&self) -> u64 {
+        self.size
+    }
+
+    #[must_use]
+    pub const fn integrity_tag(&self) -> u64 {
+        self.integrity_tag
+    }
 }
 
 #[derive(Debug)]
@@ -386,7 +555,7 @@ impl MigrationLedgerStore {
         Ok(file)
     }
 
-    fn load_recovery_marker(&self) -> Result<Option<String>, MigrationError> {
+    pub fn load_recovery_record(&self) -> Result<Option<MigrationRecoveryRecord>, MigrationError> {
         let path = sidecar_path(&self.path, "recovery")?;
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
@@ -404,28 +573,31 @@ impl MigrationLedgerStore {
                 "migration recovery marker exceeds the supported size bound".into(),
             ));
         }
-        parse_recovery_marker(&fs::read(path).map_err(io_error)?).map(Some)
+        parse_recovery_record(&fs::read(path).map_err(io_error)?).map(Some)
     }
 
     fn reconcile_recovery_marker(
         &self,
         ledger: &MigrationLedger,
-    ) -> Result<Option<String>, MigrationError> {
-        let Some(migration_id) = self.load_recovery_marker()? else {
+    ) -> Result<Option<MigrationRecoveryRecord>, MigrationError> {
+        let Some(record) = self.load_recovery_record()? else {
             return Ok(None);
         };
-        if ledger.is_applied(&migration_id) {
+        if ledger.is_applied(record.migration_id()) {
             self.clear_recovery_marker()?;
             return Ok(None);
         }
-        Ok(Some(migration_id))
+        Ok(Some(record))
     }
 
-    fn persist_recovery_marker(&self, migration_id: &str) -> Result<(), MigrationError> {
+    fn persist_recovery_record(
+        &self,
+        record: &MigrationRecoveryRecord,
+    ) -> Result<(), MigrationError> {
         let path = sidecar_path(&self.path, "recovery")?;
         atomic_write(
             &path,
-            &serialize_recovery_marker(migration_id),
+            &serialize_recovery_record(record),
             "migration recovery marker",
         )
     }
@@ -462,6 +634,7 @@ pub struct MigrationRunner {
     ledger: MigrationLedger,
     store: Option<MigrationLedgerStore>,
     recovery_required: Option<String>,
+    recovery_record: Option<MigrationRecoveryRecord>,
 }
 
 impl MigrationRunner {
@@ -471,19 +644,25 @@ impl MigrationRunner {
             ledger,
             store: None,
             recovery_required: None,
+            recovery_record: None,
         }
     }
 
     pub fn open(store: MigrationLedgerStore) -> Result<Self, MigrationError> {
         let _lock = store.acquire_exclusive()?;
         let ledger = store.load()?;
-        let recovery_required = store
-            .reconcile_recovery_marker(&ledger)?
-            .map(|id| format!("persisted recovery marker for migration {id}"));
+        let recovery_record = store.reconcile_recovery_marker(&ledger)?;
+        let recovery_required = recovery_record.as_ref().map(|record| {
+            format!(
+                "persisted recovery record for migration {}",
+                record.migration_id()
+            )
+        });
         Ok(Self {
             ledger,
             store: Some(store),
             recovery_required,
+            recovery_record,
         })
     }
 
@@ -505,8 +684,12 @@ impl MigrationRunner {
             let lock = store.acquire_exclusive()?;
             self.ledger = store.load()?;
             match store.reconcile_recovery_marker(&self.ledger) {
-                Ok(Some(id)) => {
-                    let reason = format!("persisted recovery marker for migration {id}");
+                Ok(Some(record)) => {
+                    let reason = format!(
+                        "persisted recovery record for migration {}",
+                        record.migration_id()
+                    );
+                    self.recovery_record = Some(record);
                     self.recovery_required = Some(reason.clone());
                     return Err(MigrationError::RecoveryRequired(reason));
                 }
@@ -545,16 +728,24 @@ impl MigrationRunner {
             None
         };
 
-        if let Some(store) = &store
-            && let Err(error) = store.persist_recovery_marker(&descriptor.id)
-        {
-            if matches!(error, MigrationError::DurabilityUncertain(_)) {
-                self.latch_recovery(format!(
-                    "{}: durable in-progress marker is uncertain",
-                    descriptor.id
-                ));
+        let recovery_checkpoint = checkpoint_guard
+            .as_ref()
+            .map(|guard| MigrationRecoveryCheckpoint::from_validated_backup(guard.evidence))
+            .transpose()?;
+        let recovery_record =
+            MigrationRecoveryRecord::new(descriptor.id.clone(), recovery_checkpoint)?;
+
+        if let Some(store) = &store {
+            if let Err(error) = store.persist_recovery_record(&recovery_record) {
+                if matches!(error, MigrationError::DurabilityUncertain(_)) {
+                    self.latch_recovery(format!(
+                        "{}: durable in-progress recovery record is uncertain",
+                        descriptor.id
+                    ));
+                }
+                return Err(error);
             }
-            return Err(error);
+            self.recovery_record = Some(recovery_record);
         }
 
         if let Some(guard) = &checkpoint_guard {
@@ -581,6 +772,7 @@ impl MigrationRunner {
         {
             return self.handle_cleanup_failure(error);
         }
+        self.recovery_record = None;
         Ok(MigrationOutcome::Applied)
     }
 
@@ -608,6 +800,7 @@ impl MigrationRunner {
         {
             return self.handle_cleanup_failure(cleanup_error);
         }
+        self.recovery_record = None;
         Err(MigrationError::LedgerCommitFailed {
             migration_id: descriptor.id.clone(),
             reason: error.to_string(),
@@ -663,6 +856,11 @@ impl MigrationRunner {
     pub const fn requires_recovery(&self) -> bool {
         self.recovery_required.is_some()
     }
+
+    #[must_use]
+    pub fn recovery_record(&self) -> Option<&MigrationRecoveryRecord> {
+        self.recovery_record.as_ref()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -678,6 +876,7 @@ pub enum MigrationError {
     Operation(String),
     RecoveryCheckpointRequired(String),
     RecoveryTargetRequired(String),
+    RecoveryCheckpointUnavailable(String),
     BackupNotIndependent,
     BackupMismatch,
     BackupTargetMismatch,
@@ -714,6 +913,10 @@ impl Display for MigrationError {
             Self::RecoveryTargetRequired(id) => {
                 write!(f, "migration {id} requires an exact recovery target binding")
             }
+            Self::RecoveryCheckpointUnavailable(id) => write!(
+                f,
+                "migration {id} has no persisted recovery checkpoint to revalidate"
+            ),
             Self::BackupNotIndependent => {
                 f.write_str("migration backup must be a distinct single-purpose file/inode")
             }
@@ -918,6 +1121,23 @@ fn compare_open_files(source: &fs::File, backup: &fs::File) -> Result<(bool, u64
     }
 }
 
+fn file_integrity(file: &mut fs::File) -> Result<(u64, u64), MigrationError> {
+    file.seek(SeekFrom::Start(0)).map_err(io_error)?;
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut size = 0_u64;
+    let mut integrity = FNV_OFFSET;
+    loop {
+        let read = file.read(&mut buffer).map_err(io_error)?;
+        if read == 0 {
+            return Ok((size, integrity));
+        }
+        size = size
+            .checked_add(read as u64)
+            .ok_or_else(|| MigrationError::Io("recovery backup size overflow".into()))?;
+        integrity = fnv1a_update(integrity, &buffer[..read]);
+    }
+}
+
 fn fnv1a_update(mut state: u64, bytes: &[u8]) -> u64 {
     for &byte in bytes {
         state ^= u64::from(byte);
@@ -986,14 +1206,109 @@ fn parse_ledger(bytes: &[u8]) -> Result<MigrationLedger, MigrationError> {
     MigrationLedger::from_applied(applied)
 }
 
-fn serialize_recovery_marker(migration_id: &str) -> Vec<u8> {
-    let mut payload = format!("{RECOVERY_MAGIC}\nmigration={migration_id}\n");
+fn path_hex(path: Option<&Path>) -> String {
+    match path {
+        None => "-".into(),
+        Some(path) => path
+            .as_os_str()
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    }
+}
+
+fn parse_recovery_path(value: &str, label: &str) -> Result<PathBuf, MigrationError> {
+    if value == "-"
+        || value.len() > MAX_RECOVERY_PATH_BYTES * 2
+        || !value.len().is_multiple_of(2)
+        || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(MigrationError::CorruptRecoveryMarker(format!(
+            "invalid {label}"
+        )));
+    }
+    let mut bytes = Vec::with_capacity(value.len() / 2);
+    for pair in value.as_bytes().as_chunks::<2>().0 {
+        let pair = std::str::from_utf8(pair)
+            .map_err(|_| MigrationError::CorruptRecoveryMarker(format!("invalid {label}")))?;
+        bytes.push(
+            u8::from_str_radix(pair, 16)
+                .map_err(|_| MigrationError::CorruptRecoveryMarker(format!("invalid {label}")))?,
+        );
+    }
+    if bytes.is_empty() || bytes.len() > MAX_RECOVERY_PATH_BYTES {
+        return Err(MigrationError::CorruptRecoveryMarker(format!(
+            "invalid {label}"
+        )));
+    }
+    let path = PathBuf::from(OsString::from_vec(bytes));
+    if !path.is_absolute() {
+        return Err(MigrationError::CorruptRecoveryMarker(format!(
+            "{label} is not absolute"
+        )));
+    }
+    Ok(path)
+}
+
+fn recovery_field<'a>(line: Option<&'a str>, name: &str) -> Result<&'a str, MigrationError> {
+    let line =
+        line.ok_or_else(|| MigrationError::CorruptRecoveryMarker(format!("missing {name} field")))?;
+    line.strip_prefix(&format!("{name}="))
+        .ok_or_else(|| MigrationError::CorruptRecoveryMarker(format!("invalid {name} field")))
+}
+
+fn parse_recovery_u64(value: &str, label: &str) -> Result<u64, MigrationError> {
+    value
+        .parse::<u64>()
+        .map_err(|_| MigrationError::CorruptRecoveryMarker(format!("invalid {label}")))
+}
+
+fn serialize_recovery_record(record: &MigrationRecoveryRecord) -> Vec<u8> {
+    let (
+        checkpoint_kind,
+        target_path,
+        backup_path,
+        target_device,
+        target_inode,
+        backup_device,
+        backup_inode,
+        size,
+        checkpoint_integrity,
+    ) = match record.checkpoint() {
+        Some(checkpoint) => (
+            "file",
+            path_hex(Some(checkpoint.target_path())),
+            path_hex(Some(checkpoint.backup_path())),
+            checkpoint.target_device().to_string(),
+            checkpoint.target_inode().to_string(),
+            checkpoint.backup_device().to_string(),
+            checkpoint.backup_inode().to_string(),
+            checkpoint.size().to_string(),
+            format!("{:016x}", checkpoint.integrity_tag()),
+        ),
+        None => (
+            "none",
+            "-".into(),
+            "-".into(),
+            "-".into(),
+            "-".into(),
+            "-".into(),
+            "-".into(),
+            "-".into(),
+            "-".into(),
+        ),
+    };
+    let mut payload = format!(
+        "{RECOVERY_MAGIC}\nmigration={}\ncheckpoint={checkpoint_kind}\ntarget_path={target_path}\nbackup_path={backup_path}\ntarget_device={target_device}\ntarget_inode={target_inode}\nbackup_device={backup_device}\nbackup_inode={backup_inode}\nsize={size}\ncheckpoint_integrity={checkpoint_integrity}\n",
+        record.migration_id()
+    );
     let tag = integrity_tag(payload.as_bytes());
     payload.push_str(&format!("integrity={tag:016x}\n"));
     payload.into_bytes()
 }
 
-fn parse_recovery_marker(bytes: &[u8]) -> Result<String, MigrationError> {
+fn parse_recovery_record(bytes: &[u8]) -> Result<MigrationRecoveryRecord, MigrationError> {
     let text = std::str::from_utf8(bytes).map_err(|_| {
         MigrationError::CorruptRecoveryMarker("recovery marker is not UTF-8".into())
     })?;
@@ -1017,22 +1332,88 @@ fn parse_recovery_marker(bytes: &[u8]) -> Result<String, MigrationError> {
             "integrity tag mismatch".into(),
         ));
     }
+
     let mut lines = payload.lines();
     if lines.next() != Some(RECOVERY_MAGIC) {
         return Err(MigrationError::CorruptRecoveryMarker(
             "unsupported recovery marker version".into(),
         ));
     }
-    let migration_id = lines
-        .next()
-        .and_then(|line| line.strip_prefix("migration="))
-        .ok_or_else(|| MigrationError::CorruptRecoveryMarker("missing migration field".into()))?;
-    if lines.next().is_some() || !valid_identifier(migration_id, 128) {
+    let migration_id = recovery_field(lines.next(), "migration")?.to_owned();
+    if !valid_identifier(&migration_id, 128) {
         return Err(MigrationError::CorruptRecoveryMarker(
             "invalid migration field".into(),
         ));
     }
-    Ok(migration_id.to_owned())
+    let checkpoint_kind = recovery_field(lines.next(), "checkpoint")?;
+    let target_path = recovery_field(lines.next(), "target_path")?;
+    let backup_path = recovery_field(lines.next(), "backup_path")?;
+    let target_device = recovery_field(lines.next(), "target_device")?;
+    let target_inode = recovery_field(lines.next(), "target_inode")?;
+    let backup_device = recovery_field(lines.next(), "backup_device")?;
+    let backup_inode = recovery_field(lines.next(), "backup_inode")?;
+    let size = recovery_field(lines.next(), "size")?;
+    let checkpoint_integrity = recovery_field(lines.next(), "checkpoint_integrity")?;
+    if lines.next().is_some() {
+        return Err(MigrationError::CorruptRecoveryMarker(
+            "unexpected recovery marker field".into(),
+        ));
+    }
+
+    let checkpoint = match checkpoint_kind {
+        "none" => {
+            if [
+                target_path,
+                backup_path,
+                target_device,
+                target_inode,
+                backup_device,
+                backup_inode,
+                size,
+                checkpoint_integrity,
+            ]
+            .iter()
+            .any(|value| *value != "-")
+            {
+                return Err(MigrationError::CorruptRecoveryMarker(
+                    "checkpoint=none retained checkpoint fields".into(),
+                ));
+            }
+            None
+        }
+        "file" => {
+            if checkpoint_integrity.len() != 16
+                || !checkpoint_integrity
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(MigrationError::CorruptRecoveryMarker(
+                    "invalid checkpoint integrity tag".into(),
+                ));
+            }
+            let checkpoint = MigrationRecoveryCheckpoint {
+                target_path: parse_recovery_path(target_path, "target path")?,
+                backup_path: parse_recovery_path(backup_path, "backup path")?,
+                target_device: parse_recovery_u64(target_device, "target device")?,
+                target_inode: parse_recovery_u64(target_inode, "target inode")?,
+                backup_device: parse_recovery_u64(backup_device, "backup device")?,
+                backup_inode: parse_recovery_u64(backup_inode, "backup inode")?,
+                size: parse_recovery_u64(size, "checkpoint size")?,
+                integrity_tag: u64::from_str_radix(checkpoint_integrity, 16).map_err(|_| {
+                    MigrationError::CorruptRecoveryMarker("invalid checkpoint integrity tag".into())
+                })?,
+            };
+            checkpoint.validate_descriptor()?;
+            Some(checkpoint)
+        }
+        _ => {
+            return Err(MigrationError::CorruptRecoveryMarker(
+                "unknown recovery checkpoint kind".into(),
+            ));
+        }
+    };
+
+    MigrationRecoveryRecord::new(migration_id, checkpoint)
 }
 
 fn atomic_write(path: &Path, bytes: &[u8], label: &str) -> Result<(), MigrationError> {
@@ -1117,6 +1498,7 @@ mod tests {
         applications: Cell<u32>,
         rollbacks: Cell<u32>,
         precondition: bool,
+        apply_ok: bool,
         verify_ok: bool,
         rollback_ok: bool,
         recovery_target: Option<PathBuf>,
@@ -1135,6 +1517,7 @@ mod tests {
                 applications: Cell::new(0),
                 rollbacks: Cell::new(0),
                 precondition: true,
+                apply_ok: true,
                 verify_ok: true,
                 rollback_ok: true,
                 recovery_target: None,
@@ -1158,7 +1541,11 @@ mod tests {
 
         fn apply(&self) -> Result<(), MigrationError> {
             self.applications.set(self.applications.get() + 1);
-            Ok(())
+            if self.apply_ok {
+                Ok(())
+            } else {
+                Err(MigrationError::Operation("injected apply failure".into()))
+            }
         }
 
         fn verify(&self) -> Result<(), MigrationError> {
@@ -1216,14 +1603,16 @@ mod tests {
         store
             .persist(&ledger)
             .unwrap_or_else(|error| unreachable!("{error}"));
+        let record = MigrationRecoveryRecord::new("0001-committed", None)
+            .unwrap_or_else(|error| unreachable!("{error}"));
         store
-            .persist_recovery_marker("0001-committed")
+            .persist_recovery_record(&record)
             .unwrap_or_else(|error| unreachable!("{error}"));
 
         let runner =
             MigrationRunner::open(store.clone()).unwrap_or_else(|error| unreachable!("{error}"));
         assert!(!runner.requires_recovery());
-        assert_eq!(store.load_recovery_marker(), Ok(None));
+        assert_eq!(store.load_recovery_record(), Ok(None));
         assert!(runner.ledger().is_applied("0001-committed"));
     }
 
@@ -1385,6 +1774,59 @@ mod tests {
 
         fs::write(&source, b"state-v2").unwrap_or_else(|error| unreachable!("{error}"));
         assert_eq!(guard.assert_stable(), Err(MigrationError::BackupMismatch));
+    }
+
+    #[test]
+    fn risky_recovery_record_survives_crash_with_exact_backup_identity() {
+        let dir = TestDir::new("durable-recovery-record");
+        let source = dir.path().join("state.db");
+        let backup = dir.path().join("state.db.backup");
+        fs::write(&source, b"pre-migration-state").unwrap_or_else(|error| unreachable!("{error}"));
+        fs::copy(&source, &backup).unwrap_or_else(|error| unreachable!("{error}"));
+        let evidence = ValidatedBackup::verify(&source, &backup)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let store = MigrationLedgerStore::new(dir.path().join("migration.ledger"));
+        let mut migration = TestMigration::new("0003-durable-checkpoint", true)
+            .with_recovery_target(source.clone());
+        migration.apply_ok = false;
+        let mut runner =
+            MigrationRunner::open(store.clone()).unwrap_or_else(|error| unreachable!("{error}"));
+
+        assert_eq!(
+            runner.run_with_backup(&migration, Some(&evidence)),
+            Err(MigrationError::ManualRecoveryRequired(
+                "0003-durable-checkpoint".into()
+            ))
+        );
+        let record = store
+            .load_recovery_record()
+            .unwrap_or_else(|error| unreachable!("{error}"))
+            .unwrap_or_else(|| unreachable!("missing recovery record"));
+        let checkpoint = record
+            .checkpoint()
+            .unwrap_or_else(|| unreachable!("missing recovery checkpoint"));
+        assert_eq!(checkpoint.target_path(), evidence.source_path());
+        assert_eq!(checkpoint.backup_path(), evidence.backup_path());
+        assert_eq!(checkpoint.size(), evidence.size());
+        assert_eq!(checkpoint.integrity_tag(), evidence.integrity_tag());
+        assert_eq!(record.revalidate_recovery_backup(), Ok(()));
+
+        // The target may already have changed when recovery starts; the backup
+        // must remain independently identifiable and verifiable.
+        fs::write(&source, b"post-failure-target-state")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(record.revalidate_recovery_backup(), Ok(()));
+
+        fs::write(&backup, b"tampered-backup").unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(matches!(
+            record.revalidate_recovery_backup(),
+            Err(MigrationError::UntrustedBackupArtifact | MigrationError::BackupMismatch)
+        ));
+
+        drop(runner);
+        let reopened = MigrationRunner::open(store).unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(reopened.requires_recovery());
+        assert!(reopened.recovery_record().is_some());
     }
 
     #[test]

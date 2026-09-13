@@ -730,7 +730,8 @@ impl UpdateCoordinator {
 
     #[must_use]
     pub fn snapshot_generation(&self) -> Option<&str> {
-        (self.state.stage == UpdateStage::Snapshot).then_some(self.journal_generation.token.as_str())
+        (self.state.stage == UpdateStage::Snapshot)
+            .then_some(self.journal_generation.token.as_str())
     }
 
     #[must_use]
@@ -1603,10 +1604,7 @@ mod tests {
         coordinator_with_policy(label, UpdatePolicy::default())
     }
 
-    fn coordinator_with_policy(
-        label: &str,
-        policy: UpdatePolicy,
-    ) -> (TestDir, UpdateCoordinator) {
+    fn coordinator_with_policy(label: &str, policy: UpdatePolicy) -> (TestDir, UpdateCoordinator) {
         let dir = TestDir::new(label);
         let store = UpdateJournalStore::new(dir.path().join("update.journal"));
         let coordinator = UpdateCoordinator::open(store, policy, UPDATE_ID, TARGET_ID)
@@ -1835,7 +1833,10 @@ mod tests {
             reopened.resume_decision(),
             UpdateResumeDecision::ManualRecoveryRequired
         );
-        assert_eq!(reopened.mark_dispatch_started(), Err(UpdateError::SnapshotRequired));
+        assert_eq!(
+            reopened.mark_dispatch_started(),
+            Err(UpdateError::SnapshotRequired)
+        );
     }
 
     #[test]
@@ -1896,13 +1897,7 @@ mod tests {
         let verifier = TrustedUpdateEvidenceVerifier::open_for_test(root)
             .unwrap_or_else(|error| unreachable!("{error}"));
         assert!(matches!(
-            verifier.verify_snapshot(
-                "forged-snapshot",
-                UPDATE_ID,
-                TARGET_ID,
-                generation,
-                started,
-            ),
+            verifier.verify_snapshot("forged-snapshot", UPDATE_ID, TARGET_ID, generation, started,),
             Err(UpdateError::EvidenceBindingMismatch(_))
         ));
     }

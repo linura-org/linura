@@ -62,6 +62,8 @@ Controls:
 - for the Linura-managed migration path, the exact source and backup are opened with no-symlink semantics and held under exclusive advisory locks from checkpoint acquisition through migration execution;
 - after the durable recovery marker is written and immediately before `apply()`, Linura rechecks the held descriptors, path/device/inode bindings, lengths, permissions, and byte-level checkpoint integrity; any drift fails closed;
 - a migration marked as requiring a snapshot/backup cannot start without both an exact target binding and validated recovery evidence.
+- before any risky migration effect, the durable recovery record persists the migration ID plus canonical target/backup paths, target and backup device/inode identities, byte size, and pre-migration integrity tag;
+- after restart, the persisted recovery record can independently revalidate the exact backup artifact even when the target has already changed, without treating that evidence as authority.
 
 The file locks serialize cooperating Linura participants; they are not claimed to prevent a privileged non-cooperating process from writing. The immediate post-marker path/inode/content recheck is therefore also required and release qualification must inject checkpoint drift to prove fail-closed behavior.
 
@@ -121,6 +123,8 @@ Controls:
 - each durable journal replacement has an observed generation identity derived from the exact journal file identity and commit timestamp;
 - package verification evidence must bind the update ID, target ID, transaction ID, **and the exact current durable dispatch generation**;
 - package verification evidence carries an issuance timestamp, must not predate the current dispatch generation, must not be implausibly future-dated, and is accepted only within the bounded verification freshness window;
+- snapshot evidence is likewise bound to the exact current Snapshot journal generation and a bounded issuance window, so an old snapshot receipt cannot authorize a later update attempt that reuses caller-visible IDs;
+- a resumed `Prepared` transaction is re-evaluated against the current snapshot policy before it can be reported safe or cross the dispatch boundary;
 - the coordinator rechecks dispatch generation and freshness immediately before moving the package transaction to `Verified`;
 - a receipt from another durable dispatch generation is rejected even if update/target/transaction IDs are reused;
 - the package transaction cannot advance to migrations merely because dispatch was acknowledged;

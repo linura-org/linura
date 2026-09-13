@@ -49,6 +49,9 @@ class V09RecoveryQualificationTests(unittest.TestCase):
             "V09_UPDATE_EVIDENCE_PRODUCER_UID: u32 = 0",
             "dispatch_generation",
             "PACKAGE_VERIFICATION_MAX_AGE_MS",
+            "SNAPSHOT_EVIDENCE_MAX_AGE_MS",
+            "validate_snapshot_evidence_freshness",
+            "snapshot_policy_satisfied",
             "validate_package_evidence_freshness",
         ]:
             self.assertIn(contract, update_source)
@@ -74,6 +77,10 @@ class V09RecoveryQualificationTests(unittest.TestCase):
             "hold_for_target",
             "checkpoint_guard",
             "guard.assert_stable()?",
+            "MigrationRecoveryRecord",
+            "MigrationRecoveryCheckpoint",
+            "revalidate_recovery_backup",
+            "persist_recovery_record",
         ]:
             self.assertIn(contract, migration_source)
 
