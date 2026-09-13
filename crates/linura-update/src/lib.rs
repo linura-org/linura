@@ -15,6 +15,8 @@ const JOURNAL_MAGIC: &str = "linura-update-journal-v2";
 const EVIDENCE_MAGIC: &str = "linura-update-evidence-v2";
 const MAX_JOURNAL_BYTES: u64 = 256 * 1024;
 const MAX_EVIDENCE_BYTES: u64 = 64 * 1024;
+const SNAPSHOT_EVIDENCE_MAX_AGE_MS: u64 = 15 * 60 * 1000;
+const SNAPSHOT_EVIDENCE_FUTURE_SKEW_MS: u64 = 30 * 1000;
 const PACKAGE_VERIFICATION_MAX_AGE_MS: u64 = 15 * 60 * 1000;
 const PACKAGE_VERIFICATION_FUTURE_SKEW_MS: u64 = 30 * 1000;
 const FNV_OFFSET: u64 = 0xcbf29ce484222325;
@@ -264,6 +266,8 @@ pub struct SnapshotReceipt {
     target_id: String,
     snapshot_id: String,
     proof_id: String,
+    attempt_generation: String,
+    issued_unix_ms: u64,
 }
 
 impl SnapshotReceipt {
@@ -280,6 +284,16 @@ impl SnapshotReceipt {
     #[must_use]
     pub fn proof_id(&self) -> &str {
         &self.proof_id
+    }
+
+    #[must_use]
+    pub fn attempt_generation(&self) -> &str {
+        &self.attempt_generation
+    }
+
+    #[must_use]
+    pub const fn issued_unix_ms(&self) -> u64 {
+        self.issued_unix_ms
     }
 }
 
@@ -400,30 +414,51 @@ impl TrustedUpdateEvidenceVerifier {
         receipt_id: &str,
         expected_update_id: &str,
         expected_target_id: &str,
+        expected_attempt_generation: &str,
+        attempt_started_unix_ms: u64,
     ) -> Result<SnapshotReceipt, UpdateError> {
         let receipt_id = normalize_identifier("evidence receipt id", receipt_id.to_owned())?;
         let expected_update_id = normalize_identifier("update id", expected_update_id.to_owned())?;
         let expected_target_id =
             normalize_identifier("update target id", expected_target_id.to_owned())?;
+        let expected_attempt_generation = normalize_identifier(
+            "snapshot attempt generation",
+            expected_attempt_generation.to_owned(),
+        )?;
         let evidence = self.read_receipt(&receipt_id)?;
+        let attempt_generation =
+            evidence
+                .dispatch_generation
+                .as_deref()
+                .ok_or(UpdateError::EvidenceBindingMismatch(
+                    "snapshot receipt lacks update-attempt generation binding",
+                ))?;
+        let issued_unix_ms =
+            evidence
+                .issued_unix_ms
+                .ok_or(UpdateError::EvidenceBindingMismatch(
+                    "snapshot receipt lacks issuance freshness",
+                ))?;
         if evidence.kind != EvidenceKind::Snapshot
             || evidence.update_id != expected_update_id
             || evidence.target_id != expected_target_id
-            || evidence.dispatch_generation.is_some()
-            || evidence.issued_unix_ms.is_some()
+            || attempt_generation != expected_attempt_generation
             || evidence.source != V09_UPDATE_EVIDENCE_PRODUCER_ID
             || evidence.result != "durable"
         {
             return Err(UpdateError::EvidenceBindingMismatch(
-                "snapshot receipt is not durable trusted-producer evidence bound to this update and target",
+                "snapshot receipt is not durable trusted-producer evidence bound to this update, target and snapshot attempt",
             ));
         }
+        validate_snapshot_evidence_freshness(issued_unix_ms, attempt_started_unix_ms)?;
         Ok(SnapshotReceipt {
             receipt_id,
             update_id: evidence.update_id,
             target_id: evidence.target_id,
             snapshot_id: normalize_identifier("snapshot id", evidence.subject_id)?,
             proof_id: normalize_identifier("snapshot proof id", evidence.proof_id)?,
+            attempt_generation: expected_attempt_generation,
+            issued_unix_ms,
         })
     }
 
@@ -591,9 +626,14 @@ impl UpdateJournalStore {
         let token = normalize_identifier(
             "dispatch generation",
             format!(
-                "{:x}:{:x}:{committed_unix_ms:x}",
+                "{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}",
                 metadata.dev(),
-                metadata.ino()
+                metadata.ino(),
+                metadata.ctime(),
+                metadata.ctime_nsec(),
+                metadata.mtime(),
+                metadata.mtime_nsec(),
+                metadata.len()
             ),
         )?;
         Ok(JournalGeneration {
@@ -689,6 +729,17 @@ impl UpdateCoordinator {
     }
 
     #[must_use]
+    pub fn snapshot_generation(&self) -> Option<&str> {
+        (self.state.stage == UpdateStage::Snapshot).then_some(self.journal_generation.token.as_str())
+    }
+
+    #[must_use]
+    pub fn snapshot_started_unix_ms(&self) -> Option<u64> {
+        (self.state.stage == UpdateStage::Snapshot)
+            .then_some(self.journal_generation.committed_unix_ms)
+    }
+
+    #[must_use]
     pub fn dispatch_generation(&self) -> Option<&str> {
         (self.state.stage == UpdateStage::PackageTransaction
             && self.state.external_effect == ExternalEffectState::DispatchStarted)
@@ -716,11 +767,18 @@ impl UpdateCoordinator {
                 "snapshot evidence can only be recorded at Snapshot stage",
             ));
         }
-        if receipt.update_id != self.update_id || receipt.target_id != self.target_id {
+        if receipt.update_id != self.update_id
+            || receipt.target_id != self.target_id
+            || receipt.attempt_generation != self.journal_generation.token
+        {
             return Err(UpdateError::EvidenceBindingMismatch(
-                "snapshot receipt belongs to another update or target",
+                "snapshot receipt belongs to another update, target or snapshot attempt",
             ));
         }
+        validate_snapshot_evidence_freshness(
+            receipt.issued_unix_ms,
+            self.journal_generation.committed_unix_ms,
+        )?;
         let mut candidate = self.state.clone();
         candidate.snapshot_id = Some(receipt.snapshot_id.clone());
         candidate.snapshot_receipt_id = Some(receipt.receipt_id.clone());
@@ -740,11 +798,7 @@ impl UpdateCoordinator {
                 "package transaction may only be prepared after Snapshot stage",
             ));
         }
-        if self.policy.require_snapshot_when_available
-            && (self.state.snapshot_id.is_none() || self.state.snapshot_receipt_id.is_none())
-        {
-            return Err(UpdateError::SnapshotRequired);
-        }
+        self.ensure_snapshot_policy_satisfied()?;
         let mut candidate = self.state.clone();
         candidate.stage = UpdateStage::PackageTransaction;
         candidate.transaction_id = Some(normalize_identifier(
@@ -767,6 +821,7 @@ impl UpdateCoordinator {
                 "dispatch start requires an exact durably prepared package transaction",
             ));
         }
+        self.ensure_snapshot_policy_satisfied()?;
         let mut candidate = self.state.clone();
         candidate.external_effect = ExternalEffectState::DispatchStarted;
         self.commit(candidate)
@@ -824,7 +879,11 @@ impl UpdateCoordinator {
             (UpdateStage::Complete, _) => UpdateResumeDecision::Complete,
             (UpdateStage::RecoveryRequired, _) => UpdateResumeDecision::ManualRecoveryRequired,
             (UpdateStage::PackageTransaction, ExternalEffectState::Prepared) => {
-                UpdateResumeDecision::SafeToDispatchPrepared
+                if self.snapshot_policy_satisfied() {
+                    UpdateResumeDecision::SafeToDispatchPrepared
+                } else {
+                    UpdateResumeDecision::ManualRecoveryRequired
+                }
             }
             (UpdateStage::PackageTransaction, ExternalEffectState::DispatchStarted) => {
                 UpdateResumeDecision::ReobserveBeforeContinuing
@@ -836,6 +895,19 @@ impl UpdateCoordinator {
                 UpdateResumeDecision::ManualRecoveryRequired
             }
             (stage, _) => UpdateResumeDecision::Continue(stage),
+        }
+    }
+
+    fn snapshot_policy_satisfied(&self) -> bool {
+        !self.policy.require_snapshot_when_available
+            || (self.state.snapshot_id.is_some() && self.state.snapshot_receipt_id.is_some())
+    }
+
+    fn ensure_snapshot_policy_satisfied(&self) -> Result<(), UpdateError> {
+        if self.snapshot_policy_satisfied() {
+            Ok(())
+        } else {
+            Err(UpdateError::SnapshotRequired)
         }
     }
 
@@ -941,7 +1013,7 @@ impl Display for UpdateError {
             Self::InvalidOperation(message) => f.write_str(message),
             Self::InvalidField(label) => write!(f, "invalid {label}"),
             Self::SnapshotRequired => f.write_str(
-                "a trusted durable snapshot receipt bound to this update and target is required before package dispatch",
+                "the current update policy requires trusted snapshot evidence before package dispatch",
             ),
             Self::ExternalEffectNotVerified => f.write_str(
                 "package transaction cannot advance until authoritative exact-bound verification evidence succeeds",
@@ -1128,6 +1200,22 @@ fn system_time_to_unix_ms(time: SystemTime) -> Result<u64, UpdateError> {
 
 fn unix_now_ms() -> Result<u64, UpdateError> {
     system_time_to_unix_ms(SystemTime::now())
+}
+
+fn validate_snapshot_evidence_freshness(
+    issued_unix_ms: u64,
+    snapshot_started_unix_ms: u64,
+) -> Result<(), UpdateError> {
+    let now = unix_now_ms()?;
+    if issued_unix_ms < snapshot_started_unix_ms
+        || issued_unix_ms > now.saturating_add(SNAPSHOT_EVIDENCE_FUTURE_SKEW_MS)
+        || now.saturating_sub(issued_unix_ms) > SNAPSHOT_EVIDENCE_MAX_AGE_MS
+    {
+        return Err(UpdateError::EvidenceBindingMismatch(
+            "snapshot receipt is stale, predates this snapshot attempt, or is implausibly future-dated",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_package_evidence_freshness(
@@ -1512,11 +1600,17 @@ mod tests {
     }
 
     fn coordinator(label: &str) -> (TestDir, UpdateCoordinator) {
+        coordinator_with_policy(label, UpdatePolicy::default())
+    }
+
+    fn coordinator_with_policy(
+        label: &str,
+        policy: UpdatePolicy,
+    ) -> (TestDir, UpdateCoordinator) {
         let dir = TestDir::new(label);
         let store = UpdateJournalStore::new(dir.path().join("update.journal"));
-        let coordinator =
-            UpdateCoordinator::open(store, UpdatePolicy::default(), UPDATE_ID, TARGET_ID)
-                .unwrap_or_else(|error| unreachable!("{error}"));
+        let coordinator = UpdateCoordinator::open(store, policy, UPDATE_ID, TARGET_ID)
+            .unwrap_or_else(|error| unreachable!("{error}"));
         (dir, coordinator)
     }
 
@@ -1560,8 +1654,19 @@ mod tests {
             .unwrap_or_else(|error| unreachable!("{error}"));
     }
 
-    fn snapshot_receipt(dir: &TestDir, target_id: &str) -> SnapshotReceipt {
+    fn snapshot_receipt(
+        dir: &TestDir,
+        target_id: &str,
+        coordinator: &UpdateCoordinator,
+    ) -> SnapshotReceipt {
         let root = evidence_root(dir);
+        let attempt_generation = coordinator
+            .snapshot_generation()
+            .unwrap_or_else(|| unreachable!("snapshot generation missing"));
+        let snapshot_started_unix_ms = coordinator
+            .snapshot_started_unix_ms()
+            .unwrap_or_else(|| unreachable!("snapshot timestamp missing"));
+        let issued_unix_ms = unix_now_ms().unwrap_or_else(|error| unreachable!("{error}"));
         write_evidence(
             &root,
             "snapshot-receipt-1",
@@ -1570,14 +1675,20 @@ mod tests {
             target_id,
             "snapshot-1",
             "snapshot-proof-1",
-            None,
-            None,
+            Some(attempt_generation),
+            Some(issued_unix_ms),
             V09_UPDATE_EVIDENCE_PRODUCER_ID,
             "durable",
         );
         TrustedUpdateEvidenceVerifier::open_for_test(&root)
             .unwrap_or_else(|error| unreachable!("{error}"))
-            .verify_snapshot("snapshot-receipt-1", UPDATE_ID, target_id)
+            .verify_snapshot(
+                "snapshot-receipt-1",
+                UPDATE_ID,
+                target_id,
+                attempt_generation,
+                snapshot_started_unix_ms,
+            )
             .unwrap_or_else(|error| unreachable!("{error}"))
     }
 
@@ -1672,7 +1783,7 @@ mod tests {
     fn prepared_transaction_is_durable_and_exactly_resumable_before_dispatch() {
         let (dir, mut coordinator) = coordinator("prepared");
         advance_to_snapshot(&mut coordinator);
-        let snapshot = snapshot_receipt(&dir, TARGET_ID);
+        let snapshot = snapshot_receipt(&dir, TARGET_ID, &coordinator);
         coordinator
             .record_snapshot(&snapshot)
             .unwrap_or_else(|error| unreachable!("{error}"));
@@ -1697,6 +1808,34 @@ mod tests {
             reopened.state().snapshot_receipt_id(),
             Some("snapshot-receipt-1")
         );
+    }
+
+    #[test]
+    fn prepared_transaction_revalidates_current_snapshot_policy_on_resume_and_dispatch() {
+        let policy_without_snapshot = UpdatePolicy {
+            require_snapshot_when_available: false,
+            ..UpdatePolicy::default()
+        };
+        let (dir, mut coordinator) =
+            coordinator_with_policy("policy-revalidation", policy_without_snapshot);
+        advance_to_snapshot(&mut coordinator);
+        coordinator
+            .prepare_package_transaction("transaction-1")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        drop(coordinator);
+
+        let mut reopened = UpdateCoordinator::open(
+            UpdateJournalStore::new(dir.path().join("update.journal")),
+            UpdatePolicy::default(),
+            UPDATE_ID,
+            TARGET_ID,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(
+            reopened.resume_decision(),
+            UpdateResumeDecision::ManualRecoveryRequired
+        );
+        assert_eq!(reopened.mark_dispatch_started(), Err(UpdateError::SnapshotRequired));
     }
 
     #[test]
@@ -1727,7 +1866,7 @@ mod tests {
     fn snapshot_receipt_must_be_trusted_and_exact_target_bound() {
         let (dir, mut coordinator) = coordinator("snapshot-binding");
         advance_to_snapshot(&mut coordinator);
-        let wrong_target = snapshot_receipt(&dir, "other-target");
+        let wrong_target = snapshot_receipt(&dir, "other-target", &coordinator);
         assert!(matches!(
             coordinator.record_snapshot(&wrong_target),
             Err(UpdateError::EvidenceBindingMismatch(_))
@@ -1735,6 +1874,12 @@ mod tests {
         assert!(coordinator.state().snapshot_id().is_none());
 
         let root = evidence_root(&dir);
+        let generation = coordinator
+            .snapshot_generation()
+            .unwrap_or_else(|| unreachable!("snapshot generation missing"));
+        let started = coordinator
+            .snapshot_started_unix_ms()
+            .unwrap_or_else(|| unreachable!("snapshot timestamp missing"));
         write_evidence(
             &root,
             "forged-snapshot",
@@ -1743,15 +1888,77 @@ mod tests {
             TARGET_ID,
             "snapshot-forged",
             "proof-forged",
-            None,
-            None,
+            Some(generation),
+            Some(unix_now_ms().unwrap_or_else(|error| unreachable!("{error}"))),
             "caller-string",
             "durable",
         );
         let verifier = TrustedUpdateEvidenceVerifier::open_for_test(root)
             .unwrap_or_else(|error| unreachable!("{error}"));
         assert!(matches!(
-            verifier.verify_snapshot("forged-snapshot", UPDATE_ID, TARGET_ID),
+            verifier.verify_snapshot(
+                "forged-snapshot",
+                UPDATE_ID,
+                TARGET_ID,
+                generation,
+                started,
+            ),
+            Err(UpdateError::EvidenceBindingMismatch(_))
+        ));
+    }
+
+    #[test]
+    fn snapshot_receipt_cannot_replay_across_update_attempt_generations() {
+        let (first_dir, mut first) = coordinator("snapshot-replay-first");
+        advance_to_snapshot(&mut first);
+        let old_receipt = snapshot_receipt(&first_dir, TARGET_ID, &first);
+        let old_generation = old_receipt.attempt_generation().to_owned();
+
+        let (second_dir, mut second) = coordinator("snapshot-replay-second");
+        advance_to_snapshot(&mut second);
+        assert_ne!(second.snapshot_generation(), Some(old_generation.as_str()));
+        assert!(matches!(
+            second.record_snapshot(&old_receipt),
+            Err(UpdateError::EvidenceBindingMismatch(_))
+        ));
+        assert!(second.state().snapshot_id().is_none());
+        drop(second_dir);
+    }
+
+    #[test]
+    fn stale_snapshot_receipt_is_rejected() {
+        let (dir, mut coordinator) = coordinator("stale-snapshot");
+        advance_to_snapshot(&mut coordinator);
+        let root = evidence_root(&dir);
+        let generation = coordinator
+            .snapshot_generation()
+            .unwrap_or_else(|| unreachable!("snapshot generation missing"));
+        let started = coordinator
+            .snapshot_started_unix_ms()
+            .unwrap_or_else(|| unreachable!("snapshot timestamp missing"));
+        write_evidence(
+            &root,
+            "stale-snapshot-receipt",
+            EvidenceKind::Snapshot,
+            UPDATE_ID,
+            TARGET_ID,
+            "snapshot-stale",
+            "snapshot-proof-stale",
+            Some(generation),
+            Some(started.saturating_sub(1)),
+            V09_UPDATE_EVIDENCE_PRODUCER_ID,
+            "durable",
+        );
+        let verifier = TrustedUpdateEvidenceVerifier::open_for_test(root)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(matches!(
+            verifier.verify_snapshot(
+                "stale-snapshot-receipt",
+                UPDATE_ID,
+                TARGET_ID,
+                generation,
+                started,
+            ),
             Err(UpdateError::EvidenceBindingMismatch(_))
         ));
     }
@@ -1770,7 +1977,7 @@ mod tests {
     fn crash_after_dispatch_never_blindly_replays_package_transaction() {
         let (dir, mut coordinator) = coordinator("dispatch-started");
         advance_to_snapshot(&mut coordinator);
-        let snapshot = snapshot_receipt(&dir, TARGET_ID);
+        let snapshot = snapshot_receipt(&dir, TARGET_ID, &coordinator);
         coordinator
             .record_snapshot(&snapshot)
             .unwrap_or_else(|error| unreachable!("{error}"));
@@ -1812,7 +2019,7 @@ mod tests {
                 .unwrap_or_else(|error| unreachable!("{error}"));
 
         advance_to_snapshot(&mut current);
-        let snapshot = snapshot_receipt(&dir, TARGET_ID);
+        let snapshot = snapshot_receipt(&dir, TARGET_ID, &current);
         current
             .record_snapshot(&snapshot)
             .unwrap_or_else(|error| unreachable!("{error}"));
@@ -1846,7 +2053,7 @@ mod tests {
     fn migrations_are_blocked_until_exact_authoritative_verification_receipt() {
         let (dir, mut coordinator) = coordinator("verify-gate");
         advance_to_snapshot(&mut coordinator);
-        let snapshot = snapshot_receipt(&dir, TARGET_ID);
+        let snapshot = snapshot_receipt(&dir, TARGET_ID, &coordinator);
         coordinator
             .record_snapshot(&snapshot)
             .unwrap_or_else(|error| unreachable!("{error}"));
@@ -1886,7 +2093,7 @@ mod tests {
     fn package_verification_receipt_cannot_replay_across_dispatch_generations() {
         let (first_dir, mut first) = coordinator("receipt-replay-first");
         advance_to_snapshot(&mut first);
-        let first_snapshot = snapshot_receipt(&first_dir, TARGET_ID);
+        let first_snapshot = snapshot_receipt(&first_dir, TARGET_ID, &first);
         first
             .record_snapshot(&first_snapshot)
             .unwrap_or_else(|error| unreachable!("{error}"));
@@ -1901,7 +2108,7 @@ mod tests {
 
         let (second_dir, mut second) = coordinator("receipt-replay-second");
         advance_to_snapshot(&mut second);
-        let second_snapshot = snapshot_receipt(&second_dir, TARGET_ID);
+        let second_snapshot = snapshot_receipt(&second_dir, TARGET_ID, &second);
         second
             .record_snapshot(&second_snapshot)
             .unwrap_or_else(|error| unreachable!("{error}"));
@@ -1923,7 +2130,7 @@ mod tests {
     fn stale_package_verification_receipt_is_rejected() {
         let (dir, mut coordinator) = coordinator("stale-receipt");
         advance_to_snapshot(&mut coordinator);
-        let snapshot = snapshot_receipt(&dir, TARGET_ID);
+        let snapshot = snapshot_receipt(&dir, TARGET_ID, &coordinator);
         coordinator
             .record_snapshot(&snapshot)
             .unwrap_or_else(|error| unreachable!("{error}"));
@@ -2034,7 +2241,13 @@ mod tests {
         let verifier = TrustedUpdateEvidenceVerifier::open_for_test(root)
             .unwrap_or_else(|error| unreachable!("{error}"));
         assert_eq!(
-            verifier.verify_snapshot("snapshot-receipt-1", UPDATE_ID, TARGET_ID),
+            verifier.verify_snapshot(
+                "snapshot-receipt-1",
+                UPDATE_ID,
+                TARGET_ID,
+                "snapshot-generation",
+                unix_now_ms().unwrap_or_else(|error| unreachable!("{error}")),
+            ),
             Err(UpdateError::UntrustedEvidencePath)
         );
     }
