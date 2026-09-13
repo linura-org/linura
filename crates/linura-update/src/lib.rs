@@ -426,19 +426,17 @@ impl TrustedUpdateEvidenceVerifier {
             expected_attempt_generation.to_owned(),
         )?;
         let evidence = self.read_receipt(&receipt_id)?;
-        let attempt_generation =
-            evidence
-                .dispatch_generation
-                .as_deref()
-                .ok_or(UpdateError::EvidenceBindingMismatch(
-                    "snapshot receipt lacks update-attempt generation binding",
-                ))?;
-        let issued_unix_ms =
-            evidence
-                .issued_unix_ms
-                .ok_or(UpdateError::EvidenceBindingMismatch(
-                    "snapshot receipt lacks issuance freshness",
-                ))?;
+        let attempt_generation = evidence
+            .dispatch_generation
+            .as_deref()
+            .ok_or(UpdateError::EvidenceBindingMismatch(
+                "snapshot receipt lacks update-attempt generation binding",
+            ))?;
+        let issued_unix_ms = evidence
+            .issued_unix_ms
+            .ok_or(UpdateError::EvidenceBindingMismatch(
+                "snapshot receipt lacks issuance freshness",
+            ))?;
         if evidence.kind != EvidenceKind::Snapshot
             || evidence.update_id != expected_update_id
             || evidence.target_id != expected_target_id
@@ -482,19 +480,17 @@ impl TrustedUpdateEvidenceVerifier {
             expected_dispatch_generation.to_owned(),
         )?;
         let evidence = self.read_receipt(&receipt_id)?;
-        let dispatch_generation =
-            evidence
-                .dispatch_generation
-                .as_deref()
-                .ok_or(UpdateError::EvidenceBindingMismatch(
-                    "package verification receipt lacks dispatch-generation binding",
-                ))?;
-        let issued_unix_ms =
-            evidence
-                .issued_unix_ms
-                .ok_or(UpdateError::EvidenceBindingMismatch(
-                    "package verification receipt lacks issuance freshness",
-                ))?;
+        let dispatch_generation = evidence
+            .dispatch_generation
+            .as_deref()
+            .ok_or(UpdateError::EvidenceBindingMismatch(
+                "package verification receipt lacks dispatch-generation binding",
+            ))?;
+        let issued_unix_ms = evidence
+            .issued_unix_ms
+            .ok_or(UpdateError::EvidenceBindingMismatch(
+                "package verification receipt lacks issuance freshness",
+            ))?;
         if evidence.kind != EvidenceKind::PackageVerification
             || evidence.update_id != expected_update_id
             || evidence.target_id != expected_target_id
@@ -861,7 +857,7 @@ impl UpdateCoordinator {
         let mut candidate = self.state.clone();
         candidate.verification_receipt_id = Some(receipt.receipt_id.clone());
         candidate.external_effect = ExternalEffectState::Verified;
-        self.commit(candidate)
+        self.commit_with_package_freshness(candidate, receipt.issued_unix_ms)
     }
 
     pub fn require_recovery(&mut self, reason: impl Into<String>) -> Result<(), UpdateError> {
@@ -920,6 +916,22 @@ impl UpdateCoordinator {
     }
 
     fn commit(&mut self, candidate: UpdateState) -> Result<(), UpdateError> {
+        self.commit_with_validation(candidate, None)
+    }
+
+    fn commit_with_package_freshness(
+        &mut self,
+        candidate: UpdateState,
+        issued_unix_ms: u64,
+    ) -> Result<(), UpdateError> {
+        self.commit_with_validation(candidate, Some(issued_unix_ms))
+    }
+
+    fn commit_with_validation(
+        &mut self,
+        candidate: UpdateState,
+        package_verification_issued_unix_ms: Option<u64>,
+    ) -> Result<(), UpdateError> {
         self.ensure_usable()?;
         validate_persisted_state(&candidate)?;
         let _lock = self.store.acquire_exclusive()?;
@@ -929,6 +941,12 @@ impl UpdateCoordinator {
             let reason = "durable update state/generation changed through another coordinator; reopen and reconcile before continuing".to_owned();
             self.durability_uncertain = Some(reason);
             return Err(UpdateError::StaleCoordinator);
+        }
+        if let Some(issued_unix_ms) = package_verification_issued_unix_ms {
+            validate_package_evidence_freshness(
+                issued_unix_ms,
+                durable_generation.committed_unix_ms,
+            )?;
         }
         match self.store.persist(&candidate) {
             Ok(()) => {
@@ -2169,6 +2187,53 @@ mod tests {
             ),
             Err(UpdateError::EvidenceBindingMismatch(_))
         ));
+    }
+
+    #[test]
+    fn package_verification_freshness_is_rechecked_at_locked_commit_boundary() {
+        let (dir, mut coordinator) = coordinator("locked-freshness");
+        advance_to_snapshot(&mut coordinator);
+        let snapshot = snapshot_receipt(&dir, TARGET_ID, &coordinator);
+        coordinator
+            .record_snapshot(&snapshot)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        coordinator
+            .prepare_package_transaction("transaction-1")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        coordinator
+            .mark_dispatch_started()
+            .unwrap_or_else(|error| unreachable!("{error}"));
+
+        let mut candidate = coordinator.state.clone();
+        candidate.verification_receipt_id = Some("package-receipt-locked".into());
+        candidate.external_effect = ExternalEffectState::Verified;
+        let stale_issued_unix_ms = coordinator
+            .journal_generation
+            .committed_unix_ms
+            .saturating_sub(1);
+        assert!(matches!(
+            coordinator.commit_with_package_freshness(candidate, stale_issued_unix_ms),
+            Err(UpdateError::EvidenceBindingMismatch(_))
+        ));
+        assert_eq!(
+            coordinator.state().external_effect(),
+            ExternalEffectState::DispatchStarted
+        );
+        assert!(coordinator.state().verification_receipt_id().is_none());
+        drop(coordinator);
+
+        let reopened = UpdateCoordinator::open(
+            UpdateJournalStore::new(dir.path().join("update.journal")),
+            UpdatePolicy::default(),
+            UPDATE_ID,
+            TARGET_ID,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(
+            reopened.resume_decision(),
+            UpdateResumeDecision::ReobserveBeforeContinuing
+        );
+        assert!(reopened.state().verification_receipt_id().is_none());
     }
 
     #[test]
