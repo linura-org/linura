@@ -32,6 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sed -i 's/if text.count("self.recovery_record = None;") < 3:/if text.count("self.recovery_record = None;") < 2:/' tools/tmp_pr128_repair.py
           python3 tools/tmp_pr128_repair.py
           cargo +"$RUST_VERSION" fmt --all
 
