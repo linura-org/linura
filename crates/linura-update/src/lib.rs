@@ -573,6 +573,20 @@ fn validate_persisted_state(state: &UpdateState) -> Result<(), UpdateError> {
         ));
     }
 
+    if matches!(
+        state.stage,
+        UpdateStage::Migrations
+            | UpdateStage::Reconcile
+            | UpdateStage::RestartAssessment
+            | UpdateStage::Verify
+            | UpdateStage::Complete
+    ) && state.transaction_id.is_none()
+    {
+        return Err(UpdateError::CorruptJournal(
+            "post-package stage lacks retained package transaction identity".into(),
+        ));
+    }
+
     if state.stage == UpdateStage::RecoveryRequired {
         if state.recovery_reason.is_none() {
             return Err(UpdateError::CorruptJournal(
@@ -849,6 +863,7 @@ mod tests {
             assert_eq!(state.transition(stage), Ok(()));
         }
         assert_eq!(state.stage, UpdateStage::Complete);
+        assert_eq!(state.transaction_id.as_deref(), Some("transaction-1"));
     }
 
     #[test]
@@ -995,6 +1010,33 @@ mod tests {
             .mark_package_verified()
             .unwrap_or_else(|error| unreachable!("{error}"));
         assert_eq!(coordinator.transition(UpdateStage::Migrations), Ok(()));
+    }
+
+    #[test]
+    fn post_package_stages_require_retained_transaction_identity() {
+        let dir = TestDir::new("post-package-lineage");
+        let journal = dir.path().join("update.journal");
+        for stage in [
+            UpdateStage::Migrations,
+            UpdateStage::Reconcile,
+            UpdateStage::RestartAssessment,
+            UpdateStage::Verify,
+            UpdateStage::Complete,
+        ] {
+            let invalid = UpdateState {
+                stage,
+                snapshot_id: None,
+                transaction_id: None,
+                recovery_reason: None,
+                external_effect: ExternalEffectState::None,
+            };
+            fs::write(&journal, serialize_journal(&invalid))
+                .unwrap_or_else(|error| unreachable!("{error}"));
+            assert!(matches!(
+                UpdateJournalStore::new(&journal).load(),
+                Err(UpdateError::CorruptJournal(_))
+            ));
+        }
     }
 
     #[test]
