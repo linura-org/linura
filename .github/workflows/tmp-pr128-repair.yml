@@ -28,13 +28,11 @@ jobs:
         shell: bash
         run: rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy
 
-      - name: Apply bounded PR128 repair and format before validation
+      - name: Apply final audit and format before validation
         shell: bash
         run: |
           set -euo pipefail
-          sed -i 's/if text.count("self.recovery_record = None;") < 3:/if text.count("self.recovery_record = None;") < 2:/' tools/tmp_pr128_repair.py
           python3 tools/tmp_pr128_repair.py
-          sed -i 's/value\.as_bytes()\.chunks_exact(2)/value.as_bytes().as_chunks::<2>().0/' crates/linura-migrations/src/lib.rs
           cargo +"$RUST_VERSION" fmt --all
 
       - name: Run canonical validation before any source push
@@ -44,16 +42,16 @@ jobs:
           cargo +"$RUST_VERSION" xtask check
           python3 tests/tooling/test_v09_recovery_qualification.py
 
-      - name: Commit validated formatted repair to isolated branch
+      - name: Commit validated formatted audit to isolated branch
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "linura-repair-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add crates/linura-migrations/src/lib.rs crates/linura-update/src/lib.rs docs/threat-model-v0.9-update-migration.md tests/tooling/test_v09_recovery_qualification.py
+          git add crates/linura-migrations/src/lib.rs
           if git diff --cached --quiet; then
-            echo "No source repair changes remain"
+            echo "No source audit changes remain"
             exit 0
           fi
-          git commit -m "fix(v0.9): persist exact migration recovery checkpoint"
+          git commit -m "fix(v0.9): close recovery record audit gaps"
           git push origin HEAD:tmp/pr128-recovery-record-repair
