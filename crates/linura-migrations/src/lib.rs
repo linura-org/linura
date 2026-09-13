@@ -565,6 +565,7 @@ impl MigrationLedgerStore {
         if metadata.file_type().is_symlink()
             || !metadata.file_type().is_file()
             || metadata.permissions().mode() & 0o022 != 0
+            || metadata.nlink() != 1
         {
             return Err(MigrationError::UntrustedRecoveryPath);
         }
@@ -573,7 +574,41 @@ impl MigrationLedgerStore {
                 "migration recovery marker exceeds the supported size bound".into(),
             ));
         }
-        parse_recovery_record(&fs::read(path).map_err(io_error)?).map(Some)
+
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(O_NOFOLLOW)
+            .open(&path)
+            .map_err(io_error)?;
+        let opened = file.metadata().map_err(io_error)?;
+        if opened.dev() != metadata.dev()
+            || opened.ino() != metadata.ino()
+            || opened.permissions().mode() & 0o022 != 0
+            || opened.nlink() != 1
+            || opened.len() > MAX_RECOVERY_MARKER_BYTES
+        {
+            return Err(MigrationError::UntrustedRecoveryPath);
+        }
+
+        let mut bytes = Vec::with_capacity(opened.len() as usize);
+        file.read_to_end(&mut bytes).map_err(io_error)?;
+        if bytes.len() as u64 > MAX_RECOVERY_MARKER_BYTES {
+            return Err(MigrationError::CorruptRecoveryMarker(
+                "migration recovery marker exceeds the supported size bound".into(),
+            ));
+        }
+
+        let after = fs::symlink_metadata(&path).map_err(io_error)?;
+        if after.file_type().is_symlink()
+            || !after.file_type().is_file()
+            || after.dev() != opened.dev()
+            || after.ino() != opened.ino()
+            || after.permissions().mode() & 0o022 != 0
+            || after.nlink() != 1
+        {
+            return Err(MigrationError::UntrustedRecoveryPath);
+        }
+        parse_recovery_record(&bytes).map(Some)
     }
 
     fn reconcile_recovery_marker(
@@ -748,8 +783,16 @@ impl MigrationRunner {
             self.recovery_record = Some(recovery_record);
         }
 
-        if let Some(guard) = &checkpoint_guard {
-            guard.assert_stable()?;
+        if let Some(guard) = &checkpoint_guard
+            && let Err(error) = guard.assert_stable()
+        {
+            if let Some(store) = &store
+                && let Err(cleanup_error) = store.clear_recovery_marker()
+            {
+                return self.handle_cleanup_failure(cleanup_error);
+            }
+            self.recovery_record = None;
+            return Err(error);
         }
 
         if migration.apply().is_err() {
@@ -823,6 +866,7 @@ impl MigrationRunner {
             {
                 return self.handle_cleanup_failure(cleanup_error);
             }
+            self.recovery_record = None;
             Err(MigrationError::VerificationFailed {
                 migration_id: descriptor.id.clone(),
                 reason: error.to_string(),
@@ -1841,6 +1885,46 @@ mod tests {
         assert_eq!(migration.applications.get(), 1);
         assert_eq!(migration.rollbacks.get(), 1);
         assert!(!runner.ledger().is_applied("0004-verify"));
+    }
+
+    #[test]
+    fn successful_rollback_clears_durable_and_in_memory_recovery_record() {
+        let dir = TestDir::new("rollback-clears-recovery-record");
+        let store = MigrationLedgerStore::new(dir.path().join("migration.ledger"));
+        let mut migration = TestMigration::new("0004-rollback-clears", false);
+        migration.verify_ok = false;
+        let mut runner =
+            MigrationRunner::open(store.clone()).unwrap_or_else(|error| unreachable!("{error}"));
+
+        assert!(matches!(
+            runner.run(&migration),
+            Err(MigrationError::VerificationFailed { .. })
+        ));
+        assert!(!runner.requires_recovery());
+        assert!(runner.recovery_record().is_none());
+        assert_eq!(store.load_recovery_record(), Ok(None));
+    }
+
+    #[test]
+    fn hard_linked_recovery_record_fails_closed() {
+        let dir = TestDir::new("recovery-record-hard-link");
+        let ledger = dir.path().join("migration.ledger");
+        let store = MigrationLedgerStore::new(&ledger);
+        let record = MigrationRecoveryRecord::new("0004-hard-link", None)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let external = dir.path().join("external-recovery-record");
+        fs::write(&external, serialize_recovery_record(&record))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        fs::set_permissions(&external, fs::Permissions::from_mode(0o600))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let recovery =
+            sidecar_path(&ledger, "recovery").unwrap_or_else(|error| unreachable!("{error}"));
+        fs::hard_link(&external, &recovery).unwrap_or_else(|error| unreachable!("{error}"));
+
+        assert_eq!(
+            store.load_recovery_record(),
+            Err(MigrationError::UntrustedRecoveryPath)
+        );
     }
 
     #[test]
