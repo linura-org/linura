@@ -295,6 +295,20 @@ impl MigrationLedgerStore {
         parse_recovery_marker(&fs::read(path).map_err(io_error)?).map(Some)
     }
 
+    fn reconcile_recovery_marker(
+        &self,
+        ledger: &MigrationLedger,
+    ) -> Result<Option<String>, MigrationError> {
+        let Some(migration_id) = self.load_recovery_marker()? else {
+            return Ok(None);
+        };
+        if ledger.is_applied(&migration_id) {
+            self.clear_recovery_marker()?;
+            return Ok(None);
+        }
+        Ok(Some(migration_id))
+    }
+
     fn persist_recovery_marker(&self, migration_id: &str) -> Result<(), MigrationError> {
         let path = sidecar_path(&self.path, "recovery")?;
         atomic_write(
@@ -352,7 +366,7 @@ impl MigrationRunner {
         let _lock = store.acquire_exclusive()?;
         let ledger = store.load()?;
         let recovery_required = store
-            .load_recovery_marker()?
+            .reconcile_recovery_marker(&ledger)?
             .map(|id| format!("persisted recovery marker for migration {id}"));
         Ok(Self {
             ledger,
@@ -378,10 +392,21 @@ impl MigrationRunner {
         let _lock = if let Some(store) = &store {
             let lock = store.acquire_exclusive()?;
             self.ledger = store.load()?;
-            if let Some(id) = store.load_recovery_marker()? {
-                let reason = format!("persisted recovery marker for migration {id}");
-                self.recovery_required = Some(reason.clone());
-                return Err(MigrationError::RecoveryRequired(reason));
+            match store.reconcile_recovery_marker(&self.ledger) {
+                Ok(Some(id)) => {
+                    let reason = format!("persisted recovery marker for migration {id}");
+                    self.recovery_required = Some(reason.clone());
+                    return Err(MigrationError::RecoveryRequired(reason));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    if matches!(error, MigrationError::DurabilityUncertain(_)) {
+                        self.latch_recovery(format!(
+                            "migration recovery marker reconciliation is durability-uncertain: {error}"
+                        ));
+                    }
+                    return Err(error);
+                }
             }
             Some(lock)
         } else {
@@ -1000,6 +1025,28 @@ mod tests {
             Ok(MigrationOutcome::AlreadyApplied)
         );
         assert_eq!(migration.applications.get(), 1);
+    }
+
+    #[test]
+    fn stale_recovery_marker_for_applied_migration_is_cleared_on_open() {
+        let dir = TestDir::new("stale-recovery-cleanup");
+        let store = MigrationLedgerStore::new(dir.path().join("migration.ledger"));
+        let mut ledger = MigrationLedger::default();
+        ledger
+            .mark_applied("0001-committed")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        store
+            .persist(&ledger)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        store
+            .persist_recovery_marker("0001-committed")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+
+        let runner = MigrationRunner::open(store.clone())
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(!runner.requires_recovery());
+        assert_eq!(store.load_recovery_marker(), Ok(None));
+        assert!(runner.ledger().is_applied("0001-committed"));
     }
 
     #[test]
