@@ -22,10 +22,12 @@ on:
       - "crates/linura-bootstrap/**"
       - "crates/linura-hardware/**"
       - "crates/linura-linux-observation/**"
+      - "crates/linura-migrations/**"
       - "crates/linura-observation/**"
       - "crates/linura-observation-control/**"
       - "crates/linura-planner/**"
       - "crates/linura-protocol/**"
+      - "crates/linura-update/**"
       - "contracts/components.toml"
       - "contracts/roadmap.toml"
       - "hardware/support-matrix.json"
@@ -36,6 +38,8 @@ on:
       - "docs/platform-profiles.md"
       - "docs/milestones/v0.9.0.md"
       - "docs/qualification/v0.9.0.md"
+      - "docs/threat-model-v0.9-recovery.md"
+      - "docs/threat-model-v0.9-update-migration.md"
       - "tests/acceptance/002-firstboot-offline.json"
       - "tests/tooling/test_component_maturity.py"
       - "tests/tooling/test_roadmap.py"
@@ -59,7 +63,7 @@ env:
 
 jobs:
   contract:
-    name: v0.9 First Boot contract
+    name: v0.9 exact-source contract
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -92,11 +96,16 @@ jobs:
           python3 tools/check_machine_classes.py
           python3 -m unittest tests.tooling.test_roadmap
 
-      - name: Test First Boot, bootstrap and hardware contracts
+      - name: Test First Boot, bootstrap, migration, update and hardware contracts
         run: |
           set -euo pipefail
           cargo fmt --all -- --check
-          cargo test --locked -p linura-firstboot -p linura-bootstrap -p linura-hardware
+          cargo test --locked \
+            -p linura-firstboot \
+            -p linura-bootstrap \
+            -p linura-migrations \
+            -p linura-update \
+            -p linura-hardware
           cargo build --locked --release -p linura-firstboot
           ./target/release/linura-firstboot --self-check
           ./target/release/linura-firstboot --qualification-environment | grep -Fx 'id=qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless'
@@ -179,6 +188,12 @@ jobs:
               "source_sha": source_sha,
               "result": "passed",
               "qualification_environment": qualification_environment,
+              "source_contracts": [
+                  "firstboot-exact-environment-and-non-authority",
+                  "bootstrap-recovery-evidence-binding",
+                  "migration-durable-ledger-and-independent-backup",
+                  "update-durable-prepare-dispatch-verify-and-no-blind-replay",
+              ],
               "vm_evidence": {
                   "path": evidence_path.name,
                   "sha256": evidence_sha,
