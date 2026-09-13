@@ -17,7 +17,9 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 def main() -> None:
     text = PATH.read_text(encoding="utf-8")
 
-    old = '''    pub fn load_recovery_record(&self) -> Result<Option<MigrationRecoveryRecord>, MigrationError> {
+    text = replace_once(
+        text,
+        '''    pub fn load_recovery_record(&self) -> Result<Option<MigrationRecoveryRecord>, MigrationError> {
         let path = sidecar_path(&self.path, "recovery")?;
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
@@ -37,8 +39,8 @@ def main() -> None:
         }
         parse_recovery_record(&fs::read(path).map_err(io_error)?).map(Some)
     }
-'''
-    new = '''    pub fn load_recovery_record(&self) -> Result<Option<MigrationRecoveryRecord>, MigrationError> {
+''',
+        '''    pub fn load_recovery_record(&self) -> Result<Option<MigrationRecoveryRecord>, MigrationError> {
         let path = sidecar_path(&self.path, "recovery")?;
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
@@ -93,52 +95,59 @@ def main() -> None:
         }
         parse_recovery_record(&bytes).map(Some)
     }
-'''
-    text = replace_once(text, old, new, "harden recovery-record read identity")
+''',
+        "harden recovery-record read identity",
+    )
 
-    old = '''        if let Some(guard) = &checkpoint_guard {
+    text = replace_once(
+        text,
+        '''        if let Some(guard) = &checkpoint_guard {
             guard.assert_stable()?;
         }
 
         if migration.apply().is_err() {
-'''
-    new = '''        if let Some(guard) = &checkpoint_guard {
-            if let Err(error) = guard.assert_stable() {
-                if let Some(store) = &store
-                    && let Err(cleanup_error) = store.clear_recovery_marker()
-                {
-                    return self.handle_cleanup_failure(cleanup_error);
-                }
-                self.recovery_record = None;
-                return Err(error);
+''',
+        '''        if let Some(guard) = &checkpoint_guard
+            && let Err(error) = guard.assert_stable()
+        {
+            if let Some(store) = &store
+                && let Err(cleanup_error) = store.clear_recovery_marker()
+            {
+                return self.handle_cleanup_failure(cleanup_error);
             }
+            self.recovery_record = None;
+            return Err(error);
         }
 
         if migration.apply().is_err() {
-'''
-    text = replace_once(text, old, new, "clear pre-effect drift marker")
+''',
+        "clear pre-effect drift marker",
+    )
 
-    old = '''            if let Some(store) = store
+    text = replace_once(
+        text,
+        '''            if let Some(store) = store
                 && let Err(cleanup_error) = store.clear_recovery_marker()
             {
                 return self.handle_cleanup_failure(cleanup_error);
             }
             Err(MigrationError::VerificationFailed {
-'''
-    new = '''            if let Some(store) = store
+''',
+        '''            if let Some(store) = store
                 && let Err(cleanup_error) = store.clear_recovery_marker()
             {
                 return self.handle_cleanup_failure(cleanup_error);
             }
             self.recovery_record = None;
             Err(MigrationError::VerificationFailed {
-'''
-    text = replace_once(text, old, new, "clear in-memory record after rollback")
+''',
+        "clear in-memory record after rollback",
+    )
 
     anchor = '''    #[test]
     fn failed_rollback_latches_recovery_and_survives_reopen() {
 '''
-    new_tests = '''    #[test]
+    tests = '''    #[test]
     fn successful_rollback_clears_durable_and_in_memory_recovery_record() {
         let dir = TestDir::new("rollback-clears-recovery-record");
         let store = MigrationLedgerStore::new(dir.path().join("migration.ledger"));
@@ -179,7 +188,7 @@ def main() -> None:
     }
 
 '''
-    text = replace_once(text, anchor, new_tests + anchor, "add recovery cleanup/path tests")
+    text = replace_once(text, anchor, tests + anchor, "add recovery cleanup/path tests")
 
     PATH.write_text(text, encoding="utf-8")
     print("final PR #128 recovery audit transformations applied")
