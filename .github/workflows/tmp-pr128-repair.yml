@@ -34,6 +34,7 @@ jobs:
           set -euo pipefail
           sed -i 's/if text.count("self.recovery_record = None;") < 3:/if text.count("self.recovery_record = None;") < 2:/' tools/tmp_pr128_repair.py
           python3 tools/tmp_pr128_repair.py
+          sed -i 's/value\.as_bytes()\.chunks_exact(2)/value.as_bytes().as_chunks::<2>().0/' crates/linura-migrations/src/lib.rs
           cargo +"$RUST_VERSION" fmt --all
 
       - name: Run canonical validation before any source push
