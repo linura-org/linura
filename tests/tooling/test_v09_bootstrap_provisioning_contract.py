@@ -114,6 +114,19 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
             # must not persist them as fields.
             self.assertNotIn(forbidden, serialization_region.split("#[cfg(test)]", 1)[0])
 
+    def test_firstboot_bounds_virtual_identity_payload_not_reported_stat_size(self) -> None:
+        source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(encoding="utf-8")
+        start = source.index("fn read_protected_identity_file(")
+        end = source.index("fn verify_candidate_environment()", start)
+        reader = source[start:end]
+
+        self.assertIn("Read::by_ref(&mut file)", reader)
+        self.assertIn(".take(read_limit)", reader)
+        self.assertIn("bytes.len() as u64 > max_bytes", reader)
+        self.assertNotIn("before.len() > max_bytes", reader)
+        self.assertNotIn("opened.len() > max_bytes", reader)
+        self.assertIn('DMI_PRODUCT_UUID: &str = "/sys/class/dmi/id/product_uuid"', source)
+
 
 if __name__ == "__main__":
     unittest.main()

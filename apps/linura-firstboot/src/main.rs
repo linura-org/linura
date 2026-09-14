@@ -704,13 +704,15 @@ fn read_protected_identity_file(
     max_bytes: u64,
     label: &str,
 ) -> Result<String, String> {
+    if max_bytes == 0 {
+        return Err(format!("{label} read bound must be nonzero"));
+    }
     let before = fs::symlink_metadata(path).map_err(io_string)?;
     if before.file_type().is_symlink()
         || !before.file_type().is_file()
         || before.uid() != 0
         || before.nlink() != 1
         || before.permissions().mode() & 0o022 != 0
-        || before.len() > max_bytes
     {
         return Err(format!(
             "{label} is not a protected root-owned regular file"
@@ -722,23 +724,41 @@ fn read_protected_identity_file(
         .open(path)
         .map_err(io_string)?;
     let opened = file.metadata().map_err(io_string)?;
-    if opened.uid() != 0
+    if !opened.file_type().is_file()
+        || opened.uid() != 0
         || opened.nlink() != 1
         || opened.permissions().mode() & 0o022 != 0
         || opened.dev() != before.dev()
         || opened.ino() != before.ino()
-        || opened.len() != before.len()
-        || opened.len() > max_bytes
     {
         return Err(format!("{label} changed or is not trusted while open"));
     }
-    let mut raw = String::new();
-    file.read_to_string(&mut raw).map_err(io_string)?;
+
+    // sysfs attributes such as DMI product_uuid are regular protected files,
+    // but their reported st_size is a virtual-filesystem implementation detail
+    // (commonly a page) rather than the readable payload length. Bound the
+    // actual bytes read instead of trusting st_size, while retaining the
+    // no-symlink, ownership, link-count, permissions and inode checks above.
+    let read_limit = max_bytes
+        .checked_add(1)
+        .ok_or_else(|| format!("{label} read bound overflow"))?;
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(io_string)?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(format!("{label} exceeds the supported byte bound"));
+    }
+    let raw = String::from_utf8(bytes).map_err(|_| format!("{label} is not valid UTF-8"))?;
+
     let after = fs::symlink_metadata(path).map_err(io_string)?;
-    if after.dev() != opened.dev()
+    if after.file_type().is_symlink()
+        || !after.file_type().is_file()
+        || after.dev() != opened.dev()
         || after.ino() != opened.ino()
-        || after.len() != opened.len()
         || after.uid() != 0
+        || after.nlink() != 1
         || after.permissions().mode() & 0o022 != 0
     {
         return Err(format!("{label} changed during observation"));

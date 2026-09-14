@@ -31,6 +31,14 @@ Required properties:
 
 The ledger must not contain bearer credentials, approval tokens, generic commands, shell snippets, model output transcripts, or executor capabilities.
 
+## Rollback-protection boundary
+
+The v0.9 generation anchor is deliberately stored outside the mutable bootstrap state root and is machine-scoped. Within this bounded threat model it detects replacement or restoration of an older ledger/state-root copy while the machine-scoped anchor remains trustworthy, and a copied disk is additionally bound to protected machine identity plus the DMI hardware UUID so cross-machine continuation fails closed.
+
+v0.9 does **not** claim cryptographic rollback resistance against a privileged actor that can rewind the entire trusted storage domain on the same hardware, including both the bootstrap ledger and its generation anchor in one whole-filesystem or whole-disk snapshot. Defending that stronger rollback class requires a trust anchor outside the rewound storage domain, such as TPM-backed monotonic/NV state, a hardware-backed counter, or an authenticated remote monotonic service. That stronger hardware/remote anti-rollback guarantee is outside this Experimental v0.9 slice and must not be inferred from the local generation anchor.
+
+Accordingly, “ledger rollback” qualification in this slice means rollback/substitution of the ledger or bootstrap state root against a non-rolled-back machine-scoped anchor, plus cross-machine clone rejection. Evidence and release language must not describe the local anchor as protection against privileged same-machine whole-disk rollback.
+
 ## Provisioning Manifest v1
 
 The Provisioning Manifest is **untrusted declarative input** delivered through a qualified local transport. It is not a script and is not an authorization artifact.
@@ -116,7 +124,7 @@ The dedicated v0.9 security qualification must cover at least:
 - path traversal, symlink, hard-link, and permission attacks on ledger/manifest state;
 - stale or cross-machine/cross-session manifest replay;
 - concurrent bootstrap writers and stale generation/CAS attempts;
-- ledger rollback, substitution, corruption, gap, duplicate-stage, and out-of-order stage attacks;
+- ledger rollback, substitution, corruption, gap, duplicate-stage, and out-of-order stage attacks within the rollback-protection boundary defined above;
 - crash windows before/after every persistent bootstrap transition;
 - TOCTOU between manifest validation, durable binding, and effect execution;
 - attempts to preserve or restore preparer credentials after entering `owner-enrollment-pending`;
