@@ -4,6 +4,25 @@ from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+DURABLE_SECTIONS = (
+    "state.rs",
+    "manifest.rs",
+    "store.rs",
+    "codec.rs",
+    "persistence.rs",
+    "owner_enrollment.rs",
+    "verification.rs",
+    "anchor.rs",
+    "recovery.rs",
+    "tests.rs",
+)
+
+
+def durable_source() -> str:
+    durable_root = ROOT / "crates/linura-bootstrap/src/durable"
+    return "\n".join(
+        (durable_root / name).read_text(encoding="utf-8") for name in DURABLE_SECTIONS
+    )
 
 
 class V09BootstrapProvisioningContractTests(unittest.TestCase):
@@ -74,10 +93,7 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
 
     def test_durable_bootstrap_implementation_keeps_fail_closed_boundaries(self) -> None:
         root = (ROOT / "crates/linura-bootstrap/src/root.rs").read_text(encoding="utf-8")
-        durable = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in sorted((ROOT / "crates/linura-bootstrap/src/durable").glob("part*.rs"))
-        )
+        durable = durable_source()
 
         self.assertIn("pub mod durable", root)
         for contract in [
@@ -97,10 +113,7 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
             self.assertIn(contract, durable)
 
     def test_durable_state_has_no_authority_or_secret_fields(self) -> None:
-        durable = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in sorted((ROOT / "crates/linura-bootstrap/src/durable").glob("part*.rs"))
-        )
+        durable = durable_source()
         serialization_region = durable[durable.index("fn serialize_state"):]
         for forbidden in [
             "password=",
@@ -113,6 +126,14 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
             # The strings occur only in negative tests; the canonical serializer
             # must not persist them as fields.
             self.assertNotIn(forbidden, serialization_region.split("#[cfg(test)]", 1)[0])
+
+    def test_durable_sections_are_semantic_and_complete(self) -> None:
+        durable_root = ROOT / "crates/linura-bootstrap/src/durable"
+        self.assertEqual(
+            sorted(path.name for path in durable_root.glob("*.rs")),
+            sorted(DURABLE_SECTIONS),
+        )
+        self.assertFalse(list(durable_root.glob("part*.rs")))
 
     def test_firstboot_bounds_virtual_identity_payload_not_reported_stat_size(self) -> None:
         source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(encoding="utf-8")
