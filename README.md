@@ -164,18 +164,22 @@ crates/
   linura-sdk/                  public non-privileged developer API facade
   linura-control/              unprivileged authority orchestration
   linura-lifecycle/            mutation ordering + system lifecycle workflows
+  linura-bootstrap/            bootstrap sequencing, durable provisioning and restart state
+  linura-migrations/           versioned migration, backup and recovery coordination
+  linura-update/               coordinated update, verification and reconciliation
 capabilities/                  declarative capability blueprint examples
 workflows/                     composable workflow definitions
 surfaces/                      constrained derived UI definitions
 agents/                        agent provider/specialist contracts and manifests
 executors/                     narrow privileged effectors
 interfaces/                    local D-Bus contracts
-schemas/                       machine-readable contracts, including setups/profiles
+schemas/                       machine-readable contracts, including setups/profiles/bootstrap
 profiles/                      platform and portable machine profiles
-bootstrap/                     installer/first-boot/recovery architecture
 packaging/                     system integration assets
 docs/                          product, architecture, security, ADRs, operations
 ```
+
+The complete top-level ownership map, including declarative/evidence roots, is defined in [`docs/repository-topology.md`](docs/repository-topology.md) and enforced by `contracts/repository-topology.toml`.
 
 ## Product and namespace naming
 

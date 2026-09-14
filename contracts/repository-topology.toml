@@ -1,0 +1,210 @@
+version = 1
+
+forbidden_legacy_roots = ["bootstrap"]
+
+[policy]
+implementation_roots = ["apps", "crates", "executors", "verifiers", "tools"]
+infrastructure_roots = [".cargo", ".github"]
+support_roots = ["docs", "scripts", "tests"]
+rule = "Every tracked top-level directory, including hidden infrastructure roots, must own real implementation, declarative assets, evidence, packaging, tests, tooling, or infrastructure. README-only future placeholders are forbidden."
+
+[[roots]]
+path = ".cargo"
+kind = "infrastructure"
+purpose = "Cargo workspace and toolchain configuration."
+allow_readme_only = false
+
+[[roots]]
+path = ".github"
+kind = "infrastructure"
+purpose = "GitHub contribution metadata, automation, and CI/release workflows."
+allow_readme_only = false
+
+[[roots]]
+path = "agents"
+kind = "declarative"
+purpose = "Agent skills and specialist declarations."
+allow_readme_only = false
+implementation = ["crates/linura-agent-runtime"]
+
+[[roots]]
+path = "apps"
+kind = "implementation"
+purpose = "Runnable product entry points and long-lived processes."
+allow_readme_only = false
+
+[[roots]]
+path = "capabilities"
+kind = "declarative"
+purpose = "Capability blueprints and capability configuration."
+allow_readme_only = false
+implementation = ["crates/linura-capability-sdk"]
+
+[[roots]]
+path = "contracts"
+kind = "contract"
+purpose = "Machine-readable repository, release, stability, and layering contracts."
+allow_readme_only = false
+
+[[roots]]
+path = "crates"
+kind = "implementation"
+purpose = "Reusable Rust domain and runtime implementation."
+allow_readme_only = false
+
+[[roots]]
+path = "design"
+kind = "declarative"
+purpose = "Design-system tokens and non-runtime design assets."
+allow_readme_only = false
+
+[[roots]]
+path = "docs"
+kind = "documentation"
+purpose = "Architecture, operations, milestones, qualifications, and release documentation."
+allow_readme_only = false
+
+[[roots]]
+path = "executors"
+kind = "implementation"
+purpose = "Narrow privileged executor boundaries."
+allow_readme_only = false
+
+[[roots]]
+path = "hardware"
+kind = "evidence"
+purpose = "Hardware fixtures, support matrix, and qualification metadata."
+allow_readme_only = false
+implementation = ["crates/linura-hardware"]
+
+[[roots]]
+path = "interfaces"
+kind = "contract"
+purpose = "External interface definitions such as D-Bus introspection XML."
+allow_readme_only = false
+implementation = ["crates/linura-dbus"]
+
+[[roots]]
+path = "lifecycle"
+kind = "evidence"
+purpose = "Declarative lifecycle examples and fixtures."
+allow_readme_only = false
+implementation = ["crates/linura-lifecycle"]
+
+[[roots]]
+path = "migrations"
+kind = "declarative"
+purpose = "Versioned migration descriptors and migration-domain data."
+allow_readme_only = false
+implementation = ["crates/linura-migrations"]
+
+[[roots]]
+path = "packaging"
+kind = "packaging"
+purpose = "Distribution, image, package-manager, and install packaging assets."
+allow_readme_only = false
+
+[[roots]]
+path = "profiles"
+kind = "declarative"
+purpose = "Concrete PlatformProfile definitions."
+allow_readme_only = false
+
+[[roots]]
+path = "schemas"
+kind = "contract"
+purpose = "Versioned JSON schemas for portable and declarative Linura artifacts."
+allow_readme_only = false
+
+[[roots]]
+path = "scripts"
+kind = "tooling"
+purpose = "Small operational and repository scripts that are not standalone Rust tools."
+allow_readme_only = false
+
+[[roots]]
+path = "supervision"
+kind = "declarative"
+purpose = "Application-supervision manifests."
+allow_readme_only = false
+
+[[roots]]
+path = "surfaces"
+kind = "declarative"
+purpose = "Derived-surface declarations such as container surfaces."
+allow_readme_only = false
+
+[[roots]]
+path = "tests"
+kind = "test"
+purpose = "Repository-level tooling, contract, integration, and qualification tests."
+allow_readme_only = false
+
+[[roots]]
+path = "tools"
+kind = "implementation"
+purpose = "Developer, VM, image, release, and repository tooling."
+allow_readme_only = false
+
+[[roots]]
+path = "verifiers"
+kind = "implementation"
+purpose = "Independent verifier boundaries."
+allow_readme_only = false
+
+[[roots]]
+path = "visual"
+kind = "evidence"
+purpose = "Visual baseline manifests and visual-verification evidence."
+allow_readme_only = false
+
+[[roots]]
+path = "workflows"
+kind = "declarative"
+purpose = "User/system workflow declarations; GitHub Actions remain under .github/workflows."
+allow_readme_only = false
+
+[[concepts]]
+name = "bootstrap"
+implementation = [
+  "apps/linura-firstboot",
+  "crates/linura-bootstrap",
+  "crates/linura-migrations",
+  "crates/linura-update",
+]
+declarative = [
+  "schemas/bootstrap.v1.schema.json",
+  "docs/bootstrap-recovery.md",
+  "docs/first-boot.md",
+]
+legacy_roots = ["bootstrap"]
+
+[[concepts]]
+name = "agent-runtime"
+implementation = ["crates/linura-agent-runtime"]
+declarative = ["agents"]
+
+[[concepts]]
+name = "capabilities"
+implementation = ["crates/linura-capability-sdk"]
+declarative = ["capabilities"]
+
+[[concepts]]
+name = "hardware"
+implementation = ["crates/linura-hardware"]
+declarative = ["hardware", "profiles"]
+
+[[concepts]]
+name = "interfaces"
+implementation = ["crates/linura-dbus"]
+declarative = ["interfaces"]
+
+[[concepts]]
+name = "lifecycle"
+implementation = ["crates/linura-lifecycle"]
+declarative = ["lifecycle"]
+
+[[concepts]]
+name = "migrations"
+implementation = ["crates/linura-migrations"]
+declarative = ["migrations"]
