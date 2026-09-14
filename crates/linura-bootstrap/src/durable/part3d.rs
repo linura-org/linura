@@ -151,31 +151,16 @@ impl TrustedOwnerEnrollmentReceipt {
         if session_id != expected_session_id || machine_id != expected_machine_id {
             return Err(DurableBootstrapError::StateBindingMismatch);
         }
-        let now: u64 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|error| {
-                DurableBootstrapError::Io(std::io::Error::other(error.to_string()))
-            })?
-            .as_millis()
-            .try_into()
-            .map_err(|_| {
-                DurableBootstrapError::Io(std::io::Error::other(
-                    "owner enrollment timestamp exceeds u64",
-                ))
-            })?;
-        if issued_unix_ms > now.saturating_add(BOOTSTRAP_VERIFICATION_FUTURE_SKEW_MS)
-            || now.saturating_sub(issued_unix_ms) > OWNER_ENROLLMENT_RECEIPT_MAX_AGE_MS
-        {
-            return Err(DurableBootstrapError::VerificationEvidenceStale);
-        }
-        Ok(Self {
+        let receipt = Self {
             session_id,
             machine_id,
             owner_id,
             enrollment_id,
             issued_unix_ms,
             receipt_sha256: actual_digest,
-        })
+        };
+        receipt.validate_freshness()?;
+        Ok(receipt)
     }
 
     #[must_use]
@@ -198,11 +183,35 @@ impl TrustedOwnerEnrollmentReceipt {
         self.issued_unix_ms
     }
 
+    fn validate_freshness(&self) -> Result<(), DurableBootstrapError> {
+        let now: u64 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| {
+                DurableBootstrapError::Io(std::io::Error::other(error.to_string()))
+            })?
+            .as_millis()
+            .try_into()
+            .map_err(|_| {
+                DurableBootstrapError::Io(std::io::Error::other(
+                    "owner enrollment timestamp exceeds u64",
+                ))
+            })?;
+        if self.issued_unix_ms > now.saturating_add(BOOTSTRAP_VERIFICATION_FUTURE_SKEW_MS)
+            || now.saturating_sub(self.issued_unix_ms) > OWNER_ENROLLMENT_RECEIPT_MAX_AGE_MS
+        {
+            return Err(DurableBootstrapError::VerificationEvidenceStale);
+        }
+        Ok(())
+    }
+
     fn validate_binding(&self, state: &DurableBootstrapState) -> Result<(), DurableBootstrapError> {
         if self.session_id != state.session_id || self.machine_id != state.machine_id {
             return Err(DurableBootstrapError::StateBindingMismatch);
         }
-        Ok(())
+        // Loading and consuming are separate trust boundaries. Recheck age at
+        // the exact authority-minting transition so a process suspension cannot
+        // turn a once-fresh receipt into indefinitely reusable authority.
+        self.validate_freshness()
     }
 }
 
@@ -276,5 +285,28 @@ impl DurableBootstrapCoordinator {
         let mut candidate = self.state.clone();
         candidate.enroll_owner_fresh(receipt.owner_id.clone(), receipt.enrollment_id.clone())?;
         self.commit(candidate)
+    }
+}
+
+#[cfg(test)]
+mod owner_receipt_consumption_tests {
+    use super::*;
+
+    #[test]
+    fn receipt_freshness_is_rechecked_at_consumption() {
+        let state = DurableBootstrapState::new("session-1", "machine-1")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let receipt = TrustedOwnerEnrollmentReceipt {
+            session_id: "session-1".into(),
+            machine_id: "machine-1".into(),
+            owner_id: "owner-1".into(),
+            enrollment_id: "enrollment-1".into(),
+            issued_unix_ms: 1,
+            receipt_sha256: "0".repeat(64),
+        };
+        assert!(matches!(
+            receipt.validate_binding(&state),
+            Err(DurableBootstrapError::VerificationEvidenceStale)
+        ));
     }
 }

@@ -13,8 +13,8 @@ path = "src/root.rs"
 # Internal test-only fixture support. Release builds refuse to compile with this
 # feature enabled so production recovery evidence cannot use caller-owned files.
 test-support = []
-# Exact-environment qualification binary. This is not part of normal builds or
-# the release artifact surface.
+# Exact-environment qualification binaries and crash injection. This is not part
+# of normal builds or the release artifact surface.
 qualification-harness = []
 
 [dependencies]
@@ -26,6 +26,11 @@ tempfile = "3.27"
 [[bin]]
 name = "linura-bootstrap-qualification"
 path = "src/bin/linura-bootstrap-qualification.rs"
+required-features = ["qualification-harness"]
+
+[[bin]]
+name = "linura-bootstrap-transition-qualification"
+path = "src/bin/linura-bootstrap-transition-qualification.rs"
 required-features = ["qualification-harness"]
 
 [lints]

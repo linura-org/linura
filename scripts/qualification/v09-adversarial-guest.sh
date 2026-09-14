@@ -109,6 +109,22 @@ install_text_file() {
   remote "printf '%s' '$encoded' | base64 -d | sudo -n tee '$destination' >/dev/null && sudo -n chown root:root '$destination' && sudo -n chmod '$mode' '$destination'"
 }
 
+expect_transition_crash() {
+  local point="$1"
+  local marker="$2"
+  local output=""
+  local status=0
+  set +e
+  output="$(remote "sudo -n env LINURA_BOOTSTRAP_QUALIFICATION_CRASH_AFTER='$point' /usr/local/bin/linura-bootstrap-transition-qualification prepare '$PRODUCTION_ROOT'" 2>&1)"
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 || "$output" != *"qualification_crash_after=$point"* ]]; then
+    printf 'expected qualification crash at %s, status=%s, output=%s\n' "$point" "$status" "$output" >&2
+    return 1
+  fi
+  printf '%s\n' "$marker" | tee -a "$TRANSCRIPT"
+}
+
 mkdir -p "$ARTIFACT_DIR"
 : > "$TRANSCRIPT"
 ssh-keygen -q -t ed25519 -N '' -f "$SSH_KEY"
@@ -151,6 +167,7 @@ remote 'cloud-init status --wait --long'
 binaries=(
   linura-firstboot
   linura-bootstrap-qualification
+  linura-bootstrap-transition-qualification
   linura-migrations-qualification
   linura-update-qualification
 )
@@ -235,7 +252,39 @@ hard_stop
 start_guest "$VM_UUID" clone-restore
 printf '%s\n' 'qualification_transport=explicit-out-of-band-ssh' | tee -a "$TRANSCRIPT"
 
+# Every canonical stage is power-cycled while durably Prepared. Every effectful
+# stage is also power-cycled after EffectStarted and before reconciliation. The
+# first two stages additionally exercise all three generic two-phase
+# ledger/anchor crash windows; those commit mechanics are shared by every state
+# transition, so this proves the generic crash recovery rather than duplicating
+# dozens of identical anchor cycles.
 for boundary in $(seq 1 13); do
+  if [[ "$boundary" -eq 1 ]]; then
+    expect_transition_crash anchor-stage 'anchor_crash_after_stage=reconciled'
+    power_cycle 'anchor-stage-crash'
+    expect_transition_crash ledger-persist 'anchor_crash_after_ledger_persist=reconciled'
+    power_cycle 'prepared-1-ledger-persist'
+    printf '%s\n' 'prepared_restart_boundary_01=persistent-qemu-power-cycle' | tee -a "$TRANSCRIPT"
+  elif [[ "$boundary" -eq 2 ]]; then
+    expect_transition_crash anchor-finalize 'anchor_crash_after_finalize=reconciled'
+    power_cycle 'prepared-2-anchor-finalize'
+    printf '%s\n' 'prepared_restart_boundary_02=persistent-qemu-power-cycle' | tee -a "$TRANSCRIPT"
+  else
+    remote "sudo -n /usr/local/bin/linura-bootstrap-transition-qualification prepare '$PRODUCTION_ROOT'" \
+      | tee -a "$TRANSCRIPT"
+    power_cycle "prepared-${boundary}"
+    printf 'prepared_restart_boundary_%02d=persistent-qemu-power-cycle\n' "$boundary" | tee -a "$TRANSCRIPT"
+  fi
+
+  case "$boundary" in
+    2|3|4|6|11|12)
+      remote "sudo -n /usr/local/bin/linura-bootstrap-transition-qualification effect-start '$PRODUCTION_ROOT'" \
+        | tee -a "$TRANSCRIPT"
+      power_cycle "effect-started-${boundary}"
+      printf 'effect_started_restart_boundary_%02d=persistent-qemu-power-cycle\n' "$boundary" | tee -a "$TRANSCRIPT"
+      ;;
+  esac
+
   remote "sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-step '$PRODUCTION_ROOT' '$LINURA_FIRSTBOOT_SHA'" \
     | tee -a "$TRANSCRIPT"
 
@@ -288,6 +337,7 @@ remote "sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-resume '$PRO
   remote "sudo -n /usr/local/bin/linura-bootstrap-qualification bootstrap-start '$HARNESS_ROOT'"
   remote "sudo -n /usr/local/bin/linura-bootstrap-qualification bootstrap-resume '$HARNESS_ROOT'"
   remote "sudo -n /usr/local/bin/linura-bootstrap-qualification owner-enroll '$HARNESS_ROOT'"
+  remote "sudo -n /usr/local/bin/linura-bootstrap-qualification interactive-owner '$HARNESS_ROOT'"
   remote "sudo -n /usr/local/bin/linura-bootstrap-qualification unattended-manifest '$HARNESS_ROOT'"
   remote "sudo -n /usr/local/bin/linura-migrations-qualification '$ROOT/q11-migration'"
   remote "sudo -n /usr/local/bin/linura-update-qualification '$ROOT/q11-update'"
@@ -310,6 +360,7 @@ distribution_version=$guest_version
 EOF
 
 export ARTIFACT_DIR LINURA_FIRSTBOOT_SHA LINURA_BOOTSTRAP_QUALIFICATION_SHA
+export LINURA_BOOTSTRAP_TRANSITION_QUALIFICATION_SHA
 export LINURA_MIGRATIONS_QUALIFICATION_SHA LINURA_UPDATE_QUALIFICATION_SHA
 python3 - <<'PY'
 import hashlib
@@ -329,6 +380,9 @@ required = [
     'system_restart=persistent-qemu-power-cycle',
     'clone_machine_binding=cross-hardware-rejected',
     'qualification_transport=explicit-out-of-band-ssh',
+    'anchor_crash_after_stage=reconciled',
+    'anchor_crash_after_ledger_persist=reconciled',
+    'anchor_crash_after_finalize=reconciled',
     'security_baseline=q8-fixture-passed',
     'security_baseline=inbound-default-deny',
     'security_baseline=product-ssh-disabled',
@@ -336,6 +390,7 @@ required = [
     'security_baseline=policy-present',
     'owner_enrollment=owner-enrollment-pending',
     'preparer_authority_inherited=false',
+    'interactive_owner_restart=enrolled-generation-1',
     'manifest_replay=cross-machine-rejected',
     'manifest_command_field=rejected',
     'q11_migration=real-v08-sqlite-stores',
@@ -350,6 +405,14 @@ required = [
     'q11_indeterminate=recovery-required',
     'native_recovery=available_without_firstboot_network_or_model',
 ]
+required.extend(
+    f'prepared_restart_boundary_{index:02d}=persistent-qemu-power-cycle'
+    for index in range(1, 14)
+)
+required.extend(
+    f'effect_started_restart_boundary_{index:02d}=persistent-qemu-power-cycle'
+    for index in (2, 3, 4, 6, 11, 12)
+)
 required.extend(
     f'restart_boundary_{index:02d}=persistent-qemu-power-cycle'
     for index in range(1, 14)
@@ -392,6 +455,7 @@ evidence = {
     'binaries': {
         'linura-firstboot': {'sha256': os.environ['LINURA_FIRSTBOOT_SHA']},
         'linura-bootstrap-qualification': {'sha256': os.environ['LINURA_BOOTSTRAP_QUALIFICATION_SHA']},
+        'linura-bootstrap-transition-qualification': {'sha256': os.environ['LINURA_BOOTSTRAP_TRANSITION_QUALIFICATION_SHA']},
         'linura-migrations-qualification': {'sha256': os.environ['LINURA_MIGRATIONS_QUALIFICATION_SHA']},
         'linura-update-qualification': {'sha256': os.environ['LINURA_UPDATE_QUALIFICATION_SHA']},
     },

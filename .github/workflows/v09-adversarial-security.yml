@@ -59,6 +59,8 @@ jobs:
           cargo build --locked --release -p linura-firstboot --bin linura-firstboot
           cargo build --locked --release -p linura-bootstrap \
             --features qualification-harness --bin linura-bootstrap-qualification
+          cargo build --locked --release -p linura-bootstrap \
+            --features qualification-harness --bin linura-bootstrap-transition-qualification
           cargo build --locked --release -p linura-authorityd \
             --features v09-migration-qualification --bin linura-migrations-qualification
           cargo build --locked --release -p linura-update \
@@ -88,6 +90,8 @@ jobs:
           cargo build --locked --release -p linura-firstboot --bin linura-firstboot
           cargo build --locked --release -p linura-bootstrap \
             --features qualification-harness --bin linura-bootstrap-qualification
+          cargo build --locked --release -p linura-bootstrap \
+            --features qualification-harness --bin linura-bootstrap-transition-qualification
           cargo build --locked --release -p linura-authorityd \
             --features v09-migration-qualification --bin linura-migrations-qualification
           cargo build --locked --release -p linura-update \

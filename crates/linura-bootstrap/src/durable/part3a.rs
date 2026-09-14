@@ -1,3 +1,18 @@
+#[cfg(feature = "qualification-harness")]
+fn qualification_crash_after(point: &str) {
+    if std::env::var("LINURA_BOOTSTRAP_QUALIFICATION_CRASH_AFTER")
+        .ok()
+        .as_deref()
+        == Some(point)
+    {
+        eprintln!("qualification_crash_after={point}");
+        std::process::abort();
+    }
+}
+
+#[cfg(not(feature = "qualification-harness"))]
+fn qualification_crash_after(_point: &str) {}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BootstrapStateStore {
     path: PathBuf,
@@ -268,8 +283,10 @@ impl DurableBootstrapCoordinator {
         // anchor. Reopen can distinguish both crash windows without guessing.
         self.store
             .stage_generation_anchor(&self.state, &candidate)?;
+        qualification_crash_after("anchor-stage");
         match self.store.persist(&candidate) {
             Ok(()) => {
+                qualification_crash_after("ledger-persist");
                 if let Err(error) = self.store.finalize_generation_anchor(&candidate) {
                     let reason = format!(
                         "bootstrap state generation {} committed but external generation anchor could not be finalized: {error}",
@@ -278,6 +295,7 @@ impl DurableBootstrapCoordinator {
                     self.durability_uncertain = Some(reason.clone());
                     return Err(DurableBootstrapError::DurabilityUncertain(reason));
                 }
+                qualification_crash_after("anchor-finalize");
                 if let Err(error) = self.store.reconcile_generation_anchor(&candidate) {
                     let reason = format!(
                         "bootstrap state/anchor commit could not be re-observed consistently: {error}"

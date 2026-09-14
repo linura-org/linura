@@ -3,6 +3,13 @@ const BOOTSTRAP_VERIFICATION_MAX_AGE_MS: u64 = 5 * 60 * 1000;
 const BOOTSTRAP_VERIFICATION_FUTURE_SKEW_MS: u64 = 30 * 1000;
 const SYSTEM_BOOTSTRAP_VERIFIER_ID: &str = "linura-bootstrap-system-verifier-v2";
 const MANAGED_FIRSTBOOT_PATH: &str = "/opt/linura/bin/linura-firstboot";
+const RECOVERY_CHECKPOINT_SCHEMA: &str = "linura-bootstrap-recovery-checkpoint-v3";
+const RECOVERY_CHECKPOINT_MANIFEST: &str = "checkpoint.manifest";
+const RECOVERY_CHECKPOINT_STATE: &str = "bootstrap.state";
+const RECOVERY_CHECKPOINT_SESSION: &str = ".linura-bootstrap-session";
+const RECOVERY_CHECKPOINT_ANCHOR: &str = "generation.anchor";
+const MAX_RECOVERY_CHECKPOINT_MANIFEST_BYTES: u64 = 4096;
+const MAX_RECOVERY_CHECKPOINT_SESSION_BYTES: u64 = 512;
 
 /// Exact, fresh postcondition evidence required before an effectful bootstrap
 /// stage may be recorded complete.
@@ -284,6 +291,261 @@ fn protected_regular_file_sha256(path: &Path) -> Result<String, DurableBootstrap
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+fn protected_regular_file_bytes(
+    path: &Path,
+    max_bytes: u64,
+) -> Result<Vec<u8>, DurableBootstrapError> {
+    validate_state_parent(path)?;
+    let expected_uid = current_effective_uid()?;
+    let before = fs::symlink_metadata(path).map_err(DurableBootstrapError::Io)?;
+    if before.file_type().is_symlink()
+        || !before.file_type().is_file()
+        || before.uid() != expected_uid
+        || before.nlink() != 1
+        || before.permissions().mode() & 0o022 != 0
+        || before.len() == 0
+        || before.len() > max_bytes
+    {
+        return Err(DurableBootstrapError::UntrustedControlPath);
+    }
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NOFOLLOW)
+        .open(path)
+        .map_err(DurableBootstrapError::Io)?;
+    let opened = file.metadata().map_err(DurableBootstrapError::Io)?;
+    if opened.dev() != before.dev()
+        || opened.ino() != before.ino()
+        || opened.uid() != expected_uid
+        || opened.nlink() != 1
+        || opened.permissions().mode() & 0o022 != 0
+        || opened.len() != before.len()
+        || opened.len() > max_bytes
+    {
+        return Err(DurableBootstrapError::UntrustedControlPath);
+    }
+    let mut bytes = Vec::with_capacity(opened.len() as usize);
+    file.read_to_end(&mut bytes)
+        .map_err(DurableBootstrapError::Io)?;
+    if bytes.is_empty() || bytes.len() as u64 > max_bytes {
+        return Err(DurableBootstrapError::UntrustedControlPath);
+    }
+    let after = fs::symlink_metadata(path).map_err(DurableBootstrapError::Io)?;
+    if after.file_type().is_symlink()
+        || !after.file_type().is_file()
+        || after.dev() != opened.dev()
+        || after.ino() != opened.ino()
+        || after.uid() != expected_uid
+        || after.nlink() != 1
+        || after.permissions().mode() & 0o022 != 0
+        || after.len() != opened.len()
+    {
+        return Err(DurableBootstrapError::UntrustedControlPath);
+    }
+    Ok(bytes)
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct RecoveryCheckpointManifest {
+    state_generation: u64,
+    state_sha256: String,
+    session_sha256: String,
+    anchor_sha256: String,
+}
+
+fn validate_checkpoint_sha256(value: &str) -> Result<String, DurableBootstrapError> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(DurableBootstrapError::InvalidVerificationEvidence(
+            "recovery checkpoint contains an invalid SHA-256",
+        ));
+    }
+    Ok(value.to_ascii_lowercase())
+}
+
+fn parse_recovery_checkpoint_manifest(
+    bytes: &[u8],
+) -> Result<RecoveryCheckpointManifest, DurableBootstrapError> {
+    if bytes.is_empty() || bytes.len() as u64 > MAX_RECOVERY_CHECKPOINT_MANIFEST_BYTES {
+        return Err(DurableBootstrapError::InvalidVerificationEvidence(
+            "recovery checkpoint manifest is empty or oversized",
+        ));
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| {
+        DurableBootstrapError::InvalidVerificationEvidence(
+            "recovery checkpoint manifest is not UTF-8",
+        )
+    })?;
+    let integrity_index = text
+        .rfind("\nintegrity=")
+        .map(|index| index + 1)
+        .ok_or(DurableBootstrapError::InvalidVerificationEvidence(
+            "recovery checkpoint manifest integrity record is missing",
+        ))?;
+    let (payload, integrity_line) = text.split_at(integrity_index);
+    let expected_integrity = integrity_line
+        .strip_prefix("integrity=")
+        .and_then(|value| value.strip_suffix('\n'))
+        .ok_or(DurableBootstrapError::InvalidVerificationEvidence(
+            "recovery checkpoint manifest integrity record is malformed",
+        ))?;
+    let expected_integrity = validate_checkpoint_sha256(expected_integrity)?;
+    let actual_integrity = sha256(payload.as_bytes());
+    if !constant_time_ascii_eq(actual_integrity.as_bytes(), expected_integrity.as_bytes()) {
+        return Err(DurableBootstrapError::InvalidVerificationEvidence(
+            "recovery checkpoint manifest integrity does not match its payload",
+        ));
+    }
+
+    let mut lines = payload.lines();
+    if lines.next() != Some(RECOVERY_CHECKPOINT_SCHEMA) {
+        return Err(DurableBootstrapError::InvalidVerificationEvidence(
+            "unsupported recovery checkpoint manifest schema",
+        ));
+    }
+    let state_generation = lines
+        .next()
+        .and_then(|line| line.strip_prefix("state_generation="))
+        .ok_or(DurableBootstrapError::InvalidVerificationEvidence(
+            "recovery checkpoint manifest lacks state generation",
+        ))?
+        .parse::<u64>()
+        .map_err(|_| {
+            DurableBootstrapError::InvalidVerificationEvidence(
+                "recovery checkpoint state generation is invalid",
+            )
+        })?;
+    let state_sha256 = validate_checkpoint_sha256(
+        lines
+            .next()
+            .and_then(|line| line.strip_prefix("state_sha256="))
+            .ok_or(DurableBootstrapError::InvalidVerificationEvidence(
+                "recovery checkpoint manifest lacks state digest",
+            ))?,
+    )?;
+    let session_sha256 = validate_checkpoint_sha256(
+        lines
+            .next()
+            .and_then(|line| line.strip_prefix("session_sha256="))
+            .ok_or(DurableBootstrapError::InvalidVerificationEvidence(
+                "recovery checkpoint manifest lacks session digest",
+            ))?,
+    )?;
+    let anchor_sha256 = validate_checkpoint_sha256(
+        lines
+            .next()
+            .and_then(|line| line.strip_prefix("anchor_sha256="))
+            .ok_or(DurableBootstrapError::InvalidVerificationEvidence(
+                "recovery checkpoint manifest lacks generation-anchor digest",
+            ))?,
+    )?;
+    if lines
+        .next()
+        .and_then(|line| line.strip_prefix("resume_stage="))
+        != Some("recovery-checkpoint")
+        || lines.next().is_some()
+    {
+        return Err(DurableBootstrapError::InvalidVerificationEvidence(
+            "recovery checkpoint manifest has an invalid resume stage or unexpected fields",
+        ));
+    }
+    Ok(RecoveryCheckpointManifest {
+        state_generation,
+        state_sha256,
+        session_sha256,
+        anchor_sha256,
+    })
+}
+
+fn verify_checkpoint_digest(
+    bytes: &[u8],
+    expected: &str,
+    label: &'static str,
+) -> Result<(), DurableBootstrapError> {
+    let actual = sha256(bytes);
+    if !constant_time_ascii_eq(actual.as_bytes(), expected.as_bytes()) {
+        return Err(DurableBootstrapError::InvalidVerificationEvidence(label));
+    }
+    Ok(())
+}
+
+fn nft_tokens(rules: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    for ch in rules.chars() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        if ch == '"' {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            quoted = true;
+            continue;
+        }
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+            current.push(ch.to_ascii_lowercase());
+        } else {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            if matches!(ch, '{' | '}' | ';') {
+                tokens.push(ch.to_string());
+            }
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn nft_input_base_chain_default_deny(rules: &str) -> bool {
+    let tokens = nft_tokens(rules);
+    let mut index = 0;
+    while index + 2 < tokens.len() {
+        if tokens[index] != "chain" || tokens[index + 2] != "{" {
+            index += 1;
+            continue;
+        }
+        index += 3;
+        let mut depth = 1_u32;
+        let mut input_hook = false;
+        let mut deny_policy = false;
+        while index < tokens.len() && depth > 0 {
+            match tokens[index].as_str() {
+                "{" => depth = depth.saturating_add(1),
+                "}" => depth = depth.saturating_sub(1),
+                "hook" if depth == 1 && tokens.get(index + 1).is_some_and(|v| v == "input") => {
+                    input_hook = true;
+                }
+                "policy"
+                    if depth == 1
+                        && tokens
+                            .get(index + 1)
+                            .is_some_and(|v| v == "drop" || v == "reject") =>
+                {
+                    deny_policy = true;
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+        if input_hook && deny_policy {
+            return true;
+        }
+    }
+    false
+}
+
 fn command_output(program: &str, args: &[&str]) -> Result<std::process::Output, DurableBootstrapError> {
     std::process::Command::new(program)
         .args(args)
@@ -306,9 +568,9 @@ fn firewall_default_deny() -> Result<bool, DurableBootstrapError> {
     if !output.status.success() {
         return Ok(false);
     }
-    let rules = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-    Ok(rules.contains("hook input")
-        && (rules.contains("policy drop") || rules.contains("policy reject")))
+    Ok(nft_input_base_chain_default_deny(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 fn apt_sources_fail_closed() -> Result<bool, DurableBootstrapError> {
@@ -496,10 +758,87 @@ impl DurableBootstrapCoordinator {
         manifest: &Path,
     ) -> Result<(), DurableBootstrapError> {
         self.active_effect_context(BootstrapStage::RecoveryCheckpoint)?;
-        let digest = protected_regular_file_sha256(manifest)?;
+        if manifest.file_name().and_then(|name| name.to_str()) != Some(RECOVERY_CHECKPOINT_MANIFEST) {
+            return Err(DurableBootstrapError::InvalidVerificationEvidence(
+                "recovery checkpoint manifest has a non-canonical filename",
+            ));
+        }
+        let directory = manifest.parent().ok_or(DurableBootstrapError::InvalidVerificationEvidence(
+            "recovery checkpoint manifest has no parent directory",
+        ))?;
+        let directory_metadata = fs::symlink_metadata(directory).map_err(DurableBootstrapError::Io)?;
+        if directory_metadata.file_type().is_symlink()
+            || !directory_metadata.file_type().is_dir()
+            || directory_metadata.uid() != current_effective_uid()?
+            || directory_metadata.permissions().mode() & 0o022 != 0
+        {
+            return Err(DurableBootstrapError::UntrustedControlPath);
+        }
+
+        let manifest_bytes =
+            protected_regular_file_bytes(manifest, MAX_RECOVERY_CHECKPOINT_MANIFEST_BYTES)?;
+        let parsed = parse_recovery_checkpoint_manifest(&manifest_bytes)?;
+        if parsed.state_generation != self.state.generation() {
+            return Err(DurableBootstrapError::InvalidVerificationEvidence(
+                "recovery checkpoint generation does not match the active durable state",
+            ));
+        }
+
+        let state_path = directory.join(RECOVERY_CHECKPOINT_STATE);
+        let session_path = directory.join(RECOVERY_CHECKPOINT_SESSION);
+        let anchor_path = directory.join(RECOVERY_CHECKPOINT_ANCHOR);
+        let state_bytes = protected_regular_file_bytes(&state_path, MAX_BOOTSTRAP_STATE_BYTES)?;
+        let session_bytes =
+            protected_regular_file_bytes(&session_path, MAX_RECOVERY_CHECKPOINT_SESSION_BYTES)?;
+        let anchor_bytes = protected_regular_file_bytes(&anchor_path, MAX_GENERATION_ANCHOR_BYTES)?;
+        verify_checkpoint_digest(
+            &state_bytes,
+            &parsed.state_sha256,
+            "recovery checkpoint state digest does not match manifest",
+        )?;
+        verify_checkpoint_digest(
+            &session_bytes,
+            &parsed.session_sha256,
+            "recovery checkpoint session digest does not match manifest",
+        )?;
+        verify_checkpoint_digest(
+            &anchor_bytes,
+            &parsed.anchor_sha256,
+            "recovery checkpoint anchor digest does not match manifest",
+        )?;
+
+        let checkpoint_state = parse_state(&state_bytes)?;
+        if checkpoint_state != self.state {
+            return Err(DurableBootstrapError::InvalidVerificationEvidence(
+                "recovery checkpoint state is not the exact active durable state",
+            ));
+        }
+        let expected_session = format!("{}\n", self.state.session_id());
+        if session_bytes.as_slice() != expected_session.as_bytes() {
+            return Err(DurableBootstrapError::InvalidVerificationEvidence(
+                "recovery checkpoint session identity is not exact-bound",
+            ));
+        }
+        let checkpoint_anchor = parse_generation_anchor(&anchor_bytes)?;
+        let expected_state_digest = bootstrap_state_digest(&self.state);
+        if checkpoint_anchor.committed_generation != self.state.generation()
+            || !constant_time_ascii_eq(
+                checkpoint_anchor.committed_state_sha256.as_bytes(),
+                expected_state_digest.as_bytes(),
+            )
+            || checkpoint_anchor.pending_generation.is_some()
+            || checkpoint_anchor.pending_state_sha256.is_some()
+        {
+            return Err(DurableBootstrapError::InvalidVerificationEvidence(
+                "recovery checkpoint generation anchor is not committed to the exact active state",
+            ));
+        }
+
+        let digest = sha256(&manifest_bytes);
         let postcondition = format!(
-            "checkpoint_manifest={};sha256={digest};protected=true",
-            manifest.display()
+            "checkpoint_manifest={};sha256={digest};state_generation={};bundle_members=state,session,anchor;protected=true",
+            manifest.display(),
+            parsed.state_generation,
         );
         let evidence = self.issue_system_evidence(
             BootstrapStage::RecoveryCheckpoint,
@@ -536,5 +875,69 @@ impl DurableBootstrapCoordinator {
         let mut candidate = self.state.clone();
         candidate.enter_recovery_owner_resolution()?;
         self.commit(candidate)
+    }
+}
+
+#[cfg(test)]
+mod effect_verifier_tests {
+    use super::*;
+
+    #[test]
+    fn firewall_policy_must_belong_to_the_input_base_chain() {
+        let wrong_chain = r#"
+            table inet linura {
+                chain input { type filter hook input priority 0; policy accept; }
+                chain forward { type filter hook forward priority 0; policy drop; }
+            }
+        "#;
+        assert!(!nft_input_base_chain_default_deny(wrong_chain));
+
+        let correct = r#"
+            table inet linura {
+                chain input {
+                    type filter hook input priority 0; policy drop;
+                    comment "policy accept text in a quoted comment is ignored"
+                }
+                chain forward { type filter hook forward priority 0; policy accept; }
+            }
+        "#;
+        assert!(nft_input_base_chain_default_deny(correct));
+    }
+
+    #[test]
+    fn checkpoint_manifest_parser_rejects_arbitrary_protected_file_content() {
+        assert!(matches!(
+            parse_recovery_checkpoint_manifest(b"127.0.0.1 localhost\n"),
+            Err(DurableBootstrapError::InvalidVerificationEvidence(_))
+        ));
+    }
+
+    #[test]
+    fn checkpoint_manifest_is_strict_and_integrity_bound() {
+        let mut payload = concat!(
+            "linura-bootstrap-recovery-checkpoint-v3\n",
+            "state_generation=7\n",
+            "state_sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "session_sha256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+            "anchor_sha256=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n",
+            "resume_stage=recovery-checkpoint\n"
+        )
+        .to_owned();
+        let integrity = sha256(payload.as_bytes());
+        payload.push_str(&format!("integrity={integrity}\n"));
+        let parsed = parse_recovery_checkpoint_manifest(payload.as_bytes())
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(parsed.state_generation, 7);
+
+        let mut tampered = payload.into_bytes();
+        let index = tampered
+            .iter()
+            .position(|byte| *byte == b'7')
+            .unwrap_or_else(|| unreachable!("generation byte missing"));
+        tampered[index] = b'8';
+        assert!(matches!(
+            parse_recovery_checkpoint_manifest(&tampered),
+            Err(DurableBootstrapError::InvalidVerificationEvidence(_))
+        ));
     }
 }
