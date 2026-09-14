@@ -6,16 +6,27 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+path = "src/root.rs"
+
 [features]
 # Internal test-only fixture support. Release builds refuse to compile with this
 # feature enabled so production recovery evidence cannot use caller-owned files.
 test-support = []
+# Exact-environment qualification binary. This is not part of normal builds or
+# the release artifact surface.
+qualification-harness = []
 
 [dependencies]
 sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3.27"
+
+[[bin]]
+name = "linura-bootstrap-qualification"
+path = "src/bin/linura-bootstrap-qualification.rs"
+required-features = ["qualification-harness"]
 
 [lints]
 workspace = true
