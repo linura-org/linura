@@ -1,0 +1,125 @@
+name: v0.9 adversarial security qualification
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify; defaults to selected ref
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v09-adversarial-${{ inputs.source_sha || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+  BASE_IMAGE_URL: https://cloud-images.ubuntu.com/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img
+  BASE_IMAGE_SHA256: d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac
+  QUALIFICATION_ENVIRONMENT_ID: qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless
+
+jobs:
+  source-adversarial:
+    name: source adversarial contracts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.sha }}
+
+      - name: Assert exact source and install pinned Rust
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          # shellcheck disable=SC1091
+          source tools/codex/versions.env
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Exercise source-level contracts and build gated qualification binaries
+        run: |
+          set -euo pipefail
+          python3 -m unittest \
+            tests.tooling.test_v09_bootstrap_provisioning_contract \
+            tests.tooling.test_v09_recovery_qualification
+          cargo fmt --all -- --check
+          cargo test --locked -p linura-bootstrap -p linura-migrations -p linura-update
+          cargo build --locked --release -p linura-firstboot --bin linura-firstboot
+          cargo build --locked --release -p linura-bootstrap \
+            --features qualification-harness --bin linura-bootstrap-qualification
+          cargo build --locked --release -p linura-authorityd \
+            --features v09-migration-qualification --bin linura-migrations-qualification
+          cargo build --locked --release -p linura-update \
+            --features qualification-harness --bin linura-update-qualification
+
+  exact-guest:
+    name: exact Ubuntu/QEMU adversarial guest
+    needs: source-adversarial
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.sha }}
+
+      - name: Assert exact source and build qualification binaries
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          # shellcheck disable=SC1091
+          source tools/codex/versions.env
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+          cargo build --locked --release -p linura-firstboot --bin linura-firstboot
+          cargo build --locked --release -p linura-bootstrap \
+            --features qualification-harness --bin linura-bootstrap-qualification
+          cargo build --locked --release -p linura-authorityd \
+            --features v09-migration-qualification --bin linura-migrations-qualification
+          cargo build --locked --release -p linura-update \
+            --features qualification-harness --bin linura-update-qualification
+
+      - name: Install pinned disposable-VM dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cloud-image-utils openssh-client qemu-system-x86 qemu-utils
+
+      - name: Download and verify pinned Ubuntu image
+        run: |
+          set -euo pipefail
+          case "$BASE_IMAGE_URL" in
+            https://cloud-images.ubuntu.com/*) ;;
+            *) echo "untrusted base-image origin" >&2; exit 2 ;;
+          esac
+          image="$RUNNER_TEMP/ubuntu-noble-base.qcow2"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+            --output "$image" "$BASE_IMAGE_URL"
+          printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$image" | sha256sum --check --strict
+          printf 'BASE_IMAGE=%s\n' "$image" >> "$GITHUB_ENV"
+
+      - name: Exercise every restart, identity, security, migration and update boundary
+        run: bash scripts/qualification/v09-adversarial-guest.sh
+
+      - name: Upload immutable-source adversarial evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-v09-adversarial-${{ inputs.source_sha || github.sha }}
+          path: ${{ runner.temp }}/linura-v09-adversarial-artifacts/
+          if-no-files-found: error
+          retention-days: 30

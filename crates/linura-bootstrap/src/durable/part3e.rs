@@ -85,7 +85,7 @@ impl BootstrapVerificationEvidence {
 
     /// Qualification-only state-machine evidence. This constructor is excluded
     /// from normal/release builds so product integrations cannot self-attest.
-    #[cfg(feature = "qualification-harness")]
+    #[cfg(any(test, feature = "qualification-harness"))]
     pub fn qualification_observation(
         stage: BootstrapStage,
         operation_id: impl Into<String>,
