@@ -115,11 +115,32 @@ jobs:
             -p linura-migrations \
             -p linura-update \
             -p linura-hardware
-          cargo build --locked --release -p linura-firstboot
+          cargo build --locked --release -p linura-firstboot --bin linura-firstboot
+          cargo build --locked --release -p linura-bootstrap \
+            --features qualification-harness --bin linura-bootstrap-qualification
+          cargo build --locked --release -p linura-bootstrap \
+            --features qualification-harness --bin linura-bootstrap-transition-qualification
+          cargo build --locked --release -p linura-authorityd \
+            --features v09-migration-qualification --bin linura-migrations-qualification
+          cargo build --locked --release -p linura-update \
+            --features qualification-harness --bin linura-update-qualification
           ./target/release/linura-firstboot --self-check
           ./target/release/linura-firstboot --qualification-environment | grep -Fx 'id=qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless'
           ./target/release/linura-firstboot --qualification-environment | grep -Fx 'kind=qualification-environment'
           ./target/release/linura-firstboot --qualification-environment | grep -Fx 'status=candidate-not-yet-release-supported'
+
+      - name: Upload exact-source adversarial qualification binaries
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-v09-adversarial-binaries-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          path: |
+            target/release/linura-firstboot
+            target/release/linura-bootstrap-qualification
+            target/release/linura-bootstrap-transition-qualification
+            target/release/linura-migrations-qualification
+            target/release/linura-update-qualification
+          if-no-files-found: error
+          retention-days: 7
 
   offline-reference:
     name: v0.9 offline QualificationEnvironment VM
@@ -136,6 +157,7 @@ jobs:
     needs: contract
     uses: ./.github/workflows/v09-adversarial-security.yml
     permissions:
+      actions: read
       contents: read
     with:
       source_sha: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
