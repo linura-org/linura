@@ -14,6 +14,21 @@ class V09AdversarialTransportContractTests(unittest.TestCase):
         self.assertNotIn("linura@127.0.0.1:/tmp/", source)
         self.assertIn("linura-preparer@127.0.0.1 true", source)
 
+    def test_non_primary_transport_handoff_crosses_a_power_cycle(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        start = source.index("# Non-primary shards fast-forward")
+        end = source.index("\nfi\n\nif ! remote 'command -v nft", start)
+        handoff = source[start:end]
+
+        self.assertIn('power_cycle "qualification-transport-handoff"', handoff)
+        self.assertIn(
+            "systemctl is-active --quiet linura-qualification-transport.service",
+            handoff,
+        )
+        self.assertIn('! sudo -n systemctl is-active --quiet "$unit"', handoff)
+        self.assertNotIn("systemctl stop", handoff)
+        self.assertNotIn("enable --now", handoff)
+
 
 if __name__ == "__main__":
     unittest.main()

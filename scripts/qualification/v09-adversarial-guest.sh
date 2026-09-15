@@ -302,14 +302,15 @@ install_text_file /etc/systemd/system/linura-qualification-transport.service 064
 remote 'sudo -n systemctl daemon-reload && sudo -n systemctl enable linura-qualification-transport.service >/dev/null'
 remote 'for unit in ssh.service sshd.service ssh.socket sshd.socket; do sudo -n systemctl disable "$unit" >/dev/null 2>&1 || true; done'
 
-# Non-primary shards fast-forward in the initial boot instead of crossing an
-# early power-cycle. Move them onto the qualification-only transport before
-# fast-forwarding so the canonical image SSH listener cannot contaminate the
-# product security-baseline observation at boundary 4. The established SSH
-# session is intentionally kept alive while listener ownership is transferred.
+# Non-primary shards fast-forward instead of crossing the primary shard's early
+# clone power-cycle. Move them onto the qualification-only transport through a
+# pre-bootstrap power-cycle of their own. A live listener swap cannot be made
+# reliable from the SSH session whose parent daemon is being stopped. On the
+# next boot the canonical units are disabled and the already-enabled isolated
+# transport owns the listener before any product stage is advanced.
 if (( V09_BOUNDARY_START > 1 )); then
-  remote 'set -e; for unit in ssh.socket sshd.socket ssh.service sshd.service; do sudo -n systemctl stop "$unit" >/dev/null 2>&1 || true; done; sudo -n systemctl enable --now linura-qualification-transport.service >/dev/null'
-  remote 'sudo -n systemctl is-active --quiet linura-qualification-transport.service'
+  power_cycle "qualification-transport-handoff"
+  remote 'set -e; sudo -n systemctl is-active --quiet linura-qualification-transport.service; for unit in ssh.socket sshd.socket ssh.service sshd.service; do ! sudo -n systemctl is-active --quiet "$unit"; done'
 fi
 
 if ! remote 'command -v nft >/dev/null 2>&1'; then
