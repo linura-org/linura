@@ -22,12 +22,16 @@ class V09AdversarialFastForwardContractTests(unittest.TestCase):
             "systemctl mask --runtime ssh.service sshd.service ssh.socket sshd.socket",
             helper,
         )
+        self.assertNotIn("systemctl unmask --runtime", helper)
         self.assertIn("linura-firstboot --durable-bootstrap-step", helper)
         self.assertIn(
             "systemctl enable --now linura-qualification-transport.service",
             helper,
         )
-        self.assertIn("test -s '$status_path'", helper)
+        self.assertIn("systemctl is-active --quiet linura-qualification-transport.service", helper)
+        self.assertIn("stable=", helper)
+        self.assertIn("test -s", helper)
+        self.assertIn("__LINURA_Q8_OUTPUT__", helper)
 
     def test_fast_forward_and_real_boundary_four_use_the_isolated_helper(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
