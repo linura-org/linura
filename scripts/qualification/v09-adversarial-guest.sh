@@ -300,7 +300,7 @@ EOF
 )"
 install_text_file /etc/systemd/system/linura-qualification-transport.service 0644 "$transport_unit"
 remote 'sudo -n systemctl daemon-reload && sudo -n systemctl enable linura-qualification-transport.service >/dev/null'
-remote 'for unit in ssh.service sshd.service ssh.socket sshd.socket; do sudo -n systemctl disable "$unit" >/dev/null 2>&1 || true; done'
+remote 'for unit in ssh.service sshd.service ssh.socket sshd.socket; do sudo -n systemctl disable "$unit" >/dev/null 2>&1 || true; done; sudo -n systemctl mask --force ssh.service sshd.service ssh.socket sshd.socket >/dev/null'
 
 # Non-primary shards fast-forward instead of crossing the primary shard's early
 # clone power-cycle. Move them onto the qualification-only transport through a

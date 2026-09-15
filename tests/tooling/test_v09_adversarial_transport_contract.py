@@ -19,7 +19,13 @@ class V09AdversarialTransportContractTests(unittest.TestCase):
         start = source.index("# Non-primary shards fast-forward")
         end = source.index("\nfi\n\nif ! remote 'command -v nft", start)
         handoff = source[start:end]
+        persistent_mask = (
+            "systemctl mask --force ssh.service sshd.service "
+            "ssh.socket sshd.socket"
+        )
 
+        self.assertIn(persistent_mask, source)
+        self.assertLess(source.index(persistent_mask), start)
         self.assertIn('power_cycle "qualification-transport-handoff"', handoff)
         self.assertIn(
             "systemctl is-active --quiet linura-qualification-transport.service",
