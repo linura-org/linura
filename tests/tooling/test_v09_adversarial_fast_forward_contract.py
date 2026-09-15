@@ -13,7 +13,12 @@ class V09AdversarialFastForwardContractTests(unittest.TestCase):
         helper = source[start:end]
 
         self.assertIn("systemd-run --quiet", helper)
-        self.assertIn("--on-active=2s", helper)
+        self.assertIn("--no-block", helper)
+        self.assertIn("--on-active=10s", helper)
+        self.assertIn("--property=StandardInput=null", helper)
+        self.assertIn("--property=StandardOutput=journal", helper)
+        self.assertIn("--property=StandardError=journal", helper)
+        self.assertIn("</dev/null >/dev/null 2>&1", helper)
         self.assertIn(
             "systemctl disable --now linura-qualification-transport.service",
             helper,

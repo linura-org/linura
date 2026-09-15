@@ -97,12 +97,15 @@ run_security_baseline_step() {
   local status=""
 
   # Schedule the Q8 observation before taking the qualification transport down.
-  # The timer lets this SSH command return cleanly, so the security verifier is
-  # genuinely out-of-band from the SSH listener it is required to reject.
+  # Explicitly detach every transient-service descriptor from this SSH channel
+  # and do not wait for its start job. Otherwise systemd can retain the channel
+  # until the timer fires, and stopping sshd resets the command that armed Q8.
+  # The longer timer window lets the now-detached SSH command close cleanly, so
+  # the security verifier is genuinely out-of-band from the listener it rejects.
   # Canonical SSH units stay runtime-masked for the remainder of this boot: they
   # are product transport, not qualification transport, and unmasking them here
   # creates a listener-ownership race immediately after the Q8 observation.
-  remote "sudo -n rm -f '$output_path' '$status_path'; sudo -n systemd-run --quiet --unit='$transient_unit' --on-active=2s /bin/bash -c 'set +e; systemctl disable --now linura-qualification-transport.service >/dev/null 2>&1; systemctl mask --runtime ssh.service sshd.service ssh.socket sshd.socket >/dev/null 2>&1 || true; /usr/local/bin/linura-firstboot --durable-bootstrap-step \"$PRODUCTION_ROOT\" \"$LINURA_FIRSTBOOT_SHA\" >\"$output_path\" 2>&1; status=\$?; systemctl enable --now linura-qualification-transport.service >/dev/null 2>&1; restore=\$?; stable=0; if [ \"\$restore\" -eq 0 ]; then for _ in \$(seq 1 20); do if systemctl is-active --quiet linura-qualification-transport.service; then stable=\$((stable + 1)); else stable=0; fi; [ \"\$stable\" -ge 5 ] && break; sleep 0.2; done; [ \"\$stable\" -ge 5 ] || restore=1; fi; if [ \"\$status\" -eq 0 ] && [ \"\$restore\" -ne 0 ]; then status=\$restore; fi; printf \"%s\\n\" \"\$status\" >\"$status_path\"; exit 0' >/dev/null"
+  remote "sudo -n rm -f '$output_path' '$status_path'; sudo -n systemd-run --quiet --no-block --unit='$transient_unit' --on-active=10s --property=StandardInput=null --property=StandardOutput=journal --property=StandardError=journal /bin/bash -c 'set +e; systemctl disable --now linura-qualification-transport.service >/dev/null 2>&1; systemctl mask --runtime ssh.service sshd.service ssh.socket sshd.socket >/dev/null 2>&1 || true; /usr/local/bin/linura-firstboot --durable-bootstrap-step \"$PRODUCTION_ROOT\" \"$LINURA_FIRSTBOOT_SHA\" >\"$output_path\" 2>&1; status=\$?; systemctl enable --now linura-qualification-transport.service >/dev/null 2>&1; restore=\$?; stable=0; if [ \"\$restore\" -eq 0 ]; then for _ in \$(seq 1 20); do if systemctl is-active --quiet linura-qualification-transport.service; then stable=\$((stable + 1)); else stable=0; fi; [ \"\$stable\" -ge 5 ] && break; sleep 0.2; done; [ \"\$stable\" -ge 5 ] || restore=1; fi; if [ \"\$status\" -eq 0 ] && [ \"\$restore\" -ne 0 ]; then status=\$restore; fi; printf \"%s\\n\" \"\$status\" >\"$status_path\"; exit 0' </dev/null >/dev/null 2>&1"
 
   # Read the completion marker and command output atomically over the first
   # successfully restored SSH connection. This avoids a TOCTOU window where a
