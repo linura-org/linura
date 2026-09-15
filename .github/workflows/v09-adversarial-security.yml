@@ -1,0 +1,298 @@
+name: v0.9 adversarial security qualification
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify; defaults to selected ref
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: v09-adversarial-${{ inputs.source_sha || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+  BASE_IMAGE_URL: https://cloud-images.ubuntu.com/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img
+  BASE_IMAGE_SHA256: d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac
+  QUALIFICATION_ENVIRONMENT_ID: qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless
+
+jobs:
+  exact-guest:
+    name: exact Ubuntu/QEMU adversarial guest (${{ matrix.shard_id }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard_id: early
+            boundary_start: 1
+            boundary_end: 4
+            primary: true
+            final: false
+          - shard_id: middle
+            boundary_start: 5
+            boundary_end: 8
+            primary: false
+            final: false
+          - shard_id: late
+            boundary_start: 9
+            boundary_end: 13
+            primary: false
+            final: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.sha }}
+
+      - name: Assert exact source
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Download exact-source qualification binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-v09-adversarial-binaries-${{ inputs.source_sha || github.sha }}
+          path: target/release
+
+      - name: Restore qualification binary executable modes
+        run: |
+          set -euo pipefail
+          chmod 0755 \
+            target/release/linura-firstboot \
+            target/release/linura-bootstrap-qualification \
+            target/release/linura-bootstrap-transition-qualification \
+            target/release/linura-migrations-qualification \
+            target/release/linura-update-qualification
+
+      - name: Install pinned disposable-VM dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cloud-image-utils openssh-client qemu-system-x86 qemu-utils
+
+      - name: Download and verify pinned Ubuntu image
+        run: |
+          set -euo pipefail
+          case "$BASE_IMAGE_URL" in
+            https://cloud-images.ubuntu.com/*) ;;
+            *) echo "untrusted base-image origin" >&2; exit 2 ;;
+          esac
+          image="$RUNNER_TEMP/ubuntu-noble-base.qcow2"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+            --output "$image" "$BASE_IMAGE_URL"
+          printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$image" | sha256sum --check --strict
+          printf 'BASE_IMAGE=%s\n' "$image" >> "$GITHUB_ENV"
+
+      - name: Exercise assigned restart, identity, security, migration and update boundaries
+        env:
+          V09_SHARD_ID: ${{ matrix.shard_id }}
+          V09_BOUNDARY_START: ${{ matrix.boundary_start }}
+          V09_BOUNDARY_END: ${{ matrix.boundary_end }}
+          V09_PRIMARY_SHARD: ${{ matrix.primary }}
+          V09_FINAL_SHARD: ${{ matrix.final }}
+        run: bash scripts/qualification/v09-adversarial-guest.sh
+
+      - name: Upload immutable-source shard evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-v09-adversarial-shard-${{ matrix.shard_id }}-${{ inputs.source_sha || github.sha }}
+          path: ${{ runner.temp }}/linura-v09-adversarial-artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  assemble-adversarial:
+    name: bind parallel exact-guest adversarial evidence
+    needs: exact-guest
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.sha }}
+
+      - name: Assert exact source
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Download early shard evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-v09-adversarial-shard-early-${{ inputs.source_sha || github.sha }}
+          path: /tmp/linura-v09-adversarial-shards/early
+
+      - name: Download middle shard evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-v09-adversarial-shard-middle-${{ inputs.source_sha || github.sha }}
+          path: /tmp/linura-v09-adversarial-shards/middle
+
+      - name: Download late shard evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-v09-adversarial-shard-late-${{ inputs.source_sha || github.sha }}
+          path: /tmp/linura-v09-adversarial-shards/late
+
+      - name: Validate shards and assemble canonical adversarial evidence
+        env:
+          SHARD_ROOT: /tmp/linura-v09-adversarial-shards
+          ARTIFACT_DIR: /tmp/linura-v09-adversarial
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path.cwd()
+          shard_root = Path(os.environ["SHARD_ROOT"])
+          artifact = Path(os.environ["ARTIFACT_DIR"])
+          artifact.mkdir(parents=True, exist_ok=True)
+          source_sha = os.environ["SOURCE_SHA"]
+          repository = os.environ["GITHUB_REPOSITORY"]
+          qualification_id = os.environ["QUALIFICATION_ENVIRONMENT_ID"]
+          base_image_url = os.environ["BASE_IMAGE_URL"]
+          base_image_sha = os.environ["BASE_IMAGE_SHA256"]
+          workflow = root / ".github/workflows/v09-adversarial-security.yml"
+          expected_shards = {
+              "early": (1, 4, True, False),
+              "middle": (5, 8, False, False),
+              "late": (9, 13, False, True),
+          }
+          expected_environment = {
+              "id": qualification_id,
+              "architecture": "x86_64",
+              "virtualization": "qemu",
+              "distribution_id": "ubuntu",
+              "distribution_version": "24.04",
+          }
+          def digest(path: Path) -> str:
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+          workflow_sha = digest(workflow)
+          binaries = None
+          shard_bindings = []
+          transcript_parts = []
+          for shard_id, (start, end, primary, final) in expected_shards.items():
+              directory = shard_root / shard_id
+              evidence_path = directory / f"V09-ADVERSARIAL-SHARD-{shard_id}.json"
+              checksum_path = directory / f"V09-ADVERSARIAL-SHARD-{shard_id}.sha256"
+              if not evidence_path.is_file() or not checksum_path.is_file():
+                  raise SystemExit(f"missing adversarial shard evidence: {shard_id}")
+              evidence_sha = digest(evidence_path)
+              if checksum_path.read_text(encoding="utf-8").strip() != f"{evidence_sha}  {evidence_path.name}":
+                  raise SystemExit(f"adversarial shard checksum mismatch: {shard_id}")
+              evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+              if evidence.get("schema_version") != 1 or evidence.get("kind") != "v09-adversarial-shard":
+                  raise SystemExit(f"unexpected adversarial shard schema: {shard_id}")
+              if evidence.get("repository") != repository or evidence.get("source_sha") != source_sha or evidence.get("result") != "passed":
+                  raise SystemExit(f"adversarial shard source/result mismatch: {shard_id}")
+              if evidence.get("shard") != {"id": shard_id, "boundary_start": start, "boundary_end": end, "primary": primary, "final": final}:
+                  raise SystemExit(f"adversarial shard range/role mismatch: {shard_id}")
+              if evidence.get("qualification_environment") != expected_environment:
+                  raise SystemExit(f"adversarial shard environment mismatch: {shard_id}")
+              if evidence.get("base_image") != {"url": base_image_url, "sha256": base_image_sha}:
+                  raise SystemExit(f"adversarial shard base-image mismatch: {shard_id}")
+              contract = evidence.get("qualification_contract", {})
+              if contract.get("path") != workflow.relative_to(root).as_posix() or contract.get("sha256") != workflow_sha:
+                  raise SystemExit(f"adversarial shard workflow binding mismatch: {shard_id}")
+              shard_binaries = evidence.get("binaries")
+              if not isinstance(shard_binaries, dict):
+                  raise SystemExit(f"adversarial shard binary binding missing: {shard_id}")
+              if binaries is None:
+                  binaries = shard_binaries
+              elif shard_binaries != binaries:
+                  raise SystemExit(f"adversarial shard binary bindings disagree: {shard_id}")
+              transcript_binding = evidence.get("transcript", {})
+              transcript_name = transcript_binding.get("path")
+              if not isinstance(transcript_name, str) or Path(transcript_name).name != transcript_name:
+                  raise SystemExit(f"invalid shard transcript path: {shard_id}")
+              transcript = directory / transcript_name
+              if not transcript.is_file() or transcript.is_symlink() or transcript_binding.get("size") != transcript.stat().st_size or transcript_binding.get("sha256") != digest(transcript):
+                  raise SystemExit(f"shard transcript binding mismatch: {shard_id}")
+              environment_binding = evidence.get("environment", {})
+              environment_name = environment_binding.get("path")
+              if not isinstance(environment_name, str) or Path(environment_name).name != environment_name:
+                  raise SystemExit(f"invalid shard environment path: {shard_id}")
+              environment = directory / environment_name
+              if not environment.is_file() or environment.is_symlink() or environment_binding.get("size") != environment.stat().st_size or environment_binding.get("sha256") != digest(environment):
+                  raise SystemExit(f"shard environment binding mismatch: {shard_id}")
+              transcript_parts.append(transcript.read_text(encoding="utf-8"))
+              shard_bindings.append({
+                  "id": shard_id,
+                  "boundary_start": start,
+                  "boundary_end": end,
+                  "evidence_sha256": evidence_sha,
+                  "transcript_sha256": transcript_binding["sha256"],
+                  "workflow_run_id": evidence.get("workflow", {}).get("run_id"),
+                  "workflow_run_attempt": evidence.get("workflow", {}).get("run_attempt"),
+              })
+          canonical_transcript = artifact / "guest-qualification.txt"
+          canonical_transcript.write_text("\n".join(part.rstrip("\n") for part in transcript_parts) + "\n", encoding="utf-8")
+          text = canonical_transcript.read_text(encoding="utf-8")
+          required = [
+              "bootstrap_effect_started=durable", "bootstrap_producer=linura-firstboot",
+              "bootstrap_restart=reobserved", "bootstrap_restart_source=production-firstboot",
+              "system_restart=persistent-qemu-power-cycle", "clone_machine_binding=cross-hardware-rejected",
+              "qualification_transport=explicit-out-of-band-ssh", "anchor_crash_after_stage=reconciled",
+              "anchor_crash_after_ledger_persist=reconciled", "anchor_crash_after_finalize=reconciled",
+              "security_baseline=q8-fixture-passed", "security_baseline=inbound-default-deny",
+              "security_baseline=product-ssh-disabled", "security_baseline=untrusted-sources-disabled",
+              "security_baseline=policy-present", "owner_enrollment=owner-enrollment-pending",
+              "preparer_authority_inherited=false", "interactive_owner_restart=enrolled-generation-1",
+              "manifest_replay=cross-machine-rejected", "manifest_command_field=rejected",
+              "q11_migration=real-v08-sqlite-stores", "q11_library=intent-graph-provenance-preserved",
+              "q11_authority=transaction-history-preserved", "q11_backup_restore=injected-library-failure-restored",
+              "q11_migration_restart=no-replay", "q11_update_restart=reobserve-no-blind-replay",
+              "q11_package_transaction=dpkg-killed-mid-postinst", "q11_package_reconcile=dpkg-configure-authoritative",
+              "q11_package_poststate=authoritatively-verified", "q11_indeterminate=recovery-required",
+              "native_recovery=available_without_firstboot_network_or_model",
+          ]
+          required.extend(f"prepared_restart_boundary_{index:02d}=persistent-qemu-power-cycle" for index in range(1, 14))
+          required.extend(f"effect_started_restart_boundary_{index:02d}=persistent-qemu-power-cycle" for index in (2, 3, 4, 6, 11, 12))
+          required.extend(f"restart_boundary_{index:02d}=persistent-qemu-power-cycle" for index in range(1, 14))
+          missing = [marker for marker in required if marker not in text]
+          if missing:
+              raise SystemExit(f"missing assembled adversarial evidence: {missing}")
+          evidence = {
+              "schema_version": 1, "repository": repository, "source_sha": source_sha, "result": "passed",
+              "qualification_environment": expected_environment,
+              "base_image": {"url": base_image_url, "sha256": base_image_sha},
+              "qualification_contract": {"path": workflow.relative_to(root).as_posix(), "sha256": workflow_sha},
+              "binaries": binaries,
+              "transcript": {"path": canonical_transcript.name, "sha256": digest(canonical_transcript), "size": canonical_transcript.stat().st_size},
+              "shards": shard_bindings,
+              "workflow": {"run_id": int(os.environ["GITHUB_RUN_ID"]), "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"])},
+          }
+          evidence_path = artifact / "V09-ADVERSARIAL-EVIDENCE.json"
+          evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          (artifact / "V09-ADVERSARIAL-EVIDENCE.sha256").write_text(f"{digest(evidence_path)}  {evidence_path.name}\n", encoding="utf-8")
+          PY
+
+      - name: Upload immutable-source adversarial evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-v09-adversarial-${{ inputs.source_sha || github.sha }}
+          path: /tmp/linura-v09-adversarial/
+          if-no-files-found: error
+          retention-days: 30

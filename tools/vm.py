@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -12,6 +13,9 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_IMAGE = ROOT / ".artifacts/linura-dev.qcow2"
 ACCELERATORS = ("auto", "kvm", "tcg")
+UUID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 
 
 def kvm_available() -> bool:
@@ -39,6 +43,14 @@ def resolve_acceleration(requested: str) -> str:
     return requested
 
 
+def validate_uuid(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not UUID_PATTERN.fullmatch(value) or value.lower() == "00000000-0000-0000-0000-000000000000":
+        raise ValueError("--uuid must be a canonical nonzero UUID")
+    return value.lower()
+
+
 def qemu_command(
     image: Path,
     memory: int,
@@ -47,8 +59,10 @@ def qemu_command(
     seed: Path | None = None,
     acceleration: str = "auto",
     persistent: bool = False,
+    hardware_uuid: str | None = None,
 ) -> list[str]:
     resolved_acceleration = resolve_acceleration(acceleration)
+    hardware_uuid = validate_uuid(hardware_uuid)
     command = [
         "qemu-system-x86_64",
         "-machine",
@@ -69,6 +83,8 @@ def qemu_command(
                 f"file={seed},if=virtio,format=raw,readonly=on",
             ]
         )
+    if hardware_uuid is not None:
+        command.extend(["-uuid", hardware_uuid])
     command.extend(
         [
             "-nic",
@@ -79,9 +95,9 @@ def qemu_command(
             "mon:stdio",
         ]
     )
-    # Disposable acceptance remains snapshot-isolated by default. v0.4 durability
+    # Disposable acceptance remains snapshot-isolated by default. Durability
     # qualification opts into writes on an already disposable copied qcow2 so an
-    # abrupt QEMU stop/restart can verify acknowledged SQLite/WAL state survives.
+    # abrupt QEMU stop/restart can verify acknowledged state survives.
     if not persistent:
         command.append("-snapshot")
     return command
@@ -111,6 +127,14 @@ def main() -> int:
                 "for fault qualification on a disposable copied image"
             ),
         )
+        command.add_argument(
+            "--uuid",
+            dest="hardware_uuid",
+            help=(
+                "explicit canonical nonzero QEMU system UUID; durability qualification should "
+                "reuse it across restarts and change it deliberately for cloned-disk tests"
+            ),
+        )
     sub.add_parser("doctor")
     args = parser.parse_args()
 
@@ -136,15 +160,20 @@ def main() -> int:
         print("KVM was explicitly requested but /dev/kvm is unavailable to this process", file=sys.stderr)
         return 2
 
-    command = qemu_command(
-        args.image,
-        args.memory,
-        args.cpus,
-        args.ssh_port,
-        args.seed,
-        args.accel,
-        args.persistent,
-    )
+    try:
+        command = qemu_command(
+            args.image,
+            args.memory,
+            args.cpus,
+            args.ssh_port,
+            args.seed,
+            args.accel,
+            args.persistent,
+            args.hardware_uuid,
+        )
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     print(shlex.join(command), flush=True)
     if args.command == "plan":
         return 0

@@ -7,12 +7,17 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use sha2::{Digest, Sha256};
+
 pub const V09_UPDATE_EVIDENCE_ROOT: &str = "/var/lib/linura-update/v0.9";
 pub const V09_UPDATE_EVIDENCE_PRODUCER_ID: &str = "linura-update-evidence-v09";
 pub const V09_UPDATE_EVIDENCE_PRODUCER_UID: u32 = 0;
 
 const JOURNAL_MAGIC: &str = "linura-update-journal-v2";
-const EVIDENCE_MAGIC: &str = "linura-update-evidence-v2";
+const EVIDENCE_MAGIC: &str = "linura-update-evidence-v3";
+const EVIDENCE_AUTH_KEY_FILE: &str = "evidence-auth.key";
+const EVIDENCE_AUTH_KEY_BYTES: usize = 32;
+const HMAC_BLOCK_BYTES: usize = 64;
 const MAX_JOURNAL_BYTES: u64 = 256 * 1024;
 const MAX_EVIDENCE_BYTES: u64 = 64 * 1024;
 const SNAPSHOT_EVIDENCE_MAX_AGE_MS: u64 = 15 * 60 * 1000;
@@ -342,7 +347,6 @@ enum EvidenceKind {
 }
 
 impl EvidenceKind {
-    #[cfg(test)]
     const fn as_str(self) -> &'static str {
         match self {
             Self::Snapshot => "snapshot",
@@ -372,12 +376,31 @@ struct ParsedEvidence {
     result: String,
 }
 
-#[derive(Clone, Debug)]
 pub struct TrustedUpdateEvidenceVerifier {
     root: PathBuf,
     root_device: u64,
     root_inode: u64,
     root_uid: u32,
+    key: [u8; EVIDENCE_AUTH_KEY_BYTES],
+}
+
+impl std::fmt::Debug for TrustedUpdateEvidenceVerifier {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TrustedUpdateEvidenceVerifier")
+            .field("root", &self.root)
+            .field("root_device", &self.root_device)
+            .field("root_inode", &self.root_inode)
+            .field("root_uid", &self.root_uid)
+            .field("key", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl Drop for TrustedUpdateEvidenceVerifier {
+    fn drop(&mut self) {
+        self.key.fill(0);
+    }
 }
 
 impl TrustedUpdateEvidenceVerifier {
@@ -401,11 +424,13 @@ impl TrustedUpdateEvidenceVerifier {
         if metadata.dev() != supplied_metadata.dev() || metadata.ino() != supplied_metadata.ino() {
             return Err(UpdateError::UntrustedEvidenceRoot);
         }
+        let key = read_evidence_auth_key(&canonical_root, expected_uid)?;
         Ok(Self {
             root: canonical_root,
             root_device: metadata.dev(),
             root_inode: metadata.ino(),
             root_uid: expected_uid,
+            key,
         })
     }
 
@@ -568,7 +593,7 @@ impl TrustedUpdateEvidenceVerifier {
         {
             return Err(UpdateError::UntrustedEvidencePath);
         }
-        parse_evidence(&bytes)
+        parse_evidence(&bytes, &self.key)
     }
 
     fn validate_root_identity(&self) -> Result<(), UpdateError> {
@@ -1453,12 +1478,79 @@ fn parse_journal(bytes: &[u8]) -> Result<UpdateState, UpdateError> {
     Ok(state)
 }
 
-#[cfg(test)]
-fn serialize_evidence(evidence: &ParsedEvidence) -> Vec<u8> {
+fn hmac_sha256(key: &[u8; EVIDENCE_AUTH_KEY_BYTES], payload: &[u8]) -> String {
+    let mut inner_pad = [0x36_u8; HMAC_BLOCK_BYTES];
+    let mut outer_pad = [0x5c_u8; HMAC_BLOCK_BYTES];
+    for (index, byte) in key.iter().enumerate() {
+        inner_pad[index] ^= *byte;
+        outer_pad[index] ^= *byte;
+    }
+    let mut inner = Sha256::new();
+    inner.update(inner_pad);
+    inner.update(payload);
+    let inner_digest = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(outer_pad);
+    outer.update(inner_digest);
+    format!("{:x}", outer.finalize())
+}
+
+fn constant_time_hex_eq(left: &str, right: &str) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.as_bytes()
+        .iter()
+        .zip(right.as_bytes())
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
+}
+
+fn read_evidence_auth_key(
+    root: &Path,
+    expected_uid: u32,
+) -> Result<[u8; EVIDENCE_AUTH_KEY_BYTES], UpdateError> {
+    let path = root.join(EVIDENCE_AUTH_KEY_FILE);
+    let before = fs::symlink_metadata(&path).map_err(io_error)?;
+    if before.file_type().is_symlink()
+        || !before.file_type().is_file()
+        || before.uid() != expected_uid
+        || before.nlink() != 1
+        || before.permissions().mode() & 0o077 != 0
+        || before.len() != EVIDENCE_AUTH_KEY_BYTES as u64
+    {
+        return Err(UpdateError::UntrustedEvidencePath);
+    }
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NOFOLLOW)
+        .open(&path)
+        .map_err(io_error)?;
+    let opened = file.metadata().map_err(io_error)?;
+    if opened.dev() != before.dev()
+        || opened.ino() != before.ino()
+        || opened.uid() != expected_uid
+        || opened.nlink() != 1
+    {
+        return Err(UpdateError::UntrustedEvidencePath);
+    }
+    let mut key = [0_u8; EVIDENCE_AUTH_KEY_BYTES];
+    file.read_exact(&mut key).map_err(io_error)?;
+    let mut trailing = [0_u8; 1];
+    if file.read(&mut trailing).map_err(io_error)? != 0 || key.iter().all(|byte| *byte == 0) {
+        key.fill(0);
+        return Err(UpdateError::UntrustedEvidencePath);
+    }
+    Ok(key)
+}
+
+fn serialize_evidence(evidence: &ParsedEvidence, key: &[u8; EVIDENCE_AUTH_KEY_BYTES]) -> Vec<u8> {
     let issued = evidence
         .issued_unix_ms
         .map_or_else(|| "-".to_owned(), |value| value.to_string());
-    let mut payload = format!(
+    let payload = format!(
         "{EVIDENCE_MAGIC}\nkind={}\nupdate={}\ntarget={}\nsubject={}\nproof={}\ndispatch_generation={}\nissued_unix_ms={}\nsource={}\nresult={}\n",
         evidence.kind.as_str(),
         hex_encode(Some(&evidence.update_id)),
@@ -1470,30 +1562,33 @@ fn serialize_evidence(evidence: &ParsedEvidence) -> Vec<u8> {
         evidence.source,
         evidence.result,
     );
-    let tag = integrity_tag(payload.as_bytes());
-    payload.push_str(&format!("integrity={tag:016x}\n"));
-    payload.into_bytes()
+    let authentication = hmac_sha256(key, payload.as_bytes());
+    format!("{payload}authentication={authentication}\n").into_bytes()
 }
 
-fn parse_evidence(bytes: &[u8]) -> Result<ParsedEvidence, UpdateError> {
+fn parse_evidence(
+    bytes: &[u8],
+    key: &[u8; EVIDENCE_AUTH_KEY_BYTES],
+) -> Result<ParsedEvidence, UpdateError> {
     let text = std::str::from_utf8(bytes)
         .map_err(|_| UpdateError::CorruptEvidence("evidence is not UTF-8".into()))?;
-    let integrity_start = text
-        .rfind("integrity=")
-        .ok_or_else(|| UpdateError::CorruptEvidence("integrity record is missing".into()))?;
-    let (payload, integrity_line) = text.split_at(integrity_start);
-    let expected = integrity_line
-        .strip_prefix("integrity=")
+    let authentication_start = text
+        .rfind("authentication=")
+        .ok_or_else(|| UpdateError::CorruptEvidence("authentication record is missing".into()))?;
+    let (payload, authentication_line) = text.split_at(authentication_start);
+    let expected = authentication_line
+        .strip_prefix("authentication=")
         .and_then(|value| value.strip_suffix('\n'))
-        .ok_or_else(|| UpdateError::CorruptEvidence("invalid integrity record".into()))?;
-    if expected.len() != 16 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(UpdateError::CorruptEvidence("invalid integrity tag".into()));
-    }
-    let expected = u64::from_str_radix(expected, 16)
-        .map_err(|_| UpdateError::CorruptEvidence("invalid integrity tag".into()))?;
-    if integrity_tag(payload.as_bytes()) != expected {
+        .ok_or_else(|| UpdateError::CorruptEvidence("invalid authentication record".into()))?;
+    if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(UpdateError::CorruptEvidence(
-            "integrity tag mismatch".into(),
+            "invalid HMAC-SHA-256 authentication".into(),
+        ));
+    }
+    let observed = hmac_sha256(key, payload.as_bytes());
+    if !constant_time_hex_eq(&observed, expected) {
+        return Err(UpdateError::CorruptEvidence(
+            "evidence authentication mismatch".into(),
         ));
     }
     let mut lines = payload.lines();
@@ -1537,6 +1632,110 @@ fn parse_evidence(bytes: &[u8]) -> Result<ParsedEvidence, UpdateError> {
         source,
         result,
     })
+}
+
+#[cfg(feature = "qualification-harness")]
+pub struct QualificationUpdateEvidenceIssuer {
+    root: PathBuf,
+    key: [u8; EVIDENCE_AUTH_KEY_BYTES],
+}
+
+#[cfg(feature = "qualification-harness")]
+impl std::fmt::Debug for QualificationUpdateEvidenceIssuer {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("QualificationUpdateEvidenceIssuer")
+            .field("root", &self.root)
+            .field("key", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[cfg(feature = "qualification-harness")]
+impl Drop for QualificationUpdateEvidenceIssuer {
+    fn drop(&mut self) {
+        self.key.fill(0);
+    }
+}
+
+#[cfg(feature = "qualification-harness")]
+impl QualificationUpdateEvidenceIssuer {
+    pub fn open_or_create() -> Result<Self, UpdateError> {
+        let root = PathBuf::from(V09_UPDATE_EVIDENCE_ROOT);
+        fs::create_dir_all(&root).map_err(io_error)?;
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).map_err(io_error)?;
+        trusted_evidence_root_metadata(&root, V09_UPDATE_EVIDENCE_PRODUCER_UID)?;
+        let key_path = root.join(EVIDENCE_AUTH_KEY_FILE);
+        if !key_path.exists() {
+            let mut random = fs::File::open("/dev/urandom").map_err(io_error)?;
+            let mut key = [0_u8; EVIDENCE_AUTH_KEY_BYTES];
+            random.read_exact(&mut key).map_err(io_error)?;
+            if key.iter().all(|byte| *byte == 0) {
+                return Err(UpdateError::CorruptEvidence(
+                    "OS random source returned an all-zero evidence key".into(),
+                ));
+            }
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&key_path)
+                .map_err(io_error)?;
+            file.write_all(&key).map_err(io_error)?;
+            file.sync_all().map_err(io_error)?;
+            key.fill(0);
+            fs::File::open(&root)
+                .and_then(|directory| directory.sync_all())
+                .map_err(io_error)?;
+        }
+        let key = read_evidence_auth_key(&root, V09_UPDATE_EVIDENCE_PRODUCER_UID)?;
+        Ok(Self { root, key })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn issue_package_verification(
+        &self,
+        receipt_id: &str,
+        update_id: &str,
+        target_id: &str,
+        transaction_id: &str,
+        observation_id: &str,
+        dispatch_generation: &str,
+    ) -> Result<(), UpdateError> {
+        let receipt_id = normalize_identifier("evidence receipt id", receipt_id.to_owned())?;
+        let evidence = ParsedEvidence {
+            kind: EvidenceKind::PackageVerification,
+            update_id: normalize_identifier("update id", update_id.to_owned())?,
+            target_id: normalize_identifier("update target id", target_id.to_owned())?,
+            subject_id: normalize_identifier("transaction id", transaction_id.to_owned())?,
+            proof_id: normalize_identifier("observation id", observation_id.to_owned())?,
+            dispatch_generation: Some(normalize_identifier(
+                "dispatch generation",
+                dispatch_generation.to_owned(),
+            )?),
+            issued_unix_ms: Some(unix_now_ms()?),
+            source: V09_UPDATE_EVIDENCE_PRODUCER_ID.into(),
+            result: "verified".into(),
+        };
+        let bytes = serialize_evidence(&evidence, &self.key);
+        let path = self.root.join(format!("{receipt_id}.receipt"));
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(io_error(error)),
+        }
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(io_error)?;
+        file.write_all(&bytes).map_err(io_error)?;
+        file.sync_all().map_err(io_error)?;
+        fs::File::open(&self.root)
+            .and_then(|directory| directory.sync_all())
+            .map_err(io_error)
+    }
 }
 
 fn parse_field<'a>(line: Option<&'a str>, name: &str) -> Result<&'a str, UpdateError> {
@@ -1634,11 +1833,19 @@ mod tests {
         (dir, coordinator)
     }
 
+    const TEST_EVIDENCE_KEY: [u8; EVIDENCE_AUTH_KEY_BYTES] = [0x6b; EVIDENCE_AUTH_KEY_BYTES];
+
     fn evidence_root(dir: &TestDir) -> PathBuf {
         let root = dir.path().join("trusted-evidence");
         fs::create_dir_all(&root).unwrap_or_else(|error| unreachable!("{error}"));
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
             .unwrap_or_else(|error| unreachable!("{error}"));
+        let key_path = root.join(EVIDENCE_AUTH_KEY_FILE);
+        if !key_path.exists() {
+            fs::write(&key_path, TEST_EVIDENCE_KEY).unwrap_or_else(|error| unreachable!("{error}"));
+            fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600))
+                .unwrap_or_else(|error| unreachable!("{error}"));
+        }
         root
     }
 
@@ -1668,7 +1875,7 @@ mod tests {
             result: result.into(),
         };
         let path = root.join(format!("{receipt_id}.receipt"));
-        fs::write(&path, serialize_evidence(&evidence))
+        fs::write(&path, serialize_evidence(&evidence, &TEST_EVIDENCE_KEY))
             .unwrap_or_else(|error| unreachable!("{error}"));
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
             .unwrap_or_else(|error| unreachable!("{error}"));

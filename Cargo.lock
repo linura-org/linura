@@ -496,10 +496,14 @@ dependencies = [
  "linura-core",
  "linura-dbus",
  "linura-executor-systemd",
+ "linura-intent",
+ "linura-library",
  "linura-linux-observation",
+ "linura-migrations",
  "linura-observation",
  "linura-observation-control",
  "linura-persistence-sqlite",
+ "linura-planner",
  "linura-protocol",
  "linura-provider-sdk",
  "linura-transaction",
@@ -640,6 +644,10 @@ dependencies = [
 [[package]]
 name = "linura-migrations"
 version = "0.8.0"
+dependencies = [
+ "rusqlite",
+ "sha2",
+]
 
 [[package]]
 name = "linura-observation"
@@ -753,6 +761,9 @@ dependencies = [
 [[package]]
 name = "linura-update"
 version = "0.8.0"
+dependencies = [
+ "sha2",
+]
 
 [[package]]
 name = "linura-update-guard"
