@@ -310,7 +310,7 @@ remote 'for unit in ssh.service sshd.service ssh.socket sshd.socket; do sudo -n 
 # transport owns the listener before any product stage is advanced.
 if (( V09_BOUNDARY_START > 1 )); then
   power_cycle "qualification-transport-handoff"
-  remote 'set -e; sudo -n systemctl is-active --quiet linura-qualification-transport.service; for unit in ssh.socket sshd.socket ssh.service sshd.service; do ! sudo -n systemctl is-active --quiet "$unit"; done'
+  remote 'set -e; sudo -n systemctl is-active --quiet linura-qualification-transport.service; for unit in ssh.socket sshd.socket ssh.service sshd.service; do if sudo -n systemctl is-active --quiet "$unit"; then printf "canonical SSH unit remained active after handoff: %s\n" "$unit" >&2; exit 1; fi; done'
 fi
 
 if ! remote 'command -v nft >/dev/null 2>&1'; then

@@ -25,7 +25,12 @@ class V09AdversarialTransportContractTests(unittest.TestCase):
             "systemctl is-active --quiet linura-qualification-transport.service",
             handoff,
         )
-        self.assertIn('! sudo -n systemctl is-active --quiet "$unit"', handoff)
+        self.assertIn(
+            'if sudo -n systemctl is-active --quiet "$unit"',
+            handoff,
+        )
+        self.assertIn("canonical SSH unit remained active after handoff", handoff)
+        self.assertIn("exit 1", handoff)
         self.assertNotIn("systemctl stop", handoff)
         self.assertNotIn("enable --now", handoff)
 
