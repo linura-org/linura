@@ -92,28 +92,42 @@ run_security_baseline_step() {
   local status_path="$ROOT/q8-${V09_SHARD_ID}.status"
   local transient_unit="linura-v09-q8-${V09_SHARD_ID}"
   local ready=0
+  local result=""
   local output=""
   local status=""
 
   # Schedule the Q8 observation before taking the qualification transport down.
   # The timer lets this SSH command return cleanly, so the security verifier is
   # genuinely out-of-band from the SSH listener it is required to reject.
-  remote "sudo -n rm -f '$output_path' '$status_path'; sudo -n systemd-run --quiet --unit='$transient_unit' --on-active=2s /bin/bash -c 'set +e; systemctl disable --now linura-qualification-transport.service >/dev/null 2>&1; systemctl mask --runtime ssh.service sshd.service ssh.socket sshd.socket >/dev/null 2>&1 || true; /usr/local/bin/linura-firstboot --durable-bootstrap-step \"$PRODUCTION_ROOT\" \"$LINURA_FIRSTBOOT_SHA\" >\"$output_path\" 2>&1; status=\$?; systemctl unmask --runtime ssh.service sshd.service ssh.socket sshd.socket >/dev/null 2>&1 || true; systemctl enable --now linura-qualification-transport.service >/dev/null 2>&1; restore=\$?; if [ \"\$status\" -eq 0 ] && [ \"\$restore\" -ne 0 ]; then status=\$restore; fi; printf \"%s\\n\" \"\$status\" >\"$status_path\"; exit 0' >/dev/null"
+  # Canonical SSH units stay runtime-masked for the remainder of this boot: they
+  # are product transport, not qualification transport, and unmasking them here
+  # creates a listener-ownership race immediately after the Q8 observation.
+  remote "sudo -n rm -f '$output_path' '$status_path'; sudo -n systemd-run --quiet --unit='$transient_unit' --on-active=2s /bin/bash -c 'set +e; systemctl disable --now linura-qualification-transport.service >/dev/null 2>&1; systemctl mask --runtime ssh.service sshd.service ssh.socket sshd.socket >/dev/null 2>&1 || true; /usr/local/bin/linura-firstboot --durable-bootstrap-step \"$PRODUCTION_ROOT\" \"$LINURA_FIRSTBOOT_SHA\" >\"$output_path\" 2>&1; status=\$?; systemctl enable --now linura-qualification-transport.service >/dev/null 2>&1; restore=\$?; stable=0; if [ \"\$restore\" -eq 0 ]; then for _ in \$(seq 1 20); do if systemctl is-active --quiet linura-qualification-transport.service; then stable=\$((stable + 1)); else stable=0; fi; [ \"\$stable\" -ge 5 ] && break; sleep 0.2; done; [ \"\$stable\" -ge 5 ] || restore=1; fi; if [ \"\$status\" -eq 0 ] && [ \"\$restore\" -ne 0 ]; then status=\$restore; fi; printf \"%s\\n\" \"\$status\" >\"$status_path\"; exit 0' >/dev/null"
 
+  # Read the completion marker and command output atomically over the first
+  # successfully restored SSH connection. This avoids a TOCTOU window where a
+  # readiness probe succeeds and a second immediate connection races transport
+  # stabilization.
   for _ in $(seq 1 120); do
     sleep 2
-    if remote "sudo -n test -s '$status_path'" >/dev/null 2>&1; then
+    if result="$(remote "sudo -n sh -c 'test -s \"$status_path\" && { cat \"$status_path\"; printf \"__LINURA_Q8_OUTPUT__\\n\"; cat \"$output_path\"; }'" 2>/dev/null)"; then
       ready=1
       break
     fi
   done
   if [[ "$ready" != 1 ]]; then
-    echo "isolated Q8 step did not restore the qualification transport" >&2
+    echo "isolated Q8 step did not restore a stable qualification transport" >&2
     return 1
   fi
 
-  output="$(remote "sudo -n cat '$output_path'")"
-  status="$(remote "sudo -n cat '$status_path'")"
+  status="${result%%$'\n'*}"
+  output="${result#*$'\n'}"
+  if [[ "$output" != __LINURA_Q8_OUTPUT__* ]]; then
+    echo "isolated Q8 result framing is invalid" >&2
+    return 1
+  fi
+  output="${output#__LINURA_Q8_OUTPUT__}"
+  output="${output#$'\n'}"
   printf '%s\n' "$output"
   if [[ ! "$status" =~ ^[0-9]+$ || "$status" -ne 0 ]]; then
     echo "isolated Q8 step failed with status=${status:-invalid}" >&2
