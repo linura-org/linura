@@ -191,10 +191,7 @@ fn os_release_value(text: &str, key: &str) -> Option<String> {
     })
 }
 
-fn parse_revision_reference<'a>(
-    value: &'a str,
-    prefix: &str,
-) -> Result<(&'a str, u32), String> {
+fn parse_revision_reference<'a>(value: &'a str, prefix: &str) -> Result<(&'a str, u32), String> {
     let value = value
         .strip_prefix(prefix)
         .ok_or_else(|| format!("manifest reference must begin with {prefix}"))?;
@@ -265,9 +262,18 @@ mod tests {
 
     #[test]
     fn qemu_tcg_and_kvm_are_not_conflated() {
-        assert_eq!(virtualization_from_name("qemu"), VirtualizationKind::QemuTcg);
+        assert_eq!(
+            virtualization_from_name("qemu"),
+            VirtualizationKind::QemuTcg
+        );
         assert_eq!(virtualization_from_name("kvm"), VirtualizationKind::QemuKvm);
-        assert_eq!(virtualization_from_name("none"), VirtualizationKind::BareMetal);
-        assert_eq!(virtualization_from_name("vmware"), VirtualizationKind::Other);
+        assert_eq!(
+            virtualization_from_name("none"),
+            VirtualizationKind::BareMetal
+        );
+        assert_eq!(
+            virtualization_from_name("vmware"),
+            VirtualizationKind::Other
+        );
     }
 }
