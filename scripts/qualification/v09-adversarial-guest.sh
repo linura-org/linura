@@ -87,6 +87,41 @@ remote() {
   ssh "${SSH_COMMON[@]}" -p "$SSH_PORT" "$SSH_USER@127.0.0.1" "$1"
 }
 
+run_security_baseline_step() {
+  local output_path="$ROOT/q8-${V09_SHARD_ID}.out"
+  local status_path="$ROOT/q8-${V09_SHARD_ID}.status"
+  local transient_unit="linura-v09-q8-${V09_SHARD_ID}"
+  local ready=0
+  local output=""
+  local status=""
+
+  # Schedule the Q8 observation before taking the qualification transport down.
+  # The timer lets this SSH command return cleanly, so the security verifier is
+  # genuinely out-of-band from the SSH listener it is required to reject.
+  remote "sudo -n rm -f '$output_path' '$status_path'; sudo -n systemd-run --quiet --unit='$transient_unit' --on-active=2s /bin/bash -c 'set +e; systemctl disable --now linura-qualification-transport.service >/dev/null 2>&1; systemctl mask --runtime ssh.service sshd.service ssh.socket sshd.socket >/dev/null 2>&1 || true; /usr/local/bin/linura-firstboot --durable-bootstrap-step \"$PRODUCTION_ROOT\" \"$LINURA_FIRSTBOOT_SHA\" >\"$output_path\" 2>&1; status=\$?; systemctl unmask --runtime ssh.service sshd.service ssh.socket sshd.socket >/dev/null 2>&1 || true; systemctl enable --now linura-qualification-transport.service >/dev/null 2>&1; restore=\$?; if [ \"\$status\" -eq 0 ] && [ \"\$restore\" -ne 0 ]; then status=\$restore; fi; printf \"%s\\n\" \"\$status\" >\"$status_path\"; exit 0' >/dev/null"
+
+  for _ in $(seq 1 120); do
+    sleep 2
+    if remote "sudo -n test -s '$status_path'" >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+  done
+  if [[ "$ready" != 1 ]]; then
+    echo "isolated Q8 step did not restore the qualification transport" >&2
+    return 1
+  fi
+
+  output="$(remote "sudo -n cat '$output_path'")"
+  status="$(remote "sudo -n cat '$status_path'")"
+  printf '%s\n' "$output"
+  if [[ ! "$status" =~ ^[0-9]+$ || "$status" -ne 0 ]]; then
+    echo "isolated Q8 step failed with status=${status:-invalid}" >&2
+    remote 'sudo -n systemctl list-unit-files --type=service --type=socket --no-legend --no-pager | grep -Ei "ssh|dropbear" || true; sudo -n systemctl list-units --all --type=service --type=socket --no-legend --no-pager | grep -Ei "ssh|dropbear" || true; sudo -n nft list ruleset || true' >&2 || true
+    return 1
+  fi
+}
+
 start_guest() {
   local hardware_uuid="$1"
   local label="$2"
@@ -307,7 +342,7 @@ fi
 if (( V09_BOUNDARY_START > 1 )); then
   for boundary in $(seq 1 $((V09_BOUNDARY_START - 1))); do
     if [[ "$boundary" -eq 4 ]]; then
-      remote "set -e; sudo -n systemctl disable --now linura-qualification-transport.service >/dev/null; sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-step '$PRODUCTION_ROOT' '$LINURA_FIRSTBOOT_SHA'; sudo -n systemctl enable --now linura-qualification-transport.service >/dev/null" >/dev/null
+      run_security_baseline_step >/dev/null
     else
       remote "sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-step '$PRODUCTION_ROOT' '$LINURA_FIRSTBOOT_SHA'" >/dev/null
     fi
@@ -341,7 +376,7 @@ for boundary in $(seq "$V09_BOUNDARY_START" "$V09_BOUNDARY_END"); do
   esac
 
   if [[ "$boundary" -eq 12 ]]; then
-    remote "sudo -n pkill -KILL -u linura-preparer >/dev/null 2>&1 || true; sudo -n usermod -G '' linura-preparer; sudo -n passwd -l linura-preparer >/dev/null; sudo -n rm -rf /home/linura-preparer/.ssh; for file in /etc/sudoers /etc/sudoers.d/*; do [ -f "\$file" ] || continue; sudo -n sed -i '/^linura-preparer[[:space:]]/d' "\$file"; done"
+    remote "sudo -n pkill -KILL -u linura-preparer >/dev/null 2>&1 || true; sudo -n usermod -G '' linura-preparer; sudo -n passwd -l linura-preparer >/dev/null; sudo -n rm -rf /home/linura-preparer/.ssh; for file in /etc/sudoers /etc/sudoers.d/*; do [ -f \"\$file\" ] || continue; sudo -n sed -i '/^linura-preparer[[:space:]]/d' \"\$file\"; done"
     if ssh "${SSH_COMMON[@]}" -p "$SSH_PORT" linura-preparer@127.0.0.1 true >/dev/null 2>&1; then
       echo 'revoked preparer unexpectedly retained SSH access' >&2
       exit 1
@@ -349,7 +384,7 @@ for boundary in $(seq "$V09_BOUNDARY_START" "$V09_BOUNDARY_END"); do
     remote "sudo -n /usr/local/bin/linura-bootstrap-qualification authorize-preparer-revocation '$PRODUCTION_ROOT'" | tee -a "$TRANSCRIPT"
   fi
   if [[ "$boundary" -eq 4 ]]; then
-    remote "set -e; sudo -n systemctl disable --now linura-qualification-transport.service >/dev/null; sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-step '$PRODUCTION_ROOT' '$LINURA_FIRSTBOOT_SHA'; sudo -n systemctl enable --now linura-qualification-transport.service >/dev/null" | tee -a "$TRANSCRIPT"
+    run_security_baseline_step | tee -a "$TRANSCRIPT"
   else
     remote "sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-step '$PRODUCTION_ROOT' '$LINURA_FIRSTBOOT_SHA'" | tee -a "$TRANSCRIPT"
   fi
