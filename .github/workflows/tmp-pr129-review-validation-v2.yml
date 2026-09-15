@@ -1,0 +1,52 @@
+name: tmp PR 129 review validation v2
+
+on:
+  push:
+    branches:
+      - tmp/pr129-review-validation
+    paths:
+      - tools/tmp_pr129_review_patch.py
+      - .github/workflows/tmp-pr129-review-validation-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tmp/pr129-review-validation
+          fetch-depth: 0
+
+      - name: Apply isolated product patch
+        run: python3 tools/tmp_pr129_review_patch.py
+
+      - name: Validate patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/qualification/v09-adversarial-guest.sh
+          cargo fmt --all
+          git diff --check
+          python3 -m unittest tests.tooling.test_v09_final_review_contract
+          cargo check -p linura-firstboot --bin linura-firstboot
+          cargo test -p linura-bootstrap --lib
+          cargo test -p linura-library --lib
+
+      - name: Commit validated product changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            .github/workflows/v09-qualification.yml \
+            apps/linura-firstboot/src/main.rs \
+            crates/linura-bootstrap/src/durable/verification.rs \
+            crates/linura-library/src/store.rs \
+            scripts/qualification/v09-adversarial-guest.sh \
+            tests/tooling/test_v09_final_review_contract.py
+          git commit -m "fix(v0.9): close final bootstrap review gaps"
+          git push origin HEAD:tmp/pr129-review-validation
