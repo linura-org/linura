@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod bootstrap_runtime;
+
 use linura_bootstrap::durable::{
     BootstrapResumeDecision, BootstrapStateStore, DurableBootstrapCoordinator,
     OwnerEnrollmentAuthorityVerifier, OwnerEnrollmentState,
@@ -361,7 +363,7 @@ fn execute_prepared_stage(
     operation_id: &str,
 ) -> Result<(), String> {
     if !stage_has_effect(stage) {
-        return execute_non_effect_stage(coordinator, stage, operation_id);
+        return execute_non_effect_stage(root, coordinator, stage, operation_id);
     }
     coordinator
         .mark_effect_started(operation_id)
@@ -387,6 +389,7 @@ fn execute_prepared_stage(
 }
 
 fn execute_non_effect_stage(
+    root: &Path,
     coordinator: &mut DurableBootstrapCoordinator,
     stage: BootstrapStage,
     operation_id: &str,
@@ -400,10 +403,20 @@ fn execute_non_effect_stage(
                     .map_err(display_string)?;
             }
         }
-        BootstrapStage::HardwareDiscovery
-        | BootstrapStage::SourceSelection
-        | BootstrapStage::TargetObservation
-        | BootstrapStage::FirstBootPlanning => verify_candidate_environment()?,
+        BootstrapStage::HardwareDiscovery => verify_candidate_environment()?,
+        BootstrapStage::SourceSelection => {
+            verify_candidate_environment()?;
+            bootstrap_runtime::verify_manifest_source_selection(root, coordinator)?;
+        }
+        BootstrapStage::TargetObservation => {
+            verify_candidate_environment()?;
+            bootstrap_runtime::verify_manifest_target_binding(coordinator)?;
+        }
+        BootstrapStage::FirstBootPlanning => {
+            verify_candidate_environment()?;
+            bootstrap_runtime::verify_manifest_source_selection(root, coordinator)?;
+            bootstrap_runtime::verify_manifest_target_binding(coordinator)?;
+        }
         BootstrapStage::FirstBootReady => {
             if coordinator.state().provisioning().owner_enrollment()
                 == OwnerEnrollmentState::Unresolved
@@ -786,21 +799,7 @@ fn read_protected_identity_file(
 }
 
 fn verify_candidate_environment() -> Result<(), String> {
-    QualificationEnvironment::v09_candidate()
-        .validate_contract()
-        .map_err(|error| format!("qualification environment contract failed: {error:?}"))?;
-    let os_release = fs::read_to_string("/etc/os-release").map_err(io_string)?;
-    if !os_release.lines().any(|line| line == "ID=ubuntu")
-        || !os_release
-            .lines()
-            .any(|line| line == "VERSION_ID=\"24.04\"")
-    {
-        return Err("running system is not the bounded Ubuntu 24.04 v0.9 environment".into());
-    }
-    if std::env::consts::ARCH != "x86_64" {
-        return Err("running system is not x86_64".into());
-    }
-    Ok(())
+    bootstrap_runtime::verify_candidate_environment()
 }
 
 fn verify_protected_root(root: &Path) -> Result<(), String> {
