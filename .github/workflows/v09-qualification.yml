@@ -273,7 +273,7 @@ jobs:
           shutil.copy2(checksum_path, qualification_root / checksum_path.name)
           shutil.copy2(adversarial_path, qualification_root / adversarial_path.name)
           shutil.copy2(adversarial_checksum, qualification_root / adversarial_checksum.name)
-          shutil.copy2(adversarial_transcript, qualification_root / adversarial_transcript_name)
+          shutil.copy2(adversarial_transcript, qualification_root / transcript_name)
 
           receipt = {
               "schema_version": 2,
