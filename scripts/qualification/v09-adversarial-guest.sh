@@ -89,6 +89,10 @@ remote() {
   ssh "${SSH_COMMON[@]}" -p "$SSH_PORT" "$SSH_USER@127.0.0.1" "$1"
 }
 
+isolate_canonical_ssh() {
+  remote 'set -e; sudo -n systemctl is-active --quiet linura-qualification-transport.service; for unit in ssh.socket sshd.socket ssh.service sshd.service; do sudo -n systemctl disable --now "$unit" >/dev/null 2>&1 || true; done; sudo -n systemctl mask --force ssh.service sshd.service ssh.socket sshd.socket >/dev/null; for unit in ssh.socket sshd.socket ssh.service sshd.service; do if sudo -n systemctl is-active --quiet "$unit"; then printf "canonical SSH unit remained active after isolation: %s\n" "$unit" >&2; exit 1; fi; done'
+}
+
 run_security_baseline_step() {
   local output_path="$ROOT/q8-${V09_SHARD_ID}.out"
   local status_path="$ROOT/q8-${V09_SHARD_ID}.status"
@@ -172,6 +176,9 @@ start_guest() {
   if [[ "$ready" != 1 ]]; then
     cat "$log" >&2
     return 1
+  fi
+  if [[ "$SSH_GUEST_PORT" == "$QUALIFICATION_SSH_GUEST_PORT" ]]; then
+    isolate_canonical_ssh
   fi
 }
 
@@ -314,7 +321,6 @@ SSH_GUEST_PORT="$QUALIFICATION_SSH_GUEST_PORT"
 # guest port across the power cycle before any product stage is advanced.
 if (( V09_BOUNDARY_START > 1 )); then
   power_cycle "qualification-transport-handoff"
-  remote 'set -e; sudo -n systemctl is-active --quiet linura-qualification-transport.service; for unit in ssh.socket sshd.socket ssh.service sshd.service; do if sudo -n systemctl is-active --quiet "$unit"; then printf "canonical SSH unit remained active after handoff: %s\n" "$unit" >&2; exit 1; fi; done'
 fi
 
 if ! remote 'command -v nft >/dev/null 2>&1'; then

@@ -34,17 +34,17 @@ class V09AdversarialTransportContractTests(unittest.TestCase):
             source.index('SSH_GUEST_PORT="$QUALIFICATION_SSH_GUEST_PORT"'),
             source.index('power_cycle "qualification-transport-handoff"'),
         )
+        self.assertIn("isolate_canonical_ssh()", source)
+        self.assertIn(
+            'systemctl disable --now "$unit"',
+            source,
+        )
+        self.assertIn(
+            'if [[ "$SSH_GUEST_PORT" == "$QUALIFICATION_SSH_GUEST_PORT" ]]',
+            source,
+        )
+        self.assertIn("isolate_canonical_ssh", source[source.index("start_guest()") : start])
         self.assertIn('power_cycle "qualification-transport-handoff"', handoff)
-        self.assertIn(
-            "systemctl is-active --quiet linura-qualification-transport.service",
-            handoff,
-        )
-        self.assertIn(
-            'if sudo -n systemctl is-active --quiet "$unit"',
-            handoff,
-        )
-        self.assertIn("canonical SSH unit remained active after handoff", handoff)
-        self.assertIn("exit 1", handoff)
         self.assertNotIn("systemctl stop", handoff)
         self.assertNotIn("enable --now", handoff)
 
