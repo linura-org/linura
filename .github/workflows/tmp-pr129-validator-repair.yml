@@ -1,0 +1,52 @@
+name: tmp PR 129 validator repair
+
+on:
+  push:
+    branches:
+      - tmp/pr129-review-validation
+    paths:
+      - .github/workflows/tmp-pr129-validator-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tmp/pr129-review-validation
+      - name: Repair whitespace-sensitive matcher
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/tmp-pr129-review-validation.yml')
+          source = path.read_text()
+          start_marker = '          # Review: stock systemd aliases are discovery candidates, but alias/indirect\n'
+          end_marker = "          old_tcp = r'''fn tcp22_listening"
+          start = source.index(start_marker)
+          end = source.index(end_marker, start)
+          replacement = '''          # Review: stock systemd aliases are discovery candidates, but alias/indirect
+          # are not themselves boot-enablement states. Runtime state remains checked.
+          p = Path("crates/linura-bootstrap/src/durable/verification.rs")
+          source = p.read_text()
+          old_states = '"enabled" | "enabled-runtime" | "linked" | "linked-runtime" | "alias" | "indirect"'
+          if source.count(old_states) != 2:
+              raise SystemExit(
+                  f"crates/linura-bootstrap/src/durable/verification.rs: expected two enable-state matches, found {source.count(old_states)}"
+              )
+          p.write_text(source.replace(old_states, '"enabled" | "enabled-runtime"'))
+
+'''
+          path.write_text(source[:start] + replacement + source[end:])
+          PY
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/tmp-pr129-review-validation.yml
+          git commit -m "chore: harden isolated PR 129 validator"
+          git push origin HEAD:tmp/pr129-review-validation
