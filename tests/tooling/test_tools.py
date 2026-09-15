@@ -101,6 +101,21 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("q35,accel=tcg", result.stdout)
         self.assertIn("-cpu max", result.stdout)
 
+    def test_vm_plan_can_forward_to_a_dedicated_guest_ssh_port(self) -> None:
+        result = self.run_tool(
+            "python3",
+            "tools/vm.py",
+            "plan",
+            "--image",
+            "/tmp/linura.qcow2",
+            "--ssh-port",
+            "2224",
+            "--ssh-guest-port",
+            "2222",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("hostfwd=tcp:127.0.0.1:2224-:2222", result.stdout)
+
     def test_vm_acceptance_uses_pinned_released_base_image(self) -> None:
         workflow = (ROOT / ".github/workflows/vm-acceptance.yml").read_text(encoding="utf-8")
         url_match = re.search(r"^\s*BASE_IMAGE_URL:\s*(\S+)\s*$", workflow, re.MULTILINE)

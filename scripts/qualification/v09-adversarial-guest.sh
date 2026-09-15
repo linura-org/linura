@@ -42,6 +42,8 @@ if [[ "$V09_FINAL_SHARD" == true && "$V09_BOUNDARY_END" != 13 ]]; then
 fi
 
 SSH_PORT=2224
+SSH_GUEST_PORT=22
+QUALIFICATION_SSH_GUEST_PORT=2222
 SSH_USER=linura-qualification
 VM_IMAGE="$RUNNER_TEMP/linura-v09-adversarial-${V09_SHARD_ID}.qcow2"
 SEED_IMAGE="$RUNNER_TEMP/linura-v09-adversarial-${V09_SHARD_ID}-seed.img"
@@ -148,6 +150,7 @@ start_guest() {
     --image "$VM_IMAGE" \
     --seed "$SEED_IMAGE" \
     --ssh-port "$SSH_PORT" \
+    --ssh-guest-port "$SSH_GUEST_PORT" \
     --accel tcg \
     --persistent \
     --uuid "$hardware_uuid" \
@@ -289,7 +292,7 @@ Wants=network-online.target
 Type=simple
 RuntimeDirectory=sshd
 RuntimeDirectoryMode=0755
-ExecStart=/usr/sbin/sshd -D -e -o PasswordAuthentication=no -o PermitRootLogin=no -o PidFile=/run/linura-qualification-sshd.pid
+ExecStart=/usr/sbin/sshd -D -e -p 2222 -o PasswordAuthentication=no -o PermitRootLogin=no -o PidFile=/run/linura-qualification-sshd.pid
 Restart=on-failure
 RestartSec=1
 KillMode=process
@@ -299,15 +302,16 @@ WantedBy=multi-user.target
 EOF
 )"
 install_text_file /etc/systemd/system/linura-qualification-transport.service 0644 "$transport_unit"
-remote 'sudo -n systemctl daemon-reload && sudo -n systemctl enable linura-qualification-transport.service >/dev/null'
+remote 'sudo -n systemctl daemon-reload && sudo -n systemctl enable --now linura-qualification-transport.service >/dev/null && sudo -n systemctl is-active --quiet linura-qualification-transport.service'
 remote 'for unit in ssh.service sshd.service ssh.socket sshd.socket; do sudo -n systemctl disable "$unit" >/dev/null 2>&1 || true; done; sudo -n systemctl mask --force ssh.service sshd.service ssh.socket sshd.socket >/dev/null'
+SSH_GUEST_PORT="$QUALIFICATION_SSH_GUEST_PORT"
 
 # Non-primary shards fast-forward instead of crossing the primary shard's early
 # clone power-cycle. Move them onto the qualification-only transport through a
-# pre-bootstrap power-cycle of their own. A live listener swap cannot be made
-# reliable from the SSH session whose parent daemon is being stopped. On the
-# next boot the canonical units are disabled and the already-enabled isolated
-# transport owns the listener before any product stage is advanced.
+# pre-bootstrap power-cycle of their own. The isolated daemon listens on a
+# dedicated guest port, so Ubuntu's canonical socket/generator path cannot race
+# it for port 22 during boot. QEMU changes the existing host forward to that
+# guest port across the power cycle before any product stage is advanced.
 if (( V09_BOUNDARY_START > 1 )); then
   power_cycle "qualification-transport-handoff"
   remote 'set -e; sudo -n systemctl is-active --quiet linura-qualification-transport.service; for unit in ssh.socket sshd.socket ssh.service sshd.service; do if sudo -n systemctl is-active --quiet "$unit"; then printf "canonical SSH unit remained active after handoff: %s\n" "$unit" >&2; exit 1; fi; done'
@@ -323,7 +327,7 @@ table inet linura {
     type filter hook input priority 0; policy drop;
     iifname "lo" accept
     ct state established,related accept
-    tcp dport 22 accept comment "qualification-only transport"
+    tcp dport { 22, 2222 } accept comment "qualification bootstrap and isolated transport"
   }
   chain forward {
     type filter hook forward priority 0; policy drop;

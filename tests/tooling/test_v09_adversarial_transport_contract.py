@@ -26,6 +26,14 @@ class V09AdversarialTransportContractTests(unittest.TestCase):
 
         self.assertIn(persistent_mask, source)
         self.assertLess(source.index(persistent_mask), start)
+        self.assertIn("QUALIFICATION_SSH_GUEST_PORT=2222", source)
+        self.assertIn('--ssh-guest-port "$SSH_GUEST_PORT"', source)
+        self.assertIn("/usr/sbin/sshd -D -e -p 2222", source)
+        self.assertIn('SSH_GUEST_PORT="$QUALIFICATION_SSH_GUEST_PORT"', source)
+        self.assertLess(
+            source.index('SSH_GUEST_PORT="$QUALIFICATION_SSH_GUEST_PORT"'),
+            source.index('power_cycle "qualification-transport-handoff"'),
+        )
         self.assertIn('power_cycle "qualification-transport-handoff"', handoff)
         self.assertIn(
             "systemctl is-active --quiet linura-qualification-transport.service",

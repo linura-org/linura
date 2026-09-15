@@ -60,6 +60,7 @@ def qemu_command(
     acceleration: str = "auto",
     persistent: bool = False,
     hardware_uuid: str | None = None,
+    ssh_guest_port: int = 22,
 ) -> list[str]:
     resolved_acceleration = resolve_acceleration(acceleration)
     hardware_uuid = validate_uuid(hardware_uuid)
@@ -88,7 +89,10 @@ def qemu_command(
     command.extend(
         [
             "-nic",
-            f"user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:{ssh_port}-:22",
+            (
+                "user,model=virtio-net-pci,"
+                f"hostfwd=tcp:127.0.0.1:{ssh_port}-:{ssh_guest_port}"
+            ),
             "-display",
             "none",
             "-serial",
@@ -113,6 +117,12 @@ def main() -> int:
         command.add_argument("--memory", type=int, default=4096)
         command.add_argument("--cpus", type=int, default=4)
         command.add_argument("--ssh-port", type=int, default=2222)
+        command.add_argument(
+            "--ssh-guest-port",
+            type=int,
+            default=22,
+            help="guest TCP port reached by the host SSH forward",
+        )
         command.add_argument(
             "--accel",
             choices=ACCELERATORS,
@@ -170,6 +180,7 @@ def main() -> int:
             args.accel,
             args.persistent,
             args.hardware_uuid,
+            args.ssh_guest_port,
         )
     except ValueError as error:
         print(str(error), file=sys.stderr)
