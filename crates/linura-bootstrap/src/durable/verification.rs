@@ -619,25 +619,96 @@ fn ssh_unit_exposes_runtime_or_boot(properties: &str) -> bool {
     })
 }
 
-fn tcp22_listening(path: &Path) -> Result<bool, DurableBootstrapError> {
-    let text = fs::read_to_string(path).map_err(DurableBootstrapError::Io)?;
+fn tcp_listener_inodes_from_text(
+    text: &str,
+) -> Result<std::collections::BTreeSet<u64>, DurableBootstrapError> {
+    let mut listeners = std::collections::BTreeSet::new();
     for line in text.lines().skip(1) {
-        let fields = line.split_ascii_whitespace().collect::<Vec<_>>();
-        if fields.len() < 4 || fields[3] != "0A" {
+        if line.trim().is_empty() {
             continue;
         }
-        let Some((_, port)) = fields[1].rsplit_once(':') else {
+        let fields = line.split_ascii_whitespace().collect::<Vec<_>>();
+        if fields.len() < 10 {
             return Err(DurableBootstrapError::InvalidVerificationEvidence(
                 "kernel TCP listener table is malformed",
             ));
-        };
-        let port = u16::from_str_radix(port, 16).map_err(|_| {
+        }
+        if fields[3] != "0A" {
+            continue;
+        }
+        let inode = fields[9].parse::<u64>().map_err(|_| {
             DurableBootstrapError::InvalidVerificationEvidence(
-                "kernel TCP listener port is malformed",
+                "kernel TCP listener inode is malformed",
             )
         })?;
-        if port == 22 {
-            return Ok(true);
+        if inode == 0 {
+            return Err(DurableBootstrapError::InvalidVerificationEvidence(
+                "kernel TCP listener inode is missing",
+            ));
+        }
+        listeners.insert(inode);
+    }
+    Ok(listeners)
+}
+
+fn tcp_listener_inodes(
+    path: &Path,
+) -> Result<std::collections::BTreeSet<u64>, DurableBootstrapError> {
+    let text = fs::read_to_string(path).map_err(DurableBootstrapError::Io)?;
+    tcp_listener_inodes_from_text(&text)
+}
+
+fn ssh_server_process(process: &Path) -> Result<bool, DurableBootstrapError> {
+    let comm = match fs::read_to_string(process.join("comm")) {
+        Ok(value) => value,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(DurableBootstrapError::Io(error)),
+    };
+    Ok(matches!(comm.trim(), "sshd" | "dropbear" | "tinysshd"))
+}
+
+fn socket_inode(path: &Path) -> Option<u64> {
+    let target = path.to_str()?;
+    target
+        .strip_prefix("socket:[")?
+        .strip_suffix(']')?
+        .parse::<u64>()
+        .ok()
+}
+
+fn ssh_listener_running() -> Result<bool, DurableBootstrapError> {
+    let mut listeners = tcp_listener_inodes(Path::new("/proc/net/tcp"))?;
+    listeners.extend(tcp_listener_inodes(Path::new("/proc/net/tcp6"))?);
+    if listeners.is_empty() {
+        return Ok(false);
+    }
+
+    for entry in fs::read_dir("/proc").map_err(DurableBootstrapError::Io)? {
+        let entry = entry.map_err(DurableBootstrapError::Io)?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue; };
+        if !name.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        let process = entry.path();
+        if !ssh_server_process(&process)? {
+            continue;
+        }
+        let descriptors = match fs::read_dir(process.join("fd")) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(DurableBootstrapError::Io(error)),
+        };
+        for descriptor in descriptors {
+            let descriptor = descriptor.map_err(DurableBootstrapError::Io)?;
+            let target = match fs::read_link(descriptor.path()) {
+                Ok(target) => target,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(DurableBootstrapError::Io(error)),
+            };
+            if socket_inode(&target).is_some_and(|inode| listeners.contains(&inode)) {
+                return Ok(true);
+            }
         }
     }
     Ok(false)
@@ -670,8 +741,7 @@ fn ssh_enabled() -> Result<bool, DurableBootstrapError> {
             return Ok(true);
         }
     }
-    Ok(tcp22_listening(Path::new("/proc/net/tcp"))?
-        || tcp22_listening(Path::new("/proc/net/tcp6"))?)
+    ssh_listener_running()
 }
 
 fn firewall_default_deny() -> Result<bool, DurableBootstrapError> {
@@ -1140,6 +1210,20 @@ mod effect_verifier_tests {
             }
         "#;
         assert!(nft_input_base_chain_default_deny(correct));
+    }
+
+    #[test]
+    fn ssh_listener_detection_is_port_independent() {
+        let table = concat!(
+            "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n",
+            "   0: 0100007F:08AE 00000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 424242 1 0000000000000000 100 0 0 10 0\n",
+            "   1: 0100007F:0016 0100007F:FFFF 01 00000000:00000000 00:00000000 00000000 0 0 515151 1 0000000000000000 20 4 30 10 -1\n",
+        );
+        let listeners = tcp_listener_inodes_from_text(table)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(listeners.len(), 1);
+        assert!(listeners.contains(&424242));
+        assert!(!listeners.contains(&515151));
     }
 
     #[test]
