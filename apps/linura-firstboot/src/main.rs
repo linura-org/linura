@@ -4,7 +4,7 @@ mod bootstrap_runtime;
 
 use linura_bootstrap::durable::{
     BootstrapResumeDecision, BootstrapStateStore, DurableBootstrapCoordinator,
-    OwnerEnrollmentAuthorityVerifier, OwnerEnrollmentState,
+    OwnerEnrollmentAuthorityVerifier, OwnerEnrollmentState, PreparerRevocationAuthoritySigner,
     TrustedPreparerAuthorityRevocationReceipt,
 };
 use linura_bootstrap::{BootstrapStage, ProvisioningMode};
@@ -17,7 +17,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
 
 const BOOTSTRAP_SESSION_FILE: &str = ".linura-bootstrap-session";
 const MACHINE_ID_DOMAIN: &[u8] = b"linura-bootstrap-machine-v2\0";
@@ -27,6 +27,9 @@ const CHECKPOINT_DIRECTORY: &str = "recovery-checkpoint";
 const CHECKPOINT_MANIFEST: &str = "checkpoint.manifest";
 const CONTROL_RECEIPT_AUTH_KEY: &str = "authority/control-receipt-auth.key";
 const PREPARER_REVOCATION_RECEIPT: &str = "authority/preparer-revocation.receipt";
+const PREPARER_USER: &str = "linura-preparer";
+const PREPARER_SUDOERS: &str = "/etc/sudoers.d/99-linura-preparer";
+const CONTROL_RECEIPT_AUTH_KEY_BYTES: usize = 32;
 const O_NOFOLLOW: i32 = 0o400000;
 const MAX_BOOTSTRAP_TRANSITIONS: usize = 64;
 
@@ -37,6 +40,7 @@ fn print_help() {
     println!("  linura-firstboot");
     println!("  linura-firstboot --qualification-environment");
     println!("  linura-firstboot --self-check");
+    println!("  linura-firstboot --bootstrap <absolute-state-root>");
     println!(
         "  linura-firstboot --durable-bootstrap-init <absolute-state-root> <expected-self-sha256>"
     );
@@ -70,7 +74,7 @@ fn main() -> ExitCode {
             println!("base_image={CANDIDATE_BASE_IMAGE_URL}");
             println!("base_image_sha256={CANDIDATE_BASE_IMAGE_SHA256}");
             println!("kind=qualification-environment");
-            println!("status=candidate-not-yet-release-supported");
+            println!("status={}", qualification_environment_status());
             ExitCode::SUCCESS
         }
         Some("--self-check") => {
@@ -89,6 +93,11 @@ fn main() -> ExitCode {
                     ExitCode::FAILURE
                 }
             }
+        }
+        Some("--bootstrap") => {
+            let result =
+                parse_bootstrap_root(&mut args).and_then(|root| durable_bootstrap_converge(&root));
+            finish_durable_command(result)
         }
         Some("--durable-bootstrap-init") => {
             let result = parse_root_and_digest(&mut args)
@@ -169,6 +178,59 @@ fn finish_durable_command(result: Result<(), String>) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn qualification_environment_status() -> &'static str {
+    if env!("CARGO_PKG_VERSION") == "0.9.0" {
+        "release-qualified-experimental"
+    } else {
+        "candidate-not-yet-release-supported"
+    }
+}
+
+fn parse_bootstrap_root(args: &mut impl Iterator<Item = String>) -> Result<PathBuf, String> {
+    let root = PathBuf::from(
+        args.next()
+            .ok_or_else(|| "missing absolute durable bootstrap state root".to_owned())?,
+    );
+    if args.next().is_some() || !root.is_absolute() {
+        return Err("bootstrap requires exactly one absolute state root".into());
+    }
+    Ok(root)
+}
+
+fn durable_bootstrap_converge(root: &Path) -> Result<(), String> {
+    fs::create_dir_all(root).map_err(io_string)?;
+    verify_protected_root(root)?;
+    let expected_self_sha256 = current_executable_sha256()?;
+    let create_session = !root.join(BOOTSTRAP_SESSION_FILE).exists();
+    let (store, mut coordinator) = open_coordinator(root, create_session)?;
+
+    for _ in 0..MAX_BOOTSTRAP_TRANSITIONS {
+        if coordinator.resume_decision() == BootstrapResumeDecision::Complete {
+            if coordinator.state().provisioning().mode()
+                != Some(ProvisioningMode::PrepareForAnotherOwner)
+                || coordinator.state().provisioning().owner_enrollment()
+                    != OwnerEnrollmentState::Pending
+                || !coordinator
+                    .state()
+                    .provisioning()
+                    .preparer_authority_retired()
+            {
+                return Err("production v0.9 bootstrap completed outside the deferred-owner handoff boundary".into());
+            }
+            require_effective_root()?;
+            observe_preparer_os_authority_absent()?;
+            println!("bootstrap_mode=prepare-for-another-owner");
+            println!("owner_enrollment=owner-enrollment-pending");
+            println!("preparer_authority_inherited=false");
+            return Ok(());
+        }
+        if !drive_one_stage(&store, root, &expected_self_sha256, &mut coordinator)? {
+            break;
+        }
+    }
+    Err("production v0.9 bootstrap did not converge within the bounded transition budget".into())
 }
 
 fn parse_root_and_digest(
@@ -527,15 +589,7 @@ fn resolve_owner_stage(
 ) -> Result<(), String> {
     match coordinator.state().provisioning().mode() {
         Some(ProvisioningMode::PrepareForAnotherOwner | ProvisioningMode::UnattendedLocal) => {
-            let verifier =
-                OwnerEnrollmentAuthorityVerifier::open(&root.join(CONTROL_RECEIPT_AUTH_KEY))
-                    .map_err(display_string)?;
-            let revocation = TrustedPreparerAuthorityRevocationReceipt::load(
-                &root.join(PREPARER_REVOCATION_RECEIPT),
-                coordinator.state(),
-                &verifier,
-            )
-            .map_err(display_string)?;
+            let revocation = trusted_or_produced_preparer_revocation(root, coordinator)?;
             coordinator
                 .enter_owner_enrollment_pending(&revocation)
                 .map_err(display_string)
@@ -548,6 +602,370 @@ fn resolve_owner_stage(
         ),
         None => Err("owner resolution reached before provisioning mode selection".into()),
     }
+}
+
+fn trusted_or_produced_preparer_revocation(
+    root: &Path,
+    coordinator: &DurableBootstrapCoordinator,
+) -> Result<TrustedPreparerAuthorityRevocationReceipt, String> {
+    require_effective_root()?;
+    let key_path = root.join(CONTROL_RECEIPT_AUTH_KEY);
+    let receipt_path = root.join(PREPARER_REVOCATION_RECEIPT);
+    if key_path.is_file()
+        && receipt_path.is_file()
+        && let Ok(verifier) = OwnerEnrollmentAuthorityVerifier::open(&key_path)
+        && let Ok(receipt) = TrustedPreparerAuthorityRevocationReceipt::load(
+            &receipt_path,
+            coordinator.state(),
+            &verifier,
+        )
+    {
+        let observed_postcondition = observe_preparer_os_authority_absent()?;
+        if receipt.postcondition_sha256() != observed_postcondition {
+            return Err(
+                "cached preparer revocation evidence no longer matches authoritative OS state"
+                    .into(),
+            );
+        }
+        return Ok(receipt);
+    }
+
+    let postcondition_sha256 = revoke_and_verify_preparer_os_authority()?;
+    let key_path = ensure_control_receipt_auth_key(root)?;
+    let signer = PreparerRevocationAuthoritySigner::open(&key_path).map_err(display_string)?;
+    let receipt = signer
+        .preparer_revocation_receipt_bytes(coordinator.state(), &postcondition_sha256)
+        .map_err(display_string)?;
+    durable_write(&receipt_path, &receipt, 0o600)?;
+
+    let verifier = OwnerEnrollmentAuthorityVerifier::open(&key_path).map_err(display_string)?;
+    TrustedPreparerAuthorityRevocationReceipt::load(&receipt_path, coordinator.state(), &verifier)
+        .map_err(display_string)
+}
+
+fn require_effective_root() -> Result<(), String> {
+    let status = fs::read_to_string("/proc/self/status").map_err(io_string)?;
+    let uid_line = status
+        .lines()
+        .find_map(|line| line.strip_prefix("Uid:"))
+        .ok_or_else(|| "cannot observe process effective uid".to_owned())?;
+    let mut values = uid_line.split_whitespace();
+    let _real = values.next();
+    let effective = values
+        .next()
+        .ok_or_else(|| "cannot parse process effective uid".to_owned())?;
+    if effective != "0" {
+        return Err("production bootstrap owner handoff requires effective uid 0".into());
+    }
+    Ok(())
+}
+
+fn revoke_and_verify_preparer_os_authority() -> Result<String, String> {
+    let account_present = passwd_has_user(PREPARER_USER)?;
+    if account_present {
+        let status = Command::new("/usr/bin/pkill")
+            .args(["-KILL", "-u", PREPARER_USER])
+            .status()
+            .map_err(io_string)?;
+        if !matches!(status.code(), Some(0 | 1)) {
+            return Err("failed to terminate preparer processes".into());
+        }
+        run_fixed("/usr/sbin/usermod", &["-G", "", PREPARER_USER])?;
+        run_fixed("/usr/bin/passwd", &["-l", PREPARER_USER])?;
+    }
+    remove_path_if_present(Path::new("/home/linura-preparer/.ssh"))?;
+    remove_path_if_present(Path::new(PREPARER_SUDOERS))?;
+    run_fixed("/usr/bin/sync", &[])?;
+    observe_preparer_os_authority_absent()
+}
+
+fn observe_preparer_os_authority_absent() -> Result<String, String> {
+    let account_present = passwd_has_user(PREPARER_USER)?;
+    let identity = preparer_os_identity()?;
+    if account_present != identity.is_some() {
+        return Err("preparer account identity changed during authority observation".into());
+    }
+    if account_present && preparer_has_processes()? {
+        return Err("preparer process authority survived revocation".into());
+    }
+    if account_present && preparer_has_supplementary_group()? {
+        return Err("preparer supplementary group authority survived revocation".into());
+    }
+    if account_present && !preparer_password_is_locked()? {
+        return Err("preparer password authority survived revocation".into());
+    }
+    if Path::new("/home/linura-preparer/.ssh").exists() {
+        return Err("preparer SSH authority survived revocation".into());
+    }
+    if sudoers_mentions_preparer(Path::new("/etc/sudoers"), identity.as_ref())?
+        || sudoers_directory_mentions_preparer(Path::new("/etc/sudoers.d"), identity.as_ref())?
+    {
+        return Err("preparer sudo authority survived revocation".into());
+    }
+    run_fixed("/usr/sbin/visudo", &["-cf", "/etc/sudoers"])?;
+
+    let postcondition = format!(
+        "linura-preparer-revocation-postcondition-v3\naccount_present={}\nuid={}\nprimary_gid={}\nprimary_group={}\nprocesses=absent\nsupplementary_groups={}\npassword={}\nssh_authority=absent\nsudo_authority=absent\nsudoers=valid\n",
+        account_present,
+        identity
+            .as_ref()
+            .map_or("account-absent", |value| value.uid.as_str()),
+        identity
+            .as_ref()
+            .map_or("account-absent", |value| value.gid.as_str()),
+        identity
+            .as_ref()
+            .map_or("account-absent", |value| value.primary_group.as_str()),
+        if account_present {
+            "absent"
+        } else {
+            "not-applicable"
+        },
+        if account_present {
+            "locked"
+        } else {
+            "account-absent"
+        },
+    );
+    Ok(sha256_hex(postcondition.as_bytes()))
+}
+
+fn run_fixed(program: &str, args: &[&str]) -> Result<(), String> {
+    let status = Command::new(program)
+        .args(args)
+        .status()
+        .map_err(io_string)?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("bounded bootstrap operation failed: {program}"))
+    }
+}
+
+fn passwd_has_user(user: &str) -> Result<bool, String> {
+    let passwd = fs::read_to_string("/etc/passwd").map_err(io_string)?;
+    Ok(passwd
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .any(|(name, _)| name == user))
+}
+
+fn preparer_has_processes() -> Result<bool, String> {
+    let status = Command::new("/usr/bin/pgrep")
+        .args(["-u", PREPARER_USER])
+        .status()
+        .map_err(io_string)?;
+    match status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err("cannot verify preparer process revocation".into()),
+    }
+}
+
+fn preparer_has_supplementary_group() -> Result<bool, String> {
+    let groups = fs::read_to_string("/etc/group").map_err(io_string)?;
+    Ok(groups.lines().any(|line| {
+        let mut fields = line.split(':');
+        let _name = fields.next();
+        let _password = fields.next();
+        let _gid = fields.next();
+        fields
+            .next()
+            .is_some_and(|members| members.split(',').any(|member| member == PREPARER_USER))
+    }))
+}
+
+fn preparer_password_is_locked() -> Result<bool, String> {
+    let shadow = fs::read_to_string("/etc/shadow").map_err(io_string)?;
+    let password = shadow
+        .lines()
+        .find_map(|line| {
+            let mut fields = line.split(':');
+            (fields.next()? == PREPARER_USER)
+                .then(|| fields.next())
+                .flatten()
+        })
+        .ok_or_else(|| "preparer shadow record is missing".to_owned())?;
+    Ok(password.starts_with('!') || password.starts_with('*'))
+}
+
+fn remove_path_if_present(path: &Path) -> Result<(), String> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(io_string(error)),
+    };
+    if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+        fs::remove_dir_all(path).map_err(io_string)
+    } else {
+        fs::remove_file(path).map_err(io_string)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreparerOsIdentity {
+    uid: String,
+    gid: String,
+    primary_group: String,
+}
+
+fn preparer_os_identity() -> Result<Option<PreparerOsIdentity>, String> {
+    let passwd = fs::read_to_string("/etc/passwd").map_err(io_string)?;
+    let Some((uid, gid)) = passwd.lines().find_map(|line| {
+        let mut fields = line.split(':');
+        let name = fields.next()?;
+        let _password = fields.next()?;
+        let uid = fields.next()?;
+        let gid = fields.next()?;
+        (name == PREPARER_USER).then(|| (uid.to_owned(), gid.to_owned()))
+    }) else {
+        return Ok(None);
+    };
+    if uid.is_empty()
+        || gid.is_empty()
+        || !uid.bytes().all(|byte| byte.is_ascii_digit())
+        || !gid.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err("preparer account has a non-canonical numeric uid/gid".into());
+    }
+    let groups = fs::read_to_string("/etc/group").map_err(io_string)?;
+    let primary_group = groups
+        .lines()
+        .find_map(|line| {
+            let mut fields = line.split(':');
+            let name = fields.next()?;
+            let _password = fields.next()?;
+            let candidate_gid = fields.next()?;
+            (candidate_gid == gid).then(|| name.to_owned())
+        })
+        .ok_or_else(|| "preparer primary group cannot be resolved".to_owned())?;
+    Ok(Some(PreparerOsIdentity {
+        uid,
+        gid,
+        primary_group,
+    }))
+}
+
+fn sudoers_code_prefix(line: &str) -> &str {
+    let bytes = line.as_bytes();
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        if byte == b'#'
+            && bytes
+                .get(index + 1)
+                .is_none_or(|next| !next.is_ascii_digit())
+        {
+            return &line[..index];
+        }
+    }
+    line
+}
+
+fn sudoers_text_mentions_preparer(text: &str, identity: Option<&PreparerOsIdentity>) -> bool {
+    let named_group = identity.map(|value| format!("%{}", value.primary_group));
+    let numeric_user = identity.map(|value| format!("#{}", value.uid));
+    let numeric_group = identity.map(|value| format!("%#{}", value.gid));
+    text.lines().any(|line| {
+        sudoers_code_prefix(line)
+            .split(|character: char| {
+                character.is_whitespace() || matches!(character, ',' | '=' | ':' | '(' | ')')
+            })
+            .any(|token| {
+                token == PREPARER_USER
+                    || token == "%linura-preparer"
+                    || named_group.as_deref() == Some(token)
+                    || numeric_user.as_deref() == Some(token)
+                    || numeric_group.as_deref() == Some(token)
+            })
+    })
+}
+
+fn sudoers_mentions_preparer(
+    path: &Path,
+    identity: Option<&PreparerOsIdentity>,
+) -> Result<bool, String> {
+    let text = fs::read_to_string(path).map_err(io_string)?;
+    Ok(sudoers_text_mentions_preparer(&text, identity))
+}
+
+fn sudoers_directory_mentions_preparer(
+    path: &Path,
+    identity: Option<&PreparerOsIdentity>,
+) -> Result<bool, String> {
+    for entry in fs::read_dir(path).map_err(io_string)? {
+        let entry = entry.map_err(io_string)?;
+        let metadata = entry.metadata().map_err(io_string)?;
+        if metadata.is_file() && sudoers_mentions_preparer(&entry.path(), identity)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn ensure_control_receipt_auth_key(root: &Path) -> Result<PathBuf, String> {
+    let directory = root.join("authority");
+    fs::create_dir_all(&directory).map_err(io_string)?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).map_err(io_string)?;
+    verify_protected_root(&directory)?;
+    let path = root.join(CONTROL_RECEIPT_AUTH_KEY);
+    if path.exists() {
+        validate_control_receipt_auth_key(&path)?;
+        return Ok(path);
+    }
+
+    let mut random = fs::File::open("/dev/urandom").map_err(io_string)?;
+    let mut key = [0_u8; CONTROL_RECEIPT_AUTH_KEY_BYTES];
+    random.read_exact(&mut key).map_err(io_string)?;
+    if key.iter().all(|byte| *byte == 0) {
+        return Err("kernel random source returned an invalid all-zero receipt key".into());
+    }
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(O_NOFOLLOW)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            file.write_all(&key).map_err(io_string)?;
+            file.sync_all().map_err(io_string)?;
+            fs::File::open(&directory)
+                .and_then(|dir| dir.sync_all())
+                .map_err(io_string)?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(io_string(error)),
+    }
+    key.fill(0);
+    validate_control_receipt_auth_key(&path)?;
+    Ok(path)
+}
+
+fn validate_control_receipt_auth_key(path: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path).map_err(io_string)?;
+    if metadata.file_type().is_symlink()
+        || !metadata.file_type().is_file()
+        || metadata.uid() != 0
+        || metadata.nlink() != 1
+        || metadata.permissions().mode() & 0o077 != 0
+        || metadata.len() != CONTROL_RECEIPT_AUTH_KEY_BYTES as u64
+    {
+        return Err("preparer revocation key is not a protected root-owned 256-bit file".into());
+    }
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NOFOLLOW)
+        .open(path)
+        .map_err(io_string)?;
+    let mut key = [0_u8; CONTROL_RECEIPT_AUTH_KEY_BYTES];
+    file.read_exact(&mut key).map_err(io_string)?;
+    let mut trailing = [0_u8; 1];
+    let invalid =
+        file.read(&mut trailing).map_err(io_string)? != 0 || key.iter().all(|byte| *byte == 0);
+    key.fill(0);
+    if invalid {
+        return Err("preparer revocation key failed exact protected-key validation".into());
+    }
+    Ok(())
 }
 
 fn perform_managed_installation(expected_self_sha256: &str) -> Result<(), String> {
@@ -893,4 +1311,50 @@ fn io_string(error: std::io::Error) -> String {
 
 fn display_string(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+#[cfg(test)]
+mod authority_retirement_tests {
+    use super::*;
+
+    fn identity() -> PreparerOsIdentity {
+        PreparerOsIdentity {
+            uid: "1234".into(),
+            gid: "4321".into(),
+            primary_group: "machine-preparers".into(),
+        }
+    }
+
+    #[test]
+    fn sudoers_parser_rejects_named_and_numeric_preparer_grants() {
+        let identity = identity();
+        assert!(sudoers_text_mentions_preparer(
+            "linura-preparer ALL=(ALL) ALL\n",
+            Some(&identity),
+        ));
+        assert!(sudoers_text_mentions_preparer(
+            "%linura-preparer ALL=(ALL) ALL\n",
+            Some(&identity),
+        ));
+        assert!(sudoers_text_mentions_preparer(
+            "%machine-preparers ALL=(ALL) NOPASSWD:ALL\n",
+            Some(&identity),
+        ));
+        assert!(sudoers_text_mentions_preparer(
+            "#1234 ALL=(ALL) NOPASSWD:ALL\n",
+            Some(&identity),
+        ));
+        assert!(sudoers_text_mentions_preparer(
+            "%#4321 ALL=(ALL) NOPASSWD:ALL\n",
+            Some(&identity),
+        ));
+        assert!(!sudoers_text_mentions_preparer(
+            "%sudo ALL=(ALL) ALL # ordinary comment\n",
+            Some(&identity),
+        ));
+        assert!(!sudoers_text_mentions_preparer(
+            "# ordinary comment about linura-preparer\n",
+            Some(&identity),
+        ));
+    }
 }

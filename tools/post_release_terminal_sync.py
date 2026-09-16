@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from pathlib import Path
 import tomllib
@@ -172,6 +173,55 @@ def update_docs_index(text: str, root: Path, tag: str) -> str:
     return text[: prior.start("body")] + prior_body + text[prior.end("body") :]
 
 
+def sync_release_qualified_environments(
+    root: Path,
+    contract: dict[str, object],
+    milestone: dict[str, object],
+    changed: list[str],
+) -> None:
+    matrix_path_value = contract.get("hardware_support_matrix")
+    if not isinstance(matrix_path_value, str) or not matrix_path_value:
+        raise TerminalSyncError("roadmap hardware_support_matrix must be a non-empty path")
+    requested = milestone.get("release_qualified_qualification_environments", [])
+    if not isinstance(requested, list) or not all(
+        isinstance(value, str) and value.startswith("qualification/") for value in requested
+    ):
+        raise TerminalSyncError(
+            "release_qualified_qualification_environments must be qualification/ IDs"
+        )
+    if len(requested) != len(set(requested)):
+        raise TerminalSyncError("release-qualified QualificationEnvironment IDs contain duplicates")
+    if milestone.get("platform_support") == "reference-experimental" and not requested:
+        raise TerminalSyncError(
+            "reference-experimental release requires explicit release-qualified QualificationEnvironment metadata"
+        )
+
+    matrix_path = root / matrix_path_value
+    try:
+        matrix = json.loads(read(matrix_path))
+    except json.JSONDecodeError as error:
+        raise TerminalSyncError(f"invalid hardware support matrix: {error}") from error
+    if not isinstance(matrix, dict):
+        raise TerminalSyncError("hardware support matrix root must be an object")
+    environments = matrix.get("qualification_environments")
+    if not isinstance(environments, dict):
+        raise TerminalSyncError("hardware support matrix qualification_environments must be an object")
+    existing = environments.get("release_qualified")
+    if not isinstance(existing, list) or not all(isinstance(value, str) for value in existing):
+        raise TerminalSyncError("hardware support matrix release_qualified must be an array")
+    environments["release_qualified"] = sorted(set(existing).union(requested))
+    matrix["note"] = (
+        "Release-qualified QualificationEnvironment and PlatformProfile entries are the explicit "
+        "machine-readable support boundary for the current release; domain evidence tiers remain separate."
+    )
+    write_if_changed(
+        matrix_path,
+        json.dumps(matrix, indent=2, ensure_ascii=False) + "\n",
+        changed,
+        root,
+    )
+
+
 def published_record(args: argparse.Namespace, milestone: dict[str, object], next_release: str) -> str:
     source_url = f"{REPOSITORY_URL}/commit/{args.source_sha}"
     return f"""# Linura {args.tag} — terminal release record
@@ -262,8 +312,9 @@ def sync(args: argparse.Namespace) -> list[str]:
         if getattr(args, field) <= 0:
             raise TerminalSyncError(f"{field} must be positive")
 
-    _contract, milestone, next_release = _roadmap(root, args.tag)
+    contract, milestone, next_release = _roadmap(root, args.tag)
     changed: list[str] = []
+    sync_release_qualified_environments(root, contract, milestone, changed)
     milestone_path_value = milestone.get("milestone_contract")
     qualification_path_value = milestone.get("qualification")
     if not isinstance(milestone_path_value, str) or not isinstance(qualification_path_value, str):
