@@ -56,6 +56,7 @@ TRANSCRIPT="$ARTIFACT_DIR/guest-qualification-${V09_SHARD_ID}.txt"
 ENVIRONMENT="$ARTIFACT_DIR/guest-environment-${V09_SHARD_ID}.env"
 ROOT=/var/lib/linura-qualification/v0.9
 PRODUCTION_ROOT="$ROOT/production-firstboot"
+PUBLIC_BOOTSTRAP_ROOT="$ROOT/public-bootstrap"
 HARNESS_ROOT="$ROOT/harness"
 Q8_OBSERVER=/usr/local/libexec/linura-v09-q8-observe
 PREPARER_SUDOERS=/etc/sudoers.d/99-linura-preparer
@@ -147,6 +148,43 @@ run_security_baseline_step() {
     remote 'sudo -n systemctl list-unit-files --type=service --type=socket --no-legend --no-pager | grep -Ei "ssh|dropbear" || true; sudo -n systemctl list-units --all --type=service --type=socket --no-legend --no-pager | grep -Ei "ssh|dropbear" || true; sudo -n nft list ruleset || true' >&2 || true
     return 1
   fi
+
+run_public_bootstrap_isolated() {
+  local production_root="${1:?production root is required}"
+  local output_path="$ROOT/public-bootstrap-${V09_SHARD_ID}.out"
+  local status_path="$ROOT/public-bootstrap-${V09_SHARD_ID}.status"
+  local transient_unit="linura-v09-public-bootstrap-${V09_SHARD_ID}"
+  local ready=0
+  local result=""
+  local output=""
+  local status=""
+
+  remote "sudo -n rm -f '$output_path' '$status_path'; sudo -n systemd-run --quiet --no-block --unit='$transient_unit' --on-active=10s --property=StandardInput=null --property=StandardOutput=journal --property=StandardError=journal '$Q8_OBSERVER' '$production_root' '$LINURA_FIRSTBOOT_SHA' '$output_path' '$status_path' bootstrap </dev/null >/dev/null 2>&1"
+  for _ in $(seq 1 180); do
+    sleep 2
+    if result="$(remote "sudo -n sh -c 'test -s \"$status_path\" && { cat \"$status_path\"; printf \"__LINURA_PUBLIC_BOOTSTRAP_OUTPUT__\\n\"; cat \"$output_path\"; }'" 2>/dev/null)"; then
+      ready=1
+      break
+    fi
+  done
+  if [[ "$ready" != 1 ]]; then
+    echo 'isolated production bootstrap did not restore a stable qualification transport' >&2
+    return 1
+  fi
+  status="${result%%$'\n'*}"
+  output="${result#*$'\n'}"
+  if [[ "$output" != __LINURA_PUBLIC_BOOTSTRAP_OUTPUT__* ]]; then
+    echo 'isolated production bootstrap result framing is invalid' >&2
+    return 1
+  fi
+  output="${output#__LINURA_PUBLIC_BOOTSTRAP_OUTPUT__}"
+  output="${output#$'\n'}"
+  printf '%s\n' "$output"
+  if [[ ! "$status" =~ ^[0-9]+$ || "$status" -ne 0 ]]; then
+    printf '%s\n' "$output" >&2
+    echo "isolated production bootstrap failed with status=${status:-invalid}" >&2
+    return 1
+  fi
 }
 
 start_guest() {
@@ -223,37 +261,68 @@ expect_transition_crash() {
   printf '%s\n' "$marker" | tee -a "$TRANSCRIPT"
 }
 
-revoke_preparer_authority() {
-  local revoke_script=""
-  local revoke_encoded=""
-  revoke_script="$(cat <<'REVOKE'
-set -euo pipefail
-pkill -KILL -u linura-preparer >/dev/null 2>&1 || true
-usermod -G '' linura-preparer
-passwd -l linura-preparer >/dev/null
-rm -rf /home/linura-preparer/.ssh
-rm -f /etc/sudoers.d/99-linura-preparer
-remaining="$(grep -RlE '^[[:space:]]*linura-preparer([[:space:]]|$)' /etc/sudoers /etc/sudoers.d 2>/dev/null || true)"
-if [ -n "$remaining" ]; then
-  echo 'preparer sudoers grant survived revocation in:' >&2
-  printf '%s\n' "$remaining" >&2
-  exit 1
-fi
-visudo -cf /etc/sudoers >/dev/null
-sync
-REVOKE
-)"
-  revoke_encoded="$(printf '%s' "$revoke_script" | base64 -w0)"
-  remote "printf '%s' '$revoke_encoded' | base64 -d | sudo -n /usr/bin/bash"
+verify_preparer_authority_revoked() {
+  local production_root="${1:?production root is required}"
+  local verify_script=""
+  local verify_encoded=""
+
   if ssh "${SSH_COMMON[@]}" -p "$SSH_PORT" "$PREPARER_SSH_USER@127.0.0.1" true >/dev/null 2>&1; then
     echo 'revoked preparer unexpectedly retained SSH access' >&2
     return 1
   fi
-  # Do not mint qualification-only revocation evidence for the production root.
-  # The next production First Boot step must re-observe the real OS post-state
-  # and mint the authenticated receipt itself.
-  PREPARER_ACTIVE=false
-  printf '%s\n' 'preparer_authority_revoked=actual-preparation-principal' | tee -a "$TRANSCRIPT"
+
+  verify_script="$(cat <<'VERIFY'
+set -euo pipefail
+production_root="${1:?production root is required}"
+
+if pgrep -u linura-preparer >/dev/null 2>&1; then
+  echo 'preparer process authority survived production revocation' >&2
+  exit 1
+fi
+if grep -Eq '^[^:]+:[^:]*:[0-9]+:([^,]*,)*linura-preparer(,|$)' /etc/group; then
+  echo 'preparer supplementary-group authority survived production revocation' >&2
+  exit 1
+fi
+shadow="$(getent shadow linura-preparer | cut -d: -f2)"
+case "$shadow" in
+  '!'*|'*'*) ;;
+  *) echo 'preparer password authority survived production revocation' >&2; exit 1 ;;
+esac
+test ! -e /home/linura-preparer/.ssh
+test ! -e /etc/sudoers.d/99-linura-preparer
+visudo -cf /etc/sudoers >/dev/null
+set +e
+sudo_listing="$(LC_ALL=C LANG=C /usr/bin/sudo -n -l -U linura-preparer 2>&1)"
+sudo_status=$?
+set -e
+if printf '%s\n' "$sudo_listing" | grep -F 'User linura-preparer may run the following commands on ' >/dev/null; then
+  echo 'preparer effective sudo authority survived production revocation' >&2
+  printf '%s\n' "$sudo_listing" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$sudo_listing" | grep -F 'User linura-preparer is not allowed to run sudo on ' >/dev/null; then
+  echo "independent sudo observation was ambiguous (status=$sudo_status)" >&2
+  printf '%s\n' "$sudo_listing" >&2
+  exit 1
+fi
+for relative in authority/control-receipt-auth.key authority/preparer-revocation.receipt; do
+  path="$production_root/$relative"
+  test -f "$path" -a ! -L "$path"
+  test "$(stat -c '%u:%g:%a' "$path")" = '0:0:600'
+done
+printf '%s\n' 'preparer_revocation_verifier=independent-qualification-observation'
+VERIFY
+)"
+  verify_encoded="$(printf '%s' "$verify_script" | base64 -w0)"
+  remote "printf '%s' '$verify_encoded' | base64 -d | sudo -n /usr/bin/bash -s -- '$production_root'"
+}
+
+provision_preparer_authority_fixture() {
+  local key_encoded=""
+  key_encoded="$(printf '%s\n' "$public_key" | base64 -w0)"
+  remote "set -euo pipefail; sudo -n /usr/sbin/usermod -G adm,sudo linura-preparer; sudo -n /usr/bin/passwd -d linura-preparer >/dev/null; sudo -n install -d -o linura-preparer -g linura-preparer -m 0700 /home/linura-preparer/.ssh; printf '%s' '$key_encoded' | base64 -d | sudo -n tee /home/linura-preparer/.ssh/authorized_keys >/dev/null; sudo -n chown linura-preparer:linura-preparer /home/linura-preparer/.ssh/authorized_keys; sudo -n chmod 0600 /home/linura-preparer/.ssh/authorized_keys; printf '%s\n' 'linura-preparer ALL=(ALL) NOPASSWD:ALL' | sudo -n tee '$PREPARER_SUDOERS' >/dev/null; sudo -n chmod 0440 '$PREPARER_SUDOERS'; sudo -n /usr/sbin/visudo -cf /etc/sudoers >/dev/null; sudo -n sync"
+  preparer_remote "sudo -n /usr/bin/true"
+  printf '%s\n' 'preparer_authority_fixture=hostile-and-observed' | tee -a "$TRANSCRIPT"
 }
 
 mkdir -p "$ARTIFACT_DIR"
@@ -336,6 +405,7 @@ production_root="${1:?production root is required}"
 firstboot_sha="${2:?firstboot digest is required}"
 output_path="${3:?output path is required}"
 status_path="${4:?status path is required}"
+mode="${5:-step}"
 status=0
 stop_status=0
 
@@ -395,8 +465,21 @@ else
     fi
   done
   if [ "$status" -eq 0 ]; then
-    sudo -u linura-preparer sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-step "$production_root" "$firstboot_sha" >"$output_path" 2>&1
-    status=$?
+    case "$mode" in
+      step)
+        sudo -u linura-preparer /usr/bin/sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-step "$production_root" "$firstboot_sha" >"$output_path" 2>&1
+        status=$?
+        ;;
+      bootstrap)
+        /usr/local/bin/linura-firstboot --bootstrap "$production_root" >"$output_path" 2>&1
+        status=$?
+        ;;
+      *)
+        printf 'unsupported qualification observer mode: %s
+' "$mode" >"$output_path"
+        status=2
+        ;;
+    esac
   fi
 fi
 
@@ -559,9 +642,14 @@ for boundary in $(seq "$V09_BOUNDARY_START" "$V09_BOUNDARY_END"); do
   esac
 
   if [[ "$boundary" -eq 12 ]]; then
-    revoke_preparer_authority
-  fi
-  if [[ "$boundary" -eq 4 ]]; then
+    PREPARER_ACTIVE=false
+    remote "sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-step '$PRODUCTION_ROOT' '$LINURA_FIRSTBOOT_SHA'" | tee -a "$TRANSCRIPT"
+    verify_preparer_authority_revoked "$PRODUCTION_ROOT" | tee -a "$TRANSCRIPT"
+    printf '%s
+' 'preparer_authority_revoked=actual-preparation-principal' | tee -a "$TRANSCRIPT"
+    printf '%s
+' 'preparer_revocation_producer=production-firstboot' | tee -a "$TRANSCRIPT"
+  elif [[ "$boundary" -eq 4 ]]; then
     run_security_baseline_step | tee -a "$TRANSCRIPT"
   else
     product_remote "sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-step '$PRODUCTION_ROOT' '$LINURA_FIRSTBOOT_SHA'" | tee -a "$TRANSCRIPT"
@@ -611,10 +699,17 @@ done
 
 if [[ "$V09_FINAL_SHARD" == true ]]; then
   product_remote "sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-resume '$PRODUCTION_ROOT' '$LINURA_FIRSTBOOT_SHA'" | tee -a "$TRANSCRIPT"
-  remote "sudo -n /usr/local/bin/linura-firstboot --bootstrap '$PRODUCTION_ROOT'" | tee -a "$TRANSCRIPT"
+
+  provision_preparer_authority_fixture
+  remote "sudo -n rm -rf '$PUBLIC_BOOTSTRAP_ROOT'; sudo -n install -d -o root -g root -m 0700 '$PUBLIC_BOOTSTRAP_ROOT'; sudo -n test ! -e '$PUBLIC_BOOTSTRAP_ROOT/.linura-bootstrap-session'; sudo -n test ! -e '$PUBLIC_BOOTSTRAP_ROOT/bootstrap.state'; sudo -n test ! -e '$PUBLIC_BOOTSTRAP_ROOT/authority/control-receipt-auth.key'; sudo -n test ! -e '$PUBLIC_BOOTSTRAP_ROOT/authority/preparer-revocation.receipt'"
+  run_public_bootstrap_isolated "$PUBLIC_BOOTSTRAP_ROOT" | tee -a "$TRANSCRIPT"
+  verify_preparer_authority_revoked "$PUBLIC_BOOTSTRAP_ROOT" | tee -a "$TRANSCRIPT"
   printf '%s\n' 'production_bootstrap_entry=release-facing' | tee -a "$TRANSCRIPT"
+  printf '%s\n' 'production_bootstrap_fresh_state=verified' | tee -a "$TRANSCRIPT"
+  printf '%s\n' 'production_bootstrap_authority_observation=independent' | tee -a "$TRANSCRIPT"
   power_cycle 'production-bootstrap-restart'
-  remote "sudo -n /usr/local/bin/linura-firstboot --bootstrap '$PRODUCTION_ROOT'" | tee -a "$TRANSCRIPT"
+  run_public_bootstrap_isolated "$PUBLIC_BOOTSTRAP_ROOT" | tee -a "$TRANSCRIPT"
+  verify_preparer_authority_revoked "$PUBLIC_BOOTSTRAP_ROOT" | tee -a "$TRANSCRIPT"
   printf '%s\n' 'production_bootstrap_restart=reobserved-after-power-cycle' | tee -a "$TRANSCRIPT"
   {
     remote "sudo -n /usr/local/bin/linura-bootstrap-qualification bootstrap-start '$HARNESS_ROOT'"
@@ -748,6 +843,10 @@ if final:
         'bootstrap_restart=reobserved', 'bootstrap_restart_source=production-firstboot',
         'owner_enrollment=owner-enrollment-pending', 'preparer_authority_inherited=false',
         'production_bootstrap_entry=release-facing',
+        'production_bootstrap_fresh_state=verified',
+        'production_bootstrap_authority_observation=independent',
+        'preparer_revocation_producer=production-firstboot',
+        'preparer_revocation_verifier=independent-qualification-observation',
         'production_bootstrap_restart=reobserved-after-power-cycle',
         'interactive_owner_restart=enrolled-generation-1', 'manifest_replay=cross-machine-rejected',
         'manifest_command_field=rejected', 'q11_migration=real-v08-sqlite-stores',

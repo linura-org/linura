@@ -75,50 +75,35 @@ class V09AdversarialTransportContractTests(unittest.TestCase):
         self.assertNotIn("systemctl stop", handoff)
         self.assertNotIn("enable --now", handoff)
 
-    def test_product_bootstrap_uses_the_revocable_preparer_until_handoff(self) -> None:
+    def test_product_bootstrap_uses_the_revocable_preparer_until_production_handoff(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("PREPARER_SSH_USER=linura-preparer", source)
         self.assertIn("PREPARER_ACTIVE=true", source)
         self.assertIn("preparer_remote() {", source)
         self.assertIn("product_remote() {", source)
-        router_start = source.index("product_remote() {")
-        router_end = source.index("\n}\n\nisolate_canonical_ssh", router_start) + 2
-        router = source[router_start:router_end]
-        self.assertIn('if [[ "$PREPARER_ACTIVE" == true ]]', router)
-        self.assertIn('preparer_remote "$1"', router)
-        self.assertIn('remote "$1"', router)
-        self.assertIn(
-            "sudo -u linura-preparer sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-step",
-            source,
-        )
-        self.assertIn(
-            'product_remote "sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-init',
-            source,
-        )
-        self.assertIn(
-            'product_remote "sudo -n /usr/local/bin/linura-bootstrap-transition-qualification prepare',
-            source,
-        )
-        self.assertIn(
-            'product_remote "sudo -n /usr/local/bin/linura-bootstrap-transition-qualification effect-start',
-            source,
-        )
-        revoke_start = source.index("revoke_preparer_authority() {")
-        revoke_end = source.index("\n}\n\nmkdir -p", revoke_start)
-        revoke = source[revoke_start:revoke_end]
-        self.assertNotIn("authorize-preparer-revocation", revoke)
-        self.assertIn("PREPARER_ACTIVE=false", revoke)
-        self.assertIn("preparer_authority_revoked=actual-preparation-principal", revoke)
-        self.assertIn("preparer_execution_identity=%s", source)
-        self.assertIn(
-            "The next production First Boot step must re-observe the real OS post-state",
-            revoke,
+        self.assertNotIn("revoke_preparer_authority()", source)
+        self.assertIn("verify_preparer_authority_revoked()", source)
+        verify_start = source.index("verify_preparer_authority_revoked() {")
+        verify_end = source.index("\n}\n\nprovision_preparer_authority_fixture", verify_start)
+        verifier = source[verify_start:verify_end]
+        for mutator in ("pkill -KILL", "usermod -G ''", "passwd -l", "rm -rf", "rm -f /etc/sudoers.d"):
+            self.assertNotIn(mutator, verifier)
+        self.assertIn("preparer_revocation_producer=production-firstboot", source)
+        self.assertIn("preparer_revocation_verifier=independent-qualification-observation", source)
+        boundary = source[source.index('if [[ "$boundary" -eq 12 ]]'):]
+        self.assertLess(
+            boundary.index("/usr/local/bin/linura-firstboot --durable-bootstrap-step"),
+            boundary.index('verify_preparer_authority_revoked "$PRODUCTION_ROOT"'),
         )
 
     def test_release_facing_bootstrap_is_exercised_and_reobserved_after_restart(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("--bootstrap '$PRODUCTION_ROOT'", source)
+        self.assertIn('PUBLIC_BOOTSTRAP_ROOT="$ROOT/public-bootstrap"', source)
+        self.assertIn('run_public_bootstrap_isolated "$PUBLIC_BOOTSTRAP_ROOT"', source)
         self.assertIn("production_bootstrap_entry=release-facing", source)
+        self.assertIn("production_bootstrap_fresh_state=verified", source)
+        self.assertIn("production_bootstrap_authority_observation=independent", source)
+        self.assertIn("test ! -e '$PUBLIC_BOOTSTRAP_ROOT/bootstrap.state'", source)
         self.assertIn('power_cycle \'production-bootstrap-restart\'', source)
         self.assertIn(
             "production_bootstrap_restart=reobserved-after-power-cycle",

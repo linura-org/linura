@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod bootstrap_runtime;
+mod sudo_policy;
 
 use linura_bootstrap::durable::{
     BootstrapResumeDecision, BootstrapStateStore, DurableBootstrapCoordinator,
@@ -727,21 +728,14 @@ fn preparer_has_effective_sudo_authority() -> Result<bool, String> {
         .args(["-n", "-l", "-U", PREPARER_USER])
         .output()
         .map_err(io_string)?;
-    if output.status.success() {
-        return Ok(true);
-    }
 
     let stdout = String::from_utf8(output.stdout)
         .map_err(|_| "sudo policy query returned non-UTF-8 stdout".to_owned())?;
     let stderr = String::from_utf8(output.stderr)
         .map_err(|_| "sudo policy query returned non-UTF-8 stderr".to_owned())?;
     let observed = format!("{stdout}\n{stderr}");
-    let no_authority = format!("User {PREPARER_USER} is not allowed to run sudo on ");
-    if observed.contains(&no_authority) {
-        Ok(false)
-    } else {
-        Err("cannot authoritatively evaluate preparer effective sudo policy".into())
-    }
+    sudo_policy::listing_grants_authority(&observed, PREPARER_USER)
+        .map_err(|_| "cannot authoritatively evaluate preparer effective sudo policy".to_owned())
 }
 
 fn run_fixed(program: &str, args: &[&str]) -> Result<(), String> {
