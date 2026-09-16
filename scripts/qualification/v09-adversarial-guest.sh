@@ -141,6 +141,7 @@ run_security_baseline_step() {
   output="${output#$'\n'}"
   printf '%s\n' "$output"
   if [[ ! "$status" =~ ^[0-9]+$ || "$status" -ne 0 ]]; then
+    printf '%s\n' "$output" >&2
     echo "isolated Q8 step failed with status=${status:-invalid}" >&2
     remote 'sudo -n systemctl list-unit-files --type=service --type=socket --no-legend --no-pager | grep -Ei "ssh|dropbear" || true; sudo -n systemctl list-units --all --type=service --type=socket --no-legend --no-pager | grep -Ei "ssh|dropbear" || true; sudo -n nft list ruleset || true' >&2 || true
     return 1
@@ -302,11 +303,34 @@ status_path="${4:?status path is required}"
 status=0
 stop_status=0
 
+ssh_candidate_units() {
+  {
+    systemctl list-unit-files --type=service --type=socket --no-legend --no-pager \
+      | awk '$2 ~ /^(enabled|enabled-runtime|linked|linked-runtime|alias|indirect)$/ { print $1 }'
+    systemctl list-units --all --type=service --type=socket --no-legend --no-pager \
+      | awk '$3 ~ /^(active|activating|reloading)$/ { print $1 }'
+  } | sort -u
+}
+
+ssh_serving_properties() {
+  grep -Eiq 'sshd|openssh|dropbear|^Id=(ssh\.service|sshd\.service|ssh\.socket|sshd\.socket)$'
+}
+
 systemctl disable --now linura-qualification-transport.service >/dev/null 2>&1 || stop_status=$?
 for unit in ssh.socket sshd.socket ssh.service sshd.service; do
   systemctl disable --now "$unit" >/dev/null 2>&1 || true
 done
 systemctl mask --runtime ssh.service sshd.service ssh.socket sshd.socket >/dev/null 2>&1 || true
+for unit in $(ssh_candidate_units); do
+  properties="$(systemctl show "$unit" --property=Id --property=Names --property=Description --property=ExecStart --property=FragmentPath --property=ActiveState --property=UnitFileState --no-pager 2>/dev/null || true)"
+  if printf '%s\n' "$properties" | ssh_serving_properties; then
+    systemctl disable --now "$unit" >/dev/null 2>&1 || systemctl stop "$unit" >/dev/null 2>&1 || true
+    systemctl mask --runtime --force "$unit" >/dev/null 2>&1 || true
+  fi
+done
+for daemon in sshd dropbear tinysshd; do
+  pkill -KILL -x "$daemon" >/dev/null 2>&1 || true
+done
 
 if [ "$stop_status" -ne 0 ]; then
   printf 'qualification transport stop failed: %s\n' "$stop_status" >"$output_path"
@@ -323,6 +347,21 @@ else
     /usr/local/bin/linura-firstboot --durable-bootstrap-step "$production_root" "$firstboot_sha" >"$output_path" 2>&1
     status=$?
   fi
+fi
+
+if [ "$status" -ne 0 ]; then
+  {
+    printf '\nqualification Q8 failure snapshot:\n'
+    for unit in $(ssh_candidate_units); do
+      properties="$(systemctl show "$unit" --property=Id --property=Names --property=Description --property=ExecStart --property=FragmentPath --property=ActiveState --property=UnitFileState --no-pager 2>/dev/null || true)"
+      if printf '%s\n' "$properties" | ssh_serving_properties; then
+        printf '%s\n' "$properties"
+      fi
+    done
+    command -v ss >/dev/null 2>&1 && ss -H -ltnp || true
+    ps -eo pid=,comm= | grep -E '(^|[[:space:]])(sshd|dropbear|tinysshd)$' || true
+    grep -R -Ein 'trusted[[:space:]]*=|allow-insecure|allow-weak|allow[_-]downgrade[_-]to[_-]insecure[_-]repositories' /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null || true
+  } >>"$output_path"
 fi
 
 systemctl enable --now linura-qualification-transport.service >/dev/null 2>&1
@@ -363,7 +402,7 @@ RuntimeDirectoryMode=0755
 ExecStart=/usr/sbin/sshd -D -e -p 2222 -o PasswordAuthentication=no -o PermitRootLogin=no -o PidFile=/run/linura-qualification-sshd.pid
 Restart=on-failure
 RestartSec=1
-KillMode=process
+KillMode=control-group
 
 [Install]
 WantedBy=multi-user.target
