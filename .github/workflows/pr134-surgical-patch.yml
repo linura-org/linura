@@ -42,7 +42,7 @@ jobs:
       - name: Commit patched source and remove one-shot patcher
         run: |
           set -euo pipefail
-          git rm tools/pr134_black_box_patch.py .github/workflows/pr134-surgical-patch.yml
+          git rm -f tools/pr134_black_box_patch.py .github/workflows/pr134-surgical-patch.yml
           git add \
             apps/linura-firstboot/src/main.rs \
             scripts/qualification/v09-adversarial-guest.sh \
