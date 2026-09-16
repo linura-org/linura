@@ -118,22 +118,8 @@ run_security_baseline_step() {
   local output=""
   local status=""
 
-  # Schedule the Q8 observation before taking the qualification transport down.
-  # Explicitly detach every transient-service descriptor from this SSH channel
-  # and do not wait for its start job. Otherwise systemd can retain the channel
-  # until the timer fires, and stopping sshd resets the command that armed Q8.
-  # The longer timer window lets the now-detached SSH command close cleanly, so
-  # the security verifier is genuinely out-of-band from the listener it rejects.
-  # The active transient unit executes a dedicated helper whose path and
-  # arguments contain no SSH identifiers. Keeping listener-management commands
-  # out of the unit's ExecStart matters because the product verifier correctly
-  # treats active units whose properties advertise an SSH daemon as enabled.
   remote "sudo -n rm -f '$output_path' '$status_path'; sudo -n systemd-run --quiet --no-block --unit='$transient_unit' --on-active=10s --property=StandardInput=null --property=StandardOutput=journal --property=StandardError=journal '$Q8_OBSERVER' '$PRODUCTION_ROOT' '$LINURA_FIRSTBOOT_SHA' '$output_path' '$status_path' </dev/null >/dev/null 2>&1"
 
-  # Read the completion marker and command output atomically over the first
-  # successfully restored SSH connection. This avoids a TOCTOU window where a
-  # readiness probe succeeds and a second immediate connection races transport
-  # stabilization.
   for _ in $(seq 1 120); do
     sleep 2
     if result="$(remote "sudo -n sh -c 'test -s \"$status_path\" && { cat \"$status_path\"; printf \"__LINURA_Q8_OUTPUT__\\n\"; cat \"$output_path\"; }'" 2>/dev/null)"; then
@@ -263,7 +249,9 @@ REVOKE
     echo 'revoked preparer unexpectedly retained SSH access' >&2
     return 1
   fi
-  remote "sudo -n /usr/local/bin/linura-bootstrap-qualification authorize-preparer-revocation '$PRODUCTION_ROOT'" | tee -a "$TRANSCRIPT"
+  # Do not mint qualification-only revocation evidence for the production root.
+  # The next production First Boot step must re-observe the real OS post-state
+  # and mint the authenticated receipt itself.
   PREPARER_ACTIVE=false
   printf '%s\n' 'preparer_authority_revoked=actual-preparation-principal' | tee -a "$TRANSCRIPT"
 }
@@ -315,9 +303,6 @@ cloud-localds --network-config="$RUNNER_TEMP/network-config-${V09_SHARD_ID}" \
 start_guest "$VM_UUID" initial
 remote 'cloud-init status --wait --long'
 
-# Temporary preparer elevation is an explicit harness-owned authority object.
-# Boundary 12 revokes this exact file and then performs a fail-closed scan for
-# any unexpected duplicate explicit preparer grant before minting evidence.
 preparer_sudoers="$(printf '%s\n' 'linura-preparer ALL=(ALL) NOPASSWD:ALL' | base64 -w0)"
 install_text_file "$PREPARER_SUDOERS" 0440 "$preparer_sudoers"
 remote "sudo -n visudo -cf /etc/sudoers >/dev/null && sudo -n sync"
@@ -383,12 +368,6 @@ for daemon in sshd dropbear tinysshd; do
   pkill -KILL -x "$daemon" >/dev/null 2>&1 || true
 done
 
-# systemctl stop waits for its managed cgroup, but a separately killed
-# canonical daemon can still be in the middle of process teardown. Q8
-# must observe the stable post-teardown machine, not a disappearing
-# /proc entry. Require several consecutive daemon-free samples before
-# invoking the production verifier. This does not waive any security
-# check: inability to reach quiescence is itself a qualification fail.
 ssh_quiescent_samples=0
 for _ in $(seq 1 50); do
   if ! ps -eo comm= | grep -Eq '^[[:space:]]*(sshd|dropbear|tinysshd)[[:space:]]*$'; then
@@ -455,9 +434,6 @@ if [ "$restore" -eq 0 ]; then
   systemctl is-enabled --quiet linura-qualification-transport.service || restore=1
 fi
 if [ "$restore" -eq 0 ]; then
-  # The host deliberately power-cuts QEMU immediately after Q8. An
-  # active daemon is not enough: the recreated enablement symlink must
-  # be durable before the completion marker lets the host hard-stop.
   sync || restore=1
 fi
 if [ "$status" -eq 0 ] && [ "$restore" -ne 0 ]; then
@@ -492,27 +468,11 @@ WantedBy=network.target
 EOF
 )"
 install_text_file /etc/systemd/system/linura-qualification-transport.service 0644 "$transport_unit"
-# Ubuntu's OpenSSH package ships a boot-time socket generator. Unit masks
-# alone do not prevent that generator from recreating canonical ssh.socket
-# on a later qualification power cycle. Disable the generator through the
-# administrator override tier, then reload and persist the dedicated
-# qualification transport before canonical SSH is isolated.
 remote 'sudo -n install -d -o root -g root -m 0755 /etc/systemd/system-generators && sudo -n ln -sfn /dev/null /etc/systemd/system-generators/sshd-socket-generator && test "$(readlink /etc/systemd/system-generators/sshd-socket-generator)" = /dev/null && sudo -n systemctl daemon-reload && sudo -n systemctl enable --now linura-qualification-transport.service >/dev/null && sudo -n systemctl is-active --quiet linura-qualification-transport.service'
 remote 'for unit in ssh.service sshd.service ssh.socket sshd.socket; do sudo -n systemctl disable "$unit" >/dev/null 2>&1 || true; done; sudo -n systemctl mask --force ssh.service sshd.service ssh.socket sshd.socket >/dev/null'
-# The next transition is an intentional hard QEMU power cut. Make the
-# transport enablement, generator override, and canonical SSH masks
-# durable first; otherwise ext4 may legitimately discard recent
-# directory metadata and the reboot can lose the only port-2222
-# qualification transport while resurrecting canonical ssh.socket.
 remote 'set -e; sudo -n systemctl is-enabled --quiet linura-qualification-transport.service; test "$(readlink /etc/systemd/system-generators/sshd-socket-generator)" = /dev/null; for unit in ssh.service sshd.service ssh.socket sshd.socket; do test "$(readlink "/etc/systemd/system/$unit")" = /dev/null; done; sudo -n sync'
 SSH_GUEST_PORT="$QUALIFICATION_SSH_GUEST_PORT"
 
-# Non-primary shards fast-forward instead of crossing the primary shard's early
-# clone power-cycle. Move them onto the qualification-only transport through a
-# pre-bootstrap power-cycle of their own. The isolated daemon listens on a
-# dedicated guest port, so Ubuntu's canonical socket/generator path cannot race
-# it for port 22 during boot. QEMU changes the existing host forward to that
-# guest port across the power cycle before any product stage is advanced.
 if (( V09_BOUNDARY_START > 1 )); then
   power_cycle "qualification-transport-handoff"
 fi
@@ -651,6 +611,11 @@ done
 
 if [[ "$V09_FINAL_SHARD" == true ]]; then
   product_remote "sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-resume '$PRODUCTION_ROOT' '$LINURA_FIRSTBOOT_SHA'" | tee -a "$TRANSCRIPT"
+  remote "sudo -n /usr/local/bin/linura-firstboot --bootstrap '$PRODUCTION_ROOT'" | tee -a "$TRANSCRIPT"
+  printf '%s\n' 'production_bootstrap_entry=release-facing' | tee -a "$TRANSCRIPT"
+  power_cycle 'production-bootstrap-restart'
+  remote "sudo -n /usr/local/bin/linura-firstboot --bootstrap '$PRODUCTION_ROOT'" | tee -a "$TRANSCRIPT"
+  printf '%s\n' 'production_bootstrap_restart=reobserved-after-power-cycle' | tee -a "$TRANSCRIPT"
   {
     remote "sudo -n /usr/local/bin/linura-bootstrap-qualification bootstrap-start '$HARNESS_ROOT'"
     remote "sudo -n /usr/local/bin/linura-bootstrap-qualification bootstrap-resume '$HARNESS_ROOT'"
@@ -782,6 +747,8 @@ if final:
     required.extend([
         'bootstrap_restart=reobserved', 'bootstrap_restart_source=production-firstboot',
         'owner_enrollment=owner-enrollment-pending', 'preparer_authority_inherited=false',
+        'production_bootstrap_entry=release-facing',
+        'production_bootstrap_restart=reobserved-after-power-cycle',
         'interactive_owner_restart=enrolled-generation-1', 'manifest_replay=cross-machine-rejected',
         'manifest_command_field=rejected', 'q11_migration=real-v08-sqlite-stores',
         'q11_library=intent-graph-provenance-preserved', 'q11_authority=transaction-history-preserved',
