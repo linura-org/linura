@@ -148,6 +148,7 @@ run_security_baseline_step() {
     remote 'sudo -n systemctl list-unit-files --type=service --type=socket --no-legend --no-pager | grep -Ei "ssh|dropbear" || true; sudo -n systemctl list-units --all --type=service --type=socket --no-legend --no-pager | grep -Ei "ssh|dropbear" || true; sudo -n nft list ruleset || true' >&2 || true
     return 1
   fi
+}
 
 run_public_bootstrap_isolated() {
   local production_root="${1:?production root is required}"
@@ -475,8 +476,7 @@ else
         status=$?
         ;;
       *)
-        printf 'unsupported qualification observer mode: %s
-' "$mode" >"$output_path"
+        printf 'unsupported qualification observer mode: %s\n' "$mode" >"$output_path"
         status=2
         ;;
     esac
@@ -645,10 +645,8 @@ for boundary in $(seq "$V09_BOUNDARY_START" "$V09_BOUNDARY_END"); do
     PREPARER_ACTIVE=false
     remote "sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-step '$PRODUCTION_ROOT' '$LINURA_FIRSTBOOT_SHA'" | tee -a "$TRANSCRIPT"
     verify_preparer_authority_revoked "$PRODUCTION_ROOT" | tee -a "$TRANSCRIPT"
-    printf '%s
-' 'preparer_authority_revoked=actual-preparation-principal' | tee -a "$TRANSCRIPT"
-    printf '%s
-' 'preparer_revocation_producer=production-firstboot' | tee -a "$TRANSCRIPT"
+    printf '%s\n' 'preparer_authority_revoked=actual-preparation-principal' | tee -a "$TRANSCRIPT"
+    printf '%s\n' 'preparer_revocation_producer=production-firstboot' | tee -a "$TRANSCRIPT"
   elif [[ "$boundary" -eq 4 ]]; then
     run_security_baseline_step | tee -a "$TRANSCRIPT"
   else
