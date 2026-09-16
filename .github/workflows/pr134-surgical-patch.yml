@@ -39,17 +39,16 @@ jobs:
           python3 -m unittest tests.tooling.test_v09_adversarial_transport_contract
           git diff --check
 
-      - name: Commit patched source and remove one-shot patcher
+      - name: Commit only non-workflow production and qualification source
         run: |
           set -euo pipefail
-          git rm -f tools/pr134_black_box_patch.py .github/workflows/pr134-surgical-patch.yml
+          git restore tools/pr134_black_box_patch.py .github/workflows/v09-qualification.yml
           git add \
             apps/linura-firstboot/src/main.rs \
             scripts/qualification/v09-adversarial-guest.sh \
-            tests/tooling/test_v09_adversarial_transport_contract.py \
-            .github/workflows/v09-qualification.yml
+            tests/tooling/test_v09_adversarial_transport_contract.py
           if git diff --cached --quiet; then
-            echo 'surgical patch produced no commit' >&2
+            echo 'surgical patch produced no source commit' >&2
             exit 1
           fi
           git config user.name 'github-actions[bot]'
