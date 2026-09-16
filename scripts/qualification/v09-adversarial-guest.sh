@@ -699,7 +699,7 @@ if [[ "$V09_FINAL_SHARD" == true ]]; then
   product_remote "sudo -n /usr/local/bin/linura-firstboot --durable-bootstrap-resume '$PRODUCTION_ROOT' '$LINURA_FIRSTBOOT_SHA'" | tee -a "$TRANSCRIPT"
 
   provision_preparer_authority_fixture
-  remote "sudo -n rm -rf '$PUBLIC_BOOTSTRAP_ROOT'; sudo -n install -d -o root -g root -m 0700 '$PUBLIC_BOOTSTRAP_ROOT'; sudo -n test ! -e '$PUBLIC_BOOTSTRAP_ROOT/.linura-bootstrap-session'; sudo -n test ! -e '$PUBLIC_BOOTSTRAP_ROOT/bootstrap.state'; sudo -n test ! -e '$PUBLIC_BOOTSTRAP_ROOT/authority/control-receipt-auth.key'; sudo -n test ! -e '$PUBLIC_BOOTSTRAP_ROOT/authority/preparer-revocation.receipt'"
+  remote "set -euo pipefail; sudo -n rm -rf '$PUBLIC_BOOTSTRAP_ROOT'; sudo -n install -d -o root -g root -m 0700 '$PUBLIC_BOOTSTRAP_ROOT'; sudo -n test ! -e '$PUBLIC_BOOTSTRAP_ROOT/.linura-bootstrap-session'; sudo -n test ! -e '$PUBLIC_BOOTSTRAP_ROOT/bootstrap.state'; sudo -n test ! -e '$PUBLIC_BOOTSTRAP_ROOT/authority/control-receipt-auth.key'; sudo -n test ! -e '$PUBLIC_BOOTSTRAP_ROOT/authority/preparer-revocation.receipt'"
   run_public_bootstrap_isolated "$PUBLIC_BOOTSTRAP_ROOT" | tee -a "$TRANSCRIPT"
   verify_preparer_authority_revoked "$PUBLIC_BOOTSTRAP_ROOT" | tee -a "$TRANSCRIPT"
   printf '%s\n' 'production_bootstrap_entry=release-facing' | tee -a "$TRANSCRIPT"
