@@ -1,0 +1,53 @@
+from pathlib import Path
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "scripts/qualification/v09-adversarial-guest.sh"
+
+
+class V09AdversarialTransportContractTests(unittest.TestCase):
+    def test_ssh_and_scp_share_the_canonical_qualification_identity(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("SSH_USER=linura-qualification", source)
+        self.assertIn('ssh "${SSH_COMMON[@]}" -p "$SSH_PORT" "$SSH_USER@127.0.0.1" "$1"', source)
+        self.assertIn('scp "${SSH_COMMON[@]}" -P "$SSH_PORT" "target/release/$binary" "$SSH_USER@127.0.0.1:/tmp/"', source)
+        self.assertNotIn("linura@127.0.0.1:/tmp/", source)
+        self.assertIn("linura-preparer@127.0.0.1 true", source)
+
+    def test_non_primary_transport_handoff_crosses_a_power_cycle(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        start = source.index("# Non-primary shards fast-forward")
+        end = source.index("\nfi\n\nif ! remote 'command -v nft", start)
+        handoff = source[start:end]
+        persistent_mask = (
+            "systemctl mask --force ssh.service sshd.service "
+            "ssh.socket sshd.socket"
+        )
+
+        self.assertIn(persistent_mask, source)
+        self.assertLess(source.index(persistent_mask), start)
+        self.assertIn("QUALIFICATION_SSH_GUEST_PORT=2222", source)
+        self.assertIn('--ssh-guest-port "$SSH_GUEST_PORT"', source)
+        self.assertIn("/usr/sbin/sshd -D -e -p 2222", source)
+        self.assertIn('SSH_GUEST_PORT="$QUALIFICATION_SSH_GUEST_PORT"', source)
+        self.assertLess(
+            source.index('SSH_GUEST_PORT="$QUALIFICATION_SSH_GUEST_PORT"'),
+            source.index('power_cycle "qualification-transport-handoff"'),
+        )
+        self.assertIn("isolate_canonical_ssh()", source)
+        self.assertIn(
+            'systemctl disable --now "$unit"',
+            source,
+        )
+        self.assertIn(
+            'if [[ "$SSH_GUEST_PORT" == "$QUALIFICATION_SSH_GUEST_PORT" ]]',
+            source,
+        )
+        self.assertIn("isolate_canonical_ssh", source[source.index("start_guest()") : start])
+        self.assertIn('power_cycle "qualification-transport-handoff"', handoff)
+        self.assertNotIn("systemctl stop", handoff)
+        self.assertNotIn("enable --now", handoff)
+
+
+if __name__ == "__main__":
+    unittest.main()

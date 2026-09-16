@@ -16,9 +16,12 @@ on:
   pull_request:
     paths:
       - ".github/workflows/v09-qualification.yml"
+      - ".github/workflows/v09-adversarial-security.yml"
       - ".github/workflows/vm-acceptance.yml"
       - ".github/workflows/trusted-release-proof.yml"
       - "apps/linura-firstboot/**"
+      - "apps/linura-authorityd/Cargo.toml"
+      - "apps/linura-authorityd/src/bin/linura-migrations-qualification.rs"
       - "crates/linura-bootstrap/**"
       - "crates/linura-hardware/**"
       - "crates/linura-linux-observation/**"
@@ -40,9 +43,12 @@ on:
       - "docs/qualification/v0.9.0.md"
       - "docs/threat-model-v0.9-recovery.md"
       - "docs/threat-model-v0.9-update-migration.md"
-      - "tests/acceptance/002-firstboot-offline.json"
+      - "docs/threat-model-v0.9-bootstrap-provisioning.md"
+      - "tests/acceptance/**"
       - "tests/tooling/test_component_maturity.py"
       - "tests/tooling/test_roadmap.py"
+      - "tests/tooling/test_v09_recovery_qualification.py"
+      - "tests/tooling/test_v09_bootstrap_provisioning_contract.py"
       - "tools/check_machine_classes.py"
       - "tools/image.py"
       - "tools/codex/versions.env"
@@ -94,7 +100,10 @@ jobs:
           python3 tools/check_component_maturity.py
           python3 tools/check_roadmap.py
           python3 tools/check_machine_classes.py
-          python3 -m unittest tests.tooling.test_roadmap
+          python3 -m unittest \
+            tests.tooling.test_roadmap \
+            tests.tooling.test_v09_recovery_qualification \
+            tests.tooling.test_v09_bootstrap_provisioning_contract
 
       - name: Test First Boot, bootstrap, migration, update and hardware contracts
         run: |
@@ -106,11 +115,35 @@ jobs:
             -p linura-migrations \
             -p linura-update \
             -p linura-hardware
-          cargo build --locked --release -p linura-firstboot
+          cargo build --locked --release -p linura-firstboot --bin linura-firstboot
+          cargo build --locked --release -p linura-bootstrap \
+            --features qualification-harness --bin linura-bootstrap-qualification
+          cargo build --locked --release -p linura-bootstrap \
+            --features qualification-harness --bin linura-bootstrap-transition-qualification
+          cargo build --locked --release -p linura-authorityd \
+            --features v09-migration-qualification --bin linura-migrations-qualification
+          cargo build --locked --release -p linura-update \
+            --features qualification-harness --bin linura-update-qualification
+          cargo build --locked --release -p linura-update \
+            --features qualification-harness --bin linura-update-evidence-verifier-qualification
           ./target/release/linura-firstboot --self-check
           ./target/release/linura-firstboot --qualification-environment | grep -Fx 'id=qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless'
           ./target/release/linura-firstboot --qualification-environment | grep -Fx 'kind=qualification-environment'
           ./target/release/linura-firstboot --qualification-environment | grep -Fx 'status=candidate-not-yet-release-supported'
+
+      - name: Upload exact-source adversarial qualification binaries
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-v09-adversarial-binaries-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          path: |
+            target/release/linura-firstboot
+            target/release/linura-bootstrap-qualification
+            target/release/linura-bootstrap-transition-qualification
+            target/release/linura-migrations-qualification
+            target/release/linura-update-qualification
+            target/release/linura-update-evidence-verifier-qualification
+          if-no-files-found: error
+          retention-days: 7
 
   offline-reference:
     name: v0.9 offline QualificationEnvironment VM
@@ -122,12 +155,23 @@ jobs:
       scenario: firstboot-offline
       source_sha: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
 
+  adversarial-security:
+    name: v0.9 adversarial bootstrap and Q11
+    needs: contract
+    uses: ./.github/workflows/v09-adversarial-security.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      source_sha: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
   qualification-proof:
     name: bind v0.9 qualification evidence
-    needs: [contract, offline-reference]
+    needs: [contract, offline-reference, adversarial-security]
     runs-on: ubuntu-24.04
     env:
       EVIDENCE_ROOT: /tmp/linura-v09-vm
+      ADVERSARIAL_ROOT: /tmp/linura-v09-adversarial
       QUALIFICATION_ROOT: /tmp/linura-v09-qualification
     steps:
       - name: Download exact-source VM evidence
@@ -135,6 +179,12 @@ jobs:
         with:
           name: linura-vm-acceptance-firstboot-offline-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
           path: /tmp/linura-v09-vm
+
+      - name: Download exact-source adversarial evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-v09-adversarial-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/linura-v09-adversarial
 
       - name: Validate and bind qualification evidence
         run: |
@@ -146,60 +196,118 @@ jobs:
           import pathlib
           import shutil
 
+          source_sha = os.environ["SOURCE_SHA"]
+          repository = os.environ["GITHUB_REPOSITORY"]
+          qualification_id = "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"
+          base_image_sha = "d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac"
           evidence_root = pathlib.Path(os.environ["EVIDENCE_ROOT"])
+          adversarial_root = pathlib.Path(os.environ["ADVERSARIAL_ROOT"])
           qualification_root = pathlib.Path(os.environ["QUALIFICATION_ROOT"])
           qualification_root.mkdir(parents=True, exist_ok=True)
+
+          def digest(path: pathlib.Path) -> str:
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
           evidence_path = evidence_root / "VM-ACCEPTANCE-EVIDENCE.json"
           checksum_path = evidence_root / "VM-ACCEPTANCE-EVIDENCE.sha256"
           if not evidence_path.is_file() or not checksum_path.is_file():
               raise SystemExit("v0.9 VM evidence or checksum is missing")
-
-          evidence_bytes = evidence_path.read_bytes()
-          evidence_sha = hashlib.sha256(evidence_bytes).hexdigest()
-          expected_checksum = f"{evidence_sha}  {evidence_path.name}"
-          if checksum_path.read_text(encoding="utf-8").strip() != expected_checksum:
+          evidence_sha = digest(evidence_path)
+          if checksum_path.read_text(encoding="utf-8").strip() != f"{evidence_sha}  {evidence_path.name}":
               raise SystemExit("v0.9 VM evidence checksum mismatch")
-
-          evidence = json.loads(evidence_bytes)
-          source_sha = os.environ["SOURCE_SHA"]
+          evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
           if evidence.get("schema_version") != 2:
               raise SystemExit("unexpected v0.9 VM evidence schema")
-          if evidence.get("repository") != os.environ["GITHUB_REPOSITORY"]:
-              raise SystemExit("v0.9 VM evidence repository mismatch")
-          if evidence.get("source_sha") != source_sha:
-              raise SystemExit("v0.9 VM evidence source mismatch")
+          if evidence.get("repository") != repository or evidence.get("source_sha") != source_sha:
+              raise SystemExit("v0.9 VM evidence source/repository mismatch")
           if evidence.get("result") != "passed":
               raise SystemExit("v0.9 VM qualification did not pass")
           if evidence.get("scenario", {}).get("id") != "firstboot-offline":
               raise SystemExit("v0.9 VM evidence scenario mismatch")
           qualification_environment = evidence.get("qualification_environment", {})
-          if qualification_environment.get("id") != "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless":
+          if qualification_environment.get("id") != qualification_id:
               raise SystemExit("v0.9 QualificationEnvironment identity mismatch")
           if evidence.get("virtualization", {}).get("requested_acceleration") != "tcg":
               raise SystemExit("v0.9 virtualization mode mismatch")
-          if evidence.get("base_image", {}).get("sha256") != "d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac":
+          if evidence.get("base_image", {}).get("sha256") != base_image_sha:
               raise SystemExit("v0.9 base image digest mismatch")
+
+          adversarial_path = adversarial_root / "V09-ADVERSARIAL-EVIDENCE.json"
+          adversarial_checksum = adversarial_root / "V09-ADVERSARIAL-EVIDENCE.sha256"
+          if not adversarial_path.is_file() or not adversarial_checksum.is_file():
+              raise SystemExit("v0.9 adversarial evidence or checksum is missing")
+          adversarial_sha = digest(adversarial_path)
+          if adversarial_checksum.read_text(encoding="utf-8").strip() != f"{adversarial_sha}  {adversarial_path.name}":
+              raise SystemExit("v0.9 adversarial evidence checksum mismatch")
+          adversarial = json.loads(adversarial_path.read_text(encoding="utf-8"))
+          if adversarial.get("schema_version") != 1:
+              raise SystemExit("unexpected v0.9 adversarial evidence schema")
+          if adversarial.get("repository") != repository or adversarial.get("source_sha") != source_sha:
+              raise SystemExit("v0.9 adversarial evidence source/repository mismatch")
+          if adversarial.get("result") != "passed":
+              raise SystemExit("v0.9 adversarial qualification did not pass")
+          if adversarial.get("qualification_environment", {}).get("id") != qualification_id:
+              raise SystemExit("v0.9 adversarial environment identity mismatch")
+          if adversarial.get("base_image", {}).get("sha256") != base_image_sha:
+              raise SystemExit("v0.9 adversarial base-image mismatch")
+
+          transcript_binding = adversarial.get("transcript")
+          if not isinstance(transcript_binding, dict):
+              raise SystemExit("v0.9 adversarial transcript binding is missing")
+          transcript_name = transcript_binding.get("path")
+          if (
+              not isinstance(transcript_name, str)
+              or not transcript_name
+              or pathlib.Path(transcript_name).name != transcript_name
+          ):
+              raise SystemExit("v0.9 adversarial transcript path is invalid")
+          adversarial_transcript = adversarial_root / transcript_name
+          if not adversarial_transcript.is_file() or adversarial_transcript.is_symlink():
+              raise SystemExit("v0.9 adversarial transcript is missing or untrusted")
+          if transcript_binding.get("size") != adversarial_transcript.stat().st_size:
+              raise SystemExit("v0.9 adversarial transcript size mismatch")
+          if transcript_binding.get("sha256") != digest(adversarial_transcript):
+              raise SystemExit("v0.9 adversarial transcript digest mismatch")
 
           shutil.copy2(evidence_path, qualification_root / evidence_path.name)
           shutil.copy2(checksum_path, qualification_root / checksum_path.name)
+          shutil.copy2(adversarial_path, qualification_root / adversarial_path.name)
+          shutil.copy2(adversarial_checksum, qualification_root / adversarial_checksum.name)
+          shutil.copy2(adversarial_transcript, qualification_root / transcript_name)
+
           receipt = {
               "schema_version": 2,
-              "repository": os.environ["GITHUB_REPOSITORY"],
+              "repository": repository,
               "source_sha": source_sha,
               "result": "passed",
               "qualification_environment": qualification_environment,
               "source_contracts": [
                   "firstboot-exact-environment-and-non-authority",
                   "bootstrap-recovery-evidence-binding",
+                  "bootstrap-durable-ledger-generation-and-no-blind-replay",
+                  "provisioning-manifest-v1-bounded-integrity-bound",
+                  "owner-enrollment-pending-fresh-authority-generation",
                   "migration-durable-ledger-and-independent-backup",
                   "update-durable-prepare-dispatch-verify-and-no-blind-replay",
+                  "q11-disposable-migration-restore-update-native-recovery",
+                  "v09-adversarial-bootstrap-provisioning-security",
+                  "production-firstboot-persistent-power-cycle-recovery",
+                  "update-real-dpkg-transaction-authoritative-reobservation",
+                  "adversarial-transcript-integrity-and-retention",
               ],
               "vm_evidence": {
                   "path": evidence_path.name,
                   "sha256": evidence_sha,
-                  "size": len(evidence_bytes),
+                  "size": evidence_path.stat().st_size,
                   "workflow_run_id": evidence.get("workflow", {}).get("run_id"),
                   "workflow_run_attempt": evidence.get("workflow", {}).get("run_attempt"),
+              },
+              "adversarial_evidence": {
+                  "path": adversarial_path.name,
+                  "sha256": adversarial_sha,
+                  "size": adversarial_path.stat().st_size,
+                  "workflow_run_id": adversarial.get("workflow", {}).get("run_id"),
+                  "workflow_run_attempt": adversarial.get("workflow", {}).get("run_attempt"),
               },
           }
           (qualification_root / "qualification.json").write_text(
