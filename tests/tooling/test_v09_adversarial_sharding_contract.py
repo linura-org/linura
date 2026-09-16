@@ -65,17 +65,36 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
                 source,
             )
 
-    def test_final_shard_owns_boundary_twelve_revocation(self) -> None:
+    def test_final_shard_qualifies_production_owned_boundary_twelve_revocation(self) -> None:
         final = next(row for row in EXPECTED if row[4])
         self.assertLessEqual(final[1], 12)
         self.assertGreaterEqual(final[2], 12)
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("PREPARER_SUDOERS=/etc/sudoers.d/99-linura-preparer", source)
         self.assertIn('install_text_file "$PREPARER_SUDOERS" 0440', source)
-        self.assertIn("rm -f /etc/sudoers.d/99-linura-preparer", source)
-        self.assertIn("grep -RlE", source)
-        self.assertIn("visudo -cf /etc/sudoers", source)
-        self.assertIn("revoke_preparer_authority", source)
+        self.assertNotIn("revoke_preparer_authority()", source)
+        self.assertIn("verify_preparer_authority_revoked()", source)
+        boundary = source[source.index('if [[ "$boundary" -eq 12 ]]'):]
+        self.assertLess(
+            boundary.index("/usr/local/bin/linura-firstboot --durable-bootstrap-step"),
+            boundary.index('verify_preparer_authority_revoked "$PRODUCTION_ROOT"'),
+        )
+        self.assertIn("preparer_revocation_producer=production-firstboot", boundary)
+        self.assertIn(
+            "preparer_revocation_verifier=independent-qualification-observation",
+            source,
+        )
+        verifier_start = source.index("verify_preparer_authority_revoked() {")
+        verifier_end = source.index("\n}\n\nprovision_preparer_authority_fixture", verifier_start)
+        verifier = source[verifier_start:verifier_end]
+        for mutator in (
+            "pkill -KILL",
+            "usermod -G ''",
+            "passwd -l",
+            "rm -rf /home/linura-preparer/.ssh",
+            "rm -f /etc/sudoers.d/99-linura-preparer",
+        ):
+            self.assertNotIn(mutator, verifier)
         preparer = source[
             source.index("  - name: linura-preparer") : source.index("ssh_pwauth: false")
         ]
