@@ -16,7 +16,7 @@ class V09AdversarialTransportContractTests(unittest.TestCase):
 
     def test_non_primary_transport_handoff_crosses_a_durable_power_cycle(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
-        start = source.index("# Non-primary shards fast-forward")
+        start = source.index('if (( V09_BOUNDARY_START > 1 )); then\n  power_cycle "qualification-transport-handoff"')
         end = source.index("\nfi\n\nif ! remote 'command -v nft", start)
         handoff = source[start:end]
         persistent_mask = (
@@ -75,7 +75,6 @@ class V09AdversarialTransportContractTests(unittest.TestCase):
         self.assertNotIn("systemctl stop", handoff)
         self.assertNotIn("enable --now", handoff)
 
-
     def test_product_bootstrap_uses_the_revocable_preparer_until_handoff(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("PREPARER_SSH_USER=linura-preparer", source)
@@ -107,12 +106,24 @@ class V09AdversarialTransportContractTests(unittest.TestCase):
         revoke_start = source.index("revoke_preparer_authority() {")
         revoke_end = source.index("\n}\n\nmkdir -p", revoke_start)
         revoke = source[revoke_start:revoke_end]
-        self.assertLess(
-            revoke.index("authorize-preparer-revocation"),
-            revoke.index("PREPARER_ACTIVE=false"),
-        )
+        self.assertNotIn("authorize-preparer-revocation", revoke)
+        self.assertIn("PREPARER_ACTIVE=false", revoke)
         self.assertIn("preparer_authority_revoked=actual-preparation-principal", revoke)
         self.assertIn("preparer_execution_identity=%s", source)
+        self.assertIn(
+            "The next production First Boot step must re-observe the real OS post-state",
+            revoke,
+        )
+
+    def test_release_facing_bootstrap_is_exercised_and_reobserved_after_restart(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("--bootstrap '$PRODUCTION_ROOT'", source)
+        self.assertIn("production_bootstrap_entry=release-facing", source)
+        self.assertIn('power_cycle \'production-bootstrap-restart\'', source)
+        self.assertIn(
+            "production_bootstrap_restart=reobserved-after-power-cycle",
+            source,
+        )
 
 
 if __name__ == "__main__":
