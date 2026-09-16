@@ -25,6 +25,16 @@ jobs:
       - name: Apply exact surgical patch
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tools/pr134_black_box_patch.py')
+          source = path.read_text(encoding='utf-8')
+          old = 'updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)'
+          new = 'updated, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=re.S)'
+          if source.count(old) != 1:
+              raise SystemExit('temporary patcher substitution contract changed')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+          PY
           python3 tools/pr134_black_box_patch.py
           python3 -m unittest tests.tooling.test_v09_adversarial_transport_contract
           git diff --check
