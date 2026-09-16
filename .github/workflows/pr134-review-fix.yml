@@ -39,7 +39,11 @@ jobs:
           test_path = Path('tests/tooling/test_v09_adversarial_sharding_contract.py')
           test = test_path.read_text(encoding='utf-8')
           anchor = '        self.assertIn("--accel tcg", source)\n'
-          assertion = '''        self.assertIn(\n            'remote "set -euo pipefail; sudo -n rm -rf \'$PUBLIC_BOOTSTRAP_ROOT\';',\n            source,\n        )\n'''
+          assertion = '''        self.assertIn(
+            "remote \\\"set -euo pipefail; sudo -n rm -rf '$PUBLIC_BOOTSTRAP_ROOT';",
+            source,
+        )
+'''
           if test.count(anchor) != 1:
               raise SystemExit(f'expected one regression anchor, found {test.count(anchor)}')
           if assertion not in test:
