@@ -99,6 +99,10 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
             source.index("  - name: linura-preparer") : source.index("ssh_pwauth: false")
         ]
         self.assertNotIn("    sudo:", preparer)
+        self.assertIn(
+            "remote \"set -euo pipefail; sudo -n rm -rf '$PUBLIC_BOOTSTRAP_ROOT';",
+            source,
+        )
         self.assertIn("--accel tcg", source)
 
 
