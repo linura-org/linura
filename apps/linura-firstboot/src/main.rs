@@ -135,10 +135,6 @@ fn finish_durable_command(result: Result<(), String>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            // Durable bootstrap errors can be transitively derived from protected
-            // machine/session identity. Never reflect the raw error into stderr.
-            // A small allowlist of static Q8 failure classes is safe to expose and
-            // gives operators actionable diagnostics without leaking protected data.
             let failure_class = match error.as_str() {
                 value if value.contains("Q8 security baseline rejected SSH exposure") => {
                     "security-baseline/ssh-exposure"
@@ -277,9 +273,6 @@ fn durable_bootstrap_start(root: &Path, expected_self_sha256: &str) -> Result<()
         return Err("durable bootstrap start requires a fresh canonical ledger".into());
     }
 
-    // Start performs two complete canonical stages, including a real atomic
-    // managed installation. All later states are handled by the same generic
-    // driver used after arbitrary restarts.
     drive_one_stage(&store, root, expected_self_sha256, &mut coordinator)?;
     drive_one_stage(&store, root, expected_self_sha256, &mut coordinator)?;
     println!("bootstrap_effect_started=durable");
@@ -535,10 +528,6 @@ fn reconcile_started_effect(
 ) -> Result<(), String> {
     match stage {
         BootstrapStage::LinuraInstallation => {
-            // Re-observe first. If the exact managed target is absent or does
-            // not match, the operation is a deterministic atomic file install,
-            // so it may be reconciled by repeating the exact-source copy only
-            // after observing the post-state; this is not blind replay.
             let target = Path::new(MANAGED_FIRSTBOOT_PATH);
             let matches = target.exists()
                 && file_sha256(target)
@@ -697,12 +686,13 @@ fn observe_preparer_os_authority_absent() -> Result<String, String> {
     if Path::new("/home/linura-preparer/.ssh").exists() {
         return Err("preparer SSH authority survived revocation".into());
     }
+    run_fixed("/usr/sbin/visudo", &["-cf", "/etc/sudoers"])?;
     if sudoers_mentions_preparer(Path::new("/etc/sudoers"), identity.as_ref())?
         || sudoers_directory_mentions_preparer(Path::new("/etc/sudoers.d"), identity.as_ref())?
+        || (account_present && preparer_has_effective_sudo_authority()?)
     {
         return Err("preparer sudo authority survived revocation".into());
     }
-    run_fixed("/usr/sbin/visudo", &["-cf", "/etc/sudoers"])?;
 
     let postcondition = format!(
         "linura-preparer-revocation-postcondition-v3\naccount_present={}\nuid={}\nprimary_gid={}\nprimary_group={}\nprocesses=absent\nsupplementary_groups={}\npassword={}\nssh_authority=absent\nsudo_authority=absent\nsudoers=valid\n",
@@ -728,6 +718,30 @@ fn observe_preparer_os_authority_absent() -> Result<String, String> {
         },
     );
     Ok(sha256_hex(postcondition.as_bytes()))
+}
+
+fn preparer_has_effective_sudo_authority() -> Result<bool, String> {
+    let output = Command::new("/usr/bin/sudo")
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .args(["-n", "-l", "-U", PREPARER_USER])
+        .output()
+        .map_err(io_string)?;
+    if output.status.success() {
+        return Ok(true);
+    }
+
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|_| "sudo policy query returned non-UTF-8 stdout".to_owned())?;
+    let stderr = String::from_utf8(output.stderr)
+        .map_err(|_| "sudo policy query returned non-UTF-8 stderr".to_owned())?;
+    let observed = format!("{stdout}\n{stderr}");
+    let no_authority = format!("User {PREPARER_USER} is not allowed to run sudo on ");
+    if observed.contains(&no_authority) {
+        Ok(false)
+    } else {
+        Err("cannot authoritatively evaluate preparer effective sudo policy".into())
+    }
 }
 
 fn run_fixed(program: &str, args: &[&str]) -> Result<(), String> {
@@ -1040,9 +1054,6 @@ fn create_checkpoint_bundle(
     let state_sha = file_sha256(&state_copy)?;
     let session_sha = file_sha256(&session_copy)?;
     let anchor_sha = file_sha256(&anchor_copy)?;
-    // Deliberately omit raw machine/session identifiers from evidence-like
-    // recovery artifacts. Exact artifact digests retain restore binding without
-    // exposing stable identity material in logs or uploaded evidence.
     let payload = format!(
         "linura-bootstrap-recovery-checkpoint-v3\nstate_generation={}\nstate_sha256={}\nsession_sha256={}\nanchor_sha256={}\nresume_stage=recovery-checkpoint\n",
         coordinator.state().generation(),
@@ -1217,11 +1228,6 @@ fn read_protected_identity_file(
         return Err(format!("{label} changed or is not trusted while open"));
     }
 
-    // sysfs attributes such as DMI product_uuid are regular protected files,
-    // but their reported st_size is a virtual-filesystem implementation detail
-    // (commonly a page) rather than the readable payload length. Bound the
-    // actual bytes read instead of trusting st_size, while retaining the
-    // no-symlink, ownership, link-count, permissions and inode checks above.
     let read_limit = max_bytes
         .checked_add(1)
         .ok_or_else(|| format!("{label} read bound overflow"))?;
