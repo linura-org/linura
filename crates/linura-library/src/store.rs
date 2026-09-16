@@ -5,12 +5,12 @@ use std::time::Duration;
 
 use linura_core::{
     Actor, ActorId, ActorKind, CapabilityId, IntentId, ProfileId, ProviderId, RequestId,
-    RequirementId, ResourceId, SetupId, ValidationError,
+    RequirementId, ResourceId, SemanticReason, SetupId, ValidationError,
 };
 use linura_intent::{
     Intent, IntentStatus, MachineClass, MachineProfile, Requirement, RequirementKind, Setup,
 };
-use linura_planner::DesiredState;
+use linura_planner::{DesiredResource, DesiredState};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
@@ -215,6 +215,142 @@ impl LocalLibrary {
                 load_intent_revision(&self.connection, &id, to_u64(revision, "intent revision")?)
             })
             .collect()
+    }
+
+    pub fn desired_state_for_intent_revision(
+        &self,
+        intent_id: &IntentId,
+        intent_revision: u64,
+    ) -> Result<DesiredState, LibraryError> {
+        let stored = load_intent_revision(&self.connection, intent_id, intent_revision)?;
+        let generation: Option<i64> = self.connection.query_row(
+            "SELECT MAX(generation) FROM desired_resources WHERE intent_id = ?1 AND intent_revision = ?2 AND ownership_complete = 1",
+            params![intent_id.as_str(), to_i64(intent_revision, "intent revision")?],
+            |row| row.get(0),
+        )?;
+        let generation = generation.ok_or_else(|| {
+            LibraryError::Validation(format!(
+                "intent {}@{} has no complete deterministic desired-state generation",
+                intent_id.as_str(),
+                intent_revision
+            ))
+        })?;
+        let incomplete: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM desired_resources WHERE intent_id = ?1 AND intent_revision = ?2 AND generation = ?3 AND ownership_complete = 0",
+            params![intent_id.as_str(), to_i64(intent_revision, "intent revision")?, generation],
+            |row| row.get(0),
+        )?;
+        if incomplete != 0 {
+            return Err(LibraryError::Corrupt(format!(
+                "intent {}@{} desired-state generation mixes complete and incomplete ownership",
+                intent_id.as_str(),
+                intent_revision
+            )));
+        }
+
+        let mut statement = self.connection.prepare(
+            "SELECT provider_id, resource_id, capability_id FROM desired_resources WHERE intent_id = ?1 AND intent_revision = ?2 AND generation = ?3 ORDER BY provider_id, resource_id, capability_id",
+        )?;
+        let rows = statement
+            .query_map(
+                params![
+                    intent_id.as_str(),
+                    to_i64(intent_revision, "intent revision")?,
+                    generation
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        if rows.is_empty() {
+            return Err(LibraryError::Corrupt(format!(
+                "intent {}@{} complete desired-state generation contains no resources",
+                intent_id.as_str(),
+                intent_revision
+            )));
+        }
+
+        let mut resources = Vec::with_capacity(rows.len());
+        for (provider_raw, resource_raw, capability_raw) in rows {
+            let provider = ProviderId::new(provider_raw).map_err(validation_error)?;
+            let resource = ResourceId::new(resource_raw).map_err(validation_error)?;
+            let capability = CapabilityId::new(capability_raw).map_err(validation_error)?;
+
+            let mut attributes_statement = self.connection.prepare(
+                "SELECT key, value FROM desired_resource_attributes WHERE intent_id = ?1 AND intent_revision = ?2 AND generation = ?3 AND provider_id = ?4 AND resource_id = ?5 AND capability_id = ?6 ORDER BY key",
+            )?;
+            let state = attributes_statement
+                .query_map(
+                    params![
+                        intent_id.as_str(),
+                        to_i64(intent_revision, "intent revision")?,
+                        generation,
+                        provider.as_str(),
+                        resource.as_str(),
+                        capability.as_str()
+                    ],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )?
+                .collect::<Result<BTreeMap<_, _>, _>>()?;
+
+            let mut origins_statement = self.connection.prepare(
+                "SELECT origin_kind, origin_id FROM desired_resource_origins WHERE intent_id = ?1 AND intent_revision = ?2 AND generation = ?3 AND provider_id = ?4 AND resource_id = ?5 AND capability_id = ?6 ORDER BY origin_kind, origin_id",
+            )?;
+            let origins = origins_statement
+                .query_map(
+                    params![
+                        intent_id.as_str(),
+                        to_i64(intent_revision, "intent revision")?,
+                        generation,
+                        provider.as_str(),
+                        resource.as_str(),
+                        capability.as_str()
+                    ],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut intent_ids = Vec::new();
+            let mut requirement_ids = Vec::new();
+            let mut capability_ids = Vec::new();
+            for (kind, id) in origins {
+                match kind.as_str() {
+                    "intent" => intent_ids.push(IntentId::new(id).map_err(validation_error)?),
+                    "requirement" => {
+                        requirement_ids.push(RequirementId::new(id).map_err(validation_error)?)
+                    }
+                    "capability" => {
+                        capability_ids.push(CapabilityId::new(id).map_err(validation_error)?)
+                    }
+                    other => {
+                        return Err(LibraryError::Corrupt(format!(
+                            "unknown desired-state semantic origin kind {other:?}"
+                        )));
+                    }
+                }
+            }
+            resources.push(DesiredResource {
+                provider,
+                resource,
+                observation_capability: capability,
+                state,
+                reason: SemanticReason {
+                    summary: stored.intent.statement.clone(),
+                    intent_ids,
+                    requirement_ids,
+                    capability_ids,
+                },
+            });
+        }
+        let desired_state = DesiredState { resources };
+        desired_state
+            .validate()
+            .map_err(|error| LibraryError::Corrupt(error.to_string()))?;
+        Ok(desired_state)
     }
 
     pub fn transition_intent(

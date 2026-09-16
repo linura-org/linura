@@ -353,7 +353,7 @@ impl FirstBootObservationSource {
         Ok(Self { coordinator })
     }
 
-    fn observe(
+    pub fn observe(
         &mut self,
         request: &ObservationRequest,
     ) -> Result<ObservationEnvelope, FirstBootError> {

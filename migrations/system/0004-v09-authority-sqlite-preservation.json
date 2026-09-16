@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "v09-authority-sqlite-preservation",
+  "introduced_in": "0.9.0",
+  "scope": "system",
+  "reversible": true,
+  "requires_snapshot": true,
+  "preconditions": [
+    "target is the released Linura authority SQLite store with application id LNRT and schema version 2",
+    "SQLite integrity_check and foreign_key_check succeed before migration",
+    "validated independent recovery backup is bound to the exact authority database",
+    "transaction identity, generation authority bindings, audit history, and schema migration records have a stable canonical fingerprint"
+  ]
+}
