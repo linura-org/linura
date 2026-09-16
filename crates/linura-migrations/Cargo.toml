@@ -6,5 +6,16 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+path = "src/root.rs"
+
+[features]
+default = []
+qualification-harness = []
+
+[dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
+sha2 = "0.10"
+
 [lints]
 workspace = true

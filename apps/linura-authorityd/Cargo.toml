@@ -6,14 +6,27 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+v09-migration-qualification = [
+    "dep:linura-intent",
+    "dep:linura-library",
+    "dep:linura-migrations",
+    "dep:linura-planner",
+]
+
 [dependencies]
 linura-control = { path = "../../crates/linura-control" }
 linura-core = { path = "../../crates/linura-core" }
+linura-intent = { path = "../../crates/linura-intent", optional = true }
+linura-library = { path = "../../crates/linura-library", optional = true }
+linura-migrations = { path = "../../crates/linura-migrations", optional = true, features = ["qualification-harness"] }
 linura-dbus = { path = "../../crates/linura-dbus" }
 linura-executor-systemd = { path = "../../executors/linura-executor-systemd" }
 linura-linux-observation = { path = "../../crates/linura-linux-observation" }
 linura-observation-control = { path = "../../crates/linura-observation-control" }
 linura-persistence-sqlite = { path = "../../crates/linura-persistence-sqlite" }
+linura-planner = { path = "../../crates/linura-planner", optional = true }
 linura-protocol = { path = "../../crates/linura-protocol" }
 linura-provider-sdk = { path = "../../crates/linura-provider-sdk" }
 linura-transaction = { path = "../../crates/linura-transaction" }
@@ -22,6 +35,11 @@ zbus = { version = "=5.19.0", default-features = false, features = ["async-io", 
 
 [dev-dependencies]
 linura-observation = { path = "../../crates/linura-observation" }
+
+[[bin]]
+name = "linura-migrations-qualification"
+path = "src/bin/linura-migrations-qualification.rs"
+required-features = ["v09-migration-qualification"]
 
 [lints]
 workspace = true
