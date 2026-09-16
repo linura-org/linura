@@ -19,22 +19,29 @@ class V09AdversarialFastForwardContractTests(unittest.TestCase):
         self.assertIn("--property=StandardOutput=journal", helper)
         self.assertIn("--property=StandardError=journal", helper)
         self.assertIn("</dev/null >/dev/null 2>&1", helper)
+        systemd_run = next(line for line in helper.splitlines() if "systemd-run" in line)
+        self.assertIn("'$Q8_OBSERVER'", systemd_run)
+        self.assertNotIn("/bin/bash -c", systemd_run)
+        self.assertNotIn("ssh.service", systemd_run)
+        self.assertNotIn("sshd.service", systemd_run)
+        self.assertNotIn("linura-qualification-transport.service", systemd_run)
         self.assertIn(
             "systemctl disable --now linura-qualification-transport.service",
-            helper,
+            source,
         )
         self.assertIn(
             "systemctl mask --runtime ssh.service sshd.service ssh.socket sshd.socket",
-            helper,
+            source,
         )
         self.assertNotIn("systemctl unmask --runtime", helper)
-        self.assertIn("linura-firstboot --durable-bootstrap-step", helper)
+        self.assertIn("linura-firstboot --durable-bootstrap-step", source)
         self.assertIn(
             "systemctl enable --now linura-qualification-transport.service",
-            helper,
+            source,
         )
-        self.assertIn("systemctl is-active --quiet linura-qualification-transport.service", helper)
-        self.assertIn("stable=", helper)
+        self.assertIn("systemctl is-active --quiet linura-qualification-transport.service", source)
+        self.assertIn("install_text_file \"$Q8_OBSERVER\" 0755", source)
+        self.assertIn("stable=", source)
         self.assertIn("test -s", helper)
         self.assertIn("__LINURA_Q8_OUTPUT__", helper)
 

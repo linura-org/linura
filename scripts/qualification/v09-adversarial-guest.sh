@@ -55,6 +55,7 @@ ENVIRONMENT="$ARTIFACT_DIR/guest-environment-${V09_SHARD_ID}.env"
 ROOT=/var/lib/linura-qualification/v0.9
 PRODUCTION_ROOT="$ROOT/production-firstboot"
 HARNESS_ROOT="$ROOT/harness"
+Q8_OBSERVER=/usr/local/libexec/linura-v09-q8-observe
 VM_PID=""
 BOOT_INDEX=0
 
@@ -108,10 +109,11 @@ run_security_baseline_step() {
   # until the timer fires, and stopping sshd resets the command that armed Q8.
   # The longer timer window lets the now-detached SSH command close cleanly, so
   # the security verifier is genuinely out-of-band from the listener it rejects.
-  # Canonical SSH units stay runtime-masked for the remainder of this boot: they
-  # are product transport, not qualification transport, and unmasking them here
-  # creates a listener-ownership race immediately after the Q8 observation.
-  remote "sudo -n rm -f '$output_path' '$status_path'; sudo -n systemd-run --quiet --no-block --unit='$transient_unit' --on-active=10s --property=StandardInput=null --property=StandardOutput=journal --property=StandardError=journal /bin/bash -c 'set +e; systemctl disable --now linura-qualification-transport.service >/dev/null 2>&1; systemctl mask --runtime ssh.service sshd.service ssh.socket sshd.socket >/dev/null 2>&1 || true; /usr/local/bin/linura-firstboot --durable-bootstrap-step \"$PRODUCTION_ROOT\" \"$LINURA_FIRSTBOOT_SHA\" >\"$output_path\" 2>&1; status=\$?; systemctl enable --now linura-qualification-transport.service >/dev/null 2>&1; restore=\$?; stable=0; if [ \"\$restore\" -eq 0 ]; then for _ in \$(seq 1 20); do if systemctl is-active --quiet linura-qualification-transport.service; then stable=\$((stable + 1)); else stable=0; fi; [ \"\$stable\" -ge 5 ] && break; sleep 0.2; done; [ \"\$stable\" -ge 5 ] || restore=1; fi; if [ \"\$status\" -eq 0 ] && [ \"\$restore\" -ne 0 ]; then status=\$restore; fi; printf \"%s\\n\" \"\$status\" >\"$status_path\"; exit 0' </dev/null >/dev/null 2>&1"
+  # The active transient unit executes a dedicated helper whose path and
+  # arguments contain no SSH identifiers. Keeping listener-management commands
+  # out of the unit's ExecStart matters because the product verifier correctly
+  # treats active units whose properties advertise an SSH daemon as enabled.
+  remote "sudo -n rm -f '$output_path' '$status_path'; sudo -n systemd-run --quiet --no-block --unit='$transient_unit' --on-active=10s --property=StandardInput=null --property=StandardOutput=journal --property=StandardError=journal '$Q8_OBSERVER' '$PRODUCTION_ROOT' '$LINURA_FIRSTBOOT_SHA' '$output_path' '$status_path' </dev/null >/dev/null 2>&1"
 
   # Read the completion marker and command output atomically over the first
   # successfully restored SSH connection. This avoids a TOCTOU window where a
@@ -288,6 +290,65 @@ for binary in "${binaries[@]}"; do
   printf -v "$env_name" '%s' "$host_sha"
   export "$env_name"
 done
+
+q8_observer="$(base64 -w0 <<'EOF'
+#!/usr/bin/env bash
+set -u
+
+production_root="${1:?production root is required}"
+firstboot_sha="${2:?firstboot digest is required}"
+output_path="${3:?output path is required}"
+status_path="${4:?status path is required}"
+status=0
+stop_status=0
+
+systemctl disable --now linura-qualification-transport.service >/dev/null 2>&1 || stop_status=$?
+for unit in ssh.socket sshd.socket ssh.service sshd.service; do
+  systemctl disable --now "$unit" >/dev/null 2>&1 || true
+done
+systemctl mask --runtime ssh.service sshd.service ssh.socket sshd.socket >/dev/null 2>&1 || true
+
+if [ "$stop_status" -ne 0 ]; then
+  printf 'qualification transport stop failed: %s\n' "$stop_status" >"$output_path"
+  status=$stop_status
+else
+  for unit in ssh.socket sshd.socket ssh.service sshd.service; do
+    if systemctl is-active --quiet "$unit"; then
+      printf 'canonical SSH unit remained active during Q8: %s\n' "$unit" >"$output_path"
+      status=1
+      break
+    fi
+  done
+  if [ "$status" -eq 0 ]; then
+    /usr/local/bin/linura-firstboot --durable-bootstrap-step "$production_root" "$firstboot_sha" >"$output_path" 2>&1
+    status=$?
+  fi
+fi
+
+systemctl enable --now linura-qualification-transport.service >/dev/null 2>&1
+restore=$?
+stable=0
+if [ "$restore" -eq 0 ]; then
+  for _ in $(seq 1 20); do
+    if systemctl is-active --quiet linura-qualification-transport.service; then
+      stable=$((stable + 1))
+    else
+      stable=0
+    fi
+    [ "$stable" -ge 5 ] && break
+    sleep 0.2
+  done
+  [ "$stable" -ge 5 ] || restore=1
+fi
+if [ "$status" -eq 0 ] && [ "$restore" -ne 0 ]; then
+  status=$restore
+fi
+printf '%s\n' "$status" >"$status_path"
+exit 0
+EOF
+)"
+remote 'sudo -n install -d -o root -g root -m 0755 /usr/local/libexec'
+install_text_file "$Q8_OBSERVER" 0755 "$q8_observer"
 
 transport_unit="$(base64 -w0 <<'EOF'
 [Unit]
