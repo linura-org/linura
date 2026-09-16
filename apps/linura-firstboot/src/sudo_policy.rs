@@ -3,7 +3,7 @@
 /// Interpret `sudo -n -l -U <user>` output produced under `LC_ALL=C`.
 ///
 /// `sudo -l` reports whether the policy query itself completed; its process exit
-/// status is not, by itself, an authority decision.  Production must therefore
+/// status is not, by itself, an authority decision. Production must therefore
 /// classify the policy listing that sudo actually evaluated.
 pub(crate) fn listing_grants_authority(listing: &str, user: &str) -> Result<bool, &'static str> {
     let denied_prefix = format!("User {user} is not allowed to run sudo on ");
@@ -23,14 +23,11 @@ pub(crate) fn listing_grants_authority(listing: &str, user: &str) -> Result<bool
         }
 
         // A successful policy header without a command specification is not
-        // sufficient evidence either way.  Sudo command specifications are
+        // sufficient evidence either way. Sudo command specifications are
         // rendered as indented non-empty records after this header.
         if lines.any(|candidate| {
             !candidate.trim().is_empty()
-                && candidate
-                    .chars()
-                    .next()
-                    .is_some_and(char::is_whitespace)
+                && candidate.chars().next().is_some_and(char::is_whitespace)
         }) {
             return Ok(true);
         }
