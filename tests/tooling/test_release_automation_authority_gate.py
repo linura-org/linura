@@ -47,15 +47,9 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
         with self.assertRaisesRegex(probe.AuthorityProbeError, "Contents write"):
             probe.validate_contents_probe_response(status=403, credential_source="github")
 
-    def test_obsolete_dedicated_token_source_is_rejected(self) -> None:
-        with self.assertRaisesRegex(probe.AuthorityProbeError, "credential source must be"):
-            probe.probe(
-                repository="linura-org/linura",
-                token="unused",
-                base="main",
-                head="main",
-                credential_source="dedicated",
-            )
+    def test_dedicated_token_without_contents_write_is_rejected(self) -> None:
+        with self.assertRaisesRegex(probe.AuthorityProbeError, "Contents write"):
+            probe.validate_contents_probe_response(status=403, credential_source="dedicated")
 
     def test_unexpected_contents_success_is_rejected(self) -> None:
         with self.assertRaisesRegex(probe.AuthorityProbeError, "unexpectedly changed"):
