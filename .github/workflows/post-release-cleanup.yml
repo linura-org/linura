@@ -88,6 +88,22 @@ jobs:
           git show "$CLOSURE_SHA:contracts/release-branch-cleanup.toml" > "$RUNNER_TEMP/release-branch-cleanup.toml"
           cmp "$RUNNER_TEMP/release-branch-cleanup.toml" contracts/release-branch-cleanup.toml
 
+      - name: Discover broad release-adjacent branch residue without mutation authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/release-branch-discovery.txt"
+          python3 tools/release_branch_discovery.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --format text | tee "$report"
+          {
+            echo "### Post-release branch discovery"
+            echo '```text'
+            cat "$report"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Require dedicated Release App configuration
         env:
           RELEASE_APP_CLIENT_ID: ${{ vars.LINURA_RELEASE_APP_CLIENT_ID }}
