@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 #[path = "lib.rs"]
-mod legacy;
-pub use legacy::*;
+mod migration;
+pub use migration::*;
 
-mod v09;
-pub use v09::*;
+mod persistent_state;
+pub use persistent_state::*;

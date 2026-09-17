@@ -12,10 +12,10 @@ SQLITE_SCHEMA = ROOT / "crates/linura-persistence-sqlite/src/schema.rs"
 SQLITE_VALIDATION = ROOT / "crates/linura-persistence-sqlite/src/validation.rs"
 SQLITE_INTEGRITY = ROOT / "crates/linura-persistence-sqlite/src/integrity.rs"
 MIGRATION_V1_DESCRIPTOR = (
-    ROOT / "migrations/system/0001-v04-hardened-authority-transactions.json"
+    ROOT / "migrations/system/0001-hardened-authority-transactions.json"
 )
 MIGRATION_V2_DESCRIPTOR = (
-    ROOT / "migrations/system/0002-v04-terminal-recovery-opener-headroom.json"
+    ROOT / "migrations/system/0002-terminal-recovery-opener-headroom.json"
 )
 ADR = ROOT / "docs/adr/0020-sealed-durable-mutation-authority.md"
 
