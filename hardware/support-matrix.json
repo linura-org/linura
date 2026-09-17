@@ -1,8 +1,17 @@
 {
   "schema_version": 1,
-  "evidence_tiers": ["unknown", "fixture_only", "virtual_machine", "community_hardware", "maintainer_hardware", "release_qualified"],
+  "evidence_tiers": [
+    "unknown",
+    "fixture_only",
+    "virtual_machine",
+    "community_hardware",
+    "maintainer_hardware",
+    "release_qualified"
+  ],
   "qualification_environments": {
-    "release_qualified": []
+    "release_qualified": [
+      "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"
+    ]
   },
   "machine_classes": {
     "workstation": {
@@ -26,5 +35,5 @@
     "amd_gpu": "fixture_only",
     "nvidia_gpu": "fixture_only"
   },
-  "note": "Development evidence only. No QualificationEnvironment and no workstation/server/edge PlatformProfile is release-qualified while the current release has platform_support=none."
+  "note": "Release-qualified QualificationEnvironment and PlatformProfile entries are the explicit machine-readable support boundary for the current release; domain evidence tiers remain separate."
 }
