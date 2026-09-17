@@ -191,7 +191,10 @@ complete_lifecycle = true
 managed_mutation_support = "narrow-experimental"
 agent_role = "proposal-only"
 platform_support = "reference-experimental"
+target_platform_profiles = ["arch-hyprland-v1"]
 authority_state = "lifecycle-integrated"
+milestone_contract = "docs/milestones/v0.10.0.md"
+qualification = "docs/qualification/v0.10.0.md"
 
 [[milestone]]
 version = "v1.0.0"
