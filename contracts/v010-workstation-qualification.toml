@@ -1,0 +1,60 @@
+schema_version = 1
+milestone = "v0.10.0"
+claim_class = "Experimental"
+state = "development"
+target_profile = "arch-hyprland-v1"
+target_machine_class = "workstation"
+profile_path = "profiles/arch-hyprland-v1.toml"
+profile_sha256 = "7e5863e9d6012d672ae2ae8951ec057bd07ce447a370222cc29e823b8072edcb"
+qualification_document = "docs/qualification/v0.10.0.md"
+support_matrix_path = "hardware/support-matrix.json"
+support_promotion_authority = "protected-post-release-closure"
+required_evidence = ["disposable-arch", "interactive-workstation", "inherited-v0.9"]
+
+[profile_identity]
+distribution = "arch"
+init = "systemd"
+session = "wayland"
+compositor = "hyprland"
+status_until_post_release_closure = "development"
+
+[profile_identity.providers]
+network = "networkmanager"
+bluetooth = "bluez"
+audio = "pipewire-wireplumber"
+storage = "udisks2"
+authorization = "polkit"
+filesystem = "btrfs"
+snapshots = "snapper"
+
+[substrate]
+state = "source-pinned-package-set-pending"
+source_kind = "arch-linux-archive"
+snapshot_date = "2026-09-16"
+repository_url = "https://archive.archlinux.org/repos/2026/09/16/$repo/os/$arch"
+architecture = "x86_64"
+required_packages_path = "packaging/arch/archiso/packages.linura"
+package_manifest_format = "linura-arch-package-manifest-v1"
+package_manifest_directory = "qualification/v010"
+package_manifest = ""
+package_manifest_sha256 = ""
+forbid_mutable_latest = true
+require_https = true
+require_snapshot_date = true
+require_package_manifest_digest = true
+require_exact_package_versions = true
+require_required_package_coverage = true
+require_official_repositories = true
+require_canonical_manifest_order = true
+release_qualification_ready = false
+
+[security]
+disk_encryption = "required_for_supported_install"
+firewall_inbound = "deny_by_default"
+ssh_initial_state = "disabled"
+untrusted_package_sources = "disabled"
+
+[updates]
+coordinated = true
+direct_upgrade_guard = true
+break_glass_override = "LINURA_ALLOW_DIRECT_PACMAN=1"
