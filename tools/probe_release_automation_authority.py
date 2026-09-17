@@ -12,6 +12,7 @@ API_VERSION = "2022-11-28"
 USER_AGENT = "linura-release-automation-authority-probe"
 MISSING_WORKFLOW_REF = "0000000000000000000000000000000000000000"
 WORKFLOW_PROBE = "ci.yml"
+SUPPORTED_CREDENTIAL_SOURCES = frozenset({"github", "github-app"})
 
 
 class AuthorityProbeError(RuntimeError):
@@ -22,7 +23,6 @@ def _credential_name(credential_source: str) -> str:
     names = {
         "github": "repository GITHUB_TOKEN",
         "github-app": "dedicated Linura Release GitHub App token",
-        "dedicated": "dedicated RELEASE_AUTOMATION_TOKEN",
     }
     try:
         return names[credential_source]
@@ -36,15 +36,12 @@ def _missing_permission_guidance(credential_source: str, permission: str) -> str
             f"Linura Release GitHub App lacks {permission}; grant only Actions write, Contents write, "
             "and Pull requests write to the repository installation, then approve the installation permission update"
         )
-    if credential_source == "dedicated":
+    if credential_source == "github":
         return (
-            f"RELEASE_AUTOMATION_TOKEN lacks {permission}; grant Pull requests write, Contents write, "
-            "and Actions write access to this repository"
+            f"repository GITHUB_TOKEN lacks {permission}; keep the corresponding isolated job permission and verify "
+            "the repository/organization Actions policy permits it"
         )
-    return (
-        f"repository GITHUB_TOKEN lacks {permission}; keep the corresponding isolated job permission and verify "
-        "the repository/organization Actions policy permits it"
-    )
+    raise AuthorityProbeError(f"unsupported credential source: {credential_source!r}")
 
 
 def _decode_json(body: str, label: str) -> dict[str, object]:
@@ -172,9 +169,9 @@ def probe(*, repository: str, token: str, base: str, head: str, credential_sourc
         raise AuthorityProbeError("repository must be in owner/name form")
     if not token:
         raise AuthorityProbeError("GH_TOKEN is required")
-    if credential_source not in {"github", "github-app", "dedicated"}:
+    if credential_source not in SUPPORTED_CREDENTIAL_SOURCES:
         raise AuthorityProbeError(
-            "credential source must be 'github', 'github-app', or 'dedicated'"
+            "credential source must be 'github' or 'github-app'"
         )
     if base != head:
         raise AuthorityProbeError(
@@ -239,11 +236,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--head", default="main")
     parser.add_argument(
         "--credential-source",
-        choices=("github", "github-app", "dedicated"),
+        choices=("github", "github-app"),
         required=True,
         help=(
-            "Which credential supplied GH_TOKEN: repository GITHUB_TOKEN, dedicated Linura Release GitHub App, "
-            "or legacy dedicated RELEASE_AUTOMATION_TOKEN."
+            "Which credential supplied GH_TOKEN: repository GITHUB_TOKEN or the dedicated Linura Release GitHub App."
         ),
     )
     return parser.parse_args()
