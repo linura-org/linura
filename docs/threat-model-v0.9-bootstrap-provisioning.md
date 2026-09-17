@@ -115,6 +115,10 @@ Every stage that may cause an externally visible effect follows the same fail-cl
 
 Crash injection must cover before and after every durable boundary. If an effect may have started but completion cannot be proven, restart must re-observe/reconcile or enter recovery; it must not infer success from a later stage and must not blindly replay.
 
+## Production preparer-revocation evidence
+
+The v0.9 production bootstrap includes a narrowly scoped preparer-revocation signer. It is not an owner-enrollment signer and cannot create policy approval, executor permits or final-owner authority. It becomes usable only in the active `OwnerEnrollmentResolution` effect-started state, under effective UID 0, after First Boot has terminated the fixed `linura-preparer` processes, removed supplementary-group/SSH/sudo authority, locked the password when the account exists, validated sudoers, synchronized the filesystem and re-observed those postconditions. The authenticated receipt binds session, machine, operation, stage, effect state, scope, postcondition digest and freshness. An already-valid externally produced qualification receipt remains consumable, preserving independent adversarial verification.
+
 ## Required adversarial qualification
 
 The dedicated v0.9 security qualification must cover at least:
