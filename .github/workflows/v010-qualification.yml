@@ -18,11 +18,15 @@ on:
       - ".github/workflows/v010-qualification.yml"
       - "contracts/roadmap.toml"
       - "contracts/v010-workstation-qualification.toml"
+      - "contracts/components.toml"
       - "profiles/arch-hyprland-v1.toml"
+      - "crates/linura-hardware/**"
+      - "tools/codex/versions.env"
       - "hardware/support-matrix.json"
       - "packaging/arch/archiso/packages.linura"
       - "qualification/v010/**"
       - "docs/milestones/v0.10.0.md"
+      - "docs/platform-profiles.md"
       - "docs/qualification/v0.10.0.md"
       - "tools/check_machine_classes.py"
       - "tools/check_roadmap.py"
@@ -57,6 +61,16 @@ jobs:
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
 
+      - name: Load repository toolchain contract
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source tools/codex/versions.env
+          printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+
       - name: Verify roadmap, support and v0.10 qualification contracts
         run: |
           set -euo pipefail
@@ -66,3 +80,6 @@ jobs:
           python3 -m unittest \
             tests.tooling.test_roadmap \
             tests.tooling.test_v010_workstation_qualification
+
+      - name: Test typed PlatformProfile candidate compatibility
+        run: cargo test -p linura-hardware --locked

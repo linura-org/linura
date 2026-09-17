@@ -33,6 +33,18 @@ Passing v0.9 qualification therefore does not mark `arch-hyprland-v1` supported,
 - **unsupported:** deliberately outside the contract;
 - **unknown:** capability detection could not establish support.
 
+## Candidate discovery is deliberately tri-state
+
+Live PlatformProfile discovery produces exactly one candidate-compatibility outcome:
+
+- **ExactCandidateMatch** — every required candidate fact is present and matches;
+- **KnownMismatch** — at least one authoritative observed fact contradicts the candidate, even if other facts are still unavailable;
+- **InsufficientEvidence** — no known contradiction exists, but one or more required facts are missing or ambiguous.
+
+These are **candidate compatibility states, not support states**. Even an `ExactCandidateMatch` does not make a PlatformProfile release-qualified; immutable release evidence and protected support-promotion closure own that transition. Unknown or ambiguous evidence therefore cannot silently become support or mutation authority.
+
+For the v0.10 `arch-hyprland-v1` candidate, identity evidence covers Arch, the current x86_64 qualification scope, systemd, Wayland, Hyprland, and the exact selected provider identities. Arch is rolling, so an Ubuntu-style `VERSION_ID` is not a required PlatformProfile fact. Reproducibility comes from the separately pinned Arch Archive/package-manifest qualification substrate.
+
 Adding Fedora/Ubuntu workstation profiles should create new PlatformProfiles sharing providers where possible; do not add distro conditionals throughout the core.
 
 A QualificationEnvironment may later inform or graduate into a PlatformProfile only through an explicit architecture/support decision and its own acceptance evidence.
