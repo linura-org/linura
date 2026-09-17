@@ -1,0 +1,68 @@
+name: v0.10 workstation qualification contract
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact source SHA to validate
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact source SHA to validate; defaults to selected ref
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - ".github/workflows/v010-qualification.yml"
+      - "contracts/roadmap.toml"
+      - "contracts/v010-workstation-qualification.toml"
+      - "profiles/arch-hyprland-v1.toml"
+      - "hardware/support-matrix.json"
+      - "packaging/arch/archiso/packages.linura"
+      - "qualification/v010/**"
+      - "docs/milestones/v0.10.0.md"
+      - "docs/qualification/v0.10.0.md"
+      - "tools/check_machine_classes.py"
+      - "tools/check_roadmap.py"
+      - "tools/check_v010_workstation_qualification.py"
+      - "tests/tooling/test_roadmap.py"
+      - "tests/tooling/test_v010_workstation_qualification.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v010-workstation-contract-${{ github.event.pull_request.number || inputs.source_sha || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  contract:
+    name: v0.10 exact-source workstation contract
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Assert exact source
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Verify roadmap, support and v0.10 qualification contracts
+        run: |
+          set -euo pipefail
+          python3 tools/check_roadmap.py
+          python3 tools/check_machine_classes.py
+          python3 tools/check_v010_workstation_qualification.py
+          python3 -m unittest \
+            tests.tooling.test_roadmap \
+            tests.tooling.test_v010_workstation_qualification

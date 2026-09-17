@@ -195,6 +195,7 @@ target_platform_profiles = ["arch-hyprland-v1"]
 authority_state = "lifecycle-integrated"
 milestone_contract = "docs/milestones/v0.10.0.md"
 qualification = "docs/qualification/v0.10.0.md"
+qualification_contract = "contracts/v010-workstation-qualification.toml"
 
 [[milestone]]
 version = "v1.0.0"
