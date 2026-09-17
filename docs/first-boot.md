@@ -49,11 +49,15 @@ Changing source invalidates discovery, observation, plan and recovery state deri
 
 First Boot distinguishes **machine provisioning** from **owner enrollment**. The machine, the person/operator preparing it and the eventual owner are not the same authority identity by default.
 
-The v0.9 architecture supports:
+The v0.9 durable architecture models and qualifies:
 
 1. **interactive owner provisioning** — the eventual owner is present;
 2. **prepare for another owner** — an operator prepares the machine but stops at `owner-enrollment-pending` without creating fake final-owner credentials;
 3. **unattended/headless provisioning** — a bounded declarative Provisioning Manifest selects allowed provisioning inputs without an interactive wizard.
+
+The **release-exposed production entry point in v0.9 is only mode 2**: `linura-firstboot --bootstrap <absolute-state-root>`. Interactive-owner and unattended-manifest selection remain qualified internal contracts, not user-facing v0.9 CLI promises. Native recovery remains a separately qualified recovery path rather than a selectable production provisioning mode.
+
+`--bootstrap` is not a raw-host hardening command. The exact bounded base environment and Q8 policy prerequisites must already be present and observable; First Boot verifies those postconditions and fails closed instead of silently enabling firewall/package/remote-access policy on an arbitrary unqualified Ubuntu host.
 
 Deferred owner enrollment must be restart-safe and idempotent. Rebooting into enrollment must not replay completed machine-provisioning effects, and preparer approvals/credentials must not silently become final-owner authority.
 
@@ -84,7 +88,7 @@ First Boot must never directly replay an imported action transcript or historica
 
 ## Authority boundary
 
-The First Boot client does not receive root executor handles, privileged dispatch permits, policy-admin authority or a way to manufacture approval.
+The First Boot client does not receive generic root executor handles, privileged dispatch permits, policy-admin authority or a way to manufacture approval. The production deferred-owner bootstrap has one fixed privileged handoff responsibility: retire the fixed `linura-preparer` OS authority and authenticate that exact postcondition. Its signer cannot create final-owner enrollment evidence or authorize arbitrary mutation.
 
 Its final submission carries exact source/provisioning, target/session, observation, plan and recovery bindings. It carries **no execution authority** and no caller-selected policy decision.
 

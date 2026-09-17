@@ -169,6 +169,88 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
         )
         self.assertFalse(list(durable_root.glob("part*.rs")))
 
+    def test_release_exposes_real_deferred_owner_bootstrap_and_release_aware_environment_status(self) -> None:
+        source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(encoding="utf-8")
+        durable = durable_source()
+
+        self.assertIn('Some("--bootstrap")', source)
+        self.assertIn("durable_bootstrap_converge", source)
+        self.assertIn("PreparerRevocationAuthoritySigner", source)
+        self.assertIn("revoke_and_verify_preparer_os_authority", source)
+        self.assertIn("release-qualified-experimental", source)
+        self.assertIn("CARGO_PKG_VERSION", source)
+        self.assertIn("PREPARER_REVOCATION_PRODUCER", durable)
+        self.assertIn("linura-firstboot-preparer-revocation-v1", durable)
+        self.assertIn("expected_environment_status=release-qualified-experimental", workflow)
+
+    def test_frozen_release_claim_exposes_only_real_v09_production_provisioning_entry(self) -> None:
+        release = (ROOT / "docs/releases/v0.9.0.md").read_text(encoding="utf-8")
+        first_boot = (ROOT / "docs/first-boot.md").read_text(encoding="utf-8")
+        qualification = (ROOT / "docs/qualification/v0.9.0.md").read_text(encoding="utf-8")
+
+        for text in (release, first_boot, qualification):
+            self.assertIn("linura-firstboot --bootstrap <absolute-state-root>", text)
+        self.assertIn("release-exposed production", release.lower())
+        self.assertIn("not** user-selectable production entry points", release)
+        self.assertNotIn("Users may provision as the eventual interactive owner", release)
+        self.assertIn("linura-firstboot-preparer-revocation-v1", qualification)
+        self.assertIn("not a raw Ubuntu hardening or installer entry point", release)
+        self.assertIn("not a raw-host hardening command", first_boot)
+
+    def test_production_bootstrap_verifies_q8_and_does_not_claim_generic_hardening(self) -> None:
+        source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(encoding="utf-8")
+        self.assertIn("BootstrapStage::SecurityBaseline => {}", source)
+        self.assertIn(".verify_security_baseline()", source)
+        self.assertIn("security-baseline/ssh-exposure", source)
+        self.assertIn("security-baseline/firewall-policy", source)
+        self.assertIn("security-baseline/apt-policy", source)
+
+    def test_revocation_rotates_post_handoff_key_and_binds_numeric_preparer_identity(self) -> None:
+        source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(encoding="utf-8")
+        revocation_start = source.index("fn trusted_or_produced_preparer_revocation(")
+        revocation_end = source.index("fn require_effective_root()", revocation_start)
+        revocation = source[revocation_start:revocation_end]
+        observation_start = source.index("fn revoke_and_verify_preparer_os_authority()")
+        observation_end = source.index("fn preparer_has_effective_sudo_authority()", observation_start)
+        observation = source[observation_start:observation_end]
+
+        self.assertIn("revoke_and_verify_preparer_os_authority()?", revocation)
+        self.assertIn("remove_path_if_present(&receipt_path)?;", revocation)
+        self.assertIn("rotate_control_receipt_auth_key(root)?", revocation)
+        self.assertNotIn("if key_path.is_file()", revocation)
+        self.assertIn("remove_path_if_present(&path)?;", source)
+        self.assertIn("create_new(true)", source)
+        self.assertIn("unexpectedly appeared during post-revocation rotation", source)
+        self.assertIn("expected linura-preparer identity is absent", observation)
+        self.assertIn('for selector in ["-u", "-U"]', source)
+        self.assertIn('.args(["-KILL", selector, uid])', source)
+        self.assertIn('.args([selector, uid])', source)
+        self.assertIn("preparer_has_processes(&identity.uid)?", observation)
+        self.assertIn("preparer_has_ssh_authority(&identity)?", observation)
+        self.assertIn("authorizedkeysfile ", source)
+        self.assertIn("authorizedkeyscommand ", source)
+        self.assertIn("effective sshd AuthorizedKeysFile escapes", source)
+        self.assertIn("SSHD_POLICY_RUNTIME_DIRECTORY", source)
+        self.assertIn("Path::new(SSHD_POLICY_RUNTIME_DIRECTORY)", source)
+        self.assertIn("protected OpenSSH policy-query runtime", source)
+        self.assertIn("O_DIRECTORY | O_NOFOLLOW", source)
+        rotate_start = source.index("fn rotate_control_receipt_auth_key(")
+        rotate_end = source.index("fn validate_control_receipt_auth_key", rotate_start)
+        rotate = source[rotate_start:rotate_end]
+        self.assertIn("open_or_create_protected_directory(&directory, 0o700)?", rotate)
+        self.assertNotIn("fs::create_dir_all(&directory)", rotate)
+        self.assertIn("account_present=true", observation)
+        self.assertNotIn("account-absent", observation)
+        self.assertIn('format!("#{}", value.uid)', source)
+        self.assertIn('format!("%#{}", value.gid)', source)
+
+    def test_offline_vm_environment_status_tracks_exact_source_version(self) -> None:
+        scenario = (ROOT / "tests/acceptance/002-firstboot-offline.json").read_text(encoding="utf-8")
+        self.assertIn("linuractl version", scenario)
+        self.assertIn("release-qualified-experimental", scenario)
+        self.assertIn("candidate-not-yet-release-supported", scenario)
+
     def test_firstboot_bounds_virtual_identity_payload_not_reported_stat_size(self) -> None:
         source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(encoding="utf-8")
         start = source.index("fn read_protected_identity_file(")

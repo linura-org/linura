@@ -1,6 +1,7 @@
 const OWNER_ENROLLMENT_RECEIPT_SCHEMA: &str = "linura-owner-enrollment-receipt-v2";
 const PREPARER_REVOCATION_RECEIPT_SCHEMA: &str = "linura-preparer-revocation-receipt-v1";
 const OWNER_ENROLLMENT_PRODUCER: &str = "linura-control-owner-enrollment-v2";
+const PREPARER_REVOCATION_PRODUCER: &str = "linura-firstboot-preparer-revocation-v1";
 const PREPARER_REVOCATION_SCOPE: &str = "preparer-os-authority-v1";
 const MAX_OWNER_ENROLLMENT_RECEIPT_BYTES: u64 = 4096;
 const OWNER_ENROLLMENT_RECEIPT_MAX_AGE_MS: u64 = 5 * 60 * 1000;
@@ -47,6 +48,44 @@ impl OwnerEnrollmentAuthorityVerifier {
             return Err(DurableBootstrapError::StateIntegrityMismatch);
         }
         Ok(())
+    }
+}
+
+/// Narrow production signer for the one bootstrap handoff fact that First Boot
+/// is permitted to attest after directly verifying the OS postcondition. It
+/// cannot mint final-owner enrollment evidence.
+pub struct PreparerRevocationAuthoritySigner {
+    key: [u8; OWNER_ENROLLMENT_AUTH_KEY_BYTES],
+}
+
+impl std::fmt::Debug for PreparerRevocationAuthoritySigner {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PreparerRevocationAuthoritySigner")
+            .field("key", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl Drop for PreparerRevocationAuthoritySigner {
+    fn drop(&mut self) {
+        self.key.fill(0);
+    }
+}
+
+impl PreparerRevocationAuthoritySigner {
+    pub fn open(path: &Path) -> Result<Self, DurableBootstrapError> {
+        Ok(Self {
+            key: read_owner_enrollment_auth_key(path)?,
+        })
+    }
+
+    pub fn preparer_revocation_receipt_bytes(
+        &self,
+        state: &DurableBootstrapState,
+        postcondition_sha256: &str,
+    ) -> Result<Vec<u8>, DurableBootstrapError> {
+        preparer_revocation_receipt_bytes(&self.key, state, postcondition_sha256)
     }
 }
 
@@ -103,26 +142,34 @@ impl OwnerEnrollmentAuthoritySigner {
         state: &DurableBootstrapState,
         postcondition_sha256: &str,
     ) -> Result<Vec<u8>, DurableBootstrapError> {
-        validate_anchor_sha256(postcondition_sha256)?;
-        let active = state
-            .active()
-            .ok_or(DurableBootstrapError::NoActiveStage)?;
-        if active.stage() != BootstrapStage::OwnerEnrollmentResolution
-            || active.effect_state() != BootstrapEffectState::EffectStarted
-        {
-            return Err(DurableBootstrapError::StageContextRequired(
-                BootstrapStage::OwnerEnrollmentResolution,
-            ));
-        }
-        let issued_unix_ms = owner_receipt_now_ms()?;
-        let payload = format!(
-            "{PREPARER_REVOCATION_RECEIPT_SCHEMA}\nproducer={OWNER_ENROLLMENT_PRODUCER}\nsession_id={}\nmachine_id={}\noperation_id={}\nstage=owner-enrollment-resolution\neffect_state=effect-started\nscope={PREPARER_REVOCATION_SCOPE}\npostcondition_sha256={postcondition_sha256}\nissued_unix_ms={issued_unix_ms}\n",
-            state.session_id(),
-            state.machine_id(),
-            active.operation_id(),
-        );
-        Ok(authenticated_receipt_bytes(&self.key, payload))
+        preparer_revocation_receipt_bytes(&self.key, state, postcondition_sha256)
     }
+}
+
+fn preparer_revocation_receipt_bytes(
+    key: &[u8; OWNER_ENROLLMENT_AUTH_KEY_BYTES],
+    state: &DurableBootstrapState,
+    postcondition_sha256: &str,
+) -> Result<Vec<u8>, DurableBootstrapError> {
+    validate_anchor_sha256(postcondition_sha256)?;
+    let active = state
+        .active()
+        .ok_or(DurableBootstrapError::NoActiveStage)?;
+    if active.stage() != BootstrapStage::OwnerEnrollmentResolution
+        || active.effect_state() != BootstrapEffectState::EffectStarted
+    {
+        return Err(DurableBootstrapError::StageContextRequired(
+            BootstrapStage::OwnerEnrollmentResolution,
+        ));
+    }
+    let issued_unix_ms = owner_receipt_now_ms()?;
+    let payload = format!(
+        "{PREPARER_REVOCATION_RECEIPT_SCHEMA}\nproducer={PREPARER_REVOCATION_PRODUCER}\nsession_id={}\nmachine_id={}\noperation_id={}\nstage=owner-enrollment-resolution\neffect_state=effect-started\nscope={PREPARER_REVOCATION_SCOPE}\npostcondition_sha256={postcondition_sha256}\nissued_unix_ms={issued_unix_ms}\n",
+        state.session_id(),
+        state.machine_id(),
+        active.operation_id(),
+    );
+    Ok(authenticated_receipt_bytes(key, payload))
 }
 
 fn read_owner_enrollment_auth_key(
@@ -175,7 +222,6 @@ fn hmac_sha256(key: &[u8; OWNER_ENROLLMENT_AUTH_KEY_BYTES], payload: &[u8]) -> S
     format!("{:x}", outer.finalize())
 }
 
-#[cfg(any(test, feature = "qualification-harness"))]
 fn authenticated_receipt_bytes(
     key: &[u8; OWNER_ENROLLMENT_AUTH_KEY_BYTES],
     payload: String,
@@ -349,7 +395,7 @@ impl TrustedPreparerAuthorityRevocationReceipt {
             || lines
                 .next()
                 .and_then(|line| line.strip_prefix("producer="))
-                != Some(OWNER_ENROLLMENT_PRODUCER)
+                != Some(PREPARER_REVOCATION_PRODUCER)
         {
             return Err(DurableBootstrapError::CorruptState(
                 "preparer revocation receipt is not authenticated Control evidence".into(),

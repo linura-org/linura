@@ -113,6 +113,34 @@ none
             )
             self.assertNotIn("v0.6.0.md)- [v0.5.0", updated)
 
+    def test_reference_release_advances_explicit_qualification_environment_support(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            matrix = root / "hardware/support-matrix.json"
+            matrix.parent.mkdir(parents=True, exist_ok=True)
+            matrix.write_text(
+                '{"schema_version":1,"qualification_environments":{"release_qualified":[]},"machine_classes":{},"domains":{},"note":"development"}\n',
+                encoding="utf-8",
+            )
+            changed: list[str] = []
+            sync_tool.sync_release_qualified_environments(
+                root,
+                {"hardware_support_matrix": "hardware/support-matrix.json"},
+                {
+                    "platform_support": "reference-experimental",
+                    "release_qualified_qualification_environments": [
+                        "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"
+                    ],
+                },
+                changed,
+            )
+            updated = __import__("json").loads(matrix.read_text(encoding="utf-8"))
+            self.assertEqual(
+                updated["qualification_environments"]["release_qualified"],
+                ["qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"],
+            )
+            self.assertIn("hardware/support-matrix.json", changed)
+
     def test_release_workflows_require_release_app_native_gates_and_deterministic_closure(self) -> None:
         closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
         cleanup = (ROOT / ".github/workflows/post-release-cleanup.yml").read_text(encoding="utf-8")
