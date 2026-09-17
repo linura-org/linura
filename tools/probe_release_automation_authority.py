@@ -22,7 +22,6 @@ def _credential_name(credential_source: str) -> str:
     names = {
         "github": "repository GITHUB_TOKEN",
         "github-app": "dedicated Linura Release GitHub App token",
-        "dedicated": "dedicated RELEASE_AUTOMATION_TOKEN",
     }
     try:
         return names[credential_source]
@@ -35,11 +34,6 @@ def _missing_permission_guidance(credential_source: str, permission: str) -> str
         return (
             f"Linura Release GitHub App lacks {permission}; grant only Actions write, Contents write, "
             "and Pull requests write to the repository installation, then approve the installation permission update"
-        )
-    if credential_source == "dedicated":
-        return (
-            f"RELEASE_AUTOMATION_TOKEN lacks {permission}; grant Pull requests write, Contents write, "
-            "and Actions write access to this repository"
         )
     return (
         f"repository GITHUB_TOKEN lacks {permission}; keep the corresponding isolated job permission and verify "
@@ -172,10 +166,8 @@ def probe(*, repository: str, token: str, base: str, head: str, credential_sourc
         raise AuthorityProbeError("repository must be in owner/name form")
     if not token:
         raise AuthorityProbeError("GH_TOKEN is required")
-    if credential_source not in {"github", "github-app", "dedicated"}:
-        raise AuthorityProbeError(
-            "credential source must be 'github', 'github-app', or 'dedicated'"
-        )
+    if credential_source not in {"github", "github-app"}:
+        raise AuthorityProbeError("credential source must be 'github' or 'github-app'")
     if base != head:
         raise AuthorityProbeError(
             "authority probe requires identical base/head so its merge and PR checks cannot create repository state"
@@ -239,11 +231,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--head", default="main")
     parser.add_argument(
         "--credential-source",
-        choices=("github", "github-app", "dedicated"),
+        choices=("github", "github-app"),
         required=True,
         help=(
-            "Which credential supplied GH_TOKEN: repository GITHUB_TOKEN, dedicated Linura Release GitHub App, "
-            "or legacy dedicated RELEASE_AUTOMATION_TOKEN."
+            "Which credential supplied GH_TOKEN: repository GITHUB_TOKEN or the dedicated Linura Release GitHub App."
         ),
     )
     return parser.parse_args()
