@@ -34,12 +34,15 @@ class RoadmapContractTests(unittest.TestCase):
         contract = tomllib.loads((ROOT / "contracts/roadmap.toml").read_text(encoding="utf-8"))
         paths = {
             "contracts/roadmap.toml",
+            "crates/linura-intent/src/model.rs",
+            "crates/linura-sdk/src/lib.rs",
             "docs/roadmap.md",
             "docs/system-domains.md",
             "docs/development-plan.md",
             "docs/versioning-and-release-policy.md",
             "docs/machine-profiles.md",
             "hardware/support-matrix.json",
+            "schemas/portable-profile.v1.schema.json",
         }
         for milestone in contract.get("milestone", []):
             for key in ("release_contract", "qualification"):
@@ -63,6 +66,34 @@ class RoadmapContractTests(unittest.TestCase):
         self.assertEqual(block.count(old), 1, f"{version}: expected exactly one {old!r}")
         replacement = block.replace(old, new, 1)
         return text[: match.start()] + replacement + text[match.end() :]
+
+    def _make_no_platform_support_fixture(self, root: Path) -> None:
+        contract_path = root / "contracts/roadmap.toml"
+        text = contract_path.read_text(encoding="utf-8")
+        contract = tomllib.loads(text)
+        current = contract["current_release"]
+        milestones = {
+            milestone["version"]: milestone
+            for milestone in contract["milestone"]
+            if isinstance(milestone, dict) and isinstance(milestone.get("version"), str)
+        }
+        current_milestone = milestones[current]
+        current_support = current_milestone["platform_support"]
+        if current_support != "none":
+            text = self._mutate_milestone_field(
+                text,
+                current,
+                f'platform_support = "{current_support}"',
+                'platform_support = "none"',
+            )
+            contract_path.write_text(text, encoding="utf-8")
+
+        matrix = root / "hardware/support-matrix.json"
+        payload = json.loads(matrix.read_text(encoding="utf-8"))
+        for machine_class in payload["machine_classes"].values():
+            machine_class["release_qualified_profiles"] = []
+        payload["qualification_environments"]["release_qualified"] = []
+        matrix.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
     def test_repository_roadmap_contract_is_valid(self) -> None:
         result = self._run_checker(ROOT)
@@ -346,10 +377,11 @@ class RoadmapContractTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("machine profile document missing machine-class invariant", result.stderr)
 
-    def test_current_release_cannot_claim_machine_profiles_without_platform_support(self) -> None:
+    def test_no_platform_support_cannot_claim_machine_profiles(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
+            self._make_no_platform_support_fixture(root)
             matrix = root / "hardware/support-matrix.json"
             payload = json.loads(matrix.read_text(encoding="utf-8"))
             payload["machine_classes"]["workstation"]["release_qualified_profiles"] = [
@@ -361,10 +393,11 @@ class RoadmapContractTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("current release has platform_support=none", result.stderr)
 
-    def test_current_release_cannot_claim_qualification_environment_without_platform_support(self) -> None:
+    def test_no_platform_support_cannot_claim_qualification_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
+            self._make_no_platform_support_fixture(root)
             matrix = root / "hardware/support-matrix.json"
             payload = json.loads(matrix.read_text(encoding="utf-8"))
             payload["qualification_environments"]["release_qualified"] = [
