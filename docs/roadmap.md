@@ -202,8 +202,8 @@ A model never receives direct executor, policy-admin or unrestricted system auth
 
 ## v0.9.0 — First Boot and supported reference environment
 
-**Status:** planned  
-**Target claim class:** Experimental
+**Status:** released
+**Claim class:** Experimental
 
 Prove a coherent Linura installation/adoption/recovery path on one explicitly bounded Experimental reference environment. ADR 0029 defines the exact QualificationEnvironment and provisioning boundary while ADR 0003 remains active for the first interactive workstation PlatformProfile.
 
