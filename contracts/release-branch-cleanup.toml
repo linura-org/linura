@@ -41,3 +41,39 @@ release = "v0.8.0"
 name = "tmp/v08-review-hardening"
 expected_sha = "a3d370a47fa8cd76d06d5121c37f9f25a1535543"
 reason = "temporary v0.8 review-hardening validator branch superseded by protected main"
+
+[[legacy_branch]]
+release = "v0.9.0"
+name = "tmp/pr128-recovery-record-repair"
+expected_sha = "8b822d6ff883791ebd739dca3f5381da00d09e3c"
+reason = "temporary PR #128 recovery-record repair branch superseded by protected main"
+
+[[legacy_branch]]
+release = "v0.9.0"
+name = "tmp/pr129-precompact-safety"
+expected_sha = "742ac6d90462944b262b17701fa075ddddf75b8a"
+reason = "temporary PR #129 pre-compaction safety branch superseded by protected main"
+
+[[legacy_branch]]
+release = "v0.9.0"
+name = "tmp/pr129-review-validation"
+expected_sha = "0a06b63c3e07183567799f3743f237a7ff9d9cbd"
+reason = "temporary PR #129 review-validation branch superseded by protected main"
+
+[[legacy_branch]]
+release = "v0.9.0"
+name = "tmp/pr133-precompact-safety"
+expected_sha = "87157d88ce3e1b2cb91bdfde0d369d96ae397cf1"
+reason = "temporary PR #133 pre-compaction safety branch superseded by protected main"
+
+[[legacy_branch]]
+release = "v0.9.0"
+name = "tmp/topology-compact-base"
+expected_sha = "fc0a69b08ec94052d5663e761c8b22e4b387435f"
+reason = "temporary v0.9 topology compaction base superseded by protected main"
+
+[[legacy_branch]]
+release = "v0.9.0"
+name = "tmp/v09-semantic-rebase-check"
+expected_sha = "1f96adfb7e8f4cc83e63d9fb2551ce05b7221483"
+reason = "temporary v0.9 semantic rebase validation branch superseded by protected main"
