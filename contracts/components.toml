@@ -325,7 +325,7 @@ maturity = "integrated-experimental"
 activation_milestone = "v0.9.0"
 release_artifact = false
 authority_role = "hardware-evidence"
-scope = "v0.9 QualificationEnvironment identity, platform drift detection and hardware evidence qualification"
+scope = "v0.9 QualificationEnvironment identity/evidence plus v0.10 typed PlatformProfile candidate compatibility; candidate matching has no support-promotion authority"
 
 [[component]]
 id = "linura-testkit"

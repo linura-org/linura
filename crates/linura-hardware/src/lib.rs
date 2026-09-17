@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod platform_profile;
+
 pub const V09_QUALIFICATION_ENVIRONMENT_ID: &str =
     "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless";
 pub const V09_BASE_IMAGE_URL: &str = "https://cloud-images.ubuntu.com/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img";
@@ -136,6 +138,10 @@ impl QualificationEnvironment {
     }
 }
 
+/// Exact observed identity for the version-scoped v0.9 QualificationEnvironment.
+///
+/// PlatformProfile candidate discovery uses `platform_profile::PlatformObservation`
+/// instead; rolling workstation profiles must not inherit Ubuntu VERSION_ID semantics.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObservedEnvironment {
     pub machine_class: MachineClass,
