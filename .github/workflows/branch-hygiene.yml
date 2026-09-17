@@ -1,0 +1,185 @@
+name: Branch Hygiene
+
+on:
+  workflow_dispatch:
+    inputs:
+      authority_sha:
+        description: Exact current protected main SHA whose reviewed cleanup ledger authorizes mutation
+        required: true
+        type: string
+      release:
+        description: Released milestone whose exact ledger entries should be cleaned
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: branch-hygiene-${{ inputs.authority_sha }}
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: reviewed exact-SHA branch hygiene
+    if: "${{ github.ref == 'refs/heads/main' }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      AUTHORITY_SHA: ${{ inputs.authority_sha }}
+      RELEASE_TAG: ${{ inputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Bind cleanup authority to exact current protected main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$AUTHORITY_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "authority_sha must be a full lowercase commit SHA" >&2; exit 2; }
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "release must be an exact vMAJOR.MINOR.PATCH tag" >&2; exit 2; }
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$AUTHORITY_SHA"
+          test "$(git rev-parse HEAD)" = "$AUTHORITY_SHA"
+          git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main" --force
+          test "$(git rev-parse refs/remotes/origin/main)" = "$AUTHORITY_SHA"
+          git cat-file -e "$AUTHORITY_SHA^{commit}"
+          python3 - "$RELEASE_TAG" <<'PY'
+          import pathlib
+          import sys
+          import tomllib
+
+          tag = sys.argv[1]
+          roadmap = tomllib.loads(pathlib.Path("contracts/roadmap.toml").read_text(encoding="utf-8"))
+          milestone = next(
+              (item for item in roadmap.get("milestone", []) if item.get("version") == tag),
+              None,
+          )
+          if milestone is None or milestone.get("status") != "released":
+              raise SystemExit(f"branch hygiene requires a released roadmap milestone: {tag}")
+          PY
+          python3 tools/check_roadmap.py .
+
+      - name: Require all native protected-main gates on authority commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 tools/release_native_gates.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --head-sha "$AUTHORITY_SHA" \
+            --head-branch main \
+            --timeout-seconds 0 \
+            commit --event push
+
+      - name: Freeze reviewed cleanup ledger to authority commit
+        run: |
+          set -euo pipefail
+          git show "$AUTHORITY_SHA:contracts/release-branch-cleanup.toml" > "$RUNNER_TEMP/release-branch-cleanup.toml"
+          cmp "$RUNNER_TEMP/release-branch-cleanup.toml" contracts/release-branch-cleanup.toml
+
+      - name: Discover broad release-adjacent branch residue without mutation authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/branch-hygiene-before.txt"
+          python3 tools/release_branch_discovery.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --format text | tee "$report"
+          {
+            echo "### Branch hygiene discovery before mutation"
+            echo '```text'
+            cat "$report"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Reconfirm main has not moved before write authority
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main" --force
+          test "$(git rev-parse refs/remotes/origin/main)" = "$AUTHORITY_SHA"
+
+      - name: Require dedicated Release App configuration
+        env:
+          RELEASE_APP_CLIENT_ID: ${{ vars.LINURA_RELEASE_APP_CLIENT_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.LINURA_RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_APP_CLIENT_ID" || { echo "missing repository variable LINURA_RELEASE_APP_CLIENT_ID" >&2; exit 2; }
+          test -n "$RELEASE_APP_PRIVATE_KEY" || { echo "missing repository secret LINURA_RELEASE_APP_PRIVATE_KEY" >&2; exit 2; }
+
+      - name: Mint cleanup-scoped Release App token
+        id: release_app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.LINURA_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.LINURA_RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: read
+
+      - name: Delete only reviewed exact release-owned branches under ref leases
+        env:
+          GH_TOKEN: ${{ steps.release_app.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 tools/release_branch_cleanup.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --tag "$RELEASE_TAG" \
+            --contract "$RUNNER_TEMP/release-branch-cleanup.toml"
+
+      - name: Verify reviewed cleanup candidates are absent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - "$RELEASE_TAG" "$RUNNER_TEMP/release-branch-cleanup.toml" <<'PY'
+          import importlib.util
+          import os
+          import pathlib
+          import sys
+
+          tag = sys.argv[1]
+          contract = pathlib.Path(sys.argv[2])
+          module_path = pathlib.Path("tools/release_branch_cleanup.py")
+          spec = importlib.util.spec_from_file_location("release_branch_cleanup_verify", module_path)
+          assert spec is not None and spec.loader is not None
+          cleanup = importlib.util.module_from_spec(spec)
+          sys.modules[spec.name] = cleanup
+          spec.loader.exec_module(cleanup)
+
+          token = os.environ.get("GH_TOKEN", "")
+          repository = os.environ.get("GITHUB_REPOSITORY", "")
+          legacy = cleanup.load_legacy(contract, tag)
+          remaining = cleanup.select_candidates(
+              cleanup._list_branches(repository, token),
+              tag,
+              legacy,
+          )
+          if remaining:
+              names = ", ".join(item.name for item in remaining)
+              raise SystemExit(f"reviewed cleanup candidates remain after leased deletion: {names}")
+          PY
+
+      - name: Publish post-cleanup discovery
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/branch-hygiene-after.txt"
+          python3 tools/release_branch_discovery.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --format text | tee "$report"
+          {
+            echo "### Branch hygiene discovery after mutation"
+            echo '```text'
+            cat "$report"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
