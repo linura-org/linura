@@ -2,44 +2,46 @@
 
 Packaging is a product/maturity claim, not merely a list of binaries that happen to compile. `contracts/components.toml` is the machine-readable source of truth for whether a component is intended to be a release artifact at its current maturity.
 
-The first target remains native Arch packaging, but v0.6 does **not** claim an Arch (or any other distribution) as a supported platform profile. Repository packages/image layouts before the supported-reference-environment milestone are development/Experimental delivery infrastructure.
+## Current v0.9.0 release boundary
 
-## v0.6 release-artifact boundary
+The current published release is v0.9.0, Experimental, with `platform_support = "reference-experimental"`. Its release-qualified platform evidence is the exact QualificationEnvironment:
 
-The v0.6 sealed binary payload is expected to contain:
+`qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless`
+
+That is a reproducible reference/qualification substrate, **not** a generic Ubuntu PlatformProfile. No workstation/server/edge PlatformProfile is currently release-qualified.
+
+The v0.9 sealed release payload includes the activated binaries declared by `contracts/components.toml`, including:
 
 - `linurad` — non-privileged Control1 observation/planning/query service;
 - `linuractl` — non-privileged CLI;
 - `linura-authorityd` — unprivileged bounded managed-authority runtime for `Authority1`;
-- `linura-update-guard` — narrow fail-closed update safety guard, not the future full update coordinator;
+- `linura-firstboot` — non-privileged bounded First Boot client for the v0.9 reference environment;
+- `linura-update-guard` — narrow fail-closed direct-update guard;
 - `linura-executor-systemd` — separately hardened root executor for the exact bounded systemd effect.
 
-`linura-authorityd` is security-sensitive release material and must be covered by the same SBOM, checksum, provenance, independent byte reproduction and published-release verification as the other distributable binaries.
+Release artifacts are covered by the release build/provenance/SBOM/checksum/reproducibility and published-release verification contracts. A binary appearing in a release does not widen the supported platform or authority surface.
 
-## Components deliberately not packaged as v0.6 product artifacts
+## Components not yet packaged as supported v0.9 product surfaces
 
-- `linura-firstboot` remains a workspace `roadmap-scaffold` owned by v0.9 and is not a v0.6 release/image artifact;
-- `linura-agent-runtime`/Agent UI remain future proposal-only components;
-- Control Center and Shell remain future planned applications;
-- library crates/verifiers are linked/composed as needed but are not automatically standalone release artifacts merely because they are integrated or workspace members.
-
-This distinction is enforced by component-maturity checks so a future scaffold cannot silently reappear in the release/image binary set.
+- Control Center remains a v0.10 roadmap application;
+- Agent UI remains a v0.10 roadmap application even though the underlying v0.8 proposal-only agent runtime is integrated;
+- Shell remains a v0.10 roadmap integration surface;
+- `linura-config` remains a v0.10 scaffold;
+- library/domain crates and verifiers are linked/composed as required but are not automatically standalone user-facing packages.
 
 ## Package/trust separation
 
-A future native package layout may split components such as:
+A native package layout may separate:
 
-- `linura` — non-privileged daemons/CLI, schemas, docs and profile data appropriate to the activated milestone;
-- `linura-authority` — bounded authority runtime and its system-bus/Polkit/systemd identity material where distribution policy benefits from a separate package;
-- `linura-executors` or per-domain executor packages — privileged executors and their narrowly scoped policy;
-- `linura-control-center` / `linura-shell` only when those applications actually activate.
+- ordinary non-privileged daemons/CLI, schemas, docs and profile data;
+- bounded authority runtime plus its system-bus/Polkit/service-identity material;
+- per-domain privileged executors with narrowly scoped policy;
+- graphical clients only when their milestone activates and qualifies them.
 
-Exact package names are not a Stable v0.6 contract.
+Privileged executors install system D-Bus, Polkit and systemd policy separately from ordinary clients. Human Authority1 approval and root-executor authorization remain separate trust boundaries.
 
-Privileged executors install system D-Bus, Polkit and systemd policy separately from ordinary clients. The v0.6 authority runtime also has explicit system-bus/Polkit/service-identity packaging; human Authority1 approval and root-executor authorization remain separate policy boundaries.
+Do not make `/usr/share/linura` user-editable. User configuration belongs under appropriate XDG/config/state or protected service-state locations; packaged defaults, schemas and policy remain package-owned.
 
-Do not make `/usr/share/linura` user-editable. User configuration belongs under the appropriate XDG/config/state or protected service-state locations; packaged defaults, schemas and policy remain package-owned.
+## Historical v0.6 boundary
 
-## Release payload vs supported platform
-
-A binary appearing in the GitHub Release does not imply the repository supports installing/running that binary on every Linux distribution or hardware profile. v0.6 has `Supported platform profiles: none`; its Ubuntu disposable guest is qualification infrastructure, not a product support declaration.
+v0.6 was the first release to package and qualify the complete eleven-stage managed mutation for one bounded systemd effect. Historical v0.6 release documents remain authoritative for that release; this living document describes the current packaging boundary and must not freeze later releases at v0.6 maturity.

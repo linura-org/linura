@@ -537,6 +537,7 @@ dependencies = [
  "linura-agent-runtime",
  "linura-core",
  "linura-graph",
+ "linura-hardware",
  "linura-intent",
  "linura-library",
  "linura-lifecycle",
@@ -605,6 +606,10 @@ dependencies = [
 [[package]]
 name = "linura-hardware"
 version = "0.9.0"
+dependencies = [
+ "linura-core",
+ "linura-observation",
+]
 
 [[package]]
 name = "linura-intent"

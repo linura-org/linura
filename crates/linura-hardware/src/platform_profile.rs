@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+
+use linura_observation::{ObservationAuthority, ObservationEnvelope, ObservedValue};
 
 use super::MachineClass;
 
@@ -63,113 +65,48 @@ impl PlatformFactKey {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PlatformObservationAuthority {
-    NativeOsRelease,
-    NativeArchitecture,
-    NativeInit,
-    NativeSession,
-    NativeCompositor,
-    NativeProviderApi,
-    QualificationFixture,
-}
-
-impl PlatformObservationAuthority {
-    #[must_use]
-    pub const fn is_live(self) -> bool {
-        !matches!(self, Self::QualificationFixture)
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum PlatformFactEvidence {
-    Observed {
-        value: String,
-        authority: PlatformObservationAuthority,
-    },
-    Unavailable {
-        reason: String,
-    },
-}
-
-impl PlatformFactEvidence {
-    pub fn observed(
-        value: impl Into<String>,
-        authority: PlatformObservationAuthority,
-    ) -> Result<Self, PlatformProfileError> {
-        Ok(Self::Observed {
-            value: validate_platform_text("platform fact value", value.into(), 256)?,
-            authority,
-        })
-    }
-
-    pub fn unavailable(reason: impl Into<String>) -> Result<Self, PlatformProfileError> {
-        Ok(Self::Unavailable {
-            reason: validate_platform_text("platform evidence gap reason", reason.into(), 1024)?,
-        })
-    }
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct PlatformObservation {
-    facts: BTreeMap<PlatformFactKey, PlatformFactEvidence>,
-}
-
-impl PlatformObservation {
-    pub fn record_observed(
-        &mut self,
-        key: PlatformFactKey,
-        value: impl Into<String>,
-        authority: PlatformObservationAuthority,
-    ) -> Result<(), PlatformProfileError> {
-        self.record(key, PlatformFactEvidence::observed(value, authority)?)
-    }
-
-    pub fn record_unavailable(
-        &mut self,
-        key: PlatformFactKey,
-        reason: impl Into<String>,
-    ) -> Result<(), PlatformProfileError> {
-        self.record(key, PlatformFactEvidence::unavailable(reason)?)
-    }
-
-    pub fn record(
-        &mut self,
-        key: PlatformFactKey,
-        evidence: PlatformFactEvidence,
-    ) -> Result<(), PlatformProfileError> {
-        if self.facts.contains_key(&key) {
-            return Err(PlatformProfileError::DuplicateObservationFact(key));
-        }
-        self.facts.insert(key, evidence);
-        Ok(())
-    }
-
-    #[must_use]
-    pub fn fact(&self, key: PlatformFactKey) -> Option<&PlatformFactEvidence> {
-        self.facts.get(&key)
-    }
-
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.facts.len()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.facts.is_empty()
-    }
+enum PlatformFactValueSource {
+    Attribute(&'static str),
+    ProviderIdentity,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RequiredPlatformFact {
     key: PlatformFactKey,
+    capability: &'static str,
+    evidence_provider: Option<&'static str>,
+    source: PlatformFactValueSource,
     expected: &'static str,
 }
 
 impl RequiredPlatformFact {
-    #[must_use]
-    pub const fn new(key: PlatformFactKey, expected: &'static str) -> Self {
-        Self { key, expected }
+    const fn attribute(
+        key: PlatformFactKey,
+        capability: &'static str,
+        evidence_provider: &'static str,
+        expected: &'static str,
+    ) -> Self {
+        Self {
+            key,
+            capability,
+            evidence_provider: Some(evidence_provider),
+            source: PlatformFactValueSource::Attribute("identity"),
+            expected,
+        }
+    }
+
+    const fn provider(
+        role: PlatformProviderRole,
+        capability: &'static str,
+        expected: &'static str,
+    ) -> Self {
+        Self {
+            key: PlatformFactKey::Provider(role),
+            capability,
+            evidence_provider: None,
+            source: PlatformFactValueSource::ProviderIdentity,
+            expected,
+        }
     }
 
     #[must_use]
@@ -178,8 +115,79 @@ impl RequiredPlatformFact {
     }
 
     #[must_use]
+    pub const fn capability(self) -> &'static str {
+        self.capability
+    }
+
+    #[must_use]
     pub const fn expected(self) -> &'static str {
         self.expected
+    }
+
+    /// Assess exactly one canonical observation against this one required fact.
+    ///
+    /// Cross-fact/provider aggregation is intentionally owned by Linura Control.
+    #[must_use]
+    pub fn assess_observation(
+        self,
+        observation: &ObservationEnvelope,
+        now_unix_ms: u64,
+    ) -> PlatformFactAssessment {
+        if observation
+            .validate(
+                &observation.provider,
+                &observation.resource,
+                &observation.capability,
+            )
+            .is_err()
+            || observation.require_current(now_unix_ms).is_err()
+        {
+            return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
+                key: self.key,
+                reason: "canonical observation is invalid, stale, or future-dated".to_owned(),
+            });
+        }
+        if observation.capability.as_str() != self.capability {
+            return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
+                key: self.key,
+                reason: "canonical observation has the wrong capability".to_owned(),
+            });
+        }
+        if self
+            .evidence_provider
+            .is_some_and(|provider| observation.provider.as_str() != provider)
+        {
+            return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
+                key: self.key,
+                reason: "canonical observation came from an unexpected provider".to_owned(),
+            });
+        }
+
+        let observed = match self.source {
+            PlatformFactValueSource::ProviderIdentity => observation.provider.as_str().to_owned(),
+            PlatformFactValueSource::Attribute(attribute) => {
+                let Some(ObservedValue::Text(value)) = observation.attributes.get(attribute) else {
+                    return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
+                        key: self.key,
+                        reason: "canonical observation omitted the required text attribute"
+                            .to_owned(),
+                    });
+                };
+                value.clone()
+            }
+        };
+
+        if observed == self.expected {
+            PlatformFactAssessment::Match
+        } else {
+            PlatformFactAssessment::KnownMismatch(PlatformFactMismatch {
+                key: self.key,
+                expected: self.expected,
+                observed,
+                authority: observation.authority,
+                evidence_id: observation.evidence_id(),
+            })
+        }
     }
 }
 
@@ -243,66 +251,32 @@ impl PlatformProfileCandidateContract {
         if self.required_facts.is_empty() {
             return Err(PlatformProfileError::InvalidContractField("required_facts"));
         }
-        let mut seen = BTreeSet::new();
+        let mut keys = BTreeSet::new();
+        let mut capabilities = BTreeSet::new();
         for fact in self.required_facts {
             validate_contract_literal(fact.key.as_str(), fact.expected)?;
-            if !seen.insert(fact.key) {
+            validate_contract_literal("observation capability", fact.capability)?;
+            if let Some(provider) = fact.evidence_provider {
+                validate_contract_literal("evidence provider", provider)?;
+            }
+            if !keys.insert(fact.key) {
                 return Err(PlatformProfileError::DuplicateRequiredFact(fact.key));
+            }
+            if !capabilities.insert(fact.capability) {
+                return Err(PlatformProfileError::DuplicateRequiredCapability(
+                    fact.capability,
+                ));
             }
         }
         Ok(())
     }
+}
 
-    pub fn assess(
-        self,
-        observation: &PlatformObservation,
-    ) -> Result<PlatformProfileCompatibility, PlatformProfileError> {
-        self.validate()?;
-        let mut mismatches = Vec::new();
-        let mut gaps = Vec::new();
-
-        for required in self.required_facts {
-            match observation.fact(required.key) {
-                Some(PlatformFactEvidence::Observed { value, authority }) => {
-                    if value != required.expected {
-                        mismatches.push(PlatformFactMismatch {
-                            key: required.key,
-                            expected: required.expected,
-                            observed: value.clone(),
-                            authority: *authority,
-                        });
-                    }
-                }
-                Some(PlatformFactEvidence::Unavailable { reason }) => {
-                    gaps.push(PlatformEvidenceGap {
-                        key: required.key,
-                        reason: reason.clone(),
-                    });
-                }
-                None => gaps.push(PlatformEvidenceGap {
-                    key: required.key,
-                    reason: "required fact was not observed".to_owned(),
-                }),
-            }
-        }
-
-        if !mismatches.is_empty() {
-            return Ok(PlatformProfileCompatibility::KnownMismatch {
-                profile_id: self.profile_id,
-                mismatches,
-                gaps,
-            });
-        }
-        if !gaps.is_empty() {
-            return Ok(PlatformProfileCompatibility::InsufficientEvidence {
-                profile_id: self.profile_id,
-                gaps,
-            });
-        }
-        Ok(PlatformProfileCompatibility::ExactCandidateMatch {
-            profile_id: self.profile_id,
-        })
-    }
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PlatformFactAssessment {
+    Match,
+    KnownMismatch(PlatformFactMismatch),
+    InsufficientEvidence(PlatformEvidenceGap),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -310,7 +284,8 @@ pub struct PlatformFactMismatch {
     pub key: PlatformFactKey,
     pub expected: &'static str,
     pub observed: String,
-    pub authority: PlatformObservationAuthority,
+    pub authority: ObservationAuthority,
+    pub evidence_id: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -361,43 +336,88 @@ impl PlatformProfileCompatibility {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PlatformProfileError {
     InvalidContractField(&'static str),
-    InvalidEvidenceField(&'static str),
     DuplicateRequiredFact(PlatformFactKey),
-    DuplicateObservationFact(PlatformFactKey),
+    DuplicateRequiredCapability(&'static str),
 }
 
+pub const PLATFORM_DISTRIBUTION_CAPABILITY: &str = "platform.distribution.observe";
+pub const PLATFORM_ARCHITECTURE_CAPABILITY: &str = "platform.architecture.observe";
+pub const PLATFORM_INIT_CAPABILITY: &str = "platform.init-system.observe";
+pub const PLATFORM_SESSION_CAPABILITY: &str = "platform.session.observe";
+pub const PLATFORM_COMPOSITOR_CAPABILITY: &str = "platform.compositor.observe";
+pub const PLATFORM_NETWORK_PROVIDER_CAPABILITY: &str = "platform.provider.network.observe";
+pub const PLATFORM_BLUETOOTH_PROVIDER_CAPABILITY: &str = "platform.provider.bluetooth.observe";
+pub const PLATFORM_AUDIO_PROVIDER_CAPABILITY: &str = "platform.provider.audio.observe";
+pub const PLATFORM_STORAGE_PROVIDER_CAPABILITY: &str = "platform.provider.storage.observe";
+pub const PLATFORM_AUTHORIZATION_PROVIDER_CAPABILITY: &str =
+    "platform.provider.authorization.observe";
+pub const PLATFORM_FILESYSTEM_PROVIDER_CAPABILITY: &str = "platform.provider.filesystem.observe";
+pub const PLATFORM_SNAPSHOTS_PROVIDER_CAPABILITY: &str = "platform.provider.snapshots.observe";
+
 const ARCH_HYPRLAND_V1_REQUIRED_FACTS: [RequiredPlatformFact; 12] = [
-    RequiredPlatformFact::new(PlatformFactKey::Distribution, "arch"),
-    RequiredPlatformFact::new(PlatformFactKey::Architecture, "x86_64"),
-    RequiredPlatformFact::new(PlatformFactKey::InitSystem, "systemd"),
-    RequiredPlatformFact::new(PlatformFactKey::Session, "wayland"),
-    RequiredPlatformFact::new(PlatformFactKey::Compositor, "hyprland"),
-    RequiredPlatformFact::new(
-        PlatformFactKey::Provider(PlatformProviderRole::Network),
+    RequiredPlatformFact::attribute(
+        PlatformFactKey::Distribution,
+        PLATFORM_DISTRIBUTION_CAPABILITY,
+        "linux-platform",
+        "arch",
+    ),
+    RequiredPlatformFact::attribute(
+        PlatformFactKey::Architecture,
+        PLATFORM_ARCHITECTURE_CAPABILITY,
+        "linux-platform",
+        "x86_64",
+    ),
+    RequiredPlatformFact::attribute(
+        PlatformFactKey::InitSystem,
+        PLATFORM_INIT_CAPABILITY,
+        "linux-platform",
+        "systemd",
+    ),
+    RequiredPlatformFact::attribute(
+        PlatformFactKey::Session,
+        PLATFORM_SESSION_CAPABILITY,
+        "linux-platform",
+        "wayland",
+    ),
+    RequiredPlatformFact::attribute(
+        PlatformFactKey::Compositor,
+        PLATFORM_COMPOSITOR_CAPABILITY,
+        "linux-platform",
+        "hyprland",
+    ),
+    RequiredPlatformFact::provider(
+        PlatformProviderRole::Network,
+        PLATFORM_NETWORK_PROVIDER_CAPABILITY,
         "networkmanager",
     ),
-    RequiredPlatformFact::new(
-        PlatformFactKey::Provider(PlatformProviderRole::Bluetooth),
+    RequiredPlatformFact::provider(
+        PlatformProviderRole::Bluetooth,
+        PLATFORM_BLUETOOTH_PROVIDER_CAPABILITY,
         "bluez",
     ),
-    RequiredPlatformFact::new(
-        PlatformFactKey::Provider(PlatformProviderRole::Audio),
+    RequiredPlatformFact::provider(
+        PlatformProviderRole::Audio,
+        PLATFORM_AUDIO_PROVIDER_CAPABILITY,
         "pipewire-wireplumber",
     ),
-    RequiredPlatformFact::new(
-        PlatformFactKey::Provider(PlatformProviderRole::Storage),
+    RequiredPlatformFact::provider(
+        PlatformProviderRole::Storage,
+        PLATFORM_STORAGE_PROVIDER_CAPABILITY,
         "udisks2",
     ),
-    RequiredPlatformFact::new(
-        PlatformFactKey::Provider(PlatformProviderRole::Authorization),
+    RequiredPlatformFact::provider(
+        PlatformProviderRole::Authorization,
+        PLATFORM_AUTHORIZATION_PROVIDER_CAPABILITY,
         "polkit",
     ),
-    RequiredPlatformFact::new(
-        PlatformFactKey::Provider(PlatformProviderRole::Filesystem),
+    RequiredPlatformFact::provider(
+        PlatformProviderRole::Filesystem,
+        PLATFORM_FILESYSTEM_PROVIDER_CAPABILITY,
         "btrfs",
     ),
-    RequiredPlatformFact::new(
-        PlatformFactKey::Provider(PlatformProviderRole::Snapshots),
+    RequiredPlatformFact::provider(
+        PlatformProviderRole::Snapshots,
+        PLATFORM_SNAPSHOTS_PROVIDER_CAPABILITY,
         "snapper",
     ),
 ];
@@ -417,46 +437,43 @@ fn validate_contract_literal(
     Ok(())
 }
 
-fn validate_platform_text(
-    field: &'static str,
-    value: String,
-    max_len: usize,
-) -> Result<String, PlatformProfileError> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() || trimmed.len() > max_len || trimmed.chars().any(char::is_control) {
-        return Err(PlatformProfileError::InvalidEvidenceField(field));
-    }
-    Ok(trimmed.to_owned())
-}
-
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use linura_core::{CapabilityId, ProviderId, ResourceId};
+    use linura_observation::{ObservationAuthority, ObservationEnvelope, ObservedValue};
+
     use super::*;
 
-    fn authority_for(key: PlatformFactKey) -> PlatformObservationAuthority {
-        match key {
-            PlatformFactKey::Distribution => PlatformObservationAuthority::NativeOsRelease,
-            PlatformFactKey::Architecture => PlatformObservationAuthority::NativeArchitecture,
-            PlatformFactKey::InitSystem => PlatformObservationAuthority::NativeInit,
-            PlatformFactKey::Session => PlatformObservationAuthority::NativeSession,
-            PlatformFactKey::Compositor => PlatformObservationAuthority::NativeCompositor,
-            PlatformFactKey::Provider(_) => PlatformObservationAuthority::NativeProviderApi,
-        }
-    }
+    const OBSERVED_AT: u64 = 1_000;
+    const NOW: u64 = 1_500;
 
-    fn exact_observation() -> PlatformObservation {
-        let contract = PlatformProfileCandidateContract::v010_arch_hyprland_v1();
-        let mut observation = PlatformObservation::default();
-        for required in contract.required_facts() {
-            observation
-                .record_observed(
-                    required.key(),
-                    required.expected(),
-                    authority_for(required.key()),
-                )
-                .unwrap_or_else(|error| unreachable!("{error:?}"));
+    fn envelope(
+        provider: &str,
+        resource: &str,
+        capability: &str,
+        authority: ObservationAuthority,
+        identity: Option<&str>,
+    ) -> ObservationEnvelope {
+        let mut attributes = BTreeMap::from([(
+            "source".into(),
+            ObservedValue::Text("qualification-fixture".into()),
+        )]);
+        if let Some(identity) = identity {
+            attributes.insert("identity".into(), ObservedValue::Text(identity.into()));
         }
-        observation
+        ObservationEnvelope {
+            provider: ProviderId::new(provider).unwrap_or_else(|error| unreachable!("{error}")),
+            resource: ResourceId::new(resource).unwrap_or_else(|error| unreachable!("{error}")),
+            capability: CapabilityId::new(capability)
+                .unwrap_or_else(|error| unreachable!("{error}")),
+            authority,
+            observed_at_unix_ms: OBSERVED_AT,
+            valid_for_ms: 2_000,
+            sequence: 1,
+            attributes,
+        }
     }
 
     #[test]
@@ -475,149 +492,76 @@ mod tests {
         );
     }
 
-    #[test]
-    fn exact_candidate_match_is_not_release_qualification() {
-        let contract = PlatformProfileCandidateContract::v010_arch_hyprland_v1();
-        let result = contract
-            .assess(&exact_observation())
-            .unwrap_or_else(|error| unreachable!("{error:?}"));
-        assert!(result.is_exact_candidate_match());
-        assert_eq!(result.profile_id(), ARCH_HYPRLAND_V1_PROFILE_ID);
-        assert!(!result.release_qualified());
+    fn required_fact(key: PlatformFactKey) -> RequiredPlatformFact {
+        PlatformProfileCandidateContract::v010_arch_hyprland_v1()
+            .required_facts()
+            .iter()
+            .copied()
+            .find(|fact| fact.key() == key)
+            .unwrap_or_else(|| unreachable!("required fact fixture missing"))
     }
 
     #[test]
-    fn missing_session_evidence_is_insufficient_not_a_match() {
-        let contract = PlatformProfileCandidateContract::v010_arch_hyprland_v1();
-        let mut observation = PlatformObservation::default();
-        for required in contract.required_facts() {
-            if required.key() == PlatformFactKey::Session {
-                observation
-                    .record_unavailable(required.key(), "no authoritative Wayland session evidence")
-                    .unwrap_or_else(|error| unreachable!("{error:?}"));
-            } else {
-                observation
-                    .record_observed(
-                        required.key(),
-                        required.expected(),
-                        authority_for(required.key()),
-                    )
-                    .unwrap_or_else(|error| unreachable!("{error:?}"));
-            }
-        }
-
-        let result = contract
-            .assess(&observation)
-            .unwrap_or_else(|error| unreachable!("{error:?}"));
-        assert!(matches!(
-            result,
-            PlatformProfileCompatibility::InsufficientEvidence { .. }
-        ));
-        if let PlatformProfileCompatibility::InsufficientEvidence { gaps, .. } = result {
-            assert_eq!(gaps.len(), 1);
-            assert_eq!(gaps[0].key, PlatformFactKey::Session);
-        }
-    }
-
-    #[test]
-    fn known_distribution_mismatch_dominates_other_evidence_gaps() {
-        let contract = PlatformProfileCandidateContract::v010_arch_hyprland_v1();
-        let mut observation = PlatformObservation::default();
-        observation
-            .record_observed(
-                PlatformFactKey::Distribution,
-                "ubuntu",
-                PlatformObservationAuthority::NativeOsRelease,
-            )
-            .unwrap_or_else(|error| unreachable!("{error:?}"));
-
-        let result = contract
-            .assess(&observation)
-            .unwrap_or_else(|error| unreachable!("{error:?}"));
-        assert!(matches!(
-            result,
-            PlatformProfileCompatibility::KnownMismatch { .. }
-        ));
-        if let PlatformProfileCompatibility::KnownMismatch {
-            mismatches, gaps, ..
-        } = result
-        {
-            assert_eq!(mismatches.len(), 1);
-            assert_eq!(mismatches[0].key, PlatformFactKey::Distribution);
-            assert_eq!(mismatches[0].expected, "arch");
-            assert_eq!(mismatches[0].observed, "ubuntu");
-            assert!(!gaps.is_empty());
-        }
-    }
-
-    #[test]
-    fn provider_identity_mismatch_is_typed() {
-        let contract = PlatformProfileCandidateContract::v010_arch_hyprland_v1();
-        let mut observation = PlatformObservation::default();
-        for required in contract.required_facts() {
-            let value =
-                if required.key() == PlatformFactKey::Provider(PlatformProviderRole::Network) {
-                    "systemd-networkd"
-                } else {
-                    required.expected()
-                };
-            observation
-                .record_observed(required.key(), value, authority_for(required.key()))
-                .unwrap_or_else(|error| unreachable!("{error:?}"));
-        }
-
-        let result = contract
-            .assess(&observation)
-            .unwrap_or_else(|error| unreachable!("{error:?}"));
-        assert!(matches!(
-            result,
-            PlatformProfileCompatibility::KnownMismatch { .. }
-        ));
-        if let PlatformProfileCompatibility::KnownMismatch { mismatches, .. } = result {
-            assert_eq!(mismatches.len(), 1);
-            assert_eq!(
-                mismatches[0].key,
-                PlatformFactKey::Provider(PlatformProviderRole::Network)
-            );
-            assert_eq!(mismatches[0].key.as_str(), "provider.network");
-        }
-    }
-
-    #[test]
-    fn duplicate_observation_cannot_silently_replace_evidence() {
-        let mut observation = PlatformObservation::default();
-        observation
-            .record_observed(
-                PlatformFactKey::Distribution,
-                "arch",
-                PlatformObservationAuthority::NativeOsRelease,
-            )
-            .unwrap_or_else(|error| unreachable!("{error:?}"));
+    fn one_fact_matches_only_from_canonical_observation() {
+        let fact = required_fact(PlatformFactKey::Distribution);
+        let observation = envelope(
+            "linux-platform",
+            "platform:distribution",
+            PLATFORM_DISTRIBUTION_CAPABILITY,
+            ObservationAuthority::SyntheticTest,
+            Some("arch"),
+        );
         assert_eq!(
-            observation.record_observed(
-                PlatformFactKey::Distribution,
-                "ubuntu",
-                PlatformObservationAuthority::QualificationFixture,
-            ),
-            Err(PlatformProfileError::DuplicateObservationFact(
-                PlatformFactKey::Distribution
-            ))
+            fact.assess_observation(&observation, NOW),
+            PlatformFactAssessment::Match
         );
     }
 
     #[test]
-    fn malformed_or_empty_evidence_fails_closed() {
-        assert_eq!(
-            PlatformFactEvidence::observed("   ", PlatformObservationAuthority::NativeOsRelease),
-            Err(PlatformProfileError::InvalidEvidenceField(
-                "platform fact value"
-            ))
+    fn one_fact_reports_known_mismatch() {
+        let fact = required_fact(PlatformFactKey::Provider(PlatformProviderRole::Network));
+        let observation = envelope(
+            "systemd-networkd",
+            "platform:provider:network",
+            PLATFORM_NETWORK_PROVIDER_CAPABILITY,
+            ObservationAuthority::SyntheticTest,
+            None,
         );
-        assert_eq!(
-            PlatformFactEvidence::unavailable("\n"),
-            Err(PlatformProfileError::InvalidEvidenceField(
-                "platform evidence gap reason"
-            ))
+        assert!(matches!(
+            fact.assess_observation(&observation, NOW),
+            PlatformFactAssessment::KnownMismatch(_)
+        ));
+    }
+
+    #[test]
+    fn stale_single_fact_evidence_is_insufficient() {
+        let fact = required_fact(PlatformFactKey::Distribution);
+        let observation = envelope(
+            "linux-platform",
+            "platform:distribution",
+            PLATFORM_DISTRIBUTION_CAPABILITY,
+            ObservationAuthority::SyntheticTest,
+            Some("arch"),
         );
+        assert!(matches!(
+            fact.assess_observation(&observation, 10_000),
+            PlatformFactAssessment::InsufficientEvidence(_)
+        ));
+    }
+
+    #[test]
+    fn unexpected_evidence_provider_is_insufficient() {
+        let fact = required_fact(PlatformFactKey::Distribution);
+        let observation = envelope(
+            "untrusted-platform-source",
+            "platform:distribution",
+            PLATFORM_DISTRIBUTION_CAPABILITY,
+            ObservationAuthority::SyntheticTest,
+            Some("arch"),
+        );
+        assert!(matches!(
+            fact.assess_observation(&observation, NOW),
+            PlatformFactAssessment::InsufficientEvidence(_)
+        ));
     }
 }

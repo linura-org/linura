@@ -149,7 +149,7 @@ maturity = "integrated-experimental"
 activation_milestone = "v0.1.0"
 release_artifact = false
 authority_role = "observer-adapter"
-scope = "native Linux observation adapters including systemd"
+scope = "native Linux observation adapters plus narrow bounded platform fact probes that emit canonical ObservationEnvelope evidence; no cross-provider compatibility aggregation or support-promotion authority"
 
 [[component]]
 id = "linura-dbus"
@@ -270,7 +270,7 @@ maturity = "integrated-experimental"
 activation_milestone = "v0.1.0"
 release_artifact = false
 authority_role = "control-authority"
-scope = "canonical policy/query orchestration, sealed proposal-acceptance signing authority and durable managed lifecycle authority"
+scope = "canonical policy/query orchestration, PlatformProfile compatibility aggregation over canonical evidence, sealed proposal-acceptance signing authority and durable managed lifecycle authority"
 
 [[component]]
 id = "linura-bootstrap"
@@ -325,7 +325,7 @@ maturity = "integrated-experimental"
 activation_milestone = "v0.9.0"
 release_artifact = false
 authority_role = "hardware-evidence"
-scope = "v0.9 QualificationEnvironment identity/evidence plus v0.10 typed PlatformProfile candidate compatibility; candidate matching has no support-promotion authority"
+scope = "v0.9 QualificationEnvironment identity/evidence plus v0.10 typed PlatformProfile candidate compatibility derived from canonical ObservationEnvelope evidence; no observation or support-promotion authority"
 
 [[component]]
 id = "linura-testkit"

@@ -24,6 +24,7 @@ EXPECTED_RULE_PACKAGES = {
     "linura-observation",
     "linura-provider-sdk",
     "linura-graph",
+    "linura-hardware",
     "linura-observation-control",
     "linura-protocol",
     "linura-policy",
