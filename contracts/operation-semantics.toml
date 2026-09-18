@@ -1,0 +1,65 @@
+schema_version = 1
+architecture_decision = "docs/adr/0032-classify-operations-before-authority.md"
+documentation = "docs/operation-semantics.md"
+core_type = "linura_core::OperationClass"
+descriptor_type = "linura_capability_sdk::OperationDescriptor"
+risk_type = "linura_core::RiskClass"
+classification_owner = "trusted-operation-registry-and-linura-control"
+client_classification_authority = false
+provider_classification_authority = false
+unknown_effect_behavior = "fail-closed"
+risk_model = "orthogonal"
+privileged_effect_class = "managed-external-effect"
+transient_external_max_risk = "user-state"
+managed_lifecycle = ["request", "observe", "plan", "validate", "authorize", "prepare", "execute", "verify", "commit", "audit", "reconcile"]
+transient_effect_lifecycle = ["request", "observe", "validate-classify", "authorize", "execute", "verify", "audit"]
+
+[classes.experience-ephemeral]
+rust_variant = "ExperienceEphemeral"
+changes_external_state = true
+changes_linura_durable_state = false
+control_mediated = false
+risk_classification_required = false
+privileged_executor_allowed = false
+canonical_managed_lifecycle = false
+path = "experience-local"
+
+[classes.authoritative-query]
+rust_variant = "AuthoritativeQuery"
+changes_external_state = false
+changes_linura_durable_state = false
+control_mediated = true
+risk_classification_required = false
+privileged_executor_allowed = false
+canonical_managed_lifecycle = false
+path = "observation-query"
+
+[classes.linura-owned-state]
+rust_variant = "LinuraOwnedState"
+changes_external_state = false
+changes_linura_durable_state = true
+control_mediated = true
+risk_classification_required = true
+privileged_executor_allowed = false
+canonical_managed_lifecycle = false
+path = "linura-local-transaction"
+
+[classes.transient-external-effect]
+rust_variant = "TransientExternalEffect"
+changes_external_state = true
+changes_linura_durable_state = false
+control_mediated = true
+risk_classification_required = true
+privileged_executor_allowed = false
+canonical_managed_lifecycle = false
+path = "bounded-transient-effect"
+
+[classes.managed-external-effect]
+rust_variant = "ManagedExternalEffect"
+changes_external_state = true
+changes_linura_durable_state = true
+control_mediated = true
+risk_classification_required = true
+privileged_executor_allowed = true
+canonical_managed_lifecycle = true
+path = "canonical-managed-mutation"

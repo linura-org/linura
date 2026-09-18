@@ -2,6 +2,22 @@
 
 A managed mutation is downstream of approved intent or an explicit deterministic request. Managed state carries semantic origin and passes through one canonical authority lifecycle. No transport, provider, approval artifact or executor may create a second execution path around that lifecycle.
 
+## Scope: managed external effects
+
+The eleven-stage lifecycle is the canonical successful path for `OperationClass::ManagedExternalEffect`. It is not the default implementation template for every UI interaction, query or Linura-local write.
+
+Operation classification is defined by [ADR 0032](adr/0032-classify-operations-before-authority.md) and `contracts/operation-semantics.toml`:
+
+- ephemeral experience/navigation stays outside durable managed mutation authority;
+- authoritative queries use the observation/query plane;
+- Linura-owned local state uses its typed local transaction/persistence boundary;
+- a qualified `TransientExternalEffect` uses the narrow Control-mediated `request → observe/preconditions → validate/classify → authorize → execute → verify → audit` path;
+- a `ManagedExternalEffect` uses all eleven stages below.
+
+A transient external effect may not use a privileged executor and may not exceed trusted `UserState` risk. If privilege, stronger risk, durable crash/ambiguity recovery, durable desired state or other managed semantics are required, the operation is promoted to `ManagedExternalEffect` or remains unsupported.
+
+The stages below are semantic trust boundaries. They do **not** imply eleven user prompts, processes, IPC calls, synchronous UI steps, or model/network invocations. An implementation may compose stages efficiently, and policy `Allow` does not require a redundant approval prompt.
+
 ## Canonical successful path
 
 ```text

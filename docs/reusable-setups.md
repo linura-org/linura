@@ -75,8 +75,10 @@ load setup
   → resolve target capabilities
   → derive desired state
   → generate a fresh diff/plan
-  → policy + approval
-  → canonical eleven-stage mutation lifecycle
+  → policy
+  → approval when required
+  → operation classification
+  → canonical managed lifecycle for resulting managed external effects
 ```
 
 Imported or synced setup data is untrusted input. It cannot directly execute, grant itself authority or bypass policy.

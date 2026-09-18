@@ -13,7 +13,7 @@ Linux configuration has multiple legitimate owners. Linura must not treat every 
 
 ## Drift behavior
 
-Linura-managed drift requires explicit reconciliation/approval rather than a silent overwrite. User-owned and externally-managed drift is reported, generated state may be reconciled deterministically, and ephemeral state may be ignored.
+Linura-managed drift requires explicit reconciliation policy rather than a silent overwrite. Policy may choose report-only behavior, deterministic reconciliation, or approval when the trusted operation/risk requires it. User-owned and externally-managed drift is reported, generated state may be reconciled deterministically, and ephemeral state may be ignored.
 
 Package-manager side files such as Arch `.pacnew` and `.pacsave` are reconciliation inputs. Linura must surface and classify them before claiming an update is healthy.
 
