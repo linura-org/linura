@@ -53,3 +53,4 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0028 — Proposal-only agent interpretation](0028-proposal-only-agent-interpretation.md)
 - [0029 — v0.9 First Boot qualification environment and provisioning boundary](0029-v09-first-boot-reference-and-provisioning-boundary.md)
 - [0030 — Qualify Arch/Hyprland as the first interactive PlatformProfile in v0.10](0030-v010-first-interactive-platform-profile.md)
+- [0031 — v0.10 uses many interfaces over one machine model and one authority path](0031-v010-many-interfaces-one-authority-path.md)

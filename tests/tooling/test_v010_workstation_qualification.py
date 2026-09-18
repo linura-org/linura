@@ -29,6 +29,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "profiles/arch-hyprland-v1.toml",
             "hardware/support-matrix.json",
             "docs/qualification/v0.10.0.md",
+            "docs/adr/0031-v010-many-interfaces-one-authority-path.md",
             "packaging/arch/archiso/packages.linura",
         )
         for rel in paths:
@@ -274,6 +275,15 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("package manifest digest mismatch", result.stderr)
+
+    def test_interaction_adr_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            (root / "docs/adr/0031-v010-many-interfaces-one-authority-path.md").unlink()
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interaction ADR 0031 is missing", result.stderr)
 
     def test_roadmap_must_bind_machine_readable_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
