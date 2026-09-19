@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use linura_core::{CapabilityId, ProviderId, ResourceId};
 use linura_observation::{ObservationAuthority, ObservationEnvelope, ObservedValue};
 
 use super::MachineClass;
@@ -153,30 +154,44 @@ impl RequiredPlatformFact {
         observation: &ObservationEnvelope,
         now_unix_ms: u64,
     ) -> PlatformFactAssessment {
+        let Ok(expected_resource) = ResourceId::new(self.resource) else {
+            return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
+                key: self.key,
+                reason: "platform fact contract contains an invalid resource id".to_owned(),
+            });
+        };
+        let Ok(expected_capability) = CapabilityId::new(self.capability) else {
+            return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
+                key: self.key,
+                reason: "platform fact contract contains an invalid capability id".to_owned(),
+            });
+        };
+        let expected_provider = match self.evidence_provider {
+            Some(provider) => {
+                let Ok(provider) = ProviderId::new(provider) else {
+                    return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
+                        key: self.key,
+                        reason: "platform fact contract contains an invalid provider id".to_owned(),
+                    });
+                };
+                Some(provider)
+            }
+            None => None,
+        };
+        let validation_provider = expected_provider.as_ref().unwrap_or(&observation.provider);
         if observation
             .validate(
-                &observation.provider,
-                &observation.resource,
-                &observation.capability,
+                validation_provider,
+                &expected_resource,
+                &expected_capability,
             )
             .is_err()
             || observation.require_current(now_unix_ms).is_err()
         {
             return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
                 key: self.key,
-                reason: "canonical observation is invalid, stale, or future-dated".to_owned(),
-            });
-        }
-        if observation.resource.as_str() != self.resource {
-            return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
-                key: self.key,
-                reason: "canonical observation has the wrong resource scope".to_owned(),
-            });
-        }
-        if observation.capability.as_str() != self.capability {
-            return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
-                key: self.key,
-                reason: "canonical observation has the wrong capability".to_owned(),
+                reason: "canonical observation has invalid identity, scope, structure, or freshness"
+                    .to_owned(),
             });
         }
         if observation.authority != self.authority {
@@ -186,16 +201,6 @@ impl RequiredPlatformFact {
                     .to_owned(),
             });
         }
-        if self
-            .evidence_provider
-            .is_some_and(|provider| observation.provider.as_str() != provider)
-        {
-            return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
-                key: self.key,
-                reason: "canonical observation came from an unexpected provider".to_owned(),
-            });
-        }
-
         let observed = match self.source {
             PlatformFactValueSource::ProviderIdentity => observation.provider.as_str().to_owned(),
             PlatformFactValueSource::Attribute(attribute) => {
