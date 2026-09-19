@@ -89,6 +89,7 @@ impl LogindSessionTarget {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct NativeSessionContext {
+    session_id: String,
     session_type: String,
     desktop: String,
     runtime_path: PathBuf,
@@ -330,6 +331,7 @@ fn query_session_context(
     validate_runtime_path(&runtime_path, user.0)?;
 
     Ok(NativeSessionContext {
+        session_id: target.session_id().to_owned(),
         session_type,
         desktop,
         runtime_path,
@@ -440,7 +442,13 @@ fn user_unit_active(connection: &Connection, unit_name: &str) -> Result<bool, Pl
 }
 
 fn probe_compositor(context: &NativeSessionContext) -> Result<String, PlatformProbeError> {
-    if !context.desktop.is_empty() && context.desktop != "hyprland" {
+    if context.desktop.is_empty() {
+        return Err(PlatformProbeError::new(format!(
+            "selected logind session {} does not identify a desktop; compositor IPC cannot be bound safely",
+            context.session_id
+        )));
+    }
+    if context.desktop != "hyprland" {
         return Ok(context.desktop.clone());
     }
     let socket = locate_hyprland_socket(context)?;
@@ -461,17 +469,13 @@ fn locate_hyprland_socket(context: &NativeSessionContext) -> Result<PathBuf, Pla
         ));
     }
 
-    if let Ok(signature) = std::env::var("HYPRLAND_INSTANCE_SIGNATURE")
-        && safe_instance_signature(&signature)
-    {
-        let instance = hypr_root.join(signature);
-        let hinted = instance.join(HYPRLAND_SOCKET_NAME);
-        if valid_owned_directory(&instance, context.uid)
-            && valid_hyprland_socket(&hinted, context.uid)
-        {
-            return Ok(hinted);
-        }
-    }
+    let hinted_socket = std::env::var("HYPRLAND_INSTANCE_SIGNATURE")
+        .ok()
+        .filter(|signature| safe_instance_signature(signature))
+        .map(|signature| hypr_root.join(signature))
+        .filter(|instance| valid_owned_directory(instance, context.uid))
+        .map(|instance| instance.join(HYPRLAND_SOCKET_NAME))
+        .filter(|socket| valid_hyprland_socket(socket, context.uid));
 
     let entries = std::fs::read_dir(&hypr_root).map_err(|error| {
         PlatformProbeError::new(format!(
@@ -490,18 +494,34 @@ fn locate_hyprland_socket(context: &NativeSessionContext) -> Result<PathBuf, Pla
         let socket = directory.join(HYPRLAND_SOCKET_NAME);
         if valid_hyprland_socket(&socket, context.uid) {
             candidates.push(socket);
-            if candidates.len() > 1 {
-                return Err(PlatformProbeError::new(
-                    "multiple Hyprland IPC instances are present for the selected session",
-                ));
-            }
         }
     }
-    candidates.pop().ok_or_else(|| {
-        PlatformProbeError::new(
-            "no trusted Hyprland IPC socket is present for the selected session",
-        )
-    })
+
+    let selected = select_unique_hyprland_socket(candidates, &context.session_id)?;
+    if hinted_socket.is_some_and(|hinted| hinted != selected) {
+        return Err(PlatformProbeError::new(format!(
+            "HYPRLAND_INSTANCE_SIGNATURE does not identify the unique IPC instance for selected session {}",
+            context.session_id
+        )));
+    }
+    Ok(selected)
+}
+
+fn select_unique_hyprland_socket(
+    mut candidates: Vec<PathBuf>,
+    session_id: &str,
+) -> Result<PathBuf, PlatformProbeError> {
+    match candidates.len() {
+        1 => Ok(candidates
+            .pop()
+            .unwrap_or_else(|| unreachable!("one candidate was checked"))),
+        0 => Err(PlatformProbeError::new(format!(
+            "no trusted Hyprland IPC socket can be bound to selected session {session_id}"
+        ))),
+        _ => Err(PlatformProbeError::new(format!(
+            "multiple trusted Hyprland IPC instances exist for the selected user; selected session {session_id} cannot be bound unambiguously"
+        ))),
+    }
 }
 
 fn validate_runtime_path(path: &Path, uid: u32) -> Result<(), PlatformProbeError> {
@@ -842,6 +862,26 @@ mod tests {
         assert!(!safe_instance_signature(".."));
         assert!(!safe_instance_signature("../../other"));
         assert!(!safe_instance_signature("contains/slash"));
+    }
+
+    #[test]
+    fn compositor_socket_selection_fails_closed_on_cross_session_ambiguity() {
+        let only = PathBuf::from("/run/user/1000/hypr/one/.socket.sock");
+        assert_eq!(
+            select_unique_hyprland_socket(vec![only.clone()], "2"),
+            Ok(only)
+        );
+        assert!(select_unique_hyprland_socket(Vec::new(), "2").is_err());
+        assert!(
+            select_unique_hyprland_socket(
+                vec![
+                    PathBuf::from("/run/user/1000/hypr/one/.socket.sock"),
+                    PathBuf::from("/run/user/1000/hypr/two/.socket.sock"),
+                ],
+                "2",
+            )
+            .is_err()
+        );
     }
 
     #[test]
