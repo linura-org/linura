@@ -13,6 +13,43 @@ CONTRACT_PATH = "contracts/v010-workstation-qualification.toml"
 EXPECTED_PROFILE = "arch-hyprland-v1"
 EXPECTED_MACHINE_CLASS = "workstation"
 EXPECTED_EVIDENCE = ["disposable-arch", "interactive-workstation", "inherited-v0.9"]
+EXPECTED_INTERACTION_ADR = "docs/adr/0031-v010-many-interfaces-one-authority-path.md"
+EXPECTED_INTERACTION_SURFACES = [
+    "intent-state",
+    "control-plane",
+    "agent-conversational",
+    "manual-no-ai",
+    "library-setups-profiles",
+    "control-center",
+    "declarative-configuration",
+    "keyboard",
+    "command-palette",
+    "quick-settings",
+    "desktop-shell-integration",
+    "launcher-workspace",
+    "notifications-osd",
+    "unified-visual-theme",
+    "keyboard-mouse-parity",
+]
+EXPECTED_EXPERIENCE = {
+    "interaction_model": "one-model-many-interfaces",
+    "architecture_decision": EXPECTED_INTERACTION_ADR,
+    "authority_convergence": "single-typed-machine-model-and-control-path",
+    "required_surfaces": EXPECTED_INTERACTION_SURFACES,
+    "declarative_configuration": "typed-versioned-previewable-non-authorizing",
+    "command_palette": True,
+    "keyboard_shortcuts": True,
+    "quick_settings": True,
+    "desktop_shell_integration": "bounded",
+    "launcher_workspace": True,
+    "notifications_osd": True,
+    "unified_visual_theme": True,
+    "keyboard_mouse_parity": True,
+    "manual_no_ai_required": True,
+    "agent_authority": "proposal-only",
+    "full_shell_replacement_required": False,
+    "no_parallel_mutation_paths": True,
+}
 EXPECTED_REQUIRED_PACKAGES_PATH = "packaging/arch/archiso/packages.linura"
 EXPECTED_MANIFEST_FORMAT = "linura-arch-package-manifest-v1"
 EXPECTED_MANIFEST_DIRECTORY = "qualification/v010"
@@ -256,6 +293,10 @@ def validate(root: Path) -> list[str]:
         failures.append("v0.10 support promotion authority must remain protected-post-release-closure")
     if contract.get("required_evidence") != EXPECTED_EVIDENCE:
         failures.append(f"v0.10 required_evidence must remain exactly {EXPECTED_EVIDENCE!r}")
+    if contract.get("experience") != EXPECTED_EXPERIENCE:
+        failures.append("v0.10 experience contract drifted from the required multi-interface workstation boundary")
+    if not (root / EXPECTED_INTERACTION_ADR).is_file():
+        failures.append("v0.10 interaction ADR 0031 is missing")
 
     milestone = _v010_milestone(roadmap)
     if milestone is None:
@@ -263,6 +304,14 @@ def validate(root: Path) -> list[str]:
     else:
         if milestone.get("target_platform_profiles") != [EXPECTED_PROFILE]:
             failures.append("roadmap v0.10 target_platform_profiles must remain exactly arch-hyprland-v1")
+        if milestone.get("interaction_model") != "one-model-many-interfaces":
+            failures.append("roadmap v0.10 interaction_model must remain one-model-many-interfaces")
+        if milestone.get("required_interaction_surfaces") != EXPECTED_INTERACTION_SURFACES:
+            failures.append("roadmap v0.10 required_interaction_surfaces drifted from the v0.10 experience contract")
+        if milestone.get("desktop_shell_scope") != "bounded-integration-not-full-replacement":
+            failures.append("roadmap v0.10 desktop_shell_scope must remain bounded-integration-not-full-replacement")
+        if milestone.get("interaction_adr") != EXPECTED_INTERACTION_ADR:
+            failures.append("roadmap v0.10 interaction_adr must bind ADR 0031")
         if milestone.get("claim_class") != "Experimental":
             failures.append("roadmap v0.10 claim_class must remain Experimental")
         if milestone.get("qualification_contract") != CONTRACT_PATH:

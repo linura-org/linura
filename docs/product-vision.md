@@ -47,13 +47,35 @@ Exact filesystem/system snapshots remain a separate recovery mechanism.
 
 Model providers are optional adapters. A Linura machine remains inspectable, controllable, explainable, and recoverable through deterministic clients without network/model access.
 
+## Many interfaces, one machine model
+
+Linura is intent/state-centric and control-plane-centric underneath, but it is not limited to conversational interaction. A supported machine may expose the same model through declarative configuration, graphical controls, keyboard shortcuts, a command palette, quick settings, CLI/SDK automation and proposal-only agent assistance.
+
+```text
+intent / config / GUI / keyboard / palette / quick settings / CLI / agent
+                                  │
+                                  ▼
+                       typed Linura state/actions
+                                  │
+                                  ▼
+                           Linura Control
+                                  │
+                                  ▼
+                        verified machine state
+```
+
+The interface does not become authority. Declarative configuration is validated data rather than an executable script. A keyboard shortcut or quick-setting toggle maps to a registered typed action instead of a hidden privileged command. Low-risk actions may be policy-authorized with minimal ceremony, while higher-risk actions can require explicit plan review or approval without changing the underlying authority model.
+
+Ephemeral desktop navigation such as opening a launcher, focusing a window or switching workspace is not durable Linura-managed machine state. It may remain a direct desktop interaction. Any operation that changes Linura-managed state still converges on Control.
+
 ## Product surfaces
 
 - Linura First Boot: establish initial intents/profile or adopt saved setups/profiles.
 - Linura Agent: conversationally propose/change/retire intent and save/reuse setups.
 - Linura Library: local-first catalog for reusable setups/profiles and future reusable declarative artifacts.
+- Declarative configuration: versioned, typed, previewable power-user input that carries no execution authority.
 - Linura Control Center: inspect current/desired state, approvals, drift, graph, provenance and reusable configurations.
-- Linura Shell: cohesive desktop surfaces consuming the same APIs.
+- Linura Shell/desktop integration: cohesive workstation entry points including command palette/launcher, bounded quick settings, workspace/session integration, notifications/OSD and shared visual/theme foundations, all consuming the same APIs.
 - CLI/Linura SDK: deterministic automation, integrations and recovery.
 - Enterprise/Fleet: optional remote policy/orchestration built on the same local authority model.
 

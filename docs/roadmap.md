@@ -225,18 +225,48 @@ v0.9 does not claim a general-purpose full-disk/dual-boot/bare-metal Linux insta
 **Status:** planned  
 **Target claim class:** Experimental
 
-Deliver the first coherent end-user Linura experience while keeping the product/support contract explicitly Experimental.
+Deliver the first coherent end-user Linura workstation experience while keeping the product/support contract explicitly Experimental.
 
 Target experience:
 
-- coherent local end-to-end intent → reviewed change → verified state workflows;
-- manual operation that remains fully usable without AI;
-- bounded agent-assisted intent interpretation;
-- supported Experimental install/update/recovery path for the reference environment;
-- setup/profile Library workflows;
+- **intent/state-centric:** durable typed intent, desired state, authoritative observation, deterministic planning and verified convergence remain the product model;
+- **control-plane-centric:** every Linura-managed durable external mutation converges on the canonical Control authority lifecycle, while lighter bounded interactions remain typed and cannot gain a UI-, config-, shortcut- or agent-specific authority bypass;
+- **agent/conversational:** bounded model assistance produces proposal-only typed input and remains optional;
+- **manual/no-AI:** the supported workstation remains fully usable through deterministic local interfaces without any model provider;
+- **Library/Setups/Profiles:** local versioned reusable definitions are normal workstation workflows rather than specialist tooling;
+- **GUI Control Center:** the first supported graphical management client exposes observation, plans, approval/risk, execution, verification, provenance, diagnostics and recovery guidance;
+- **configuration-centric:** a versioned declarative configuration surface can express supported state and setup/profile selections as typed, non-authorizing input with deterministic preview before mutation;
+- **keyboard-centric:** supported workstation workflows expose coherent keyboard navigation and essential shortcuts without turning shortcuts into authority;
+- **command palette:** a keyboard-first palette/launcher resolves registered typed actions, intents, setups and navigation targets instead of arbitrary privileged shell text;
+- **quick settings:** bounded workstation toggles/actions for supported domains use authoritative state and the same typed Control path as other clients;
+- **desktop shell integration:** a bounded Linura workstation integration layer connects Control Center, Library, Agent, status, command palette and quick settings to the Hyprland session;
+- **launcher/workspace UX:** application/action discovery and workspace/session navigation are coherent with the Linura desktop experience;
+- **notifications/OSD:** operation progress, verification outcomes and relevant workstation feedback are presented without treating UI state or executor self-report as authoritative success;
+- **unified visual/theme system:** First Boot, Control Center and bounded desktop surfaces share a coherent Linura design/token foundation;
+- **keyboard/mouse parity:** every supported v0.10 end-user workflow has both keyboard-accessible and pointer-accessible operation, with any exception explicit in the release contract;
+- supported Experimental install/adoption/update/recovery on the exact qualified workstation profile;
 - diagnostics, explanation and audit surfaces appropriate to the supported scope;
-- explicit unsupported-domain, machine-class, platform and compatibility boundaries;
+- explicit unsupported-domain, machine-class, platform, hardware and compatibility boundaries;
 - user-facing acceptance evidence sufficient to discover the remaining gaps before Stable support is attempted.
+
+The v0.10 interaction invariant is **many interfaces, one machine model, one authority path**:
+
+```text
+intent / config / Control Center / keyboard / palette / quick settings / CLI / agent
+                                      │
+                                      ▼
+                           typed Linura state/actions
+                                      │
+                                      ▼
+                               Linura Control
+                                      │
+                                      ▼
+                            verified machine state
+```
+
+Declarative configuration is data, not an executable script or authority grant. Keyboard shortcuts and graphical controls are invocation surfaces, not alternate privilege paths. Ephemeral desktop navigation such as focusing a window or changing workspace does not need to masquerade as a durable managed mutation. Durable Linura-managed external machine-state changes must preserve the canonical lifecycle and support boundary; lighter bounded interactions still require typed semantics and may not bypass Control-owned authority.
+
+v0.10 requires a **bounded desktop integration**, not a complete replacement desktop shell. Existing qualified Hyprland/upstream desktop components may remain in use while Linura supplies the coherent management, command, quick-setting, notification and visual surfaces required by this milestone. A complete Linura-owned shell/panel/lock-screen/widget environment may deepen after v0.10 without weakening the v0.10 interaction invariant.
 
 v0.10.0 is where Linura should become meaningfully usable by external experimental users. It is deliberately **not** the point where Stable/production support is declared.
 
@@ -276,12 +306,15 @@ These tracks preserve Linura's long-term product ambitions without assigning spe
 
 ### Personal operating environment
 
-- machine profile/personality composition;
+v0.10 establishes the first bounded desktop-integration, design-system and keyboard/mouse-parity baseline. This later track deepens that foundation rather than postponing its first usable form.
+
+- richer machine profile/personality composition;
 - profile/setup capture from managed causal state;
 - reusable workflow/Library integration and replay UX;
-- coherent shell surfaces and design system;
+- expand the v0.10 bounded desktop integration into a complete Linura-owned shell/panel/lock-screen/widget environment where justified;
+- advanced theming, personalization and cross-surface design-system evolution;
 - declarative workflows and constrained derived UI surfaces;
-- accessibility and keyboard/mouse parity.
+- deeper accessibility beyond the v0.10 keyboard/mouse parity release gate.
 
 ### Extension and sharing ecosystem
 
