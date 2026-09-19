@@ -190,8 +190,9 @@ impl RequiredPlatformFact {
         {
             return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
                 key: self.key,
-                reason: "canonical observation has invalid identity, scope, structure, or freshness"
-                    .to_owned(),
+                reason:
+                    "canonical observation has invalid identity, scope, structure, or freshness"
+                        .to_owned(),
             });
         }
         if observation.authority != self.authority {
