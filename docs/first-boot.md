@@ -1,6 +1,6 @@
 # First-boot product architecture
 
-> **Maturity:** v0.9 candidate implementation, not yet a released platform-support claim. `linura-firstboot` is activated as an `integrated-experimental` v0.9 client and distributable binary, but `v0.8.0` remains the current release until the full v0.9 protected qualification/release lifecycle completes.
+> **Maturity:** v0.9.0 released and independently verified. `linura-firstboot` is an `integrated-experimental` distributable client for the release-qualified v0.9 QualificationEnvironment. This remains a bounded Experimental reference-environment claim, not generic Ubuntu/Linux or workstation support.
 
 The Linura First Boot entry point is:
 
@@ -12,9 +12,9 @@ It is **not** the authority plane and it is **not** a generic Linux installer.
 
 ADR 0029 defines the v0.9 QualificationEnvironment, deferred-owner and unattended-provisioning boundaries while ADR 0003 remains active for the first interactive workstation PlatformProfile.
 
-## Current v0.9 candidate QualificationEnvironment
+## Released v0.9 QualificationEnvironment
 
-The first candidate is intentionally narrow:
+The release-qualified v0.9 reference environment is intentionally narrow:
 
 - QualificationEnvironment ID: `qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless`;
 - Ubuntu 24.04 LTS server;
@@ -25,7 +25,7 @@ The first candidate is intentionally narrow:
 - pinned Ubuntu cloud image `https://cloud-images.ubuntu.com/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img`;
 - SHA-256 `d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac`.
 
-This is a **candidate**, chosen because Linura already has exact-source disposable acceptance infrastructure on this image shape. It becomes a release-qualified Experimental QualificationEnvironment only after v0.9's dedicated Linura-install/First Boot/update/recovery/migration qualification, Trusted Release Proof, immutable publication and independent verification all succeed.
+This environment completed the v0.9 dedicated Linura-install/First Boot/update/recovery/migration qualification, Trusted Release Proof, immutable tag-last publication and independent release verification. It is therefore release-qualified as the exact Experimental **QualificationEnvironment** above; that does not make it an Ubuntu PlatformProfile.
 
 The candidate says nothing about bare metal, full-disk installation, dual boot, desktop Ubuntu, arm64, workstations, edge nodes or other VM/cloud configurations. The pinned Ubuntu image is the base substrate; v0.9 proves the Linura layer on top of it rather than claiming to have installed the underlying operating system.
 
@@ -172,30 +172,24 @@ Agent/model interpretation, when used, stays inside the released v0.8 proposal-o
 
 The guest-installed `linura-firstboot` binary must be hashed/measured inside the guest and match the exact host-built binary used to produce the acceptance evidence.
 
-While the current release is v0.8 with `platform_support = "none"`, the support matrix remains empty. Candidate code must not pre-announce platform support.
+The current release is v0.9.0 with `platform_support = "reference-experimental"`. `hardware/support-matrix.json` therefore contains the exact Ubuntu/QEMU QualificationEnvironment in `qualification_environments.release_qualified`, while every `machine_classes.*.release_qualified_profiles` lane remains empty. In particular, `arch-hyprland-v1` is still a development candidate and has not been support-promoted.
 
-## What v0.9 still must prove
+## What v0.9 proved and what remains bounded
 
-The first implementation slice establishes the typed contracts and invariants. v0.9 is not release-ready until the repository also proves:
+v0.9.0 has already proved the version-scoped First Boot/reference-environment contract through exact-source qualification and independent release verification, including:
 
-- exact-source Linura installation into the candidate VM;
-- interactive-owner, deferred-owner and unattended-local First Boot modes;
-- malformed/tampered Provisioning Manifest rejection;
-- offline/no-model First Boot inside the guest;
-- exact authoritative observation/session/plan binding;
-- canonical Control-owned review/authorization rather than caller-manufactured approval;
-- bootstrap/provisioning restart/resume and corruption/failure cases;
-- update interruption and indeterminate-outcome recovery;
-- persistent-state migration plus backup/restore;
-- native recovery when First Boot is unavailable;
-- bounded bootstrap networking and default-deny remote exposure;
-- typed hardware adaptation and unsupported-hardware rejection;
-- immutable support evidence and guest binary identity verification;
-- security/adversarial qualification;
-- inherited v0.6/v0.7/v0.8 authority and durability gates;
-- Trusted Release Proof, immutable tag-last publication, independent verification and protected closure.
+- installation of exact Linura source into the pinned Ubuntu/QEMU substrate;
+- bounded interactive/deferred-owner/unattended-local provisioning contracts;
+- malformed/tampered manifest rejection;
+- offline/no-model behavior;
+- authoritative observation/session/plan binding;
+- Control-owned review/authorization;
+- restart/resume, update interruption, migration/backup/restore and native recovery cases;
+- default-deny remote exposure and bounded bootstrap networking;
+- immutable qualification evidence and guest binary identity;
+- inherited v0.6/v0.7/v0.8 authority/durability gates.
 
-See [v0.9 milestone contract](milestones/v0.9.0.md), [ADR 0029](adr/0029-v09-first-boot-reference-and-provisioning-boundary.md) and [v0.9 qualification](qualification/v0.9.0.md).
+Those results qualify only `qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless` as the v0.9 Experimental reference environment. They do not qualify a workstation PlatformProfile, generic Ubuntu, bare metal, arbitrary virtualization, additional architectures, or a general OS installer.
 
 ## v0.10 boundary
 

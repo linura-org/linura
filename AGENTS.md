@@ -27,6 +27,7 @@ Implement that by converting human/model input into typed intent and determinist
 - Unknown/unsupported state fails closed for mutations and authority review.
 - Provider/platform dependencies stay out of UI and core domain crates.
 - D-Bus objects, Unix file descriptors, sockets, process/session handles and other transport primitives remain adapter details. Providers expose bounded mechanisms; cross-provider query budgets, deadlines, caching/coalescing and aggregation belong to Linura Control.
+- PlatformProfile compatibility is derived from canonical `linura-observation::ObservationEnvelope` evidence. Do not introduce a second observation authority/envelope in `linura-hardware`, and do not aggregate platform compatibility inside `linura-linux-observation`.
 - Cached observations and retrieval/RAG context do not become authoritative current state merely because they are available; required authoritative facts retain provider/resource/capability/freshness requirements.
 - Contract version is not contract stability. Before preserving, removing, or changing a public interface/schema/SDK/CLI surface, read `contracts/stability.toml` and `docs/api-versioning.md`.
 - Do not create compatibility shims for Experimental contracts merely because an earlier development commit exposed them; replace the contract coherently and update all in-repo consumers/tests/docs in the same change.
@@ -43,7 +44,8 @@ Implement that by converting human/model input into typed intent and determinist
 - `linura-planner`: deterministic desired-state derivation and canonical non-executable `ReconciliationPlan`.
 - `linura-observation`: canonical authoritative observation envelope and freshness primitives.
 - `linura-observation-control`: provider-neutral authoritative observation coordination and bounded retained evidence.
-- `linura-linux-observation`: concrete Linux observation adapters; transport mechanisms remain internal.
+- `linura-linux-observation`: concrete narrow Linux observation adapters/probes; transport mechanisms remain internal and cross-provider compatibility aggregation is forbidden.
+- `linura-hardware`: QualificationEnvironment/hardware evidence plus provider-neutral PlatformProfile contracts and single-fact compatibility rules over canonical `ObservationEnvelope` evidence; Control owns cross-fact aggregation; no observation or support-promotion authority.
 - `linura-provenance`: why-chain lineage.
 - `linura-policy`: deterministic policy/review/approval semantics over the canonical plan lineage; no provider/executor authority.
 - `linura-protocol`: versioned public contracts.

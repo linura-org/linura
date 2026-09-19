@@ -24,13 +24,13 @@ The evidence tier describes the strength of evidence. It does **not** by itself 
 
 These lanes are intentionally different. Evidence for a QualificationEnvironment never silently promotes a PlatformProfile, and evidence for one PlatformProfile never transfers to another profile, machine class, architecture or hardware boundary.
 
-While the current published release has `platform_support = "none"`, both lanes must remain empty.
+For the current published v0.9.0 release, `platform_support = "reference-experimental"`. The QualificationEnvironment lane contains exactly `qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless`; the workstation/server/edge `release_qualified_profiles` lanes remain empty. A future release may change either lane only through its protected qualification/support-promotion contract.
 
-For v0.9, the candidate QualificationEnvironment is:
+For v0.9, the release-qualified QualificationEnvironment is:
 
 `qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless`
 
-It exists to prove the Linura installation/adoption/First Boot/update/recovery/migration control path on an exact Ubuntu/QEMU substrate. Qualifying it does **not** automatically qualify an Ubuntu server PlatformProfile and does not qualify `arch-hyprland-v1`.
+It proves the Linura installation/adoption/First Boot/update/recovery/migration control path on an exact Ubuntu/QEMU substrate. That completed qualification does **not** qualify an Ubuntu server PlatformProfile and does not qualify `arch-hyprland-v1`.
 
 `arch-hyprland-v1` remains Linura's first interactive workstation PlatformProfile under ADR 0003 and requires its own workstation-specific evidence before it can enter `machine_classes.workstation.release_qualified_profiles`.
 
