@@ -10,6 +10,7 @@ Providers observe and plan against a Linux subsystem; they do not become ambient
 - Treat one observation call as a bounded probe. Do not hide unbounded polling, retries, fan-out, cache lifetime or background work inside a provider.
 - When a query contract supplies a deadline, cancellation signal, freshness requirement or resource budget, honor it and never silently widen it. Cross-provider scheduling/coalescing/backpressure belongs to Linura Control.
 - Emit capability support with a reason/evidence level.
+- Do not own or downgrade `OperationClass`. A provider may expose typed facts such as privilege/reversibility/postconditions, but trusted operation registration + Control choose the authority path. Any privileged provider effect is `ManagedExternalEffect`, never transient.
 - Make observations deterministic enough for sanitized fixtures.
 - Preserve provider/resource/capability identity and authoritative freshness in observation evidence; retrieved/model confidence never substitutes for required authoritative state.
 - Provider tests must cover unavailable service, malformed state, unsupported feature, stale observation, timeout/cancellation where supported, and budget exhaustion where applicable.

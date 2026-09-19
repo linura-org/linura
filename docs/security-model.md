@@ -66,6 +66,14 @@ Only after that authorization succeeds does `linura-dbus` construct human proven
 
 “Local” is never equivalent to trusted. Root/administrator identity also does not mean the caller may bypass the canonical managed path.
 
+## Operation-class boundary
+
+Operation class is security-relevant authority metadata owned by trusted registered semantics and Linura Control. UI, CLI, configuration, agents, imported artifacts and providers cannot assert a weaker class to obtain a lighter execution path.
+
+The only lightweight external-effect path is `TransientExternalEffect`, and it is deliberately constrained to qualified unprivileged effects whose trusted risk does not exceed `UserState` and whose outcome can be independently verified without durable indeterminate recovery. Privileged, system-level, security-sensitive, destructive, ambiguity-sensitive or durable desired-state work is a `ManagedExternalEffect` or unsupported and therefore cannot bypass the canonical durable lifecycle.
+
+Unknown/ambiguous external effect semantics fail closed. See [ADR 0032](adr/0032-classify-operations-before-authority.md) and `contracts/operation-semantics.toml`.
+
 ## Human approval is not executor authority
 
 The original caller's Polkit decision authorizes continuation of the exact Authority1 request. It is not a bearer token and is never forwarded as authority to the root executor.

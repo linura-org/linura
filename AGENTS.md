@@ -34,6 +34,8 @@ Implement that by converting human/model input into typed intent and determinist
 - Stable compatibility obligations exist only for contracts explicitly marked `stable` in `contracts/stability.toml`; Stable breaking changes require a new major generation, overlap/migration documentation, and compatibility evidence.
 - Generated UI must use typed constrained surfaces or isolated extensions.
 - Preserve an offline/no-model path for deterministic control and recovery.
+- Classify operation semantics before choosing an authority path. Follow `contracts/operation-semantics.toml` and ADR 0032: do not force experience/query/Linura-local work through external-effect machinery, and do not downgrade a transient/managed external effect into a direct provider/UI call for convenience.
+- `TransientExternalEffect` is restricted to qualified unprivileged at-most-`UserState` effects. Privilege, stronger risk, durable desired state or durable ambiguity/recovery requirements require `ManagedExternalEffect` semantics or an unsupported result.
 
 ## Architecture ownership
 
@@ -62,13 +64,14 @@ Implement that by converting human/model input into typed intent and determinist
 
 1. Identify the user intent and durable domain object affected.
 2. Identify graph/provenance consequences.
-3. Identify trust/privilege boundary crossed.
-4. Identify whether code is obsolete, live, or deliberate future scaffold before deleting it.
-5. Update core/intent/graph/protocol first where their contract actually changes.
-6. Update planner/policy/provider/executor as applicable without creating parallel authority paths.
-7. Add failure/denial/shared-ownership and anti-drift tests before UI work.
-8. Update ADR/RFC and threat model for contract or trust-boundary changes.
-9. Run the repository quality gate.
+3. Classify operation semantics and trusted risk independently; identify whether it is experience-ephemeral, authoritative-query, Linura-owned-state, transient-external-effect or managed-external-effect.
+4. Identify trust/privilege boundary crossed and verify the selected path is permitted by `contracts/operation-semantics.toml`.
+5. Identify whether code is obsolete, live, or deliberate future scaffold before deleting it.
+6. Update core/intent/graph/protocol first where their contract actually changes.
+7. Update planner/policy/provider/executor as applicable without creating parallel authority paths.
+8. Add failure/denial/shared-ownership, operation-class downgrade and anti-drift tests before UI work.
+9. Update ADR/RFC and threat model for contract or trust-boundary changes.
+10. Run the repository quality gate.
 
 ## Task-specific guides
 

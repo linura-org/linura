@@ -24,7 +24,9 @@ The old bootstrap `Provider::plan → ActionPlan` path was removed before v0.3 b
 
 Future narrow executors and independent verifiers remain required by the roadmap, but their provider-SDK authority contracts are introduced against the durable prepared-transaction model after v0.4 and qualified in v0.5 rather than freezing the earlier generic scaffold. The existing `executors/linura-executor-systemd` package remains a deliberately narrow future implementation scaffold.
 
-Providers/executors/verifiers cannot skip `authorize`, `prepare`, `commit`, `audit` or `reconcile`; those stages remain owned by Linura Control's canonical mutation lifecycle.
+For a `ManagedExternalEffect`, providers/executors/verifiers cannot skip `authorize`, `prepare`, `commit`, `audit` or `reconcile`; those stages remain owned by Linura Control's canonical mutation lifecycle. A provider cannot relabel work as transient to avoid those boundaries.
+
+Operation class is a trusted Linura semantic contract, not provider-owned metadata. Providers may expose bounded mechanism facts such as required privilege, reversibility and postconditions, but any privilege requirement or trusted risk above `UserState` makes the transient external-effect path ineligible. See [Operation semantics](operation-semantics.md) and ADR 0032.
 
 ## Bounded probes and orchestration
 

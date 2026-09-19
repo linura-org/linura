@@ -4,7 +4,7 @@ Linura is intended to become a general-purpose system control plane, not only a 
 
 Domain sequencing is intentionally independent of product release numbers. Exact release inclusion belongs in milestone/release contracts, and support exists only where a published release explicitly claims and qualifies a bounded capability.
 
-Shipping a domain requires more than UI or code presence: a provider contract, typed capability/resource model, policy semantics, authoritative observation, validation, recovery/verification appropriate to risk, tests, documentation and release evidence are required for the supported slice.
+Shipping a domain requires more than UI or code presence: a provider contract, typed capability/resource model, trusted operation-class semantics, policy/risk semantics, authoritative observation, validation, recovery/verification appropriate to operation class and risk, tests, documentation and release evidence are required for the supported slice. A domain may expose query, Linura-owned, transient and managed operations independently; the presence of one class never grants another.
 
 See [Roadmap](roadmap.md) for the canonical trust-boundary release spine and domain maturity levels, and [Machine profiles](machine-profiles.md) for the workstation/server/edge machine-class model.
 
@@ -195,8 +195,9 @@ Avoid monolithic grants such as `system.admin`, `virtualization.admin` or unrest
 1. Domain inventory entries do not imply implementation or support.
 2. Machine-class applicability does not imply implementation or support.
 3. Exact version targeting is recorded in active milestone contracts, not permanently baked into this long-term inventory.
-4. High-risk mutation requires the generic durable/recovery lifecycle plus domain-specific failure and recovery semantics.
-5. New providers must not bypass capability resolution, policy, authorization, prepare, verification or audit boundaries.
-6. Backend adapters remain replaceable. Linura's source of truth is its typed intent/desired-state/evidence model, not libvirt, Incus, Docker, NetworkManager or any other external provider.
+4. Privileged, system-level, security-sensitive, destructive, ambiguity-sensitive or durable desired-state external mutation is a `ManagedExternalEffect` and requires the generic durable/recovery lifecycle plus domain-specific failure and recovery semantics.
+5. A `TransientExternalEffect` is permitted only for a qualified unprivileged at-most-`UserState` slice with trusted classification, bounded execution, independent verification and audit; otherwise it is promoted to managed or unsupported.
+6. New providers must not bypass operation classification, capability resolution, policy, authorization, required durability, verification or audit boundaries.
+7. Backend adapters remain replaceable. Linura's source of truth is its typed intent/desired-state/evidence model, not libvirt, Incus, Docker, NetworkManager or any other external provider.
 7. Remote/fleet providers and hosted services remain optional; loss of them must not destroy local authority, local recovery or the user's portable Library definitions.
 8. Workstation, server and edge support claims require exact machine/platform profiles and evidence; never promote an entire class from one passing configuration.

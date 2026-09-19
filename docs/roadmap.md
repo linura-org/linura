@@ -230,7 +230,7 @@ Deliver the first coherent end-user Linura workstation experience while keeping 
 Target experience:
 
 - **intent/state-centric:** durable typed intent, desired state, authoritative observation, deterministic planning and verified convergence remain the product model;
-- **control-plane-centric:** every Linura-managed durable external mutation converges on the canonical Control authority lifecycle, while lighter bounded interactions remain typed and cannot gain a UI-, config-, shortcut- or agent-specific authority bypass;
+- **control-plane-centric:** every Linura-managed durable external mutation converges on the canonical Control authority lifecycle; lighter operation classes retain typed semantics and cannot gain a UI-, config-, shortcut- or agent-specific authority bypass;
 - **agent/conversational:** bounded model assistance produces proposal-only typed input and remains optional;
 - **manual/no-AI:** the supported workstation remains fully usable through deterministic local interfaces without any model provider;
 - **Library/Setups/Profiles:** local versioned reusable definitions are normal workstation workflows rather than specialist tooling;
@@ -264,7 +264,7 @@ intent / config / Control Center / keyboard / palette / quick settings / CLI / a
                             verified machine state
 ```
 
-Declarative configuration is data, not an executable script or authority grant. Keyboard shortcuts and graphical controls are invocation surfaces, not alternate privilege paths. Ephemeral desktop navigation such as focusing a window or changing workspace does not need to masquerade as a durable managed mutation. Durable Linura-managed external machine-state changes must preserve the canonical lifecycle and support boundary; lighter bounded interactions still require typed semantics and may not bypass Control-owned authority.
+Declarative configuration is data, not an executable script or authority grant. Keyboard shortcuts and graphical controls are invocation surfaces, not alternate privilege paths. Ephemeral desktop navigation such as focusing a window or changing workspace does not need to masquerade as a durable managed mutation. Durable Linura-managed external machine-state changes preserve the canonical lifecycle and support boundary; transient external effects and other lighter classes remain constrained by ADR 0032 and may not bypass Control-owned authority.
 
 v0.10 requires a **bounded desktop integration**, not a complete replacement desktop shell. Existing qualified Hyprland/upstream desktop components may remain in use while Linura supplies the coherent management, command, quick-setting, notification and visual surfaces required by this milestone. A complete Linura-owned shell/panel/lock-screen/widget environment may deepen after v0.10 without weakening the v0.10 interaction invariant.
 

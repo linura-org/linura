@@ -1,7 +1,81 @@
 #![forbid(unsafe_code)]
 
-use linura_core::{CapabilityId, ProviderId, ResourceId};
+use linura_core::{CapabilityId, OperationClass, OperationId, ProviderId, ResourceId, RiskClass};
 use std::collections::{BTreeMap, BTreeSet};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OperationDescriptorError {
+    MissingRiskFloor,
+    UnexpectedRiskFloor,
+    InvalidRiskFloor,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperationDescriptor {
+    id: OperationId,
+    class: OperationClass,
+    risk_floor: Option<RiskClass>,
+}
+
+impl OperationDescriptor {
+    pub fn try_new(
+        id: OperationId,
+        class: OperationClass,
+        risk_floor: Option<RiskClass>,
+    ) -> Result<Self, OperationDescriptorError> {
+        match class {
+            OperationClass::ExperienceEphemeral => {
+                if risk_floor.is_some() {
+                    return Err(OperationDescriptorError::UnexpectedRiskFloor);
+                }
+            }
+            OperationClass::AuthoritativeQuery => {
+                if risk_floor != Some(RiskClass::ReadOnly) {
+                    return Err(OperationDescriptorError::InvalidRiskFloor);
+                }
+            }
+            OperationClass::LinuraOwnedState | OperationClass::ManagedExternalEffect => {
+                match risk_floor {
+                    Some(
+                        RiskClass::UserState
+                        | RiskClass::SystemMutation
+                        | RiskClass::SecuritySensitive
+                        | RiskClass::Destructive,
+                    ) => {}
+                    Some(RiskClass::ReadOnly) => {
+                        return Err(OperationDescriptorError::InvalidRiskFloor);
+                    }
+                    None => return Err(OperationDescriptorError::MissingRiskFloor),
+                }
+            }
+            OperationClass::TransientExternalEffect => {
+                if risk_floor != Some(RiskClass::UserState) {
+                    return Err(OperationDescriptorError::InvalidRiskFloor);
+                }
+            }
+        }
+        Ok(Self {
+            id,
+            class,
+            risk_floor,
+        })
+    }
+
+    #[must_use]
+    pub fn id(&self) -> &OperationId {
+        &self.id
+    }
+
+    #[must_use]
+    pub const fn class(&self) -> OperationClass {
+        self.class
+    }
+
+    #[must_use]
+    pub const fn risk_floor(&self) -> Option<RiskClass> {
+        self.risk_floor
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CapabilityRelationKind {
@@ -143,6 +217,46 @@ mod tests {
             }],
             desired_resources: vec![],
         }
+    }
+
+    #[test]
+    fn operation_descriptor_enforces_class_risk_floor() {
+        let query = OperationDescriptor::try_new(
+            OperationId::new("operation:network.inspect")
+                .unwrap_or_else(|error| unreachable!("{error}")),
+            OperationClass::AuthoritativeQuery,
+            Some(RiskClass::ReadOnly),
+        )
+        .unwrap_or_else(|error| unreachable!("{error:?}"));
+        assert_eq!(query.class(), OperationClass::AuthoritativeQuery);
+
+        let transient = OperationDescriptor::try_new(
+            OperationId::new("operation:audio.volume.set-session")
+                .unwrap_or_else(|error| unreachable!("{error}")),
+            OperationClass::TransientExternalEffect,
+            Some(RiskClass::UserState),
+        )
+        .unwrap_or_else(|error| unreachable!("{error:?}"));
+        assert_eq!(transient.risk_floor(), Some(RiskClass::UserState));
+
+        assert_eq!(
+            OperationDescriptor::try_new(
+                OperationId::new("operation:network.enable")
+                    .unwrap_or_else(|error| unreachable!("{error}")),
+                OperationClass::TransientExternalEffect,
+                Some(RiskClass::SystemMutation),
+            ),
+            Err(OperationDescriptorError::InvalidRiskFloor)
+        );
+
+        let managed = OperationDescriptor::try_new(
+            OperationId::new("operation:storage.replace")
+                .unwrap_or_else(|error| unreachable!("{error}")),
+            OperationClass::ManagedExternalEffect,
+            Some(RiskClass::Destructive),
+        )
+        .unwrap_or_else(|error| unreachable!("{error:?}"));
+        assert_eq!(managed.class(), OperationClass::ManagedExternalEffect);
     }
 
     #[test]
