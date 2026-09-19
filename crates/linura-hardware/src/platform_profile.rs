@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use linura_core::{CapabilityId, ProviderId, ResourceId};
 use linura_observation::{ObservationAuthority, ObservationEnvelope, ObservedValue};
 
 use super::MachineClass;
@@ -73,8 +74,10 @@ enum PlatformFactValueSource {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RequiredPlatformFact {
     key: PlatformFactKey,
+    resource: &'static str,
     capability: &'static str,
     evidence_provider: Option<&'static str>,
+    authority: ObservationAuthority,
     source: PlatformFactValueSource,
     expected: &'static str,
 }
@@ -82,14 +85,18 @@ pub struct RequiredPlatformFact {
 impl RequiredPlatformFact {
     const fn attribute(
         key: PlatformFactKey,
+        resource: &'static str,
         capability: &'static str,
         evidence_provider: &'static str,
+        authority: ObservationAuthority,
         expected: &'static str,
     ) -> Self {
         Self {
             key,
+            resource,
             capability,
             evidence_provider: Some(evidence_provider),
+            authority,
             source: PlatformFactValueSource::Attribute("identity"),
             expected,
         }
@@ -97,13 +104,17 @@ impl RequiredPlatformFact {
 
     const fn provider(
         role: PlatformProviderRole,
+        resource: &'static str,
         capability: &'static str,
+        authority: ObservationAuthority,
         expected: &'static str,
     ) -> Self {
         Self {
             key: PlatformFactKey::Provider(role),
+            resource,
             capability,
             evidence_provider: None,
+            authority,
             source: PlatformFactValueSource::ProviderIdentity,
             expected,
         }
@@ -115,8 +126,18 @@ impl RequiredPlatformFact {
     }
 
     #[must_use]
+    pub const fn resource(self) -> &'static str {
+        self.resource
+    }
+
+    #[must_use]
     pub const fn capability(self) -> &'static str {
         self.capability
+    }
+
+    #[must_use]
+    pub const fn authority(self) -> ObservationAuthority {
+        self.authority
     }
 
     #[must_use]
@@ -133,36 +154,53 @@ impl RequiredPlatformFact {
         observation: &ObservationEnvelope,
         now_unix_ms: u64,
     ) -> PlatformFactAssessment {
+        let Ok(expected_resource) = ResourceId::new(self.resource) else {
+            return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
+                key: self.key,
+                reason: "platform fact contract contains an invalid resource id".to_owned(),
+            });
+        };
+        let Ok(expected_capability) = CapabilityId::new(self.capability) else {
+            return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
+                key: self.key,
+                reason: "platform fact contract contains an invalid capability id".to_owned(),
+            });
+        };
+        let expected_provider = match self.evidence_provider {
+            Some(provider) => {
+                let Ok(provider) = ProviderId::new(provider) else {
+                    return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
+                        key: self.key,
+                        reason: "platform fact contract contains an invalid provider id".to_owned(),
+                    });
+                };
+                Some(provider)
+            }
+            None => None,
+        };
+        let validation_provider = expected_provider.as_ref().unwrap_or(&observation.provider);
         if observation
             .validate(
-                &observation.provider,
-                &observation.resource,
-                &observation.capability,
+                validation_provider,
+                &expected_resource,
+                &expected_capability,
             )
             .is_err()
             || observation.require_current(now_unix_ms).is_err()
         {
             return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
                 key: self.key,
-                reason: "canonical observation is invalid, stale, or future-dated".to_owned(),
+                reason: "canonical observation has invalid identity, scope, structure, or freshness"
+                    .to_owned(),
             });
         }
-        if observation.capability.as_str() != self.capability {
+        if observation.authority != self.authority {
             return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
                 key: self.key,
-                reason: "canonical observation has the wrong capability".to_owned(),
+                reason: "canonical observation has an authority not permitted for this fact"
+                    .to_owned(),
             });
         }
-        if self
-            .evidence_provider
-            .is_some_and(|provider| observation.provider.as_str() != provider)
-        {
-            return PlatformFactAssessment::InsufficientEvidence(PlatformEvidenceGap {
-                key: self.key,
-                reason: "canonical observation came from an unexpected provider".to_owned(),
-            });
-        }
-
         let observed = match self.source {
             PlatformFactValueSource::ProviderIdentity => observation.provider.as_str().to_owned(),
             PlatformFactValueSource::Attribute(attribute) => {
@@ -255,6 +293,7 @@ impl PlatformProfileCandidateContract {
         let mut capabilities = BTreeSet::new();
         for fact in self.required_facts {
             validate_contract_literal(fact.key.as_str(), fact.expected)?;
+            validate_contract_literal("observation resource", fact.resource)?;
             validate_contract_literal("observation capability", fact.capability)?;
             if let Some(provider) = fact.evidence_provider {
                 validate_contract_literal("evidence provider", provider)?;
@@ -357,67 +396,91 @@ pub const PLATFORM_SNAPSHOTS_PROVIDER_CAPABILITY: &str = "platform.provider.snap
 const ARCH_HYPRLAND_V1_REQUIRED_FACTS: [RequiredPlatformFact; 12] = [
     RequiredPlatformFact::attribute(
         PlatformFactKey::Distribution,
+        "platform:distribution",
         PLATFORM_DISTRIBUTION_CAPABILITY,
         "linux-platform",
+        ObservationAuthority::Filesystem,
         "arch",
     ),
     RequiredPlatformFact::attribute(
         PlatformFactKey::Architecture,
+        "platform:architecture",
         PLATFORM_ARCHITECTURE_CAPABILITY,
         "linux-platform",
+        ObservationAuthority::NativeApi,
         "x86_64",
     ),
     RequiredPlatformFact::attribute(
         PlatformFactKey::InitSystem,
+        "platform:init",
         PLATFORM_INIT_CAPABILITY,
         "linux-platform",
+        ObservationAuthority::Kernel,
         "systemd",
     ),
     RequiredPlatformFact::attribute(
         PlatformFactKey::Session,
+        "platform:session",
         PLATFORM_SESSION_CAPABILITY,
         "linux-platform",
+        ObservationAuthority::NativeApi,
         "wayland",
     ),
     RequiredPlatformFact::attribute(
         PlatformFactKey::Compositor,
+        "platform:compositor",
         PLATFORM_COMPOSITOR_CAPABILITY,
         "linux-platform",
+        ObservationAuthority::NativeApi,
         "hyprland",
     ),
     RequiredPlatformFact::provider(
         PlatformProviderRole::Network,
+        "platform:provider:network",
         PLATFORM_NETWORK_PROVIDER_CAPABILITY,
+        ObservationAuthority::NativeApi,
         "networkmanager",
     ),
     RequiredPlatformFact::provider(
         PlatformProviderRole::Bluetooth,
+        "platform:provider:bluetooth",
         PLATFORM_BLUETOOTH_PROVIDER_CAPABILITY,
+        ObservationAuthority::NativeApi,
         "bluez",
     ),
     RequiredPlatformFact::provider(
         PlatformProviderRole::Audio,
+        "platform:provider:audio",
         PLATFORM_AUDIO_PROVIDER_CAPABILITY,
+        ObservationAuthority::NativeApi,
         "pipewire-wireplumber",
     ),
     RequiredPlatformFact::provider(
         PlatformProviderRole::Storage,
+        "platform:provider:storage",
         PLATFORM_STORAGE_PROVIDER_CAPABILITY,
+        ObservationAuthority::NativeApi,
         "udisks2",
     ),
     RequiredPlatformFact::provider(
         PlatformProviderRole::Authorization,
+        "platform:provider:authorization",
         PLATFORM_AUTHORIZATION_PROVIDER_CAPABILITY,
+        ObservationAuthority::NativeApi,
         "polkit",
     ),
     RequiredPlatformFact::provider(
         PlatformProviderRole::Filesystem,
+        "platform:provider:filesystem",
         PLATFORM_FILESYSTEM_PROVIDER_CAPABILITY,
+        ObservationAuthority::Kernel,
         "btrfs",
     ),
     RequiredPlatformFact::provider(
         PlatformProviderRole::Snapshots,
+        "platform:provider:snapshots",
         PLATFORM_SNAPSHOTS_PROVIDER_CAPABILITY,
+        ObservationAuthority::NativeApi,
         "snapper",
     ),
 ];
@@ -506,9 +569,9 @@ mod tests {
         let fact = required_fact(PlatformFactKey::Distribution);
         let observation = envelope(
             "linux-platform",
-            "platform:distribution",
+            fact.resource(),
             PLATFORM_DISTRIBUTION_CAPABILITY,
-            ObservationAuthority::SyntheticTest,
+            fact.authority(),
             Some("arch"),
         );
         assert_eq!(
@@ -522,9 +585,9 @@ mod tests {
         let fact = required_fact(PlatformFactKey::Provider(PlatformProviderRole::Network));
         let observation = envelope(
             "systemd-networkd",
-            "platform:provider:network",
+            fact.resource(),
             PLATFORM_NETWORK_PROVIDER_CAPABILITY,
-            ObservationAuthority::SyntheticTest,
+            fact.authority(),
             None,
         );
         assert!(matches!(
@@ -538,9 +601,9 @@ mod tests {
         let fact = required_fact(PlatformFactKey::Distribution);
         let observation = envelope(
             "linux-platform",
-            "platform:distribution",
+            fact.resource(),
             PLATFORM_DISTRIBUTION_CAPABILITY,
-            ObservationAuthority::SyntheticTest,
+            fact.authority(),
             Some("arch"),
         );
         assert!(matches!(
@@ -550,13 +613,45 @@ mod tests {
     }
 
     #[test]
+    fn wrong_resource_scope_is_insufficient() {
+        let fact = required_fact(PlatformFactKey::Distribution);
+        let observation = envelope(
+            "linux-platform",
+            "platform:architecture",
+            PLATFORM_DISTRIBUTION_CAPABILITY,
+            fact.authority(),
+            Some("arch"),
+        );
+        assert!(matches!(
+            fact.assess_observation(&observation, NOW),
+            PlatformFactAssessment::InsufficientEvidence(_)
+        ));
+    }
+
+    #[test]
+    fn synthetic_authority_cannot_satisfy_runtime_candidate_compatibility() {
+        let fact = required_fact(PlatformFactKey::Distribution);
+        let observation = envelope(
+            "linux-platform",
+            fact.resource(),
+            PLATFORM_DISTRIBUTION_CAPABILITY,
+            ObservationAuthority::SyntheticTest,
+            Some("arch"),
+        );
+        assert!(matches!(
+            fact.assess_observation(&observation, NOW),
+            PlatformFactAssessment::InsufficientEvidence(_)
+        ));
+    }
+
+    #[test]
     fn unexpected_evidence_provider_is_insufficient() {
         let fact = required_fact(PlatformFactKey::Distribution);
         let observation = envelope(
             "untrusted-platform-source",
-            "platform:distribution",
+            fact.resource(),
             PLATFORM_DISTRIBUTION_CAPABILITY,
-            ObservationAuthority::SyntheticTest,
+            fact.authority(),
             Some("arch"),
         );
         assert!(matches!(
