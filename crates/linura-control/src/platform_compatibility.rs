@@ -97,7 +97,7 @@ mod tests {
     use linura_hardware::platform_profile::{
         PlatformFactKey, PlatformProfileCandidateContract, PlatformProfileCompatibility,
     };
-    use linura_observation::{ObservationAuthority, ObservationEnvelope, ObservedValue};
+    use linura_observation::{ObservationEnvelope, ObservedValue};
 
     use super::*;
 
