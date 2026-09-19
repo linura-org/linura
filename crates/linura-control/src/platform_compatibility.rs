@@ -121,11 +121,11 @@ mod tests {
                 ObservationEnvelope {
                     provider: ProviderId::new(provider)
                         .unwrap_or_else(|error| unreachable!("{error}")),
-                    resource: ResourceId::new(format!("platform:fixture:{index}"))
+                    resource: ResourceId::new(fact.resource())
                         .unwrap_or_else(|error| unreachable!("{error}")),
                     capability: CapabilityId::new(fact.capability())
                         .unwrap_or_else(|error| unreachable!("{error}")),
-                    authority: ObservationAuthority::SyntheticTest,
+                    authority: fact.authority(),
                     observed_at_unix_ms: 1_000,
                     valid_for_ms: 2_000,
                     sequence: u64::try_from(index + 1)
