@@ -75,9 +75,9 @@ load setup
   → resolve target capabilities
   → derive desired state
   → generate a fresh diff/plan
-  → policy
+  → trusted operation classification in Control
+  → policy for the classified operation and trusted risk
   → approval when required
-  → operation classification
   → canonical managed lifecycle for resulting managed external effects
 ```
 
@@ -183,7 +183,7 @@ The target machine can therefore realize equivalent intent differently while pre
 - Portable setups contain secret references only, never secret values.
 - Imports and synchronized library items are untrusted until validated.
 - A setup never carries an authority grant.
-- Adoption always requires local capability resolution, observation, planning and policy evaluation.
+- Adoption always requires local capability resolution, observation, planning, trusted operation classification and policy evaluation; imported data cannot choose a weaker class.
 - Unsupported or ambiguous requirements fail closed for mutation.
 - Package names and command strings are implementation details, not the portable source of truth.
 - Snapshots remain separate exact-machine recovery artifacts.
