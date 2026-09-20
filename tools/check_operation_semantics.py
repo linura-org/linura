@@ -11,6 +11,7 @@ ADR_PATH = "docs/adr/0032-classify-operations-before-authority.md"
 DOC_PATH = "docs/operation-semantics.md"
 CORE_PATH = "crates/linura-core/src/lib.rs"
 DESCRIPTOR_PATH = "crates/linura-capability-sdk/src/lib.rs"
+CONTROL_OPERATION_PATH = "crates/linura-control/src/operation_semantics.rs"
 SECURITY_PATH = "SECURITY.md"
 MILESTONE_PATH = "docs/milestones/v0.10.0.md"
 QUALIFICATION_PATH = "docs/qualification/v0.10.0.md"
@@ -72,6 +73,9 @@ def validate(root: Path) -> list[str]:
         "documentation": DOC_PATH,
         "core_type": "linura_core::OperationClass",
         "descriptor_type": "linura_capability_sdk::OperationDescriptor",
+        "effect_binding_type": "linura_capability_sdk::OperationEffectBinding",
+        "operation_registry_type": "linura_capability_sdk::OperationRegistry",
+        "external_operation_resolution_type": "linura_control::OperationSemanticsControl",
         "risk_type": "linura_core::RiskClass",
         "classification_owner": "trusted-operation-registry-and-linura-control",
         "client_classification_authority": False,
@@ -82,6 +86,7 @@ def validate(root: Path) -> list[str]:
         "policy_subject_type": "linura_policy::PolicySubject",
         "policy_plan_type": "linura_planner::ReconciliationPlan",
         "external_effect_authorization_binding": "canonical-plan-plus-authenticated-principal",
+        "external_effect_plan_shape_binding": "registered-provider-capability-resource-scope-change-keys",
         "transient_external_max_risk": "user-state",
         "transient_durable_prepare_required": False,
         "transient_failure_model": "bounded-reobserve-no-durable-indeterminate-recovery",
@@ -100,7 +105,8 @@ def validate(root: Path) -> list[str]:
         (ADR_PATH, "ADR 0032"),
         (DOC_PATH, "operation semantics documentation"),
         (CORE_PATH, "OperationClass core type"),
-        (DESCRIPTOR_PATH, "OperationDescriptor type"),
+        (DESCRIPTOR_PATH, "OperationDescriptor/OperationRegistry types"),
+        (CONTROL_OPERATION_PATH, "Control operation-semantics resolver"),
         (SECURITY_PATH, "security policy"),
         (MILESTONE_PATH, "v0.10 milestone"),
         (QUALIFICATION_PATH, "v0.10 qualification"),
@@ -175,9 +181,23 @@ def validate(root: Path) -> list[str]:
     descriptor_path = root / DESCRIPTOR_PATH
     if descriptor_path.is_file() and not descriptor_path.is_symlink():
         descriptor = descriptor_path.read_text(encoding="utf-8")
-        for fragment in ("pub struct OperationDescriptor", "OperationClass", "RiskClass", "pub fn try_new"):
+        for fragment in ("pub struct OperationDescriptor", "pub struct OperationEffectBinding", "pub struct OperationRegistry", "MissingEffectBinding", "DuplicateOperation", "effect_binding", "OperationClass", "RiskClass", "pub fn try_new"):
             if fragment not in descriptor:
                 failures.append(f"linura_capability_sdk::OperationDescriptor missing required fragment: {fragment}")
+    control_operation_path = root / CONTROL_OPERATION_PATH
+    if control_operation_path.is_file() and not control_operation_path.is_symlink():
+        control_operation = control_operation_path.read_text(encoding="utf-8")
+        for fragment in (
+            "pub struct OperationSemanticsControl",
+            "pub fn resolve_external",
+            "classify_plan_risk",
+            "TransientRiskExceedsBoundary",
+            "pub enum OperationPlanBindingMismatch",
+        ):
+            if fragment not in control_operation:
+                failures.append(
+                    f"linura_control::OperationSemanticsControl missing required fragment: {fragment}"
+                )
     core_text = core_path.read_text(encoding="utf-8") if core_path.is_file() and not core_path.is_symlink() else ""
     if "requires_plan_bound_external_authorization" not in core_text:
         failures.append("linura_core::OperationClass missing plan-bound external authorization invariant")

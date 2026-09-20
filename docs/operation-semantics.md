@@ -23,7 +23,7 @@ Risk does not determine whether something is a query, Linura-owned state, transi
 | `TransientExternalEffect` | temporary external effect not adopted as durable desired state | Control-mediated bounded effect path; unprivileged and at most `UserState` |
 | `ManagedExternalEffect` | durable/consequential/privileged/ambiguity-sensitive external effect | full canonical managed-mutation lifecycle |
 
-The trusted operation registry/domain contract owns classification. Clients, agents, configuration and providers cannot self-declare a weaker class.
+The trusted operation registry/domain contract owns classification. The concrete v0.10 binding is `linura_capability_sdk::OperationRegistry` for duplicate-safe registered descriptors plus `linura_control::OperationSemanticsControl` for Control-owned external-effect resolution against the canonical plan and trusted risk classification. Every registered external effect also carries a validated `OperationEffectBinding` that fixes the trusted provider, observation capability, resource scope, and allowed material change keys; Control rejects a plan whose shape does not match that binding before risk/policy resolution. Clients, agents, configuration and providers cannot self-declare a weaker class or pair a registered operation with an unrelated plan.
 
 ## Promotion rules
 

@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 linura-agent-runtime = { path = "../linura-agent-runtime" }
+linura-capability-sdk = { path = "../linura-capability-sdk" }
 linura-core = { path = "../linura-core" }
 linura-graph = { path = "../linura-graph" }
 linura-hardware = { path = "../linura-hardware" }

@@ -18,6 +18,7 @@ FIXTURE_PATHS = (
     "docs/operation-semantics.md",
     "crates/linura-core/src/lib.rs",
     "crates/linura-capability-sdk/src/lib.rs",
+    "crates/linura-control/src/operation_semantics.rs",
     "SECURITY.md",
     "docs/milestones/v0.10.0.md",
     "docs/qualification/v0.10.0.md",
@@ -221,6 +222,82 @@ class OperationSemanticsContractTests(unittest.TestCase):
             core = root / "crates/linura-core/src/lib.rs"
             core.write_text(core.read_text(encoding="utf-8").replace("    TransientExternalEffect,\n", "", 1), encoding="utf-8")
             self.assertTrue(any("OperationClass variants drifted" in failure for failure in check_operation_semantics.validate(root)))
+
+    def test_trusted_operation_registry_and_control_resolver_are_required(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+
+            descriptor = root / "crates/linura-capability-sdk/src/lib.rs"
+            descriptor.write_text(
+                descriptor.read_text(encoding="utf-8").replace(
+                    "pub struct OperationRegistry",
+                    "struct OperationRegistry",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "OperationDescriptor missing required fragment: pub struct OperationRegistry"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+            self._copy_fixture(root)
+            descriptor = root / "crates/linura-capability-sdk/src/lib.rs"
+            descriptor.write_text(
+                descriptor.read_text(encoding="utf-8").replace(
+                    "pub struct OperationEffectBinding",
+                    "struct OperationEffectBinding",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "OperationDescriptor missing required fragment: pub struct OperationEffectBinding"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+            self._copy_fixture(root)
+            control = root / "crates/linura-control/src/operation_semantics.rs"
+            control.write_text(
+                control.read_text(encoding="utf-8").replace(
+                    "pub fn resolve_external",
+                    "fn resolve_external",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "OperationSemanticsControl missing required fragment: pub fn resolve_external"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+            self._copy_fixture(root)
+            control = root / "crates/linura-control/src/operation_semantics.rs"
+            control.write_text(
+                control.read_text(encoding="utf-8").replace(
+                    "pub enum OperationPlanBindingMismatch",
+                    "enum OperationPlanBindingMismatch",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "OperationSemanticsControl missing required fragment: pub enum OperationPlanBindingMismatch"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
 
     def test_typed_operation_descriptor_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
