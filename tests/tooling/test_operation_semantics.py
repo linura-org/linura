@@ -22,6 +22,8 @@ FIXTURE_PATHS = (
     "docs/milestones/v0.10.0.md",
     "docs/qualification/v0.10.0.md",
     "docs/ui-architecture.md",
+    "AGENTS.md",
+    "agents/skills/policy.md",
 )
 
 
@@ -128,6 +130,23 @@ class OperationSemanticsContractTests(unittest.TestCase):
                     for failure in check_operation_semantics.validate(root)
                 )
             )
+
+    def test_transient_recovery_marker_is_not_bound_to_sentence_pronoun(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            qualification = root / "docs/qualification/v0.10.0.md"
+            text = qualification.read_text(encoding="utf-8")
+            self.assertIn("It has no durable prepare/commit/reconcile transaction", text)
+            qualification.write_text(
+                text.replace(
+                    "It has no durable prepare/commit/reconcile transaction",
+                    "This bounded path has no durable prepare/commit/reconcile transaction",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(check_operation_semantics.validate(root), [])
 
     def test_transient_prepare_exemption_cannot_drift_from_security_policy(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
