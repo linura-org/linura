@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::Shutdown;
@@ -35,6 +35,13 @@ const SYSTEMD_SERVICE: &str = "org.freedesktop.systemd1";
 const SYSTEMD_PATH: &str = "/org/freedesktop/systemd1";
 const SYSTEMD_MANAGER: &str = "org.freedesktop.systemd1.Manager";
 const SYSTEMD_UNIT: &str = "org.freedesktop.systemd1.Unit";
+
+const NETWORKMANAGER_SERVICE: &str = "org.freedesktop.NetworkManager";
+const NETWORKMANAGER_PATH: &str = "/org/freedesktop/NetworkManager";
+const NETWORKMANAGER_INTERFACE: &str = "org.freedesktop.NetworkManager";
+const NETWORKMANAGER_DEVICE_INTERFACE: &str = "org.freedesktop.NetworkManager.Device";
+const NETWORKMANAGER_DEVICE_TYPE_LOOPBACK: u32 = 32;
+const NETWORKMANAGER_MAX_DEVICES: usize = 128;
 
 const PLATFORM_PROVIDER: &str = "linux-platform";
 pub const PLATFORM_DISTRIBUTION_CAPABILITY: &str = "platform.distribution.observe";
@@ -196,12 +203,80 @@ pub fn observe_compositor(
 }
 
 pub fn observe_network_provider() -> Result<ObservationEnvelope, PlatformProbeError> {
-    observe_selected_dbus_provider(
+    let connection = connect_system_bus()?;
+    require_owned_service(&connection, NETWORKMANAGER_SERVICE)?;
+    let peer = Proxy::new(
+        &connection,
+        NETWORKMANAGER_SERVICE,
+        NETWORKMANAGER_PATH,
+        DBUS_PEER,
+    )
+    .map_err(|error| {
+        PlatformProbeError::new(format!(
+            "cannot create NetworkManager health proxy: {error}"
+        ))
+    })?;
+    let _: () = peer.call("Ping", &()).map_err(|error| {
+        PlatformProbeError::new(format!(
+            "NetworkManager direct health probe failed: {error}"
+        ))
+    })?;
+
+    let manager = Proxy::new(
+        &connection,
+        NETWORKMANAGER_SERVICE,
+        NETWORKMANAGER_PATH,
+        NETWORKMANAGER_INTERFACE,
+    )
+    .map_err(|error| {
+        PlatformProbeError::new(format!(
+            "cannot create NetworkManager manager proxy: {error}"
+        ))
+    })?;
+    let devices: Vec<OwnedObjectPath> = manager.call("GetDevices", &()).map_err(|error| {
+        PlatformProbeError::new(format!(
+            "cannot enumerate NetworkManager managed-device candidates: {error}"
+        ))
+    })?;
+    if devices.len() > NETWORKMANAGER_MAX_DEVICES {
+        return Err(PlatformProbeError::new(
+            "NetworkManager device evidence exceeds the bounded device ceiling",
+        ));
+    }
+
+    let mut device_states = Vec::with_capacity(devices.len());
+    for device_path in devices {
+        let device = Proxy::new(
+            &connection,
+            NETWORKMANAGER_SERVICE,
+            device_path.as_str(),
+            NETWORKMANAGER_DEVICE_INTERFACE,
+        )
+        .map_err(|error| {
+            PlatformProbeError::new(format!(
+                "cannot create NetworkManager device proxy: {error}"
+            ))
+        })?;
+        let managed: bool = device.get_property("Managed").map_err(|error| {
+            PlatformProbeError::new(format!(
+                "cannot read NetworkManager device Managed property: {error}"
+            ))
+        })?;
+        let device_type: u32 = device.get_property("DeviceType").map_err(|error| {
+            PlatformProbeError::new(format!(
+                "cannot read NetworkManager device DeviceType property: {error}"
+            ))
+        })?;
+        device_states.push((managed, device_type));
+    }
+    require_networkmanager_selected_device(&device_states)?;
+
+    provider_identity_envelope(
         "networkmanager",
         "network",
         PLATFORM_NETWORK_PROVIDER_CAPABILITY,
-        "org.freedesktop.NetworkManager",
-        "/org/freedesktop/NetworkManager",
+        ObservationAuthority::NativeApi,
+        "org.freedesktop.NetworkManager:managed-device",
     )
 }
 
@@ -374,6 +449,19 @@ fn query_session_context(
     })
 }
 
+fn require_networkmanager_selected_device(
+    device_states: &[(bool, u32)],
+) -> Result<(), PlatformProbeError> {
+    if device_states.iter().any(|(managed, device_type)| {
+        *managed && *device_type != NETWORKMANAGER_DEVICE_TYPE_LOOPBACK
+    }) {
+        return Ok(());
+    }
+    Err(PlatformProbeError::new(
+        "NetworkManager is live but does not authoritatively report any managed non-loopback device",
+    ))
+}
+
 fn observe_selected_dbus_provider(
     identity: &str,
     role: &str,
@@ -442,9 +530,13 @@ fn user_unit_active(connection: &Connection, unit_name: &str) -> Result<bool, Pl
             PlatformProbeError::new(format!("cannot create user systemd manager proxy: {error}"))
         },
     )?;
-    let unit_path: OwnedObjectPath = manager.call("GetUnit", &(unit_name,)).map_err(|error| {
+    // `GetUnit` only resolves units currently resident in the manager. An installed but
+    // inactive PipeWire/WirePlumber unit may have been garbage-collected from that set, so use
+    // `LoadUnit`: it loads configuration without starting the unit and gives us authoritative
+    // ActiveState evidence for both active and inactive installed units.
+    let unit_path: OwnedObjectPath = manager.call("LoadUnit", &(unit_name,)).map_err(|error| {
         PlatformProbeError::new(format!(
-            "cannot resolve active user unit {unit_name}: {error}"
+            "cannot load user unit {unit_name} for observation: {error}"
         ))
     })?;
     let unit = Proxy::new(
@@ -554,6 +646,7 @@ fn hyprland_socket_candidates(
 ) -> Result<Vec<PathBuf>, PlatformProbeError> {
     let hypr_root = runtime_path.join("hypr");
     let mut candidates = Vec::new();
+    let mut seen_paths = BTreeSet::new();
 
     for line in socket_table.lines().skip(1) {
         let Some(raw_path) = line.split_ascii_whitespace().nth(7) else {
@@ -576,6 +669,14 @@ fn hyprland_socket_candidates(
             continue;
         };
         if !safe_instance_signature(signature) {
+            continue;
+        }
+
+        // /proc/net/unix may contain the listening socket and one or more accepted sockets with
+        // the same pathname. The pathname is locator evidence only, so probe each unique locator
+        // once; otherwise one compositor can be misclassified as multiple verified peers and
+        // duplicate rows can consume the bounded candidate budget.
+        if !seen_paths.insert(path.clone()) {
             continue;
         }
         candidates.push(path);
@@ -1085,6 +1186,26 @@ mod tests {
     }
 
     #[test]
+    fn network_provider_requires_selected_non_loopback_management_evidence() {
+        assert!(require_networkmanager_selected_device(&[(true, 1)]).is_ok());
+        assert!(require_networkmanager_selected_device(&[(false, 1)]).is_err());
+        assert!(
+            require_networkmanager_selected_device(&[(
+                true,
+                NETWORKMANAGER_DEVICE_TYPE_LOOPBACK,
+            )])
+            .is_err()
+        );
+        assert!(
+            require_networkmanager_selected_device(&[
+                (false, 1),
+                (true, NETWORKMANAGER_DEVICE_TYPE_LOOPBACK),
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
     fn audio_provider_identity_preserves_known_mismatches_for_control() {
         assert_eq!(audio_identity(true, true), "pipewire-wireplumber");
         assert_eq!(audio_identity(true, false), "pipewire-only");
@@ -1093,13 +1214,14 @@ mod tests {
     }
 
     #[test]
-    fn hyprland_socket_candidates_use_only_bounded_kernel_socket_paths() {
+    fn hyprland_socket_candidates_use_only_unique_bounded_kernel_socket_paths() {
         let table = concat!(
             "Num RefCount Protocol Flags Type St Inode Path\n",
             "000: 00000002 00000000 00010000 0001 01 1 /run/user/1000/hypr/good/.socket.sock\n",
-            "001: 00000002 00000000 00010000 0001 01 2 /run/user/1000/hypr/../../bad/.socket.sock\n",
-            "002: 00000002 00000000 00010000 0001 01 3 /run/user/1000/other/good/.socket.sock\n",
-            "003: 00000002 00000000 00010000 0001 01 4 @abstract-hyprland\n",
+            "001: 00000002 00000000 00010000 0001 03 2 /run/user/1000/hypr/good/.socket.sock\n",
+            "002: 00000002 00000000 00010000 0001 01 3 /run/user/1000/hypr/../../bad/.socket.sock\n",
+            "003: 00000002 00000000 00010000 0001 01 4 /run/user/1000/other/good/.socket.sock\n",
+            "004: 00000002 00000000 00010000 0001 01 5 @abstract-hyprland\n",
         );
         assert_eq!(
             hyprland_socket_candidates(table, Path::new("/run/user/1000")),
