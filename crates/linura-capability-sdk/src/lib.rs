@@ -77,6 +77,49 @@ impl OperationDescriptor {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum OperationRegistryError {
+    DuplicateOperation(OperationId),
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct OperationRegistry {
+    descriptors: BTreeMap<OperationId, OperationDescriptor>,
+}
+
+impl OperationRegistry {
+    pub fn register(
+        &mut self,
+        descriptor: OperationDescriptor,
+    ) -> Result<(), OperationRegistryError> {
+        let id = descriptor.id().clone();
+        if self.descriptors.contains_key(&id) {
+            return Err(OperationRegistryError::DuplicateOperation(id));
+        }
+        self.descriptors.insert(id, descriptor);
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn descriptor(&self, id: &OperationId) -> Option<&OperationDescriptor> {
+        self.descriptors.get(id)
+    }
+
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &OperationDescriptor> {
+        self.descriptors.values()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.descriptors.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.descriptors.is_empty()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CapabilityRelationKind {
     Requires,
@@ -217,6 +260,56 @@ mod tests {
             }],
             desired_resources: vec![],
         }
+    }
+
+    #[test]
+    fn operation_registry_rejects_duplicate_ids_without_overwrite() {
+        let operation_id = OperationId::new("operation:audio.volume.set-session")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let descriptor = OperationDescriptor::try_new(
+            operation_id.clone(),
+            OperationClass::TransientExternalEffect,
+            Some(RiskClass::UserState),
+        )
+        .unwrap_or_else(|error| unreachable!("{error:?}"));
+
+        let mut registry = OperationRegistry::default();
+        registry
+            .register(descriptor.clone())
+            .unwrap_or_else(|error| unreachable!("{error:?}"));
+
+        assert_eq!(
+            registry.register(descriptor.clone()),
+            Err(OperationRegistryError::DuplicateOperation(
+                operation_id.clone()
+            ))
+        );
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.descriptor(&operation_id), Some(&descriptor));
+    }
+
+    #[test]
+    fn operation_registry_iteration_is_deterministic_by_operation_id() {
+        let mut registry = OperationRegistry::default();
+        for value in ["operation:z", "operation:a", "operation:m"] {
+            registry
+                .register(
+                    OperationDescriptor::try_new(
+                        OperationId::new(value)
+                            .unwrap_or_else(|error| unreachable!("{error}")),
+                        OperationClass::AuthoritativeQuery,
+                        Some(RiskClass::ReadOnly),
+                    )
+                    .unwrap_or_else(|error| unreachable!("{error:?}")),
+                )
+                .unwrap_or_else(|error| unreachable!("{error:?}"));
+        }
+
+        let ids = registry
+            .iter()
+            .map(|descriptor| descriptor.id().as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["operation:a", "operation:m", "operation:z"]);
     }
 
     #[test]
