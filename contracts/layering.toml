@@ -117,8 +117,14 @@ forbid_local_prefixes = ["linura-executor-"]
 forbid_external = ["zbus"]
 
 [[rules]]
+package = "linura-hardware"
+forbid_local = ["linura-dbus", "linura-linux-observation", "linura-observation-control", "linura-provider-sdk", "linura-control", "linura-policy", "linura-agent-runtime", "linura-sdk", "linura-transaction", "linura-persistence-sqlite"]
+forbid_local_prefixes = ["linura-executor-"]
+forbid_external = ["zbus"]
+
+[[rules]]
 package = "linura-linux-observation"
-forbid_local = ["linura-dbus", "linura-planner", "linura-policy", "linura-control", "linura-observation-control", "linura-agent-runtime", "linura-sdk", "linura-transaction", "linura-persistence-sqlite"]
+forbid_local = ["linura-dbus", "linura-hardware", "linura-planner", "linura-policy", "linura-control", "linura-observation-control", "linura-agent-runtime", "linura-sdk", "linura-transaction", "linura-persistence-sqlite"]
 forbid_local_prefixes = ["linura-executor-"]
 forbid_external = []
 
@@ -171,3 +177,11 @@ contains = "Providers expose bounded mechanisms; Linura owns orchestration."
 [[markers]]
 path = "crates/linura-provider-sdk/src/lib.rs"
 contains = "Result<ObservationEnvelope, ProviderError>"
+
+[[markers]]
+path = "crates/linura-hardware/src/platform_profile.rs"
+contains = "ObservationEnvelope"
+
+[[markers]]
+path = "crates/linura-control/src/platform_compatibility.rs"
+contains = "Control-owned semantic aggregation of canonical platform observations."

@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod platform_discovery;
+
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
 use std::sync::atomic::{AtomicU64, Ordering};

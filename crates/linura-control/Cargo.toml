@@ -10,6 +10,7 @@ repository.workspace = true
 linura-agent-runtime = { path = "../linura-agent-runtime" }
 linura-core = { path = "../linura-core" }
 linura-graph = { path = "../linura-graph" }
+linura-hardware = { path = "../linura-hardware" }
 linura-intent = { path = "../linura-intent" }
 linura-library = { path = "../linura-library" }
 linura-lifecycle = { path = "../linura-lifecycle" }
