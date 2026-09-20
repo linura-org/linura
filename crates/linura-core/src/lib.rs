@@ -239,12 +239,8 @@ mod tests {
         assert!(
             OperationClass::TransientExternalEffect.requires_plan_bound_external_authorization()
         );
-        assert!(
-            OperationClass::ManagedExternalEffect.requires_plan_bound_external_authorization()
-        );
-        assert!(
-            !OperationClass::AuthoritativeQuery.requires_plan_bound_external_authorization()
-        );
+        assert!(OperationClass::ManagedExternalEffect.requires_plan_bound_external_authorization());
+        assert!(!OperationClass::AuthoritativeQuery.requires_plan_bound_external_authorization());
         assert!(!OperationClass::TransientExternalEffect.requires_canonical_managed_lifecycle());
         assert!(OperationClass::ManagedExternalEffect.requires_canonical_managed_lifecycle());
         assert_eq!(
