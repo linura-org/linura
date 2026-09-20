@@ -19,6 +19,7 @@ mod approval_review;
 mod authority_clock;
 mod durable_authority;
 mod managed_lifecycle;
+mod operation_semantics;
 mod plan_preview;
 mod platform_compatibility;
 mod policy_review;
@@ -57,6 +58,10 @@ pub use managed_lifecycle::{
     MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_UNIT_PREFIX, ManagedApprovalAuthorizer,
     ManagedApprovalChallenge, ManagedLifecycleControl, ManagedLifecycleError,
     ManagedMutationReceipt, TrustedHumanApproval, managed_request_id,
+};
+pub use operation_semantics::{
+    OperationPlanBindingMismatch, OperationSemanticsControl, OperationSemanticsError,
+    TrustedExternalOperationSemantics,
 };
 pub use plan_preview::{
     AuthenticatedPrincipal, MAX_DESIRED_ATTRIBUTES, MAX_ORIGINS_PER_KIND, MAX_PREVIEW_ENTRIES,

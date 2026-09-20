@@ -4,10 +4,90 @@ use linura_core::{CapabilityId, OperationClass, OperationId, ProviderId, Resourc
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OperationEffectBindingError {
+    EmptyResourcePrefix,
+    ResourcePrefixTooLong,
+    ResourcePrefixControlCharacter,
+    EmptyChangeKeys,
+    InvalidChangeKey,
+    DuplicateChangeKey,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperationEffectBinding {
+    provider: ProviderId,
+    observation_capability: CapabilityId,
+    resource_prefix: String,
+    change_keys: BTreeSet<String>,
+}
+
+impl OperationEffectBinding {
+    pub fn try_new(
+        provider: ProviderId,
+        observation_capability: CapabilityId,
+        resource_prefix: impl Into<String>,
+        change_keys: Vec<String>,
+    ) -> Result<Self, OperationEffectBindingError> {
+        let resource_prefix = resource_prefix.into();
+        if resource_prefix.trim().is_empty() {
+            return Err(OperationEffectBindingError::EmptyResourcePrefix);
+        }
+        if resource_prefix.len() > 256 {
+            return Err(OperationEffectBindingError::ResourcePrefixTooLong);
+        }
+        if resource_prefix.chars().any(char::is_control) {
+            return Err(OperationEffectBindingError::ResourcePrefixControlCharacter);
+        }
+        if change_keys.is_empty() {
+            return Err(OperationEffectBindingError::EmptyChangeKeys);
+        }
+
+        let mut canonical_change_keys = BTreeSet::new();
+        for key in change_keys {
+            if key.trim().is_empty() || key.len() > 256 || key.chars().any(char::is_control) {
+                return Err(OperationEffectBindingError::InvalidChangeKey);
+            }
+            if !canonical_change_keys.insert(key) {
+                return Err(OperationEffectBindingError::DuplicateChangeKey);
+            }
+        }
+
+        Ok(Self {
+            provider,
+            observation_capability,
+            resource_prefix,
+            change_keys: canonical_change_keys,
+        })
+    }
+
+    #[must_use]
+    pub fn provider(&self) -> &ProviderId {
+        &self.provider
+    }
+
+    #[must_use]
+    pub fn observation_capability(&self) -> &CapabilityId {
+        &self.observation_capability
+    }
+
+    #[must_use]
+    pub fn resource_prefix(&self) -> &str {
+        &self.resource_prefix
+    }
+
+    #[must_use]
+    pub fn change_keys(&self) -> &BTreeSet<String> {
+        &self.change_keys
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OperationDescriptorError {
     MissingRiskFloor,
     UnexpectedRiskFloor,
     InvalidRiskFloor,
+    MissingEffectBinding,
+    UnexpectedEffectBinding,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -15,6 +95,7 @@ pub struct OperationDescriptor {
     id: OperationId,
     class: OperationClass,
     risk_floor: Option<RiskClass>,
+    effect_binding: Option<OperationEffectBinding>,
 }
 
 impl OperationDescriptor {
@@ -22,19 +103,26 @@ impl OperationDescriptor {
         id: OperationId,
         class: OperationClass,
         risk_floor: Option<RiskClass>,
+        effect_binding: Option<OperationEffectBinding>,
     ) -> Result<Self, OperationDescriptorError> {
         match class {
             OperationClass::ExperienceEphemeral => {
                 if risk_floor.is_some() {
                     return Err(OperationDescriptorError::UnexpectedRiskFloor);
                 }
+                if effect_binding.is_some() {
+                    return Err(OperationDescriptorError::UnexpectedEffectBinding);
+                }
             }
             OperationClass::AuthoritativeQuery => {
                 if risk_floor != Some(RiskClass::ReadOnly) {
                     return Err(OperationDescriptorError::InvalidRiskFloor);
                 }
+                if effect_binding.is_some() {
+                    return Err(OperationDescriptorError::UnexpectedEffectBinding);
+                }
             }
-            OperationClass::LinuraOwnedState | OperationClass::ManagedExternalEffect => {
+            OperationClass::LinuraOwnedState => {
                 match risk_floor {
                     Some(
                         RiskClass::UserState
@@ -47,10 +135,33 @@ impl OperationDescriptor {
                     }
                     None => return Err(OperationDescriptorError::MissingRiskFloor),
                 }
+                if effect_binding.is_some() {
+                    return Err(OperationDescriptorError::UnexpectedEffectBinding);
+                }
+            }
+            OperationClass::ManagedExternalEffect => {
+                match risk_floor {
+                    Some(
+                        RiskClass::UserState
+                        | RiskClass::SystemMutation
+                        | RiskClass::SecuritySensitive
+                        | RiskClass::Destructive,
+                    ) => {}
+                    Some(RiskClass::ReadOnly) => {
+                        return Err(OperationDescriptorError::InvalidRiskFloor);
+                    }
+                    None => return Err(OperationDescriptorError::MissingRiskFloor),
+                }
+                if effect_binding.is_none() {
+                    return Err(OperationDescriptorError::MissingEffectBinding);
+                }
             }
             OperationClass::TransientExternalEffect => {
                 if risk_floor != Some(RiskClass::UserState) {
                     return Err(OperationDescriptorError::InvalidRiskFloor);
+                }
+                if effect_binding.is_none() {
+                    return Err(OperationDescriptorError::MissingEffectBinding);
                 }
             }
         }
@@ -58,6 +169,7 @@ impl OperationDescriptor {
             id,
             class,
             risk_floor,
+            effect_binding,
         })
     }
 
@@ -74,6 +186,58 @@ impl OperationDescriptor {
     #[must_use]
     pub const fn risk_floor(&self) -> Option<RiskClass> {
         self.risk_floor
+    }
+
+    #[must_use]
+    pub fn effect_binding(&self) -> Option<&OperationEffectBinding> {
+        self.effect_binding.as_ref()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum OperationRegistryError {
+    DuplicateOperation(OperationId),
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct OperationRegistry {
+    descriptors: BTreeMap<OperationId, OperationDescriptor>,
+}
+
+impl OperationRegistry {
+    pub fn register(
+        &mut self,
+        descriptor: OperationDescriptor,
+    ) -> Result<(), OperationRegistryError> {
+        let id = descriptor.id().clone();
+        match self.descriptors.entry(id) {
+            std::collections::btree_map::Entry::Occupied(entry) => Err(
+                OperationRegistryError::DuplicateOperation(entry.key().clone()),
+            ),
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(descriptor);
+                Ok(())
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn descriptor(&self, id: &OperationId) -> Option<&OperationDescriptor> {
+        self.descriptors.get(id)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &OperationDescriptor> + '_ {
+        self.descriptors.values()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.descriptors.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.descriptors.is_empty()
     }
 }
 
@@ -207,6 +371,17 @@ mod tests {
         result.unwrap_or_else(|error| unreachable!("{error}"))
     }
 
+    fn systemd_effect_binding() -> OperationEffectBinding {
+        OperationEffectBinding::try_new(
+            ProviderId::new("systemd").unwrap_or_else(|error| unreachable!("{error}")),
+            CapabilityId::new("systemd.unit.observe")
+                .unwrap_or_else(|error| unreachable!("{error}")),
+            "systemd:unit:",
+            vec!["active_state".into()],
+        )
+        .unwrap_or_else(|error| unreachable!("{error:?}"))
+    }
+
     fn conflicting_blueprint(id_value: &str, other: &CapabilityId) -> CapabilityBlueprint {
         CapabilityBlueprint {
             id: id(CapabilityId::new(id_value)),
@@ -220,12 +395,64 @@ mod tests {
     }
 
     #[test]
+    fn operation_registry_rejects_duplicate_ids_without_overwrite() {
+        let operation_id = OperationId::new("operation:audio.volume.set-session")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let descriptor = OperationDescriptor::try_new(
+            operation_id.clone(),
+            OperationClass::TransientExternalEffect,
+            Some(RiskClass::UserState),
+            Some(systemd_effect_binding()),
+        )
+        .unwrap_or_else(|error| unreachable!("{error:?}"));
+
+        let mut registry = OperationRegistry::default();
+        registry
+            .register(descriptor.clone())
+            .unwrap_or_else(|error| unreachable!("{error:?}"));
+
+        assert_eq!(
+            registry.register(descriptor.clone()),
+            Err(OperationRegistryError::DuplicateOperation(
+                operation_id.clone()
+            ))
+        );
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.descriptor(&operation_id), Some(&descriptor));
+    }
+
+    #[test]
+    fn operation_registry_iteration_is_deterministic_by_operation_id() {
+        let mut registry = OperationRegistry::default();
+        for value in ["operation:z", "operation:a", "operation:m"] {
+            registry
+                .register(
+                    OperationDescriptor::try_new(
+                        OperationId::new(value).unwrap_or_else(|error| unreachable!("{error}")),
+                        OperationClass::AuthoritativeQuery,
+                        Some(RiskClass::ReadOnly),
+                        None,
+                    )
+                    .unwrap_or_else(|error| unreachable!("{error:?}")),
+                )
+                .unwrap_or_else(|error| unreachable!("{error:?}"));
+        }
+
+        let ids = registry
+            .iter()
+            .map(|descriptor| descriptor.id().as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["operation:a", "operation:m", "operation:z"]);
+    }
+
+    #[test]
     fn operation_descriptor_enforces_class_risk_floor() {
         let query = OperationDescriptor::try_new(
             OperationId::new("operation:network.inspect")
                 .unwrap_or_else(|error| unreachable!("{error}")),
             OperationClass::AuthoritativeQuery,
             Some(RiskClass::ReadOnly),
+            None,
         )
         .unwrap_or_else(|error| unreachable!("{error:?}"));
         assert_eq!(query.class(), OperationClass::AuthoritativeQuery);
@@ -235,6 +462,7 @@ mod tests {
                 .unwrap_or_else(|error| unreachable!("{error}")),
             OperationClass::TransientExternalEffect,
             Some(RiskClass::UserState),
+            Some(systemd_effect_binding()),
         )
         .unwrap_or_else(|error| unreachable!("{error:?}"));
         assert_eq!(transient.risk_floor(), Some(RiskClass::UserState));
@@ -245,6 +473,7 @@ mod tests {
                     .unwrap_or_else(|error| unreachable!("{error}")),
                 OperationClass::TransientExternalEffect,
                 Some(RiskClass::SystemMutation),
+                Some(systemd_effect_binding()),
             ),
             Err(OperationDescriptorError::InvalidRiskFloor)
         );
@@ -254,9 +483,38 @@ mod tests {
                 .unwrap_or_else(|error| unreachable!("{error}")),
             OperationClass::ManagedExternalEffect,
             Some(RiskClass::Destructive),
+            Some(systemd_effect_binding()),
         )
         .unwrap_or_else(|error| unreachable!("{error:?}"));
         assert_eq!(managed.class(), OperationClass::ManagedExternalEffect);
+    }
+
+    #[test]
+    fn external_operation_requires_effect_binding() {
+        assert_eq!(
+            OperationDescriptor::try_new(
+                OperationId::new("operation:service.manage")
+                    .unwrap_or_else(|error| unreachable!("{error}")),
+                OperationClass::ManagedExternalEffect,
+                Some(RiskClass::SystemMutation),
+                None,
+            ),
+            Err(OperationDescriptorError::MissingEffectBinding)
+        );
+    }
+
+    #[test]
+    fn effect_binding_rejects_duplicate_change_keys() {
+        assert_eq!(
+            OperationEffectBinding::try_new(
+                ProviderId::new("systemd").unwrap_or_else(|error| unreachable!("{error}")),
+                CapabilityId::new("systemd.unit.observe")
+                    .unwrap_or_else(|error| unreachable!("{error}")),
+                "systemd:unit:",
+                vec!["active_state".into(), "active_state".into()],
+            ),
+            Err(OperationEffectBindingError::DuplicateChangeKey)
+        );
     }
 
     #[test]
