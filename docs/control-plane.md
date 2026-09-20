@@ -168,7 +168,7 @@ Control does not:
 
 The workspace contains foundations and future scaffolds in addition to integrated components. `contracts/components.toml` defines component maturity and activation; workspace membership is not a claim that Control currently composes that component.
 
-In particular, v0.6 does not broaden itself into First Boot, agent interpretation, supported hardware/bootstrap, Control Center, Shell or general managed-configuration work. See [ADR 0025](adr/0025-component-maturity-and-milestone-activation.md).
+The current published v0.9.0 line includes the durable Library, proposal-only agent interpretation and bounded First Boot/reference-environment layers while preserving the narrow v0.6 managed-effect authority. Control Center, Agent UI, Shell, declarative configuration and broader workstation effect domains remain v0.10 implementation/qualification work until their component contracts are explicitly activated and evidenced. See [ADR 0025](adr/0025-component-maturity-and-milestone-activation.md).
 
 ## Gateway transport
 

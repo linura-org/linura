@@ -44,8 +44,11 @@ The generic scenario does not replace milestone-specific privileged/recovery tes
 - v0.4 has permanent durability and real-ext4/ENOSPC recovery qualification.
 - v0.5 has permanent isolated executor/verifier qualification.
 - v0.6 has permanent complete managed-lifecycle qualification in `.github/workflows/v06-managed-lifecycle-vm.yml` with guest/host scripts under `tests/acceptance/v06/`.
+- v0.7 has permanent exact-source local Library qualification in `.github/workflows/v07-library-qualification.yml`.
+- v0.8 has permanent proposal-only agent interpretation qualification in `.github/workflows/v08-agent-qualification.yml`.
+- v0.9 has permanent exact-source First Boot/QualificationEnvironment qualification in `.github/workflows/v09-qualification.yml`, including the offline Ubuntu/QEMU lane and parallel adversarial guest shards.
 
-Each proof has a different claim and all mandatory inherited gates remain explicit dependencies of Trusted Release Proof.
+Each proof has a different claim and all mandatory inherited gates remain explicit dependencies of Trusted Release Proof. A later milestone may inherit an earlier proof, but it may not reinterpret that proof as evidence for a broader platform or product claim.
 
 ## v0.6 managed-lifecycle disposable guest
 
@@ -105,7 +108,7 @@ Running the deterministic matrix inside the real guest provides a common exact-s
 
 ## Trusted Release Proof relationship
 
-`Trusted Release Proof` directly calls all mandatory exact-source qualification workflows, including v0.6 managed-lifecycle qualification, before the reusable sealed release build may run.
+`Trusted Release Proof` directly calls the mandatory exact-source qualification chain for the candidate release—including inherited durability/executor/lifecycle/Library/agent/bootstrap gates as applicable—before the reusable sealed release build may run.
 
 Therefore:
 
@@ -115,8 +118,26 @@ Therefore:
 - a successful v0.5 executor workflow cannot substitute for the v0.6 complete-lifecycle gate;
 - build/promotion cannot bypass a failed/missing mandatory VM dependency.
 
-## Reserved/future scenarios
+## v0.9 released qualification boundary
 
-The repository also reserves acceptance coverage for bootstrap resume, offline First Boot, fail-closed security baseline, intent retirement, interrupted updates and native recovery. These become release-gating only when the corresponding Linura capability/milestone actually activates.
+Bootstrap resume, offline First Boot, the fail-closed v0.9 security baseline, provisioning checkpoint integrity, update/migration behavior and native recovery are no longer merely reserved scenarios. They are part of the released v0.9 QualificationEnvironment evidence and are exercised by the v0.9 exact-source contract, offline guest and adversarial guest shards.
+
+That evidence qualifies only the exact Ubuntu 24.04/amd64/QEMU-TCG/headless **QualificationEnvironment**. It does not establish a workstation PlatformProfile or generic Ubuntu/Linux support.
+
+## v0.10 workstation evidence boundary
+
+v0.10 inherits the earlier deterministic/authority qualification chain but adds different evidence that the Ubuntu headless guest cannot supply:
+
+- a reproducible exact Arch package/base substrate for `arch-hyprland-v1`;
+- live candidate PlatformProfile compatibility evidence;
+- actual Wayland/Hyprland workstation/session evidence;
+- exact maintained hardware/driver/display lane identity;
+- Control Center/many-interface convergence evidence;
+- reviewed visual and interaction/accessibility evidence;
+- workstation capability-domain effect qualification.
+
+Passing the inherited Ubuntu VM lanes is therefore necessary continuity evidence, not sufficient v0.10 workstation support evidence.
+
+Future scenarios such as general bare-metal OS installation, additional PlatformProfiles, broader hardware classes or product VM lifecycle management become release-gating only when their corresponding capability and release contract activate.
 
 Placeholder commands, scaffold applications and future architecture descriptions must never be interpreted as evidence of an implemented feature. Component maturity is governed by `contracts/components.toml`.
