@@ -17,6 +17,7 @@ QUALIFICATION_PATH = "docs/qualification/v0.10.0.md"
 UI_ARCHITECTURE_PATH = "docs/ui-architecture.md"
 AGENTS_PATH = "AGENTS.md"
 POLICY_GUIDE_PATH = "agents/skills/policy.md"
+README_PATH = "README.md"
 
 EXPECTED_MANAGED_LIFECYCLE = ["request", "observe", "plan", "validate", "authorize", "prepare", "execute", "verify", "commit", "audit", "reconcile"]
 EXPECTED_TRANSIENT_LIFECYCLE = ["request", "observe", "plan", "validate-classify", "authorize", "execute", "verify", "audit"]
@@ -106,6 +107,7 @@ def validate(root: Path) -> list[str]:
         (UI_ARCHITECTURE_PATH, "UI architecture"),
         (AGENTS_PATH, "agent contribution contract"),
         (POLICY_GUIDE_PATH, "policy task guide"),
+        (README_PATH, "repository README"),
     )
     for path, label in required_files:
         candidate = root / path
@@ -136,6 +138,10 @@ def validate(root: Path) -> list[str]:
         POLICY_GUIDE_PATH: (
             "both managed and qualified transient external effects",
             "including `TransientExternalEffect`",
+        ),
+        README_PATH: (
+            "Supported `ManagedExternalEffect` operations require durable pre-execution prepare/recovery state.",
+            "A qualified `TransientExternalEffect` is the narrow exception defined by the operation-semantics contract",
         ),
     }
     for path, markers in required_markers.items():
