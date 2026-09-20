@@ -15,15 +15,17 @@ SECURITY_PATH = "SECURITY.md"
 MILESTONE_PATH = "docs/milestones/v0.10.0.md"
 QUALIFICATION_PATH = "docs/qualification/v0.10.0.md"
 UI_ARCHITECTURE_PATH = "docs/ui-architecture.md"
+AGENTS_PATH = "AGENTS.md"
+POLICY_GUIDE_PATH = "agents/skills/policy.md"
 
 EXPECTED_MANAGED_LIFECYCLE = ["request", "observe", "plan", "validate", "authorize", "prepare", "execute", "verify", "commit", "audit", "reconcile"]
-EXPECTED_TRANSIENT_LIFECYCLE = ["request", "observe", "validate-classify", "authorize", "execute", "verify", "audit"]
+EXPECTED_TRANSIENT_LIFECYCLE = ["request", "observe", "plan", "validate-classify", "authorize", "execute", "verify", "audit"]
 EXPECTED_CLASSES = {
-    "experience-ephemeral": {"rust_variant": "ExperienceEphemeral", "changes_external_state": True, "changes_linura_durable_state": False, "control_mediated": False, "risk_classification_required": False, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "experience-local"},
-    "authoritative-query": {"rust_variant": "AuthoritativeQuery", "changes_external_state": False, "changes_linura_durable_state": False, "control_mediated": True, "risk_classification_required": False, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "observation-query"},
-    "linura-owned-state": {"rust_variant": "LinuraOwnedState", "changes_external_state": False, "changes_linura_durable_state": True, "control_mediated": True, "risk_classification_required": True, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "linura-local-transaction"},
-    "transient-external-effect": {"rust_variant": "TransientExternalEffect", "changes_external_state": True, "changes_linura_durable_state": False, "control_mediated": True, "risk_classification_required": True, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "bounded-transient-effect"},
-    "managed-external-effect": {"rust_variant": "ManagedExternalEffect", "changes_external_state": True, "changes_linura_durable_state": True, "control_mediated": True, "risk_classification_required": True, "privileged_executor_allowed": True, "canonical_managed_lifecycle": True, "path": "canonical-managed-mutation"},
+    "experience-ephemeral": {"rust_variant": "ExperienceEphemeral", "changes_external_state": True, "changes_linura_durable_state": False, "control_mediated": False, "risk_classification_required": False, "plan_bound_authorization": False, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "experience-local"},
+    "authoritative-query": {"rust_variant": "AuthoritativeQuery", "changes_external_state": False, "changes_linura_durable_state": False, "control_mediated": True, "risk_classification_required": False, "plan_bound_authorization": False, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "observation-query"},
+    "linura-owned-state": {"rust_variant": "LinuraOwnedState", "changes_external_state": False, "changes_linura_durable_state": True, "control_mediated": True, "risk_classification_required": True, "plan_bound_authorization": False, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "linura-local-transaction"},
+    "transient-external-effect": {"rust_variant": "TransientExternalEffect", "changes_external_state": True, "changes_linura_durable_state": False, "control_mediated": True, "risk_classification_required": True, "plan_bound_authorization": True, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "bounded-transient-effect"},
+    "managed-external-effect": {"rust_variant": "ManagedExternalEffect", "changes_external_state": True, "changes_linura_durable_state": True, "control_mediated": True, "risk_classification_required": True, "plan_bound_authorization": True, "privileged_executor_allowed": True, "canonical_managed_lifecycle": True, "path": "canonical-managed-mutation"},
 }
 EXPECTED_RUST_VARIANTS = [value["rust_variant"] for value in EXPECTED_CLASSES.values()]
 ENUM_RE = re.compile(r"pub enum OperationClass\s*\{(?P<body>[^}]*)\}", re.DOTALL)
@@ -76,6 +78,9 @@ def validate(root: Path) -> list[str]:
         "unknown_effect_behavior": "fail-closed",
         "risk_model": "orthogonal",
         "privileged_effect_class": "managed-external-effect",
+        "policy_subject_type": "linura_policy::PolicySubject",
+        "policy_plan_type": "linura_planner::ReconciliationPlan",
+        "external_effect_authorization_binding": "canonical-plan-plus-authenticated-principal",
         "transient_external_max_risk": "user-state",
         "transient_durable_prepare_required": False,
         "transient_failure_model": "bounded-reobserve-no-durable-indeterminate-recovery",
@@ -99,6 +104,8 @@ def validate(root: Path) -> list[str]:
         (MILESTONE_PATH, "v0.10 milestone"),
         (QUALIFICATION_PATH, "v0.10 qualification"),
         (UI_ARCHITECTURE_PATH, "UI architecture"),
+        (AGENTS_PATH, "agent contribution contract"),
+        (POLICY_GUIDE_PATH, "policy task guide"),
     )
     for path, label in required_files:
         candidate = root / path
@@ -119,8 +126,16 @@ def validate(root: Path) -> list[str]:
             "it has no durable prepare/commit/reconcile transaction",
         ),
         UI_ARCHITECTURE_PATH: (
-            "every `ManagedExternalEffect` is plan-first",
+            "every external effect that reaches policy authorization is plan-bound",
             "a qualified `TransientExternalEffect` may use the bounded Control-mediated transient lifecycle",
+        ),
+        AGENTS_PATH: (
+            "including qualified `TransientExternalEffect` operations",
+            "after the same canonical plan-bound authorization",
+        ),
+        POLICY_GUIDE_PATH: (
+            "both managed and qualified transient external effects",
+            "including `TransientExternalEffect`",
         ),
     }
     for path, markers in required_markers.items():
@@ -142,6 +157,9 @@ def validate(root: Path) -> list[str]:
         for fragment in ("pub struct OperationDescriptor", "OperationClass", "RiskClass", "pub fn try_new"):
             if fragment not in descriptor:
                 failures.append(f"linura_capability_sdk::OperationDescriptor missing required fragment: {fragment}")
+    core_text = core_path.read_text(encoding="utf-8") if core_path.is_file() and not core_path.is_symlink() else ""
+    if "requires_plan_bound_external_authorization" not in core_text:
+        failures.append("linura_core::OperationClass missing plan-bound external authorization invariant")
     return failures
 
 
