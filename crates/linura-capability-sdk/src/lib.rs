@@ -93,11 +93,15 @@ impl OperationRegistry {
         descriptor: OperationDescriptor,
     ) -> Result<(), OperationRegistryError> {
         let id = descriptor.id().clone();
-        if self.descriptors.contains_key(&id) {
-            return Err(OperationRegistryError::DuplicateOperation(id));
+        match self.descriptors.entry(id) {
+            std::collections::btree_map::Entry::Occupied(entry) => Err(
+                OperationRegistryError::DuplicateOperation(entry.key().clone()),
+            ),
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(descriptor);
+                Ok(())
+            }
         }
-        self.descriptors.insert(id, descriptor);
-        Ok(())
     }
 
     #[must_use]
