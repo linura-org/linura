@@ -535,6 +535,7 @@ name = "linura-control"
 version = "0.9.0"
 dependencies = [
  "linura-agent-runtime",
+ "linura-capability-sdk",
  "linura-core",
  "linura-graph",
  "linura-hardware",
