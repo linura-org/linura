@@ -121,6 +121,14 @@ impl OperationClass {
     }
 
     #[must_use]
+    pub const fn requires_plan_bound_external_authorization(self) -> bool {
+        matches!(
+            self,
+            Self::TransientExternalEffect | Self::ManagedExternalEffect
+        )
+    }
+
+    #[must_use]
     pub const fn requires_canonical_managed_lifecycle(self) -> bool {
         matches!(self, Self::ManagedExternalEffect)
     }
@@ -228,6 +236,15 @@ mod tests {
         assert!(OperationClass::ManagedExternalEffect.control_mediated());
         assert!(!OperationClass::TransientExternalEffect.permits_privileged_executor());
         assert!(OperationClass::ManagedExternalEffect.permits_privileged_executor());
+        assert!(
+            OperationClass::TransientExternalEffect.requires_plan_bound_external_authorization()
+        );
+        assert!(
+            OperationClass::ManagedExternalEffect.requires_plan_bound_external_authorization()
+        );
+        assert!(
+            !OperationClass::AuthoritativeQuery.requires_plan_bound_external_authorization()
+        );
         assert!(!OperationClass::TransientExternalEffect.requires_canonical_managed_lifecycle());
         assert!(OperationClass::ManagedExternalEffect.requires_canonical_managed_lifecycle());
         assert_eq!(
