@@ -251,6 +251,25 @@ mod tests {
     }
 
     #[test]
+    fn unclassified_plan_risk_fails_closed() {
+        let id = operation_id("operation:service.manage-unclassified");
+        let descriptor = OperationDescriptor::try_new(
+            id.clone(),
+            OperationClass::ManagedExternalEffect,
+            Some(RiskClass::SystemMutation),
+        )
+        .unwrap_or_else(|error| unreachable!("{error:?}"));
+        let control = OperationSemanticsControl::new(registry_with(vec![descriptor]));
+        let mut plan = canonical_systemd_plan("systemd:unit:test.service");
+        plan.changes[0].key = "unknown_mutation_shape".into();
+
+        assert_eq!(
+            control.resolve_external(&id, &plan),
+            Err(OperationSemanticsError::UnclassifiedRisk(id))
+        );
+    }
+
+    #[test]
     fn managed_operation_uses_trusted_plan_risk_and_registered_floor() {
         let id = operation_id("operation:service.manage");
         let descriptor = OperationDescriptor::try_new(
