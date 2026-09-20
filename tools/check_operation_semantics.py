@@ -123,7 +123,7 @@ def validate(root: Path) -> list[str]:
         ),
         QUALIFICATION_PATH: (
             "A qualified `TransientExternalEffect` instead follows the machine-readable bounded transient lifecycle",
-            "it has no durable prepare/commit/reconcile transaction",
+            "has no durable prepare/commit/reconcile transaction",
         ),
         UI_ARCHITECTURE_PATH: (
             "every external effect that reaches policy authorization is plan-bound",
