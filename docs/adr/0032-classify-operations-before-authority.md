@@ -88,9 +88,11 @@ Implementations may locally compose stages and auto-authorize when deterministic
 
 A transient external effect uses the bounded semantic path:
 
-`request → observe/preconditions → validate/classify → authorize → execute → verify → audit`
+`request → observe/preconditions → plan → validate/classify → authorize → execute → verify → audit`
 
-and is permitted only inside the narrow envelope above. It has no durable `prepare/commit/reconcile` claim because it is not durable managed desired state; if those semantics are needed, the operation is a managed external effect.
+The `plan` stage is the same canonical non-executable `linura-planner::ReconciliationPlan` authority subject used by policy elsewhere. Control derives policy review from that exact plan plus the authenticated principal; transient semantics do not permit a client/provider-authored policy subject or a direct authorize-from-request shortcut.
+
+The transient exemption begins **after** authorization: it has no durable `prepare/commit/reconcile` transaction because it is not durable managed desired state and its failure envelope is bounded. If durable ambiguity/recovery semantics are needed, the operation is a managed external effect.
 
 ## Consequences
 
