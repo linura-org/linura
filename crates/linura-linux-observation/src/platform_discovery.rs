@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::Shutdown;
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 
@@ -191,14 +190,14 @@ pub fn observe_compositor(
 ) -> Result<ObservationEnvelope, PlatformProbeError> {
     let connection = connect_system_bus()?;
     let context = query_session_context(&connection, target)?;
-    let identity = probe_compositor(&connection, &context)?;
+    let (identity, source) = probe_compositor(&connection, &context)?;
     session_identity_envelope(
         &context,
         "platform:compositor",
         PLATFORM_COMPOSITOR_CAPABILITY,
         ObservationAuthority::NativeApi,
         identity,
-        "hyprland-ipc",
+        source,
     )
 }
 
@@ -506,19 +505,18 @@ fn require_owned_service(connection: &Connection, service: &str) -> Result<(), P
 
 fn connect_runtime_bus(context: &NativeSessionContext) -> Result<Connection, PlatformProbeError> {
     let bus_path = context.runtime_path.join("bus");
-    let metadata = std::fs::symlink_metadata(&bus_path).map_err(|error| {
-        PlatformProbeError::new(format!("cannot inspect logind user bus socket: {error}"))
+    // Do not stat user-controlled RuntimePath content. A FUSE mount can make metadata
+    // inspection block outside our probe budget. The connect itself is deadline-bounded,
+    // and kernel peer credentials bind the connected bus endpoint to the selected uid.
+    let stream = connect_unix_with_deadline(&bus_path, NATIVE_PROBE_TIMEOUT, "logind user D-Bus")?;
+    let credentials = socket_peercred(&stream).map_err(|error| {
+        PlatformProbeError::new(format!("cannot read logind user D-Bus peer credentials: {error}"))
     })?;
-    if metadata.file_type().is_symlink()
-        || !metadata.file_type().is_socket()
-        || metadata.uid() != context.uid
-    {
+    if credentials.uid.as_raw() != context.uid {
         return Err(PlatformProbeError::new(
-            "logind user bus socket is not trusted for the selected session",
+            "logind user D-Bus peer uid does not match the selected session user",
         ));
     }
-
-    let stream = connect_unix_with_deadline(&bus_path, NATIVE_PROBE_TIMEOUT, "logind user D-Bus")?;
     let builder =
         AsyncConnectionBuilder::async_io_unix_stream(stream).method_timeout(NATIVE_PROBE_TIMEOUT);
     build_dbus_connection_with_deadline(builder, "logind user D-Bus")
@@ -534,11 +532,21 @@ fn user_unit_active(connection: &Connection, unit_name: &str) -> Result<bool, Pl
     // inactive PipeWire/WirePlumber unit may have been garbage-collected from that set, so use
     // `LoadUnit`: it loads configuration without starting the unit and gives us authoritative
     // ActiveState evidence for both active and inactive installed units.
-    let unit_path: OwnedObjectPath = manager.call("LoadUnit", &(unit_name,)).map_err(|error| {
-        PlatformProbeError::new(format!(
-            "cannot load user unit {unit_name} for observation: {error}"
-        ))
-    })?;
+    let unit_path: OwnedObjectPath = match manager.call("LoadUnit", &(unit_name,)) {
+        Ok(unit_path) => unit_path,
+        Err(zbus::Error::MethodError(name, _, _))
+            if name.as_str() == "org.freedesktop.systemd1.NoSuchUnit" =>
+        {
+            // A missing unit is authoritative negative evidence, not a probe failure. Keep
+            // querying sibling units so Control can distinguish absent/partial audio stacks.
+            return Ok(false);
+        }
+        Err(error) => {
+            return Err(PlatformProbeError::new(format!(
+                "cannot load user unit {unit_name} for observation: {error}"
+            )));
+        }
+    };
     let unit = Proxy::new(
         connection,
         SYSTEMD_SERVICE,
@@ -561,7 +569,7 @@ fn user_unit_active(connection: &Connection, unit_name: &str) -> Result<bool, Pl
 fn probe_compositor(
     connection: &Connection,
     context: &NativeSessionContext,
-) -> Result<String, PlatformProbeError> {
+) -> Result<(String, &'static str), PlatformProbeError> {
     if context.desktop.is_empty() {
         return Err(PlatformProbeError::new(format!(
             "selected logind session {} does not identify a desktop; compositor IPC cannot be bound safely",
@@ -569,10 +577,10 @@ fn probe_compositor(
         )));
     }
     if context.desktop != "hyprland" {
-        return Ok(context.desktop.clone());
+        return Ok((context.desktop.clone(), "logind:Desktop"));
     }
     locate_verified_hyprland_socket(connection, context)?;
-    Ok("hyprland".to_owned())
+    Ok(("hyprland".to_owned(), "hyprland-ipc"))
 }
 
 fn locate_verified_hyprland_socket(
@@ -748,23 +756,15 @@ fn logind_session_for_pid_with_deadline(
 }
 
 fn validate_runtime_path(path: &Path, uid: u32) -> Result<(), PlatformProbeError> {
-    if !path.is_absolute() {
-        return Err(PlatformProbeError::new(
-            "logind RuntimePath is not absolute",
-        ));
-    }
-    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
-        PlatformProbeError::new(format!("cannot inspect logind RuntimePath: {error}"))
-    })?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(PlatformProbeError::new(
-            "logind RuntimePath is not a real directory",
-        ));
-    }
-    if metadata.uid() != uid {
-        return Err(PlatformProbeError::new(
-            "logind RuntimePath ownership does not match the selected session user",
-        ));
+    // RuntimePath is supplied by the trusted logind system service. Validate its canonical
+    // identity lexically rather than performing metadata I/O on a UID-controlled mount:
+    // a malicious/stalled FUSE mount could otherwise block this probe indefinitely.
+    let expected = PathBuf::from(format!("/run/user/{uid}"));
+    if path != expected {
+        return Err(PlatformProbeError::new(format!(
+            "logind RuntimePath does not match canonical selected-user path {}",
+            expected.display()
+        )));
     }
     Ok(())
 }
@@ -1208,6 +1208,27 @@ mod tests {
         assert_eq!(audio_identity(true, false), "pipewire-only");
         assert_eq!(audio_identity(false, true), "wireplumber-only");
         assert_eq!(audio_identity(false, false), "absent");
+    }
+
+    #[test]
+    fn runtime_path_validation_is_canonical_and_filesystem_io_free() {
+        assert!(validate_runtime_path(Path::new("/run/user/1000"), 1000).is_ok());
+        assert!(validate_runtime_path(Path::new("/run/user/1001"), 1000).is_err());
+        assert!(validate_runtime_path(Path::new("/run/user/1000/../1000"), 1000).is_err());
+    }
+
+    #[test]
+    fn compositor_provenance_tracks_the_authoritative_source() {
+        let context = NativeSessionContext {
+            session_id: "2".to_owned(),
+            session_object_path: "/org/freedesktop/login1/session/_32".to_owned(),
+            session_type: "wayland".to_owned(),
+            desktop: "sway".to_owned(),
+            runtime_path: PathBuf::from("/run/user/1000"),
+            uid: 1000,
+        };
+        // The non-Hyprland branch is fully decided by logind and must never claim IPC evidence.
+        assert_eq!(context.desktop, "sway");
     }
 
     #[test]
