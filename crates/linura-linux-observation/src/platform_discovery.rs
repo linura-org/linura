@@ -36,6 +36,13 @@ const SYSTEMD_PATH: &str = "/org/freedesktop/systemd1";
 const SYSTEMD_MANAGER: &str = "org.freedesktop.systemd1.Manager";
 const SYSTEMD_UNIT: &str = "org.freedesktop.systemd1.Unit";
 
+const NETWORKMANAGER_SERVICE: &str = "org.freedesktop.NetworkManager";
+const NETWORKMANAGER_PATH: &str = "/org/freedesktop/NetworkManager";
+const NETWORKMANAGER_INTERFACE: &str = "org.freedesktop.NetworkManager";
+const NETWORKMANAGER_DEVICE_INTERFACE: &str = "org.freedesktop.NetworkManager.Device";
+const NETWORKMANAGER_DEVICE_TYPE_LOOPBACK: u32 = 32;
+const NETWORKMANAGER_MAX_DEVICES: usize = 128;
+
 const PLATFORM_PROVIDER: &str = "linux-platform";
 pub const PLATFORM_DISTRIBUTION_CAPABILITY: &str = "platform.distribution.observe";
 pub const PLATFORM_ARCHITECTURE_CAPABILITY: &str = "platform.architecture.observe";
@@ -196,12 +203,80 @@ pub fn observe_compositor(
 }
 
 pub fn observe_network_provider() -> Result<ObservationEnvelope, PlatformProbeError> {
-    observe_selected_dbus_provider(
+    let connection = connect_system_bus()?;
+    require_owned_service(&connection, NETWORKMANAGER_SERVICE)?;
+    let peer = Proxy::new(
+        &connection,
+        NETWORKMANAGER_SERVICE,
+        NETWORKMANAGER_PATH,
+        DBUS_PEER,
+    )
+    .map_err(|error| {
+        PlatformProbeError::new(format!(
+            "cannot create NetworkManager health proxy: {error}"
+        ))
+    })?;
+    let _: () = peer.call("Ping", &()).map_err(|error| {
+        PlatformProbeError::new(format!(
+            "NetworkManager direct health probe failed: {error}"
+        ))
+    })?;
+
+    let manager = Proxy::new(
+        &connection,
+        NETWORKMANAGER_SERVICE,
+        NETWORKMANAGER_PATH,
+        NETWORKMANAGER_INTERFACE,
+    )
+    .map_err(|error| {
+        PlatformProbeError::new(format!(
+            "cannot create NetworkManager manager proxy: {error}"
+        ))
+    })?;
+    let devices: Vec<OwnedObjectPath> = manager.call("GetDevices", &()).map_err(|error| {
+        PlatformProbeError::new(format!(
+            "cannot enumerate NetworkManager managed-device candidates: {error}"
+        ))
+    })?;
+    if devices.len() > NETWORKMANAGER_MAX_DEVICES {
+        return Err(PlatformProbeError::new(
+            "NetworkManager device evidence exceeds the bounded device ceiling",
+        ));
+    }
+
+    let mut device_states = Vec::with_capacity(devices.len());
+    for device_path in devices {
+        let device = Proxy::new(
+            &connection,
+            NETWORKMANAGER_SERVICE,
+            device_path.as_str(),
+            NETWORKMANAGER_DEVICE_INTERFACE,
+        )
+        .map_err(|error| {
+            PlatformProbeError::new(format!(
+                "cannot create NetworkManager device proxy: {error}"
+            ))
+        })?;
+        let managed: bool = device.get_property("Managed").map_err(|error| {
+            PlatformProbeError::new(format!(
+                "cannot read NetworkManager device Managed property: {error}"
+            ))
+        })?;
+        let device_type: u32 = device.get_property("DeviceType").map_err(|error| {
+            PlatformProbeError::new(format!(
+                "cannot read NetworkManager device DeviceType property: {error}"
+            ))
+        })?;
+        device_states.push((managed, device_type));
+    }
+    require_networkmanager_selected_device(&device_states)?;
+
+    provider_identity_envelope(
         "networkmanager",
         "network",
         PLATFORM_NETWORK_PROVIDER_CAPABILITY,
-        "org.freedesktop.NetworkManager",
-        "/org/freedesktop/NetworkManager",
+        ObservationAuthority::NativeApi,
+        "org.freedesktop.NetworkManager:managed-device",
     )
 }
 
@@ -372,6 +447,19 @@ fn query_session_context(
         runtime_path,
         uid: user.0,
     })
+}
+
+fn require_networkmanager_selected_device(
+    device_states: &[(bool, u32)],
+) -> Result<(), PlatformProbeError> {
+    if device_states.iter().any(|(managed, device_type)| {
+        *managed && *device_type != NETWORKMANAGER_DEVICE_TYPE_LOOPBACK
+    }) {
+        return Ok(());
+    }
+    Err(PlatformProbeError::new(
+        "NetworkManager is live but does not authoritatively report any managed non-loopback device",
+    ))
 }
 
 fn observe_selected_dbus_provider(
@@ -1095,6 +1183,26 @@ mod tests {
         let ext4 = "36 25 8:2 / / rw,relatime - ext4 /dev/vda2 rw\n";
         assert_eq!(root_filesystem_type(ext4), Ok("ext4".to_owned()));
         assert!(root_filesystem_type("malformed\n").is_err());
+    }
+
+    #[test]
+    fn network_provider_requires_selected_non_loopback_management_evidence() {
+        assert!(require_networkmanager_selected_device(&[(true, 1)]).is_ok());
+        assert!(require_networkmanager_selected_device(&[(false, 1)]).is_err());
+        assert!(
+            require_networkmanager_selected_device(&[(
+                true,
+                NETWORKMANAGER_DEVICE_TYPE_LOOPBACK,
+            )])
+            .is_err()
+        );
+        assert!(
+            require_networkmanager_selected_device(&[
+                (false, 1),
+                (true, NETWORKMANAGER_DEVICE_TYPE_LOOPBACK),
+            ])
+            .is_err()
+        );
     }
 
     #[test]
