@@ -1190,11 +1190,8 @@ mod tests {
         assert!(require_networkmanager_selected_device(&[(true, 1)]).is_ok());
         assert!(require_networkmanager_selected_device(&[(false, 1)]).is_err());
         assert!(
-            require_networkmanager_selected_device(&[(
-                true,
-                NETWORKMANAGER_DEVICE_TYPE_LOOPBACK,
-            )])
-            .is_err()
+            require_networkmanager_selected_device(&[(true, NETWORKMANAGER_DEVICE_TYPE_LOOPBACK,)])
+                .is_err()
         );
         assert!(
             require_networkmanager_selected_device(&[
