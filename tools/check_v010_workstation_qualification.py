@@ -164,6 +164,25 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _read_bounded_bytes(
+    path: Path,
+    max_bytes: int,
+    *,
+    label: str,
+    failures: list[str],
+) -> bytes | None:
+    try:
+        with path.open("rb") as stream:
+            data = stream.read(max_bytes + 1)
+    except OSError as error:
+        failures.append(f"{label} could not be read: {error}")
+        return None
+    if len(data) > max_bytes:
+        failures.append(f"{label} exceeds the bounded PNG artifact size")
+        return None
+    return data
+
+
 def _bounded_regular_path(
     root: Path,
     value: object,
@@ -222,6 +241,9 @@ def _decode_png_pixels(
     height: int | None = None
     color_type: int | None = None
     bytes_per_pixel: int | None = None
+    transparent_gray: int | None = None
+    transparent_rgb: tuple[int, int, int] | None = None
+    seen_trns = False
     idat = bytearray()
     seen_idat = False
     idat_closed = False
@@ -284,6 +306,32 @@ def _decode_png_pixels(
             if width is None or seen_idat:
                 failures.append(f"{label} has an out-of-order PLTE chunk")
                 return None
+        elif chunk_type == b"tRNS":
+            if width is None or seen_idat or seen_trns:
+                failures.append(f"{label} has an invalid or out-of-order tRNS chunk")
+                return None
+            seen_trns = True
+            if color_type == 0:
+                if length != 2:
+                    failures.append(f"{label} has an invalid grayscale tRNS chunk")
+                    return None
+                transparent_gray = struct.unpack(">H", payload)[0]
+                if transparent_gray > 255:
+                    failures.append(f"{label} has an out-of-range grayscale tRNS sample")
+                    return None
+            elif color_type == 2:
+                if length != 6:
+                    failures.append(f"{label} has an invalid truecolor tRNS chunk")
+                    return None
+                transparent_rgb = struct.unpack(">HHH", payload)
+                if any(sample > 255 for sample in transparent_rgb):
+                    failures.append(f"{label} has an out-of-range truecolor tRNS sample")
+                    return None
+            else:
+                failures.append(
+                    f"{label} uses tRNS with a PNG color type that already carries alpha"
+                )
+                return None
         elif chunk_type == b"IDAT":
             if width is None or seen_iend or idat_closed:
                 failures.append(f"{label} has an out-of-order IDAT chunk")
@@ -331,16 +379,19 @@ def _decode_png_pixels(
     expected_raw_size = height * (row_bytes + 1)
     decompressor = zlib.decompressobj()
     try:
+        # max_length is the hard memory bound. Never call flush() while untrusted input remains:
+        # flush() has no output limit and can expand a small digest-valid artifact into gigabytes.
         raw = decompressor.decompress(bytes(idat), expected_raw_size + 1)
-        raw += decompressor.flush()
     except zlib.error as error:
         failures.append(f"{label} has invalid compressed PNG image data: {error}")
+        return None
+    if decompressor.unconsumed_tail:
+        failures.append(f"{label} has overlong PNG image data")
         return None
     if (
         len(raw) != expected_raw_size
         or not decompressor.eof
         or decompressor.unused_data
-        or decompressor.unconsumed_tail
     ):
         failures.append(f"{label} has incomplete or overlong PNG image data")
         return None
@@ -379,14 +430,14 @@ def _decode_png_pixels(
         for pixel_start in range(0, row_bytes, bytes_per_pixel):
             if color_type == 0:
                 gray = scanline[pixel_start]
-                pixel = (gray, gray, gray, 255)
+                alpha = 0 if transparent_gray == gray else 255
+                pixel = (gray, gray, gray, alpha)
             elif color_type == 2:
-                pixel = (
-                    scanline[pixel_start],
-                    scanline[pixel_start + 1],
-                    scanline[pixel_start + 2],
-                    255,
-                )
+                red = scanline[pixel_start]
+                green = scanline[pixel_start + 1]
+                blue = scanline[pixel_start + 2]
+                alpha = 0 if transparent_rgb == (red, green, blue) else 255
+                pixel = (red, green, blue, alpha)
             elif color_type == 4:
                 gray = scanline[pixel_start]
                 pixel = (gray, gray, gray, scanline[pixel_start + 1])
@@ -421,7 +472,14 @@ def _validate_png_artifact(
     if not isinstance(expected_digest, str) or not SHA256_RE.fullmatch(expected_digest):
         failures.append(f"{label} must carry a lowercase SHA-256 digest")
         return None
-    data = path.read_bytes()
+    data = _read_bounded_bytes(
+        path,
+        PNG_MAX_BYTES,
+        label=label,
+        failures=failures,
+    )
+    if data is None:
+        return None
     if hashlib.sha256(data).hexdigest() != expected_digest:
         failures.append(f"{label} digest mismatch")
         return None
@@ -436,6 +494,48 @@ def _validate_png_artifact(
         failures.append(f"{label} PNG height does not match reviewed metadata")
         return None
     return decoded
+
+
+def _validate_digest_bound_json_artifact(
+    root: Path,
+    path_value: object,
+    digest_value: object,
+    *,
+    label: str,
+    failures: list[str],
+) -> dict[str, object] | None:
+    path = _bounded_regular_path(
+        root,
+        path_value,
+        prefix="qualification/v010/",
+        label=label,
+        failures=failures,
+    )
+    if path is None:
+        return None
+    if not isinstance(digest_value, str) or not SHA256_RE.fullmatch(digest_value):
+        failures.append(f"{label} must carry a lowercase SHA-256 digest")
+        return None
+    if _sha256(path) != digest_value:
+        failures.append(f"{label} digest mismatch")
+        return None
+    return _load_json(path, label, failures)
+
+
+def _visual_failure_binding_sha256(
+    baseline_id: str,
+    baseline_sha256: str,
+    failed_capture_sha256: str,
+    diff_sha256: str,
+) -> str:
+    payload = (
+        "linura-v010-visual-failure-v1\n"
+        f"{baseline_id}\n"
+        f"{baseline_sha256}\n"
+        f"{failed_capture_sha256}\n"
+        f"{diff_sha256}\n"
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _validate_experience_evidence(
@@ -471,6 +571,7 @@ def _validate_experience_evidence(
     baseline_ids: set[str] = set()
     baseline_metadata: dict[str, tuple[int, int, float, str]] = {}
     baseline_images: dict[str, tuple[int, int, bytes]] = {}
+    baseline_digests: dict[str, str] = {}
     observed_scales: set[float] = set()
     observed_resolutions: set[str] = set()
     observed_surfaces: set[str] = set()
@@ -512,16 +613,18 @@ def _validate_experience_evidence(
             label=f"visual baseline artifact {baseline_id}",
             failures=failures,
         )
+        baseline_digest = item.get("sha256")
         baseline_image = _validate_png_artifact(
             artifact_path,
-            item.get("sha256"),
+            baseline_digest,
             label=f"visual baseline artifact {baseline_id}",
             failures=failures,
             expected_width=width,
             expected_height=height,
         )
-        if baseline_image is not None:
+        if baseline_image is not None and isinstance(baseline_digest, str):
             baseline_images[baseline_id] = baseline_image
+            baseline_digests[baseline_id] = baseline_digest
 
     required_visual_surfaces = experience.get("required_visual_surfaces")
     if required_visual_surfaces != EXPECTED_REQUIRED_VISUAL_SURFACES:
@@ -632,22 +735,78 @@ def _validate_experience_evidence(
         failures.append("v0.10 experience evidence requires at least one retained reviewed failure diff")
     else:
         for index, item in enumerate(failure_diffs):
+            label = f"retained failure diff {index}"
             if not isinstance(item, dict) or item.get("reviewed") is not True:
-                failures.append(f"retained failure diff {index} must be a reviewed object")
+                failures.append(f"{label} must be a reviewed object")
                 continue
+            baseline_id = item.get("baseline_id")
+            if not isinstance(baseline_id, str) or baseline_id not in baseline_metadata:
+                failures.append(f"{label} must reference a valid baseline_id")
+                continue
+            metadata = baseline_metadata[baseline_id]
+            baseline_digest = baseline_digests.get(baseline_id)
+            if baseline_digest is None or item.get("baseline_sha256") != baseline_digest:
+                failures.append(f"{label} baseline digest does not match the reviewed baseline")
+                continue
+            if item.get("status") != "fail":
+                failures.append(f"{label} must record status=fail")
+
+            failed_capture_path = _bounded_regular_path(
+                root,
+                item.get("failed_capture"),
+                prefix="qualification/v010/",
+                label=f"{label} failed capture",
+                failures=failures,
+            )
+            failed_capture_digest = item.get("failed_capture_sha256")
+            failed_capture_image = _validate_png_artifact(
+                failed_capture_path,
+                failed_capture_digest,
+                label=f"{label} failed capture",
+                failures=failures,
+                expected_width=metadata[0],
+                expected_height=metadata[1],
+            )
+            baseline_image = baseline_images.get(baseline_id)
+            if (
+                baseline_image is not None
+                and failed_capture_image is not None
+                and failed_capture_image == baseline_image
+            ):
+                failures.append(f"{label} does not represent an actual failed pixel comparison")
+
             diff_path = _bounded_regular_path(
                 root,
                 item.get("diff"),
                 prefix="qualification/v010/",
-                label=f"retained failure diff {index}",
+                label=label,
                 failures=failures,
             )
+            diff_digest = item.get("diff_sha256")
             _validate_png_artifact(
                 diff_path,
-                item.get("sha256"),
-                label=f"retained failure diff {index}",
+                diff_digest,
+                label=label,
                 failures=failures,
+                expected_width=metadata[0],
+                expected_height=metadata[1],
             )
+            if (
+                isinstance(failed_capture_digest, str)
+                and SHA256_RE.fullmatch(failed_capture_digest)
+                and isinstance(diff_digest, str)
+                and SHA256_RE.fullmatch(diff_digest)
+            ):
+                expected_binding = _visual_failure_binding_sha256(
+                    baseline_id,
+                    baseline_digest,
+                    failed_capture_digest,
+                    diff_digest,
+                )
+                if item.get("binding_sha256") != expected_binding:
+                    failures.append(
+                        f"{label} binding_sha256 does not bind the baseline/capture/diff digests"
+                    )
 
     interactions = evidence.get("interaction_accessibility")
     required_surfaces = experience.get("required_accessibility_surfaces")
@@ -657,26 +816,75 @@ def _validate_experience_evidence(
         failures.append("experience required_accessibility_surfaces must contain non-empty strings")
         return
     records: dict[str, dict[str, object]] = {}
-    if isinstance(interactions, list):
-        for item in interactions:
-            if isinstance(item, dict) and isinstance(item.get("surface"), str):
-                records[item["surface"]] = item
+    if not isinstance(interactions, list):
+        failures.append("v0.10 experience evidence requires interaction_accessibility reports")
+        interactions = []
+    for index, item in enumerate(interactions):
+        if not isinstance(item, dict) or not isinstance(item.get("surface"), str):
+            failures.append(f"interaction/accessibility evidence {index} must identify a surface")
+            continue
+        surface = item["surface"]
+        if surface in records:
+            failures.append(f"interaction/accessibility evidence has duplicate surface: {surface}")
+            continue
+        records[surface] = item
+
+    required_checks = (
+        "keyboard",
+        "pointer",
+        "screen_reader",
+        "reduced_motion",
+        "display_scaling",
+        "offline_error",
+        "reconnect",
+    )
     for surface in required_surfaces:
         record = records.get(surface)
         if record is None:
             failures.append(f"interaction/accessibility evidence missing surface: {surface}")
             continue
-        for key in (
-            "keyboard",
-            "pointer",
-            "screen_reader",
-            "reduced_motion",
-            "display_scaling",
-            "offline_error",
-            "reconnect",
-        ):
-            if record.get(key) is not True:
-                failures.append(f"interaction/accessibility evidence {surface}.{key} must be true")
+        report = _validate_digest_bound_json_artifact(
+            root,
+            record.get("report"),
+            record.get("report_sha256"),
+            label=f"interaction/accessibility report {surface}",
+            failures=failures,
+        )
+        if report is None:
+            continue
+        if report.get("schema_version") != 1:
+            failures.append(f"interaction/accessibility report {surface} schema_version must be 1")
+        if report.get("artifact_type") != "linura-v010-interaction-accessibility":
+            failures.append(f"interaction/accessibility report {surface} has invalid artifact_type")
+        if report.get("surface") != surface:
+            failures.append(f"interaction/accessibility report {surface} surface binding mismatch")
+        if report.get("result") != "pass":
+            failures.append(f"interaction/accessibility report {surface} must record result=pass")
+
+        runner = report.get("runner")
+        if not isinstance(runner, dict):
+            failures.append(f"interaction/accessibility report {surface} missing runner identity")
+        else:
+            for key in ("name", "version", "run_id", "platform"):
+                value = runner.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    failures.append(
+                        f"interaction/accessibility report {surface} runner.{key} must be non-empty"
+                    )
+            if runner.get("platform") != EXPECTED_PROFILE:
+                failures.append(
+                    f"interaction/accessibility report {surface} runner.platform must be {EXPECTED_PROFILE}"
+                )
+
+        checks = report.get("checks")
+        if not isinstance(checks, dict):
+            failures.append(f"interaction/accessibility report {surface} missing checks")
+            continue
+        for key in required_checks:
+            if checks.get(key) != "pass":
+                failures.append(
+                    f"interaction/accessibility report {surface} checks.{key} must be pass"
+                )
 
 
 def _v010_milestone(roadmap: dict[str, object]) -> dict[str, object] | None:
