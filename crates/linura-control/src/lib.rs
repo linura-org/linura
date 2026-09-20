@@ -19,6 +19,7 @@ mod approval_review;
 mod authority_clock;
 mod durable_authority;
 mod managed_lifecycle;
+mod operation_semantics;
 mod plan_preview;
 mod platform_compatibility;
 mod policy_review;
@@ -50,6 +51,9 @@ pub use authority_clock::ControlAuthorityClock;
 pub use durable_authority::{
     DispatchPermit, DurableAuthorityCandidate, DurableAuthorityControl, DurableAuthorityError,
     DurableRecoveryOutcome, FreshRecoveryApproval, PreparedDurableAuthority,
+};
+pub use operation_semantics::{
+    OperationSemanticsControl, OperationSemanticsError, TrustedExternalOperationSemantics,
 };
 pub use managed_lifecycle::{
     AuthorizedEffect, AuthorizedEffectExecutor, IndependentManagedVerifier,
