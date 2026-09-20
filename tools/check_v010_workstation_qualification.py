@@ -16,6 +16,8 @@ EXPECTED_PROFILE = "arch-hyprland-v1"
 EXPECTED_MACHINE_CLASS = "workstation"
 EXPECTED_EVIDENCE = ["disposable-arch", "interactive-workstation", "inherited-v0.9"]
 EXPECTED_INTERACTION_ADR = "docs/adr/0031-v010-many-interfaces-one-authority-path.md"
+EXPECTED_OPERATION_SEMANTICS_CONTRACT = "contracts/operation-semantics.toml"
+EXPECTED_OPERATION_SEMANTICS_ADR = "docs/adr/0032-classify-operations-before-authority.md"
 EXPECTED_INTERACTION_SURFACES = [
     "intent-state",
     "control-plane",
@@ -82,6 +84,9 @@ EXPECTED_EXPERIENCE = {
     "agent_authority": "proposal-only",
     "full_shell_replacement_required": False,
     "no_parallel_mutation_paths": True,
+    "operation_classification": "trusted-registry-plus-control",
+    "transient_external_effect": "unprivileged-user-state-only",
+    "managed_external_effect": "canonical-eleven-stage-lifecycle",
 }
 EXPECTED_REQUIRED_PACKAGES_PATH = "packaging/arch/archiso/packages.linura"
 EXPECTED_MANIFEST_FORMAT = "linura-arch-package-manifest-v1"
@@ -1128,6 +1133,10 @@ def validate(root: Path) -> list[str]:
         failures.append("v0.10 support promotion authority must remain protected-post-release-closure")
     if contract.get("required_evidence") != EXPECTED_EVIDENCE:
         failures.append(f"v0.10 required_evidence must remain exactly {EXPECTED_EVIDENCE!r}")
+    if contract.get("operation_semantics_contract") != EXPECTED_OPERATION_SEMANTICS_CONTRACT:
+        failures.append("v0.10 operation_semantics_contract must bind the canonical operation-semantics contract")
+    elif not (root / EXPECTED_OPERATION_SEMANTICS_CONTRACT).is_file():
+        failures.append("v0.10 operation-semantics contract file is missing")
     experience = contract.get("experience")
     if not isinstance(experience, dict):
         failures.append("v0.10 qualification contract missing experience")
@@ -1155,6 +1164,10 @@ def validate(root: Path) -> list[str]:
             failures.append("roadmap v0.10 desktop_shell_scope must remain bounded-integration-not-full-replacement")
         if milestone.get("interaction_adr") != EXPECTED_INTERACTION_ADR:
             failures.append("roadmap v0.10 interaction_adr must bind ADR 0031")
+        if milestone.get("operation_semantics_contract") != EXPECTED_OPERATION_SEMANTICS_CONTRACT:
+            failures.append("roadmap v0.10 operation_semantics_contract must bind the canonical contract")
+        if milestone.get("operation_semantics_adr") != EXPECTED_OPERATION_SEMANTICS_ADR:
+            failures.append("roadmap v0.10 operation_semantics_adr must bind ADR 0032")
         if milestone.get("claim_class") != "Experimental":
             failures.append("roadmap v0.10 claim_class must remain Experimental")
         if milestone.get("qualification_contract") != CONTRACT_PATH:

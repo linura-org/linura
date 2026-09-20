@@ -22,6 +22,20 @@ request / intent
 
 A successful managed mutation cannot skip or reorder these stages. Failure/denial may stop earlier; ambiguous execution is retained durably and reconciled rather than automatically replayed. See [Action lifecycle](action-lifecycle.md), [ADR 0012](adr/0012-canonical-mutation-lifecycle.md) and [ADR 0026](adr/0026-bounded-v0.6-managed-mutation-authority.md).
 
+## Operation semantics and proportional control
+
+Control selects an authority path only after trusted operation classification. The machine-readable contract is `contracts/operation-semantics.toml`; [ADR 0032](adr/0032-classify-operations-before-authority.md) records the decision.
+
+- `ExperienceEphemeral`: no Control mutation authority and no privileged executor;
+- `AuthoritativeQuery`: observation/query only;
+- `LinuraOwnedState`: typed local durable state transaction with no external executor;
+- `TransientExternalEffect`: Control-mediated bounded unprivileged effect, trusted risk at most `UserState`, with observation/preconditions, policy, verification and audit;
+- `ManagedExternalEffect`: full canonical managed-mutation lifecycle.
+
+Operation class is not a request field that a caller may use to reduce authority. Registered operation semantics/domain contracts plus Control own classification. If a nominal transient effect needs privilege, is classified above `UserState`, needs durable ambiguity recovery or otherwise escapes the bounded envelope, Control must use the managed path or fail closed.
+
+Risk changes **ceremony**, not trust ownership. A policy `Allow` may make a supported operation immediate without manufacturing a human approval step. Conversely, UI latency goals cannot justify skipping managed-effect authority stages.
+
 ## Control responsibilities
 
 For a capability that has reached the relevant milestone, Control owns or coordinates the semantic decision for:

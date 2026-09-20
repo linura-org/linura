@@ -10,6 +10,7 @@ qualification_document = "docs/qualification/v0.10.0.md"
 support_matrix_path = "hardware/support-matrix.json"
 support_promotion_authority = "protected-post-release-closure"
 required_evidence = ["disposable-arch", "interactive-workstation", "inherited-v0.9"]
+operation_semantics_contract = "contracts/operation-semantics.toml"
 
 [experience]
 interaction_model = "one-model-many-interfaces"
@@ -46,6 +47,9 @@ manual_no_ai_required = true
 agent_authority = "proposal-only"
 full_shell_replacement_required = false
 no_parallel_mutation_paths = true
+operation_classification = "trusted-registry-plus-control"
+transient_external_effect = "unprivileged-user-state-only"
+managed_external_effect = "canonical-eleven-stage-lifecycle"
 
 [profile_identity]
 distribution = "arch"

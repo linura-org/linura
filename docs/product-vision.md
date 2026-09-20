@@ -66,7 +66,9 @@ intent / config / GUI / keyboard / palette / quick settings / CLI / agent
 
 The interface does not become authority. Declarative configuration is validated data rather than an executable script. A keyboard shortcut or quick-setting toggle maps to a registered typed action instead of a hidden privileged command. Low-risk actions may be policy-authorized with minimal ceremony, while higher-risk actions can require explicit plan review or approval without changing the underlying authority model.
 
-Ephemeral desktop navigation such as opening a launcher, focusing a window or switching workspace is not durable Linura-managed machine state. It may remain a direct desktop interaction. Any operation that changes Linura-managed state still converges on Control.
+Before choosing an execution path, Linura classifies the registered typed operation according to [operation semantics](operation-semantics.md). Ephemeral experience/navigation, authoritative queries, Linura-owned local state, bounded transient external effects and managed external effects are different semantic classes. Risk is orthogonal to that class. Clients/agents/providers cannot select a weaker class, and unknown external-effect semantics fail closed.
+
+Ephemeral desktop navigation such as opening a launcher, focusing a window or switching workspace is not durable Linura-managed machine state. It may remain a direct desktop interaction. Transient external effects remain Control-mediated and deliberately narrow; managed external effects retain the full canonical lifecycle.
 
 ## Product surfaces
 
