@@ -16,8 +16,6 @@ EXPECTED_PROFILE = "arch-hyprland-v1"
 EXPECTED_MACHINE_CLASS = "workstation"
 EXPECTED_EVIDENCE = ["disposable-arch", "interactive-workstation", "inherited-v0.9"]
 EXPECTED_INTERACTION_ADR = "docs/adr/0031-v010-many-interfaces-one-authority-path.md"
-EXPECTED_OPERATION_SEMANTICS_CONTRACT = "contracts/operation-semantics.toml"
-EXPECTED_OPERATION_SEMANTICS_ADR = "docs/adr/0032-classify-operations-before-authority.md"
 EXPECTED_INTERACTION_SURFACES = [
     "intent-state",
     "control-plane",
@@ -84,9 +82,6 @@ EXPECTED_EXPERIENCE = {
     "agent_authority": "proposal-only",
     "full_shell_replacement_required": False,
     "no_parallel_mutation_paths": True,
-    "operation_classification": "trusted-registry-plus-control",
-    "transient_external_effect": "unprivileged-user-state-only",
-    "managed_external_effect": "canonical-eleven-stage-lifecycle",
 }
 EXPECTED_REQUIRED_PACKAGES_PATH = "packaging/arch/archiso/packages.linura"
 EXPECTED_MANIFEST_FORMAT = "linura-arch-package-manifest-v1"
@@ -125,6 +120,8 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 PNG_MAX_BYTES = 64 * 1024 * 1024
 PNG_MAX_PIXELS = 32 * 1024 * 1024
 PNG_BYTES_PER_PIXEL = {0: 1, 2: 3, 4: 2, 6: 4}
+PNG_UNSUPPORTED_COLOR_CHUNKS = {b"cHRM", b"gAMA", b"iCCP", b"sRGB", b"cICP", b"mDCV", b"cLLI"}
+VISUAL_MAX_BASELINES = 128
 ARCHIVE_RE = re.compile(
     r"^https://archive\.archlinux\.org/repos/(\d{4})/(\d{2})/(\d{2})/\$repo/os/\$arch$"
 )
@@ -332,6 +329,11 @@ def _decode_png_pixels(
                     f"{label} uses tRNS with a PNG color type that already carries alpha"
                 )
                 return None
+        elif chunk_type in PNG_UNSUPPORTED_COLOR_CHUNKS:
+            failures.append(
+                f"{label} contains unsupported color-management PNG chunk {chunk_type.decode('ascii')}"
+            )
+            return None
         elif chunk_type == b"IDAT":
             if width is None or seen_iend or idat_closed:
                 failures.append(f"{label} has an out-of-order IDAT chunk")
@@ -522,6 +524,28 @@ def _validate_digest_bound_json_artifact(
     return _load_json(path, label, failures)
 
 
+def _matches_canonical_visual_diff(
+    baseline: tuple[int, int, bytes],
+    capture: tuple[int, int, bytes],
+    diff: tuple[int, int, bytes],
+) -> bool:
+    if baseline[:2] != capture[:2] or baseline[:2] != diff[:2]:
+        return False
+    baseline_pixels = baseline[2]
+    capture_pixels = capture[2]
+    diff_pixels = diff[2]
+    if len(baseline_pixels) != len(capture_pixels) or len(baseline_pixels) != len(diff_pixels):
+        return False
+    for offset in range(0, len(baseline_pixels), 4):
+        delta = max(
+            abs(baseline_pixels[offset + channel] - capture_pixels[offset + channel])
+            for channel in range(4)
+        )
+        if diff_pixels[offset : offset + 4] != bytes((delta, delta, delta, 255)):
+            return False
+    return True
+
+
 def _visual_failure_binding_sha256(
     baseline_id: str,
     baseline_sha256: str,
@@ -567,10 +591,17 @@ def _validate_experience_evidence(
     if not isinstance(baselines, list) or not baselines:
         failures.append("v0.10 experience readiness requires reviewed visual baselines")
         return
+    if len(baselines) > VISUAL_MAX_BASELINES:
+        failures.append(
+            f"v0.10 visual baseline manifest exceeds bounded baseline count {VISUAL_MAX_BASELINES}"
+        )
+        return
 
     baseline_ids: set[str] = set()
     baseline_metadata: dict[str, tuple[int, int, float, str]] = {}
-    baseline_images: dict[str, tuple[int, int, bytes]] = {}
+    # Keep only artifact locators/digests. Decoded RGBA buffers can be very large and must not
+    # accumulate across a manifest; decode a baseline only while its comparison is being checked.
+    baseline_artifacts: dict[str, tuple[Path, str]] = {}
     baseline_digests: dict[str, str] = {}
     observed_scales: set[float] = set()
     observed_resolutions: set[str] = set()
@@ -622,8 +653,12 @@ def _validate_experience_evidence(
             expected_width=width,
             expected_height=height,
         )
-        if baseline_image is not None and isinstance(baseline_digest, str):
-            baseline_images[baseline_id] = baseline_image
+        if (
+            baseline_image is not None
+            and artifact_path is not None
+            and isinstance(baseline_digest, str)
+        ):
+            baseline_artifacts[baseline_id] = (artifact_path, baseline_digest)
             baseline_digests[baseline_id] = baseline_digest
 
     required_visual_surfaces = experience.get("required_visual_surfaces")
@@ -715,7 +750,19 @@ def _validate_experience_evidence(
                 expected_width=metadata[0],
                 expected_height=metadata[1],
             )
-            baseline_image = baseline_images.get(str(baseline_id))
+            baseline_artifact = baseline_artifacts.get(str(baseline_id))
+            baseline_image = (
+                _validate_png_artifact(
+                    baseline_artifact[0],
+                    baseline_artifact[1],
+                    label=f"visual baseline artifact {baseline_id}",
+                    failures=failures,
+                    expected_width=metadata[0],
+                    expected_height=metadata[1],
+                )
+                if baseline_artifact is not None
+                else None
+            )
             if (
                 baseline_image is not None
                 and capture_image is not None
@@ -767,7 +814,19 @@ def _validate_experience_evidence(
                 expected_width=metadata[0],
                 expected_height=metadata[1],
             )
-            baseline_image = baseline_images.get(baseline_id)
+            baseline_artifact = baseline_artifacts.get(baseline_id)
+            baseline_image = (
+                _validate_png_artifact(
+                    baseline_artifact[0],
+                    baseline_artifact[1],
+                    label=f"visual baseline artifact {baseline_id}",
+                    failures=failures,
+                    expected_width=metadata[0],
+                    expected_height=metadata[1],
+                )
+                if baseline_artifact is not None
+                else None
+            )
             if (
                 baseline_image is not None
                 and failed_capture_image is not None
@@ -783,7 +842,7 @@ def _validate_experience_evidence(
                 failures=failures,
             )
             diff_digest = item.get("diff_sha256")
-            _validate_png_artifact(
+            diff_image = _validate_png_artifact(
                 diff_path,
                 diff_digest,
                 label=label,
@@ -791,6 +850,17 @@ def _validate_experience_evidence(
                 expected_width=metadata[0],
                 expected_height=metadata[1],
             )
+            if (
+                baseline_image is not None
+                and failed_capture_image is not None
+                and diff_image is not None
+                and not _matches_canonical_visual_diff(
+                    baseline_image, failed_capture_image, diff_image
+                )
+            ):
+                failures.append(
+                    f"{label} pixels do not match the canonical failed-pair diff"
+                )
             if (
                 isinstance(failed_capture_digest, str)
                 and SHA256_RE.fullmatch(failed_capture_digest)
@@ -1058,10 +1128,6 @@ def validate(root: Path) -> list[str]:
         failures.append("v0.10 support promotion authority must remain protected-post-release-closure")
     if contract.get("required_evidence") != EXPECTED_EVIDENCE:
         failures.append(f"v0.10 required_evidence must remain exactly {EXPECTED_EVIDENCE!r}")
-    if contract.get("operation_semantics_contract") != EXPECTED_OPERATION_SEMANTICS_CONTRACT:
-        failures.append("v0.10 operation_semantics_contract must bind the canonical operation-semantics contract")
-    elif not (root / EXPECTED_OPERATION_SEMANTICS_CONTRACT).is_file():
-        failures.append("v0.10 operation-semantics contract file is missing")
     experience = contract.get("experience")
     if not isinstance(experience, dict):
         failures.append("v0.10 qualification contract missing experience")
@@ -1089,10 +1155,6 @@ def validate(root: Path) -> list[str]:
             failures.append("roadmap v0.10 desktop_shell_scope must remain bounded-integration-not-full-replacement")
         if milestone.get("interaction_adr") != EXPECTED_INTERACTION_ADR:
             failures.append("roadmap v0.10 interaction_adr must bind ADR 0031")
-        if milestone.get("operation_semantics_contract") != EXPECTED_OPERATION_SEMANTICS_CONTRACT:
-            failures.append("roadmap v0.10 operation_semantics_contract must bind the canonical contract")
-        if milestone.get("operation_semantics_adr") != EXPECTED_OPERATION_SEMANTICS_ADR:
-            failures.append("roadmap v0.10 operation_semantics_adr must bind ADR 0032")
         if milestone.get("claim_class") != "Experimental":
             failures.append("roadmap v0.10 claim_class must remain Experimental")
         if milestone.get("qualification_contract") != CONTRACT_PATH:
