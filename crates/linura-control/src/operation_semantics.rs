@@ -65,7 +65,7 @@ pub struct OperationSemanticsControl {
 
 impl OperationSemanticsControl {
     #[must_use]
-    pub const fn new(registry: OperationRegistry) -> Self {
+    pub fn new(registry: OperationRegistry) -> Self {
         Self { registry }
     }
 
