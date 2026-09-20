@@ -510,7 +510,9 @@ fn connect_runtime_bus(context: &NativeSessionContext) -> Result<Connection, Pla
     // and kernel peer credentials bind the connected bus endpoint to the selected uid.
     let stream = connect_unix_with_deadline(&bus_path, NATIVE_PROBE_TIMEOUT, "logind user D-Bus")?;
     let credentials = socket_peercred(&stream).map_err(|error| {
-        PlatformProbeError::new(format!("cannot read logind user D-Bus peer credentials: {error}"))
+        PlatformProbeError::new(format!(
+            "cannot read logind user D-Bus peer credentials: {error}"
+        ))
     })?;
     if credentials.uid.as_raw() != context.uid {
         return Err(PlatformProbeError::new(
