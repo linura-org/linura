@@ -24,6 +24,7 @@ FIXTURE_PATHS = (
     "docs/ui-architecture.md",
     "AGENTS.md",
     "agents/skills/policy.md",
+    "README.md",
 )
 
 
@@ -164,6 +165,26 @@ class OperationSemanticsContractTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     "SECURITY.md missing operation-semantics marker" in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_readme_cannot_reintroduce_universal_durable_prepare_rule(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            readme = root / "README.md"
+            readme.write_text(
+                readme.read_text(encoding="utf-8").replace(
+                    "Supported `ManagedExternalEffect` operations require durable pre-execution prepare/recovery state.",
+                    "External effects require durable pre-execution prepare/recovery state.",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "README.md missing operation-semantics marker" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
