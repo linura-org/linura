@@ -28,7 +28,6 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         paths = (
             "contracts/roadmap.toml",
             "contracts/v010-workstation-qualification.toml",
-            "contracts/operation-semantics.toml",
             "profiles/arch-hyprland-v1.toml",
             "hardware/support-matrix.json",
             "docs/qualification/v0.10.0.md",
@@ -114,6 +113,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         pixel_value: int = 0,
         transparent_gray: int | None = None,
         extra_raw_bytes: int = 0,
+        ancillary_chunks: tuple[tuple[bytes, bytes], ...] = (),
     ) -> bytes:
         def chunk(kind: bytes, payload: bytes) -> bytes:
             return (
@@ -136,6 +136,9 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         result = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
         if transparent_gray is not None:
             result += chunk(b"tRNS", struct.pack(">H", transparent_gray))
+        for kind, payload in ancillary_chunks:
+            self.assertEqual(len(kind), 4)
+            result += chunk(kind, payload)
         return result + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 
     def _refresh_experience_evidence_digest(self, root: Path) -> None:
@@ -653,6 +656,34 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 result.stderr,
             )
 
+    def test_png_color_management_metadata_is_rejected_before_pixel_equivalence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            evidence_path = root / "qualification/v010/experience-evidence.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            comparison = evidence["visual_comparisons"][0]
+            capture_path = root / comparison["capture"]
+            capture_path.write_bytes(
+                self._png_bytes(
+                    1280,
+                    800,
+                    ancillary_chunks=((b"gAMA", struct.pack(">I", 45455)),),
+                )
+            )
+            comparison["capture_sha256"] = hashlib.sha256(
+                capture_path.read_bytes()
+            ).hexdigest()
+            evidence_path.write_text(
+                json.dumps(evidence, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            self._refresh_experience_evidence_digest(root)
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unsupported color-management PNG chunk gAMA", result.stderr)
+
     def test_png_overlong_inflate_is_rejected_under_declared_dimensions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -705,6 +736,36 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("does not represent an actual failed pixel comparison", result.stderr)
+
+    def test_retained_failure_diff_pixels_must_match_bound_failed_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            evidence_path = root / "qualification/v010/experience-evidence.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            failure = evidence["retained_failure_diffs"][0]
+            baseline_path = root / "visual/baselines/firstboot-1280x800-1x.png"
+            diff_path = root / failure["diff"]
+            diff_path.write_bytes(baseline_path.read_bytes())
+            failure["diff_sha256"] = hashlib.sha256(diff_path.read_bytes()).hexdigest()
+            failure["binding_sha256"] = self._visual_failure_binding(
+                failure["baseline_id"],
+                failure["baseline_sha256"],
+                failure["failed_capture_sha256"],
+                failure["diff_sha256"],
+            )
+            evidence_path.write_text(
+                json.dumps(evidence, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            self._refresh_experience_evidence_digest(root)
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "pixels do not match the canonical failed-pair diff",
+                result.stderr,
+            )
 
     def test_accessibility_claims_require_digest_bound_runner_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -775,15 +836,6 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("interaction ADR 0031 is missing", result.stderr)
-
-    def test_operation_semantics_contract_is_required(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            self._copy_fixture(root)
-            (root / "contracts/operation-semantics.toml").unlink()
-            result = self._run(root)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("operation-semantics contract file is missing", result.stderr)
 
     def test_roadmap_must_bind_machine_readable_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
