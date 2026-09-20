@@ -105,7 +105,7 @@ impl OperationRegistry {
         self.descriptors.get(id)
     }
 
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &OperationDescriptor> {
+    pub fn iter(&self) -> impl Iterator<Item = &OperationDescriptor> + '_ {
         self.descriptors.values()
     }
 
