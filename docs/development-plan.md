@@ -139,7 +139,12 @@ The v0.9 claim is Linura installation/adoption on the pinned Linux base, not a g
 Integrate the proven trust core into a coherent external-user experience without prematurely claiming Stable support:
 
 - First Boot, local Library and profile/setup workflows;
-- initial Control Center and shell surfaces over the same typed control protocol;
+- initial Control Center and bounded desktop/shell surfaces over the same typed control protocol;
+- versioned declarative configuration that compiles to typed, previewable, non-authorizing Linura input;
+- keyboard navigation, essential shortcuts and a command palette/launcher backed by registered typed operations or non-authoritative navigation;
+- bounded quick settings, launcher/workspace integration and lifecycle notifications/OSD for the qualified workstation slice;
+- a shared Linura visual/theme token foundation across First Boot, Control Center and bounded desktop surfaces;
+- keyboard/mouse parity for every supported v0.10 end-user workflow unless the release contract records an explicit exception;
 - essential system domains required by the Experimental reference environment;
 - manual operation that remains complete without AI;
 - bounded agent-assisted `IntentProposal` workflows;
@@ -176,9 +181,9 @@ Provider breadth does not automatically inherit Stable status. Each capability a
 
 ## Phase 13 — personal operating environment, workflows and derived UI (post-v1 strategic expansion)
 
-Add declarative workflow runtime, constrained derived surfaces, machine profile/personality composition, profile/setup capture from managed causal state, coherent shell/design-system behavior and accessibility/input parity.
+Build beyond the bounded v0.10 workstation baseline with a declarative workflow runtime, constrained derived surfaces, machine profile/personality composition, profile/setup capture from managed causal state, richer coherent shell/design-system behavior, and broader accessibility/input capabilities. Phase 13 extends the v0.10 visual/theme and keyboard/mouse-parity foundation; it does not defer those v0.10 qualification requirements.
 
-Custom code uses isolated extensions only. Workflow steps still enter Linura Control through typed requests and cannot bypass the mutation lifecycle.
+Custom code uses isolated extensions only. Workflow steps still enter Linura Control through typed requests and cannot bypass the operation-class-specific Control path.
 
 Reusable workflows can later be cataloged by the Linura Library, but portability contracts must stabilize before Stable support is claimed.
 
