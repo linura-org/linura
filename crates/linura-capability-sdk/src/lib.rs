@@ -8,6 +8,9 @@ pub enum OperationEffectBindingError {
     EmptyResourcePrefix,
     ResourcePrefixTooLong,
     ResourcePrefixControlCharacter,
+    EmptyResourceSuffix,
+    ResourceSuffixTooLong,
+    ResourceSuffixControlCharacter,
     EmptyChangeKeys,
     InvalidChangeKey,
     DuplicateChangeKey,
@@ -18,6 +21,7 @@ pub struct OperationEffectBinding {
     provider: ProviderId,
     observation_capability: CapabilityId,
     resource_prefix: String,
+    resource_suffix: Option<String>,
     change_keys: BTreeSet<String>,
 }
 
@@ -56,6 +60,7 @@ impl OperationEffectBinding {
             provider,
             observation_capability,
             resource_prefix,
+            resource_suffix: None,
             change_keys: canonical_change_keys,
         })
     }
@@ -73,6 +78,38 @@ impl OperationEffectBinding {
     #[must_use]
     pub fn resource_prefix(&self) -> &str {
         &self.resource_prefix
+    }
+
+    pub fn with_resource_suffix(
+        mut self,
+        resource_suffix: impl Into<String>,
+    ) -> Result<Self, OperationEffectBindingError> {
+        let resource_suffix = resource_suffix.into();
+        if resource_suffix.is_empty() {
+            return Err(OperationEffectBindingError::EmptyResourceSuffix);
+        }
+        if resource_suffix.len() > 256 {
+            return Err(OperationEffectBindingError::ResourceSuffixTooLong);
+        }
+        if resource_suffix.chars().any(char::is_control) {
+            return Err(OperationEffectBindingError::ResourceSuffixControlCharacter);
+        }
+        self.resource_suffix = Some(resource_suffix);
+        Ok(self)
+    }
+
+    #[must_use]
+    pub fn resource_suffix(&self) -> Option<&str> {
+        self.resource_suffix.as_deref()
+    }
+
+    #[must_use]
+    pub fn matches_resource(&self, resource: &str) -> bool {
+        resource.starts_with(&self.resource_prefix)
+            && self
+                .resource_suffix
+                .as_deref()
+                .is_none_or(|suffix| resource.ends_with(suffix))
     }
 
     #[must_use]
@@ -392,6 +429,25 @@ mod tests {
             }],
             desired_resources: vec![],
         }
+    }
+
+    #[test]
+    fn operation_effect_binding_can_narrow_resource_scope_with_suffix() {
+        let binding = systemd_effect_binding()
+            .with_resource_suffix(".service")
+            .unwrap_or_else(|error| unreachable!("{error:?}"));
+
+        assert!(binding.matches_resource("systemd:unit:linura-managed-example.service"));
+        assert!(!binding.matches_resource("systemd:unit:linura-managed-example.timer"));
+        assert_eq!(binding.resource_suffix(), Some(".service"));
+    }
+
+    #[test]
+    fn operation_effect_binding_rejects_empty_resource_suffix() {
+        assert_eq!(
+            systemd_effect_binding().with_resource_suffix(""),
+            Err(OperationEffectBindingError::EmptyResourceSuffix)
+        );
     }
 
     #[test]

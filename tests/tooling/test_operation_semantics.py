@@ -16,9 +16,15 @@ FIXTURE_PATHS = (
     "contracts/operation-semantics.toml",
     "docs/adr/0032-classify-operations-before-authority.md",
     "docs/operation-semantics.md",
+    "docs/threat-model.md",
     "crates/linura-core/src/lib.rs",
     "crates/linura-capability-sdk/src/lib.rs",
     "crates/linura-control/src/operation_semantics.rs",
+    "crates/linura-control/src/operation_registry.rs",
+    "crates/linura-control/src/managed_lifecycle.rs",
+    "crates/linura-control/src/durable_authority.rs",
+    "crates/linura-control/src/risk_classification.rs",
+    "crates/linura-control/src/policy_review.rs",
     "SECURITY.md",
     "docs/milestones/v0.10.0.md",
     "docs/qualification/v0.10.0.md",
@@ -60,6 +66,48 @@ class OperationSemanticsContractTests(unittest.TestCase):
             self._copy_fixture(root)
             (root / "docs/adr/0032-classify-operations-before-authority.md").unlink()
             self.assertTrue(any("ADR 0032" in failure for failure in check_operation_semantics.validate(root)))
+
+    def test_registered_authority_adr_cannot_drop_risk_floor_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            adr = root / "docs/adr/0032-classify-operations-before-authority.md"
+            adr.write_text(
+                adr.read_text(encoding="utf-8").replace(
+                    "A registered risk floor is applied **before policy review**.",
+                    "A registered risk floor is advisory.",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "docs/adr/0032-classify-operations-before-authority.md missing operation-semantics marker"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_threat_model_cannot_drop_recovery_registry_revalidation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            threat = root / "docs/threat-model.md"
+            threat.write_text(
+                threat.read_text(encoding="utf-8").replace(
+                    "managed restart and `Indeterminate` recovery re-establish authority from current registration",
+                    "managed restart reuses prior registration",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "docs/threat-model.md missing operation-semantics marker"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
 
     def test_transient_external_effect_cannot_gain_privileged_executor(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -294,6 +342,175 @@ class OperationSemanticsContractTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     "OperationSemanticsControl missing required fragment: pub enum OperationPlanBindingMismatch"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_registered_managed_systemd_contract_cannot_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._rewrite_contract(
+                root,
+                'risk_floor = "security-sensitive"',
+                'risk_floor = "user-state"',
+            )
+            self.assertTrue(
+                any(
+                    "registered_operations drifted" in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_registered_managed_systemd_resource_suffix_cannot_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._rewrite_contract(
+                root,
+                'resource_suffix = ".service"',
+                'resource_suffix = ".timer"',
+            )
+            self.assertTrue(
+                any(
+                    "registered_operations drifted" in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_registered_risk_floor_authority_binding_cannot_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._rewrite_contract(
+                root,
+                'registered_risk_floor_authority_binding = "policy-review-and-durable-authority-binding"',
+                'registered_risk_floor_authority_binding = "handoff-only"',
+            )
+            self.assertTrue(
+                any(
+                    "registered_risk_floor_authority_binding drifted"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_managed_candidate_cannot_drop_registered_risk_floor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            managed = root / "crates/linura-control/src/managed_lifecycle.rs"
+            managed.write_text(
+                managed.read_text(encoding="utf-8").replace(
+                    "candidate_with_risk_floor(",
+                    "candidate(",
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "managed lifecycle missing trusted operation-registry integration"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_durable_authority_cannot_drop_floored_policy_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            durable = root / "crates/linura-control/src/durable_authority.rs"
+            durable.write_text(
+                durable.read_text(encoding="utf-8").replace(
+                    "review_plan_with_classification(",
+                    "review_plan(",
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "durable authority floored policy-review path count drifted"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_managed_lifecycle_cannot_skip_trusted_registry_resolution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            managed = root / "crates/linura-control/src/managed_lifecycle.rs"
+            managed.write_text(
+                managed.read_text(encoding="utf-8").replace(
+                    "self.validate_registered_managed_systemd_candidate(&candidate)?;",
+                    "",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "managed lifecycle missing trusted operation-registry integration"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_reprepared_recovery_cannot_skip_registered_operation_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            managed = root / "crates/linura-control/src/managed_lifecycle.rs"
+            marker = "self.handoff_registered_managed_systemd(&principal, prepared.as_mut())?"
+            text = managed.read_text(encoding="utf-8")
+            self.assertEqual(text.count(marker), 1)
+            managed.write_text(text.replace(marker, "self.authority.handoff(&principal, prepared.as_mut())?", 1), encoding="utf-8")
+            self.assertTrue(
+                any(
+                    "managed lifecycle missing trusted operation-registry integration"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_durable_handoff_stays_internal_and_exposes_plan_for_semantic_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            durable = root / "crates/linura-control/src/durable_authority.rs"
+            durable.write_text(
+                durable.read_text(encoding="utf-8").replace(
+                    "pub(crate) fn handoff(",
+                    "pub fn handoff(",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "durable authority handoff boundary missing required fragment"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_builtin_registry_cannot_drop_managed_systemd_operation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            registry = root / "crates/linura-control/src/operation_registry.rs"
+            registry.write_text(
+                registry.read_text(encoding="utf-8").replace(
+                    '"operation:systemd.unit.set-active-state"',
+                    '"operation:systemd.unit.other"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "trusted Control operation registry missing required fragment"
                     in failure
                     for failure in check_operation_semantics.validate(root)
                 )

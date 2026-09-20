@@ -84,6 +84,15 @@ pub(crate) fn review_plan(
     Ok(review_subject_for_control(subject))
 }
 
+pub(crate) fn review_plan_with_classification(
+    principal: &AuthenticatedPrincipal,
+    plan: &ReconciliationPlan,
+    classification: RiskClassification,
+) -> Result<TrustedPolicyReview, PolicySubjectError> {
+    let subject = policy_subject_from_plan_with_classification(principal, plan, classification)?;
+    Ok(review_subject_for_control(subject))
+}
+
 pub(crate) fn review_subject_for_control(subject: PolicySubject) -> TrustedPolicyReview {
     TrustedPolicyReview {
         evaluation: BaselinePolicy::default().evaluate(&subject),
@@ -297,6 +306,30 @@ mod tests {
                     .message
                     .contains("systemd.unit.active-state.security-sensitive")
         }));
+    }
+
+    #[test]
+    fn explicit_trusted_classification_is_reflected_in_policy_subject() {
+        let plan = canonical_plan();
+        let review = review_plan_with_classification(
+            &principal(),
+            &plan,
+            RiskClassification::Classified {
+                risk: RiskClass::Destructive,
+                revision: "risk-policy:test:registered-floor",
+                rule_ids: vec!["operation-registry:test-floor"],
+            },
+        )
+        .unwrap_or_else(|error| unreachable!("{error:?}"));
+
+        assert_eq!(review.subject().prospective_risk(), RiskClass::Destructive);
+        assert!(matches!(
+            review.decision(),
+            PolicyDecision::RequireApproval {
+                class: ApprovalClass::DestructiveAction,
+                ..
+            }
+        ));
     }
 
     #[test]

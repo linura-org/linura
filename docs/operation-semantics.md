@@ -25,6 +25,21 @@ Risk does not determine whether something is a query, Linura-owned state, transi
 
 The trusted operation registry/domain contract owns classification. The concrete v0.10 binding is `linura_capability_sdk::OperationRegistry` for duplicate-safe registered descriptors plus `linura_control::OperationSemanticsControl` for Control-owned external-effect resolution against the canonical plan and trusted risk classification. Every registered external effect also carries a validated `OperationEffectBinding` that fixes the trusted provider, observation capability, resource scope, and allowed material change keys; Control rejects a plan whose shape does not match that binding before risk/policy resolution. Clients, agents, configuration and providers cannot self-declare a weaker class or pair a registered operation with an unrelated plan.
 
+## First concrete registered external operation
+
+The first built-in external operation registered through this v0.10 substrate is the already-qualified v0.6 managed systemd active-state effect:
+
+- operation ID: `operation:systemd.unit.set-active-state`;
+- class: `ManagedExternalEffect`;
+- trusted risk floor: `SecuritySensitive`;
+- trusted risk-floor provenance: `operation-registry.managed-systemd-active-state.risk-floor`;
+- provider: `systemd`;
+- observation capability: `systemd.unit.observe`;
+- resource scope: exact trusted prefix/suffix match `systemd:unit:linura-managed-*.service` (both `systemd:unit:linura-managed-` and `.service` are encoded in the registered effect binding);
+- allowed material change key: `active_state`.
+
+This registration does not widen the v0.6 effect. It makes the existing narrow lifecycle consume the same trusted registry that future v0.10 interfaces and domains must use. `ManagedLifecycleControl` constructs the built-in registry internally, validates that registration at composition time, and resolves the initial canonical candidate plus any post-approval refreshed candidate through `OperationSemanticsControl` before durable prepare. Every privileged handoff is revalidated against the registered operation immediately before authority crosses the handoff boundary, including an indeterminate-recovery `Reprepared` candidate, so recovery cannot become an unclassified execution path. The registered risk floor is also fed into durable candidate and recovery construction before policy evaluation: the `PolicySubject`, approval decision, risk provenance, review digest and signed `AuthorityBinding.trusted_risk` all carry the floored risk. Handoff requires the current registry resolution to equal that durable trusted risk, so raising a registered floor cannot reuse weaker prior authority.
+
 ## Promotion rules
 
 A transient external effect is valid only when all of these remain true:

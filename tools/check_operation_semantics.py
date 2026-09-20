@@ -9,9 +9,15 @@ import tomllib
 CONTRACT_PATH = "contracts/operation-semantics.toml"
 ADR_PATH = "docs/adr/0032-classify-operations-before-authority.md"
 DOC_PATH = "docs/operation-semantics.md"
+THREAT_MODEL_PATH = "docs/threat-model.md"
 CORE_PATH = "crates/linura-core/src/lib.rs"
 DESCRIPTOR_PATH = "crates/linura-capability-sdk/src/lib.rs"
 CONTROL_OPERATION_PATH = "crates/linura-control/src/operation_semantics.rs"
+CONTROL_REGISTRY_PATH = "crates/linura-control/src/operation_registry.rs"
+MANAGED_LIFECYCLE_PATH = "crates/linura-control/src/managed_lifecycle.rs"
+DURABLE_AUTHORITY_PATH = "crates/linura-control/src/durable_authority.rs"
+RISK_CLASSIFICATION_PATH = "crates/linura-control/src/risk_classification.rs"
+POLICY_REVIEW_PATH = "crates/linura-control/src/policy_review.rs"
 SECURITY_PATH = "SECURITY.md"
 MILESTONE_PATH = "docs/milestones/v0.10.0.md"
 QUALIFICATION_PATH = "docs/qualification/v0.10.0.md"
@@ -28,6 +34,19 @@ EXPECTED_CLASSES = {
     "linura-owned-state": {"rust_variant": "LinuraOwnedState", "changes_external_state": False, "changes_linura_durable_state": True, "control_mediated": True, "risk_classification_required": True, "plan_bound_authorization": False, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "linura-local-transaction"},
     "transient-external-effect": {"rust_variant": "TransientExternalEffect", "changes_external_state": True, "changes_linura_durable_state": False, "control_mediated": True, "risk_classification_required": True, "plan_bound_authorization": True, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "bounded-transient-effect"},
     "managed-external-effect": {"rust_variant": "ManagedExternalEffect", "changes_external_state": True, "changes_linura_durable_state": True, "control_mediated": True, "risk_classification_required": True, "plan_bound_authorization": True, "privileged_executor_allowed": True, "canonical_managed_lifecycle": True, "path": "canonical-managed-mutation"},
+}
+EXPECTED_REGISTERED_OPERATIONS = {
+    "managed-systemd-active-state": {
+        "operation_id": "operation:systemd.unit.set-active-state",
+        "class": "managed-external-effect",
+        "risk_floor": "security-sensitive",
+        "risk_floor_rule_id": "operation-registry.managed-systemd-active-state.risk-floor",
+        "provider": "systemd",
+        "observation_capability": "systemd.unit.observe",
+        "resource_prefix": "systemd:unit:linura-managed-",
+        "resource_suffix": ".service",
+        "change_keys": ["active_state"],
+    },
 }
 EXPECTED_RUST_VARIANTS = [value["rust_variant"] for value in EXPECTED_CLASSES.values()]
 ENUM_RE = re.compile(r"pub enum OperationClass\s*\{(?P<body>[^}]*)\}", re.DOTALL)
@@ -87,6 +106,8 @@ def validate(root: Path) -> list[str]:
         "policy_plan_type": "linura_planner::ReconciliationPlan",
         "external_effect_authorization_binding": "canonical-plan-plus-authenticated-principal",
         "external_effect_plan_shape_binding": "registered-provider-capability-resource-scope-change-keys",
+        "managed_handoff_semantics_binding": "registered-operation-before-every-privileged-handoff",
+        "registered_risk_floor_authority_binding": "policy-review-and-durable-authority-binding",
         "transient_external_max_risk": "user-state",
         "transient_durable_prepare_required": False,
         "transient_failure_model": "bounded-reobserve-no-durable-indeterminate-recovery",
@@ -101,12 +122,23 @@ def validate(root: Path) -> list[str]:
         failures.append("operation-semantics contract missing classes")
     elif classes != EXPECTED_CLASSES:
         failures.append("operation-semantics classes drifted from the canonical contract")
+    registered_operations = contract.get("registered_operations")
+    if not isinstance(registered_operations, dict):
+        failures.append("operation-semantics contract missing registered_operations")
+    elif registered_operations != EXPECTED_REGISTERED_OPERATIONS:
+        failures.append("operation-semantics registered_operations drifted from the canonical contract")
     required_files = (
         (ADR_PATH, "ADR 0032"),
         (DOC_PATH, "operation semantics documentation"),
+        (THREAT_MODEL_PATH, "operation-semantics threat model"),
         (CORE_PATH, "OperationClass core type"),
         (DESCRIPTOR_PATH, "OperationDescriptor/OperationRegistry types"),
         (CONTROL_OPERATION_PATH, "Control operation-semantics resolver"),
+        (CONTROL_REGISTRY_PATH, "trusted Control operation registry"),
+        (MANAGED_LIFECYCLE_PATH, "managed lifecycle integration"),
+        (DURABLE_AUTHORITY_PATH, "durable authority handoff boundary"),
+        (RISK_CLASSIFICATION_PATH, "trusted risk classification"),
+        (POLICY_REVIEW_PATH, "trusted policy review"),
         (SECURITY_PATH, "security policy"),
         (MILESTONE_PATH, "v0.10 milestone"),
         (QUALIFICATION_PATH, "v0.10 qualification"),
@@ -121,6 +153,17 @@ def validate(root: Path) -> list[str]:
             failures.append(f"missing or non-regular {label}: {path}")
 
     required_markers = {
+        ADR_PATH: (
+            "### Registered semantics are authority input",
+            "A registered risk floor is applied **before policy review**.",
+            "Immediately before every privileged handoff, Control re-resolves the prepared canonical plan",
+        ),
+        THREAT_MODEL_PATH: (
+            "### Registered-operation substitution or risk-floor weakening",
+            "the registered risk floor is applied before policy review",
+            "managed restart and `Indeterminate` recovery re-establish authority from current registration",
+            "immediately before every privileged handoff, Control re-resolves the prepared plan through the trusted registry",
+        ),
         SECURITY_PATH: (
             "Prepare before managed external effects.",
             "A qualified `TransientExternalEffect` is deliberately exempt from durable prepare",
@@ -181,7 +224,7 @@ def validate(root: Path) -> list[str]:
     descriptor_path = root / DESCRIPTOR_PATH
     if descriptor_path.is_file() and not descriptor_path.is_symlink():
         descriptor = descriptor_path.read_text(encoding="utf-8")
-        for fragment in ("pub struct OperationDescriptor", "pub struct OperationEffectBinding", "pub struct OperationRegistry", "MissingEffectBinding", "DuplicateOperation", "effect_binding", "OperationClass", "RiskClass", "pub fn try_new"):
+        for fragment in ("pub struct OperationDescriptor", "pub struct OperationEffectBinding", "pub struct OperationRegistry", "MissingEffectBinding", "DuplicateOperation", "effect_binding", "matches_resource", "resource_suffix", "OperationClass", "RiskClass", "pub fn try_new"):
             if fragment not in descriptor:
                 failures.append(f"linura_capability_sdk::OperationDescriptor missing required fragment: {fragment}")
     control_operation_path = root / CONTROL_OPERATION_PATH
@@ -198,6 +241,102 @@ def validate(root: Path) -> list[str]:
                 failures.append(
                     f"linura_control::OperationSemanticsControl missing required fragment: {fragment}"
                 )
+    registry_path = root / CONTROL_REGISTRY_PATH
+    if registry_path.is_file() and not registry_path.is_symlink():
+        registry_text = registry_path.read_text(encoding="utf-8")
+        for fragment in (
+            'MANAGED_SYSTEMD_REGISTERED_OPERATION_ID',
+            '"operation:systemd.unit.set-active-state"',
+            'OperationClass::ManagedExternalEffect',
+            'Some(RiskClass::SecuritySensitive)',
+            'MANAGED_SYSTEMD_RESOURCE_PREFIX',
+            'MANAGED_SYSTEMD_RESOURCE_SUFFIX',
+            'MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID',
+            '"operation-registry.managed-systemd-active-state.risk-floor"',
+            '.with_resource_suffix(MANAGED_SYSTEMD_RESOURCE_SUFFIX)',
+            'vec![MANAGED_SYSTEMD_CHANGE_KEY.into()]',
+            'trusted_builtin_operation_registry',
+        ):
+            if fragment not in registry_text:
+                failures.append(
+                    f"trusted Control operation registry missing required fragment: {fragment}"
+                )
+    managed_path = root / MANAGED_LIFECYCLE_PATH
+    if managed_path.is_file() and not managed_path.is_symlink():
+        managed_text = managed_path.read_text(encoding="utf-8")
+        for fragment in (
+            'trusted_builtin_operation_registry()',
+            'validate_managed_systemd_registration(&operation_semantics)',
+            'self.validate_registered_managed_systemd_candidate(&candidate)?',
+            'self.validate_registered_managed_systemd_candidate(&refreshed)?',
+            'self.handoff_registered_managed_systemd(&principal, &mut prepared)?',
+            'self.handoff_registered_managed_systemd(&principal, prepared.as_mut())?',
+            'candidate_with_risk_floor',
+            'recover_indeterminate_with_risk_floor',
+            'recover_indeterminate_with_approver_and_risk_floor',
+            'registered_managed_systemd_risk_floor',
+            'prepared.binding().trusted_risk()',
+            'semantics.risk() != bound_risk',
+        ):
+            if fragment not in managed_text:
+                failures.append(
+                    f"managed lifecycle missing trusted operation-registry integration: {fragment}"
+                )
+        expected_managed_path_counts = {
+            "candidate_with_risk_floor(": 2,
+            "recover_indeterminate_with_risk_floor(": 3,
+            "recover_indeterminate_with_approver_and_risk_floor(": 1,
+        }
+        for fragment, expected_count in expected_managed_path_counts.items():
+            actual_count = managed_text.count(fragment)
+            if actual_count != expected_count:
+                failures.append(
+                    f"managed lifecycle risk-floor path count drifted for {fragment}: "
+                    f"expected {expected_count}, found {actual_count}"
+                )
+    durable_path = root / DURABLE_AUTHORITY_PATH
+    if durable_path.is_file() and not durable_path.is_symlink():
+        durable_text = durable_path.read_text(encoding="utf-8")
+        for fragment in (
+            "pub(crate) fn plan(&self) -> &linura_planner::ReconciliationPlan",
+            "pub(crate) fn handoff(",
+            "candidate_with_risk_floor",
+            "recover_indeterminate_with_risk_floor",
+            "recover_indeterminate_with_approver_and_risk_floor",
+            "review_plan_with_classification",
+            "candidate.risk_floor",
+            "review.subject().prospective_risk() != risk.risk",
+        ):
+            if fragment not in durable_text:
+                failures.append(
+                    f"durable authority handoff boundary missing required fragment: {fragment}"
+                )
+        expected_review_paths = 3
+        actual_review_paths = durable_text.count("review_plan_with_classification(")
+        if actual_review_paths != expected_review_paths:
+            failures.append(
+                "durable authority floored policy-review path count drifted: "
+                f"expected {expected_review_paths}, found {actual_review_paths}"
+            )
+    risk_path = root / RISK_CLASSIFICATION_PATH
+    if risk_path.is_file() and not risk_path.is_symlink():
+        risk_text = risk_path.read_text(encoding="utf-8")
+        for fragment in (
+            "REGISTERED_OPERATION_RISK_POLICY_REVISION",
+            "classify_plan_risk_with_floor",
+            "std::cmp::max(risk, floor)",
+        ):
+            if fragment not in risk_text:
+                failures.append(
+                    f"trusted risk classification missing registered floor binding: {fragment}"
+                )
+    policy_review_path = root / POLICY_REVIEW_PATH
+    if policy_review_path.is_file() and not policy_review_path.is_symlink():
+        policy_review_text = policy_review_path.read_text(encoding="utf-8")
+        if "review_plan_with_classification" not in policy_review_text:
+            failures.append(
+                "trusted policy review missing explicit risk-classification review path"
+            )
     core_text = core_path.read_text(encoding="utf-8") if core_path.is_file() and not core_path.is_symlink() else ""
     if "requires_plan_bound_external_authorization" not in core_text:
         failures.append("linura_core::OperationClass missing plan-bound external authorization invariant")

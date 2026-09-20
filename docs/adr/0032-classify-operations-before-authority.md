@@ -41,6 +41,20 @@ Operation class is **not caller-controlled metadata**.
 - Unknown or ambiguous effect semantics fail closed for mutation. They do not default to `TransientExternalEffect`.
 - A provider may report mechanism requirements such as privilege/reversibility, but it cannot use those reports to weaken the trusted class.
 
+### Registered semantics are authority input
+
+The trusted operation registry is part of Linura's authority trust boundary, not descriptive metadata consulted after policy review.
+
+For an external effect, the registered descriptor and effect binding constrain the operation identifier, semantic class, trusted risk floor, provider, observation capability, resource scope and material change keys before authority is created. Control resolves the canonical plan against that trusted registration and fails closed when the plan does not match it.
+
+A registered risk floor is applied **before policy review**. The resulting trusted risk provenance feeds the canonical policy subject and approval decision, and the exact review/risk material is retained in the durable authority binding. Raising or otherwise changing the registered floor therefore invalidates weaker prior authority instead of allowing an already-reviewed or prepared generation to cross the effect boundary under stale semantics.
+
+Managed recovery follows the same rule. A restart, `Indeterminate` transaction or `Reprepared` generation does not inherit permission merely because an earlier generation was valid. Fresh recovery reconstructs authority from the current trusted registration, current authoritative observation and current canonical plan; the registered risk floor is applied again before review/approval and the resulting authority is bound to the new generation.
+
+Immediately before every privileged handoff, Control re-resolves the prepared canonical plan against the current registered operation and requires the resolved trusted risk to equal the risk committed in the durable authority binding. Registry mismatch, missing registration, weaker/stale reviewed risk or changed plan shape blocks handoff. The process-local dispatch permit is minted only after that revalidation and the durable ambiguity transition succeed.
+
+The registry and its composition are therefore trusted control-plane inputs. Interfaces, providers, imported configuration, agents and recovery state cannot supply or weaken these semantics.
+
 ### Risk is orthogonal
 
 `OperationClass` and `RiskClass` answer different questions.
