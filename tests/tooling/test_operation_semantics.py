@@ -79,6 +79,56 @@ class OperationSemanticsContractTests(unittest.TestCase):
             contract.write_text(contract.read_text(encoding="utf-8") + '\n[classes.unclassified-fast-path]\nrust_variant = "UnclassifiedFastPath"\n', encoding="utf-8")
             self.assertTrue(any("classes drifted" in failure for failure in check_operation_semantics.validate(root)))
 
+    def test_transient_authorization_cannot_skip_canonical_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._rewrite_contract(
+                root,
+                'transient_effect_lifecycle = ["request", "observe", "plan", "validate-classify", "authorize", "execute", "verify", "audit"]',
+                'transient_effect_lifecycle = ["request", "observe", "validate-classify", "authorize", "execute", "verify", "audit"]',
+            )
+            self.assertTrue(
+                any(
+                    "transient_effect_lifecycle drifted" in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_class_cannot_drop_plan_bound_authorization(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/operation-semantics.toml"
+            text = contract.read_text(encoding="utf-8")
+            marker = (
+                '[classes.transient-external-effect]\n'
+                'rust_variant = "TransientExternalEffect"\n'
+                'changes_external_state = true\n'
+                'changes_linura_durable_state = false\n'
+                'control_mediated = true\n'
+                'risk_classification_required = true\n'
+                'plan_bound_authorization = true\n'
+            )
+            self.assertIn(marker, text)
+            contract.write_text(
+                text.replace(
+                    marker,
+                    marker.replace(
+                        "plan_bound_authorization = true",
+                        "plan_bound_authorization = false",
+                    ),
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "classes drifted" in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
     def test_transient_prepare_exemption_cannot_drift_from_security_policy(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -99,15 +149,15 @@ class OperationSemanticsContractTests(unittest.TestCase):
                 )
             )
 
-    def test_ui_cannot_reintroduce_universal_plan_first_mutation_semantics(self) -> None:
+    def test_ui_cannot_drop_plan_bound_external_authorization(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
             ui = root / "docs/ui-architecture.md"
             ui.write_text(
                 ui.read_text(encoding="utf-8").replace(
-                    "every `ManagedExternalEffect` is plan-first",
-                    "every mutation is plan-first",
+                    "every external effect that reaches policy authorization is plan-bound",
+                    "managed external effects are plan-bound",
                     1,
                 ),
                 encoding="utf-8",
