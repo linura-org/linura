@@ -17,11 +17,24 @@ policy_subject_type = "linura_policy::PolicySubject"
 policy_plan_type = "linura_planner::ReconciliationPlan"
 external_effect_authorization_binding = "canonical-plan-plus-authenticated-principal"
 external_effect_plan_shape_binding = "registered-provider-capability-resource-scope-change-keys"
+managed_handoff_semantics_binding = "registered-operation-before-every-privileged-handoff"
+registered_risk_floor_authority_binding = "policy-review-and-durable-authority-binding"
 transient_external_max_risk = "user-state"
 transient_durable_prepare_required = false
 transient_failure_model = "bounded-reobserve-no-durable-indeterminate-recovery"
 managed_lifecycle = ["request", "observe", "plan", "validate", "authorize", "prepare", "execute", "verify", "commit", "audit", "reconcile"]
 transient_effect_lifecycle = ["request", "observe", "plan", "validate-classify", "authorize", "execute", "verify", "audit"]
+
+[registered_operations.managed-systemd-active-state]
+operation_id = "operation:systemd.unit.set-active-state"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+risk_floor_rule_id = "operation-registry.managed-systemd-active-state.risk-floor"
+provider = "systemd"
+observation_capability = "systemd.unit.observe"
+resource_prefix = "systemd:unit:linura-managed-"
+resource_suffix = ".service"
+change_keys = ["active_state"]
 
 [classes.experience-ephemeral]
 rust_variant = "ExperienceEphemeral"

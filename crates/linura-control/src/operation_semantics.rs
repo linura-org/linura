@@ -78,6 +78,11 @@ pub struct OperationSemanticsControl {
 
 impl OperationSemanticsControl {
     #[must_use]
+    pub(crate) fn from_trusted_registry(registry: OperationRegistry) -> Self {
+        Self { registry }
+    }
+
+    #[must_use]
     pub fn descriptor(&self, operation_id: &OperationId) -> Option<&OperationDescriptor> {
         self.registry.descriptor(operation_id)
     }
@@ -116,11 +121,7 @@ impl OperationSemanticsControl {
                 mismatch: OperationPlanBindingMismatch::ObservationCapability,
             });
         }
-        if !plan
-            .resource
-            .as_str()
-            .starts_with(binding.resource_prefix())
-        {
+        if !binding.matches_resource(plan.resource.as_str()) {
             return Err(OperationSemanticsError::PlanBindingMismatch {
                 operation_id: operation_id.clone(),
                 mismatch: OperationPlanBindingMismatch::Resource,

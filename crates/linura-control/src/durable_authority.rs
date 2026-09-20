@@ -17,8 +17,10 @@ use sha2::{Digest, Sha256};
 
 use crate::approval::ApprovalValidation;
 use crate::approval_review::{ApprovalControlError, PolicyAuthenticatedApprover};
-use crate::policy_review::{TrustedPolicyReview, review_plan};
-use crate::risk_classification::{RiskClassification, classify_plan_risk};
+use crate::policy_review::{TrustedPolicyReview, review_plan_with_classification};
+use crate::risk_classification::{
+    RiskClassification, classify_plan_risk, classify_plan_risk_with_floor,
+};
 use crate::{AuthenticatedPrincipal, PlanPreviewControl, PlanPreviewControlError};
 
 const MAX_CANONICAL_DIGEST_FIELD_BYTES: usize = 256 * 1024;
@@ -138,6 +140,19 @@ struct RiskProvenance {
     rule_ids: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct TrustedRiskFloor {
+    risk: RiskClass,
+    rule_id: &'static str,
+}
+
+impl TrustedRiskFloor {
+    #[must_use]
+    pub(crate) const fn new(risk: RiskClass, rule_id: &'static str) -> Self {
+        Self { risk, rule_id }
+    }
+}
+
 #[derive(Debug)]
 pub struct DurableAuthorityCandidate {
     principal: AuthenticatedPrincipal,
@@ -145,6 +160,7 @@ pub struct DurableAuthorityCandidate {
     observation: ObservationEnvelope,
     review: TrustedPolicyReview,
     risk: RiskProvenance,
+    risk_floor: Option<TrustedRiskFloor>,
     request_digest: ContentDigest,
     precondition_digest: ContentDigest,
     observation_digest: ContentDigest,
@@ -160,6 +176,11 @@ impl DurableAuthorityCandidate {
     #[must_use]
     pub fn plan_id(&self) -> &linura_core::PlanId {
         &self.plan.id
+    }
+
+    #[must_use]
+    pub(crate) fn plan(&self) -> &linura_planner::ReconciliationPlan {
+        &self.plan
     }
 
     #[must_use]
@@ -196,6 +217,11 @@ impl PreparedDurableAuthority {
     #[must_use]
     pub fn binding(&self) -> &AuthorityBinding {
         &self.binding
+    }
+
+    #[must_use]
+    pub(crate) fn plan(&self) -> &linura_planner::ReconciliationPlan {
+        &self.candidate.plan
     }
 }
 
@@ -335,6 +361,28 @@ where
         actor: Actor,
         request: PlanDesiredStateRequest,
     ) -> Result<DurableAuthorityCandidate, DurableAuthorityError> {
+        self.candidate_inner(previews, principal, actor, request, None)
+    }
+
+    pub(crate) fn candidate_with_risk_floor(
+        &mut self,
+        previews: &mut PlanPreviewControl,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: PlanDesiredStateRequest,
+        risk_floor: TrustedRiskFloor,
+    ) -> Result<DurableAuthorityCandidate, DurableAuthorityError> {
+        self.candidate_inner(previews, principal, actor, request, Some(risk_floor))
+    }
+
+    fn candidate_inner(
+        &mut self,
+        previews: &mut PlanPreviewControl,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: PlanDesiredStateRequest,
+        risk_floor: Option<TrustedRiskFloor>,
+    ) -> Result<DurableAuthorityCandidate, DurableAuthorityError> {
         let request_digest = digest_request(&request)?;
         let (plan, observation) =
             previews.authority_candidate(principal.clone(), actor, request)?;
@@ -345,9 +393,13 @@ where
             return Err(DurableAuthorityError::CandidateNotMutation);
         }
 
-        let risk = risk_provenance(&plan)?;
-        let review = review_plan(&principal, &plan)
+        let classification = classify_candidate_risk(&plan, risk_floor);
+        let risk = risk_provenance(&classification)?;
+        let review = review_plan_with_classification(&principal, &plan, classification)
             .map_err(|error| DurableAuthorityError::Preview(format!("{error:?}")))?;
+        if review.subject().prospective_risk() != risk.risk {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
         if matches!(
             review.decision(),
             PolicyDecision::Deny { .. } | PolicyDecision::Blocked { .. }
@@ -366,6 +418,7 @@ where
             observation,
             review,
             risk,
+            risk_floor,
             request_digest,
             precondition_digest,
             observation_digest,
@@ -428,7 +481,7 @@ where
 
     /// Revalidate all mutable authority immediately before the durable
     /// `Prepared -> Indeterminate` CAS. Only a successful CAS returns a permit.
-    pub fn handoff(
+    pub(crate) fn handoff(
         &mut self,
         principal: &AuthenticatedPrincipal,
         prepared: &mut PreparedDurableAuthority,
@@ -517,6 +570,26 @@ where
             actor,
             request,
             RecoveryApproval::Existing(approval_evidence_id),
+            None,
+        )
+    }
+
+    pub(crate) fn recover_indeterminate_with_risk_floor(
+        &mut self,
+        previews: &mut PlanPreviewControl,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: PlanDesiredStateRequest,
+        approval_evidence_id: Option<ApprovalEvidenceId>,
+        risk_floor: TrustedRiskFloor,
+    ) -> Result<DurableRecoveryOutcome, DurableAuthorityError> {
+        self.recover_indeterminate_inner(
+            previews,
+            principal,
+            actor,
+            request,
+            RecoveryApproval::Existing(approval_evidence_id),
+            Some(risk_floor),
         )
     }
 
@@ -535,6 +608,26 @@ where
             actor,
             request,
             RecoveryApproval::OnDemand(approval),
+            None,
+        )
+    }
+
+    pub(crate) fn recover_indeterminate_with_approver_and_risk_floor(
+        &mut self,
+        previews: &mut PlanPreviewControl,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: PlanDesiredStateRequest,
+        approval: FreshRecoveryApproval,
+        risk_floor: TrustedRiskFloor,
+    ) -> Result<DurableRecoveryOutcome, DurableAuthorityError> {
+        self.recover_indeterminate_inner(
+            previews,
+            principal,
+            actor,
+            request,
+            RecoveryApproval::OnDemand(approval),
+            Some(risk_floor),
         )
     }
 
@@ -545,6 +638,7 @@ where
         actor: Actor,
         request: PlanDesiredStateRequest,
         approval: RecoveryApproval,
+        risk_floor: Option<TrustedRiskFloor>,
     ) -> Result<DurableRecoveryOutcome, DurableAuthorityError> {
         let principal_id = PrincipalId::new(principal.as_str().to_owned())
             .map_err(|error| DurableAuthorityError::Preview(error.to_string()))?;
@@ -641,9 +735,13 @@ where
                     };
                 }
 
-                let risk = risk_provenance(&plan)?;
-                let review = review_plan(&principal, &plan)
+                let classification = classify_candidate_risk(&plan, risk_floor);
+                let risk = risk_provenance(&classification)?;
+                let review = review_plan_with_classification(&principal, &plan, classification)
                     .map_err(|error| DurableAuthorityError::Preview(format!("{error:?}")))?;
+                if review.subject().prospective_risk() != risk.risk {
+                    return Err(DurableAuthorityError::AuthorityChanged);
+                }
                 if matches!(
                     review.decision(),
                     PolicyDecision::Deny { .. } | PolicyDecision::Blocked { .. }
@@ -677,6 +775,7 @@ where
                     observation,
                     review,
                     risk,
+                    risk_floor,
                     request_digest,
                     precondition_digest,
                     observation_digest: observation_digest.clone(),
@@ -876,13 +975,18 @@ where
             return Err(DurableAuthorityError::AuthorityChanged);
         }
 
-        let risk = risk_provenance(&candidate.plan)?;
+        let classification = classify_candidate_risk(&candidate.plan, candidate.risk_floor);
+        let risk = risk_provenance(&classification)?;
         if risk != candidate.risk {
             return Err(DurableAuthorityError::AuthorityChanged);
         }
-        let review = review_plan(&candidate.principal, &candidate.plan)
-            .map_err(|error| DurableAuthorityError::Preview(format!("{error:?}")))?;
-        if digest_review(&review)? != candidate.review_digest || review != candidate.review {
+        let review =
+            review_plan_with_classification(&candidate.principal, &candidate.plan, classification)
+                .map_err(|error| DurableAuthorityError::Preview(format!("{error:?}")))?;
+        if review.subject().prospective_risk() != risk.risk
+            || digest_review(&review)? != candidate.review_digest
+            || review != candidate.review
+        {
             return Err(DurableAuthorityError::AuthorityChanged);
         }
 
@@ -951,18 +1055,28 @@ fn map_approval_error(error: ApprovalControlError) -> DurableAuthorityError {
     DurableAuthorityError::Approval(format!("{error:?}"))
 }
 
-fn risk_provenance(
+fn classify_candidate_risk(
     plan: &linura_planner::ReconciliationPlan,
+    risk_floor: Option<TrustedRiskFloor>,
+) -> RiskClassification {
+    risk_floor.map_or_else(
+        || classify_plan_risk(plan),
+        |floor| classify_plan_risk_with_floor(plan, floor.risk, floor.rule_id),
+    )
+}
+
+fn risk_provenance(
+    classification: &RiskClassification,
 ) -> Result<RiskProvenance, DurableAuthorityError> {
-    match classify_plan_risk(plan) {
+    match classification {
         RiskClassification::Classified {
             risk,
             revision,
             rule_ids,
         } => Ok(RiskProvenance {
-            risk,
-            revision: revision.to_owned(),
-            rule_ids: rule_ids.into_iter().map(str::to_owned).collect(),
+            risk: *risk,
+            revision: (*revision).to_owned(),
+            rule_ids: rule_ids.iter().map(|value| (*value).to_owned()).collect(),
         }),
         RiskClassification::NotApplicable { .. }
         | RiskClassification::Unclassified { .. }

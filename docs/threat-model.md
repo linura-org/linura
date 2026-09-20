@@ -45,6 +45,17 @@ A caller, model, UI, configuration file, provider or extension attempts to label
 - interface equivalence tests ensure GUI/config/shortcut/CLI/agent requests resolve to the same trusted operation class;
 - machine-readable operation semantics and tooling tests reject contract drift.
 
+### Registered-operation substitution or risk-floor weakening
+A caller, provider, extension, recovery path or compromised composition attempts to substitute a different registered operation, broaden its resource/effect binding, lower its trusted risk floor, or reuse authority produced before registered semantics changed.
+- the trusted operation registry is constructed inside Control and is not supplied by clients, providers, agents or imported configuration;
+- external-effect authorization begins from a canonical `ReconciliationPlan` that must match the registered provider, observation capability, resource scope and allowed material change keys;
+- the registered risk floor is applied before policy review, so the policy subject, approval class, review digest and durable `AuthorityBinding.trusted_risk` all carry the strengthened risk;
+- changing or raising the registered floor cannot reuse weaker prior review/approval/prepared authority; current authority must be reconstructed and rebound;
+- managed restart and `Indeterminate` recovery re-establish authority from current registration, fresh authoritative observation and a fresh canonical plan instead of inheriting permission from the predecessor generation;
+- immediately before every privileged handoff, Control re-resolves the prepared plan through the trusted registry and requires current resolved risk to equal the reviewed/durable bound risk;
+- missing registration, plan-shape mismatch, stale/weaker bound risk or registry inconsistency fails closed before permit minting or executor dispatch;
+- operation-semantics contract checks and adversarial tests cover candidate creation, approval refresh, recovery/reprepare and privileged handoff so one alternate path cannot silently omit the registry/risk-floor binding.
+
 ### Risk downgrade, under-classification or classifier substitution
 A caller, model, provider or configuration change attempts to make a dangerous canonical plan look like a lower-risk mutation, or relies on an unknown mutation shape receiving the ordinary mutation approval class.
 - planner `prospective_risk` is a lower bound and cannot be reduced by authority classification;

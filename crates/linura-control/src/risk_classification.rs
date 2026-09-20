@@ -2,6 +2,8 @@ use linura_core::RiskClass;
 use linura_planner::{PlanStatus, ReconciliationPlan};
 
 pub(crate) const BASELINE_RISK_POLICY_REVISION: &str = "risk-policy:v0.3:1";
+pub(crate) const REGISTERED_OPERATION_RISK_POLICY_REVISION: &str =
+    "risk-policy:v0.10:registered-operation-floor";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct RiskRule {
@@ -134,6 +136,32 @@ pub(crate) fn classify_plan_risk(plan: &ReconciliationPlan) -> RiskClassificatio
     RiskPolicy::baseline().classify(plan)
 }
 
+pub(crate) fn classify_plan_risk_with_floor(
+    plan: &ReconciliationPlan,
+    floor: RiskClass,
+    floor_rule_id: &'static str,
+) -> RiskClassification {
+    match classify_plan_risk(plan) {
+        RiskClassification::Classified {
+            risk, mut rule_ids, ..
+        } => {
+            rule_ids.push(floor_rule_id);
+            rule_ids.sort_unstable();
+            rule_ids.dedup();
+            RiskClassification::Classified {
+                risk: std::cmp::max(risk, floor),
+                revision: REGISTERED_OPERATION_RISK_POLICY_REVISION,
+                rule_ids,
+            }
+        }
+        RiskClassification::NotApplicable { risk } => RiskClassification::NotApplicable {
+            risk: std::cmp::max(risk, floor),
+        },
+        other @ (RiskClassification::Unclassified { .. }
+        | RiskClassification::DowngradeRejected { .. }) => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -201,6 +229,27 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn registered_operation_floor_is_bound_into_risk_provenance() {
+        let plan = canonical_plan("systemd:unit:test.service");
+        let classification = classify_plan_risk_with_floor(
+            &plan,
+            RiskClass::Destructive,
+            "operation-registry:test-floor",
+        );
+        assert_eq!(
+            classification,
+            RiskClassification::Classified {
+                risk: RiskClass::Destructive,
+                revision: REGISTERED_OPERATION_RISK_POLICY_REVISION,
+                rule_ids: vec![
+                    "operation-registry:test-floor",
+                    "systemd.unit.active-state.security-sensitive",
+                ],
+            }
+        );
     }
 
     #[test]

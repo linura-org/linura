@@ -4,7 +4,8 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use linura_core::{
-    Actor, ActorKind, ApprovalRequestId, PlanId, PrincipalId, ProviderId, RequestId, ResourceId,
+    Actor, ActorKind, ApprovalRequestId, OperationClass, OperationId, PlanId, PrincipalId,
+    ProviderId, RequestId, ResourceId, RiskClass,
 };
 use linura_lifecycle::{MutationProgress, MutationStage};
 use linura_policy::{ApprovalClass, PolicyDecision};
@@ -17,17 +18,23 @@ use linura_transaction::{TransactionId, TransactionState, TransactionStore};
 use sha2::{Digest, Sha256};
 
 use crate::approval_review::PolicyAuthenticatedApprover;
+use crate::durable_authority::TrustedRiskFloor;
+pub use crate::operation_registry::{
+    MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_REGISTERED_OPERATION_ID,
+    MANAGED_SYSTEMD_UNIT_PREFIX,
+};
+use crate::operation_registry::{
+    MANAGED_SYSTEMD_CHANGE_KEY, MANAGED_SYSTEMD_RESOURCE_PREFIX, MANAGED_SYSTEMD_RESOURCE_SUFFIX,
+    MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID, trusted_builtin_operation_registry,
+};
 use crate::policy_review::TrustedPolicyReview;
 use crate::{
     AuthenticatedPrincipal, DispatchPermit, DurableAuthorityCandidate, DurableAuthorityControl,
-    DurableAuthorityError, DurableRecoveryOutcome, FreshRecoveryApproval, PlanPreviewControl,
-    PreparedDurableAuthority,
+    DurableAuthorityError, DurableRecoveryOutcome, FreshRecoveryApproval,
+    OperationSemanticsControl, PlanPreviewControl, PreparedDurableAuthority,
 };
 
-pub const MANAGED_SYSTEMD_UNIT_PREFIX: &str = "linura-managed-";
 pub const MANAGED_SYSTEMD_OPERATION: &str = "set-active-state";
-pub const MANAGED_SYSTEMD_PROVIDER: &str = "systemd";
-pub const MANAGED_SYSTEMD_CAPABILITY: &str = "systemd.unit.observe";
 pub const MANAGED_SYSTEMD_INTENT_ORIGIN: &str = "intent:v06:managed-systemd-active-state";
 const MANAGED_APPROVAL_TTL_SECONDS: u64 = 300;
 const MANAGED_REQUEST_PREFIX: &str = "request:v06:";
@@ -384,6 +391,7 @@ where
     S: TransactionStore,
 {
     previews: PlanPreviewControl,
+    operation_semantics: OperationSemanticsControl,
     authority: DurableAuthorityControl<S>,
 }
 
@@ -396,8 +404,14 @@ where
         store: S,
         authority_signer: linura_transaction::TransactionAuthoritySigner,
     ) -> Result<Self, ManagedLifecycleError> {
+        let registry = trusted_builtin_operation_registry()
+            .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
+        let operation_semantics = OperationSemanticsControl::from_trusted_registry(registry);
+        validate_managed_systemd_registration(&operation_semantics)?;
+
         Ok(Self {
             previews,
+            operation_semantics,
             authority: DurableAuthorityControl::new(store, authority_signer)?,
         })
     }
@@ -447,11 +461,13 @@ where
             Err(error) => return Err(error.into()),
         }
 
-        let candidate = match self.authority.candidate(
+        let risk_floor = self.registered_managed_systemd_risk_floor()?;
+        let candidate = match self.authority.candidate_with_risk_floor(
             &mut self.previews,
             principal.clone(),
             actor.clone(),
             request.clone(),
+            risk_floor,
         ) {
             Ok(candidate) => candidate,
             Err(DurableAuthorityError::CandidateNotMutation) => {
@@ -461,6 +477,7 @@ where
             }
             Err(error) => return Err(error.into()),
         };
+        self.validate_registered_managed_systemd_candidate(&candidate)?;
         let canonical_effect = effect_from_candidate(&candidate)?;
         if canonical_effect != effect {
             return Err(ManagedLifecycleError::Contract(
@@ -508,7 +525,7 @@ where
         advance(&mut progress, MutationStage::Prepare)?;
 
         let plan_id = prepared.binding().plan_id().as_str().to_owned();
-        let permit = self.authority.handoff(&principal, &mut prepared)?;
+        let permit = self.handoff_registered_managed_systemd(&principal, &mut prepared)?;
         let authorization = authorized_effect(effect.clone(), permit)?;
         let dispatch_digest = authorization.binding().dispatch_digest.to_hex();
         let execution = executor
@@ -541,12 +558,13 @@ where
             }
         }
 
-        let verified = match self.authority.recover_indeterminate(
+        let verified = match self.authority.recover_indeterminate_with_risk_floor(
             &mut self.previews,
             principal.clone(),
             actor.clone(),
             request.clone(),
             None,
+            risk_floor,
         )? {
             DurableRecoveryOutcome::Verified(verified) => verified,
             DurableRecoveryOutcome::Reprepared(_) => {
@@ -740,20 +758,25 @@ where
             let expires_at = now_unix_seconds()?
                 .checked_add(MANAGED_APPROVAL_TTL_SECONDS)
                 .ok_or_else(|| ManagedLifecycleError::Contract("approval clock overflow".into()))?;
-            self.authority.recover_indeterminate_with_approver(
-                &mut self.previews,
-                principal.clone(),
-                actor.clone(),
-                request.clone(),
-                FreshRecoveryApproval::new(approval_request, approver, expires_at),
-            )?
+            let risk_floor = self.registered_managed_systemd_risk_floor()?;
+            self.authority
+                .recover_indeterminate_with_approver_and_risk_floor(
+                    &mut self.previews,
+                    principal.clone(),
+                    actor.clone(),
+                    request.clone(),
+                    FreshRecoveryApproval::new(approval_request, approver, expires_at),
+                    risk_floor,
+                )?
         } else {
-            self.authority.recover_indeterminate(
+            let risk_floor = self.registered_managed_systemd_risk_floor()?;
+            self.authority.recover_indeterminate_with_risk_floor(
                 &mut self.previews,
                 principal.clone(),
                 actor.clone(),
                 request.clone(),
                 None,
+                risk_floor,
             )?
         };
 
@@ -831,7 +854,7 @@ where
         }
 
         let mut progress = progress_through(MutationStage::Prepare)?;
-        let permit = self.authority.handoff(&principal, prepared.as_mut())?;
+        let permit = self.handoff_registered_managed_systemd(&principal, prepared.as_mut())?;
         let authorization = authorized_effect(effect.clone(), permit)?;
         let dispatch_digest = authorization.binding().dispatch_digest.to_hex();
         let execution = executor
@@ -865,12 +888,14 @@ where
             }
         }
 
-        let verified = match self.authority.recover_indeterminate(
+        let risk_floor = self.registered_managed_systemd_risk_floor()?;
+        let verified = match self.authority.recover_indeterminate_with_risk_floor(
             &mut self.previews,
             principal.clone(),
             actor.clone(),
             request.clone(),
             None,
+            risk_floor,
         )? {
             DurableRecoveryOutcome::Verified(verified) => verified,
             DurableRecoveryOutcome::Reprepared(_) => {
@@ -957,20 +982,24 @@ where
         effect: &EffectDescriptor,
     ) -> Result<DurableAuthorityCandidate, ManagedLifecycleError> {
         let approved_challenge = ManagedApprovalChallenge::from_candidate(approved, &request)?;
-        let refreshed =
-            match self
-                .authority
-                .candidate(&mut self.previews, principal, actor, request.clone())
-            {
-                Ok(candidate) => candidate,
-                Err(DurableAuthorityError::CandidateNotMutation) => {
-                    return Err(ManagedLifecycleError::ApprovalBoundary(
-                        "approved mutation is no longer required after administrator interaction"
-                            .into(),
-                    ));
-                }
-                Err(error) => return Err(error.into()),
-            };
+        let risk_floor = self.registered_managed_systemd_risk_floor()?;
+        let refreshed = match self.authority.candidate_with_risk_floor(
+            &mut self.previews,
+            principal,
+            actor,
+            request.clone(),
+            risk_floor,
+        ) {
+            Ok(candidate) => candidate,
+            Err(DurableAuthorityError::CandidateNotMutation) => {
+                return Err(ManagedLifecycleError::ApprovalBoundary(
+                    "approved mutation is no longer required after administrator interaction"
+                        .into(),
+                ));
+            }
+            Err(error) => return Err(error.into()),
+        };
+        self.validate_registered_managed_systemd_candidate(&refreshed)?;
         let refreshed_challenge = ManagedApprovalChallenge::from_candidate(&refreshed, &request)?;
         let semantics_unchanged = approved_challenge.principal == refreshed_challenge.principal
             && approved_challenge.request_id == refreshed_challenge.request_id
@@ -988,6 +1017,83 @@ where
             ));
         }
         Ok(refreshed)
+    }
+
+    fn registered_managed_systemd_risk_floor(
+        &self,
+    ) -> Result<TrustedRiskFloor, ManagedLifecycleError> {
+        let operation_id = OperationId::new(MANAGED_SYSTEMD_REGISTERED_OPERATION_ID)
+            .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
+        let risk = self
+            .operation_semantics
+            .descriptor(&operation_id)
+            .and_then(|descriptor| descriptor.risk_floor())
+            .ok_or_else(|| {
+                ManagedLifecycleError::Contract(
+                    "registered managed-systemd operation is missing its trusted risk floor".into(),
+                )
+            })?;
+        Ok(TrustedRiskFloor::new(
+            risk,
+            MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID,
+        ))
+    }
+
+    fn validate_registered_managed_systemd_candidate(
+        &self,
+        candidate: &DurableAuthorityCandidate,
+    ) -> Result<(), ManagedLifecycleError> {
+        self.validate_registered_managed_systemd_plan(
+            candidate.plan(),
+            candidate.review().subject().prospective_risk(),
+        )
+    }
+
+    fn validate_registered_managed_systemd_plan(
+        &self,
+        plan: &linura_planner::ReconciliationPlan,
+        bound_risk: RiskClass,
+    ) -> Result<(), ManagedLifecycleError> {
+        let operation_id = OperationId::new(MANAGED_SYSTEMD_REGISTERED_OPERATION_ID)
+            .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
+        let semantics = self
+            .operation_semantics
+            .resolve_external(&operation_id, plan)
+            .map_err(|error| {
+                ManagedLifecycleError::Contract(format!(
+                    "registered managed-systemd operation rejected canonical plan: {error:?}"
+                ))
+            })?;
+        if semantics.risk() != bound_risk {
+            return Err(ManagedLifecycleError::Contract(format!(
+                "registered managed-systemd risk {:?} is not bound into reviewed/durable authority risk {:?}",
+                semantics.risk(),
+                bound_risk
+            )));
+        }
+        if !semantics.requires_durable_managed_lifecycle()
+            || !semantics.permits_privileged_executor()
+        {
+            return Err(ManagedLifecycleError::Contract(
+                "registered managed-systemd operation is not bound to the managed privileged lifecycle"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn handoff_registered_managed_systemd(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        prepared: &mut PreparedDurableAuthority,
+    ) -> Result<DispatchPermit, ManagedLifecycleError> {
+        self.validate_registered_managed_systemd_plan(
+            prepared.plan(),
+            prepared.binding().trusted_risk(),
+        )?;
+        self.authority
+            .handoff(principal, prepared)
+            .map_err(Into::into)
     }
 
     fn reconcile<V>(
@@ -1121,6 +1227,44 @@ where
             "post-dispatch verifier produced no bounded observation".into(),
         )
     })
+}
+
+fn validate_managed_systemd_registration(
+    operation_semantics: &OperationSemanticsControl,
+) -> Result<(), ManagedLifecycleError> {
+    let operation_id = OperationId::new(MANAGED_SYSTEMD_REGISTERED_OPERATION_ID)
+        .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
+    let descriptor = operation_semantics
+        .descriptor(&operation_id)
+        .ok_or_else(|| {
+            ManagedLifecycleError::Contract(
+                "trusted registry is missing the qualified managed-systemd operation".into(),
+            )
+        })?;
+    if descriptor.class() != OperationClass::ManagedExternalEffect
+        || descriptor.risk_floor() != Some(RiskClass::SecuritySensitive)
+    {
+        return Err(ManagedLifecycleError::Contract(
+            "qualified managed-systemd operation class or risk floor drifted".into(),
+        ));
+    }
+    let binding = descriptor.effect_binding().ok_or_else(|| {
+        ManagedLifecycleError::Contract(
+            "qualified managed-systemd operation is missing its effect binding".into(),
+        )
+    })?;
+    if binding.provider().as_str() != MANAGED_SYSTEMD_PROVIDER
+        || binding.observation_capability().as_str() != MANAGED_SYSTEMD_CAPABILITY
+        || binding.resource_prefix() != MANAGED_SYSTEMD_RESOURCE_PREFIX
+        || binding.resource_suffix() != Some(MANAGED_SYSTEMD_RESOURCE_SUFFIX)
+        || binding.change_keys().len() != 1
+        || !binding.change_keys().contains(MANAGED_SYSTEMD_CHANGE_KEY)
+    {
+        return Err(ManagedLifecycleError::Contract(
+            "qualified managed-systemd operation effect binding drifted".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_public_request(request: &PlanDesiredStateRequest) -> Result<(), ManagedLifecycleError> {

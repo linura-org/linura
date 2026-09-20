@@ -23,6 +23,9 @@ on:
       - "apps/linura-authorityd/Cargo.toml"
       - "apps/linura-authorityd/src/bin/linura-migrations-qualification.rs"
       - "crates/linura-bootstrap/**"
+      - "crates/linura-capability-sdk/**"
+      - "crates/linura-control/**"
+      - "crates/linura-core/**"
       - "crates/linura-hardware/**"
       - "crates/linura-linux-observation/**"
       - "crates/linura-migrations/**"
@@ -32,12 +35,14 @@ on:
       - "crates/linura-protocol/**"
       - "crates/linura-update/**"
       - "contracts/components.toml"
+      - "contracts/operation-semantics.toml"
       - "contracts/roadmap.toml"
       - "hardware/support-matrix.json"
       - "docs/adr/0029-v09-first-boot-reference-and-provisioning-boundary.md"
       - "docs/first-boot.md"
       - "docs/hardware-validation.md"
       - "docs/machine-profiles.md"
+      - "docs/operation-semantics.md"
       - "docs/platform-profiles.md"
       - "docs/milestones/v0.9.0.md"
       - "docs/qualification/v0.9.0.md"
@@ -46,6 +51,7 @@ on:
       - "docs/threat-model-v0.9-bootstrap-provisioning.md"
       - "tests/acceptance/**"
       - "tests/tooling/test_component_maturity.py"
+      - "tests/tooling/test_operation_semantics.py"
       - "tests/tooling/test_roadmap.py"
       - "tests/tooling/test_v09_recovery_qualification.py"
       - "tests/tooling/test_v09_bootstrap_provisioning_contract.py"
@@ -53,6 +59,7 @@ on:
       - "tests/tooling/test_v09_adversarial_transport_contract.py"
       - "tests/tooling/test_v09_adversarial_sharding_contract.py"
       - "tools/check_machine_classes.py"
+      - "tools/check_operation_semantics.py"
       - "tools/image.py"
       - "tools/codex/versions.env"
       - "rust-toolchain.toml"
@@ -103,8 +110,10 @@ jobs:
           python3 tools/check_component_maturity.py
           python3 tools/check_roadmap.py
           python3 tools/check_machine_classes.py
+          python3 tools/check_operation_semantics.py
           python3 -m unittest \
             tests.tooling.test_roadmap \
+            tests.tooling.test_operation_semantics \
             tests.tooling.test_v09_recovery_qualification \
             tests.tooling.test_v09_bootstrap_provisioning_contract \
             tests.tooling.test_v09_adversarial_fast_forward_contract \

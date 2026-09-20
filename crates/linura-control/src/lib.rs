@@ -19,6 +19,7 @@ mod approval_review;
 mod authority_clock;
 mod durable_authority;
 mod managed_lifecycle;
+mod operation_registry;
 mod operation_semantics;
 mod plan_preview;
 mod platform_compatibility;
@@ -55,9 +56,9 @@ pub use durable_authority::{
 pub use managed_lifecycle::{
     AuthorizedEffect, AuthorizedEffectExecutor, IndependentManagedVerifier,
     MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_INTENT_ORIGIN, MANAGED_SYSTEMD_OPERATION,
-    MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_UNIT_PREFIX, ManagedApprovalAuthorizer,
-    ManagedApprovalChallenge, ManagedLifecycleControl, ManagedLifecycleError,
-    ManagedMutationReceipt, TrustedHumanApproval, managed_request_id,
+    MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
+    ManagedApprovalAuthorizer, ManagedApprovalChallenge, ManagedLifecycleControl,
+    ManagedLifecycleError, ManagedMutationReceipt, TrustedHumanApproval, managed_request_id,
 };
 pub use operation_semantics::{
     OperationPlanBindingMismatch, OperationSemanticsControl, OperationSemanticsError,
