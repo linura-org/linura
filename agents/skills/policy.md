@@ -1,8 +1,8 @@
 # Policy task guide
 
-Policy decides whether an exact validated canonical reconciliation plan may enter or satisfy authority review. It does not create execution authority.
+Policy decides whether an exact validated canonical reconciliation plan may enter or satisfy authority review. This plan-bound rule applies to both managed and qualified transient external effects. Policy does not create execution authority.
 
-- Derive `PolicySubject` from `linura-planner::ReconciliationPlan` plus the transport-authenticated principal; do not accept a client-authored executable plan model.
+- Derive `PolicySubject` from `linura-planner::ReconciliationPlan` plus the transport-authenticated principal for every external effect that reaches policy authorization, including `TransientExternalEffect`; do not accept a client-authored executable plan model or a transient-only policy subject.
 - Treat `Actor` as request provenance and authenticated principal as authority identity; never substitute one for the other.
 - Policy outcomes are typed and fail closed: allow, deny, require-approval, or blocked.
 - Bind evaluation/approval to the exact principal, request/plan, authoritative evidence, provider/resource/capability, material plan content/provenance, and policy revision.
@@ -12,6 +12,6 @@ Policy decides whether an exact validated canonical reconciliation plan may ente
 - Keep `RiskClass` orthogonal to `OperationClass`. Policy/risk may increase ceremony or force promotion to the managed-effect path, but a caller/provider/model cannot use risk metadata to select a weaker operation class. Transient external effects may not exceed trusted `UserState` risk.
 - Approval surfaces must describe the canonical typed planned changes/findings and authoritative evidence, not only an agent's prose summary.
 - Expired, revoked, wrong-principal, wrong-plan, stale-evidence, wrong-policy-revision and wrong-approver evidence fail closed.
-- Policy `allow`, valid approval, and reviewed-plan status are not executor credentials and may not bypass durable `prepare` in later milestones.
+- Policy `allow`, valid approval, and reviewed-plan status are not executor credentials. They may not bypass durable `prepare` for `ManagedExternalEffect`; a qualified `TransientExternalEffect` is exempt from durable prepare only after canonical plan-bound authorization and only within its unprivileged bounded-failure contract.
 - Add deny/blocked/replay/substitution tests before allow-path convenience.
 - Any policy/approval contract change requires threat-model review under `SECURITY.md`.
