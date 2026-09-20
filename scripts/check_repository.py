@@ -22,11 +22,12 @@ REQUIRED = [
     "docs/migrations.md", "docs/managed-configuration.md", "docs/hardware-validation.md", "docs/vm-acceptance.md",
     "docs/visual-testing.md", "docs/application-supervision.md", "docs/lifecycle-workflows.md",
     "docs/release-engineering.md", "docs/api-versioning.md", "docs/omarchy-development-lessons.md",
-    "docs/roadmap.md", "docs/system-domains.md", "docs/adr/README.md", "docs/adr/0017-bounded-probes-context-query.md",
+    "docs/roadmap.md", "docs/system-domains.md", "docs/operation-semantics.md", "docs/adr/README.md", "docs/adr/0017-bounded-probes-context-query.md", "docs/adr/0032-classify-operations-before-authority.md",
     "tools/check_adrs.py", "tests/tooling/test_adrs.py",
     "contracts/stability.toml", "tools/check_contract_stability.py", "tests/tooling/test_contract_stability.py",
     "contracts/roadmap.toml", "tools/check_roadmap.py", "tests/tooling/test_roadmap.py",
     "contracts/layering.toml", "tools/check_layering.py", "tests/tooling/test_layering.py",
+    "contracts/operation-semantics.toml", "tools/check_operation_semantics.py", "tests/tooling/test_operation_semantics.py",
     "contracts/components.toml", "tools/check_component_maturity.py", "tests/tooling/test_component_maturity.py",
     "profiles/arch-hyprland-v1.toml",
     "crates/linura-intent/Cargo.toml", "crates/linura-graph/Cargo.toml", "crates/linura-capability-sdk/Cargo.toml",
@@ -265,6 +266,16 @@ def main() -> int:
     if roadmap_result.returncode != 0:
         details = roadmap_result.stderr.strip() or roadmap_result.stdout.strip()
         failures.append(f"roadmap contract validation failed: {details}")
+
+    operation_semantics_result = subprocess.run(
+        [sys.executable, str(ROOT / "tools/check_operation_semantics.py"), str(ROOT)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if operation_semantics_result.returncode != 0:
+        details = operation_semantics_result.stderr.strip() or operation_semantics_result.stdout.strip()
+        failures.append(f"operation semantics validation failed: {details}")
 
     layering_result = subprocess.run(
         [sys.executable, str(ROOT / "tools/check_layering.py"), str(ROOT)],

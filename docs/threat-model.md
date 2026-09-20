@@ -35,6 +35,16 @@ Low-privilege client or agent convinces Linura to perform privileged work.
 - plan/approval before privilege;
 - strict executor revalidation.
 
+### Operation-class downgrade or lifecycle bypass
+A caller, model, UI, configuration file, provider or extension attempts to label an external effect as ephemeral/query/local/transient so it can avoid the authority path required by its semantics.
+- operation class is bound by a trusted registered operation/domain contract and validated by Linura Control, not accepted as caller authority;
+- unknown or ambiguous external effect semantics fail closed rather than defaulting to the transient path;
+- `TransientExternalEffect` is limited to qualified unprivileged effects with trusted risk no higher than `UserState` and bounded verification/audit semantics;
+- privilege, stronger trusted risk, durable desired state, ambiguity/recovery requirements or unsupported transient semantics promote the operation to `ManagedExternalEffect` or block it;
+- only `ManagedExternalEffect` may cross a privileged executor boundary;
+- interface equivalence tests ensure GUI/config/shortcut/CLI/agent requests resolve to the same trusted operation class;
+- machine-readable operation semantics and tooling tests reject contract drift.
+
 ### Risk downgrade, under-classification or classifier substitution
 A caller, model, provider or configuration change attempts to make a dangerous canonical plan look like a lower-risk mutation, or relies on an unknown mutation shape receiving the ordinary mutation approval class.
 - planner `prospective_risk` is a lower bound and cannot be reduced by authority classification;

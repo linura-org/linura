@@ -34,6 +34,14 @@ context projection     → derived consumer view
 retrieval / RAG        → reasoning context only
 ```
 
+## Operation semantics versus state truth
+
+State truth and operation semantics are separate concerns. `ObservationEnvelope` answers what Linux proves is true; `OperationClass` answers which authority path a requested operation may use.
+
+A direct experience action such as focusing a window does not become durable desired state merely because it changes session behavior. A transient external effect is intentionally not retained as desired state. Conversely, when a user expresses durable intent such as "maintain this profile state", the resulting external convergence is a managed external effect even if the same subsystem also exposes lightweight transient actions.
+
+Operation class is bound by trusted registered semantics and Control, never by UI choice or model confidence. See [Operation semantics](operation-semantics.md).
+
 ## Reconciliation
 
 Reconciliation compares desired and observed state, then produces the same plan/policy/execute/verify lifecycle as an interactive request. It never silently overwrites an administrator's intentional out-of-band repair. Drift can be report-only, require approval, or reconcile according to explicit policy.

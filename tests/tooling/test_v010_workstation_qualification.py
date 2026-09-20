@@ -28,6 +28,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         paths = (
             "contracts/roadmap.toml",
             "contracts/v010-workstation-qualification.toml",
+            "contracts/operation-semantics.toml",
             "profiles/arch-hyprland-v1.toml",
             "hardware/support-matrix.json",
             "docs/qualification/v0.10.0.md",
@@ -580,6 +581,15 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("interaction ADR 0031 is missing", result.stderr)
+
+    def test_operation_semantics_contract_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            (root / "contracts/operation-semantics.toml").unlink()
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("operation-semantics contract file is missing", result.stderr)
 
     def test_roadmap_must_bind_machine_readable_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
