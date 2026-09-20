@@ -6,5 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[dependencies]
+linura-core = { path = "../linura-core" }
+linura-observation = { path = "../linura-observation" }
+
 [lints]
 workspace = true

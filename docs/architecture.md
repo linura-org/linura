@@ -2,9 +2,9 @@
 
 Linura separates **experience**, **intelligence**, and **authority**. Only the authority plane can cause trusted system effects, and no transport, model, UI or executor is allowed to become a parallel source of policy or machine truth.
 
-## Current v0.6 process and trust boundaries
+## Current authority process and trust boundaries
 
-The v0.6 candidate has two deliberately different local D-Bus roles.
+The current v0.9.0 release inherits the deliberately narrow v0.6 managed-effect authority path while adding later durable Library, proposal-only agent interpretation and First Boot/reference-environment layers. The public mutation authority remains narrow rather than becoming a generic Linux mutation API. Two deliberately different local D-Bus roles remain relevant.
 
 `Control1` remains the non-privileged planning/query lineage hosted by `linurad`. The first real managed external effect enters through a separate Experimental `Authority1` system-bus boundary hosted by `linura-authorityd`.
 
@@ -61,7 +61,7 @@ The v0.6 candidate has two deliberately different local D-Bus roles.
 
 The original human Polkit decision and the executor's service-identity authorization are separate trust decisions. Passing human approval does not create an executor credential. Transaction IDs and digests correlate and bind evidence but are not bearer authority.
 
-The only v0.6 managed external effect is convergence of canonical `linura-managed-*.service` units to exactly `active` or `inactive`. `Authority1` is not a generic apply/systemd/root-RPC surface. See [ADR 0026](adr/0026-bounded-v0.6-managed-mutation-authority.md).
+The currently supported managed external effect remains the bounded v0.6 convergence of canonical `linura-managed-*.service` units to exactly `active` or `inactive`. v0.7–v0.9 broaden surrounding deterministic product infrastructure, not this mutation authority. `Authority1` is not a generic apply/systemd/root-RPC surface. See [ADR 0026](adr/0026-bounded-v0.6-managed-mutation-authority.md).
 
 ### Non-mutating Control1 lineage
 
@@ -99,18 +99,19 @@ Linura's target experience includes First Boot, Agent UI, a local Library, Contr
                          Control/authority plane
 ```
 
-However, presence in this target topology does **not** mean current product activation. `contracts/components.toml` is the source of truth for component maturity and milestone activation. For the v0.6 candidate:
+Presence in this topology does **not** make every surface equally mature. `contracts/components.toml` is the source of truth:
 
-- `linura-firstboot` is a `roadmap-scaffold` owned by v0.9 and is not a v0.6 release artifact;
-- `linura-agent-runtime` and Agent UI remain future proposal-only v0.8 components with no mutation authority;
-- Control Center and Shell remain later roadmap scaffolds;
-- supported-reference-environment bootstrap/hardware and broad managed configuration remain later work.
+- `linura-firstboot` is integrated Experimental and shipped in v0.9.0 for the bounded reference environment;
+- `linura-agent-runtime` is integrated Experimental from v0.8.0 and remains proposal-only with no mutation authority;
+- the local Linura Library/durable intent lifecycle is integrated from v0.7.0;
+- Control Center, Agent UI and Shell remain v0.10 roadmap surfaces until separately implemented and qualified;
+- broad managed workstation configuration and support promotion remain v0.10+ work.
 
 See [ADR 0025](adr/0025-component-maturity-and-milestone-activation.md).
 
 Agent/model processes always remain outside the authority plane. They may eventually read scoped context and emit structured `IntentProposal` objects; they do not receive privileged executor handles. Model output is untrusted proposal data and cannot bypass the canonical lifecycle.
 
-The future Linura Library is also outside execution authority: loading or synchronizing a declarative artifact cannot mutate the machine until Control validates/adopts it through the normal planning and authority path.
+The Linura Library is outside execution authority: loading or synchronizing a declarative artifact cannot mutate the machine until Control validates/adopts it through the normal planning and authority path.
 
 ## Canonical managed-mutation data flow
 
@@ -257,14 +258,15 @@ Key ownership rules are:
 8. `linura-protocol` / `linura-sdk`: non-privileged versioned client contracts/facade.
 9. `linura-observation`: canonical authoritative observation envelope/freshness semantics.
 10. `linura-observation-control`: provider-neutral authoritative observation coordination.
-11. `linura-linux-observation`: concrete Linux observation adapters.
-12. `linura-provider-sdk`: provider/executor correlation contracts without policy ownership.
-13. `linura-transaction` + persistence adapters: durable authority identity/state and storage.
-14. `linura-control`: canonical policy/query orchestration and managed-lifecycle authority.
-15. `linura-dbus`: local/system-bus transport adapter, caller binding and Authority1 Polkit boundary.
-16. process composition roots such as `linurad` and `linura-authorityd`.
-17. narrow privileged executors.
-18. non-privileged clients/future experience applications.
+11. `linura-linux-observation`: concrete narrow Linux observation adapters/probes; no cross-provider compatibility aggregation.
+12. `linura-hardware`: QualificationEnvironment/hardware evidence plus provider-neutral PlatformProfile contracts and single-fact compatibility rules over canonical observations; `linura-control` owns cross-fact aggregation and final compatibility outcomes; no observation or support-promotion authority.
+13. `linura-provider-sdk`: provider/executor correlation contracts without policy ownership.
+14. `linura-transaction` + persistence adapters: durable authority identity/state and storage.
+15. `linura-control`: canonical policy/query orchestration and managed-lifecycle authority.
+16. `linura-dbus`: local/system-bus transport adapter, caller binding and Authority1 Polkit boundary.
+17. process composition roots such as `linurad` and `linura-authorityd`.
+18. narrow privileged executors.
+19. non-privileged clients/future experience applications.
 
 Dependencies point inward. UI, Library adapters and agents do not import privileged/provider implementations. Semantic/planning crates do not import transport libraries or concrete Linux providers. `linura-control` does not depend directly on concrete SQLite or systemd adapters; composition roots wire those ports to concrete implementations.
 
@@ -276,7 +278,7 @@ The v0.6 authority path has real local durable SQLite/WAL state for authority tr
 
 Observed Linux state is re-derived from authoritative providers whenever truth matters for planning, verification or recovery. Storage cannot make a desired postcondition true merely because a transaction row says execution occurred.
 
-Broader persistent product state will later include durable intents, requirements, reusable setup/profile revisions, Library metadata, graph edges, desired state and richer provenance/reconciliation records as their milestones activate.
+Durable intent/setup/profile Library state is already integrated from v0.7. Broader graph/desired-state/provenance/reconciliation persistence continues to evolve by milestone; current Linux machine truth remains provider-observed rather than inferred from persistence.
 
 Portable export/import remains separate from authority-state backup. Portable artifacts preserve reusable declarative meaning; authority-state backup preserves local operational/evidence records; filesystem snapshots preserve exact machine recovery state.
 

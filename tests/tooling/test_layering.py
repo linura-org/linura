@@ -31,6 +31,8 @@ class LayeringContractTests(unittest.TestCase):
             "docs/action-lifecycle.md",
             "agents/skills/providers.md",
             "crates/linura-provider-sdk/src/lib.rs",
+            "crates/linura-hardware/src/platform_profile.rs",
+            "crates/linura-control/src/platform_compatibility.rs",
         ):
             source = ROOT / rel
             target = destination / rel
@@ -201,6 +203,36 @@ class LayeringContractTests(unittest.TestCase):
                 "linura-observation-control violates inward dependency boundary",
                 result.stderr,
             )
+
+    def test_concrete_observer_cannot_gain_hardware_aggregation_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = root / "crates/linura-linux-observation/Cargo.toml"
+            self._add_dependency(
+                manifest,
+                "linura-hardware",
+                '{ path = "../linura-hardware" }',
+            )
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("linura-linux-observation violates inward dependency boundary", result.stderr)
+
+    def test_hardware_contract_cannot_gain_concrete_linux_observer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = root / "crates/linura-hardware/Cargo.toml"
+            self._add_dependency(
+                manifest,
+                "linura-linux-observation",
+                '{ path = "../linura-linux-observation" }',
+            )
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("linura-hardware violates inward dependency boundary", result.stderr)
 
     def test_concrete_observer_cannot_gain_control_plane_orchestration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

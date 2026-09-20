@@ -20,6 +20,7 @@ mod authority_clock;
 mod durable_authority;
 mod managed_lifecycle;
 mod plan_preview;
+mod platform_compatibility;
 mod policy_review;
 #[path = "proposal_acceptance_secure.rs"]
 mod proposal_acceptance;
@@ -62,6 +63,7 @@ pub use plan_preview::{
     MAX_PREVIEW_ENTRY_BYTES, MAX_PREVIEW_TOTAL_BYTES, MAX_REQUEST_BYTES, MAX_SUMMARY_BYTES,
     MAX_TOTAL_ORIGINS, PlanPreviewControl, PlanPreviewControlError,
 };
+pub use platform_compatibility::PlatformCompatibilityControl;
 pub use policy_review::{PolicySubjectError, TrustedPolicyReview, policy_subject_from_plan};
 pub use proposal_acceptance::{
     AcceptProposalRequest, AcceptanceAuthoritySnapshot, AuthorityClockUnit,
