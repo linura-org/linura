@@ -1,7 +1,17 @@
 # Minimal bootstrap, installation and recovery
 
-Linura's product architecture begins before the full desktop exists. Installation creates a small supported base capable of observation, profile selection, snapshots/recovery and first boot.
+Linura's product architecture begins before the full desktop exists, but **Linura adoption/bootstrap and OS/platform installation are separate support claims**.
 
-Recovery must not require `linurad`, a GUI, internet access or a model provider. The supported platform profile should provide documented TTY/snapshot/package-repair paths and must preserve administrator out-of-band repair.
+## Current release boundary
 
-Future installer work must define transaction boundaries, snapshot points, boot rollback, hardware support reporting and offline installation behavior before a supported release.
+v0.9.0 qualifies Linura adoption, First Boot, update/recovery and migration on the exact Ubuntu 24.04/amd64/QEMU-TCG/headless QualificationEnvironment. The underlying Linux base image already exists and is independently verified; v0.9 does not claim that Linura partitioned disks, installed the base operating system, configured full-disk encryption, or installed the bootloader.
+
+The v0.10 workstation contract follows the same truthfulness rule: the baseline claim is Linura installation/adoption onto the qualified `arch-hyprland-v1` base unless a broader OS installer is separately implemented and qualified.
+
+Recovery must not require the graphical client, internet access or a model provider. Native CLI/TTY and profile-appropriate snapshot/package-repair paths must remain available, and administrator out-of-band repair must not be trapped behind Linura UI state.
+
+## Installer-capable profiles
+
+A future installer-capable PlatformProfile may own destructive OS-installation work, but only after its contract defines and qualifies transaction boundaries, storage/encryption policy, snapshot points, boot rollback, exact hardware/support reporting, offline behavior, interruption recovery and the boundary between installer authority and ordinary Linura Control.
+
+See [Installer and bootstrap](installer-bootstrap.md), [First Boot](first-boot.md), and [v0.10 qualification](qualification/v0.10.0.md).

@@ -132,7 +132,7 @@ The control plane is reusable without AI. The intelligence plane can be replaced
 - Every successful managed mutation follows **request/intent → observe → plan → validate → authorize → prepare → execute → verify → commit → audit → reconcile** without shortcuts.
 - Planning consumes authoritative observation; it does not assume current machine state.
 - Executor success is evidence of dispatch, not proof of resulting state; verification is a separate boundary.
-- External effects are never supported without a durable pre-execution recovery record.
+- Supported `ManagedExternalEffect` operations require durable pre-execution prepare/recovery state. A qualified `TransientExternalEffect` is the narrow exception defined by the operation-semantics contract: unprivileged, at most `UserState`, plan-bound, independently verified/audited, and bounded so failure does not require durable indeterminate recovery.
 - Reusable setups/profiles contain no secret values and carry no authority grants.
 - Imported/synced setup data is untrusted and must be locally re-observed/replanned before mutation.
 - Portable declarative configuration and exact recovery snapshots remain separate concepts.
@@ -189,7 +189,7 @@ The name is inspired by **Linux + aura**: Linux underneath, with a coherent, int
 
 ## First platform profile
 
-The first planned platform target stays deliberately narrow: Arch Linux + systemd + Wayland/Hyprland + NetworkManager + PipeWire/WirePlumber + BlueZ + UDisks2 + Polkit + Btrfs/Snapper. This is a **planned platform profile**, not an architectural dependency of the core model and not a v0.4.0 support claim.
+The first interactive workstation PlatformProfile target stays deliberately narrow: Arch Linux + systemd + Wayland/Hyprland + NetworkManager + PipeWire/WirePlumber + BlueZ + UDisks2 + Polkit + Btrfs/Snapper. `arch-hyprland-v1` remains a **development candidate for v0.10**, not an architectural dependency of the core model and not part of the current v0.9.0 release-qualified support boundary.
 
 ## Development order
 

@@ -77,8 +77,11 @@ load setup
   → generate a fresh diff/plan
   → trusted operation classification in Control
   → policy for the classified operation and trusted risk
-  → approval when required
-  → canonical managed lifecycle for resulting managed external effects
+  → approval only when policy requires it
+  → class-specific handling:
+       Linura-owned local transaction
+       OR bounded transient effect
+       OR canonical managed lifecycle
 ```
 
 Imported or synced setup data is untrusted input. It cannot directly execute, grant itself authority or bypass policy.
@@ -100,15 +103,20 @@ Portable exports remain declarative. They do not include historical executor rec
 
 ## Linura Library
 
-The Linura Library is the user-facing catalog/storage abstraction for reusable declarative artifacts. A future implementation may contain:
+The Linura Library is the user-facing catalog/storage abstraction for reusable declarative artifacts. v0.7.0 shipped the first durable local-first Library implementation with persistent intent lifecycle, append-only Setup/MachineProfile revisions, causal ownership/removal-impact evidence, deterministic portable export/import/adoption, and validated local backup/restore.
 
-- setups;
-- machine profiles;
-- reusable workflows;
-- capability presets/blueprints that are safe to expose;
-- associated metadata, revisions, provenance and signatures.
+The released local baseline includes:
 
-The first implementation should be local-first and usable offline. Storage/sync backends are optional adapters, for example:
+- durable intents and lifecycle lineage;
+- versioned Setups and MachineProfiles;
+- deterministic SHA-256-integrity-bound portable Setup/Profile artifacts;
+- validation/import and dry-run/direct adoption without imported authority;
+- causal ownership/removal-impact evidence;
+- local Library backup/restore.
+
+Reusable workflows, hosted sync, enterprise catalogs, optional signatures/attestations and richer capability presets remain later/optional surfaces unless separately activated.
+
+Storage/sync backends beyond the released local baseline are optional adapters, for example:
 
 ```text
 Linura Library
@@ -127,7 +135,7 @@ No network service is the source of truth for local machine authority. A synchro
 
 Setups are revisioned. A user action such as "save this as a new version of my Rust setup" creates a new revision rather than silently rewriting historical meaning.
 
-Future persisted/exported representations should support canonical serialization, content digests and optional signatures. Exact digest/signature formats remain a later ADR because canonical serialization must be stabilized first.
+The released v0.7 portable Setup/Profile format is deterministic, versioned and SHA-256 integrity-bound. Optional signatures/attestations and any network synchronization trust model remain separate future contracts; they do not replace local parse/validate/adopt semantics.
 
 Provenance should retain lineage between revisions and between a setup and the intents adopted from it.
 
@@ -188,6 +196,8 @@ The target machine can therefore realize equivalent intent differently while pre
 - Package names and command strings are implementation details, not the portable source of truth.
 - Snapshots remain separate exact-machine recovery artifacts.
 
-## `v0.0.0` boundary
+## Current release boundary
 
-At `v0.0.0`, Linura locks the domain/protocol/schema and trust semantics for reusable setups and self-contained profile exports. Durable Library storage, capture, sync providers, signatures and polished UX are implementation work for later milestones.
+v0.7.0 moved the Library from architecture-only design into an Experimental durable local implementation, and v0.8/v0.9 inherit that contract. The current v0.9 release therefore includes persistent intent/Setup/MachineProfile Library semantics and portable local adoption, but it does **not** claim hosted synchronization, remote/fleet Library authority, secret synchronization, general workflow execution, a polished graphical Library experience, or broader machine mutation authority than separately qualified effect paths.
+
+v0.10 may expose this existing Library through Control Center and the many-interface workstation experience, but UI activation does not widen the Library's authority: imported/synced declarative data still requires fresh local validation, observation, planning, trusted operation classification and policy before any effect.
