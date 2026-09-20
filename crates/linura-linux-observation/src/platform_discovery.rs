@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::net::Shutdown;
@@ -442,9 +442,13 @@ fn user_unit_active(connection: &Connection, unit_name: &str) -> Result<bool, Pl
             PlatformProbeError::new(format!("cannot create user systemd manager proxy: {error}"))
         },
     )?;
-    let unit_path: OwnedObjectPath = manager.call("GetUnit", &(unit_name,)).map_err(|error| {
+    // `GetUnit` only resolves units currently resident in the manager. An installed but
+    // inactive PipeWire/WirePlumber unit may have been garbage-collected from that set, so use
+    // `LoadUnit`: it loads configuration without starting the unit and gives us authoritative
+    // ActiveState evidence for both active and inactive installed units.
+    let unit_path: OwnedObjectPath = manager.call("LoadUnit", &(unit_name,)).map_err(|error| {
         PlatformProbeError::new(format!(
-            "cannot resolve active user unit {unit_name}: {error}"
+            "cannot load user unit {unit_name} for observation: {error}"
         ))
     })?;
     let unit = Proxy::new(
@@ -554,6 +558,7 @@ fn hyprland_socket_candidates(
 ) -> Result<Vec<PathBuf>, PlatformProbeError> {
     let hypr_root = runtime_path.join("hypr");
     let mut candidates = Vec::new();
+    let mut seen_paths = BTreeSet::new();
 
     for line in socket_table.lines().skip(1) {
         let Some(raw_path) = line.split_ascii_whitespace().nth(7) else {
@@ -576,6 +581,14 @@ fn hyprland_socket_candidates(
             continue;
         };
         if !safe_instance_signature(signature) {
+            continue;
+        }
+
+        // /proc/net/unix may contain the listening socket and one or more accepted sockets with
+        // the same pathname. The pathname is locator evidence only, so probe each unique locator
+        // once; otherwise one compositor can be misclassified as multiple verified peers and
+        // duplicate rows can consume the bounded candidate budget.
+        if !seen_paths.insert(path.clone()) {
             continue;
         }
         candidates.push(path);
@@ -1093,13 +1106,14 @@ mod tests {
     }
 
     #[test]
-    fn hyprland_socket_candidates_use_only_bounded_kernel_socket_paths() {
+    fn hyprland_socket_candidates_use_only_unique_bounded_kernel_socket_paths() {
         let table = concat!(
             "Num RefCount Protocol Flags Type St Inode Path\n",
             "000: 00000002 00000000 00010000 0001 01 1 /run/user/1000/hypr/good/.socket.sock\n",
-            "001: 00000002 00000000 00010000 0001 01 2 /run/user/1000/hypr/../../bad/.socket.sock\n",
-            "002: 00000002 00000000 00010000 0001 01 3 /run/user/1000/other/good/.socket.sock\n",
-            "003: 00000002 00000000 00010000 0001 01 4 @abstract-hyprland\n",
+            "001: 00000002 00000000 00010000 0001 03 2 /run/user/1000/hypr/good/.socket.sock\n",
+            "002: 00000002 00000000 00010000 0001 01 3 /run/user/1000/hypr/../../bad/.socket.sock\n",
+            "003: 00000002 00000000 00010000 0001 01 4 /run/user/1000/other/good/.socket.sock\n",
+            "004: 00000002 00000000 00010000 0001 01 5 @abstract-hyprland\n",
         );
         assert_eq!(
             hyprland_socket_candidates(table, Path::new("/run/user/1000")),
