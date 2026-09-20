@@ -105,7 +105,15 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "release_qualification_ready = true",
         )
 
-    def _png_bytes(self, width: int, height: int, *, pixel_value: int = 0) -> bytes:
+    def _png_bytes(
+        self,
+        width: int,
+        height: int,
+        *,
+        pixel_value: int = 0,
+        transparent_gray: int | None = None,
+        extra_raw_bytes: int = 0,
+    ) -> bytes:
         def chunk(kind: bytes, payload: bytes) -> bytes:
             return (
                 struct.pack(">I", len(payload))
@@ -117,15 +125,17 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         ihdr = struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0)
         self.assertGreaterEqual(pixel_value, 0)
         self.assertLessEqual(pixel_value, 255)
+        if transparent_gray is not None:
+            self.assertGreaterEqual(transparent_gray, 0)
+            self.assertLessEqual(transparent_gray, 255)
+        self.assertGreaterEqual(extra_raw_bytes, 0)
         rows = b"".join(
             b"\x00" + bytes([pixel_value]) * width for _ in range(height)
-        )
-        return (
-            b"\x89PNG\r\n\x1a\n"
-            + chunk(b"IHDR", ihdr)
-            + chunk(b"IDAT", zlib.compress(rows))
-            + chunk(b"IEND", b"")
-        )
+        ) + (b"\x00" * extra_raw_bytes)
+        result = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+        if transparent_gray is not None:
+            result += chunk(b"tRNS", struct.pack(">H", transparent_gray))
+        return result + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 
     def _refresh_experience_evidence_digest(self, root: Path) -> None:
         evidence = root / "qualification/v010/experience-evidence.json"
@@ -135,6 +145,31 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         data = tomllib.loads(text)
         old_digest = data["experience"]["experience_evidence_manifest_sha256"]
         contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+
+    def _refresh_visual_baseline_manifest_digest(self, root: Path) -> None:
+        manifest = root / "visual/baselines/manifest.json"
+        digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        contract = root / "contracts/v010-workstation-qualification.toml"
+        text = contract.read_text(encoding="utf-8")
+        data = tomllib.loads(text)
+        old_digest = data["experience"]["visual_baseline_manifest_sha256"]
+        contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+
+    def _visual_failure_binding(
+        self,
+        baseline_id: str,
+        baseline_sha256: str,
+        failed_capture_sha256: str,
+        diff_sha256: str,
+    ) -> str:
+        payload = (
+            "linura-v010-visual-failure-v1\n"
+            f"{baseline_id}\n"
+            f"{baseline_sha256}\n"
+            f"{failed_capture_sha256}\n"
+            f"{diff_sha256}\n"
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def _write_complete_experience_evidence(self, root: Path) -> None:
         baseline_manifest = root / "visual/baselines/manifest.json"
@@ -198,9 +233,35 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             f'visual_baseline_manifest_sha256 = "{baseline_digest}"',
         )
 
+        failed_baseline = baselines[0]
+        failed_capture_rel = "qualification/v010/visual-failure-capture.png"
+        failed_capture_path = root / failed_capture_rel
+        failed_capture_path.write_bytes(
+            self._png_bytes(
+                int(failed_baseline["width"]),
+                int(failed_baseline["height"]),
+                pixel_value=255,
+            )
+        )
+        failed_capture_digest = hashlib.sha256(failed_capture_path.read_bytes()).hexdigest()
         diff_rel = "qualification/v010/visual-failure-diff.png"
         diff_path = root / diff_rel
-        diff_path.write_bytes(self._png_bytes(1280, 800))
+        diff_path.write_bytes(
+            self._png_bytes(
+                int(failed_baseline["width"]),
+                int(failed_baseline["height"]),
+                pixel_value=255,
+            )
+        )
+        diff_digest = hashlib.sha256(diff_path.read_bytes()).hexdigest()
+        baseline_digest = str(failed_baseline["sha256"])
+        failure_binding = self._visual_failure_binding(
+            str(failed_baseline["id"]),
+            baseline_digest,
+            failed_capture_digest,
+            diff_digest,
+        )
+
         required_surfaces = [
             "linura-firstboot",
             "linura-control-center",
@@ -209,29 +270,57 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "desktop-shell-integration",
             "notifications-osd",
         ]
+        interaction_records = []
+        for surface in required_surfaces:
+            report_rel = f"qualification/v010/{surface}-interaction-accessibility.json"
+            report_path = root / report_rel
+            report = {
+                "schema_version": 1,
+                "artifact_type": "linura-v010-interaction-accessibility",
+                "surface": surface,
+                "result": "pass",
+                "runner": {
+                    "name": "fixture-runner",
+                    "version": "1.0",
+                    "run_id": f"fixture-{surface}",
+                    "platform": "arch-hyprland-v1",
+                },
+                "checks": {
+                    "keyboard": "pass",
+                    "pointer": "pass",
+                    "screen_reader": "pass",
+                    "reduced_motion": "pass",
+                    "display_scaling": "pass",
+                    "offline_error": "pass",
+                    "reconnect": "pass",
+                },
+            }
+            report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+            interaction_records.append(
+                {
+                    "surface": surface,
+                    "report": report_rel,
+                    "report_sha256": hashlib.sha256(report_path.read_bytes()).hexdigest(),
+                }
+            )
+
         evidence = {
             "schema_version": 1,
             "visual_comparisons": comparisons,
             "retained_failure_diffs": [
                 {
+                    "baseline_id": failed_baseline["id"],
+                    "baseline_sha256": baseline_digest,
+                    "failed_capture": failed_capture_rel,
+                    "failed_capture_sha256": failed_capture_digest,
+                    "status": "fail",
                     "diff": diff_rel,
-                    "sha256": hashlib.sha256(diff_path.read_bytes()).hexdigest(),
+                    "diff_sha256": diff_digest,
+                    "binding_sha256": failure_binding,
                     "reviewed": True,
                 }
             ],
-            "interaction_accessibility": [
-                {
-                    "surface": surface,
-                    "keyboard": True,
-                    "pointer": True,
-                    "screen_reader": True,
-                    "reduced_motion": True,
-                    "display_scaling": True,
-                    "offline_error": True,
-                    "reconnect": True,
-                }
-                for surface in required_surfaces
-            ],
+            "interaction_accessibility": interaction_records,
         }
         evidence_path = qualification_dir / "experience-evidence.json"
         evidence_path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
@@ -533,6 +622,111 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
                 "visual comparison for firstboot-1280x800-1x does not match baseline pixels",
+                result.stderr,
+            )
+
+    def test_png_transparency_is_part_of_pixel_equivalence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            evidence_path = root / "qualification/v010/experience-evidence.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            comparison = evidence["visual_comparisons"][0]
+            capture_path = root / comparison["capture"]
+            capture_path.write_bytes(
+                self._png_bytes(1280, 800, pixel_value=0, transparent_gray=0)
+            )
+            comparison["capture_sha256"] = hashlib.sha256(
+                capture_path.read_bytes()
+            ).hexdigest()
+            evidence_path.write_text(
+                json.dumps(evidence, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            self._refresh_experience_evidence_digest(root)
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "visual comparison for firstboot-1280x800-1x does not match baseline pixels",
+                result.stderr,
+            )
+
+    def test_png_overlong_inflate_is_rejected_under_declared_dimensions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            evidence_path = root / "qualification/v010/experience-evidence.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            comparison = evidence["visual_comparisons"][0]
+            capture_path = root / comparison["capture"]
+            capture_path.write_bytes(
+                self._png_bytes(1280, 800, extra_raw_bytes=4 * 1024 * 1024)
+            )
+            comparison["capture_sha256"] = hashlib.sha256(
+                capture_path.read_bytes()
+            ).hexdigest()
+            evidence_path.write_text(
+                json.dumps(evidence, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            self._refresh_experience_evidence_digest(root)
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("overlong PNG image data", result.stderr)
+
+    def test_retained_failure_diff_must_bind_an_actual_failed_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            evidence_path = root / "qualification/v010/experience-evidence.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            failure = evidence["retained_failure_diffs"][0]
+            baseline_path = root / "visual/baselines/firstboot-1280x800-1x.png"
+            failed_capture_path = root / failure["failed_capture"]
+            failed_capture_path.write_bytes(baseline_path.read_bytes())
+            failure["failed_capture_sha256"] = hashlib.sha256(
+                failed_capture_path.read_bytes()
+            ).hexdigest()
+            failure["binding_sha256"] = self._visual_failure_binding(
+                failure["baseline_id"],
+                failure["baseline_sha256"],
+                failure["failed_capture_sha256"],
+                failure["diff_sha256"],
+            )
+            evidence_path.write_text(
+                json.dumps(evidence, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            self._refresh_experience_evidence_digest(root)
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("does not represent an actual failed pixel comparison", result.stderr)
+
+    def test_accessibility_claims_require_digest_bound_runner_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            evidence_path = root / "qualification/v010/experience-evidence.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            record = evidence["interaction_accessibility"][0]
+            report_path = root / record["report"]
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["checks"]["screen_reader"] = "fail"
+            report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+            record["report_sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+            evidence_path.write_text(
+                json.dumps(evidence, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            self._refresh_experience_evidence_digest(root)
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "interaction/accessibility report linura-firstboot checks.screen_reader must be pass",
                 result.stderr,
             )
 
