@@ -159,6 +159,25 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _read_bounded_bytes(
+    path: Path,
+    max_bytes: int,
+    *,
+    label: str,
+    failures: list[str],
+) -> bytes | None:
+    try:
+        with path.open("rb") as stream:
+            data = stream.read(max_bytes + 1)
+    except OSError as error:
+        failures.append(f"{label} could not be read: {error}")
+        return None
+    if len(data) > max_bytes:
+        failures.append(f"{label} exceeds the bounded PNG artifact size")
+        return None
+    return data
+
+
 def _bounded_regular_path(
     root: Path,
     value: object,
@@ -448,7 +467,14 @@ def _validate_png_artifact(
     if not isinstance(expected_digest, str) or not SHA256_RE.fullmatch(expected_digest):
         failures.append(f"{label} must carry a lowercase SHA-256 digest")
         return None
-    data = path.read_bytes()
+    data = _read_bounded_bytes(
+        path,
+        PNG_MAX_BYTES,
+        label=label,
+        failures=failures,
+    )
+    if data is None:
+        return None
     if hashlib.sha256(data).hexdigest() != expected_digest:
         failures.append(f"{label} digest mismatch")
         return None
