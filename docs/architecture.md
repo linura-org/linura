@@ -113,6 +113,20 @@ Agent/model processes always remain outside the authority plane. They may eventu
 
 The Linura Library is outside execution authority: loading or synchronizing a declarative artifact cannot mutate the machine until Control validates/adopts it through the normal planning and authority path.
 
+## Operation classification before authority path
+
+Linura does not treat every interaction as a managed mutation, and it does not let a UI/provider choose a weaker path for convenience. Before authority/execution selection, a registered typed operation is classified under [ADR 0032](adr/0032-classify-operations-before-authority.md) and `contracts/operation-semantics.toml` as one of:
+
+- `ExperienceEphemeral` — non-authoritative experience/session navigation;
+- `AuthoritativeQuery` — read-only observation/query;
+- `LinuraOwnedState` — typed local Linura durable state with no external Linux effect;
+- `TransientExternalEffect` — Control-mediated, unprivileged, at-most-`UserState` external effect with bounded verify/audit semantics;
+- `ManagedExternalEffect` — durable/consequential/privileged/ambiguity-sensitive external effect using the full managed lifecycle.
+
+`OperationClass` is orthogonal to `RiskClass`. Trusted operation registration plus Control own the routing decision; clients, agents and providers cannot self-declare a weaker class. A transient effect that requires privilege, trusted risk above `UserState`, durable ambiguity recovery or stronger semantics is promoted to `ManagedExternalEffect` or remains unsupported.
+
+The complete eleven-stage path below applies to `ManagedExternalEffect`. It is a semantic trust contract, not a requirement for eleven user prompts, processes, IPC calls or model/network interactions. Implementations may compose stages efficiently while preserving mandatory durable/security boundaries.
+
 ## Canonical managed-mutation data flow
 
 A successful managed mutation follows exactly:
@@ -288,6 +302,7 @@ When prose and implementation appear to disagree, resolve the disagreement rathe
 
 - architecture decisions: `docs/adr/`;
 - dependency direction: `contracts/layering.toml`;
+- operation semantics / proportional authority: `contracts/operation-semantics.toml` plus ADR 0032;
 - API stability: `contracts/stability.toml`;
 - component maturity/activation/packaging: `contracts/components.toml`;
 - milestone sequence and claim boundaries: `contracts/roadmap.toml` plus `docs/milestones/`;

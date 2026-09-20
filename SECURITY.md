@@ -17,7 +17,7 @@ No production-supported version exists yet. Security fixes apply to the active d
 7. **Deny by default.** Unknown actors, capabilities, resources, policy states and unsupported observations cannot mutate the machine.
 8. **Plan before apply.** Material effects, risk, reversibility and verification are inspectable before privilege.
 9. **Verify after apply.** Success requires authoritative postcondition evidence.
-10. **Prepare before external effects.** Supported mutation paths durably record intent-to-execute before dispatch and recover indeterminate operations by re-observation rather than blind replay.
+10. **Prepare before managed external effects.** Supported `ManagedExternalEffect` paths durably record intent-to-execute before dispatch and recover indeterminate operations by re-observation rather than blind replay. A qualified `TransientExternalEffect` is deliberately exempt from durable prepare only while it remains unprivileged, no higher than `UserState` risk, non-durable desired state, independently verifiable/auditable, and bounded so failure does not require durable indeterminate recovery; otherwise it is promoted to `ManagedExternalEffect` or remains unsupported.
 11. **Safe retirement.** Removing intent performs dependency/shared-ownership analysis before cleanup.
 12. **No secret argv or general model-context leakage.** Secrets use protected handles/channels and are minimized/redacted.
 13. **No unsandboxed extension/generated code in authority processes.** Derived UI is constrained; custom extensions are isolated.

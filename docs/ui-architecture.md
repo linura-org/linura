@@ -4,7 +4,9 @@ Linura has four principal local UX surfaces: Linura First Boot, Linura Agent, Li
 
 ## Rules
 - no distro/provider-specific backend logic in UI;
-- every mutation is plan-first and shows material effects/risk/approval;
+- every external effect that reaches policy authorization is plan-bound: `ManagedExternalEffect` and qualified `TransientExternalEffect` both derive policy review from the canonical non-executable `ReconciliationPlan` plus authenticated principal and show material effects, risk, and actual policy/approval state;
+- a qualified `TransientExternalEffect` may use the bounded Control-mediated transient lifecycle without fabricating a durable prepare/commit/reconcile transaction or unconditional approval prompt; the UI must still show material user-visible effect/risk when relevant, preserve trusted classification, honor plan-bound policy authorization, and surface verification/audit outcome;
+- Linura-owned local state and ephemeral experience actions use their own typed class-specific paths rather than being disguised as managed external mutations;
 - `Explain` renders structured provenance/dependency evidence;
 - intent retirement shows shared resources and cleanup impact;
 - agent suggestions are visually distinguishable from approved desired state;

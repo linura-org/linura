@@ -25,6 +25,7 @@ macro_rules! typed_id {
 typed_id!(ActorId, "actor id");
 typed_id!(PrincipalId, "principal id");
 typed_id!(RequestId, "request id");
+typed_id!(OperationId, "operation id");
 typed_id!(PlanId, "plan id");
 typed_id!(ApprovalRequestId, "approval request id");
 typed_id!(ApprovalEvidenceId, "approval evidence id");
@@ -86,6 +87,51 @@ pub struct Capability {
     pub support: SupportLevel,
     pub provider: Option<ProviderId>,
     pub reason: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OperationClass {
+    ExperienceEphemeral,
+    AuthoritativeQuery,
+    LinuraOwnedState,
+    TransientExternalEffect,
+    ManagedExternalEffect,
+}
+
+impl OperationClass {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ExperienceEphemeral => "experience-ephemeral",
+            Self::AuthoritativeQuery => "authoritative-query",
+            Self::LinuraOwnedState => "linura-owned-state",
+            Self::TransientExternalEffect => "transient-external-effect",
+            Self::ManagedExternalEffect => "managed-external-effect",
+        }
+    }
+
+    #[must_use]
+    pub const fn control_mediated(self) -> bool {
+        !matches!(self, Self::ExperienceEphemeral)
+    }
+
+    #[must_use]
+    pub const fn permits_privileged_executor(self) -> bool {
+        matches!(self, Self::ManagedExternalEffect)
+    }
+
+    #[must_use]
+    pub const fn requires_plan_bound_external_authorization(self) -> bool {
+        matches!(
+            self,
+            Self::TransientExternalEffect | Self::ManagedExternalEffect
+        )
+    }
+
+    #[must_use]
+    pub const fn requires_canonical_managed_lifecycle(self) -> bool {
+        matches!(self, Self::ManagedExternalEffect)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -179,6 +225,28 @@ mod tests {
         assert!(ApprovalEvidenceId::new("approval\nevidence").is_err());
         assert!(ActorId::new("uid:1000\nspoof").is_err());
         assert!(PrincipalId::new("uid:1000\nspoof").is_err());
+    }
+
+    #[test]
+    fn operation_classes_lock_authority_shape() {
+        assert!(!OperationClass::ExperienceEphemeral.control_mediated());
+        assert!(OperationClass::AuthoritativeQuery.control_mediated());
+        assert!(OperationClass::LinuraOwnedState.control_mediated());
+        assert!(OperationClass::TransientExternalEffect.control_mediated());
+        assert!(OperationClass::ManagedExternalEffect.control_mediated());
+        assert!(!OperationClass::TransientExternalEffect.permits_privileged_executor());
+        assert!(OperationClass::ManagedExternalEffect.permits_privileged_executor());
+        assert!(
+            OperationClass::TransientExternalEffect.requires_plan_bound_external_authorization()
+        );
+        assert!(OperationClass::ManagedExternalEffect.requires_plan_bound_external_authorization());
+        assert!(!OperationClass::AuthoritativeQuery.requires_plan_bound_external_authorization());
+        assert!(!OperationClass::TransientExternalEffect.requires_canonical_managed_lifecycle());
+        assert!(OperationClass::ManagedExternalEffect.requires_canonical_managed_lifecycle());
+        assert_eq!(
+            OperationClass::ManagedExternalEffect.as_str(),
+            "managed-external-effect"
+        );
     }
 
     #[test]

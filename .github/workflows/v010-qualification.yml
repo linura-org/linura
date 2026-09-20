@@ -18,6 +18,7 @@ on:
       - ".github/workflows/v010-qualification.yml"
       - "contracts/roadmap.toml"
       - "contracts/v010-workstation-qualification.toml"
+      - "contracts/operation-semantics.toml"
       - "contracts/components.toml"
       - "profiles/arch-hyprland-v1.toml"
       - "crates/linura-hardware/**"
@@ -30,12 +31,16 @@ on:
       - "packaging/arch/archiso/packages.linura"
       - "qualification/v010/**"
       - "docs/milestones/v0.10.0.md"
+      - "docs/operation-semantics.md"
+      - "docs/adr/0032-classify-operations-before-authority.md"
       - "docs/platform-profiles.md"
       - "docs/qualification/v0.10.0.md"
       - "tools/check_machine_classes.py"
+      - "tools/check_operation_semantics.py"
       - "tools/check_roadmap.py"
       - "tools/check_v010_workstation_qualification.py"
       - "tests/tooling/test_roadmap.py"
+      - "tests/tooling/test_operation_semantics.py"
       - "tests/tooling/test_v010_workstation_qualification.py"
 
 permissions:
@@ -80,9 +85,11 @@ jobs:
           set -euo pipefail
           python3 tools/check_roadmap.py
           python3 tools/check_machine_classes.py
+          python3 tools/check_operation_semantics.py
           python3 tools/check_v010_workstation_qualification.py
           python3 -m unittest \
             tests.tooling.test_roadmap \
+            tests.tooling.test_operation_semantics \
             tests.tooling.test_v010_workstation_qualification
 
       - name: Test typed PlatformProfile candidate compatibility
