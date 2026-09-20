@@ -68,6 +68,7 @@ The bounded transient path is:
 ```text
 request
 → authoritative observation/preconditions
+→ deterministic canonical plan
 → validate + trusted class/risk
 → authorize
 → bounded unprivileged execute
@@ -75,7 +76,9 @@ request
 → audit
 ```
 
-A qualified transient effect does **not** create a durable prepare/recovery transaction. That exemption is part of the class boundary, not an optimization: it is valid only while the operation is unprivileged, at most `UserState`, independently verifiable/auditable, carries no durable desired state, and has bounded failure semantics that do not require durable indeterminate recovery. If any of those conditions stop being true, Control must promote the operation to `ManagedExternalEffect` or reject it.
+A qualified transient effect still produces the canonical non-executable `linura-planner::ReconciliationPlan` from the exact typed requested postcondition plus authoritative observation. Linura Control derives the `PolicySubject` from that plan plus the transport-authenticated principal, so policy/approval remains bound to the same request, evidence, provider/resource/capability, material change, risk and policy revision as other external-effect authorization. The transient class does **not** create an independently authored policy subject or skip planning.
+
+The exemption is specifically the durable prepare/commit/reconcile recovery transaction. That exemption is part of the class boundary, not an optimization: it is valid only while the operation is unprivileged, at most `UserState`, independently verifiable/auditable, carries no durable desired state, and has bounded failure semantics that do not require durable indeterminate recovery. If any of those conditions stop being true, Control must promote the operation to `ManagedExternalEffect` or reject it.
 
 This is not a generic "fast mutation" API. It is unavailable to privileged, `SystemMutation`, `SecuritySensitive`, `Destructive`, ambiguity-sensitive or durable desired-state work.
 
@@ -99,6 +102,7 @@ The same subsystem can expose operations in different classes. Classification fo
 - Agent/model confidence never determines operation class or risk.
 - Provider mechanism metadata cannot lower trusted classification.
 - No `ExperienceEphemeral`, `AuthoritativeQuery`, `LinuraOwnedState` or `TransientExternalEffect` operation may acquire a privileged executor.
+- Every `TransientExternalEffect` and `ManagedExternalEffect` that reaches policy authorization is bound to a canonical `ReconciliationPlan` plus the authenticated principal.
 - No `ManagedExternalEffect` may bypass the canonical lifecycle for latency or convenience.
 - Every public registered effect operation must have a typed operation descriptor before support is claimed.
 - Qualification must test class substitution/downgrade, interface inconsistency and privilege-path attempts.
