@@ -11,6 +11,42 @@ support_matrix_path = "hardware/support-matrix.json"
 support_promotion_authority = "protected-post-release-closure"
 required_evidence = ["disposable-arch", "interactive-workstation", "inherited-v0.9"]
 
+[experience]
+interaction_model = "one-model-many-interfaces"
+architecture_decision = "docs/adr/0031-v010-many-interfaces-one-authority-path.md"
+authority_convergence = "single-typed-machine-model-and-control-path"
+required_surfaces = ["intent-state", "control-plane", "agent-conversational", "manual-no-ai", "library-setups-profiles", "control-center", "declarative-configuration", "keyboard", "command-palette", "quick-settings", "desktop-shell-integration", "launcher-workspace", "notifications-osd", "unified-visual-theme", "keyboard-mouse-parity"]
+declarative_configuration = "typed-versioned-previewable-non-authorizing"
+command_palette = true
+keyboard_shortcuts = true
+quick_settings = true
+desktop_shell_integration = "bounded"
+launcher_workspace = true
+notifications_osd = true
+unified_visual_theme = true
+keyboard_mouse_parity = true
+visual_baseline_manifest = "visual/baselines/manifest.json"
+visual_baseline_manifest_sha256 = ""
+experience_evidence_manifest = "qualification/v010/experience-evidence.json"
+experience_evidence_manifest_sha256 = ""
+representative_visual_scales = [1.0, 2.0]
+representative_visual_resolutions = ["1280x800", "1440x900"]
+required_visual_surfaces = ["linura-firstboot", "linura-control-center", "command-palette", "quick-settings", "desktop-shell-integration", "notifications-osd"]
+required_accessibility_surfaces = ["linura-firstboot", "linura-control-center", "command-palette", "quick-settings", "desktop-shell-integration", "notifications-osd"]
+require_reviewed_non_null_visual_baselines = true
+require_representative_resolution_scale_captures = true
+require_retained_visual_failure_diffs = true
+require_visual_interaction_evidence = true
+require_screen_reader_semantics = true
+require_reduced_motion = true
+require_display_scaling = true
+require_offline_error_states = true
+experience_evidence_ready = false
+manual_no_ai_required = true
+agent_authority = "proposal-only"
+full_shell_replacement_required = false
+no_parallel_mutation_paths = true
+
 [profile_identity]
 distribution = "arch"
 init = "systemd"

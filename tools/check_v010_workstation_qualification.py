@@ -5,14 +5,84 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import struct
 import sys
 import tomllib
+import zlib
 from urllib.parse import urlparse
 
 CONTRACT_PATH = "contracts/v010-workstation-qualification.toml"
 EXPECTED_PROFILE = "arch-hyprland-v1"
 EXPECTED_MACHINE_CLASS = "workstation"
 EXPECTED_EVIDENCE = ["disposable-arch", "interactive-workstation", "inherited-v0.9"]
+EXPECTED_INTERACTION_ADR = "docs/adr/0031-v010-many-interfaces-one-authority-path.md"
+EXPECTED_INTERACTION_SURFACES = [
+    "intent-state",
+    "control-plane",
+    "agent-conversational",
+    "manual-no-ai",
+    "library-setups-profiles",
+    "control-center",
+    "declarative-configuration",
+    "keyboard",
+    "command-palette",
+    "quick-settings",
+    "desktop-shell-integration",
+    "launcher-workspace",
+    "notifications-osd",
+    "unified-visual-theme",
+    "keyboard-mouse-parity",
+]
+EXPECTED_REQUIRED_VISUAL_SURFACES = [
+    "linura-firstboot",
+    "linura-control-center",
+    "command-palette",
+    "quick-settings",
+    "desktop-shell-integration",
+    "notifications-osd",
+]
+EXPECTED_ALLOWED_VISUAL_SURFACES = set(EXPECTED_REQUIRED_VISUAL_SURFACES) | {"approval-dialog"}
+
+EXPECTED_EXPERIENCE = {
+    "interaction_model": "one-model-many-interfaces",
+    "architecture_decision": EXPECTED_INTERACTION_ADR,
+    "authority_convergence": "single-typed-machine-model-and-control-path",
+    "required_surfaces": EXPECTED_INTERACTION_SURFACES,
+    "declarative_configuration": "typed-versioned-previewable-non-authorizing",
+    "command_palette": True,
+    "keyboard_shortcuts": True,
+    "quick_settings": True,
+    "desktop_shell_integration": "bounded",
+    "launcher_workspace": True,
+    "notifications_osd": True,
+    "unified_visual_theme": True,
+    "keyboard_mouse_parity": True,
+    "visual_baseline_manifest": "visual/baselines/manifest.json",
+    "experience_evidence_manifest": "qualification/v010/experience-evidence.json",
+    "representative_visual_scales": [1.0, 2.0],
+    "representative_visual_resolutions": ["1280x800", "1440x900"],
+    "required_visual_surfaces": EXPECTED_REQUIRED_VISUAL_SURFACES,
+    "required_accessibility_surfaces": [
+        "linura-firstboot",
+        "linura-control-center",
+        "command-palette",
+        "quick-settings",
+        "desktop-shell-integration",
+        "notifications-osd",
+    ],
+    "require_reviewed_non_null_visual_baselines": True,
+    "require_representative_resolution_scale_captures": True,
+    "require_retained_visual_failure_diffs": True,
+    "require_visual_interaction_evidence": True,
+    "require_screen_reader_semantics": True,
+    "require_reduced_motion": True,
+    "require_display_scaling": True,
+    "require_offline_error_states": True,
+    "manual_no_ai_required": True,
+    "agent_authority": "proposal-only",
+    "full_shell_replacement_required": False,
+    "no_parallel_mutation_paths": True,
+}
 EXPECTED_REQUIRED_PACKAGES_PATH = "packaging/arch/archiso/packages.linura"
 EXPECTED_MANIFEST_FORMAT = "linura-arch-package-manifest-v1"
 EXPECTED_MANIFEST_DIRECTORY = "qualification/v010"
@@ -46,6 +116,10 @@ OFFICIAL_REPOSITORIES = {"core", "extra", "multilib"}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PACKAGE_NAME_RE = re.compile(r"^[a-z0-9@._+-]+$")
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+PNG_MAX_BYTES = 64 * 1024 * 1024
+PNG_MAX_PIXELS = 32 * 1024 * 1024
+PNG_BYTES_PER_PIXEL = {0: 1, 2: 3, 4: 2, 6: 4}
 ARCHIVE_RE = re.compile(
     r"^https://archive\.archlinux\.org/repos/(\d{4})/(\d{2})/(\d{2})/\$repo/os/\$arch$"
 )
@@ -83,6 +157,521 @@ def _load_json(path: Path, label: str, failures: list[str]) -> dict[str, object]
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _bounded_regular_path(
+    root: Path,
+    value: object,
+    *,
+    prefix: str,
+    label: str,
+    failures: list[str],
+) -> Path | None:
+    if not isinstance(value, str) or not value:
+        failures.append(f"{label} must be a non-empty repository-relative path")
+        return None
+    relative = Path(value)
+    if relative.is_absolute() or ".." in relative.parts or not value.startswith(prefix):
+        failures.append(f"{label} must stay under {prefix}")
+        return None
+    path = root / relative
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        failures.append(f"{label} escapes the repository root")
+        return None
+    if not path.is_file() or path.is_symlink():
+        failures.append(f"{label} missing or not a regular file: {value}")
+        return None
+    return path
+
+
+def _paeth_predictor(left: int, up: int, upper_left: int) -> int:
+    candidate = left + up - upper_left
+    distance_left = abs(candidate - left)
+    distance_up = abs(candidate - up)
+    distance_upper_left = abs(candidate - upper_left)
+    if distance_left <= distance_up and distance_left <= distance_upper_left:
+        return left
+    if distance_up <= distance_upper_left:
+        return up
+    return upper_left
+
+
+def _decode_png_pixels(
+    data: bytes,
+    *,
+    label: str,
+    failures: list[str],
+) -> tuple[int, int, bytes] | None:
+    if len(data) > PNG_MAX_BYTES:
+        failures.append(f"{label} exceeds the bounded PNG artifact size")
+        return None
+    if not data.startswith(PNG_SIGNATURE):
+        failures.append(f"{label} is not a PNG")
+        return None
+
+    position = len(PNG_SIGNATURE)
+    chunk_index = 0
+    width: int | None = None
+    height: int | None = None
+    color_type: int | None = None
+    bytes_per_pixel: int | None = None
+    idat = bytearray()
+    seen_idat = False
+    idat_closed = False
+    seen_iend = False
+
+    while position < len(data):
+        if len(data) - position < 12:
+            failures.append(f"{label} has a truncated PNG chunk")
+            return None
+        length = struct.unpack_from(">I", data, position)[0]
+        chunk_type = data[position + 4 : position + 8]
+        chunk_end = position + 12 + length
+        if chunk_end > len(data):
+            failures.append(f"{label} has a truncated PNG chunk payload")
+            return None
+        payload = data[position + 8 : position + 8 + length]
+        expected_crc = struct.unpack_from(">I", data, position + 8 + length)[0]
+        actual_crc = zlib.crc32(chunk_type + payload) & 0xFFFFFFFF
+        if actual_crc != expected_crc:
+            failures.append(f"{label} has an invalid PNG chunk CRC")
+            return None
+        if len(chunk_type) != 4 or not all(
+            65 <= value <= 90 or 97 <= value <= 122 for value in chunk_type
+        ):
+            failures.append(f"{label} has an invalid PNG chunk type")
+            return None
+
+        if chunk_index == 0 and chunk_type != b"IHDR":
+            failures.append(f"{label} does not begin with IHDR")
+            return None
+
+        if chunk_type == b"IHDR":
+            if chunk_index != 0 or width is not None or length != 13:
+                failures.append(f"{label} has an invalid IHDR chunk")
+                return None
+            (
+                width,
+                height,
+                bit_depth,
+                color_type,
+                compression,
+                filter_method,
+                interlace,
+            ) = struct.unpack(">IIBBBBB", payload)
+            if width <= 0 or height <= 0 or width * height > PNG_MAX_PIXELS:
+                failures.append(f"{label} has invalid or unbounded PNG dimensions")
+                return None
+            if bit_depth != 8 or color_type not in PNG_BYTES_PER_PIXEL:
+                failures.append(
+                    f"{label} must use a supported non-indexed 8-bit PNG color type"
+                )
+                return None
+            if compression != 0 or filter_method != 0 or interlace != 0:
+                failures.append(
+                    f"{label} must use standard compression/filtering and non-interlaced PNG data"
+                )
+                return None
+            bytes_per_pixel = PNG_BYTES_PER_PIXEL[color_type]
+        elif chunk_type == b"PLTE":
+            if width is None or seen_idat:
+                failures.append(f"{label} has an out-of-order PLTE chunk")
+                return None
+        elif chunk_type == b"IDAT":
+            if width is None or seen_iend or idat_closed:
+                failures.append(f"{label} has an out-of-order IDAT chunk")
+                return None
+            seen_idat = True
+            idat.extend(payload)
+            if len(idat) > PNG_MAX_BYTES:
+                failures.append(f"{label} has unbounded compressed PNG image data")
+                return None
+        elif chunk_type == b"IEND":
+            if length != 0 or not seen_idat or seen_iend:
+                failures.append(f"{label} has an invalid IEND chunk")
+                return None
+            seen_iend = True
+            position = chunk_end
+            if position != len(data):
+                failures.append(f"{label} has trailing data after IEND")
+                return None
+            break
+        else:
+            if seen_idat:
+                idat_closed = True
+            if chunk_type[0] & 0x20 == 0:
+                failures.append(
+                    f"{label} contains unsupported critical PNG chunk {chunk_type.decode('ascii')}"
+                )
+                return None
+
+        if seen_idat and chunk_type not in {b"IDAT", b"IEND"}:
+            idat_closed = True
+        position = chunk_end
+        chunk_index += 1
+
+    if width is None or height is None or color_type is None or bytes_per_pixel is None:
+        failures.append(f"{label} is missing a valid IHDR")
+        return None
+    if not seen_idat:
+        failures.append(f"{label} is missing IDAT image data")
+        return None
+    if not seen_iend:
+        failures.append(f"{label} is missing IEND")
+        return None
+
+    row_bytes = width * bytes_per_pixel
+    expected_raw_size = height * (row_bytes + 1)
+    decompressor = zlib.decompressobj()
+    try:
+        raw = decompressor.decompress(bytes(idat), expected_raw_size + 1)
+        raw += decompressor.flush()
+    except zlib.error as error:
+        failures.append(f"{label} has invalid compressed PNG image data: {error}")
+        return None
+    if (
+        len(raw) != expected_raw_size
+        or not decompressor.eof
+        or decompressor.unused_data
+        or decompressor.unconsumed_tail
+    ):
+        failures.append(f"{label} has incomplete or overlong PNG image data")
+        return None
+
+    rgba = bytearray(width * height * 4)
+    previous = bytearray(row_bytes)
+    raw_offset = 0
+    rgba_offset = 0
+    for _row in range(height):
+        filter_type = raw[raw_offset]
+        raw_offset += 1
+        scanline = bytearray(raw[raw_offset : raw_offset + row_bytes])
+        raw_offset += row_bytes
+
+        for index in range(row_bytes):
+            left = scanline[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
+            up = previous[index]
+            upper_left = previous[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
+            if filter_type == 0:
+                value = scanline[index]
+            elif filter_type == 1:
+                value = (scanline[index] + left) & 0xFF
+            elif filter_type == 2:
+                value = (scanline[index] + up) & 0xFF
+            elif filter_type == 3:
+                value = (scanline[index] + ((left + up) // 2)) & 0xFF
+            elif filter_type == 4:
+                value = (
+                    scanline[index] + _paeth_predictor(left, up, upper_left)
+                ) & 0xFF
+            else:
+                failures.append(f"{label} uses unsupported PNG filter type {filter_type}")
+                return None
+            scanline[index] = value
+
+        for pixel_start in range(0, row_bytes, bytes_per_pixel):
+            if color_type == 0:
+                gray = scanline[pixel_start]
+                pixel = (gray, gray, gray, 255)
+            elif color_type == 2:
+                pixel = (
+                    scanline[pixel_start],
+                    scanline[pixel_start + 1],
+                    scanline[pixel_start + 2],
+                    255,
+                )
+            elif color_type == 4:
+                gray = scanline[pixel_start]
+                pixel = (gray, gray, gray, scanline[pixel_start + 1])
+            else:
+                pixel = (
+                    scanline[pixel_start],
+                    scanline[pixel_start + 1],
+                    scanline[pixel_start + 2],
+                    scanline[pixel_start + 3],
+                )
+            rgba[rgba_offset : rgba_offset + 4] = bytes(pixel)
+            rgba_offset += 4
+        previous = scanline
+
+    return width, height, bytes(rgba)
+
+
+def _validate_png_artifact(
+    path: Path | None,
+    expected_digest: object,
+    *,
+    label: str,
+    failures: list[str],
+    expected_width: int | None = None,
+    expected_height: int | None = None,
+) -> tuple[int, int, bytes] | None:
+    if path is None:
+        return None
+    if path.suffix.lower() != ".png":
+        failures.append(f"{label} must be a PNG artifact")
+        return None
+    if not isinstance(expected_digest, str) or not SHA256_RE.fullmatch(expected_digest):
+        failures.append(f"{label} must carry a lowercase SHA-256 digest")
+        return None
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != expected_digest:
+        failures.append(f"{label} digest mismatch")
+        return None
+    decoded = _decode_png_pixels(data, label=label, failures=failures)
+    if decoded is None:
+        return None
+    width, height, _pixels = decoded
+    if expected_width is not None and width != expected_width:
+        failures.append(f"{label} PNG width does not match reviewed metadata")
+        return None
+    if expected_height is not None and height != expected_height:
+        failures.append(f"{label} PNG height does not match reviewed metadata")
+        return None
+    return decoded
+
+
+def _validate_experience_evidence(
+    root: Path,
+    experience: dict[str, object],
+    failures: list[str],
+) -> None:
+    baseline_path = _bounded_regular_path(
+        root,
+        experience.get("visual_baseline_manifest"),
+        prefix="visual/baselines/",
+        label="visual baseline manifest",
+        failures=failures,
+    )
+    baseline_digest = experience.get("visual_baseline_manifest_sha256")
+    if not isinstance(baseline_digest, str) or not SHA256_RE.fullmatch(baseline_digest):
+        failures.append("visual_baseline_manifest_sha256 must be a lowercase SHA-256 digest")
+        return
+    if baseline_path is None:
+        return
+    if _sha256(baseline_path) != baseline_digest:
+        failures.append("v0.10 visual baseline manifest digest mismatch")
+        return
+
+    baseline_manifest = _load_json(baseline_path, "v0.10 visual baseline manifest", failures)
+    if baseline_manifest.get("schema_version") != 1:
+        failures.append("v0.10 visual baseline manifest schema_version must be 1")
+    baselines = baseline_manifest.get("baselines") if baseline_manifest else None
+    if not isinstance(baselines, list) or not baselines:
+        failures.append("v0.10 experience readiness requires reviewed visual baselines")
+        return
+
+    baseline_ids: set[str] = set()
+    baseline_metadata: dict[str, tuple[int, int, float, str]] = {}
+    baseline_images: dict[str, tuple[int, int, bytes]] = {}
+    observed_scales: set[float] = set()
+    observed_resolutions: set[str] = set()
+    observed_surfaces: set[str] = set()
+
+    for index, item in enumerate(baselines):
+        if not isinstance(item, dict):
+            failures.append(f"visual baseline entry {index} must be an object")
+            continue
+        baseline_id = item.get("id")
+        surface = item.get("surface")
+        width = item.get("width")
+        height = item.get("height")
+        scale = item.get("scale")
+        if not isinstance(baseline_id, str) or not baseline_id or baseline_id in baseline_ids:
+            failures.append(f"visual baseline entry {index} has invalid or duplicate id")
+            continue
+        baseline_ids.add(baseline_id)
+        if not isinstance(surface, str) or surface not in EXPECTED_ALLOWED_VISUAL_SURFACES:
+            failures.append(f"visual baseline {baseline_id} has unsupported surface")
+            continue
+        observed_surfaces.add(surface)
+        if not isinstance(width, int) or isinstance(width, bool) or width <= 0:
+            failures.append(f"visual baseline {baseline_id} has invalid width")
+            continue
+        if not isinstance(height, int) or isinstance(height, bool) or height <= 0:
+            failures.append(f"visual baseline {baseline_id} has invalid height")
+            continue
+        if not isinstance(scale, (int, float)) or isinstance(scale, bool) or scale <= 0:
+            failures.append(f"visual baseline {baseline_id} has invalid scale")
+            continue
+        scale_value = float(scale)
+        observed_scales.add(scale_value)
+        observed_resolutions.add(f"{width}x{height}")
+        baseline_metadata[baseline_id] = (width, height, scale_value, surface)
+        artifact_path = _bounded_regular_path(
+            root,
+            item.get("baseline"),
+            prefix="visual/baselines/",
+            label=f"visual baseline artifact {baseline_id}",
+            failures=failures,
+        )
+        baseline_image = _validate_png_artifact(
+            artifact_path,
+            item.get("sha256"),
+            label=f"visual baseline artifact {baseline_id}",
+            failures=failures,
+            expected_width=width,
+            expected_height=height,
+        )
+        if baseline_image is not None:
+            baseline_images[baseline_id] = baseline_image
+
+    required_visual_surfaces = experience.get("required_visual_surfaces")
+    if required_visual_surfaces != EXPECTED_REQUIRED_VISUAL_SURFACES:
+        failures.append("experience required_visual_surfaces drifted from the qualified UI surface set")
+    else:
+        missing_surfaces = sorted(set(required_visual_surfaces) - observed_surfaces)
+        if missing_surfaces:
+            failures.append(
+                "visual baseline coverage missing required surfaces: " + ", ".join(missing_surfaces)
+            )
+
+    required_scales = experience.get("representative_visual_scales")
+    if not isinstance(required_scales, list) or any(
+        not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0
+        for value in required_scales
+    ):
+        failures.append("experience representative_visual_scales must contain positive numbers")
+    else:
+        missing_scales = sorted(
+            float(value) for value in required_scales if float(value) not in observed_scales
+        )
+        if missing_scales:
+            failures.append(f"visual baseline coverage missing representative scales: {missing_scales}")
+
+    required_resolutions = experience.get("representative_visual_resolutions")
+    if not isinstance(required_resolutions, list) or any(
+        not isinstance(value, str) or not value for value in required_resolutions
+    ):
+        failures.append("experience representative_visual_resolutions must contain non-empty strings")
+    else:
+        missing_resolutions = sorted(set(required_resolutions) - observed_resolutions)
+        if missing_resolutions:
+            failures.append(
+                "visual baseline coverage missing representative resolutions: "
+                + ", ".join(missing_resolutions)
+            )
+
+    evidence_path = _bounded_regular_path(
+        root,
+        experience.get("experience_evidence_manifest"),
+        prefix="qualification/v010/",
+        label="v0.10 experience evidence manifest",
+        failures=failures,
+    )
+    evidence_digest = experience.get("experience_evidence_manifest_sha256")
+    if not isinstance(evidence_digest, str) or not SHA256_RE.fullmatch(evidence_digest):
+        failures.append("experience_evidence_manifest_sha256 must be a lowercase SHA-256 digest")
+        return
+    if evidence_path is None:
+        return
+    if _sha256(evidence_path) != evidence_digest:
+        failures.append("v0.10 experience evidence manifest digest mismatch")
+        return
+
+    evidence = _load_json(evidence_path, "v0.10 experience evidence manifest", failures)
+    if evidence.get("schema_version") != 1:
+        failures.append("v0.10 experience evidence manifest schema_version must be 1")
+
+    comparisons = evidence.get("visual_comparisons")
+    covered_baselines: set[str] = set()
+    if not isinstance(comparisons, list) or not comparisons:
+        failures.append("v0.10 experience evidence requires visual_comparisons")
+    else:
+        for index, item in enumerate(comparisons):
+            if not isinstance(item, dict):
+                failures.append(f"visual comparison {index} must be an object")
+                continue
+            baseline_id = item.get("baseline_id")
+            metadata = baseline_metadata.get(str(baseline_id))
+            if baseline_id not in baseline_ids or metadata is None:
+                failures.append(f"visual comparison {index} references unknown or invalid baseline")
+                continue
+            covered_baselines.add(str(baseline_id))
+            if item.get("status") != "pass" or item.get("reviewed") is not True:
+                failures.append(f"visual comparison for {baseline_id} must be reviewed and passing")
+            capture_path = _bounded_regular_path(
+                root,
+                item.get("capture"),
+                prefix="qualification/v010/",
+                label=f"visual capture for {baseline_id}",
+                failures=failures,
+            )
+            capture_image = _validate_png_artifact(
+                capture_path,
+                item.get("capture_sha256"),
+                label=f"visual capture for {baseline_id}",
+                failures=failures,
+                expected_width=metadata[0],
+                expected_height=metadata[1],
+            )
+            baseline_image = baseline_images.get(str(baseline_id))
+            if (
+                baseline_image is not None
+                and capture_image is not None
+                and capture_image != baseline_image
+            ):
+                failures.append(
+                    f"visual comparison for {baseline_id} does not match baseline pixels"
+                )
+    missing_comparisons = sorted(baseline_ids - covered_baselines)
+    if missing_comparisons:
+        failures.append(
+            "visual comparison evidence missing baselines: " + ", ".join(missing_comparisons)
+        )
+
+    failure_diffs = evidence.get("retained_failure_diffs")
+    if not isinstance(failure_diffs, list) or not failure_diffs:
+        failures.append("v0.10 experience evidence requires at least one retained reviewed failure diff")
+    else:
+        for index, item in enumerate(failure_diffs):
+            if not isinstance(item, dict) or item.get("reviewed") is not True:
+                failures.append(f"retained failure diff {index} must be a reviewed object")
+                continue
+            diff_path = _bounded_regular_path(
+                root,
+                item.get("diff"),
+                prefix="qualification/v010/",
+                label=f"retained failure diff {index}",
+                failures=failures,
+            )
+            _validate_png_artifact(
+                diff_path,
+                item.get("sha256"),
+                label=f"retained failure diff {index}",
+                failures=failures,
+            )
+
+    interactions = evidence.get("interaction_accessibility")
+    required_surfaces = experience.get("required_accessibility_surfaces")
+    if not isinstance(required_surfaces, list) or any(
+        not isinstance(value, str) or not value for value in required_surfaces
+    ):
+        failures.append("experience required_accessibility_surfaces must contain non-empty strings")
+        return
+    records: dict[str, dict[str, object]] = {}
+    if isinstance(interactions, list):
+        for item in interactions:
+            if isinstance(item, dict) and isinstance(item.get("surface"), str):
+                records[item["surface"]] = item
+    for surface in required_surfaces:
+        record = records.get(surface)
+        if record is None:
+            failures.append(f"interaction/accessibility evidence missing surface: {surface}")
+            continue
+        for key in (
+            "keyboard",
+            "pointer",
+            "screen_reader",
+            "reduced_motion",
+            "display_scaling",
+            "offline_error",
+            "reconnect",
+        ):
+            if record.get(key) is not True:
+                failures.append(f"interaction/accessibility evidence {surface}.{key} must be true")
 
 
 def _v010_milestone(roadmap: dict[str, object]) -> dict[str, object] | None:
@@ -256,6 +845,18 @@ def validate(root: Path) -> list[str]:
         failures.append("v0.10 support promotion authority must remain protected-post-release-closure")
     if contract.get("required_evidence") != EXPECTED_EVIDENCE:
         failures.append(f"v0.10 required_evidence must remain exactly {EXPECTED_EVIDENCE!r}")
+    experience = contract.get("experience")
+    if not isinstance(experience, dict):
+        failures.append("v0.10 qualification contract missing experience")
+    else:
+        static_experience = dict(experience)
+        static_experience.pop("experience_evidence_ready", None)
+        static_experience.pop("experience_evidence_manifest_sha256", None)
+        static_experience.pop("visual_baseline_manifest_sha256", None)
+        if static_experience != EXPECTED_EXPERIENCE:
+            failures.append("v0.10 experience contract drifted from the required multi-interface workstation boundary")
+    if not (root / EXPECTED_INTERACTION_ADR).is_file():
+        failures.append("v0.10 interaction ADR 0031 is missing")
 
     milestone = _v010_milestone(roadmap)
     if milestone is None:
@@ -263,6 +864,14 @@ def validate(root: Path) -> list[str]:
     else:
         if milestone.get("target_platform_profiles") != [EXPECTED_PROFILE]:
             failures.append("roadmap v0.10 target_platform_profiles must remain exactly arch-hyprland-v1")
+        if milestone.get("interaction_model") != "one-model-many-interfaces":
+            failures.append("roadmap v0.10 interaction_model must remain one-model-many-interfaces")
+        if milestone.get("required_interaction_surfaces") != EXPECTED_INTERACTION_SURFACES:
+            failures.append("roadmap v0.10 required_interaction_surfaces drifted from the v0.10 experience contract")
+        if milestone.get("desktop_shell_scope") != "bounded-integration-not-full-replacement":
+            failures.append("roadmap v0.10 desktop_shell_scope must remain bounded-integration-not-full-replacement")
+        if milestone.get("interaction_adr") != EXPECTED_INTERACTION_ADR:
+            failures.append("roadmap v0.10 interaction_adr must bind ADR 0031")
         if milestone.get("claim_class") != "Experimental":
             failures.append("roadmap v0.10 claim_class must remain Experimental")
         if milestone.get("qualification_contract") != CONTRACT_PATH:
@@ -409,6 +1018,13 @@ def validate(root: Path) -> list[str]:
                             required_packages,
                             failures,
                         )
+
+    if isinstance(experience, dict):
+        experience_ready = experience.get("experience_evidence_ready")
+        if not isinstance(experience_ready, bool):
+            failures.append("experience.experience_evidence_ready must be boolean")
+        if experience_ready is True:
+            _validate_experience_evidence(root, experience, failures)
 
     if contract.get("security") != EXPECTED_SECURITY:
         failures.append("v0.10 contract security baseline must match the target PlatformProfile")
