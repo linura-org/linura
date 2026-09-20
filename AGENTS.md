@@ -20,8 +20,8 @@ Implement that by converting human/model input into typed intent and determinist
 - Never move general orchestration into a privileged executor.
 - Never bypass policy because the caller is local, root-owned, trusted by the user, or an AI agent.
 - Agent/model code cannot depend on or receive a privileged executor handle.
-- Policy review derives from the canonical `linura-planner::ReconciliationPlan`; do not revive provider-owned or independently client-authored executable plan models.
-- Policy `allow`, valid approval, and a reviewed plan are **not** execution authority. They cannot be converted directly into an executor call or privileged credential; durable prepare/revalidation is a later lifecycle boundary.
+- Policy review derives from the canonical `linura-planner::ReconciliationPlan`; this includes every external effect that reaches policy authorization, including qualified `TransientExternalEffect` operations. Do not revive provider-owned or independently client-authored executable plan models.
+- Policy `allow`, valid approval, and a reviewed plan are **not** privileged execution authority. They cannot be converted directly into a privileged executor call or reusable credential. `ManagedExternalEffect` requires durable prepare/revalidation before dispatch; a qualified `TransientExternalEffect` may proceed only to its narrow unprivileged effect after the same canonical plan-bound authorization and remains exempt only from durable prepare/commit/reconcile recovery state.
 - Authenticated principal identity is derived by the trusted transport/control boundary and remains distinct from `Actor` provenance. Clients/models cannot choose their principal.
 - Never pass secrets in process arguments, logs, audit payloads, model prompts/context, panic messages or fixtures.
 - Unknown/unsupported state fails closed for mutations and authority review.
