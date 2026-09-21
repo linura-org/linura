@@ -25,6 +25,7 @@ FIXTURE_PATHS = (
     "crates/linura-control/src/durable_authority.rs",
     "crates/linura-control/src/risk_classification.rs",
     "crates/linura-control/src/policy_review.rs",
+    "crates/linura-control/src/transient_effect.rs",
     "SECURITY.md",
     "docs/milestones/v0.10.0.md",
     "docs/qualification/v0.10.0.md",
@@ -431,6 +432,255 @@ class OperationSemanticsContractTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     "durable authority floored policy-review path count drifted"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_substrate_cannot_be_misrepresented_as_supported_effect(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            qualification = root / "docs/qualification/v0.10.0.md"
+            qualification.write_text(
+                qualification.read_text(encoding="utf-8").replace(
+                    "That substrate is not itself a supported external effect.",
+                    "That substrate activates supported transient effects.",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "docs/qualification/v0.10.0.md missing operation-semantics marker"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_contract_cannot_drop_mandatory_reobservation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._rewrite_contract(
+                root,
+                "transient_post_effect_reobserve_required = true",
+                "transient_post_effect_reobserve_required = false",
+            )
+            self.assertTrue(
+                any(
+                    "transient_post_effect_reobserve_required drifted"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_contract_cannot_revert_to_initial_diff_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._rewrite_contract(
+                root,
+                'transient_requested_postcondition_binding = "complete-requested-state-not-initial-diff"',
+                'transient_requested_postcondition_binding = "initial-diff-only"',
+            )
+            self.assertTrue(
+                any(
+                    "transient_requested_postcondition_binding drifted"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_contract_cannot_drop_audit_material_digests(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._rewrite_contract(
+                root,
+                'transient_audit_material_binding = "canonical-plan-sha256-plus-requested-postcondition-sha256"',
+                'transient_audit_material_binding = "ids-only"',
+            )
+            self.assertTrue(
+                any(
+                    "transient_audit_material_binding drifted"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_contract_cannot_drop_audit_authorization_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._rewrite_contract(
+                root,
+                'transient_audit_authorization_binding = "policy-id-revision-plus-reviewed-risk-plus-risk-classification-revision-rule-ids"',
+                'transient_audit_authorization_binding = "risk-only"',
+            )
+            self.assertTrue(
+                any(
+                    "transient_audit_authorization_binding drifted"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_contract_cannot_drop_complete_risk_material_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._rewrite_contract(
+                root,
+                'transient_risk_refinement_material_binding = "complete-requested-postcondition"',
+                'transient_risk_refinement_material_binding = "initial-diff-only"',
+            )
+            self.assertTrue(
+                any(
+                    "transient_risk_refinement_material_binding drifted"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_contract_cannot_drop_pre_dispatch_audit_reservation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._rewrite_contract(
+                root,
+                'transient_audit_dispatch_binding = "durable-attempt-reservation-before-executor-dispatch"',
+                'transient_audit_dispatch_binding = "terminal-only"',
+            )
+            self.assertTrue(
+                any(
+                    "transient_audit_dispatch_binding drifted"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_executor_cannot_move_before_audit_reservation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            transient = root / "crates/linura-control/src/transient_effect.rs"
+            text = transient.read_text(encoding="utf-8")
+            reservation = text.index(".reserve_attempt(&reservation)")
+            dispatch = text.index("self.executor.execute(&effect)")
+            self.assertLess(reservation, dispatch)
+            text = text.replace(
+                ".reserve_attempt(&reservation)",
+                ".reserve_attempt_disabled(&reservation)",
+                1,
+            )
+            transient.write_text(text, encoding="utf-8")
+            self.assertTrue(
+                any(
+                    "transient executor dispatch must remain downstream of durable audit reservation"
+                    in failure
+                    or "transient effect Control lifecycle missing required fragment"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_contract_cannot_allow_arbitrary_audit_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._rewrite_contract(
+                root,
+                'transient_audit_diagnostic_binding = "stable-categorical-code-no-executor-or-provider-diagnostic-text"',
+                'transient_audit_diagnostic_binding = "bounded-free-form-text"',
+            )
+            self.assertTrue(
+                any(
+                    "transient_audit_diagnostic_binding drifted"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_audit_record_cannot_reintroduce_free_form_detail(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            transient = root / "crates/linura-control/src/transient_effect.rs"
+            transient.write_text(
+                transient.read_text(encoding="utf-8").replace(
+                    "pub failure_code: Option<TransientEffectAuditFailureCode>,",
+                    "pub detail: Option<String>,",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            failures = check_operation_semantics.validate(root)
+            self.assertTrue(
+                any(
+                    "transient audit record must not persist arbitrary diagnostic text"
+                    in failure
+                    for failure in failures
+                )
+            )
+
+    def test_transient_control_cannot_drop_post_effect_observation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            transient = root / "crates/linura-control/src/transient_effect.rs"
+            transient.write_text(
+                transient.read_text(encoding="utf-8").replace(
+                    ".observe(&observation_request)",
+                    ".observe_disabled(&observation_request)",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "transient effect Control lifecycle missing required fragment"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_risk_refinement_cannot_become_generic(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            semantics = root / "crates/linura-control/src/operation_semantics.rs"
+            semantics.write_text(
+                semantics.read_text(encoding="utf-8").replace(
+                    "classify_exact_registered_transient_risk",
+                    "classify_plan_risk",
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "OperationSemanticsControl missing required fragment: classify_exact_registered_transient_risk"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_threat_model_cannot_drop_hidden_ambiguity_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            threat = root / "docs/threat-model.md"
+            threat.write_text(
+                threat.read_text(encoding="utf-8").replace(
+                    "### Transient executor self-report, stale verification or hidden ambiguity",
+                    "### Transient effect",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "docs/threat-model.md missing operation-semantics marker"
                     in failure
                     for failure in check_operation_semantics.validate(root)
                 )

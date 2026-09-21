@@ -45,6 +45,22 @@ A caller, model, UI, configuration file, provider or extension attempts to label
 - interface equivalence tests ensure GUI/config/shortcut/CLI/agent requests resolve to the same trusted operation class;
 - machine-readable operation semantics and tooling tests reject contract drift.
 
+### Transient executor self-report, stale verification or hidden ambiguity
+A bounded transient mechanism reports success/failure inaccurately, post-effect evidence is stale/reused/substituted, or a transport failure creates ambiguity that the lightweight path cannot safely resolve.
+- the transient executor is unprivileged and receives only a Control-minted typed `AuthorizedTransientEffect`; it receives no durable dispatch permit, privileged executor handle or generic shell authority;
+- executor return status is never postcondition evidence;
+- Control always performs a fresh authoritative post-effect observation after an execution attempt, including executor failure;
+- post-effect evidence must carry a provider observation timestamp **strictly later** than Control's executor-dispatch lower bound; equal/older timestamps are ordering-ambiguous and fail closed even when the evidence ID differs and the envelope is otherwise current;
+- no-change outcomes pass the same authenticated-principal policy review before audited success, so a denied actor cannot use the no-change branch as an authorization bypass or state oracle;
+- registration validation, executor input and post-effect verification bind the complete requested postcondition, including attributes that were already satisfied before execution and therefore absent from the initial plan diff;
+- transient audit records include provider/resource/capability identity plus independent SHA-256 bindings of the complete canonical plan and complete requested postcondition, so request/plan ID reuse cannot alias changed effect material;
+- reused pre-effect evidence, non-current evidence, wrong provider/resource/capability or a postcondition mismatch cannot produce a verified receipt;
+- every planned material change must match fresh authoritative post-effect attributes before success is reported;
+- the audit record binds authenticated principal, operation/plan/request identities, trusted semantic risk, exact policy ID/revision, reviewed policy-subject risk, trusted risk-classification revision/rule IDs and pre/post evidence identities;
+- a durable audit attempt reservation is accepted before executor dispatch; reservation failure prevents execution, while terminal records are linked to the same deterministic attempt binding so a terminal audit failure cannot erase evidence that dispatch was attempted;
+- arbitrary executor/provider diagnostic text is never persisted in transient audit records; stable typed failure codes preserve forensic category without copying credentials, tokens or provider error payloads into durable audit;
+- inability to obtain/interpret bounded fresh post-effect evidence fails the transient attempt; if the domain can require durable indeterminate recovery, that operation is `ManagedExternalEffect` or unsupported rather than transient.
+
 ### Registered-operation substitution or risk-floor weakening
 A caller, provider, extension, recovery path or compromised composition attempts to substitute a different registered operation, broaden its resource/effect binding, lower its trusted risk floor, or reuse authority produced before registered semantics changed.
 - the trusted operation registry is constructed inside Control and is not supplied by clients, providers, agents or imported configuration;
@@ -58,7 +74,11 @@ A caller, provider, extension, recovery path or compromised composition attempts
 
 ### Risk downgrade, under-classification or classifier substitution
 A caller, model, provider or configuration change attempts to make a dangerous canonical plan look like a lower-risk mutation, or relies on an unknown mutation shape receiving the ordinary mutation approval class.
-- planner `prospective_risk` is a lower bound and cannot be reduced by authority classification;
+- planner `prospective_risk` remains a conservative lower-bound guard for ordinary/unregistered and managed classification;
+- the sole downward-refinement exception is the trusted exact registered transient path, entered only after Control has matched the canonical plan to a trusted `TransientExternalEffect` descriptor's provider, observation capability, resource scope and allowed material change keys;
+- the complete requested postcondition must be covered by the trusted transient risk rule before any downward refinement; attributes already satisfied in the pre-effect observation cannot bypass classification merely because they are absent from the initial plan diff;
+- the ordinary classifier continues to reject downward classification, while the registered transient refinement must resolve to at most `UserState`; unknown rules, shape mismatch, privilege, stronger risk or durable/ambiguity requirements fail closed rather than entering the lightweight path;
+- callers, providers, UI/configuration and models cannot request or supply the refinement flag/classification;
 - trusted deterministic risk classification is owned by Linura Control, not client/model/provider payloads;
 - classification uses exact typed canonical plan material such as provider/resource/capability/change keys;
 - no matching trusted rule means unclassified mutation risk and the review fails closed as `blocked`;

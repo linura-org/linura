@@ -106,6 +106,10 @@ A transient external effect uses the bounded semantic path:
 
 The `plan` stage is the same canonical non-executable `linura-planner::ReconciliationPlan` authority subject used by policy elsewhere. Control derives policy review from that exact plan plus the authenticated principal; transient semantics do not permit a client/provider-authored policy subject or a direct authorize-from-request shortcut.
 
+The planner may conservatively assign a coarse prospective risk before trusted operation semantics are known. A lower transient risk is valid only as a **trusted exact registered refinement** performed by Control after the canonical plan has matched the registered operation's provider, observation capability, resource scope and material change keys. The ordinary classifier continues to reject a downward classification; only this exact registered transient path may refine the coarse planner value, and the result must still be at most `UserState`. Registration is therefore proof input, not caller-supplied risk metadata.
+
+The concrete transient lifecycle is owned by `linura_control::TransientEffectControl`: it requires policy `Allow`, exposes no privileged dispatch permit, executes through an unprivileged typed mechanism, performs a fresh authoritative post-effect observation regardless of executor success/failure, rejects reused/non-current evidence, independently verifies every planned postcondition, and writes a bounded audit record. Any failure mode that cannot be resolved by bounded re-observation is outside the transient contract and must be managed or unsupported.
+
 The transient exemption begins **after** authorization: it has no durable `prepare/commit/reconcile` transaction because it is not durable managed desired state and its failure envelope is bounded. If durable ambiguity/recovery semantics are needed, the operation is a managed external effect.
 
 ## Consequences
