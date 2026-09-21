@@ -807,10 +807,13 @@ class OperationSemanticsContractTests(unittest.TestCase):
             root = Path(temp_dir)
             self._copy_fixture(root)
             runtime = root / "apps/linurad/src/session_audio.rs"
+            text = runtime.read_text(encoding="utf-8")
+            marker = "expected_sink_identity(effect.pre_effect_observation(), effect.resource(), node_id)?"
+            self.assertEqual(text.count(marker), 1)
             runtime.write_text(
-                runtime.read_text(encoding="utf-8").replace(
-                    "effect.resource(),",
-                    "effect.resource_disabled(),",
+                text.replace(
+                    marker,
+                    "expected_sink_identity(effect.pre_effect_observation(), effect.resource_disabled(), node_id)?",
                     1,
                 ),
                 encoding="utf-8",
@@ -904,6 +907,98 @@ class OperationSemanticsContractTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     "must not expose raw WirePlumber stderr"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_session_audit_cannot_skip_effective_sqlite_mode_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            audit = root / "apps/linurad/src/session_audit.rs"
+            text = audit.read_text(encoding="utf-8")
+            marker = "        verify_effective_sqlite_configuration(&connection)?;\n"
+            self.assertIn(marker, text)
+            audit.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            self.assertTrue(
+                any(
+                    "transient session audit missing durability fragment"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_pipewire_runtime_cannot_drop_post_effect_identity_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            runtime = root / "apps/linurad/src/session_audio.rs"
+            text = runtime.read_text(encoding="utf-8")
+            marker = (
+                "        verify_same_sink_identity(\n"
+                "            effect.pre_effect_observation(),\n"
+                "            post_effect,\n"
+                "            effect.resource(),\n"
+                "            node_id,\n"
+                "        )\n"
+            )
+            self.assertEqual(text.count(marker), 1)
+            runtime.write_text(
+                text.replace(
+                    marker,
+                    '        Err(executor_error("post-effect identity binding removed"))\n',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "PipeWire session-volume runtime missing hardening fragment"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_session_audit_cannot_drop_wal_autocheckpoint_byte_derivation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            audit = root / "apps/linurad/src/session_audit.rs"
+            text = audit.read_text(encoding="utf-8")
+            marker = '             PRAGMA wal_autocheckpoint = {max_wal_frames};"'
+            self.assertEqual(text.count(marker), 1)
+            audit.write_text(
+                text.replace(
+                    marker,
+                    '             PRAGMA wal_autocheckpoint = 1000;"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "transient session audit missing durability fragment"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_transient_session_audit_cannot_drop_enforced_wal_sidecar_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            audit = root / "apps/linurad/src/session_audit.rs"
+            text = audit.read_text(encoding="utf-8")
+            marker = "            if metadata.len() > MAX_WAL_BYTES {\n"
+            self.assertIn(marker, text)
+            audit.write_text(
+                text.replace(marker, "            if false {\n", 1),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "transient session audit missing durability fragment"
                     in failure
                     for failure in check_operation_semantics.validate(root)
                 )

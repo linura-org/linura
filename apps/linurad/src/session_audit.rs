@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Formatter};
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use linura_control::{
@@ -71,6 +71,7 @@ CREATE TABLE transient_effect_audit (
 
 pub(crate) struct SqliteTransientAudit {
     connection: Connection,
+    database_path: PathBuf,
 }
 
 impl Debug for SqliteTransientAudit {
@@ -96,6 +97,7 @@ impl SqliteTransientAudit {
             .ok_or_else(|| "transient audit path has no parent directory".to_owned())?;
         prepare_private_directory(parent)?;
         prepare_private_database_file(path)?;
+        validate_wal_sidecar(path)?;
 
         let mut connection = Connection::open(path)
             .map_err(|error| format!("cannot open transient audit: {error}"))?;
@@ -110,6 +112,7 @@ impl SqliteTransientAudit {
                  PRAGMA trusted_schema = OFF;",
             )
             .map_err(|error| format!("cannot configure transient audit SQLite: {error}"))?;
+        verify_effective_sqlite_configuration(&connection)?;
         configure_storage_bounds(&connection)?;
 
         let application_id: i64 = connection
@@ -154,9 +157,13 @@ impl SqliteTransientAudit {
             ));
         }
 
+        checkpoint_and_validate_wal(&connection, path)?;
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))
             .map_err(|error| format!("cannot harden transient audit permissions: {error}"))?;
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            database_path: path.to_path_buf(),
+        })
     }
 
     fn store_reservation(
@@ -164,6 +171,7 @@ impl SqliteTransientAudit {
         record: &TransientEffectAuditRecord,
     ) -> Result<(), TransientEffectAuditError> {
         validate_record(record)?;
+        checkpoint_and_validate_wal(&self.connection, &self.database_path).map_err(audit_error)?;
         if record.disposition != TransientEffectAuditDisposition::AttemptReserved {
             return Err(audit_error("reservation record has a terminal disposition"));
         }
@@ -175,12 +183,15 @@ impl SqliteTransientAudit {
         if let Some(stored) = load_record(&transaction, &record.audit_attempt_sha256)? {
             require_same_binding(record, &stored)?;
             transaction.commit().map_err(sqlite_audit_error)?;
+            checkpoint_and_validate_wal(&self.connection, &self.database_path)
+                .map_err(audit_error)?;
             return Ok(());
         }
 
         require_capacity(&transaction)?;
         insert_record(&transaction, record)?;
-        transaction.commit().map_err(sqlite_audit_error)
+        transaction.commit().map_err(sqlite_audit_error)?;
+        checkpoint_and_validate_wal(&self.connection, &self.database_path).map_err(audit_error)
     }
 
     fn store_terminal(
@@ -188,6 +199,7 @@ impl SqliteTransientAudit {
         record: &TransientEffectAuditRecord,
     ) -> Result<(), TransientEffectAuditError> {
         validate_record(record)?;
+        checkpoint_and_validate_wal(&self.connection, &self.database_path).map_err(audit_error)?;
         if record.disposition == TransientEffectAuditDisposition::AttemptReserved {
             return Err(audit_error(
                 "terminal record cannot be an attempt reservation",
@@ -245,7 +257,8 @@ impl SqliteTransientAudit {
             }
         }
 
-        transaction.commit().map_err(sqlite_audit_error)
+        transaction.commit().map_err(sqlite_audit_error)?;
+        checkpoint_and_validate_wal(&self.connection, &self.database_path).map_err(audit_error)
     }
 }
 
@@ -319,6 +332,93 @@ fn prepare_private_database_file(path: &Path) -> Result<(), String> {
     }
 }
 
+fn sqlite_sidecar_path(path: &Path, suffix: &str) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(suffix);
+    PathBuf::from(value)
+}
+
+fn validate_wal_sidecar(path: &Path) -> Result<(), String> {
+    let wal_path = sqlite_sidecar_path(path, "-wal");
+    match fs::symlink_metadata(&wal_path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err("transient audit WAL sidecar is not a regular file".into());
+            }
+            if metadata.nlink() != 1 {
+                return Err("transient audit WAL sidecar must not have hard-link aliases".into());
+            }
+            if metadata.len() > MAX_WAL_BYTES {
+                return Err(format!(
+                    "transient audit WAL sidecar exceeds the {}-byte ceiling",
+                    MAX_WAL_BYTES
+                ));
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "cannot inspect transient audit WAL sidecar: {error}"
+        )),
+    }
+}
+
+fn checkpoint_and_validate_wal(connection: &Connection, path: &Path) -> Result<(), String> {
+    validate_wal_sidecar(path)?;
+    let (busy, log_frames, checkpointed_frames): (i64, i64, i64) = connection
+        .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .map_err(|error| format!("cannot checkpoint transient audit WAL: {error}"))?;
+    if busy != 0 || checkpointed_frames != log_frames {
+        return Err(format!(
+            "transient audit WAL checkpoint could not complete: busy={busy}, log_frames={log_frames}, checkpointed_frames={checkpointed_frames}"
+        ));
+    }
+    validate_wal_sidecar(path)
+}
+
+fn verify_effective_sqlite_configuration(connection: &Connection) -> Result<(), String> {
+    let journal_mode: String = connection
+        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+        .map_err(|error| format!("cannot read transient audit journal_mode: {error}"))?;
+    if !journal_mode.eq_ignore_ascii_case("wal") {
+        return Err(format!(
+            "transient audit SQLite journal_mode is {journal_mode:?}; WAL is required"
+        ));
+    }
+
+    let synchronous: i64 = connection
+        .query_row("PRAGMA synchronous", [], |row| row.get(0))
+        .map_err(|error| format!("cannot read transient audit synchronous mode: {error}"))?;
+    const SQLITE_SYNCHRONOUS_FULL: i64 = 2;
+    if synchronous != SQLITE_SYNCHRONOUS_FULL {
+        return Err(format!(
+            "transient audit SQLite synchronous mode is {synchronous}; FULL ({SQLITE_SYNCHRONOUS_FULL}) is required"
+        ));
+    }
+
+    let foreign_keys: i64 = connection
+        .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+        .map_err(|error| format!("cannot read transient audit foreign_keys mode: {error}"))?;
+    if foreign_keys != 1 {
+        return Err(format!(
+            "transient audit SQLite foreign_keys mode is {foreign_keys}; enabled mode is required"
+        ));
+    }
+
+    let trusted_schema: i64 = connection
+        .query_row("PRAGMA trusted_schema", [], |row| row.get(0))
+        .map_err(|error| format!("cannot read transient audit trusted_schema mode: {error}"))?;
+    if trusted_schema != 0 {
+        return Err(format!(
+            "transient audit SQLite trusted_schema mode is {trusted_schema}; disabled mode is required"
+        ));
+    }
+
+    Ok(())
+}
+
 fn configure_storage_bounds(connection: &Connection) -> Result<(), String> {
     let page_size: i64 = connection
         .query_row("PRAGMA page_size", [], |row| row.get(0))
@@ -331,11 +431,21 @@ fn configure_storage_bounds(connection: &Connection) -> Result<(), String> {
         ));
     }
     let max_pages = (MAX_DATABASE_BYTES / page_size).max(1);
+    const WAL_HEADER_BYTES: u64 = 32;
+    const WAL_FRAME_HEADER_BYTES: u64 = 24;
+    let wal_frame_bytes = page_size
+        .checked_add(WAL_FRAME_HEADER_BYTES)
+        .ok_or_else(|| "transient audit WAL frame-size overflow".to_owned())?;
+    let max_wal_frames = MAX_WAL_BYTES
+        .saturating_sub(WAL_HEADER_BYTES)
+        .checked_div(wal_frame_bytes)
+        .unwrap_or(0)
+        .max(1);
     connection
         .execute_batch(&format!(
             "PRAGMA max_page_count = {max_pages};
              PRAGMA journal_size_limit = {MAX_WAL_BYTES};
-             PRAGMA wal_autocheckpoint = 1000;"
+             PRAGMA wal_autocheckpoint = {max_wal_frames};"
         ))
         .map_err(|error| format!("cannot bound transient audit storage: {error}"))?;
     let configured_max_pages: i64 = connection
@@ -345,6 +455,14 @@ fn configure_storage_bounds(connection: &Connection) -> Result<(), String> {
         .map_err(|_| "transient audit max_page_count is negative".to_owned())?;
     if configured_max_pages > max_pages {
         return Err("transient audit max_page_count exceeds the configured ceiling".into());
+    }
+    let configured_wal_autocheckpoint: i64 = connection
+        .query_row("PRAGMA wal_autocheckpoint", [], |row| row.get(0))
+        .map_err(|error| format!("cannot verify transient audit wal_autocheckpoint: {error}"))?;
+    let configured_wal_autocheckpoint = u64::try_from(configured_wal_autocheckpoint)
+        .map_err(|_| "transient audit wal_autocheckpoint is negative".to_owned())?;
+    if configured_wal_autocheckpoint == 0 || configured_wal_autocheckpoint > max_wal_frames {
+        return Err("transient audit wal_autocheckpoint exceeds the WAL byte ceiling".into());
     }
     Ok(())
 }
@@ -727,6 +845,9 @@ const fn failure_name(failure: TransientEffectAuditFailureCode) -> &'static str 
             "post-effect-evidence-not-after-dispatch"
         }
         TransientEffectAuditFailureCode::PostEffectEvidenceReused => "post-effect-evidence-reused",
+        TransientEffectAuditFailureCode::PostEffectBindingMismatch => {
+            "post-effect-binding-mismatch"
+        }
         TransientEffectAuditFailureCode::PostconditionMismatch => "postcondition-mismatch",
     }
 }
@@ -785,7 +906,7 @@ mod tests {
         }
     }
 
-    fn temp_database() -> std::path::PathBuf {
+    fn temp_database() -> PathBuf {
         let root = std::env::temp_dir().join(format!(
             "linura-session-audit-{}-{}",
             std::process::id(),
@@ -794,6 +915,62 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap_or_else(|error| unreachable!("{error}"));
         root.join("audit.sqlite3")
+    }
+
+    #[test]
+    fn ineffective_wal_mode_fails_closed_before_audit_use() {
+        let connection =
+            Connection::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
+        connection
+            .execute_batch(
+                "PRAGMA journal_mode = WAL;
+                 PRAGMA synchronous = FULL;
+                 PRAGMA foreign_keys = ON;
+                 PRAGMA trusted_schema = OFF;",
+            )
+            .unwrap_or_else(|error| unreachable!("{error}"));
+
+        let Err(error) = verify_effective_sqlite_configuration(&connection) else {
+            unreachable!("in-memory SQLite cannot satisfy the required WAL audit mode");
+        };
+        assert!(error.contains("journal_mode"));
+        assert!(error.contains("WAL"));
+    }
+
+    #[test]
+    fn opened_audit_store_uses_effective_wal_full_sync_and_hardened_schema_mode() {
+        let path = temp_database();
+        let audit =
+            SqliteTransientAudit::open(&path).unwrap_or_else(|error| unreachable!("{error}"));
+
+        let journal_mode: String = audit
+            .connection
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let synchronous: i64 = audit
+            .connection
+            .query_row("PRAGMA synchronous", [], |row| row.get(0))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let foreign_keys: i64 = audit
+            .connection
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let trusted_schema: i64 = audit
+            .connection
+            .query_row("PRAGMA trusted_schema", [], |row| row.get(0))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+
+        assert!(journal_mode.eq_ignore_ascii_case("wal"));
+        assert_eq!(synchronous, 2);
+        assert_eq!(foreign_keys, 1);
+        assert_eq!(trusted_schema, 0);
+
+        let root = path
+            .parent()
+            .unwrap_or_else(|| unreachable!())
+            .to_path_buf();
+        drop(audit);
+        fs::remove_dir_all(root).unwrap_or_else(|error| unreachable!("{error}"));
     }
 
     #[test]
@@ -892,6 +1069,33 @@ mod tests {
         file.set_len(MAX_DATABASE_BYTES + 1)
             .unwrap_or_else(|error| unreachable!("{error}"));
         drop(file);
+        assert!(SqliteTransientAudit::open(&path).is_err());
+        let root = path
+            .parent()
+            .unwrap_or_else(|| unreachable!())
+            .to_path_buf();
+        fs::remove_dir_all(root).unwrap_or_else(|error| unreachable!("{error}"));
+    }
+
+    #[test]
+    fn oversized_wal_sidecar_is_rejected_before_sqlite_open() {
+        let path = temp_database();
+        let audit =
+            SqliteTransientAudit::open(&path).unwrap_or_else(|error| unreachable!("{error}"));
+        drop(audit);
+
+        let wal_path = sqlite_sidecar_path(&path, "-wal");
+        let wal = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&wal_path)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        wal.set_len(MAX_WAL_BYTES + 1)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        drop(wal);
+
         assert!(SqliteTransientAudit::open(&path).is_err());
         let root = path
             .parent()

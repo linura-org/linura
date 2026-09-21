@@ -451,6 +451,9 @@ def validate(root: Path) -> list[str]:
             "post_effect.observation.observed_at_unix_ms <= dispatch_started_unix_ms",
             "PostEffectEvidenceNotAfterDispatch",
             "PostEffectEvidenceReused",
+            "PostEffectBindingMismatch",
+            ".verify_post_effect(&effect, &post_effect.observation)",
+            "TransientEffectAuditFailureCode::PostEffectBindingMismatch",
             "TransientEffectAuditDisposition::Verified",
             "requested_desired_state",
             "canonical_plan_sha256",
@@ -506,9 +509,9 @@ def validate(root: Path) -> list[str]:
         for fragment in (
             "TransientEffectControl::new(",
             "effect.pre_effect_observation()",
-            "expected_sink_identity(",
-            "effect.pre_effect_observation(),",
-            "effect.resource(),",
+            "expected_sink_identity(effect.pre_effect_observation(), effect.resource(), node_id)?",
+            "fn verify_post_effect(",
+            "verify_same_sink_identity(\n            effect.pre_effect_observation(),\n            post_effect,\n            effect.resource(),\n            node_id,\n        )",
             "verify_packaged_session_audio_helper()",
             "WIREPLUMBER_EXECUTABLE_PATH",
             "LINURA_SESSION_AUDIO_HELPER_PATH",
@@ -538,12 +541,17 @@ def validate(root: Path) -> list[str]:
     session_audit = root / SESSION_AUDIT_PATH
     if session_audit.is_file() and not session_audit.is_symlink():
         session_audit_text = session_audit.read_text(encoding="utf-8")
+        session_audit_production_text = session_audit_text.split("#[cfg(test)]", 1)[0]
         for fragment in (
             "impl TransientEffectAuditSink for SqliteTransientAudit",
             "fn reserve_attempt(",
             "fn record_terminal(",
             "PRAGMA journal_mode = WAL",
             "PRAGMA synchronous = FULL",
+            "verify_effective_sqlite_configuration(&connection)?",
+            "fn verify_effective_sqlite_configuration(",
+            '.eq_ignore_ascii_case("wal")',
+            "SQLITE_SYNCHRONOUS_FULL",
             "TransactionBehavior::Immediate",
             "MAX_AUDIT_RECORDS",
             "MAX_DATABASE_BYTES",
@@ -552,9 +560,18 @@ def validate(root: Path) -> list[str]:
             "EXPECTED_AUDIT_COLUMNS",
             "PRAGMA max_page_count =",
             "PRAGMA journal_size_limit =",
+            "checkpoint_and_validate_wal(&self.connection, &self.database_path)",
+            "fn checkpoint_and_validate_wal(",
+            'query_row("PRAGMA wal_checkpoint(TRUNCATE)"',
+            "fn validate_wal_sidecar(",
+            "metadata.len() > MAX_WAL_BYTES",
+            "max_wal_frames",
+            "PRAGMA wal_autocheckpoint = {max_wal_frames}",
+            "configured_wal_autocheckpoint",
+            "validate_wal_sidecar(path)?",
             "terminal audit has no durable attempt reservation",
         ):
-            if fragment not in session_audit_text:
+            if fragment not in session_audit_production_text:
                 failures.append(
                     f"transient session audit missing durability fragment: {fragment}"
                 )

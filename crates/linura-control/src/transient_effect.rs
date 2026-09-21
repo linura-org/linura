@@ -138,6 +138,17 @@ pub trait TransientEffectExecutor {
         &mut self,
         effect: &AuthorizedTransientEffect,
     ) -> Result<(), TransientEffectExecutorError>;
+
+    /// Validate provider-specific identity material on independently observed
+    /// post-effect evidence. Implementations should fail closed when volatile
+    /// provider identity no longer matches the exact object authorized before
+    /// dispatch. The default is appropriate only for effects whose resource
+    /// identity is intrinsically stable across the dispatch boundary.
+    fn verify_post_effect(
+        &self,
+        effect: &AuthorizedTransientEffect,
+        post_effect: &ObservationEnvelope,
+    ) -> Result<(), TransientEffectExecutorError>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -157,6 +168,7 @@ pub enum TransientEffectAuditFailureCode {
     PostEffectEvidenceNotFresh,
     PostEffectEvidenceNotAfterDispatch,
     PostEffectEvidenceReused,
+    PostEffectBindingMismatch,
     PostconditionMismatch,
 }
 
@@ -270,6 +282,10 @@ pub enum TransientEffectError {
         dispatch_started_unix_ms: u64,
     },
     PostEffectEvidenceReused,
+    PostEffectBindingMismatch {
+        detail: String,
+        post_effect_evidence_id: String,
+    },
     VerificationFailed {
         key: String,
         desired: String,
@@ -327,6 +343,12 @@ impl Display for TransientEffectError {
             ),
             Self::PostEffectEvidenceReused => {
                 formatter.write_str("post-effect verification reused pre-effect evidence")
+            }
+            Self::PostEffectBindingMismatch { detail, .. } => {
+                write!(
+                    formatter,
+                    "post-effect provider identity binding failed: {detail}"
+                )
             }
             Self::VerificationFailed {
                 key,
@@ -608,6 +630,25 @@ where
             return Err(TransientEffectError::ExecutorFailed {
                 detail: error.detail().into(),
                 post_effect_evidence_id: Some(post_effect_evidence_id),
+            });
+        }
+
+        if let Err(error) = self
+            .executor
+            .verify_post_effect(&effect, &post_effect.observation)
+        {
+            let record = audit_record(
+                &audit_context,
+                Some(&post_effect.observation),
+                TransientEffectAuditDisposition::VerificationFailed,
+                Some(TransientEffectAuditFailureCode::PostEffectBindingMismatch),
+            );
+            self.audit.record_terminal(&record).map_err(|audit_error| {
+                TransientEffectError::AuditFailed(audit_error.detail().into())
+            })?;
+            return Err(TransientEffectError::PostEffectBindingMismatch {
+                detail: error.detail().into(),
+                post_effect_evidence_id,
             });
         }
 
@@ -1074,6 +1115,14 @@ mod tests {
                     state.insert("muted".into(), "true".into());
                 }
             }
+            Ok(())
+        }
+
+        fn verify_post_effect(
+            &self,
+            _effect: &AuthorizedTransientEffect,
+            _post_effect: &ObservationEnvelope,
+        ) -> Result<(), TransientEffectExecutorError> {
             Ok(())
         }
     }

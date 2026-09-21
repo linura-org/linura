@@ -78,6 +78,22 @@ impl TransientEffectExecutor for PipeWireVolumeExecutor {
         let (node_id, object_serial, node_name, volume_percent) = Self::validate_effect(effect)?;
         run_identity_bound_volume_update(node_id, object_serial, &node_name, volume_percent)
     }
+
+    fn verify_post_effect(
+        &self,
+        effect: &AuthorizedTransientEffect,
+        post_effect: &ObservationEnvelope,
+    ) -> Result<(), TransientEffectExecutorError> {
+        let node_id = pipewire_output_node_id(effect.resource()).map_err(|_| {
+            executor_error("post-effect verification requires an exact output node")
+        })?;
+        verify_same_sink_identity(
+            effect.pre_effect_observation(),
+            post_effect,
+            effect.resource(),
+            node_id,
+        )
+    }
 }
 
 pub(crate) struct SessionAudioRuntime {
@@ -267,6 +283,22 @@ fn expected_sink_identity(
     Ok((object_serial, node_name))
 }
 
+fn verify_same_sink_identity(
+    pre_effect: &ObservationEnvelope,
+    post_effect: &ObservationEnvelope,
+    expected_resource: &ResourceId,
+    expected_node_id: u32,
+) -> Result<(), TransientEffectExecutorError> {
+    let pre_identity = expected_sink_identity(pre_effect, expected_resource, expected_node_id)?;
+    let post_identity = expected_sink_identity(post_effect, expected_resource, expected_node_id)?;
+    if post_identity != pre_identity {
+        return Err(executor_error(
+            "post-effect PipeWire evidence refers to a different sink identity",
+        ));
+    }
+    Ok(())
+}
+
 fn run_identity_bound_volume_update(
     node_id: u32,
     object_serial: u64,
@@ -405,8 +437,8 @@ fn executor_error(detail: impl Into<String>) -> TransientEffectExecutorError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linura_linux_observation::PIPEWIRE_DEFAULT_OUTPUT_RESOURCE;
     use linura_core::{CapabilityId, ProviderId, ResourceId};
+    use linura_linux_observation::PIPEWIRE_DEFAULT_OUTPUT_RESOURCE;
     fn observation(serial: u64, node_name: &str) -> ObservationEnvelope {
         ObservationEnvelope {
             provider: ProviderId::new("pipewire").unwrap_or_else(|error| unreachable!("{error}")),
@@ -449,6 +481,20 @@ mod tests {
             ObservedValue::Text("Audio/Source".into()),
         );
         assert!(expected_sink_identity(&wrong_class, &wrong_class.resource, 42).is_err());
+    }
+
+    #[test]
+    fn post_effect_verification_rejects_recycled_pipewire_node_identity() {
+        let pre = observation(100, "sink-a");
+        let same = observation(100, "sink-a");
+        verify_same_sink_identity(&pre, &same, &pre.resource, 42)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+
+        let recycled_serial = observation(101, "sink-a");
+        assert!(verify_same_sink_identity(&pre, &recycled_serial, &pre.resource, 42).is_err());
+
+        let recycled_name = observation(100, "sink-b");
+        assert!(verify_same_sink_identity(&pre, &recycled_name, &pre.resource, 42).is_err());
     }
 
     #[test]
