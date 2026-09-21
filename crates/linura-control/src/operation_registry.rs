@@ -18,6 +18,12 @@ pub const MANAGED_SYSTEMD_CHANGE_KEY: &str = "active_state";
 pub(crate) const MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID: &str =
     "operation-registry.managed-systemd-active-state.risk-floor";
 
+pub const TRANSIENT_AUDIO_VOLUME_OPERATION_ID: &str = "operation:audio.output.set-session-volume";
+pub const TRANSIENT_AUDIO_PROVIDER: &str = "pipewire";
+pub const TRANSIENT_AUDIO_CAPABILITY: &str = "audio.session.observe";
+pub const TRANSIENT_AUDIO_RESOURCE_PREFIX: &str = "audio:session:output:";
+pub const TRANSIENT_AUDIO_VOLUME_CHANGE_KEY: &str = "volume_percent";
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum TrustedOperationRegistryError {
     Identifier(String),
@@ -87,6 +93,7 @@ pub(crate) fn trusted_builtin_operation_registry()
 -> Result<OperationRegistry, TrustedOperationRegistryError> {
     let mut registry = OperationRegistry::default();
     registry.register(managed_systemd_active_state_descriptor()?)?;
+    registry.register(transient_audio_volume_descriptor()?)?;
     Ok(registry)
 }
 
@@ -107,6 +114,22 @@ fn managed_systemd_active_state_descriptor()
     )?)
 }
 
+fn transient_audio_volume_descriptor() -> Result<OperationDescriptor, TrustedOperationRegistryError>
+{
+    let binding = OperationEffectBinding::try_new(
+        ProviderId::new(TRANSIENT_AUDIO_PROVIDER)?,
+        CapabilityId::new(TRANSIENT_AUDIO_CAPABILITY)?,
+        TRANSIENT_AUDIO_RESOURCE_PREFIX,
+        vec![TRANSIENT_AUDIO_VOLUME_CHANGE_KEY.into()],
+    )?;
+    Ok(OperationDescriptor::try_new(
+        OperationId::new(TRANSIENT_AUDIO_VOLUME_OPERATION_ID)?,
+        OperationClass::TransientExternalEffect,
+        Some(RiskClass::UserState),
+        Some(binding),
+    )?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,7 +138,7 @@ mod tests {
     fn builtin_registry_binds_the_qualified_managed_systemd_operation() {
         let registry =
             trusted_builtin_operation_registry().unwrap_or_else(|error| unreachable!("{error}"));
-        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.len(), 2);
 
         let operation_id = OperationId::new(MANAGED_SYSTEMD_REGISTERED_OPERATION_ID)
             .unwrap_or_else(|error| unreachable!("{error}"));
@@ -147,6 +170,41 @@ mod tests {
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
             vec![MANAGED_SYSTEMD_CHANGE_KEY]
+        );
+    }
+
+    #[test]
+    fn builtin_registry_binds_exact_session_audio_volume_operation() {
+        let registry =
+            trusted_builtin_operation_registry().unwrap_or_else(|error| unreachable!("{error}"));
+        let operation_id = OperationId::new(TRANSIENT_AUDIO_VOLUME_OPERATION_ID)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let descriptor = registry
+            .descriptor(&operation_id)
+            .unwrap_or_else(|| unreachable!("session audio volume operation is not registered"));
+        assert_eq!(descriptor.class(), OperationClass::TransientExternalEffect);
+        assert_eq!(descriptor.risk_floor(), Some(RiskClass::UserState));
+
+        let binding = descriptor
+            .effect_binding()
+            .unwrap_or_else(|| unreachable!("transient audio operation has no effect binding"));
+        assert_eq!(binding.provider().as_str(), TRANSIENT_AUDIO_PROVIDER);
+        assert_eq!(
+            binding.observation_capability().as_str(),
+            TRANSIENT_AUDIO_CAPABILITY
+        );
+        assert_eq!(binding.resource_prefix(), TRANSIENT_AUDIO_RESOURCE_PREFIX);
+        assert_eq!(binding.resource_suffix(), None);
+        assert!(binding.matches_resource("audio:session:output:42"));
+        assert!(!binding.matches_resource("audio:session:default-output"));
+        assert!(!binding.matches_resource("audio:session:input:42"));
+        assert_eq!(
+            binding
+                .change_keys()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec![TRANSIENT_AUDIO_VOLUME_CHANGE_KEY]
         );
     }
 

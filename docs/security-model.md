@@ -74,6 +74,12 @@ The only lightweight external-effect path is `TransientExternalEffect`, and it i
 
 Unknown/ambiguous external effect semantics fail closed. See [ADR 0032](adr/0032-classify-operations-before-authority.md) and `contracts/operation-semantics.toml`.
 
+## v0.10 Session1 caller boundary
+
+The Experimental `org.linura.Session1` path is an unprivileged user-session authority surface for only qualified `TransientExternalEffect` operations. It does not inherit administrator semantics from `Authority1` and does not make every local session-bus peer trusted. The transport derives the caller from authenticated D-Bus metadata, derives the service connection's own Unix UID independently from the bus daemon, and rejects the call unless those UIDs are equal. This prevents an accidentally shared or misconfigured bus from using one user's `linurad` and PipeWire session as a cross-user confused deputy.
+
+Session1 carries only narrow typed request material. Operation class, trusted risk, provider/resource binding, policy decision, durable audit reservation, executor dispatch and verification remain owned inward by registered semantics and Linura Control. The session-audio provider adapter invokes only the fixed `/usr/bin/wpexec` executable and root-owned `/usr/lib/linura/linura-session-audio.lua` helper with a scrubbed process environment; the helper's Lua sandbox exposes no shell or arbitrary filesystem/process execution path. The Arch image contract pins the helper to `root:root` mode `0644`, and the runtime independently rejects symlinks, hard-link aliases, non-root ownership and group/world-writable helper bytes before every observation or mutation.
+
 ## Human approval is not executor authority
 
 The original caller's Polkit decision authorizes continuation of the exact Authority1 request. It is not a bearer token and is never forwarded as authority to the root executor.

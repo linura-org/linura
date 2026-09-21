@@ -25,9 +25,11 @@ Risk does not determine whether something is a query, Linura-owned state, transi
 
 The trusted operation registry/domain contract owns classification. The concrete v0.10 binding is `linura_capability_sdk::OperationRegistry` for duplicate-safe registered descriptors plus `linura_control::OperationSemanticsControl` for Control-owned external-effect resolution against the canonical plan and trusted risk classification. Every registered external effect also carries a validated `OperationEffectBinding` that fixes the trusted provider, observation capability, resource scope, and allowed material change keys; Control rejects a plan whose shape does not match that binding before risk/policy resolution. Clients, agents, configuration and providers cannot self-declare a weaker class or pair a registered operation with an unrelated plan.
 
-## First concrete registered external operation
+## Built-in registered external operations
 
-The first built-in external operation registered through this v0.10 substrate is the already-qualified v0.6 managed systemd active-state effect:
+The registry now contains two deliberately narrow external-operation descriptors. Registration is an authority contract, not by itself a release-support claim.
+
+The already-qualified v0.6 managed systemd active-state effect remains:
 
 - operation ID: `operation:systemd.unit.set-active-state`;
 - class: `ManagedExternalEffect`;
@@ -38,7 +40,21 @@ The first built-in external operation registered through this v0.10 substrate is
 - resource scope: exact trusted prefix/suffix match `systemd:unit:linura-managed-*.service` (both `systemd:unit:linura-managed-` and `.service` are encoded in the registered effect binding);
 - allowed material change key: `active_state`.
 
-This registration does not widen the v0.6 effect. It makes the existing narrow lifecycle consume the same trusted registry that future v0.10 interfaces and domains must use. `ManagedLifecycleControl` constructs the built-in registry internally, validates that registration at composition time, and resolves the initial canonical candidate plus any post-approval refreshed candidate through `OperationSemanticsControl` before durable prepare. Every privileged handoff is revalidated against the registered operation immediately before authority crosses the handoff boundary, including an indeterminate-recovery `Reprepared` candidate, so recovery cannot become an unclassified execution path. The registered risk floor is also fed into durable candidate and recovery construction before policy evaluation: the `PolicySubject`, approval decision, risk provenance, review digest and signed `AuthorityBinding.trusted_risk` all carry the floored risk. Handoff requires the current registry resolution to equal that durable trusted risk, so raising a registered floor cannot reuse weaker prior authority.
+The first concrete v0.10 transient candidate is current-session output volume:
+
+- operation ID: `operation:audio.output.set-session-volume`;
+- class: `TransientExternalEffect`;
+- trusted risk floor: `UserState`;
+- provider: `pipewire`;
+- observation capability: `audio.session.observe`;
+- mutation resource scope: exact numeric `audio:session:output:<node-id>` resources only;
+- allowed material change key: `volume_percent`.
+
+The moving `audio:session:default-output` alias is observation/discovery-only and is intentionally outside the registered mutation prefix. A caller must bind a mutation to the concrete output-node identity observed before planning so a default-device change cannot silently retarget an already authorized effect. PipeWire/WirePlumber observation uses a repository-owned, root-installed `wpexec` helper with a fixed SPA-JSON action surface, WirePlumber `ObjectManager`, `default-nodes` and `mixer-api`; transport mechanics do not enter the semantic plan.
+
+The audio descriptor is still a **candidate activation**, not a widened v0.10 support claim: runtime executor/audit composition and interactive workstation qualification must land before support promotion.
+
+The systemd registration does not widen the v0.6 effect. It makes the existing narrow lifecycle consume the same trusted registry that future v0.10 interfaces and domains must use. `ManagedLifecycleControl` constructs the built-in registry internally, validates that registration at composition time, and resolves the initial canonical candidate plus any post-approval refreshed candidate through `OperationSemanticsControl` before durable prepare. Every privileged handoff is revalidated against the registered operation immediately before authority crosses the handoff boundary, including an indeterminate-recovery `Reprepared` candidate, so recovery cannot become an unclassified execution path. The registered risk floor is also fed into durable candidate and recovery construction before policy evaluation: the `PolicySubject`, approval decision, risk provenance, review digest and signed `AuthorityBinding.trusted_risk` all carry the floored risk. Handoff requires the current registry resolution to equal that durable trusted risk, so raising a registered floor cannot reuse weaker prior authority.
 
 ## Promotion rules
 
@@ -125,3 +141,12 @@ The same subsystem can expose operations in different classes. Classification fo
 - No `ManagedExternalEffect` may bypass the canonical lifecycle for latency or convenience.
 - Every public registered effect operation must have a typed operation descriptor before support is claimed.
 - Qualification must test class substitution/downgrade, interface inconsistency and privilege-path attempts.
+
+
+## First concrete transient domain: session output volume
+
+The first production-composed `TransientExternalEffect` is `operation:audio.output.set-session-volume` on the v0.10 workstation path. The trusted binding is PipeWire/WirePlumber observation capability `audio.session.observe`, exact resource `audio:session:output:<numeric-node-id>`, and desired key `volume_percent`.
+
+This activation is intentionally narrower than the observer. `audio:session:default-output` is a discovery alias only; it may identify the current default sink for a read, but it is never accepted as mutation authority. The unprivileged session executor passes the trusted pre-effect `node_id`, `object_serial`, `node_name` and `media_class` material to the same root-owned WirePlumber helper used by observation. Inside one `wpexec` WirePlumber event-loop callback, the helper resolves exactly one `Audio/Sink` object whose bound ID, object serial and node name all match the authorized evidence and immediately calls `mixer-api` on that matched object without yielding. Mutation therefore does not perform a second external numeric-ID lookup that could silently retarget a recycled PipeWire ID. Control still performs its own independent fresh post-effect observation and exact postcondition verification; helper self-report is never success evidence.
+
+The public mutation surface is the Experimental session-bus `org.linura.Session1.SetAudioOutputVolume` method hosted by `linurad`. The transport authenticates the D-Bus sender and additionally requires its Unix UID to equal the UID owning the `linurad` session-bus connection, preventing a misconfigured cross-user bus from turning Session1 into a confused deputy. Session1 delegates to the same `TransientEffectControl`; it does not add a second classification, policy, execution or verification path. Durable audit uses a bounded per-user SQLite/WAL store with `synchronous=FULL`, an exact validated STRICT schema, single-link regular database identity and explicit database/WAL growth ceilings; Control's attempt reservation is committed before executor dispatch and terminal disposition finalizes that same attempt identity.

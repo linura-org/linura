@@ -13,6 +13,7 @@ use linura_policy::PolicyDecision;
 use linura_protocol::{ObservationRequest, PlanDesiredStateRequest};
 use sha2::{Digest, Sha256};
 
+use crate::operation_registry::trusted_builtin_operation_registry;
 use crate::policy_review::review_plan_with_classification;
 use crate::risk_classification::{REGISTERED_TRANSIENT_RISK_POLICY_REVISION, RiskClassification};
 use crate::{
@@ -31,6 +32,7 @@ pub struct AuthorizedTransientEffect {
     resource: ResourceId,
     desired_state: BTreeMap<String, String>,
     pre_effect_evidence_id: String,
+    pre_effect_observation: ObservationEnvelope,
 }
 
 impl AuthorizedTransientEffect {
@@ -39,6 +41,7 @@ impl AuthorizedTransientEffect {
         risk: RiskClass,
         plan: &ReconciliationPlan,
         requested_state: &BTreeMap<String, String>,
+        pre_effect_observation: &ObservationEnvelope,
     ) -> Self {
         Self {
             operation_id,
@@ -49,6 +52,7 @@ impl AuthorizedTransientEffect {
             resource: plan.resource.clone(),
             desired_state: requested_state.clone(),
             pre_effect_evidence_id: plan.observed_evidence_id.clone(),
+            pre_effect_observation: pre_effect_observation.clone(),
         }
     }
 
@@ -91,6 +95,15 @@ impl AuthorizedTransientEffect {
     pub fn pre_effect_evidence_id(&self) -> &str {
         &self.pre_effect_evidence_id
     }
+
+    /// Returns the exact authoritative pre-effect observation that Control
+    /// bound into this authorized dispatch. Narrow executors may use this
+    /// immutable evidence to revalidate volatile provider identity immediately
+    /// before mutation; callers cannot supply or replace it.
+    #[must_use]
+    pub fn pre_effect_observation(&self) -> &ObservationEnvelope {
+        &self.pre_effect_observation
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -125,6 +138,17 @@ pub trait TransientEffectExecutor {
         &mut self,
         effect: &AuthorizedTransientEffect,
     ) -> Result<(), TransientEffectExecutorError>;
+
+    /// Validate provider-specific identity material on independently observed
+    /// post-effect evidence. Implementations should fail closed when volatile
+    /// provider identity no longer matches the exact object authorized before
+    /// dispatch. The default is appropriate only for effects whose resource
+    /// identity is intrinsically stable across the dispatch boundary.
+    fn verify_post_effect(
+        &self,
+        effect: &AuthorizedTransientEffect,
+        post_effect: &ObservationEnvelope,
+    ) -> Result<(), TransientEffectExecutorError>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -144,6 +168,7 @@ pub enum TransientEffectAuditFailureCode {
     PostEffectEvidenceNotFresh,
     PostEffectEvidenceNotAfterDispatch,
     PostEffectEvidenceReused,
+    PostEffectBindingMismatch,
     PostconditionMismatch,
 }
 
@@ -257,6 +282,10 @@ pub enum TransientEffectError {
         dispatch_started_unix_ms: u64,
     },
     PostEffectEvidenceReused,
+    PostEffectBindingMismatch {
+        detail: String,
+        post_effect_evidence_id: String,
+    },
     VerificationFailed {
         key: String,
         desired: String,
@@ -315,6 +344,12 @@ impl Display for TransientEffectError {
             Self::PostEffectEvidenceReused => {
                 formatter.write_str("post-effect verification reused pre-effect evidence")
             }
+            Self::PostEffectBindingMismatch { detail, .. } => {
+                write!(
+                    formatter,
+                    "post-effect provider identity binding failed: {detail}"
+                )
+            }
             Self::VerificationFailed {
                 key,
                 desired,
@@ -332,6 +367,19 @@ impl Display for TransientEffectError {
 
 impl std::error::Error for TransientEffectError {}
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransientEffectControlBuildError {
+    detail: String,
+}
+
+impl Display for TransientEffectControlBuildError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.detail)
+    }
+}
+
+impl std::error::Error for TransientEffectControlBuildError {}
+
 #[derive(Debug)]
 pub struct TransientEffectControl<E, A> {
     previews: PlanPreviewControl,
@@ -345,6 +393,24 @@ where
     E: TransientEffectExecutor,
     A: TransientEffectAuditSink,
 {
+    pub fn new(
+        previews: PlanPreviewControl,
+        executor: E,
+        audit: A,
+    ) -> Result<Self, TransientEffectControlBuildError> {
+        let registry = trusted_builtin_operation_registry().map_err(|error| {
+            TransientEffectControlBuildError {
+                detail: format!("cannot construct trusted transient operation registry: {error}"),
+            }
+        })?;
+        Ok(Self {
+            previews,
+            semantics: OperationSemanticsControl::from_trusted_registry(registry),
+            executor,
+            audit,
+        })
+    }
+
     #[cfg(test)]
     fn from_trusted_registry(
         previews: PlanPreviewControl,
@@ -464,6 +530,7 @@ where
             semantics.risk(),
             &plan,
             &requested_desired_state,
+            &pre_effect_observation,
         );
         // Establish the verification lower bound before reserving the attempt.
         // No external effect can occur until the mandatory durable audit
@@ -563,6 +630,25 @@ where
             return Err(TransientEffectError::ExecutorFailed {
                 detail: error.detail().into(),
                 post_effect_evidence_id: Some(post_effect_evidence_id),
+            });
+        }
+
+        if let Err(error) = self
+            .executor
+            .verify_post_effect(&effect, &post_effect.observation)
+        {
+            let record = audit_record(
+                &audit_context,
+                Some(&post_effect.observation),
+                TransientEffectAuditDisposition::VerificationFailed,
+                Some(TransientEffectAuditFailureCode::PostEffectBindingMismatch),
+            );
+            self.audit.record_terminal(&record).map_err(|audit_error| {
+                TransientEffectError::AuditFailed(audit_error.detail().into())
+            })?;
+            return Err(TransientEffectError::PostEffectBindingMismatch {
+                detail: error.detail().into(),
+                post_effect_evidence_id,
             });
         }
 
@@ -1029,6 +1115,14 @@ mod tests {
                     state.insert("muted".into(), "true".into());
                 }
             }
+            Ok(())
+        }
+
+        fn verify_post_effect(
+            &self,
+            _effect: &AuthorizedTransientEffect,
+            _post_effect: &ObservationEnvelope,
+        ) -> Result<(), TransientEffectExecutorError> {
             Ok(())
         }
     }

@@ -5,9 +5,9 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 use linura_sdk::{
-    ActorKind, CapabilityId, IntentId, LocalControlClient, PlanDesiredStateRequest, PlanId,
-    PlanPreview, PlanReview, ProtocolVersion, ProviderId, RequestId, RequirementId, ResourceId,
-    RiskClass, SemanticReason,
+    ActorKind, CapabilityId, IntentId, LocalControlClient, LocalSessionClient,
+    LocalSessionEffectReceipt, PlanDesiredStateRequest, PlanId, PlanPreview, PlanReview,
+    ProtocolVersion, ProviderId, RequestId, RequirementId, ResourceId, RiskClass, SemanticReason,
 };
 
 #[derive(Clone, Copy)]
@@ -71,6 +71,11 @@ const COMMANDS: &[CommandInfo] = &[
     CommandInfo {
         name: "review-plan",
         summary: "Review one retained canonical plan through trusted policy",
+        offline: false,
+    },
+    CommandInfo {
+        name: "set-audio-output-volume",
+        summary: "Set one exact PipeWire output node volume through Session1 Control",
         offline: false,
     },
     CommandInfo {
@@ -232,6 +237,28 @@ fn run() -> Result<(), Box<dyn Error>> {
             let review = LocalControlClient::connect()?.explain_plan_review(&plan_id)?;
             print_plan_review(&review);
         }
+        Some("set-audio-output-volume") => {
+            require_arity(
+                &args,
+                5,
+                "set-audio-output-volume <request-id> <node-id> <volume-percent> <reason>",
+            )?;
+            let request_id = RequestId::new(args[1].clone())?;
+            let node_id = parse_canonical_u32(&args[2], "node-id")?;
+            let volume_percent = parse_canonical_u16(&args[3], "volume-percent")?;
+            if volume_percent > 100 {
+                return Err(Box::new(CliError(
+                    "volume-percent must be in the inclusive range 0..100".into(),
+                )));
+            }
+            let receipt = LocalSessionClient::connect()?.set_audio_output_volume(
+                request_id.as_str(),
+                node_id,
+                volume_percent,
+                &args[4],
+            )?;
+            print_session_effect_receipt(&receipt);
+        }
         Some("help") | Some("--help") | Some("-h") | None => print_help(),
         Some(other) => {
             return Err(Box::new(CliError(format!(
@@ -348,9 +375,54 @@ fn infer_route(resource: &str) -> Result<(&'static str, &'static str), Box<dyn E
     if resource.starts_with("networkmanager:device:") {
         return Ok(("networkmanager", "networkmanager.device.observe"));
     }
+    if resource == "audio:session:default-output" || resource.starts_with("audio:session:output:") {
+        return Ok(("pipewire", "audio.session.observe"));
+    }
     Err(Box::new(CliError(format!(
         "cannot infer an observation provider for {resource:?}; use `linuractl observe <provider> <capability> <resource>`"
     ))))
+}
+
+fn parse_canonical_u32(value: &str, label: &str) -> Result<u32, Box<dyn Error>> {
+    if value.is_empty()
+        || value.len() > 10
+        || (value.len() > 1 && value.starts_with('0'))
+        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(Box::new(CliError(format!(
+            "{label} must be a canonical non-negative integer"
+        ))));
+    }
+    value
+        .parse::<u32>()
+        .map_err(|_| Box::new(CliError(format!("{label} exceeds the u32 range"))) as Box<dyn Error>)
+}
+
+fn parse_canonical_u16(value: &str, label: &str) -> Result<u16, Box<dyn Error>> {
+    if value.is_empty()
+        || value.len() > 5
+        || (value.len() > 1 && value.starts_with('0'))
+        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(Box::new(CliError(format!(
+            "{label} must be a canonical non-negative integer"
+        ))));
+    }
+    value
+        .parse::<u16>()
+        .map_err(|_| Box::new(CliError(format!("{label} exceeds the u16 range"))) as Box<dyn Error>)
+}
+
+fn print_session_effect_receipt(receipt: &LocalSessionEffectReceipt) {
+    field("operation_id", &receipt.operation_id);
+    field("plan_id", &receipt.plan_id);
+    field("request_id", &receipt.request_id);
+    field("risk", &receipt.risk);
+    field("pre_effect_evidence_id", &receipt.pre_effect_evidence_id);
+    if let Some(post) = &receipt.post_effect_evidence_id {
+        field("post_effect_evidence_id", post);
+    }
+    field("status", &receipt.status);
 }
 
 fn require_arity(args: &[String], expected: usize, usage: &str) -> Result<(), Box<dyn Error>> {
@@ -585,6 +657,9 @@ fn print_help() {
     );
     println!("  get-plan-preview <plan-id>");
     println!("  explain-plan-preview <plan-id>");
+    println!("  review-plan <plan-id>");
+    println!("  explain-plan-review <plan-id>");
+    println!("  set-audio-output-volume <request-id> <node-id> <volume-percent> <reason>");
     println!("  help");
     println!();
     println!("Plan preview origin flags: --intent, --requirement, --capability-origin");
@@ -622,6 +697,35 @@ mod tests {
             infer_route("networkmanager:manager").unwrap_or_else(|error| unreachable!("{error}")),
             ("networkmanager", "networkmanager.manager.observe")
         );
+    }
+
+    #[test]
+    fn audio_resource_routes_are_read_only_discovery_capable() {
+        assert_eq!(
+            infer_route("audio:session:default-output")
+                .unwrap_or_else(|error| unreachable!("{error}")),
+            ("pipewire", "audio.session.observe")
+        );
+        assert_eq!(
+            infer_route("audio:session:output:42").unwrap_or_else(|error| unreachable!("{error}")),
+            ("pipewire", "audio.session.observe")
+        );
+    }
+
+    #[test]
+    fn audio_cli_numeric_inputs_are_canonical_and_bounded() {
+        assert_eq!(
+            parse_canonical_u32("42", "node-id").unwrap_or_else(|error| unreachable!("{error}")),
+            42
+        );
+        assert_eq!(
+            parse_canonical_u16("100", "volume-percent")
+                .unwrap_or_else(|error| unreachable!("{error}")),
+            100
+        );
+        for value in ["", "042", "+42", "-1", "42.0"] {
+            assert!(parse_canonical_u32(value, "node-id").is_err(), "{value}");
+        }
     }
 
     #[test]
@@ -683,6 +787,7 @@ mod tests {
         assert!(names.contains("plan-preview"));
         assert!(names.contains("get-plan-preview"));
         assert!(names.contains("explain-plan-preview"));
+        assert!(names.contains("set-audio-output-volume"));
 
         let json = commands_json();
         assert!(json.starts_with('['));
@@ -690,6 +795,7 @@ mod tests {
         assert!(json.contains("\"name\":\"commands\""));
         assert!(json.contains("\"name\":\"observe\""));
         assert!(json.contains("\"name\":\"plan-preview\""));
+        assert!(json.contains("\"name\":\"set-audio-output-volume\""));
         assert!(json.contains("\"offline\":true"));
         assert!(json.contains("\"offline\":false"));
     }

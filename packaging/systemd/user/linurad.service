@@ -11,6 +11,10 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
+StateDirectory=linura
+StateDirectoryMode=0700
+UMask=0077
+RestrictAddressFamilies=AF_UNIX
 RestrictSUIDSGID=yes
 LockPersonality=yes
 

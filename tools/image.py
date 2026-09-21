@@ -25,6 +25,11 @@ BINARIES = {
     "linura-authorityd": "usr/lib/linura/linura-authorityd",
 }
 
+RUNTIME_ASSETS = {
+    ROOT / "packaging/wireplumber/linura-session-audio.lua":
+        "usr/lib/linura/linura-session-audio.lua",
+}
+
 
 def mkarchiso_command(profile: Path = STAGED) -> list[str]:
     return ["mkarchiso", "-v", "-w", str(WORK), "-o", str(OUT), str(profile)]
@@ -39,6 +44,14 @@ def install_binaries(profile: Path, binaries_dir: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(binaries_dir / name, destination)
         destination.chmod(0o755)
+    for source, relative in RUNTIME_ASSETS.items():
+        if not source.is_file() or source.is_symlink():
+            raise RuntimeError(f"missing or non-regular trusted runtime asset: {source}")
+        destination = profile / "airootfs" / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        destination.chmod(0o644)
+
     hook_dir = profile / "airootfs/etc/pacman.d/hooks"
     hook_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT / "packaging/arch/hooks/95-linura-update-guard.hook", hook_dir / "95-linura-update-guard.hook")
@@ -81,7 +94,7 @@ def main() -> int:
         print(f"2. copy {RELENG} -> {STAGED}")
         print(f"3. overlay Linura profile/security files from {OVERLAY}")
         print("4. merge packages.linura into releng packages.x86_64")
-        print(f"5. stage Linura binaries from {args.binaries_dir} and install update guard hook atomically")
+        print(f"5. stage Linura binaries from {args.binaries_dir}, trusted runtime assets, and the update guard hook")
         print(f"6. {shlex.join(mkarchiso_command())}")
         return 0
     if shutil.which("mkarchiso") is None:

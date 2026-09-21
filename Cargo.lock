@@ -801,9 +801,15 @@ dependencies = [
 name = "linurad"
 version = "0.9.0"
 dependencies = [
+ "linura-control",
+ "linura-core",
  "linura-dbus",
  "linura-linux-observation",
+ "linura-observation",
  "linura-observation-control",
+ "linura-protocol",
+ "linura-provider-sdk",
+ "rusqlite",
 ]
 
 [[package]]

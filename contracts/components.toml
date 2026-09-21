@@ -13,7 +13,7 @@ activation_milestone = "v0.1.0"
 release_artifact = true
 binary = "linurad"
 authority_role = "control-service"
-scope = "typed local control service; no privileged executor ownership"
+scope = "typed local control service plus bounded unprivileged session-effect composition; no privileged executor ownership"
 
 [[component]]
 id = "linuractl"
@@ -160,7 +160,7 @@ maturity = "integrated-experimental"
 activation_milestone = "v0.1.0"
 release_artifact = false
 authority_role = "transport"
-scope = "versioned system-bus transport, caller binding and Authority1 Polkit boundary"
+scope = "versioned session/system-bus transport, caller binding, bounded Session1 transport and Authority1 Polkit boundary"
 
 [[component]]
 id = "linura-planner"
