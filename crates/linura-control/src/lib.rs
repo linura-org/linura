@@ -31,6 +31,7 @@ mod review_projection;
 mod risk_classification;
 mod secure_agent_interpretation;
 mod secure_proposal_acceptance;
+mod transient_effect;
 
 pub use agent_interpretation::{
     InterpretationControlError, InterpretationInvocation, InterpretationSessionBudget,
@@ -79,3 +80,9 @@ pub use proposal_acceptance::{
 pub use proposal_authority::{ControlProposalAuthority, ProposalDecisionIssueRequest};
 pub use secure_agent_interpretation::{AdapterHealth, ControlInterpretationEngine};
 pub use secure_proposal_acceptance::ProposalAcceptanceControl;
+pub use transient_effect::{
+    AuthorizedTransientEffect, TransientEffectAuditDisposition, TransientEffectAuditError,
+    TransientEffectAuditFailureCode, TransientEffectAuditRecord, TransientEffectAuditSink,
+    TransientEffectControl, TransientEffectError, TransientEffectExecutor,
+    TransientEffectExecutorError, TransientEffectReceipt, TransientEffectReceiptStatus,
+};

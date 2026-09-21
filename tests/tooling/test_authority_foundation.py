@@ -131,7 +131,6 @@ class AuthorityFoundationTests(unittest.TestCase):
             text = classifier.read_text(encoding="utf-8").replace(
                 "return RiskClassification::Unclassified {",
                 "return RiskClassification::NotApplicable {",
-                1,
             )
             classifier.write_text(text, encoding="utf-8")
 

@@ -1,14 +1,19 @@
+use std::collections::BTreeMap;
+
 use linura_capability_sdk::{OperationDescriptor, OperationRegistry};
 use linura_core::{OperationClass, OperationId, RiskClass};
 use linura_planner::ReconciliationPlan;
 
-use crate::risk_classification::{RiskClassification, classify_plan_risk};
+use crate::risk_classification::{
+    RiskClassification, classify_exact_registered_transient_risk, classify_plan_risk,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TrustedExternalOperationSemantics {
     operation_id: OperationId,
     class: OperationClass,
     risk: RiskClass,
+    risk_classification: RiskClassification,
 }
 
 impl TrustedExternalOperationSemantics {
@@ -25,6 +30,10 @@ impl TrustedExternalOperationSemantics {
     #[must_use]
     pub const fn risk(&self) -> RiskClass {
         self.risk
+    }
+
+    pub(crate) fn risk_classification(&self) -> &RiskClassification {
+        &self.risk_classification
     }
 
     #[must_use]
@@ -49,6 +58,7 @@ pub enum OperationPlanBindingMismatch {
     ObservationCapability,
     Resource,
     ChangeKey(String),
+    RequestedStateKey(String),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -65,6 +75,7 @@ pub enum OperationSemanticsError {
     },
     UnclassifiedRisk(OperationId),
     RiskDowngradeRejected(OperationId),
+    TransientRequestedStateRequired(OperationId),
     TransientRiskExceedsBoundary {
         operation_id: OperationId,
         risk: RiskClass,
@@ -91,6 +102,24 @@ impl OperationSemanticsControl {
         &self,
         operation_id: &OperationId,
         plan: &ReconciliationPlan,
+    ) -> Result<TrustedExternalOperationSemantics, OperationSemanticsError> {
+        self.resolve_external_internal(operation_id, plan, None)
+    }
+
+    pub(crate) fn resolve_external_with_requested_state(
+        &self,
+        operation_id: &OperationId,
+        plan: &ReconciliationPlan,
+        requested_state: &BTreeMap<String, String>,
+    ) -> Result<TrustedExternalOperationSemantics, OperationSemanticsError> {
+        self.resolve_external_internal(operation_id, plan, Some(requested_state))
+    }
+
+    fn resolve_external_internal(
+        &self,
+        operation_id: &OperationId,
+        plan: &ReconciliationPlan,
+        requested_state: Option<&BTreeMap<String, String>>,
     ) -> Result<TrustedExternalOperationSemantics, OperationSemanticsError> {
         let descriptor = self
             .registry
@@ -138,9 +167,28 @@ impl OperationSemanticsControl {
             });
         }
 
-        let trusted_risk = match classify_plan_risk(plan) {
+        if let Some(requested_state) = requested_state
+            && let Some(key) = requested_state
+                .keys()
+                .find(|key| !binding.change_keys().contains(*key))
+        {
+            return Err(OperationSemanticsError::PlanBindingMismatch {
+                operation_id: operation_id.clone(),
+                mismatch: OperationPlanBindingMismatch::RequestedStateKey(key.clone()),
+            });
+        }
+
+        let risk_classification = if class == OperationClass::TransientExternalEffect {
+            let requested_state = requested_state.ok_or_else(|| {
+                OperationSemanticsError::TransientRequestedStateRequired(operation_id.clone())
+            })?;
+            classify_exact_registered_transient_risk(plan, requested_state)
+        } else {
+            classify_plan_risk(plan)
+        };
+        let trusted_risk = match &risk_classification {
             RiskClassification::NotApplicable { risk }
-            | RiskClassification::Classified { risk, .. } => risk,
+            | RiskClassification::Classified { risk, .. } => *risk,
             RiskClassification::Unclassified { .. } => {
                 return Err(OperationSemanticsError::UnclassifiedRisk(
                     operation_id.clone(),
@@ -168,6 +216,7 @@ impl OperationSemanticsControl {
             operation_id: operation_id.clone(),
             class,
             risk,
+            risk_classification,
         })
     }
 }
@@ -326,6 +375,249 @@ mod tests {
     }
 
     #[test]
+    fn exact_registered_audio_transient_refines_to_user_state() {
+        let id = operation_id("operation:audio.volume.set-session");
+        let descriptor = OperationDescriptor::try_new(
+            id.clone(),
+            OperationClass::TransientExternalEffect,
+            Some(RiskClass::UserState),
+            Some(effect_binding(
+                "pipewire",
+                "audio.session.observe",
+                "audio:session:",
+                &["volume_percent"],
+            )),
+        )
+        .unwrap_or_else(|error| unreachable!("{error:?}"));
+        let control = control_with(vec![descriptor]);
+
+        let provider = ProviderId::new("pipewire").unwrap_or_else(|error| unreachable!("{error}"));
+        let resource = ResourceId::new("audio:session:uid:1000")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let capability = CapabilityId::new("audio.session.observe")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let desired = DesiredResource {
+            provider: provider.clone(),
+            resource: resource.clone(),
+            observation_capability: capability.clone(),
+            state: BTreeMap::from([("volume_percent".into(), "40".into())]),
+            reason: SemanticReason {
+                summary: "set current session volume".into(),
+                intent_ids: vec![
+                    IntentId::new("intent:audio").unwrap_or_else(|error| unreachable!("{error}")),
+                ],
+                requirement_ids: vec![],
+                capability_ids: vec![],
+            },
+        };
+        let observation = PlanningObservation {
+            provider,
+            resource,
+            observation_capability: capability,
+            authority: "authoritative".into(),
+            evidence_id: "evidence:audio".into(),
+            freshness: PlanningFreshness::Current,
+            attributes: BTreeMap::from([("volume_percent".into(), "20".into())]),
+        };
+        let plan = DeterministicPlanner
+            .plan_resource(
+                RequestId::new("request:audio").unwrap_or_else(|error| unreachable!("{error}")),
+                Actor {
+                    id: ActorId::new("actor:human").unwrap_or_else(|error| unreachable!("{error}")),
+                    kind: ActorKind::Human,
+                    interactive: true,
+                },
+                desired,
+                &observation,
+            )
+            .unwrap_or_else(|error| unreachable!("{error}"));
+
+        assert_eq!(
+            control.resolve_external(&id, &plan),
+            Err(OperationSemanticsError::TransientRequestedStateRequired(
+                id.clone()
+            ))
+        );
+        let requested_state = BTreeMap::from([("volume_percent".to_owned(), "40".to_owned())]);
+        let resolved = control
+            .resolve_external_with_requested_state(&id, &plan, &requested_state)
+            .unwrap_or_else(|error| unreachable!("{error:?}"));
+        assert_eq!(resolved.class(), OperationClass::TransientExternalEffect);
+        assert_eq!(resolved.risk(), RiskClass::UserState);
+        assert!(!resolved.permits_privileged_executor());
+        assert!(!resolved.requires_durable_managed_lifecycle());
+    }
+
+    #[test]
+    fn transient_registration_validates_complete_requested_postcondition() {
+        let id = operation_id("operation:audio.volume.set-session");
+        let descriptor = OperationDescriptor::try_new(
+            id.clone(),
+            OperationClass::TransientExternalEffect,
+            Some(RiskClass::UserState),
+            Some(effect_binding(
+                "pipewire",
+                "audio.session.observe",
+                "audio:session:",
+                &["volume_percent"],
+            )),
+        )
+        .unwrap_or_else(|error| unreachable!("{error:?}"));
+        let control = control_with(vec![descriptor]);
+
+        let provider = ProviderId::new("pipewire").unwrap_or_else(|error| unreachable!("{error}"));
+        let resource = ResourceId::new("audio:session:uid:1000")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let capability = CapabilityId::new("audio.session.observe")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let desired = DesiredResource {
+            provider: provider.clone(),
+            resource: resource.clone(),
+            observation_capability: capability.clone(),
+            state: BTreeMap::from([
+                ("muted".into(), "false".into()),
+                ("volume_percent".into(), "40".into()),
+            ]),
+            reason: SemanticReason {
+                summary: "set current session volume".into(),
+                intent_ids: vec![
+                    IntentId::new("intent:audio-complete-postcondition")
+                        .unwrap_or_else(|error| unreachable!("{error}")),
+                ],
+                requirement_ids: vec![],
+                capability_ids: vec![],
+            },
+        };
+        let observation = PlanningObservation {
+            provider,
+            resource,
+            observation_capability: capability,
+            authority: "authoritative".into(),
+            evidence_id: "evidence:audio-complete-postcondition".into(),
+            freshness: PlanningFreshness::Current,
+            attributes: BTreeMap::from([
+                ("muted".into(), "false".into()),
+                ("volume_percent".into(), "20".into()),
+            ]),
+        };
+        let plan = DeterministicPlanner
+            .plan_resource(
+                RequestId::new("request:audio-complete-postcondition")
+                    .unwrap_or_else(|error| unreachable!("{error}")),
+                Actor {
+                    id: ActorId::new("actor:human").unwrap_or_else(|error| unreachable!("{error}")),
+                    kind: ActorKind::Human,
+                    interactive: true,
+                },
+                desired,
+                &observation,
+            )
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(
+            plan.changes
+                .iter()
+                .map(|change| change.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["volume_percent"]
+        );
+
+        let requested_state = BTreeMap::from([
+            ("muted".into(), "false".into()),
+            ("volume_percent".into(), "40".into()),
+        ]);
+        assert_eq!(
+            control.resolve_external_with_requested_state(&id, &plan, &requested_state),
+            Err(OperationSemanticsError::PlanBindingMismatch {
+                operation_id: id,
+                mismatch: OperationPlanBindingMismatch::RequestedStateKey("muted".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn transient_risk_refinement_covers_complete_requested_postcondition() {
+        let id = operation_id("operation:audio.volume.set-session");
+        let descriptor = OperationDescriptor::try_new(
+            id.clone(),
+            OperationClass::TransientExternalEffect,
+            Some(RiskClass::UserState),
+            Some(effect_binding(
+                "pipewire",
+                "audio.session.observe",
+                "audio:session:",
+                &["privileged_toggle", "volume_percent"],
+            )),
+        )
+        .unwrap_or_else(|error| unreachable!("{error:?}"));
+        let control = control_with(vec![descriptor]);
+
+        let provider = ProviderId::new("pipewire").unwrap_or_else(|error| unreachable!("{error}"));
+        let resource = ResourceId::new("audio:session:uid:1000")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let capability = CapabilityId::new("audio.session.observe")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let desired = DesiredResource {
+            provider: provider.clone(),
+            resource: resource.clone(),
+            observation_capability: capability.clone(),
+            state: BTreeMap::from([
+                ("privileged_toggle".into(), "false".into()),
+                ("volume_percent".into(), "40".into()),
+            ]),
+            reason: SemanticReason {
+                summary: "set current session volume with complete requested state".into(),
+                intent_ids: vec![
+                    IntentId::new("intent:audio-risk-complete-postcondition")
+                        .unwrap_or_else(|error| unreachable!("{error}")),
+                ],
+                requirement_ids: vec![],
+                capability_ids: vec![],
+            },
+        };
+        let observation = PlanningObservation {
+            provider,
+            resource,
+            observation_capability: capability,
+            authority: "authoritative".into(),
+            evidence_id: "evidence:audio-risk-complete-postcondition".into(),
+            freshness: PlanningFreshness::Current,
+            attributes: BTreeMap::from([
+                ("privileged_toggle".into(), "false".into()),
+                ("volume_percent".into(), "20".into()),
+            ]),
+        };
+        let plan = DeterministicPlanner
+            .plan_resource(
+                RequestId::new("request:audio-risk-complete-postcondition")
+                    .unwrap_or_else(|error| unreachable!("{error}")),
+                Actor {
+                    id: ActorId::new("actor:human").unwrap_or_else(|error| unreachable!("{error}")),
+                    kind: ActorKind::Human,
+                    interactive: true,
+                },
+                desired,
+                &observation,
+            )
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(
+            plan.changes
+                .iter()
+                .map(|change| change.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["volume_percent"]
+        );
+
+        let requested_state = BTreeMap::from([
+            ("privileged_toggle".into(), "false".into()),
+            ("volume_percent".into(), "40".into()),
+        ]);
+        assert_eq!(
+            control.resolve_external_with_requested_state(&id, &plan, &requested_state),
+            Err(OperationSemanticsError::UnclassifiedRisk(id))
+        );
+    }
+
+    #[test]
     fn transient_operation_rejects_plan_risk_above_user_state() {
         let id = operation_id("operation:service.start-session");
         let descriptor = OperationDescriptor::try_new(
@@ -342,8 +634,10 @@ mod tests {
         .unwrap_or_else(|error| unreachable!("{error:?}"));
         let control = control_with(vec![descriptor]);
 
+        let plan = canonical_systemd_plan("systemd:unit:test.service");
+        let requested_state = BTreeMap::from([("active_state".to_owned(), "active".to_owned())]);
         assert_eq!(
-            control.resolve_external(&id, &canonical_systemd_plan("systemd:unit:test.service")),
+            control.resolve_external_with_requested_state(&id, &plan, &requested_state),
             Err(OperationSemanticsError::TransientRiskExceedsBoundary {
                 operation_id: id,
                 risk: RiskClass::SecuritySensitive,

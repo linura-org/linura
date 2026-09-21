@@ -1,9 +1,13 @@
+use std::collections::BTreeMap;
+
 use linura_core::RiskClass;
 use linura_planner::{PlanStatus, ReconciliationPlan};
 
 pub(crate) const BASELINE_RISK_POLICY_REVISION: &str = "risk-policy:v0.3:1";
 pub(crate) const REGISTERED_OPERATION_RISK_POLICY_REVISION: &str =
     "risk-policy:v0.10:registered-operation-floor";
+pub(crate) const REGISTERED_TRANSIENT_RISK_POLICY_REVISION: &str =
+    "risk-policy:v0.10:registered-transient-refinement";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct RiskRule {
@@ -17,14 +21,22 @@ struct RiskRule {
 
 impl RiskRule {
     fn matches(self, plan: &ReconciliationPlan) -> bool {
+        let material_keys = plan
+            .changes
+            .iter()
+            .map(|change| change.key.as_str())
+            .collect::<Vec<_>>();
+        self.matches_material_keys(plan, &material_keys)
+    }
+
+    fn matches_material_keys(self, plan: &ReconciliationPlan, material_keys: &[&str]) -> bool {
         plan.provider.as_str() == self.provider
             && plan.observation_capability.as_str() == self.capability
             && plan.resource.as_str().starts_with(self.resource_prefix)
-            && !plan.changes.is_empty()
-            && plan
-                .changes
+            && !material_keys.is_empty()
+            && material_keys
                 .iter()
-                .all(|change| self.change_keys.contains(&change.key.as_str()))
+                .all(|key| self.change_keys.contains(key))
     }
 }
 
@@ -66,21 +78,64 @@ impl RiskPolicy {
         // closed until a reviewed typed rule is introduced.
         Self {
             revision: BASELINE_RISK_POLICY_REVISION,
-            rules: vec![RiskRule {
-                id: "systemd.unit.active-state.security-sensitive",
-                provider: "systemd",
-                capability: "systemd.unit.observe",
-                resource_prefix: "systemd:unit:",
-                change_keys: &["active_state"],
-                risk: RiskClass::SecuritySensitive,
-            }],
+            rules: vec![
+                RiskRule {
+                    id: "systemd.unit.active-state.security-sensitive",
+                    provider: "systemd",
+                    capability: "systemd.unit.observe",
+                    resource_prefix: "systemd:unit:",
+                    change_keys: &["active_state"],
+                    risk: RiskClass::SecuritySensitive,
+                },
+                RiskRule {
+                    id: "audio.session.output-state.user-state",
+                    provider: "pipewire",
+                    capability: "audio.session.observe",
+                    resource_prefix: "audio:session:",
+                    change_keys: &["muted", "volume_percent"],
+                    risk: RiskClass::UserState,
+                },
+            ],
         }
     }
 
     fn classify(&self, plan: &ReconciliationPlan) -> RiskClassification {
+        self.classify_with_registered_transient_refinement(plan, false, None)
+    }
+
+    fn classify_registered_transient(
+        &self,
+        plan: &ReconciliationPlan,
+        requested_state: &BTreeMap<String, String>,
+    ) -> RiskClassification {
+        self.classify_with_registered_transient_refinement(plan, true, Some(requested_state))
+    }
+
+    fn classify_with_registered_transient_refinement(
+        &self,
+        plan: &ReconciliationPlan,
+        allow_registered_transient_refinement: bool,
+        requested_state: Option<&BTreeMap<String, String>>,
+    ) -> RiskClassification {
         if plan.status != PlanStatus::ChangeProposed || plan.changes.is_empty() {
             return RiskClassification::NotApplicable {
                 risk: plan.prospective_risk,
+            };
+        }
+
+        let material_keys = requested_state.map_or_else(
+            || {
+                plan.changes
+                    .iter()
+                    .map(|change| change.key.as_str())
+                    .collect::<Vec<_>>()
+            },
+            |state| state.keys().map(String::as_str).collect::<Vec<_>>(),
+        );
+        if material_keys.is_empty() {
+            return RiskClassification::Unclassified {
+                revision: self.revision,
+                reason: "registered transient requested state is empty".into(),
             };
         }
 
@@ -88,7 +143,13 @@ impl RiskPolicy {
             .rules
             .iter()
             .copied()
-            .filter(|rule| rule.matches(plan))
+            .filter(|rule| {
+                if allow_registered_transient_refinement {
+                    rule.matches_material_keys(plan, &material_keys)
+                } else {
+                    rule.matches(plan)
+                }
+            })
             .collect();
         matched.sort_by_key(|rule| rule.id);
 
@@ -96,14 +157,10 @@ impl RiskPolicy {
             return RiskClassification::Unclassified {
                 revision: self.revision,
                 reason: format!(
-                    "no trusted risk rule covers provider={} resource={} capability={} change_keys={:?}",
+                    "no trusted risk rule covers provider={} resource={} capability={} material_keys={material_keys:?}",
                     plan.provider.as_str(),
                     plan.resource.as_str(),
-                    plan.observation_capability.as_str(),
-                    plan.changes
-                        .iter()
-                        .map(|change| change.key.as_str())
-                        .collect::<Vec<_>>()
+                    plan.observation_capability.as_str()
                 ),
             };
         }
@@ -115,7 +172,7 @@ impl RiskPolicy {
             .unwrap_or(plan.prospective_risk);
         let rule_ids = matched.iter().map(|rule| rule.id).collect::<Vec<_>>();
 
-        if classified < plan.prospective_risk {
+        if classified < plan.prospective_risk && !allow_registered_transient_refinement {
             return RiskClassification::DowngradeRejected {
                 revision: self.revision,
                 floor: plan.prospective_risk,
@@ -126,7 +183,11 @@ impl RiskPolicy {
 
         RiskClassification::Classified {
             risk: classified,
-            revision: self.revision,
+            revision: if classified < plan.prospective_risk {
+                REGISTERED_TRANSIENT_RISK_POLICY_REVISION
+            } else {
+                self.revision
+            },
             rule_ids,
         }
     }
@@ -134,6 +195,13 @@ impl RiskPolicy {
 
 pub(crate) fn classify_plan_risk(plan: &ReconciliationPlan) -> RiskClassification {
     RiskPolicy::baseline().classify(plan)
+}
+
+pub(crate) fn classify_exact_registered_transient_risk(
+    plan: &ReconciliationPlan,
+    requested_state: &BTreeMap<String, String>,
+) -> RiskClassification {
+    RiskPolicy::baseline().classify_registered_transient(plan, requested_state)
 }
 
 pub(crate) fn classify_plan_risk_with_floor(
@@ -228,6 +296,87 @@ mod tests {
                 risk: RiskClass::SecuritySensitive,
                 ..
             }
+        ));
+    }
+
+    fn canonical_audio_plan() -> ReconciliationPlan {
+        let provider = ProviderId::new("pipewire").unwrap_or_else(|error| unreachable!("{error}"));
+        let resource = ResourceId::new("audio:session:uid:1000")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let capability = CapabilityId::new("audio.session.observe")
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let desired = DesiredResource {
+            provider: provider.clone(),
+            resource: resource.clone(),
+            observation_capability: capability.clone(),
+            state: BTreeMap::from([("volume_percent".into(), "40".into())]),
+            reason: SemanticReason {
+                summary: "set current session volume".into(),
+                intent_ids: vec![
+                    IntentId::new("intent:audio-volume")
+                        .unwrap_or_else(|error| unreachable!("{error}")),
+                ],
+                requirement_ids: vec![],
+                capability_ids: vec![],
+            },
+        };
+        let observation = PlanningObservation {
+            provider,
+            resource,
+            observation_capability: capability,
+            authority: "authoritative".into(),
+            evidence_id: "evidence:audio-volume".into(),
+            freshness: PlanningFreshness::Current,
+            attributes: BTreeMap::from([("volume_percent".into(), "20".into())]),
+        };
+        DeterministicPlanner
+            .plan_resource(
+                RequestId::new("request:audio-volume")
+                    .unwrap_or_else(|error| unreachable!("{error}")),
+                Actor {
+                    id: ActorId::new("actor:human").unwrap_or_else(|error| unreachable!("{error}")),
+                    kind: ActorKind::Human,
+                    interactive: true,
+                },
+                desired,
+                &observation,
+            )
+            .unwrap_or_else(|error| unreachable!("{error}"))
+    }
+
+    #[test]
+    fn exact_registered_transient_can_refine_conservative_planner_risk() {
+        let plan = canonical_audio_plan();
+        assert_eq!(plan.prospective_risk, RiskClass::SystemMutation);
+        assert!(matches!(
+            classify_plan_risk(&plan),
+            RiskClassification::DowngradeRejected {
+                floor: RiskClass::SystemMutation,
+                classified: RiskClass::UserState,
+                ..
+            }
+        ));
+        let requested_state = BTreeMap::from([("volume_percent".to_owned(), "40".to_owned())]);
+        assert_eq!(
+            classify_exact_registered_transient_risk(&plan, &requested_state),
+            RiskClassification::Classified {
+                risk: RiskClass::UserState,
+                revision: REGISTERED_TRANSIENT_RISK_POLICY_REVISION,
+                rule_ids: vec!["audio.session.output-state.user-state"],
+            }
+        );
+    }
+
+    #[test]
+    fn exact_registered_transient_requires_complete_requested_state_coverage() {
+        let plan = canonical_audio_plan();
+        let requested_state = BTreeMap::from([
+            ("privileged_toggle".to_owned(), "false".to_owned()),
+            ("volume_percent".to_owned(), "40".to_owned()),
+        ]);
+        assert!(matches!(
+            classify_exact_registered_transient_risk(&plan, &requested_state),
+            RiskClassification::Unclassified { .. }
         ));
     }
 

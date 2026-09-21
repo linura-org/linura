@@ -18,6 +18,7 @@ MANAGED_LIFECYCLE_PATH = "crates/linura-control/src/managed_lifecycle.rs"
 DURABLE_AUTHORITY_PATH = "crates/linura-control/src/durable_authority.rs"
 RISK_CLASSIFICATION_PATH = "crates/linura-control/src/risk_classification.rs"
 POLICY_REVIEW_PATH = "crates/linura-control/src/policy_review.rs"
+TRANSIENT_EFFECT_PATH = "crates/linura-control/src/transient_effect.rs"
 SECURITY_PATH = "SECURITY.md"
 MILESTONE_PATH = "docs/milestones/v0.10.0.md"
 QUALIFICATION_PATH = "docs/qualification/v0.10.0.md"
@@ -108,6 +109,20 @@ def validate(root: Path) -> list[str]:
         "external_effect_plan_shape_binding": "registered-provider-capability-resource-scope-change-keys",
         "managed_handoff_semantics_binding": "registered-operation-before-every-privileged-handoff",
         "registered_risk_floor_authority_binding": "policy-review-and-durable-authority-binding",
+        "transient_control_type": "linura_control::TransientEffectControl",
+        "transient_risk_refinement": "exact-registered-plan-shape-only",
+        "transient_risk_refinement_material_binding": "complete-requested-postcondition",
+        "transient_executor_privilege": "unprivileged-only",
+        "transient_post_effect_reobserve_required": True,
+        "transient_post_effect_order_binding": "strictly-after-dispatch-start",
+        "transient_no_change_policy_review_required": True,
+        "transient_audit_sink_required": True,
+        "transient_requested_postcondition_binding": "complete-requested-state-not-initial-diff",
+        "transient_audit_material_binding": "canonical-plan-sha256-plus-requested-postcondition-sha256",
+        "transient_audit_authorization_binding": "policy-id-revision-plus-reviewed-risk-plus-risk-classification-revision-rule-ids",
+        "transient_audit_diagnostic_binding": "stable-categorical-code-no-executor-or-provider-diagnostic-text",
+        "transient_audit_dispatch_binding": "durable-attempt-reservation-before-executor-dispatch",
+        "transient_audit_terminal_binding": "reservation-linked-idempotent-terminal-record",
         "transient_external_max_risk": "user-state",
         "transient_durable_prepare_required": False,
         "transient_failure_model": "bounded-reobserve-no-durable-indeterminate-recovery",
@@ -139,6 +154,7 @@ def validate(root: Path) -> list[str]:
         (DURABLE_AUTHORITY_PATH, "durable authority handoff boundary"),
         (RISK_CLASSIFICATION_PATH, "trusted risk classification"),
         (POLICY_REVIEW_PATH, "trusted policy review"),
+        (TRANSIENT_EFFECT_PATH, "transient external-effect Control lifecycle"),
         (SECURITY_PATH, "security policy"),
         (MILESTONE_PATH, "v0.10 milestone"),
         (QUALIFICATION_PATH, "v0.10 qualification"),
@@ -157,12 +173,19 @@ def validate(root: Path) -> list[str]:
             "### Registered semantics are authority input",
             "A registered risk floor is applied **before policy review**.",
             "Immediately before every privileged handoff, Control re-resolves the prepared canonical plan",
+            "trusted exact registered refinement",
+            "linura_control::TransientEffectControl",
         ),
         THREAT_MODEL_PATH: (
             "### Registered-operation substitution or risk-floor weakening",
             "the registered risk floor is applied before policy review",
             "managed restart and `Indeterminate` recovery re-establish authority from current registration",
             "immediately before every privileged handoff, Control re-resolves the prepared plan through the trusted registry",
+            "### Transient executor self-report, stale verification or hidden ambiguity",
+            "the sole downward-refinement exception is the trusted exact registered transient path",
+            "the complete requested postcondition must be covered by the trusted transient risk rule",
+            "a durable audit attempt reservation is accepted before executor dispatch",
+            "arbitrary executor/provider diagnostic text is never persisted in transient audit records",
         ),
         SECURITY_PATH: (
             "Prepare before managed external effects.",
@@ -175,6 +198,8 @@ def validate(root: Path) -> list[str]:
         QUALIFICATION_PATH: (
             "A qualified `TransientExternalEffect` instead follows the machine-readable bounded transient lifecycle",
             "has no durable prepare/commit/reconcile transaction",
+            "That substrate is not itself a supported external effect.",
+            "Test-only operation descriptors and synthetic observers/executors are architecture qualification, not support activation.",
         ),
         UI_ARCHITECTURE_PATH: (
             "every external effect that reaches policy authorization is plan-bound",
@@ -234,6 +259,10 @@ def validate(root: Path) -> list[str]:
             "pub struct OperationSemanticsControl",
             "pub fn resolve_external",
             "classify_plan_risk",
+            "classify_exact_registered_transient_risk",
+            "TransientRequestedStateRequired",
+            "classify_exact_registered_transient_risk(plan, requested_state)",
+            "class == OperationClass::TransientExternalEffect",
             "TransientRiskExceedsBoundary",
             "pub enum OperationPlanBindingMismatch",
         ):
@@ -323,7 +352,13 @@ def validate(root: Path) -> list[str]:
         risk_text = risk_path.read_text(encoding="utf-8")
         for fragment in (
             "REGISTERED_OPERATION_RISK_POLICY_REVISION",
+            "REGISTERED_TRANSIENT_RISK_POLICY_REVISION",
             "classify_plan_risk_with_floor",
+            "classify_exact_registered_transient_risk",
+            "audio.session.output-state.user-state",
+            "matches_material_keys",
+            "requested_state",
+            "allow_registered_transient_refinement",
             "std::cmp::max(risk, floor)",
         ):
             if fragment not in risk_text:
@@ -337,6 +372,80 @@ def validate(root: Path) -> list[str]:
             failures.append(
                 "trusted policy review missing explicit risk-classification review path"
             )
+    transient_path = root / TRANSIENT_EFFECT_PATH
+    if transient_path.is_file() and not transient_path.is_symlink():
+        transient_text = transient_path.read_text(encoding="utf-8")
+        policy_review_index = transient_text.find("let review = review_plan_with_classification")
+        no_change_success_index = transient_text.find(
+            "TransientEffectAuditDisposition::NoChange"
+        )
+        if (
+            policy_review_index < 0
+            or no_change_success_index < 0
+            or policy_review_index > no_change_success_index
+        ):
+            failures.append(
+                "transient no-change success must remain downstream of trusted policy review"
+            )
+        audit_record_start = transient_text.find("pub struct TransientEffectAuditRecord")
+        audit_record_end = transient_text.find("\n}\n", audit_record_start)
+        if audit_record_start < 0 or audit_record_end < 0:
+            failures.append("transient audit record shape is missing")
+        else:
+            audit_record_text = transient_text[audit_record_start:audit_record_end]
+            if "pub detail:" in audit_record_text:
+                failures.append(
+                    "transient audit record must not persist arbitrary diagnostic text"
+                )
+        audit_reservation_index = transient_text.find(".reserve_attempt(&reservation)")
+        executor_dispatch_index = transient_text.find("self.executor.execute(&effect)")
+        if (
+            audit_reservation_index < 0
+            or executor_dispatch_index < 0
+            or audit_reservation_index > executor_dispatch_index
+        ):
+            failures.append(
+                "transient executor dispatch must remain downstream of durable audit reservation"
+            )
+        for fragment in (
+            "pub struct TransientEffectControl",
+            "pub trait TransientEffectExecutor",
+            "pub trait TransientEffectAuditSink",
+            ".authority_candidate(",
+            ".resolve_external_with_requested_state(",
+            "review_plan_with_classification",
+            "PolicyDecision::Allow",
+            "semantics.risk() > RiskClass::UserState",
+            ".observe(&observation_request)",
+            "FreshnessState::Current",
+            "dispatch_started_unix_ms",
+            "post_effect.observation.observed_at_unix_ms <= dispatch_started_unix_ms",
+            "PostEffectEvidenceNotAfterDispatch",
+            "PostEffectEvidenceReused",
+            "TransientEffectAuditDisposition::Verified",
+            "requested_desired_state",
+            "canonical_plan_sha256",
+            "requested_postcondition_sha256",
+            "pub enum TransientEffectAuditFailureCode",
+            "TransientEffectAuditDisposition::AttemptReserved",
+            "fn reserve_attempt(",
+            "fn record_terminal(",
+            "audit_attempt_sha256",
+            "pub audit_attempt_sha256: String",
+            "pub policy_id: PolicyId",
+            "pub policy_revision_id: PolicyRevisionId",
+            "pub policy_subject_risk: RiskClass",
+            "pub risk_classification_revision: String",
+            "pub risk_rule_ids: Vec<String>",
+            "pub failure_code: Option<TransientEffectAuditFailureCode>",
+            "risk_classification_audit_provenance",
+            "provider: context.plan.provider.clone()",
+            "principal: context.principal.as_str().to_owned()",
+        ):
+            if fragment not in transient_text:
+                failures.append(
+                    f"transient effect Control lifecycle missing required fragment: {fragment}"
+                )
     core_text = core_path.read_text(encoding="utf-8") if core_path.is_file() and not core_path.is_symlink() else ""
     if "requires_plan_bound_external_authorization" not in core_text:
         failures.append("linura_core::OperationClass missing plan-bound external authorization invariant")
