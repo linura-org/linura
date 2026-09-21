@@ -7,9 +7,15 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+linura-control = { path = "../../crates/linura-control" }
+linura-core = { path = "../../crates/linura-core" }
 linura-dbus = { path = "../../crates/linura-dbus" }
 linura-linux-observation = { path = "../../crates/linura-linux-observation" }
+linura-observation = { path = "../../crates/linura-observation" }
 linura-observation-control = { path = "../../crates/linura-observation-control" }
+linura-protocol = { path = "../../crates/linura-protocol" }
+linura-provider-sdk = { path = "../../crates/linura-provider-sdk" }
+rusqlite = { version = "0.37", features = ["bundled"] }
 
 [lints]
 workspace = true

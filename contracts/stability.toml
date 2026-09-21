@@ -11,6 +11,13 @@ version = "1"
 stability = "experimental"
 
 [[contract]]
+id = "dbus.org.linura.Session1"
+kind = "dbus-interface"
+path = "interfaces/dbus/org.linura.Session1.xml"
+version = "1"
+stability = "experimental"
+
+[[contract]]
 id = "cli.linuractl"
 kind = "cli"
 path = "apps/linuractl/src/main.rs"

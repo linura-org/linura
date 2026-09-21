@@ -13,6 +13,7 @@ use linura_policy::PolicyDecision;
 use linura_protocol::{ObservationRequest, PlanDesiredStateRequest};
 use sha2::{Digest, Sha256};
 
+use crate::operation_registry::trusted_builtin_operation_registry;
 use crate::policy_review::review_plan_with_classification;
 use crate::risk_classification::{REGISTERED_TRANSIENT_RISK_POLICY_REVISION, RiskClassification};
 use crate::{
@@ -31,6 +32,7 @@ pub struct AuthorizedTransientEffect {
     resource: ResourceId,
     desired_state: BTreeMap<String, String>,
     pre_effect_evidence_id: String,
+    pre_effect_observation: ObservationEnvelope,
 }
 
 impl AuthorizedTransientEffect {
@@ -39,6 +41,7 @@ impl AuthorizedTransientEffect {
         risk: RiskClass,
         plan: &ReconciliationPlan,
         requested_state: &BTreeMap<String, String>,
+        pre_effect_observation: &ObservationEnvelope,
     ) -> Self {
         Self {
             operation_id,
@@ -49,6 +52,7 @@ impl AuthorizedTransientEffect {
             resource: plan.resource.clone(),
             desired_state: requested_state.clone(),
             pre_effect_evidence_id: plan.observed_evidence_id.clone(),
+            pre_effect_observation: pre_effect_observation.clone(),
         }
     }
 
@@ -90,6 +94,15 @@ impl AuthorizedTransientEffect {
     #[must_use]
     pub fn pre_effect_evidence_id(&self) -> &str {
         &self.pre_effect_evidence_id
+    }
+
+    /// Returns the exact authoritative pre-effect observation that Control
+    /// bound into this authorized dispatch. Narrow executors may use this
+    /// immutable evidence to revalidate volatile provider identity immediately
+    /// before mutation; callers cannot supply or replace it.
+    #[must_use]
+    pub fn pre_effect_observation(&self) -> &ObservationEnvelope {
+        &self.pre_effect_observation
     }
 }
 
@@ -332,6 +345,19 @@ impl Display for TransientEffectError {
 
 impl std::error::Error for TransientEffectError {}
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransientEffectControlBuildError {
+    detail: String,
+}
+
+impl Display for TransientEffectControlBuildError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.detail)
+    }
+}
+
+impl std::error::Error for TransientEffectControlBuildError {}
+
 #[derive(Debug)]
 pub struct TransientEffectControl<E, A> {
     previews: PlanPreviewControl,
@@ -345,6 +371,24 @@ where
     E: TransientEffectExecutor,
     A: TransientEffectAuditSink,
 {
+    pub fn new(
+        previews: PlanPreviewControl,
+        executor: E,
+        audit: A,
+    ) -> Result<Self, TransientEffectControlBuildError> {
+        let registry = trusted_builtin_operation_registry().map_err(|error| {
+            TransientEffectControlBuildError {
+                detail: format!("cannot construct trusted transient operation registry: {error}"),
+            }
+        })?;
+        Ok(Self {
+            previews,
+            semantics: OperationSemanticsControl::from_trusted_registry(registry),
+            executor,
+            audit,
+        })
+    }
+
     #[cfg(test)]
     fn from_trusted_registry(
         previews: PlanPreviewControl,
@@ -464,6 +508,7 @@ where
             semantics.risk(),
             &plan,
             &requested_desired_state,
+            &pre_effect_observation,
         );
         // Establish the verification lower bound before reserving the attempt.
         // No external effect can occur until the mandatory durable audit

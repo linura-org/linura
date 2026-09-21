@@ -37,9 +37,10 @@ REQUIRED = [
     "crates/linura-config/Cargo.toml", "crates/linura-hardware/Cargo.toml", "crates/linura-testkit/Cargo.toml",
     "crates/linura-lifecycle/Cargo.toml", "apps/linura-update-guard/Cargo.toml", "tools/xtask/Cargo.toml",
     "apps/linura-firstboot/Cargo.toml", "apps/linura-control-center/README.md", "apps/linura-agent-ui/README.md", "apps/linura-shell/README.md",
-    "interfaces/dbus/org.linura.Control1.xml", "interfaces/dbus/org.linura.Authority1.xml", ".cargo/config.toml",
+    "interfaces/dbus/org.linura.Control1.xml", "interfaces/dbus/org.linura.Session1.xml", "interfaces/dbus/org.linura.Authority1.xml", ".cargo/config.toml",
     "scripts/validate_assets.py", "tools/acceptance.py", "tools/vm.py", "tools/image.py", "tools/visual.py",
     "hardware/support-matrix.json", "packaging/arch/archiso/profiledef.sh", "packaging/arch/hooks/95-linura-update-guard.hook",
+    "packaging/wireplumber/linura-session-audio.lua",
     "schemas/intent.v1.schema.json", "schemas/intent-proposal.v1.schema.json", "schemas/setup.v1.schema.json", "schemas/portable-profile.v1.schema.json",
     "schemas/desired-state.v1.schema.json", "schemas/system-graph.v1.schema.json", "schemas/capability-blueprint.v1.schema.json",
     "schemas/bootstrap.v1.schema.json", "schemas/migration.v1.schema.json", "schemas/update-plan.v1.schema.json",
@@ -50,7 +51,7 @@ REQUIRED = [
 FORBIDDEN_SNIPPETS = ["sudo bash -c", "chmod 777"]
 LEGACY_BRANDS = ["sys" + "plane", "luna" + "rchy"]
 LEGACY_COMPONENTS = ["linura-runtime", "linura_runtime", "apps/control-center", "apps/agent-ui", "apps/shell"]
-TEXT_SUFFIXES = {".md", ".rs", ".toml", ".py", ".yml", ".yaml", ".xml", ".json", ".service", ".policy", ".hook", ".sh", ".conf"}
+TEXT_SUFFIXES = {".md", ".rs", ".toml", ".py", ".yml", ".yaml", ".xml", ".json", ".service", ".policy", ".hook", ".sh", ".conf", ".lua"}
 GENERATED_DIRS = {
     ".cache",
     ".direnv",

@@ -19,6 +19,12 @@ DURABLE_AUTHORITY_PATH = "crates/linura-control/src/durable_authority.rs"
 RISK_CLASSIFICATION_PATH = "crates/linura-control/src/risk_classification.rs"
 POLICY_REVIEW_PATH = "crates/linura-control/src/policy_review.rs"
 TRANSIENT_EFFECT_PATH = "crates/linura-control/src/transient_effect.rs"
+SESSION_DBUS_PATH = "crates/linura-dbus/src/session.rs"
+SESSION_RUNTIME_PATH = "apps/linurad/src/session_audio.rs"
+SESSION_AUDIT_PATH = "apps/linurad/src/session_audit.rs"
+SESSION_AUDIO_HELPER_PATH = "packaging/wireplumber/linura-session-audio.lua"
+ARCH_PROFILE_PATH = "packaging/arch/archiso/profiledef.sh"
+LINUX_OBSERVATION_PATH = "crates/linura-linux-observation/src/lib.rs"
 SECURITY_PATH = "SECURITY.md"
 MILESTONE_PATH = "docs/milestones/v0.10.0.md"
 QUALIFICATION_PATH = "docs/qualification/v0.10.0.md"
@@ -47,6 +53,15 @@ EXPECTED_REGISTERED_OPERATIONS = {
         "resource_prefix": "systemd:unit:linura-managed-",
         "resource_suffix": ".service",
         "change_keys": ["active_state"],
+    },
+    "transient-audio-session-volume": {
+        "operation_id": "operation:audio.output.set-session-volume",
+        "class": "transient-external-effect",
+        "risk_floor": "user-state",
+        "provider": "pipewire",
+        "observation_capability": "audio.session.observe",
+        "resource_prefix": "audio:session:output:",
+        "change_keys": ["volume_percent"],
     },
 }
 EXPECTED_RUST_VARIANTS = [value["rust_variant"] for value in EXPECTED_CLASSES.values()]
@@ -123,6 +138,14 @@ def validate(root: Path) -> list[str]:
         "transient_audit_diagnostic_binding": "stable-categorical-code-no-executor-or-provider-diagnostic-text",
         "transient_audit_dispatch_binding": "durable-attempt-reservation-before-executor-dispatch",
         "transient_audit_terminal_binding": "reservation-linked-idempotent-terminal-record",
+        "transient_session_interface": "dbus.org.linura.Session1",
+        "transient_session_composition_owner": "linurad",
+        "transient_session_principal_binding": "authenticated-same-uid-as-session-service",
+        "transient_session_audit_persistence": "sqlite-wal-full-sync-bounded",
+        "transient_session_audit_schema_binding": "exact-strict-schema-single-link-bounded-file",
+        "transient_session_audio_native_api": "wireplumber-object-manager-plus-mixer-api",
+        "transient_session_audio_helper": "root-owned-packaged-wpexec-script",
+        "transient_volatile_resource_identity_binding": "wireplumber-object-identity-resolved-and-mutated-in-one-event-loop-turn",
         "transient_external_max_risk": "user-state",
         "transient_durable_prepare_required": False,
         "transient_failure_model": "bounded-reobserve-no-durable-indeterminate-recovery",
@@ -155,6 +178,12 @@ def validate(root: Path) -> list[str]:
         (RISK_CLASSIFICATION_PATH, "trusted risk classification"),
         (POLICY_REVIEW_PATH, "trusted policy review"),
         (TRANSIENT_EFFECT_PATH, "transient external-effect Control lifecycle"),
+        (SESSION_DBUS_PATH, "bounded Session1 transport"),
+        (SESSION_RUNTIME_PATH, "PipeWire session-volume runtime"),
+        (SESSION_AUDIT_PATH, "durable transient session audit"),
+        (SESSION_AUDIO_HELPER_PATH, "trusted WirePlumber session-audio helper"),
+        (ARCH_PROFILE_PATH, "Arch workstation image profile"),
+        (LINUX_OBSERVATION_PATH, "bounded Linux observation adapters"),
         (SECURITY_PATH, "security policy"),
         (MILESTONE_PATH, "v0.10 milestone"),
         (QUALIFICATION_PATH, "v0.10 qualification"),
@@ -449,6 +478,162 @@ def validate(root: Path) -> list[str]:
     core_text = core_path.read_text(encoding="utf-8") if core_path.is_file() and not core_path.is_symlink() else ""
     if "requires_plan_bound_external_authorization" not in core_text:
         failures.append("linura_core::OperationClass missing plan-bound external authorization invariant")
+
+    session_dbus = root / SESSION_DBUS_PATH
+    if session_dbus.is_file() and not session_dbus.is_symlink():
+        session_dbus_text = session_dbus.read_text(encoding="utf-8")
+        for fragment in (
+            'SESSION_CONTRACT_ID: &str = "dbus.org.linura.Session1"',
+            "pub trait Session1Handler",
+            "async fn set_audio_output_volume(",
+            ".set_audio_output_volume(context, request)",
+            "session_service_uid(connection).await?",
+            "require_same_session_uid(caller.uid, service_uid)?",
+        ):
+            if fragment not in session_dbus_text:
+                failures.append(
+                    f"Session1 transport missing required transient-effect fragment: {fragment}"
+                )
+        for forbidden in ("Command::new", "/usr/bin/wpctl", "PolicyDecision", "OperationClass"):
+            if forbidden in session_dbus_text:
+                failures.append(
+                    f"Session1 transport must not own effect authority/execution: {forbidden}"
+                )
+
+    session_runtime = root / SESSION_RUNTIME_PATH
+    if session_runtime.is_file() and not session_runtime.is_symlink():
+        session_runtime_text = session_runtime.read_text(encoding="utf-8")
+        for fragment in (
+            "TransientEffectControl::new(",
+            "effect.pre_effect_observation()",
+            "expected_sink_identity(",
+            "effect.pre_effect_observation(),",
+            "effect.resource(),",
+            "verify_packaged_session_audio_helper()",
+            "WIREPLUMBER_EXECUTABLE_PATH",
+            "LINURA_SESSION_AUDIO_HELPER_PATH",
+            ".env_clear()",
+            "volume_percent > 100",
+            "pipewire_output_node_id(effect.resource())",
+            "observation.authority != ObservationAuthority::NativeApi",
+        ):
+            if fragment not in session_runtime_text:
+                failures.append(
+                    f"PipeWire session-volume runtime missing hardening fragment: {fragment}"
+                )
+        session_runtime_production_text = session_runtime_text.split("#[cfg(test)]", 1)[0]
+        default_alias_dispatch = (
+            '"audio:session:default-output"' in session_runtime_production_text
+        )
+        for forbidden in ('"/usr/bin/wpctl"', '"--limit"', "revalidate_identity("):
+            if forbidden in session_runtime_production_text:
+                failures.append(
+                    f"PipeWire session-volume runtime retains obsolete split wpctl authority: {forbidden}"
+                )
+        if default_alias_dispatch:
+            failures.append(
+                "PipeWire session-volume runtime must not accept the moving default-output alias"
+            )
+
+    session_audit = root / SESSION_AUDIT_PATH
+    if session_audit.is_file() and not session_audit.is_symlink():
+        session_audit_text = session_audit.read_text(encoding="utf-8")
+        for fragment in (
+            "impl TransientEffectAuditSink for SqliteTransientAudit",
+            "fn reserve_attempt(",
+            "fn record_terminal(",
+            "PRAGMA journal_mode = WAL",
+            "PRAGMA synchronous = FULL",
+            "TransactionBehavior::Immediate",
+            "MAX_AUDIT_RECORDS",
+            "MAX_DATABASE_BYTES",
+            "metadata.nlink() != 1",
+            "validate_exact_schema(&connection)?",
+            "EXPECTED_AUDIT_COLUMNS",
+            "PRAGMA max_page_count =",
+            "PRAGMA journal_size_limit =",
+            "terminal audit has no durable attempt reservation",
+        ):
+            if fragment not in session_audit_text:
+                failures.append(
+                    f"transient session audit missing durability fragment: {fragment}"
+                )
+
+
+    arch_profile = root / ARCH_PROFILE_PATH
+    if arch_profile.is_file() and not arch_profile.is_symlink():
+        arch_profile_text = arch_profile.read_text(encoding="utf-8")
+        helper_permission = (
+            '["/usr/lib/linura/linura-session-audio.lua"]="0:0:0644"'
+        )
+        if helper_permission not in arch_profile_text:
+            failures.append(
+                "Arch workstation image must pin the trusted WirePlumber helper to root:root 0644"
+            )
+
+    helper = root / SESSION_AUDIO_HELPER_PATH
+    if helper.is_file() and not helper.is_symlink():
+        helper_text = helper.read_text(encoding="utf-8")
+        required_helper_fragments = (
+            'Constraint { "media.class", "equals", "Audio/Sink", type = "pw-global" }',
+            'properties["object.serial"] == args.object_serial',
+            'properties["node.name"] == args.node_name',
+            'bound_id == args.node_id',
+            'mixer:call("set-volume", matched_id, args.volume_percent / 100.0)',
+            'mixer["scale"] = "cubic"',
+            'sinks:connect("installed"',
+            'sinks:activate()',
+        )
+        for fragment in required_helper_fragments:
+            if fragment not in helper_text:
+                failures.append(
+                    f"WirePlumber session-audio helper missing identity-bound fragment: {fragment}"
+                )
+        identity_indices = [
+            helper_text.find('bound_id == args.node_id'),
+            helper_text.find('properties["object.serial"] == args.object_serial'),
+            helper_text.find('properties["node.name"] == args.node_name'),
+        ]
+        mutation_index = helper_text.find(
+            'mixer:call("set-volume", matched_id, args.volume_percent / 100.0)'
+        )
+        if (
+            any(index < 0 for index in identity_indices)
+            or mutation_index < 0
+            or any(index > mutation_index for index in identity_indices)
+        ):
+            failures.append(
+                "WirePlumber session-audio mutation must remain downstream of exact object identity resolution"
+            )
+        for forbidden in ("os.execute", "io.", "/usr/bin/wpctl"):
+            if forbidden in helper_text:
+                failures.append(
+                    f"WirePlumber session-audio helper contains forbidden execution surface: {forbidden}"
+                )
+
+    linux_observation = root / LINUX_OBSERVATION_PATH
+    if linux_observation.is_file() and not linux_observation.is_symlink():
+        linux_observation_text = linux_observation.read_text(encoding="utf-8")
+        for fragment in (
+            'WIREPLUMBER_EXECUTABLE_PATH: &str = "/usr/bin/wpexec"',
+            'LINURA_SESSION_AUDIO_HELPER_PATH',
+            "parse_wireplumber_sink_snapshot",
+            "verify_packaged_session_audio_helper",
+            ".env_clear()",
+        ):
+            if fragment not in linux_observation_text:
+                failures.append(
+                    f"PipeWire observer missing trusted WirePlumber helper fragment: {fragment}"
+                )
+        if "/usr/bin/wpctl" in linux_observation_text:
+            failures.append(
+                "PipeWire observer must not depend on the wpctl command surface"
+            )
+        if "String::from_utf8_lossy(&stderr)" in linux_observation_text:
+            failures.append(
+                "PipeWire observer must not expose raw WirePlumber stderr through provider diagnostics"
+            )
+
     return failures
 
 

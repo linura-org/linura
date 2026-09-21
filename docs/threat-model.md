@@ -410,3 +410,16 @@ Fleet/remote orchestration and hosted/shared Library services receive dedicated 
 - canonical systemd observation independently records `ActiveEnterTimestampMonotonic`;
 - the verifier consumes only fresh native canonical observation and is structurally forbidden from depending on the executor or native D-Bus transport;
 - stale, future, missing, wrong-resource, wrong-capability, non-native, inactive, or unchanged-timestamp evidence cannot verify success.
+
+
+### PipeWire numeric-node reuse, moving-default substitution or unaudited session dispatch
+A session audio client supplies the moving default alias as mutation authority, or a concrete PipeWire numeric object ID is destroyed and reused for a different sink between authoritative planning and executor dispatch. A local persistence failure could otherwise allow an external effect without durable attempt evidence.
+- the default-output alias is observation/discovery-only and is outside the registered mutation resource scope;
+- the trusted pre-effect observation records exact `node_id`, `object_serial`, `node_name` and `media_class` material;
+- observation and execution use a root-owned packaged WirePlumber helper rather than `wpctl` text/ID command composition;
+- the helper's `ObjectManager` resolves exactly one `Audio/Sink` whose bound node ID, `object.serial` and `node.name` all match the trusted pre-effect evidence, then invokes `mixer-api` on that matched object in the same event-loop callback without yielding; there is no second external numeric-ID target lookup between identity match and mutation;
+- volume execution accepts only the registered operation/provider, one exact numeric output resource and one canonical integer `volume_percent` in 0..100; the mixer uses cubic user-volume scale and the helper rejects values above 100%;
+- `/usr/bin/wpexec` and the helper path are fixed, the helper must be a root-owned single-link regular file that is not group/world writable, execution has a bounded deadline and scrubbed environment, and raw helper stderr is consumed under the output bound but is not surfaced as public/provider diagnostic text;
+- the per-user SQLite audit runs in WAL + FULL synchronous mode with bounded retained records and bounded database/WAL growth; opening rejects symlinks, hard-link aliases, oversized files, unexpected schema objects and any column/STRICT-schema drift;
+- Control requires the durable attempt reservation before dispatch, and terminal records are finalized only against the same attempt binding; a non-no-change terminal record without a prior reservation fails closed;
+- Session1 carries typed request material only, requires the authenticated sender UID to match the UID owning the service's session-bus connection, and owns no shell, provider forwarding, policy decision or privileged execution authority.

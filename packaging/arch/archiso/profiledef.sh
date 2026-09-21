@@ -12,4 +12,6 @@ arch="x86_64"
 pacman_conf="pacman.conf"
 airootfs_image_type="squashfs"
 airootfs_image_tool_options=("-comp" "zstd" "-Xcompression-level" "15")
-file_permissions=()
+file_permissions=(
+  ["/usr/lib/linura/linura-session-audio.lua"]="0:0:0644"
+)

@@ -15,7 +15,10 @@ pub use linura_core::{
     PolicyId, PolicyRevisionId, PrincipalId, ProfileId, ProviderId, RequestId, RequirementId,
     ResourceId, RiskClass, SemanticReason, SetupId, SupportLevel, ValidationError, WorkflowId,
 };
-pub use linura_dbus::{Control1Client as LocalControlClient, TransportError as LocalControlError};
+pub use linura_dbus::{
+    Control1Client as LocalControlClient, Session1Client as LocalSessionClient,
+    SessionEffectReceipt as LocalSessionEffectReceipt, TransportError as LocalControlError,
+};
 pub use linura_graph::{
     Edge, EdgeKind, Node, NodeId, ObservationRecordOutcome, RemovalImpact, SystemGraph,
 };

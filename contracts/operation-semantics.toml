@@ -33,6 +33,14 @@ transient_audit_authorization_binding = "policy-id-revision-plus-reviewed-risk-p
 transient_audit_diagnostic_binding = "stable-categorical-code-no-executor-or-provider-diagnostic-text"
 transient_audit_dispatch_binding = "durable-attempt-reservation-before-executor-dispatch"
 transient_audit_terminal_binding = "reservation-linked-idempotent-terminal-record"
+transient_session_interface = "dbus.org.linura.Session1"
+transient_session_composition_owner = "linurad"
+transient_session_principal_binding = "authenticated-same-uid-as-session-service"
+transient_session_audit_persistence = "sqlite-wal-full-sync-bounded"
+transient_session_audit_schema_binding = "exact-strict-schema-single-link-bounded-file"
+transient_session_audio_native_api = "wireplumber-object-manager-plus-mixer-api"
+transient_session_audio_helper = "root-owned-packaged-wpexec-script"
+transient_volatile_resource_identity_binding = "wireplumber-object-identity-resolved-and-mutated-in-one-event-loop-turn"
 transient_external_max_risk = "user-state"
 transient_durable_prepare_required = false
 transient_failure_model = "bounded-reobserve-no-durable-indeterminate-recovery"
@@ -49,6 +57,15 @@ observation_capability = "systemd.unit.observe"
 resource_prefix = "systemd:unit:linura-managed-"
 resource_suffix = ".service"
 change_keys = ["active_state"]
+
+[registered_operations.transient-audio-session-volume]
+operation_id = "operation:audio.output.set-session-volume"
+class = "transient-external-effect"
+risk_floor = "user-state"
+provider = "pipewire"
+observation_capability = "audio.session.observe"
+resource_prefix = "audio:session:output:"
+change_keys = ["volume_percent"]
 
 [classes.experience-ephemeral]
 rust_variant = "ExperienceEphemeral"

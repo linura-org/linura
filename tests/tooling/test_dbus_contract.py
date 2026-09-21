@@ -7,6 +7,8 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[2]
 XML_PATH = ROOT / "interfaces/dbus/org.linura.Control1.xml"
 RUNTIME_PATH = ROOT / "crates/linura-dbus/src/lib.rs"
+SESSION_XML_PATH = ROOT / "interfaces/dbus/org.linura.Session1.xml"
+SESSION_RUNTIME_PATH = ROOT / "crates/linura-dbus/src/session.rs"
 
 PLAN_PREVIEW_OUTPUTS = (
     ("ids", "(ss)", "out"),
@@ -138,6 +140,44 @@ class Control1ContractTests(unittest.TestCase):
         )
         for forbidden in {"Apply", "Execute", "CommitPlan", "AuthorizePlan", "PreparePlan"}:
             self.assertNotIn(forbidden, method_names)
+
+
+class Session1ContractTests(unittest.TestCase):
+    def test_session1_is_one_exact_bounded_mutation_surface(self) -> None:
+        root = ET.parse(SESSION_XML_PATH).getroot()
+        interface = root.find("./interface[@name='org.linura.Session1']")
+        self.assertIsNotNone(interface)
+        assert interface is not None
+        annotations = {
+            annotation.attrib["name"]: annotation.attrib["value"]
+            for annotation in interface.findall("annotation")
+        }
+        self.assertEqual(annotations["org.linura.ContractId"], "dbus.org.linura.Session1")
+        self.assertEqual(annotations["org.linura.ContractVersion"], "1")
+        self.assertEqual(annotations["org.linura.Stability"], "experimental")
+        methods = interface.findall("method")
+        self.assertEqual([method.attrib["name"] for method in methods], ["SetAudioOutputVolume"])
+        args = tuple(
+            (arg.attrib["name"], arg.attrib["type"], arg.attrib.get("direction", "in"))
+            for arg in methods[0].findall("arg")
+        )
+        self.assertEqual(
+            args,
+            (
+                ("request_id", "s", "in"),
+                ("node_id", "u", "in"),
+                ("volume_percent", "q", "in"),
+                ("reason", "s", "in"),
+                ("receipt", "(sssssss)", "out"),
+            ),
+        )
+
+    def test_session1_runtime_delegates_authority_inward(self) -> None:
+        source = SESSION_RUNTIME_PATH.read_text(encoding="utf-8")
+        self.assertIn("trait Session1Handler", source)
+        self.assertIn(".set_audio_output_volume(context, request)", source)
+        for forbidden in ("Command::new", "wpctl", "PolicyDecision", "OperationClass"):
+            self.assertNotIn(forbidden, source)
 
 
 if __name__ == "__main__":

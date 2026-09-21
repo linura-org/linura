@@ -61,6 +61,10 @@ pub use managed_lifecycle::{
     ManagedApprovalAuthorizer, ManagedApprovalChallenge, ManagedLifecycleControl,
     ManagedLifecycleError, ManagedMutationReceipt, TrustedHumanApproval, managed_request_id,
 };
+pub use operation_registry::{
+    TRANSIENT_AUDIO_CAPABILITY, TRANSIENT_AUDIO_PROVIDER, TRANSIENT_AUDIO_RESOURCE_PREFIX,
+    TRANSIENT_AUDIO_VOLUME_CHANGE_KEY, TRANSIENT_AUDIO_VOLUME_OPERATION_ID,
+};
 pub use operation_semantics::{
     OperationPlanBindingMismatch, OperationSemanticsControl, OperationSemanticsError,
     TrustedExternalOperationSemantics,
@@ -83,6 +87,7 @@ pub use secure_proposal_acceptance::ProposalAcceptanceControl;
 pub use transient_effect::{
     AuthorizedTransientEffect, TransientEffectAuditDisposition, TransientEffectAuditError,
     TransientEffectAuditFailureCode, TransientEffectAuditRecord, TransientEffectAuditSink,
-    TransientEffectControl, TransientEffectError, TransientEffectExecutor,
-    TransientEffectExecutorError, TransientEffectReceipt, TransientEffectReceiptStatus,
+    TransientEffectControl, TransientEffectControlBuildError, TransientEffectError,
+    TransientEffectExecutor, TransientEffectExecutorError, TransientEffectReceipt,
+    TransientEffectReceiptStatus,
 };

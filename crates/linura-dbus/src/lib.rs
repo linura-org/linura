@@ -2,12 +2,18 @@
 
 mod authority;
 mod planning;
+mod session;
 
 pub use authority::{
     AUTHORITY_CONTRACT_ID, AUTHORITY_CONTRACT_STABILITY, AUTHORITY_CONTRACT_VERSION,
     AUTHORITY_INTERFACE_NAME, AUTHORITY_OBJECT_PATH, AUTHORITY_SERVICE_NAME, Authority1Context,
     Authority1Handler, Authority1ManagedRequest, AuthorityReceiptWire,
     MANAGE_SYSTEMD_ACTIVE_STATE_ACTION, serve_authority1,
+};
+pub use session::{
+    SESSION_CONTRACT_ID, SESSION_CONTRACT_STABILITY, SESSION_CONTRACT_VERSION,
+    SESSION_INTERFACE_NAME, SESSION_OBJECT_PATH, Session1AudioVolumeRequest, Session1Client,
+    Session1Context, Session1Handler, SessionEffectReceipt, SessionEffectReceiptWire,
 };
 
 use std::collections::HashMap;
@@ -485,6 +491,22 @@ pub fn serve(coordinator: ObservationCoordinator) -> Result<(), TransportError> 
     let _connection = zbus::blocking::connection::Builder::session()?
         .name(SERVICE_NAME)?
         .serve_at(OBJECT_PATH, service)?
+        .build()?;
+    loop {
+        std::thread::park();
+    }
+}
+
+pub fn serve_with_session1(
+    coordinator: ObservationCoordinator,
+    handler: impl Session1Handler,
+) -> Result<(), TransportError> {
+    let control = control1_service(coordinator);
+    let session = session::session1_service(handler);
+    let _connection = zbus::blocking::connection::Builder::session()?
+        .name(SERVICE_NAME)?
+        .serve_at(OBJECT_PATH, control)?
+        .serve_at(SESSION_OBJECT_PATH, session)?
         .build()?;
     loop {
         std::thread::park();
