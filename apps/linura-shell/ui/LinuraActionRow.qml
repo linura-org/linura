@@ -60,4 +60,6 @@ AbstractButton {
     Accessible.name: accessibleName.length > 0 ? accessibleName : title
     Accessible.description: description
     Accessible.role: Accessible.Button
+    Accessible.selectable: true
+    Accessible.selected: control.selected
 }

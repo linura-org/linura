@@ -524,6 +524,230 @@ class LinuraShellContractTests(unittest.TestCase):
                 )
             )
 
+    def test_command_palette_rejects_process_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette.write_text(
+                palette.read_text(encoding="utf-8") + "\nProcess { }\n",
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "forbidden authority/process/provider surface" in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_manifest_cannot_gain_capabilities(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = root / "apps/linura-shell/plugins/command-palette/manifest.json"
+            text = manifest.read_text(encoding="utf-8")
+            manifest.write_text(
+                text.replace(
+                    '"authority": "none",',
+                    '"authority": "none",\n  "capabilities": ["system.audio.control"],',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("Command palette manifest" in item for item in failures)
+            )
+
+    def test_command_palette_must_use_linura_ui_primitives(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            text = palette.read_text(encoding="utf-8")
+            marker = "LinuraActionRow {"
+            self.assertIn(marker, text)
+            palette.write_text(
+                text.replace(marker, "Button {", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Command palette product surface must consume Linura UI primitives" in item
+                    or ("Command palette shell contract missing" in item and marker in item)
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_exposes_keyboard_selection_to_search_accessibility(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            text = palette.read_text(encoding="utf-8")
+            marker = "accessibleDescription: root.selectedAccessibilityDescription()"
+            self.assertIn(marker, text)
+            palette.write_text(
+                text.replace(marker, 'accessibleDescription: ""', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Command palette shell contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_action_row_exposes_accessible_selected_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            component = root / "apps/linura-shell/ui/LinuraActionRow.qml"
+            text = component.read_text(encoding="utf-8")
+            marker = "Accessible.selected: control.selected"
+            self.assertIn(marker, text)
+            component.write_text(
+                text.replace(marker, "Accessible.selected: false", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura UI SDK component" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_text_field_preserves_accessible_description_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            component = root / "apps/linura-shell/ui/LinuraTextField.qml"
+            text = component.read_text(encoding="utf-8")
+            marker = "Accessible.description: invalid ? errorText : accessibleDescription"
+            self.assertIn(marker, text)
+            component.write_text(
+                text.replace(
+                    marker,
+                    'Accessible.description: invalid ? errorText : ""',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura UI SDK component" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_shell_root_owns_navigation_before_ipc_delegation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            shell = root / "apps/linura-shell/shell.qml"
+            text = shell.read_text(encoding="utf-8")
+            marker = "function toggleCommandPalette()"
+            ipc_index = text.index("IpcHandler {")
+            root_method_index = text.index(marker)
+            self.assertLess(root_method_index, ipc_index)
+
+            text = (
+                text[:root_method_index]
+                + "function brokenToggleCommandPalette()"
+                + text[root_method_index + len(marker):]
+            )
+            shell.write_text(text, encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "root must own navigation method before IPC delegation" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_global_shortcut_registration_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            shell = root / "apps/linura-shell/shell.qml"
+            text = shell.read_text(encoding="utf-8")
+            marker = 'name: "commandPalette"'
+            self.assertIn(marker, text)
+            shell.write_text(
+                text.replace(marker, 'name: "brokenCommandPalette"', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura Shell root contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_must_have_a_packaged_launcher(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "apps/linura-shell/org.linura.CommandPalette.desktop"
+            text = launcher.read_text(encoding="utf-8")
+            marker = (
+                "Exec=/usr/bin/qs -p /usr/share/linura/shell "
+                "ipc call -- linura.shell toggleCommandPalette"
+            )
+            self.assertIn(marker, text)
+            launcher.write_text(
+                text.replace(marker, "Exec=/bin/false", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Command palette packaged launcher contract missing" in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_and_control_center_remain_mutually_exclusive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            shell = root / "apps/linura-shell/shell.qml"
+            text = shell.read_text(encoding="utf-8")
+            marker = (
+                "function showCommandPalette() {\n"
+                "        shell.controlCenterOpen = false\n"
+                "        shell.commandPaletteOpen = true\n"
+                "    }"
+            )
+            replacement = (
+                "function showCommandPalette() {\n"
+                "        shell.commandPaletteOpen = true\n"
+                "    }"
+            )
+            self.assertIn(marker, text)
+            shell.write_text(
+                text.replace(marker, replacement, 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "transient surfaces must remain mutually exclusive" in item
+                    for item in failures
+                )
+            )
+
     def test_ui_sdk_control_size_token_drift_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

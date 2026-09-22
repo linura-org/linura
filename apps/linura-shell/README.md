@@ -2,7 +2,7 @@
 
 Linura Shell is the v0.10 desktop-shell candidate for the `arch-hyprland-v1` workstation profile.
 
-The shell runs as one supervised, long-lived Quickshell process. First-party shell surfaces are Qt Quick/QML components hosted inside that process. The initial bounded surface is the Control Center audio panel.
+The shell runs as one supervised, long-lived Quickshell process. First-party shell surfaces are Qt Quick/QML components hosted inside that process. The current bounded surfaces are the Control Center audio panel and a navigation-only command palette foundation.
 
 ## Architecture
 
@@ -39,7 +39,8 @@ v0.10 intentionally distinguishes trusted shipped shell surfaces from the future
 
 - `shell.qml` is the single trusted Quickshell root.
 - `plugins/control-center` is a first-party panel loaded by the trusted shell.
-- the first-party manifest is descriptive metadata; it does not grant capabilities or authority.
+- `plugins/command-palette` is a first-party overlay whose current catalog contains explicit experience-navigation targets only.
+- first-party manifests are descriptive metadata; they do not grant capabilities or authority.
 - arbitrary user QML is **not** loaded into the trusted shell process in this slice.
 - future third-party/custom UI remains governed by `docs/plugin-model.md`: isolated/out-of-process or otherwise capability-confined, never ambient shell authority.
 
@@ -59,15 +60,24 @@ The current Control Center panel provides current-session default-output volume:
 
 The panel exposes keyboard and pointer operation, uses the shared Linura token vocabulary, and requires no animation to communicate state.
 
+## Command palette slice
+
+The command palette is an `ExperienceEphemeral` shell surface. Its current catalog is deliberately navigation-only and contains the explicit `navigation:control-center` target. Search/filtering, keyboard selection and pointer activation remain local presentation behavior. The palette cannot carry shell text, provider handles, policy/risk selection, approvals or executor authority.
+
+The shell also registers the Hyprland global-shortcut identity `linura:commandPalette`. The qualified profile may bind a compositor key chord to that identity; registering the shortcut does not mutate Hyprland configuration or grant shell authority.
+
+Effectful palette entries are not added as QML callbacks. Future effectful entries must resolve through a typed controller to the same trusted registered operation and Control path used by other interfaces.
+
 ## Launch and idle behavior
 
-The image installs a `Linura Control Center` desktop entry that calls the running shell through Quickshell IPC:
+The image installs `Linura Control Center` and `Linura Command Palette` desktop entries that call the running shell through Quickshell IPC:
 
 ```sh
 qs -p /usr/share/linura/shell ipc call -- linura.shell toggleControlCenter
+qs -p /usr/share/linura/shell ipc call -- linura.shell toggleCommandPalette
 ```
 
-The shell does not poll PipeWire while the panel is closed. Opening the panel activates the bridge, obtains fresh authoritative state, and arms refresh only from the returned freshness lifetime. Closing the panel disables future observation refreshes while allowing an already-dispatched effect to finish its post-effect verification path.
+The shell keeps the Control Center and command palette mutually exclusive so keyboard focus is owned by at most one transient Linura surface. The shell does not poll PipeWire while the panel is closed. Opening the panel activates the bridge, obtains fresh authoritative state, and arms refresh only from the returned freshness lifetime. Closing the panel disables future observation refreshes while allowing an already-dispatched effect to finish its post-effect verification path.
 
 ## Runtime and qualification boundary
 
