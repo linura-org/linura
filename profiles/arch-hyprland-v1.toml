@@ -22,6 +22,7 @@ networkmanager = ">=1"
 bluez = ">=5"
 pipewire = ">=1"
 systemd = ">=255"
+quickshell = ">=0.3.1"
 
 [features]
 local_control = true

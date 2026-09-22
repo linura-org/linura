@@ -10,10 +10,12 @@ PanelWindow {
     property bool opened: false
     property int selectedIndex: 0
     property var results: []
+    property var workspaceCatalog: []
     property string statusText: ""
 
     readonly property var catalog: [
         {
+            kind: "surface",
             targetId: "navigation:control-center",
             title: qsTr("Control Center"),
             description: qsTr("Open authoritative current-session controls"),
@@ -24,6 +26,7 @@ PanelWindow {
 
     signal closeRequested()
     signal controlCenterRequested()
+    signal workspaceRequested(int workspaceId)
 
     visible: opened
     implicitHeight: Math.min(560, paletteSurface.implicitHeight + theme.spacing2xl * 3)
@@ -46,15 +49,52 @@ PanelWindow {
         id: theme
     }
 
+    function workspaceTitle(workspace) {
+        const label = workspace.name && workspace.name.length > 0
+            ? workspace.name
+            : String(workspace.id)
+        return qsTr("Workspace %1").arg(label)
+    }
+
+    function workspaceDescription(workspace) {
+        if (workspace.focused)
+            return qsTr("Current Hyprland workspace")
+        return qsTr("Switch to Hyprland workspace")
+    }
+
+    function workspaceEntry(workspace) {
+        return {
+            kind: "workspace",
+            targetId: "navigation:workspace:" + workspace.id,
+            workspaceId: workspace.id,
+            title: workspaceTitle(workspace),
+            description: workspaceDescription(workspace),
+            keywords: "workspace hyprland " + workspace.name + " " + workspace.id,
+            shortcut: workspace.focused ? qsTr("Current") : qsTr("Enter")
+        }
+    }
+
+    function matches(entry, needle) {
+        if (needle.length === 0)
+            return true
+        const haystack = (entry.title + " " + entry.description + " " + entry.keywords)
+            .toLowerCase()
+        return haystack.indexOf(needle) !== -1
+    }
+
     function refreshResults() {
         const needle = queryField.text.trim().toLowerCase()
         const next = []
 
         for (let i = 0; i < catalog.length; i++) {
             const entry = catalog[i]
-            const haystack = (entry.title + " " + entry.description + " " + entry.keywords)
-                .toLowerCase()
-            if (needle.length === 0 || haystack.indexOf(needle) !== -1)
+            if (matches(entry, needle))
+                next.push(entry)
+        }
+
+        for (let i = 0; i < workspaceCatalog.length; i++) {
+            const entry = workspaceEntry(workspaceCatalog[i])
+            if (matches(entry, needle))
                 next.push(entry)
         }
 
@@ -63,6 +103,22 @@ PanelWindow {
             selectedIndex = -1
         else
             selectedIndex = Math.max(0, Math.min(selectedIndex, results.length - 1))
+
+        ensureSelectedResultVisible()
+    }
+
+    function ensureSelectedResultVisible() {
+        if (!opened || selectedIndex < 0)
+            return
+
+        Qt.callLater(function() {
+            if (!root.opened || root.selectedIndex < 0)
+                return
+            if (root.selectedIndex >= resultList.count)
+                return
+
+            resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
+        })
     }
 
     function selectedAccessibilityDescription() {
@@ -85,16 +141,37 @@ PanelWindow {
 
         const current = selectedIndex < 0 ? 0 : selectedIndex
         selectedIndex = (current + delta + results.length) % results.length
+        ensureSelectedResultVisible()
+    }
+
+    function completeWorkspaceRequest(activated) {
+        if (!opened)
+            return
+
+        if (activated) {
+            statusText = ""
+            closeRequested()
+            return
+        }
+
+        statusText = qsTr("That workspace is no longer available.")
+        refreshResults()
     }
 
     function activate(index) {
         if (index < 0 || index >= results.length)
             return
 
-        const target = results[index].targetId
-        if (target === "navigation:control-center") {
+        const entry = results[index]
+        if (entry.targetId === "navigation:control-center") {
             statusText = ""
             controlCenterRequested()
+            return
+        }
+
+        if (entry.kind === "workspace") {
+            statusText = ""
+            workspaceRequested(entry.workspaceId)
             return
         }
 
@@ -112,6 +189,11 @@ PanelWindow {
                     queryField.forceActiveFocus(Qt.ShortcutFocusReason)
             })
         }
+    }
+
+    onWorkspaceCatalogChanged: {
+        if (opened)
+            refreshResults()
     }
 
     Component.onCompleted: refreshResults()
@@ -155,7 +237,7 @@ PanelWindow {
 
                     LinuraText {
                         Layout.fillWidth: true
-                        text: qsTr("Find trusted Linura navigation targets")
+                        text: qsTr("Find Linura surfaces and Hyprland workspaces")
                         muted: true
                         elide: Text.ElideRight
                         Accessible.name: text
@@ -210,6 +292,8 @@ PanelWindow {
                 clip: true
                 spacing: theme.spacingSm
                 model: root.results
+                currentIndex: root.selectedIndex
+                highlightFollowsCurrentItem: true
 
                 delegate: LinuraActionRow {
                     required property int index
@@ -231,7 +315,7 @@ PanelWindow {
             LinuraText {
                 Layout.fillWidth: true
                 visible: root.results.length === 0
-                text: qsTr("No Linura navigation targets match this search.")
+                text: qsTr("No Linura surface or workspace matches this search.")
                 muted: true
                 wrapMode: Text.WordWrap
                 Accessible.name: text
@@ -246,7 +330,7 @@ PanelWindow {
 
             LinuraText {
                 Layout.fillWidth: true
-                text: qsTr("This slice is navigation-only. Effectful palette actions remain typed Control operations, never shell text.")
+                text: qsTr("Workspace switching is experience navigation. Effectful palette actions remain typed Control operations, never shell or compositor command strings.")
                 role: "caption"
                 muted: true
                 wrapMode: Text.WordWrap

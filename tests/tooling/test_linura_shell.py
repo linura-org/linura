@@ -581,6 +581,299 @@ class LinuraShellContractTests(unittest.TestCase):
                 )
             )
 
+    def test_workspace_navigation_requires_quickshell_031(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            profile = root / "profiles/arch-hyprland-v1.toml"
+            text = profile.read_text(encoding="utf-8")
+            marker = 'quickshell = ">=0.3.1"'
+            self.assertIn(marker, text)
+            profile.write_text(
+                text.replace(marker, 'quickshell = ">=0.3.0"', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "must require quickshell >=0.3.1" in item
+                    for item in failures
+                )
+            )
+
+    def test_workspace_controller_owns_typed_hyprland_workspace_model(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            marker = "const workspaces = Hyprland.workspaces.values"
+            self.assertEqual(text.count(marker), 2)
+            controller.write_text(
+                text.replace(marker, "const workspaces = []", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "must read the live Hyprland workspace model once for descriptors "
+                    "and once immediately before activation" in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_cannot_retain_hyprland_provider_control(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette.write_text(
+                palette.read_text(encoding="utf-8")
+                + "\nimport Quickshell.Hyprland\n",
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "presentation must not retain Hyprland provider control" in item
+                    for item in failures
+                )
+            )
+
+    def test_shell_routes_workspace_intent_through_controller(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            shell = root / "apps/linura-shell/shell.qml"
+            text = shell.read_text(encoding="utf-8")
+            marker = "workspaceNavigation.activateWorkspace(workspaceId)"
+            self.assertIn(marker, text)
+            shell.write_text(
+                text.replace(marker, "false", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura Shell root contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_workspace_target_uses_stable_numeric_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            text = palette.read_text(encoding="utf-8")
+            marker = 'targetId: "navigation:workspace:" + workspace.id'
+            self.assertIn(marker, text)
+            palette.write_text(
+                text.replace(
+                    marker,
+                    'targetId: "navigation:workspace:" + workspace.name',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Command palette shell contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_does_not_break_current_index_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            text = palette.read_text(encoding="utf-8")
+            self.assertNotIn("resultList.currentIndex =", text)
+
+    def test_workspace_controller_uses_typed_activation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            marker = "workspace.activate()"
+            self.assertIn(marker, text)
+            controller.write_text(
+                text.replace(marker, "return false", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Workspace navigation controller contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_workspace_controller_matches_exact_numeric_identity_before_activation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            marker = "if (workspace.id !== workspaceId)"
+            self.assertIn(marker, text)
+            controller.write_text(
+                text.replace(marker, "if (false)", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Workspace navigation controller contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_workspace_focus_uses_supported_workspace_property(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            marker = "focused: workspace.focused"
+            self.assertIn(marker, text)
+            controller.write_text(
+                text.replace(marker, "focused: false", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Workspace navigation controller contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_workspace_controller_rejects_raw_hyprland_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"
+            )
+            controller.write_text(
+                controller.read_text(encoding="utf-8")
+                + '\n// forbidden regression\nHyprland.dispatch("workspace 1")\n',
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "forbidden authority/process/provider surface: Hyprland.dispatch("
+                    in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_refreshes_when_workspace_descriptors_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            text = palette.read_text(encoding="utf-8")
+            marker = "onWorkspaceCatalogChanged:"
+            self.assertIn(marker, text)
+            palette.write_text(
+                text.replace(marker, "onVisibleChanged:", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Command palette shell contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_manifest_declares_workspace_navigation_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = root / "apps/linura-shell/plugins/command-palette/manifest.json"
+            text = manifest.read_text(encoding="utf-8")
+            marker = '"hyprland.workspaces"'
+            self.assertIn(marker, text)
+            manifest.write_text(
+                text.replace(marker, '"arbitrary.commands"', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Command palette manifest must remain exact" in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_keeps_keyboard_selection_visible(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            text = palette.read_text(encoding="utf-8")
+            marker = "resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)"
+            self.assertIn(marker, text)
+            palette.write_text(
+                text.replace(marker, "// selection visibility removed", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Command palette shell contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_list_current_index_tracks_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            text = palette.read_text(encoding="utf-8")
+            marker = "currentIndex: root.selectedIndex"
+            self.assertIn(marker, text)
+            palette.write_text(
+                text.replace(marker, "currentIndex: -1", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Command palette shell contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
     def test_command_palette_exposes_keyboard_selection_to_search_accessibility(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

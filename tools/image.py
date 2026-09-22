@@ -50,6 +50,8 @@ RUNTIME_ASSETS = {
         "usr/share/linura/shell/plugins/command-palette/CommandPalette.qml",
     ROOT / "apps/linura-shell/plugins/command-palette/manifest.json":
         "usr/share/linura/shell/plugins/command-palette/manifest.json",
+    ROOT / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml":
+        "usr/share/linura/shell/integrations/hyprland/WorkspaceNavigationController.qml",
     ROOT / "apps/linura-shell/org.linura.ControlCenter.desktop":
         "usr/share/applications/org.linura.ControlCenter.desktop",
     ROOT / "apps/linura-shell/org.linura.CommandPalette.desktop":
