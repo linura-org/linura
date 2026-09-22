@@ -1,27 +1,32 @@
 import QtQuick
 
 QtObject {
-    readonly property SystemPalette systemPalette: SystemPalette {
-        colorGroup: SystemPalette.Active
-    }
-
+    readonly property SystemPalette systemPalette: SystemPalette { colorGroup: SystemPalette.Active }
     readonly property int spacingXs: 4
     readonly property int spacingSm: 8
     readonly property int spacingMd: 12
     readonly property int spacingLg: 16
     readonly property int spacingXl: 24
     readonly property int spacing2xl: 32
-
     readonly property int radiusSm: 6
     readonly property int radiusMd: 10
     readonly property int radiusLg: 14
     readonly property int radiusXl: 20
-
+    readonly property int motionFast: 120
+    readonly property int motionNormal: 180
+    readonly property int motionSlow: 260
+    readonly property int controlSm: 32
+    readonly property int controlMd: 40
+    readonly property int controlLg: 48
+    readonly property int iconSm: 16
+    readonly property int iconMd: 18
+    readonly property int iconLg: 24
+    readonly property int borderWidth: 1
+    readonly property int focusBorderWidth: 2
     readonly property int typeCaption: 12
     readonly property int typeBody: 14
     readonly property int typeTitle: 20
     readonly property int typeDisplay: 32
-
     readonly property color background: systemPalette.window
     readonly property color surface: systemPalette.base
     readonly property color surfaceElevated: systemPalette.button

@@ -18,18 +18,18 @@ Themes provide tokens, not arbitrary code. Security, failure, verification and a
 
 The v0.10 shell now contains the initial **Linura QML UI Component SDK** under `apps/linura-shell/ui`. Qt Quick Controls are implementation infrastructure; first-party product surfaces should consume Linura-owned components instead of independently styling raw Qt controls.
 
-The initial integrated primitives are:
+The v0.10 first-party component layer is compiled as the internal `org.linura.UI 1.0` QML module rather than copied as per-surface source. Its integrated primitives now include:
 
-- `LinuraSurface` for semantic background, elevation and outline treatment;
-- `LinuraText` for token-bound typography and muted/emphasis roles;
-- `LinuraButton` for consistent action geometry, focus treatment and highlighted state;
-- `LinuraSlider` for consistent range geometry, focus treatment and enabled/disabled state.
+- `LinuraTheme`, `LinuraSurface`, `LinuraText`, `LinuraCard`, `LinuraDivider` and `LinuraStatus` for shared semantic visual language;
+- `LinuraButton`, `LinuraIconButton`, `LinuraSlider`, `LinuraSwitch` and `LinuraTextField` for shared accessible controls;
+- `LinuraActionRow` for keyboard-first palette/list actions;
+- `LinuraPopover` and `LinuraDialog` for shared transient/modal composition without raw Qt standard-button styling.
 
-The Control Center slice consumes these primitives directly. Raw Qt Quick Controls remain permitted *inside* the SDK implementation because Qt is the rendering/input foundation; they are not the preferred visual API for first-party product surfaces.
+The Control Center slice imports the same module used by upcoming shell surfaces and standalone QML applications. Raw Qt Quick Controls remain permitted *inside* the SDK implementation because Qt is the rendering/input foundation; they are not the preferred visual API for first-party product surfaces.
 
 The component layer is presentation-only. It does not receive D-Bus handles, provider APIs, executor permits, policy authority, approval material or operation-class selection. Those remain in typed client/controller boundaries and Linura Control.
 
-The current component set is an integrated v0.10 foundation, **not yet a stable third-party API**. Compatibility/versioning for external consumers requires a separate public SDK contract. Future first-party primitives may include navigation, text fields, switches, menus, popovers, dialogs, sheets, notifications, command-palette rows and other shared workstation patterns, but their names do not constitute support claims until implemented and qualified.
+The current component set is an integrated v0.10 foundation, **not yet a stable third-party API**. Compatibility/versioning for external consumers requires a separate public SDK contract. Product composites such as command palette, quick settings, notification/OSD stacks, Settings navigation and future Agent/Inspector surfaces are built on these primitives; implementing a primitive does not by itself activate or qualify the composite product surface.
 
 ## Current maturity and v0.10 scope
 

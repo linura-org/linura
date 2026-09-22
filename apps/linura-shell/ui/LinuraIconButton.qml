@@ -3,32 +3,38 @@ import QtQuick.Controls
 
 Button {
     id: control
+    property string glyph: ""
+    required property string accessibleName
+    property string toolTip: ""
     LinuraTheme { id: theme }
+
     activeFocusOnTab: true
-    font.pixelSize: theme.typeBody
+    hoverEnabled: true
+    implicitWidth: theme.controlMd
     implicitHeight: theme.controlMd
-    implicitWidth: Math.max(96, contentItem.implicitWidth + theme.spacingXl * 2)
-    leftPadding: theme.spacingLg
-    rightPadding: theme.spacingLg
-    topPadding: theme.spacingSm
-    bottomPadding: theme.spacingSm
+    padding: 0
+    font.pixelSize: theme.iconMd
 
     contentItem: Text {
-        text: control.text
+        text: control.glyph
         font: control.font
         color: !control.enabled ? theme.muted
             : control.highlighted ? theme.highlightedText : theme.foreground
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
-        elide: Text.ElideRight
     }
 
     background: Rectangle {
         radius: theme.radiusMd
         color: control.highlighted ? theme.accent
-            : control.down ? theme.surfaceElevated : theme.surface
+            : control.down || control.hovered ? theme.surfaceElevated : theme.surface
         border.width: control.activeFocus ? theme.focusBorderWidth : theme.borderWidth
         border.color: control.activeFocus ? theme.focus : theme.surfaceElevated
         opacity: control.enabled ? 1.0 : 0.55
     }
+
+    Accessible.name: accessibleName
+    Accessible.role: Accessible.Button
+    ToolTip.visible: control.hovered && toolTip.length > 0
+    ToolTip.text: toolTip
 }

@@ -1,17 +1,12 @@
 import QtQuick
 import QtQuick.Controls
-import "../theme"
 
 Slider {
     id: control
-
-    LinuraTheme {
-        id: theme
-    }
-
+    LinuraTheme { id: theme }
     activeFocusOnTab: true
     implicitWidth: 220
-    implicitHeight: 32
+    implicitHeight: theme.controlSm
     leftPadding: 9
     rightPadding: 9
     topPadding: 7
@@ -24,7 +19,6 @@ Slider {
         height: 4
         radius: 2
         color: theme.surfaceElevated
-
         Rectangle {
             width: control.visualPosition * parent.width
             height: parent.height
@@ -36,11 +30,11 @@ Slider {
     handle: Rectangle {
         x: control.leftPadding + control.visualPosition * (control.availableWidth - width)
         y: control.topPadding + (control.availableHeight - height) / 2
-        width: 18
-        height: 18
-        radius: 9
+        width: theme.iconMd
+        height: theme.iconMd
+        radius: width / 2
         color: control.enabled ? theme.accent : theme.muted
-        border.width: control.activeFocus ? 2 : 1
+        border.width: control.activeFocus ? theme.focusBorderWidth : theme.borderWidth
         border.color: control.activeFocus ? theme.focus : theme.background
     }
 }

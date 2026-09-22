@@ -256,29 +256,37 @@ class LinuraShellContractTests(unittest.TestCase):
             self._copy_fixture(root)
             button = root / "apps/linura-shell/ui/LinuraButton.qml"
             text = button.read_text(encoding="utf-8")
-            marker = "control.activeFocus ? 2 : 1"
+            marker = "theme.focusBorderWidth"
             self.assertIn(marker, text)
-            button.write_text(text.replace(marker, "1", 1), encoding="utf-8")
+            button.write_text(
+                text.replace(marker, "theme.borderWidth", 1),
+                encoding="utf-8",
+            )
             failures = check_linura_shell.validate(root)
             self.assertTrue(any("Linura UI SDK component" in item for item in failures))
 
-    def test_ui_sdk_runtime_assets_are_staged(self) -> None:
+    def test_ui_sdk_runtime_module_is_staged(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
             image = root / "tools/image.py"
             text = image.read_text(encoding="utf-8")
-            marker = 'ROOT / "apps/linura-shell/ui/LinuraSlider.qml"'
+            marker = "build_ui_sdk(STAGED)"
             self.assertIn(marker, text)
-            image.write_text(text.replace(marker, 'ROOT / "missing/LinuraSlider.qml"', 1), encoding="utf-8")
+            image.write_text(
+                text.replace(marker, "missing_ui_sdk(STAGED)", 1),
+                encoding="utf-8",
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("Arch image shell integration missing" in item for item in failures))
+            self.assertTrue(
+                any("Arch image shell integration missing" in item for item in failures)
+            )
 
     def test_shared_theme_token_drift_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            theme = root / "apps/linura-shell/theme/LinuraTheme.qml"
+            theme = root / "apps/linura-shell/ui/LinuraTheme.qml"
             text = theme.read_text(encoding="utf-8")
             theme.write_text(
                 text.replace(
@@ -316,6 +324,24 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertTrue(any("canonical CI must build/install" in item for item in failures))
 
 
+    def test_canonical_ci_must_compile_and_install_ui_sdk(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/ci.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "cmake -S apps/linura-shell/ui"
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, "cmake -S unrelated-ui", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("canonical CI must build/install" in item for item in failures)
+            )
+
+
     def test_shell_service_is_bound_to_graphical_session_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -346,6 +372,175 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertTrue(
                 any("v0.10 workstation session qualification missing" in item and marker in item for item in failures)
             )
+
+
+    def test_ui_sdk_module_is_required_for_product_imports(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
+            text = panel.read_text(encoding="utf-8")
+            marker = "import org.linura.UI 1.0"
+            self.assertIn(marker, text)
+            panel.write_text(
+                text.replace(marker, 'import "../../ui"', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Control Center shell panel contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_ui_sdk_rejects_authority_surface_in_new_component(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            component = root / "apps/linura-shell/ui/LinuraActionRow.qml"
+            component.write_text(
+                component.read_text(encoding="utf-8") + "\nProcess { }\n",
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "forbidden authority/process/provider surface" in item
+                    for item in failures
+                )
+            )
+
+    def test_ui_sdk_cmake_module_contract_is_enforced(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            cmake = root / "apps/linura-shell/ui/CMakeLists.txt"
+            text = cmake.read_text(encoding="utf-8")
+            marker = "URI org.linura.UI"
+            self.assertIn(marker, text)
+            cmake.write_text(
+                text.replace(marker, "URI org.linura.Broken", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura UI SDK CMake contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_icon_button_requires_explicit_accessible_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            component = root / "apps/linura-shell/ui/LinuraIconButton.qml"
+            text = component.read_text(encoding="utf-8")
+            marker = "required property string accessibleName"
+            self.assertIn(marker, text)
+            component.write_text(
+                text.replace(marker, 'property string accessibleName: ""', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura UI SDK component" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_dialog_reopen_resets_decision_before_enter_transition(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            component = root / "apps/linura-shell/ui/LinuraDialog.qml"
+            text = component.read_text(encoding="utf-8")
+            marker = "onAboutToShow: decisionEmitted = false"
+            self.assertIn(marker, text)
+            component.write_text(
+                text.replace(marker, "onOpened: decisionEmitted = false", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura UI SDK component" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_dialog_nonaccepted_close_must_emit_rejection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            component = root / "apps/linura-shell/ui/LinuraDialog.qml"
+            text = component.read_text(encoding="utf-8")
+            marker = "onClosed:"
+            self.assertIn(marker, text)
+            component.write_text(
+                text.replace(marker, "onVisibleChanged:", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura UI SDK component" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_image_doctor_qt_probe_covers_ui_sdk_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            image = root / "tools/image.py"
+            text = image.read_text(encoding="utf-8")
+            marker = (
+                'UI_SDK_QT_MODULES = ("Qt6Core", "Qt6Qml", '
+                '"Qt6Quick", "Qt6QuickControls2")'
+            )
+            self.assertIn(marker, text)
+            image.write_text(
+                text.replace(
+                    marker,
+                    'UI_SDK_QT_MODULES = ("Qt6Core", "Qt6Qml")',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Arch image shell integration missing" in item
+                    and "Qt6QuickControls2" in item
+                    for item in failures
+                )
+            )
+
+    def test_ui_sdk_control_size_token_drift_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            theme = root / "apps/linura-shell/ui/LinuraTheme.qml"
+            text = theme.read_text(encoding="utf-8")
+            marker = "readonly property int controlMd: 40"
+            self.assertIn(marker, text)
+            theme.write_text(
+                text.replace(marker, "readonly property int controlMd: 41", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("design token control_size.md" in item for item in failures)
+            )
+
 
 
 if __name__ == "__main__":
