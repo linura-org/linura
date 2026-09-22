@@ -1,18 +1,36 @@
 # Linura QML UI SDK
 
-This directory is the first-party visual component layer for Linura workstation surfaces.
+This directory is Linura's first-party visual component layer for workstation surfaces and future standalone QML applications.
 
-Qt Quick and Qt Quick Controls are rendering/input infrastructure. Product surfaces should consume Linura components from this directory instead of independently styling raw Qt controls. The goal is one visual and interaction language shared by shell surfaces and future standalone QML applications such as Settings, Agent Manager and Machine Inspector.
+The source is compiled and installed as the versioned internal QML module `org.linura.UI 1.0`. Qt Quick and Qt Quick Controls remain rendering/input infrastructure; first-party product surfaces import the Linura module instead of independently styling raw Qt controls or copying source-relative component directories.
 
-The v0.10 foundation contains:
+## v0.10 component foundation
 
+Foundation and semantic primitives:
+
+- `LinuraTheme` — token-bound system palette, geometry, typography, motion-duration and focus metrics;
 - `LinuraSurface` — semantic background/elevation/outline treatment;
 - `LinuraText` — token-bound typography and muted/emphasis roles;
+- `LinuraCard` — semantic card/status outline composition;
+- `LinuraDivider` — token-bound structural separator;
+- `LinuraStatus` — shared success/warning/danger/accent/neutral status language.
+
+Interactive controls:
+
 - `LinuraButton` — keyboard-focusable Linura action control;
-- `LinuraSlider` — token-bound range control with consistent focus and handle geometry.
+- `LinuraIconButton` — compact accessible icon/glyph action control with tooltip support;
+- `LinuraSlider` — token-bound range control with consistent focus and handle geometry;
+- `LinuraSwitch` — keyboard/pointer toggle with RTL-aware visual position;
+- `LinuraTextField` — shared input, selection, validation and focus treatment;
+- `LinuraActionRow` — palette/list action row with title, description and shortcut affordance.
 
-These components own presentation only. They do not receive D-Bus handles, provider APIs, policy state, executor authority or operation-class selection. Effectful behavior remains in typed client/controller boundaries.
+Composition primitives:
 
-Raw Qt Quick Controls are allowed inside this SDK implementation. First-party product surfaces should prefer the Linura components so visual, accessibility and focus behavior remain centrally reviewable and qualifiable.
+- `LinuraPopover` — non-modal first-party transient surface;
+- `LinuraDialog` — modal first-party composition surface with explicit accept/reject helpers and no raw Qt standard-button styling.
 
-This is an initial v0.10 SDK foundation, not yet a stable third-party API. Public compatibility/versioning is activated only when a separate SDK contract and qualification boundary say so.
+These components own presentation only. They do not receive D-Bus handles, provider APIs, policy state, approval material, executor authority or operation-class selection. Effectful behavior remains in typed client/controller boundaries.
+
+Raw Qt Quick Controls are allowed inside this SDK implementation. First-party product surfaces should import `org.linura.UI 1.0` so visual, accessibility and focus behavior remain centrally reviewable, build-validated and qualifiable.
+
+This is an internal v0.10 first-party SDK, not yet a stable third-party API. Public compatibility/versioning is activated only when a separate SDK contract and qualification boundary say so.

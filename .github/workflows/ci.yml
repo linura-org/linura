@@ -106,7 +106,7 @@ jobs:
             pkg-config \
             qt6-base-dev \
             qt6-declarative-dev
-      - name: Build and install Linura Shell bridge
+      - name: Build and install Linura Shell QML modules
         run: |
           set -euo pipefail
           build_dir="$RUNNER_TEMP/linura-shell-bridge-build"
@@ -120,6 +120,17 @@ jobs:
           test -f "$module_dir/qmldir"
           find "$module_dir" -maxdepth 1 -type f -name '*.qmltypes' -print -quit | grep -q .
           find "$module_dir" -maxdepth 1 -type f -name '*.so*' -print -quit | grep -q .
+
+          ui_build_dir="$RUNNER_TEMP/linura-ui-build"
+          cmake -S apps/linura-shell/ui -B "$ui_build_dir" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$ui_build_dir" --parallel 2
+          cmake --install "$ui_build_dir" --prefix "$install_dir"
+
+          ui_module_dir="$install_dir/lib/qt6/qml/org/linura/UI"
+          test -f "$ui_module_dir/qmldir"
+          find "$ui_module_dir" -maxdepth 1 -type f -name '*.qmltypes' -print -quit | grep -q .
+          find "$ui_module_dir" -maxdepth 1 -type f -name '*.so*' -print -quit | grep -q .
       - name: Run canonical Linura checks
         run: cargo xtask check
       - name: Verify canonical checks are non-mutating

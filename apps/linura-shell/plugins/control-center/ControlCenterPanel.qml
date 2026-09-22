@@ -3,8 +3,7 @@ import QtQuick.Layouts
 import Quickshell
 import Quickshell.Wayland
 import org.linura.ShellBridge 1.0
-import "../../theme"
-import "../../ui"
+import org.linura.UI 1.0
 
 PanelWindow {
     id: root

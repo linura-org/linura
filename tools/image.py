@@ -17,6 +17,12 @@ STAGED = ROOT / ".artifacts/archiso-profile"
 DEFAULT_BINARIES = ROOT / "target/release"
 SHELL_BRIDGE_SOURCE = ROOT / "apps/linura-shell/bridge"
 SHELL_BRIDGE_BUILD = ROOT / ".artifacts/linura-shell-bridge-build"
+UI_SDK_SOURCE = ROOT / "apps/linura-shell/ui"
+UI_SDK_BUILD = ROOT / ".artifacts/linura-ui-build"
+
+SHELL_BRIDGE_QT_MODULES = ("Qt6Core", "Qt6DBus", "Qt6Qml")
+UI_SDK_QT_MODULES = ("Qt6Core", "Qt6Qml", "Qt6Quick", "Qt6QuickControls2")
+DOCTOR_QT_MODULES = tuple(dict.fromkeys(SHELL_BRIDGE_QT_MODULES + UI_SDK_QT_MODULES))
 
 BINARIES = {
     "linurad": "usr/bin/linurad",
@@ -36,16 +42,6 @@ RUNTIME_ASSETS = {
         "usr/lib/systemd/user/linura-shell.service",
     ROOT / "apps/linura-shell/shell.qml":
         "usr/share/linura/shell/shell.qml",
-    ROOT / "apps/linura-shell/theme/LinuraTheme.qml":
-        "usr/share/linura/shell/theme/LinuraTheme.qml",
-    ROOT / "apps/linura-shell/ui/LinuraSurface.qml":
-        "usr/share/linura/shell/ui/LinuraSurface.qml",
-    ROOT / "apps/linura-shell/ui/LinuraText.qml":
-        "usr/share/linura/shell/ui/LinuraText.qml",
-    ROOT / "apps/linura-shell/ui/LinuraButton.qml":
-        "usr/share/linura/shell/ui/LinuraButton.qml",
-    ROOT / "apps/linura-shell/ui/LinuraSlider.qml":
-        "usr/share/linura/shell/ui/LinuraSlider.qml",
     ROOT / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml":
         "usr/share/linura/shell/plugins/control-center/ControlCenterPanel.qml",
     ROOT / "apps/linura-shell/plugins/control-center/manifest.json":
@@ -59,6 +55,13 @@ def mkarchiso_command(profile: Path = STAGED) -> list[str]:
     return ["mkarchiso", "-v", "-w", str(WORK), "-o", str(OUT), str(profile)]
 
 
+def have_qt_modules(modules: tuple[str, ...]) -> bool:
+    return subprocess.run(
+        ["pkg-config", "--exists", *modules],
+        check=False,
+    ).returncode == 0
+
+
 def build_shell_bridge(profile: Path) -> None:
     required_tools = ("cmake", "ninja", "pkg-config")
     missing_tools = [name for name in required_tools if shutil.which(name) is None]
@@ -67,11 +70,7 @@ def build_shell_bridge(profile: Path) -> None:
             "missing shell-bridge build tools: " + ", ".join(missing_tools)
         )
 
-    qt_probe = subprocess.run(
-        ["pkg-config", "--exists", "Qt6Core", "Qt6DBus", "Qt6Qml"],
-        check=False,
-    )
-    if qt_probe.returncode != 0:
+    if not have_qt_modules(SHELL_BRIDGE_QT_MODULES):
         raise RuntimeError(
             "Qt6Core/Qt6DBus/Qt6Qml development metadata is required to build Linura Shell bridge"
         )
@@ -101,6 +100,52 @@ def build_shell_bridge(profile: Path) -> None:
             "cmake",
             "--install",
             str(SHELL_BRIDGE_BUILD),
+            "--prefix",
+            str(profile / "airootfs/usr"),
+        ],
+        check=True,
+    )
+
+
+def build_ui_sdk(profile: Path) -> None:
+    required_tools = ("cmake", "ninja", "pkg-config")
+    missing_tools = [name for name in required_tools if shutil.which(name) is None]
+    if missing_tools:
+        raise RuntimeError(
+            "missing Linura UI SDK build tools: " + ", ".join(missing_tools)
+        )
+
+    if not have_qt_modules(UI_SDK_QT_MODULES):
+        raise RuntimeError(
+            "Qt6Core/Qt6Qml/Qt6Quick/Qt6QuickControls2 development metadata "
+            "is required to build the Linura UI SDK"
+        )
+
+    if UI_SDK_BUILD.exists():
+        shutil.rmtree(UI_SDK_BUILD)
+
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(UI_SDK_SOURCE),
+            "-B",
+            str(UI_SDK_BUILD),
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["cmake", "--build", str(UI_SDK_BUILD), "--parallel", "2"],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "cmake",
+            "--install",
+            str(UI_SDK_BUILD),
             "--prefix",
             str(profile / "airootfs/usr"),
         ],
@@ -160,6 +205,7 @@ def stage_profile(binaries_dir: Path) -> None:
     package_file.write_text("\n".join(merged).rstrip() + "\n", encoding="utf-8")
     install_binaries(STAGED, binaries_dir)
     build_shell_bridge(STAGED)
+    build_ui_sdk(STAGED)
 
 
 def main() -> int:
@@ -178,13 +224,8 @@ def main() -> int:
             "shell bridge tools: "
             + ", ".join(f"{name}={value or 'missing'}" for name, value in shell_tools.items())
         )
-        qt_ready = False
-        if all(shell_tools.values()):
-            qt_ready = subprocess.run(
-                ["pkg-config", "--exists", "Qt6Core", "Qt6DBus", "Qt6Qml"],
-                check=False,
-            ).returncode == 0
-        print(f"shell bridge Qt6 dev metadata: {'present' if qt_ready else 'missing'}")
+        qt_ready = all(shell_tools.values()) and have_qt_modules(DOCTOR_QT_MODULES)
+        print(f"shell/UI Qt6 dev metadata: {'present' if qt_ready else 'missing'}")
         return 0 if path and RELENG.is_dir() and not missing and all(shell_tools.values()) and qt_ready else 1
     if args.command == "plan":
         print(f"1. cargo build --workspace --release --locked")
@@ -193,7 +234,8 @@ def main() -> int:
         print("4. merge packages.linura into releng packages.x86_64")
         print(f"5. stage Linura binaries from {args.binaries_dir}, trusted runtime assets, and the update guard hook")
         print("6. build and install the Linura Shell Qt/D-Bus QML bridge into the staged image")
-        print(f"7. {shlex.join(mkarchiso_command())}")
+        print("7. build and install the first-party org.linura.UI QML module into the staged image")
+        print(f"8. {shlex.join(mkarchiso_command())}")
         return 0
     if shutil.which("mkarchiso") is None:
         print("mkarchiso is required to stage/build the Arch development image", file=sys.stderr)

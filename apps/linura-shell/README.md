@@ -29,7 +29,7 @@ The narrow compiled `org.linura.ShellBridge` QML module is the only first-party 
 
 ## Linura QML UI SDK
 
-The shell now carries the initial first-party **Linura QML UI SDK** in `ui/`. Product surfaces consume `LinuraSurface`, `LinuraText`, `LinuraButton` and `LinuraSlider` instead of independently styling raw Qt visual controls. Qt Quick remains the rendering/input engine; the Linura component layer owns product-facing geometry, typography, focus treatment and semantic visual roles.
+The shell carries the first-party **Linura QML UI SDK** as the compiled internal module `org.linura.UI 1.0`. Product surfaces import that module rather than copying source-relative component directories or independently styling raw Qt visual controls. The v0.10 foundation covers surfaces/text, buttons/icon buttons, slider/switch/text input, action rows, cards/status/dividers and popover/dialog composition. Qt Quick remains the rendering/input engine; the Linura component layer owns product-facing geometry, typography, focus treatment and semantic visual roles.
 
 The UI SDK is presentation-only. It receives no provider handles, D-Bus authority, executor permits, policy decisions or operation-class selection. Its current v0.10 form is an internal first-party foundation, not a stable public/third-party API.
 

@@ -13,8 +13,18 @@ REQUIRED = (
     ".github/workflows/ci.yml",
     "apps/linura-shell/README.md",
     "apps/linura-shell/shell.qml",
-    "apps/linura-shell/theme/LinuraTheme.qml",
     "apps/linura-shell/ui/README.md",
+    "apps/linura-shell/ui/CMakeLists.txt",
+    "apps/linura-shell/ui/LinuraTheme.qml",
+    "apps/linura-shell/ui/LinuraIconButton.qml",
+    "apps/linura-shell/ui/LinuraSwitch.qml",
+    "apps/linura-shell/ui/LinuraTextField.qml",
+    "apps/linura-shell/ui/LinuraActionRow.qml",
+    "apps/linura-shell/ui/LinuraCard.qml",
+    "apps/linura-shell/ui/LinuraStatus.qml",
+    "apps/linura-shell/ui/LinuraDivider.qml",
+    "apps/linura-shell/ui/LinuraPopover.qml",
+    "apps/linura-shell/ui/LinuraDialog.qml",
     "apps/linura-shell/ui/LinuraSurface.qml",
     "apps/linura-shell/ui/LinuraText.qml",
     "apps/linura-shell/ui/LinuraButton.qml",
@@ -118,22 +128,28 @@ REQUIRED_CI = (
     "cmake -S apps/linura-shell/bridge",
     "cmake --build",
     "cmake --install",
+    "cmake -S apps/linura-shell/ui",
     'module_dir="$install_dir/lib/qt6/qml/org/linura/ShellBridge"',
     'test -f "$module_dir/qmldir"',
+    'ui_module_dir="$install_dir/lib/qt6/qml/org/linura/UI"',
+    'test -f "$ui_module_dir/qmldir"',
 )
 
 REQUIRED_IMAGE = (
     'ROOT / "apps/linura-shell/shell.qml"',
     'ROOT / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"',
-    'ROOT / "apps/linura-shell/ui/LinuraSurface.qml"',
-    'ROOT / "apps/linura-shell/ui/LinuraText.qml"',
-    'ROOT / "apps/linura-shell/ui/LinuraButton.qml"',
-    'ROOT / "apps/linura-shell/ui/LinuraSlider.qml"',
     'ROOT / "apps/linura-shell/plugins/control-center/manifest.json"',
     'ROOT / "apps/linura-shell/org.linura.ControlCenter.desktop"',
     '"usr/share/applications/org.linura.ControlCenter.desktop"',
     'ROOT / "packaging/systemd/user/linura-shell.service"',
     "build_shell_bridge(STAGED)",
+    'UI_SDK_SOURCE = ROOT / "apps/linura-shell/ui"',
+    'UI_SDK_BUILD = ROOT / ".artifacts/linura-ui-build"',
+    "build_ui_sdk(STAGED)",
+    'SHELL_BRIDGE_QT_MODULES = ("Qt6Core", "Qt6DBus", "Qt6Qml")',
+    'UI_SDK_QT_MODULES = ("Qt6Core", "Qt6Qml", "Qt6Quick", "Qt6QuickControls2")',
+    "DOCTOR_QT_MODULES = tuple(dict.fromkeys(SHELL_BRIDGE_QT_MODULES + UI_SDK_QT_MODULES))",
+    "have_qt_modules(DOCTOR_QT_MODULES)",
     "graphical-session.target.wants/linura-shell.service",
     "default.target.wants/linurad.service",
 )
@@ -199,10 +215,20 @@ def validate(root: Path) -> list[str]:
     ui_qml = "\n".join(
         (root / relative).read_text(encoding="utf-8")
         for relative in (
+            "apps/linura-shell/ui/LinuraTheme.qml",
             "apps/linura-shell/ui/LinuraSurface.qml",
             "apps/linura-shell/ui/LinuraText.qml",
             "apps/linura-shell/ui/LinuraButton.qml",
             "apps/linura-shell/ui/LinuraSlider.qml",
+            "apps/linura-shell/ui/LinuraIconButton.qml",
+            "apps/linura-shell/ui/LinuraSwitch.qml",
+            "apps/linura-shell/ui/LinuraTextField.qml",
+            "apps/linura-shell/ui/LinuraActionRow.qml",
+            "apps/linura-shell/ui/LinuraCard.qml",
+            "apps/linura-shell/ui/LinuraStatus.qml",
+            "apps/linura-shell/ui/LinuraDivider.qml",
+            "apps/linura-shell/ui/LinuraPopover.qml",
+            "apps/linura-shell/ui/LinuraDialog.qml",
         )
     )
     combined_qml = shell_qml + "\n" + panel_qml + "\n" + ui_qml
@@ -226,7 +252,7 @@ def validate(root: Path) -> list[str]:
         "controller.setActive(opened)",
         "closeButton.forceActiveFocus(Qt.TabFocusReason)",
         "controller.setVolume(root.draftVolume)",
-        'import "../../ui"',
+        "import org.linura.UI 1.0",
         "LinuraSurface {",
         "LinuraText {",
         "LinuraButton {",
@@ -249,7 +275,7 @@ def validate(root: Path) -> list[str]:
     if "volumeSlider.value =" in panel_qml:
         failures.append("Control Center keyboard handling must preserve the slider value binding")
     raw_visual_control = re.search(
-        r"(?m)^\s*(?:Rectangle|Label|Button|Slider)\s*\{",
+        r"(?m)^\s*(?:Rectangle|Label|Button|Slider|Switch|TextField|AbstractButton|Popup|Dialog)\s*\{",
         panel_qml,
     )
     if raw_visual_control is not None:
@@ -271,13 +297,62 @@ def validate(root: Path) -> list[str]:
         "apps/linura-shell/ui/LinuraButton.qml": (
             "activeFocusOnTab: true",
             "font.pixelSize: theme.typeBody",
-            "control.activeFocus ? 2 : 1",
+            "theme.focusBorderWidth",
             "theme.highlightedText",
         ),
         "apps/linura-shell/ui/LinuraSlider.qml": (
             "activeFocusOnTab: true",
             "control.visualPosition",
-            "control.activeFocus ? 2 : 1",
+            "theme.focusBorderWidth",
+        ),
+        "apps/linura-shell/ui/LinuraIconButton.qml": (
+            "required property string accessibleName",
+            "activeFocusOnTab: true",
+            "Accessible.name: accessibleName",
+            "Accessible.role: Accessible.Button",
+            "ToolTip.visible:",
+        ),
+        "apps/linura-shell/ui/LinuraSwitch.qml": (
+            "activeFocusOnTab: true",
+            "control.visualPosition",
+            "Accessible.role: Accessible.CheckBox",
+        ),
+        "apps/linura-shell/ui/LinuraTextField.qml": (
+            "selectByMouse: true",
+            "selectionColor: theme.accent",
+            "Accessible.role: Accessible.EditableText",
+        ),
+        "apps/linura-shell/ui/LinuraActionRow.qml": (
+            "AbstractButton {",
+            "LinuraText {",
+            "Accessible.role: Accessible.Button",
+        ),
+        "apps/linura-shell/ui/LinuraCard.qml": (
+            'property string tone: "neutral"',
+            "outlineColor:",
+        ),
+        "apps/linura-shell/ui/LinuraStatus.qml": (
+            'property string tone: "neutral"',
+            "Accessible.role: Accessible.StaticText",
+        ),
+        "apps/linura-shell/ui/LinuraDivider.qml": (
+            "property bool vertical: false",
+            "theme.borderWidth",
+        ),
+        "apps/linura-shell/ui/LinuraPopover.qml": (
+            "Popup {",
+            "Popup.CloseOnEscape | Popup.CloseOnPressOutside",
+            'level: "elevated"',
+        ),
+        "apps/linura-shell/ui/LinuraDialog.qml": (
+            "signal accepted()",
+            "signal rejected()",
+            "property bool decisionEmitted: false",
+            "onAboutToShow: decisionEmitted = false",
+            "onClosed:",
+            "if (!decisionEmitted)",
+            "modal: true",
+            "Popup.CloseOnEscape",
         ),
     }
     for relative, fragments in ui_requirements.items():
@@ -364,6 +439,21 @@ def validate(root: Path) -> list[str]:
     cmake = (root / "apps/linura-shell/bridge/CMakeLists.txt").read_text(
         encoding="utf-8"
     )
+    ui_cmake = (root / "apps/linura-shell/ui/CMakeLists.txt").read_text(
+        encoding="utf-8"
+    )
+    for fragment in (
+        "find_package(Qt6 6.4 REQUIRED COMPONENTS Core Qml Quick QuickControls2)",
+        "qt_add_library(linura-ui SHARED)",
+        "qt_add_qml_module(linura-ui",
+        "URI org.linura.UI",
+        "VERSION 1.0",
+        "Qt6::QuickControls2",
+        "lib/qt6/qml/org/linura/UI",
+    ):
+        if fragment not in ui_cmake:
+            failures.append(f"Linura UI SDK CMake contract missing: {fragment}")
+
     for fragment in (
         "find_package(Qt6 6.4 REQUIRED COMPONENTS Core DBus Qml)",
         "qt_add_library(linura-shell-bridge SHARED)",
@@ -376,7 +466,7 @@ def validate(root: Path) -> list[str]:
             failures.append(f"Linura Shell bridge CMake contract missing: {fragment}")
 
     tokens = json.loads((root / "design/tokens.json").read_text(encoding="utf-8"))
-    theme = (root / "apps/linura-shell/theme/LinuraTheme.qml").read_text(
+    theme = (root / "apps/linura-shell/ui/LinuraTheme.qml").read_text(
         encoding="utf-8"
     )
     token_bindings = {
@@ -399,6 +489,25 @@ def validate(root: Path) -> list[str]:
             "body": "typeBody",
             "title": "typeTitle",
             "display": "typeDisplay",
+        },
+        "motion_ms": {
+            "fast": "motionFast",
+            "normal": "motionNormal",
+            "slow": "motionSlow",
+        },
+        "control_size": {
+            "sm": "controlSm",
+            "md": "controlMd",
+            "lg": "controlLg",
+        },
+        "icon_size": {
+            "sm": "iconSm",
+            "md": "iconMd",
+            "lg": "iconLg",
+        },
+        "border_width": {
+            "default": "borderWidth",
+            "focus": "focusBorderWidth",
         },
     }
     for group, names in token_bindings.items():
@@ -482,6 +591,7 @@ def validate(root: Path) -> list[str]:
         "qs -p /usr/share/linura/shell ipc call -- linura.shell toggleControlCenter",
         "does not poll PipeWire while the panel is closed",
         "Linura QML UI SDK",
+        "org.linura.UI 1.0",
         "HYPRLAND_NO_SD_TARGET",
         "does **not** promote",
     ):
@@ -491,6 +601,7 @@ def validate(root: Path) -> list[str]:
     ui_readme = (root / "apps/linura-shell/ui/README.md").read_text(encoding="utf-8")
     for fragment in (
         "first-party visual component layer",
+        "org.linura.UI 1.0",
         "presentation only",
         "not yet a stable third-party API",
     ):
