@@ -31,10 +31,13 @@ REQUIRED = (
     "apps/linura-shell/ui/LinuraSlider.qml",
     "apps/linura-shell/plugins/control-center/manifest.json",
     "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml",
+    "apps/linura-shell/plugins/command-palette/manifest.json",
+    "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
     "apps/linura-shell/bridge/CMakeLists.txt",
     "apps/linura-shell/bridge/audio_session_controller.h",
     "apps/linura-shell/bridge/audio_session_controller.cpp",
     "apps/linura-shell/org.linura.ControlCenter.desktop",
+    "apps/linura-shell/org.linura.CommandPalette.desktop",
     "apps/linura-control-center/README.md",
     "contracts/components.toml",
     "design/tokens.json",
@@ -139,8 +142,12 @@ REQUIRED_IMAGE = (
     'ROOT / "apps/linura-shell/shell.qml"',
     'ROOT / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"',
     'ROOT / "apps/linura-shell/plugins/control-center/manifest.json"',
+    'ROOT / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"',
+    'ROOT / "apps/linura-shell/plugins/command-palette/manifest.json"',
     'ROOT / "apps/linura-shell/org.linura.ControlCenter.desktop"',
     '"usr/share/applications/org.linura.ControlCenter.desktop"',
+    'ROOT / "apps/linura-shell/org.linura.CommandPalette.desktop"',
+    '"usr/share/applications/org.linura.CommandPalette.desktop"',
     'ROOT / "packaging/systemd/user/linura-shell.service"',
     "build_shell_bridge(STAGED)",
     'UI_SDK_SOURCE = ROOT / "apps/linura-shell/ui"',
@@ -212,6 +219,9 @@ def validate(root: Path) -> list[str]:
     panel_qml = (
         root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
     ).read_text(encoding="utf-8")
+    palette_qml = (
+        root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+    ).read_text(encoding="utf-8")
     ui_qml = "\n".join(
         (root / relative).read_text(encoding="utf-8")
         for relative in (
@@ -231,18 +241,48 @@ def validate(root: Path) -> list[str]:
             "apps/linura-shell/ui/LinuraDialog.qml",
         )
     )
-    combined_qml = shell_qml + "\n" + panel_qml + "\n" + ui_qml
+    combined_qml = shell_qml + "\n" + panel_qml + "\n" + palette_qml + "\n" + ui_qml
 
     for fragment in (
         "import Quickshell",
+        "import Quickshell.Hyprland",
         "import org.linura.ShellBridge 1.0",
+        'import "plugins/command-palette"',
         "ShellRoot {",
         "IpcHandler {",
         'target: "linura.shell"',
+        "function toggleCommandPalette()",
+        "GlobalShortcut {",
+        'appid: "linura"',
+        'name: "commandPalette"',
         "ControlCenterPanel {",
+        "CommandPalette {",
     ):
         if fragment not in shell_qml:
             failures.append(f"Linura Shell root contract missing: {fragment}")
+
+    ipc_index = shell_qml.find("IpcHandler {")
+    if ipc_index < 0:
+        failures.append("Linura Shell root contract missing: IpcHandler {")
+    else:
+        for method in (
+            "showControlCenter",
+            "hideControlCenter",
+            "toggleControlCenter",
+            "showCommandPalette",
+            "hideCommandPalette",
+            "toggleCommandPalette",
+        ):
+            declaration = f"function {method}()"
+            if shell_qml.find(declaration, 0, ipc_index) < 0:
+                failures.append(
+                    f"Linura Shell root must own navigation method before IPC delegation: {declaration}"
+                )
+            delegation = f"shell.{method}()"
+            if shell_qml.find(delegation, ipc_index) < 0:
+                failures.append(
+                    f"Linura Shell IPC must delegate navigation method to ShellRoot: {delegation}"
+                )
 
     for fragment in (
         "PanelWindow {",
@@ -270,6 +310,55 @@ def validate(root: Path) -> list[str]:
             failures.append(
                 f"trusted shell QML contains forbidden authority/process/provider surface: {fragment}"
             )
+    for fragment in (
+        "PanelWindow {",
+        "import org.linura.UI 1.0",
+        "signal controlCenterRequested()",
+        'targetId: "navigation:control-center"',
+        "LinuraTextField {",
+        "LinuraActionRow {",
+        "Keys.onDownPressed:",
+        "Keys.onUpPressed:",
+        "Keys.onReturnPressed:",
+        "function selectedAccessibilityDescription()",
+        "accessibleDescription: root.selectedAccessibilityDescription()",
+        'WlrLayershell.namespace: "linura-command-palette"',
+    ):
+        if fragment not in palette_qml:
+            failures.append(f"Command palette shell contract missing: {fragment}")
+
+    raw_palette_control = re.search(
+        r"(?m)^\s*(?:Rectangle|Label|Button|Slider|Switch|TextField|AbstractButton|Popup|Dialog)\s*\{",
+        palette_qml,
+    )
+    if raw_palette_control is not None:
+        failures.append(
+            "Command palette product surface must consume Linura UI primitives instead of raw Qt visual controls"
+        )
+
+    root_navigation_scope = (
+        shell_qml[:ipc_index] if ipc_index >= 0 else shell_qml
+    )
+    show_control_center_is_exclusive = re.search(
+        r"function\s+showControlCenter\(\)\s*\{"
+        r"\s*shell\.commandPaletteOpen\s*=\s*false"
+        r"\s*shell\.controlCenterOpen\s*=\s*true\s*\}",
+        root_navigation_scope,
+        re.DOTALL,
+    )
+    show_command_palette_is_exclusive = re.search(
+        r"function\s+showCommandPalette\(\)\s*\{"
+        r"\s*shell\.controlCenterOpen\s*=\s*false"
+        r"\s*shell\.commandPaletteOpen\s*=\s*true\s*\}",
+        root_navigation_scope,
+        re.DOTALL,
+    )
+    if (
+        show_control_center_is_exclusive is None
+        or show_command_palette_is_exclusive is None
+    ):
+        failures.append("Linura Shell transient surfaces must remain mutually exclusive")
+
     if panel_qml.count("controller.setActive(opened)") != 1:
         failures.append("Control Center panel must activate observation only while opened")
     if "volumeSlider.value =" in panel_qml:
@@ -318,14 +407,18 @@ def validate(root: Path) -> list[str]:
             "Accessible.role: Accessible.CheckBox",
         ),
         "apps/linura-shell/ui/LinuraTextField.qml": (
+            "property string accessibleDescription:",
             "selectByMouse: true",
             "selectionColor: theme.accent",
+            "Accessible.description: invalid ? errorText : accessibleDescription",
             "Accessible.role: Accessible.EditableText",
         ),
         "apps/linura-shell/ui/LinuraActionRow.qml": (
             "AbstractButton {",
             "LinuraText {",
             "Accessible.role: Accessible.Button",
+            "Accessible.selectable: true",
+            "Accessible.selected: control.selected",
         ),
         "apps/linura-shell/ui/LinuraCard.qml": (
             'property string tone: "neutral"',
@@ -389,6 +482,30 @@ def validate(root: Path) -> list[str]:
     protocols = manifest.get("protocol_requirements")
     if not isinstance(protocols, list) or set(protocols) != expected_protocols:
         failures.append("Control Center shell manifest protocol requirements drifted")
+
+    palette_manifest = json.loads(
+        (
+            root / "apps/linura-shell/plugins/command-palette/manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    expected_palette_manifest = {
+        "schema_version": 1,
+        "id": "linura.command-palette",
+        "name": "Linura Command Palette",
+        "kind": "overlay",
+        "entry_point": "CommandPalette.qml",
+        "trust": "first-party",
+        "authority": "none",
+        "interaction_scope": "experience-navigation-only",
+        "navigation_targets": ["navigation:control-center"],
+        "protocol_requirements": [],
+    }
+    if palette_manifest != expected_palette_manifest:
+        failures.append(
+            "Command palette manifest must remain exact, first-party, navigation-only and authority-free"
+        )
+    if "capabilities" in palette_manifest:
+        failures.append("Command palette manifest must not become a capability grant")
 
     bridge_header = (
         root / "apps/linura-shell/bridge/audio_session_controller.h"
@@ -573,6 +690,18 @@ def validate(root: Path) -> list[str]:
         if fragment not in launcher:
             failures.append(f"Control Center packaged launcher contract missing: {fragment}")
 
+    palette_launcher = (
+        root / "apps/linura-shell/org.linura.CommandPalette.desktop"
+    ).read_text(encoding="utf-8")
+    for fragment in (
+        "[Desktop Entry]",
+        "Name=Linura Command Palette",
+        "Exec=/usr/bin/qs -p /usr/share/linura/shell ipc call -- linura.shell toggleCommandPalette",
+        "Terminal=false",
+    ):
+        if fragment not in palette_launcher:
+            failures.append(f"Command palette packaged launcher contract missing: {fragment}")
+
     image = (root / "tools/image.py").read_text(encoding="utf-8")
     for fragment in REQUIRED_IMAGE:
         if fragment not in image:
@@ -592,6 +721,9 @@ def validate(root: Path) -> list[str]:
         "does not poll PipeWire while the panel is closed",
         "Linura QML UI SDK",
         "org.linura.UI 1.0",
+        "navigation-only command palette",
+        "linura:commandPalette",
+        "toggleCommandPalette",
         "HYPRLAND_NO_SD_TARGET",
         "does **not** promote",
     ):

@@ -6,6 +6,7 @@ TextField {
     property bool invalid: false
     property string errorText: ""
     property string accessibleName: ""
+    property string accessibleDescription: ""
     LinuraTheme { id: theme }
 
     activeFocusOnTab: true
@@ -32,6 +33,6 @@ TextField {
     }
 
     Accessible.name: accessibleName.length > 0 ? accessibleName : placeholderText
-    Accessible.description: invalid ? errorText : ""
+    Accessible.description: invalid ? errorText : accessibleDescription
     Accessible.role: Accessible.EditableText
 }

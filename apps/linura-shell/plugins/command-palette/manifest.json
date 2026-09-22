@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "linura.command-palette",
+  "name": "Linura Command Palette",
+  "kind": "overlay",
+  "entry_point": "CommandPalette.qml",
+  "trust": "first-party",
+  "authority": "none",
+  "interaction_scope": "experience-navigation-only",
+  "navigation_targets": [
+    "navigation:control-center"
+  ],
+  "protocol_requirements": []
+}

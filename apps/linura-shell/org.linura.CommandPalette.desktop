@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Linura Command Palette
+Comment=Open the Linura command palette
+Exec=/usr/bin/qs -p /usr/share/linura/shell ipc call -- linura.shell toggleCommandPalette
+Icon=system-search
+Terminal=false
+Categories=System;Utility;
+Keywords=Linura;Command Palette;Launcher;Search;
+StartupNotify=false

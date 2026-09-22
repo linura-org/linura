@@ -8,7 +8,9 @@ The preferred path is a constrained surface description over typed resources/act
 
 Derived UI is a presentation mechanism, never an authority mechanism. Effectful controls must resolve to registered typed Linura operations and authoritative state; a surface definition cannot carry shell text, approval evidence, policy overrides, executor permits, operation-class downgrades or private backend logic.
 
-The current v0.9 release does not claim a generic generated-UI or plugin runtime. v0.10 activates a bounded first-party `linura-shell` candidate: one supervised Quickshell host containing shipped Qt Quick/QML surfaces such as the Control Center quick-settings panel. Those surfaces remain ordinary unprivileged clients over the versioned Linura protocol.
+The current v0.9 release does not claim a generic generated-UI or plugin runtime. v0.10 activates a bounded first-party `linura-shell` candidate: one supervised Quickshell host containing shipped Qt Quick/QML surfaces such as the Control Center quick-settings panel and command palette. Those surfaces remain ordinary unprivileged clients over the versioned Linura protocol.
+
+The initial command-palette slice is navigation-only: its catalog contains explicit trusted presentation targets and cannot carry arbitrary shell/process text. Search, selection, opening/closing surfaces and equivalent session navigation are `ExperienceEphemeral`. Effectful palette entries must later resolve through typed controller boundaries to registered Linura operations; the palette never assigns `OperationClass`, risk or approval semantics.
 
 A quick-settings/control-center surface belongs in the shell when it is transient desktop chrome analogous to a panel, OSD or launcher. Substantial management applications—Settings, machine inspection, agent/provider management and similar multi-page tools—may remain standalone Qt Quick/QML applications over the same client boundary.
 
