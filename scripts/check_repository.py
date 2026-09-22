@@ -17,7 +17,7 @@ REQUIRED = [
     "docs/system-graph.md", "docs/capability-composition.md", "docs/semantic-provenance.md", "docs/reusable-setups.md",
     "docs/agent-architecture.md", "docs/provider-model.md", "docs/state-model.md", "docs/terminology.md",
     "docs/first-boot.md", "docs/machine-profiles.md", "docs/workflow-model.md",
-    "docs/derived-surfaces.md", "docs/bootstrap-recovery.md", "docs/security-model.md", "docs/threat-model.md",
+    "docs/derived-surfaces.md", "docs/design-system.md", "docs/bootstrap-recovery.md", "docs/security-model.md", "docs/threat-model.md",
     "docs/development-plan.md", "docs/development-infrastructure.md", "docs/installer-bootstrap.md",
     "docs/migrations.md", "docs/managed-configuration.md", "docs/hardware-validation.md", "docs/vm-acceptance.md",
     "docs/visual-testing.md", "docs/application-supervision.md", "docs/lifecycle-workflows.md",
@@ -29,6 +29,7 @@ REQUIRED = [
     "contracts/layering.toml", "tools/check_layering.py", "tests/tooling/test_layering.py",
     "contracts/operation-semantics.toml", "tools/check_operation_semantics.py", "tests/tooling/test_operation_semantics.py",
     "contracts/components.toml", "tools/check_component_maturity.py", "tests/tooling/test_component_maturity.py",
+    "tools/check_linura_shell.py", "tests/tooling/test_linura_shell.py", "docs/plugin-model.md",
     "profiles/arch-hyprland-v1.toml",
     "crates/linura-intent/Cargo.toml", "crates/linura-graph/Cargo.toml", "crates/linura-capability-sdk/Cargo.toml",
     "crates/linura-planner/Cargo.toml", "crates/linura-provenance/Cargo.toml", "crates/linura-library/Cargo.toml", "crates/linura-agent-runtime/Cargo.toml",
@@ -37,6 +38,14 @@ REQUIRED = [
     "crates/linura-config/Cargo.toml", "crates/linura-hardware/Cargo.toml", "crates/linura-testkit/Cargo.toml",
     "crates/linura-lifecycle/Cargo.toml", "apps/linura-update-guard/Cargo.toml", "tools/xtask/Cargo.toml",
     "apps/linura-firstboot/Cargo.toml", "apps/linura-control-center/README.md", "apps/linura-agent-ui/README.md", "apps/linura-shell/README.md",
+    "apps/linura-shell/shell.qml", "apps/linura-shell/theme/LinuraTheme.qml",
+    "apps/linura-shell/ui/README.md", "apps/linura-shell/ui/LinuraSurface.qml",
+    "apps/linura-shell/ui/LinuraText.qml", "apps/linura-shell/ui/LinuraButton.qml",
+    "apps/linura-shell/ui/LinuraSlider.qml",
+    "apps/linura-shell/plugins/control-center/manifest.json", "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml",
+    "apps/linura-shell/bridge/CMakeLists.txt", "apps/linura-shell/bridge/audio_session_controller.h",
+    "apps/linura-shell/bridge/audio_session_controller.cpp", "apps/linura-shell/org.linura.ControlCenter.desktop",
+    "packaging/systemd/user/linura-shell.service",
     "interfaces/dbus/org.linura.Control1.xml", "interfaces/dbus/org.linura.Session1.xml", "interfaces/dbus/org.linura.Authority1.xml", ".cargo/config.toml",
     "scripts/validate_assets.py", "tools/acceptance.py", "tools/vm.py", "tools/image.py", "tools/visual.py",
     "hardware/support-matrix.json", "packaging/arch/archiso/profiledef.sh", "packaging/arch/hooks/95-linura-update-guard.hook",
@@ -51,7 +60,7 @@ REQUIRED = [
 FORBIDDEN_SNIPPETS = ["sudo bash -c", "chmod 777"]
 LEGACY_BRANDS = ["sys" + "plane", "luna" + "rchy"]
 LEGACY_COMPONENTS = ["linura-runtime", "linura_runtime", "apps/control-center", "apps/agent-ui", "apps/shell"]
-TEXT_SUFFIXES = {".md", ".rs", ".toml", ".py", ".yml", ".yaml", ".xml", ".json", ".service", ".policy", ".hook", ".sh", ".conf", ".lua"}
+TEXT_SUFFIXES = {".md", ".rs", ".toml", ".py", ".yml", ".yaml", ".xml", ".json", ".service", ".policy", ".hook", ".sh", ".conf", ".lua", ".cpp", ".h", ".hpp", ".qml", ".cmake", ".desktop"}
 GENERATED_DIRS = {
     ".cache",
     ".direnv",
@@ -297,6 +306,16 @@ def main() -> int:
     if maturity_result.returncode != 0:
         details = maturity_result.stderr.strip() or maturity_result.stdout.strip()
         failures.append(f"component maturity validation failed: {details}")
+
+    shell_result = subprocess.run(
+        [sys.executable, str(ROOT / "tools/check_linura_shell.py"), str(ROOT)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if shell_result.returncode != 0:
+        details = shell_result.stderr.strip() or shell_result.stdout.strip()
+        failures.append(f"Linura Shell validation failed: {details}")
 
     if failures:
         for failure in failures:

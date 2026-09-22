@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "linura.control-center",
+  "name": "Linura Control Center",
+  "kind": "panel",
+  "entry_point": "ControlCenterPanel.qml",
+  "trust": "first-party",
+  "authority": "none",
+  "protocol_requirements": [
+    "org.linura.Control1.Observe",
+    "org.linura.Session1.SetAudioOutputVolume"
+  ]
+}

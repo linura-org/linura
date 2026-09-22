@@ -42,6 +42,15 @@ class ComponentMaturityContractTests(unittest.TestCase):
             path.mkdir(parents=True, exist_ok=True)
             if component["kind"] == "planned-app":
                 (path / "README.md").write_text("planned\n", encoding="utf-8")
+            elif component["kind"] == "shell":
+                (path / "README.md").write_text("shell\n", encoding="utf-8")
+                (path / "shell.qml").write_text("import Quickshell\nShellRoot {}\n", encoding="utf-8")
+                bridge = path / "bridge"
+                bridge.mkdir(parents=True, exist_ok=True)
+                (bridge / "CMakeLists.txt").write_text(
+                    "cmake_minimum_required(VERSION 3.24)\n",
+                    encoding="utf-8",
+                )
 
     def _replace_component_block(self, contract: Path, component_id: str, transform) -> None:
         text = contract.read_text(encoding="utf-8")
@@ -135,6 +144,25 @@ class ComponentMaturityContractTests(unittest.TestCase):
             self.assertEqual(next_count, 1)
             roadmap_path.write_text(roadmap_text, encoding="utf-8")
 
+            contract = root / "contracts/components.toml"
+
+            def restore_future_shell(block: str) -> str:
+                return (
+                    block.replace('kind = "shell"', 'kind = "planned-app"', 1)
+                    .replace(
+                        'maturity = "integrated-experimental"',
+                        'maturity = "roadmap-scaffold"',
+                        1,
+                    )
+                    .replace(
+                        'scope = "trusted first-party Quickshell host plus narrow Qt/D-Bus client bridge over Control1/Session1; no provider/executor, policy, risk-classification or privileged authority ownership"',
+                        'scope = "future desktop-shell integration over Linura protocol surfaces"',
+                        1,
+                    )
+                )
+
+            self._replace_component_block(contract, "linura-shell", restore_future_shell)
+
             result = self._run_checker(root)
             self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -171,11 +199,46 @@ class ComponentMaturityContractTests(unittest.TestCase):
             self.assertEqual(component["activation_milestone"], "v0.9.0")
             self.assertFalse(component["release_artifact"])
 
-        for component_id in ("linura-agent-ui", "linura-control-center", "linura-shell"):
+        for component_id in ("linura-agent-ui", "linura-control-center"):
             component = components[component_id]
             self.assertEqual(component["maturity"], "roadmap-scaffold")
             self.assertEqual(component["activation_milestone"], "v0.10.0")
             self.assertFalse(component["release_artifact"])
+
+        shell = components["linura-shell"]
+        self.assertEqual(shell["kind"], "shell")
+        self.assertFalse(shell["workspace_member"])
+        self.assertEqual(shell["maturity"], "integrated-experimental")
+        self.assertEqual(shell["activation_milestone"], "v0.10.0")
+        self.assertFalse(shell["release_artifact"])
+        self.assertEqual(shell["authority_role"], "client")
+
+    def test_active_shell_requires_shell_root_and_bridge_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            (root / "apps/linura-shell/shell.qml").unlink()
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("active shell component must declare shell.qml", result.stderr)
+
+    def test_active_shell_cannot_claim_release_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/components.toml"
+
+            def claim_binary(block: str) -> str:
+                return block.replace(
+                    "release_artifact = false\n",
+                    'release_artifact = true\nbinary = "linura-shell"\n',
+                    1,
+                )
+
+            self._replace_component_block(contract, "linura-shell", claim_binary)
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("shell components are runtime assets, not release binaries", result.stderr)
 
     def test_stable_component_requires_stable_milestone_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

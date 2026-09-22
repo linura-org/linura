@@ -14,6 +14,23 @@ A polished intent-native Linux experience requires shared visual and interaction
 
 Themes provide tokens, not arbitrary code. Security, failure, verification and approval-required meaning use protected semantic roles so themes cannot visually disguise authority state.
 
+## Linura QML UI Component SDK
+
+The v0.10 shell now contains the initial **Linura QML UI Component SDK** under `apps/linura-shell/ui`. Qt Quick Controls are implementation infrastructure; first-party product surfaces should consume Linura-owned components instead of independently styling raw Qt controls.
+
+The initial integrated primitives are:
+
+- `LinuraSurface` for semantic background, elevation and outline treatment;
+- `LinuraText` for token-bound typography and muted/emphasis roles;
+- `LinuraButton` for consistent action geometry, focus treatment and highlighted state;
+- `LinuraSlider` for consistent range geometry, focus treatment and enabled/disabled state.
+
+The Control Center slice consumes these primitives directly. Raw Qt Quick Controls remain permitted *inside* the SDK implementation because Qt is the rendering/input foundation; they are not the preferred visual API for first-party product surfaces.
+
+The component layer is presentation-only. It does not receive D-Bus handles, provider APIs, executor permits, policy authority, approval material or operation-class selection. Those remain in typed client/controller boundaries and Linura Control.
+
+The current component set is an integrated v0.10 foundation, **not yet a stable third-party API**. Compatibility/versioning for external consumers requires a separate public SDK contract. Future first-party primitives may include navigation, text fields, switches, menus, popovers, dialogs, sheets, notifications, command-palette rows and other shared workstation patterns, but their names do not constitute support claims until implemented and qualified.
+
 ## Current maturity and v0.10 scope
 
 `design/tokens.json` establishes the initial semantic token vocabulary. v0.10 turns that foundation into a qualified cross-surface contract for First Boot, Control Center, command palette, quick settings, bounded desktop integration, notifications/OSD and the other required workstation interaction surfaces.

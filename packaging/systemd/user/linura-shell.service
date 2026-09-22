@@ -1,0 +1,22 @@
+[Unit]
+Description=Linura desktop shell
+After=graphical-session.target linurad.service
+Wants=linurad.service
+BindsTo=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/quickshell -n -p /usr/share/linura/shell
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target

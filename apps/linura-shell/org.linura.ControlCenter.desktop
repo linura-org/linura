@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Linura Control Center
+Comment=Open Linura quick settings
+Exec=/usr/bin/qs -p /usr/share/linura/shell ipc call -- linura.shell toggleControlCenter
+Icon=preferences-system
+Terminal=false
+Categories=System;Settings;
+Keywords=Linura;Control Center;Quick Settings;Audio;
+StartupNotify=false

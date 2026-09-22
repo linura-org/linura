@@ -242,7 +242,7 @@ Target experience:
 - **desktop shell integration:** a bounded Linura workstation integration layer connects Control Center, Library, Agent, status, command palette and quick settings to the Hyprland session;
 - **launcher/workspace UX:** application/action discovery and workspace/session navigation are coherent with the Linura desktop experience;
 - **notifications/OSD:** operation progress, verification outcomes and relevant workstation feedback are presented without treating UI state or executor self-report as authoritative success;
-- **unified visual/theme system:** First Boot, Control Center and bounded desktop surfaces share a coherent Linura design/token foundation;
+- **unified visual/theme system:** First Boot, Control Center and bounded desktop surfaces share a coherent Linura design/token foundation and first-party QML component layer rather than per-surface raw Qt styling;
 - **keyboard/mouse parity:** every supported v0.10 end-user workflow has both keyboard-accessible and pointer-accessible operation, with any exception explicit in the release contract;
 - supported Experimental install/adoption/update/recovery on the exact qualified workstation profile;
 - diagnostics, explanation and audit surfaces appropriate to the supported scope;
