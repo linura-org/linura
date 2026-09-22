@@ -408,10 +408,11 @@ scope = "future graphical protocol client with no distro backend or privileged h
 [[component]]
 id = "linura-shell"
 path = "apps/linura-shell"
-kind = "planned-app"
+kind = "shell"
 workspace_member = false
-maturity = "roadmap-scaffold"
+maturity = "integrated-experimental"
 activation_milestone = "v0.10.0"
 release_artifact = false
 authority_role = "client"
-scope = "future desktop-shell integration over Linura protocol surfaces"
+scope = "trusted first-party Quickshell host with shared QML UI component foundation plus narrow Qt/D-Bus client bridge over Control1/Session1; no provider/executor, policy, risk-classification or privileged authority ownership"
+

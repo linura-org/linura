@@ -96,7 +96,7 @@ The control plane is reusable without AI. The intelligence plane can be replaced
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │ EXPERIENCE                                                  │
-│ First Boot │ Agent UI │ Library │ Control Center │ CLI      │
+│ First Boot │ Agent UI │ Library │ Control Center │ Shell │ CLI │
 ├─────────────────────────────────────────────────────────────┤
 │ INTELLIGENCE                                                │
 │ Intent │ Setups │ Profiles │ Context │ Specialists │ Planner│
@@ -149,7 +149,8 @@ apps/
   linura-firstboot/            signature "what should this become?" flow
   linura-control-center/       planned typed GUI client
   linura-agent-ui/             planned conversational Linura Agent client
-  linura-shell/                planned desktop shell
+  linura-shell/                integrated-experimental Quickshell/QML desktop shell host
+    ui/                       first-party Linura QML UI component foundation
 crates/
   linura-core/                 IDs, actions, semantic reasons, invariants
   linura-intent/               intents, reusable setups, machine profiles

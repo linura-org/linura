@@ -21,7 +21,7 @@ Linura:   user intent → structured model → personalized environment
 | Why state exists | mostly implicit in configuration/history | explicit semantic provenance from intent to resource |
 | Removing a goal | manual/tool-specific cleanup | retire intent → shared ownership/dependency impact → cleanup plan |
 | New workflows | scripts/plugins/configuration | typed workflow composition + isolated extensions |
-| UI growth | shipped shell/plugins | shipped UI + constrained derived surfaces + isolated extensions |
+| UI growth | shipped shell/plugins | unified trusted Quickshell surfaces + standalone apps + isolated extensions |
 | Portability | controlled Arch substrate | explicit platform profiles with portable intent/profile replay |
 | Fleet/enterprise | not primary | later optional extension of the same local authority model |
 
@@ -33,7 +33,9 @@ Linura:   user intent → structured model → personalized environment
 - graphical/VM acceptance testing is required for a desktop product;
 - keyboard UX and visual coherence deserve first-class engineering;
 - document contributor/agent workflows precisely;
-- integration quality matters as much as architectural novelty.
+- integration quality matters as much as architectural novelty;
+- transient desktop chrome belongs in one supervised shell host, while substantial management tools may remain standalone clients;
+- a plugin-shaped first-party shell component is not permission to load arbitrary third-party QML into the trusted shell process.
 
 ## Where Linura deliberately goes further
 

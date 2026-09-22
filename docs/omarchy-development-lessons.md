@@ -15,12 +15,18 @@ Linura is not an Omarchy fork and does not copy Omarchy's shell-command architec
 | Config ownership/resync | `linura-config` ownership/drift model | implemented |
 | Hardware fixtures/matrix | `linura-hardware` + sanitized fixtures | implemented foundation |
 | Visual verification | semantic tokens + baseline manifest + comparator | implemented harness |
-| Shell coherence | single Linura Shell product boundary | architectural contract |
+| Shell coherence | single supervised Quickshell host + first-party QML surfaces | implementation candidate |
 | CLI introspection | `linuractl commands --json` | implemented |
 | Strong graphical acceptance discipline | VM/visual scenario boundaries | implemented harness |
 | Supply-chain release proof | exact-SHA candidate, SBOM, checksums, attestations | implemented workflow |
 | Build/publish separation | candidate promotion workflow | implemented |
 | Verify released bytes independently | release verification workflow | implemented |
+
+## Quattro-era shell lessons
+
+Omarchy's move to a single Quickshell process reinforces the value of one coherent shell host for bar/panel/OSD/launcher-style surfaces instead of a fleet of independent desktop utilities. Linura adopts that **presentation topology** for its first-party shell.
+
+The same architecture also makes lifecycle and trust boundaries more important. Quickshell/Qt package compatibility, shell reloads, lock-screen ownership and plugin teardown are workstation-runtime concerns that must be version-bound and exercised in Q11. Linura therefore does not make arbitrary in-process user QML or hot reload part of the v0.10 security/support boundary.
 
 ## Deliberately not copied
 

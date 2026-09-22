@@ -14,7 +14,7 @@ ALLOWED_MATURITY = (
     "integrated-experimental",
     "stable",
 )
-ALLOWED_KINDS = {"app", "crate", "executor", "verifier", "tool", "planned-app"}
+ALLOWED_KINDS = {"app", "crate", "executor", "verifier", "tool", "planned-app", "shell"}
 VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 RELEASE_BINARIES_COMMAND = "python3 tools/check_component_maturity.py --release-binaries"
 RELEASE_PAYLOAD_VERIFY_COMMAND = (
@@ -178,6 +178,21 @@ def check(root: Path) -> list[str]:
                 failures.append(f"{component_id}: {error}")
                 activation_key = None
 
+        if kind == "planned-app" and maturity != "roadmap-scaffold":
+            failures.append(f"{component_id}: planned-app kind must remain roadmap-scaffold")
+
+        if kind == "shell":
+            if workspace_member is not False:
+                failures.append(f"{component_id}: shell components must remain outside the Cargo workspace")
+            if release_artifact is not False:
+                failures.append(f"{component_id}: shell components are runtime assets, not release binaries")
+            shell_root = root / path / "shell.qml"
+            bridge_manifest = root / path / "bridge" / "CMakeLists.txt"
+            if not shell_root.is_file():
+                failures.append(f"{component_id}: active shell component must declare shell.qml")
+            if not bridge_manifest.is_file():
+                failures.append(f"{component_id}: active shell component must declare bridge/CMakeLists.txt")
+
         if maturity == "roadmap-scaffold":
             if release_artifact is True:
                 failures.append(f"{component_id}: roadmap scaffold cannot be a release artifact")
@@ -248,16 +263,24 @@ def check(root: Path) -> list[str]:
     if extra:
         failures.append(f"component contract claims non-members as workspace members: {extra}")
 
-    planned_app_dirs = {
+    non_workspace_app_dirs = {
         path.relative_to(root).as_posix()
         for path in (root / "apps").iterdir()
-        if path.is_dir() and (path / "README.md").is_file() and path.relative_to(root).as_posix() not in actual_workspace
+        if path.is_dir()
+        and (path / "README.md").is_file()
+        and path.relative_to(root).as_posix() not in actual_workspace
     }
-    declared_planned = {path for path, item in by_path.items() if item.get("kind") == "planned-app"}
-    if planned_app_dirs != declared_planned:
+    declared_non_workspace_apps = {
+        path
+        for path, item in by_path.items()
+        if item.get("workspace_member") is False
+        and item.get("kind") in {"planned-app", "shell"}
+    }
+    if non_workspace_app_dirs != declared_non_workspace_apps:
         failures.append(
-            "planned app maturity ownership mismatch: "
-            f"expected {sorted(planned_app_dirs)}, declared {sorted(declared_planned)}"
+            "non-workspace app maturity ownership mismatch: "
+            f"expected {sorted(non_workspace_app_dirs)}, "
+            f"declared {sorted(declared_non_workspace_apps)}"
         )
 
     release_text = release_workflow.read_text(encoding="utf-8")

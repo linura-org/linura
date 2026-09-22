@@ -96,6 +96,30 @@ jobs:
         run: rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy --component rustfmt
       - name: Use pinned Rust toolchain
         run: rustup default "$RUST_VERSION"
+      - name: Install Linura Shell bridge build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            cmake \
+            ninja-build \
+            pkg-config \
+            qt6-base-dev \
+            qt6-declarative-dev
+      - name: Build and install Linura Shell bridge
+        run: |
+          set -euo pipefail
+          build_dir="$RUNNER_TEMP/linura-shell-bridge-build"
+          install_dir="$RUNNER_TEMP/linura-shell-bridge-install"
+          cmake -S apps/linura-shell/bridge -B "$build_dir" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$build_dir" --parallel 2
+          cmake --install "$build_dir" --prefix "$install_dir"
+
+          module_dir="$install_dir/lib/qt6/qml/org/linura/ShellBridge"
+          test -f "$module_dir/qmldir"
+          find "$module_dir" -maxdepth 1 -type f -name '*.qmltypes' -print -quit | grep -q .
+          find "$module_dir" -maxdepth 1 -type f -name '*.so*' -print -quit | grep -q .
       - name: Run canonical Linura checks
         run: cargo xtask check
       - name: Verify canonical checks are non-mutating

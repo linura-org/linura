@@ -15,6 +15,8 @@ OUT = ROOT / ".artifacts/iso"
 WORK = ROOT / ".artifacts/archiso-work"
 STAGED = ROOT / ".artifacts/archiso-profile"
 DEFAULT_BINARIES = ROOT / "target/release"
+SHELL_BRIDGE_SOURCE = ROOT / "apps/linura-shell/bridge"
+SHELL_BRIDGE_BUILD = ROOT / ".artifacts/linura-shell-bridge-build"
 
 BINARIES = {
     "linurad": "usr/bin/linurad",
@@ -28,11 +30,82 @@ BINARIES = {
 RUNTIME_ASSETS = {
     ROOT / "packaging/wireplumber/linura-session-audio.lua":
         "usr/lib/linura/linura-session-audio.lua",
+    ROOT / "packaging/systemd/user/linurad.service":
+        "usr/lib/systemd/user/linurad.service",
+    ROOT / "packaging/systemd/user/linura-shell.service":
+        "usr/lib/systemd/user/linura-shell.service",
+    ROOT / "apps/linura-shell/shell.qml":
+        "usr/share/linura/shell/shell.qml",
+    ROOT / "apps/linura-shell/theme/LinuraTheme.qml":
+        "usr/share/linura/shell/theme/LinuraTheme.qml",
+    ROOT / "apps/linura-shell/ui/LinuraSurface.qml":
+        "usr/share/linura/shell/ui/LinuraSurface.qml",
+    ROOT / "apps/linura-shell/ui/LinuraText.qml":
+        "usr/share/linura/shell/ui/LinuraText.qml",
+    ROOT / "apps/linura-shell/ui/LinuraButton.qml":
+        "usr/share/linura/shell/ui/LinuraButton.qml",
+    ROOT / "apps/linura-shell/ui/LinuraSlider.qml":
+        "usr/share/linura/shell/ui/LinuraSlider.qml",
+    ROOT / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml":
+        "usr/share/linura/shell/plugins/control-center/ControlCenterPanel.qml",
+    ROOT / "apps/linura-shell/plugins/control-center/manifest.json":
+        "usr/share/linura/shell/plugins/control-center/manifest.json",
+    ROOT / "apps/linura-shell/org.linura.ControlCenter.desktop":
+        "usr/share/applications/org.linura.ControlCenter.desktop",
 }
 
 
 def mkarchiso_command(profile: Path = STAGED) -> list[str]:
     return ["mkarchiso", "-v", "-w", str(WORK), "-o", str(OUT), str(profile)]
+
+
+def build_shell_bridge(profile: Path) -> None:
+    required_tools = ("cmake", "ninja", "pkg-config")
+    missing_tools = [name for name in required_tools if shutil.which(name) is None]
+    if missing_tools:
+        raise RuntimeError(
+            "missing shell-bridge build tools: " + ", ".join(missing_tools)
+        )
+
+    qt_probe = subprocess.run(
+        ["pkg-config", "--exists", "Qt6Core", "Qt6DBus", "Qt6Qml"],
+        check=False,
+    )
+    if qt_probe.returncode != 0:
+        raise RuntimeError(
+            "Qt6Core/Qt6DBus/Qt6Qml development metadata is required to build Linura Shell bridge"
+        )
+
+    if SHELL_BRIDGE_BUILD.exists():
+        shutil.rmtree(SHELL_BRIDGE_BUILD)
+
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(SHELL_BRIDGE_SOURCE),
+            "-B",
+            str(SHELL_BRIDGE_BUILD),
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["cmake", "--build", str(SHELL_BRIDGE_BUILD), "--parallel", "2"],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "cmake",
+            "--install",
+            str(SHELL_BRIDGE_BUILD),
+            "--prefix",
+            str(profile / "airootfs/usr"),
+        ],
+        check=True,
+    )
 
 
 def install_binaries(profile: Path, binaries_dir: Path) -> None:
@@ -51,6 +124,17 @@ def install_binaries(profile: Path, binaries_dir: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
         destination.chmod(0o644)
+
+    user_unit_dir = profile / "airootfs/usr/lib/systemd/user"
+    service_links = {
+        user_unit_dir / "default.target.wants/linurad.service": "../linurad.service",
+        user_unit_dir / "graphical-session.target.wants/linura-shell.service": "../linura-shell.service",
+    }
+    for link, target in service_links.items():
+        link.parent.mkdir(parents=True, exist_ok=True)
+        if link.exists() or link.is_symlink():
+            link.unlink()
+        link.symlink_to(target)
 
     hook_dir = profile / "airootfs/etc/pacman.d/hooks"
     hook_dir.mkdir(parents=True, exist_ok=True)
@@ -75,6 +159,7 @@ def stage_profile(binaries_dir: Path) -> None:
     merged = existing + [package for package in additions if package not in names]
     package_file.write_text("\n".join(merged).rstrip() + "\n", encoding="utf-8")
     install_binaries(STAGED, binaries_dir)
+    build_shell_bridge(STAGED)
 
 
 def main() -> int:
@@ -88,14 +173,27 @@ def main() -> int:
         print(f"releng profile: {RELENG if RELENG.is_dir() else 'missing'}")
         missing = [name for name in BINARIES if not (args.binaries_dir / name).is_file()]
         print(f"release binaries: {'missing ' + ', '.join(missing) if missing else 'present'}")
-        return 0 if path and RELENG.is_dir() and not missing else 1
+        shell_tools = {name: shutil.which(name) for name in ("cmake", "ninja", "pkg-config")}
+        print(
+            "shell bridge tools: "
+            + ", ".join(f"{name}={value or 'missing'}" for name, value in shell_tools.items())
+        )
+        qt_ready = False
+        if all(shell_tools.values()):
+            qt_ready = subprocess.run(
+                ["pkg-config", "--exists", "Qt6Core", "Qt6DBus", "Qt6Qml"],
+                check=False,
+            ).returncode == 0
+        print(f"shell bridge Qt6 dev metadata: {'present' if qt_ready else 'missing'}")
+        return 0 if path and RELENG.is_dir() and not missing and all(shell_tools.values()) and qt_ready else 1
     if args.command == "plan":
         print(f"1. cargo build --workspace --release --locked")
         print(f"2. copy {RELENG} -> {STAGED}")
         print(f"3. overlay Linura profile/security files from {OVERLAY}")
         print("4. merge packages.linura into releng packages.x86_64")
         print(f"5. stage Linura binaries from {args.binaries_dir}, trusted runtime assets, and the update guard hook")
-        print(f"6. {shlex.join(mkarchiso_command())}")
+        print("6. build and install the Linura Shell Qt/D-Bus QML bridge into the staged image")
+        print(f"7. {shlex.join(mkarchiso_command())}")
         return 0
     if shutil.which("mkarchiso") is None:
         print("mkarchiso is required to stage/build the Arch development image", file=sys.stderr)

@@ -6,6 +6,10 @@ Extensions are not loaded as arbitrary native code inside `linurad` or privilege
 
 This is a **future extension architecture contract**, not a supported v0.9 plugin system. No plugin, extension manifest or WASM component gains Linura authority merely because this document or scaffold exists.
 
+v0.10 introduces a separate concept: trusted **first-party shell surfaces** shipped as part of `linura-shell`. They may be structured as QML plugin components inside one Quickshell process, but they are product code, not a third-party extension API. Their manifests are descriptive and carry no authority grants.
+
+Untrusted or user-installed QML must not be imported into the trusted shell engine merely because Quickshell can load QML dynamically. A future public extension runtime must preserve explicit capability brokering and isolation—preferably out of process or in a similarly enforceable sandbox—and effectful requests must still cross Linura's typed authority boundary.
+
 When an extension runtime is activated, the preferred models are:
 
 1. out-of-process extension communicating over a capability-limited IPC contract;

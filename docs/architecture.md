@@ -85,7 +85,7 @@ CLI / SDK / local client
 
 The Authority1 runtime and the Control1 client surface share inward domain/control components where appropriate, but their transport and privilege claims remain explicit.
 
-## Future experience/intelligence topology is not current maturity
+## Experience/intelligence topology and current maturity
 
 Linura's target experience includes First Boot, Agent UI, a local Library, Control Center and Shell. Their architectural position remains outside privileged execution authority:
 
@@ -104,8 +104,27 @@ Presence in this topology does **not** make every surface equally mature. `contr
 - `linura-firstboot` is integrated Experimental and shipped in v0.9.0 for the bounded reference environment;
 - `linura-agent-runtime` is integrated Experimental from v0.8.0 and remains proposal-only with no mutation authority;
 - the local Linura Library/durable intent lifecycle is integrated from v0.7.0;
-- Control Center, Agent UI and Shell remain v0.10 roadmap surfaces until separately implemented and qualified;
+- `linura-shell` is integrated Experimental in v0.10 as one supervised Quickshell host with a bounded first-party Control Center panel; this implementation state is not a release-support promotion;
+- the standalone `linura-control-center` and `linura-agent-ui` applications remain roadmap scaffolds until separately implemented;
 - broad managed workstation configuration and support promotion remain v0.10+ work.
+
+The current graphical layering is:
+
+```text
+Hyprland / Wayland
+        │
+Quickshell + Qt Quick/QML presentation
+        │
+Linura QML UI Component SDK
+        │
+first-party shell surfaces
+        │
+org.linura.ShellBridge / typed Linura protocols
+        │
+Rust Control / authority plane
+```
+
+The UI component SDK owns visual and interaction consistency only. It cannot become a second provider, policy, approval or execution plane.
 
 See [ADR 0025](adr/0025-component-maturity-and-milestone-activation.md).
 
