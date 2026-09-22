@@ -2,7 +2,7 @@
 
 Linura Shell is the v0.10 desktop-shell candidate for the `arch-hyprland-v1` workstation profile.
 
-The shell runs as one supervised, long-lived Quickshell process. First-party shell surfaces are Qt Quick/QML components hosted inside that process. The current bounded surfaces are the Control Center audio panel and a navigation-only command palette foundation.
+The shell runs as one supervised, long-lived Quickshell process. First-party shell surfaces are Qt Quick/QML components hosted inside that process. The current bounded surfaces are the Control Center audio panel and a navigation-only command palette with typed Hyprland workspace discovery/switching.
 
 ## Architecture
 
@@ -62,11 +62,13 @@ The panel exposes keyboard and pointer operation, uses the shared Linura token v
 
 ## Command palette slice
 
-The command palette is an `ExperienceEphemeral` shell surface. Its current catalog is deliberately navigation-only and contains the explicit `navigation:control-center` target. Search/filtering, keyboard selection and pointer activation remain local presentation behavior. The palette cannot carry shell text, provider handles, policy/risk selection, approvals or executor authority.
+The command palette is an `ExperienceEphemeral` shell surface. Its static catalog contains the explicit `navigation:control-center` target and it receives plain workspace descriptors from the nonvisual `WorkspaceNavigationController` as `navigation:workspace` entries. Search/filtering, keyboard selection and pointer activation remain presentation behavior; the palette owns no Hyprland provider object or compositor-control API.
+
+`WorkspaceNavigationController` is the bounded shell integration adapter. It alone projects the live typed `Hyprland.workspaces` model into plain `{id, name, focused}` descriptors, uses the supported per-workspace `focused` state for current-workspace presentation, resolves an exact numeric workspace ID against the fresh live model immediately before activation, and then calls the typed `HyprlandWorkspace.activate()` API. The palette emits only `workspaceRequested(id)` navigation intent. It does not construct or dispatch Hyprland command strings, launch processes, carry shell text, hold provider/executor handles, or choose policy/risk/operation class. A stale/removed workspace fails closed and the palette refreshes instead of retargeting another workspace.
 
 The shell also registers the Hyprland global-shortcut identity `linura:commandPalette`. The qualified profile may bind a compositor key chord to that identity; registering the shortcut does not mutate Hyprland configuration or grant shell authority.
 
-Effectful palette entries are not added as QML callbacks. Future effectful entries must resolve through a typed controller to the same trusted registered operation and Control path used by other interfaces.
+Effectful palette entries are not added as QML callbacks. Future effectful entries must resolve through a typed controller to the same trusted registered operation and Control path used by other interfaces. Application discovery/launch remains a later bounded launcher slice rather than being approximated through arbitrary process execution here.
 
 ## Launch and idle behavior
 
@@ -81,7 +83,7 @@ The shell keeps the Control Center and command palette mutually exclusive so key
 
 ## Runtime and qualification boundary
 
-The Arch workstation image includes the official Arch `quickshell` package and the shell runtime assets. The compiled bridge is independently build-validated in canonical CI. Exact Quickshell/Qt/Hyprland package identity remains part of v0.10 workstation qualification rather than being inferred from a rolling package name.
+The Arch workstation image includes the official Arch `quickshell` package and the shell runtime assets. Because this slice relies on typed `HyprlandWorkspace.activate()` behavior that is correct for named/special workspaces starting with Quickshell 0.3.1, `arch-hyprland-v1` now owns `quickshell >= 0.3.1` as a semantic minimum. The compiled bridge is independently build-validated in canonical CI. Exact Quickshell/Qt/Hyprland package identity remains part of v0.10 workstation qualification rather than being inferred from a rolling package name.
 
 Shell supervision is attached to the systemd graphical-session lifecycle, not to a compositor child process. `linura-shell.service` is `WantedBy`, `BindsTo` and `PartOf` `graphical-session.target`. The qualified Hyprland startup path must activate `hyprland-session.target` / `graphical-session.target`, and Q11 must prove both activation and teardown. A workstation session that sets `HYPRLAND_NO_SD_TARGET` is outside this candidate profile unless a separately qualified session manager supplies the equivalent target lifecycle.
 

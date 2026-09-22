@@ -49,6 +49,7 @@ REQUIRED = [
     "apps/linura-shell/ui/LinuraDialog.qml",
     "apps/linura-shell/plugins/control-center/manifest.json", "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml",
     "apps/linura-shell/plugins/command-palette/manifest.json", "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
+    "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml",
     "apps/linura-shell/bridge/CMakeLists.txt", "apps/linura-shell/bridge/audio_session_controller.h",
     "apps/linura-shell/bridge/audio_session_controller.cpp", "apps/linura-shell/org.linura.ControlCenter.desktop",
     "apps/linura-shell/org.linura.CommandPalette.desktop",

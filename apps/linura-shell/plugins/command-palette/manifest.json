@@ -8,7 +8,11 @@
   "authority": "none",
   "interaction_scope": "experience-navigation-only",
   "navigation_targets": [
-    "navigation:control-center"
+    "navigation:control-center",
+    "navigation:workspace"
+  ],
+  "navigation_sources": [
+    "hyprland.workspaces"
   ],
   "protocol_requirements": []
 }

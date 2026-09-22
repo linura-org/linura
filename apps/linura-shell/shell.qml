@@ -4,6 +4,7 @@ import Quickshell.Hyprland
 import org.linura.ShellBridge 1.0
 import "plugins/control-center"
 import "plugins/command-palette"
+import "integrations/hyprland"
 
 ShellRoot {
     id: shell
@@ -45,6 +46,10 @@ ShellRoot {
 
     AudioSessionController {
         id: audioController
+    }
+
+    WorkspaceNavigationController {
+        id: workspaceNavigation
     }
 
     IpcHandler {
@@ -89,8 +94,14 @@ ShellRoot {
     }
 
     CommandPalette {
+        id: commandPalette
         opened: shell.commandPaletteOpen
+        workspaceCatalog: workspaceNavigation.workspaceEntries
         onCloseRequested: shell.hideCommandPalette()
         onControlCenterRequested: shell.showControlCenter()
+        onWorkspaceRequested: workspaceId => {
+            const activated = workspaceNavigation.activateWorkspace(workspaceId)
+            commandPalette.completeWorkspaceRequest(activated)
+        }
     }
 }

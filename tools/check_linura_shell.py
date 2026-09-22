@@ -33,6 +33,7 @@ REQUIRED = (
     "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml",
     "apps/linura-shell/plugins/command-palette/manifest.json",
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
+    "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml",
     "apps/linura-shell/bridge/CMakeLists.txt",
     "apps/linura-shell/bridge/audio_session_controller.h",
     "apps/linura-shell/bridge/audio_session_controller.cpp",
@@ -40,6 +41,8 @@ REQUIRED = (
     "apps/linura-shell/org.linura.CommandPalette.desktop",
     "apps/linura-control-center/README.md",
     "contracts/components.toml",
+    "contracts/v010-workstation-qualification.toml",
+    "profiles/arch-hyprland-v1.toml",
     "design/tokens.json",
     "docs/design-system.md",
     "docs/architecture.md",
@@ -56,6 +59,8 @@ FORBIDDEN_QML = (
     "Quickshell.Services.Pipewire",
     "Quickshell.Bluetooth",
     "Quickshell.Networking",
+    "Hyprland.dispatch(",
+    "HyprlandIpc.dispatch(",
     "linuractl",
     "wpctl",
     "pactl",
@@ -144,6 +149,7 @@ REQUIRED_IMAGE = (
     'ROOT / "apps/linura-shell/plugins/control-center/manifest.json"',
     'ROOT / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"',
     'ROOT / "apps/linura-shell/plugins/command-palette/manifest.json"',
+    'ROOT / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"',
     'ROOT / "apps/linura-shell/org.linura.ControlCenter.desktop"',
     '"usr/share/applications/org.linura.ControlCenter.desktop"',
     'ROOT / "apps/linura-shell/org.linura.CommandPalette.desktop"',
@@ -215,12 +221,24 @@ def validate(root: Path) -> list[str]:
                     f"standalone linura-control-center {key} must remain {value!r}"
                 )
 
+    profile = tomllib.loads(
+        (root / "profiles/arch-hyprland-v1.toml").read_text(encoding="utf-8")
+    )
+    requirements = profile.get("requirements", {})
+    if not isinstance(requirements, dict) or requirements.get("quickshell") != ">=0.3.1":
+        failures.append(
+            "arch-hyprland-v1 must require quickshell >=0.3.1 for typed named/special workspace activation"
+        )
+
     shell_qml = (root / "apps/linura-shell/shell.qml").read_text(encoding="utf-8")
     panel_qml = (
         root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
     ).read_text(encoding="utf-8")
     palette_qml = (
         root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+    ).read_text(encoding="utf-8")
+    workspace_controller_qml = (
+        root / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"
     ).read_text(encoding="utf-8")
     ui_qml = "\n".join(
         (root / relative).read_text(encoding="utf-8")
@@ -241,13 +259,24 @@ def validate(root: Path) -> list[str]:
             "apps/linura-shell/ui/LinuraDialog.qml",
         )
     )
-    combined_qml = shell_qml + "\n" + panel_qml + "\n" + palette_qml + "\n" + ui_qml
+    combined_qml = (
+        shell_qml
+        + "\n"
+        + panel_qml
+        + "\n"
+        + palette_qml
+        + "\n"
+        + workspace_controller_qml
+        + "\n"
+        + ui_qml
+    )
 
     for fragment in (
         "import Quickshell",
         "import Quickshell.Hyprland",
         "import org.linura.ShellBridge 1.0",
         'import "plugins/command-palette"',
+        'import "integrations/hyprland"',
         "ShellRoot {",
         "IpcHandler {",
         'target: "linura.shell"',
@@ -256,7 +285,12 @@ def validate(root: Path) -> list[str]:
         'appid: "linura"',
         'name: "commandPalette"',
         "ControlCenterPanel {",
+        "WorkspaceNavigationController {",
         "CommandPalette {",
+        "workspaceCatalog: workspaceNavigation.workspaceEntries",
+        "onWorkspaceRequested: workspaceId =>",
+        "workspaceNavigation.activateWorkspace(workspaceId)",
+        "commandPalette.completeWorkspaceRequest(activated)",
     ):
         if fragment not in shell_qml:
             failures.append(f"Linura Shell root contract missing: {fragment}")
@@ -313,19 +347,64 @@ def validate(root: Path) -> list[str]:
     for fragment in (
         "PanelWindow {",
         "import org.linura.UI 1.0",
+        "property var workspaceCatalog:",
         "signal controlCenterRequested()",
+        "signal workspaceRequested(int workspaceId)",
         'targetId: "navigation:control-center"',
+        'targetId: "navigation:workspace:" + workspace.id',
+        "workspaceId: workspace.id",
+        "if (workspace.focused)",
+        "workspace.focused ? qsTr(\"Current\") : qsTr(\"Enter\")",
+        "for (let i = 0; i < workspaceCatalog.length; i++)",
+        "workspaceRequested(entry.workspaceId)",
+        "function completeWorkspaceRequest(activated)",
+        "onWorkspaceCatalogChanged:",
         "LinuraTextField {",
         "LinuraActionRow {",
         "Keys.onDownPressed:",
         "Keys.onUpPressed:",
         "Keys.onReturnPressed:",
+        "function ensureSelectedResultVisible()",
+        "resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)",
+        "currentIndex: root.selectedIndex",
         "function selectedAccessibilityDescription()",
         "accessibleDescription: root.selectedAccessibilityDescription()",
         'WlrLayershell.namespace: "linura-command-palette"',
     ):
         if fragment not in palette_qml:
             failures.append(f"Command palette shell contract missing: {fragment}")
+
+    for fragment in (
+        "import Quickshell.Hyprland",
+        "Hyprland.",
+        ".activate()",
+    ):
+        if fragment in palette_qml:
+            failures.append(
+                f"Command palette presentation must not retain Hyprland provider control: {fragment}"
+            )
+
+    for fragment in (
+        "import Quickshell.Hyprland",
+        "Scope {",
+        "readonly property var workspaceEntries: buildWorkspaceEntries()",
+        "Hyprland.workspaces.values",
+        "focused: workspace.focused",
+        "function activateWorkspace(workspaceId)",
+        "Number.isInteger(workspaceId)",
+        "if (workspace.id !== workspaceId)",
+        "workspace.activate()",
+    ):
+        if fragment not in workspace_controller_qml:
+            failures.append(
+                f"Workspace navigation controller contract missing: {fragment}"
+            )
+
+    live_workspace_model = "const workspaces = Hyprland.workspaces.values"
+    if workspace_controller_qml.count(live_workspace_model) != 2:
+        failures.append(
+            "Workspace navigation controller must read the live Hyprland workspace model once for descriptors and once immediately before activation"
+        )
 
     raw_palette_control = re.search(
         r"(?m)^\s*(?:Rectangle|Label|Button|Slider|Switch|TextField|AbstractButton|Popup|Dialog)\s*\{",
@@ -497,7 +576,11 @@ def validate(root: Path) -> list[str]:
         "trust": "first-party",
         "authority": "none",
         "interaction_scope": "experience-navigation-only",
-        "navigation_targets": ["navigation:control-center"],
+        "navigation_targets": [
+            "navigation:control-center",
+            "navigation:workspace",
+        ],
+        "navigation_sources": ["hyprland.workspaces"],
         "protocol_requirements": [],
     }
     if palette_manifest != expected_palette_manifest:
