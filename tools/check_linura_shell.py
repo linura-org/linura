@@ -34,6 +34,7 @@ REQUIRED = (
     "apps/linura-shell/plugins/command-palette/manifest.json",
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
     "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml",
+    "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml",
     "apps/linura-shell/bridge/CMakeLists.txt",
     "apps/linura-shell/bridge/audio_session_controller.h",
     "apps/linura-shell/bridge/audio_session_controller.cpp",
@@ -53,8 +54,6 @@ REQUIRED = (
 )
 
 FORBIDDEN_QML = (
-    "import Quickshell.Io",
-    "Process {",
     "execDetached",
     "Quickshell.Services.Pipewire",
     "Quickshell.Bluetooth",
@@ -150,6 +149,7 @@ REQUIRED_IMAGE = (
     'ROOT / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"',
     'ROOT / "apps/linura-shell/plugins/command-palette/manifest.json"',
     'ROOT / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"',
+    'ROOT / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"',
     'ROOT / "apps/linura-shell/org.linura.ControlCenter.desktop"',
     '"usr/share/applications/org.linura.ControlCenter.desktop"',
     'ROOT / "apps/linura-shell/org.linura.CommandPalette.desktop"',
@@ -229,6 +229,10 @@ def validate(root: Path) -> list[str]:
         failures.append(
             "arch-hyprland-v1 must require quickshell >=0.3.1 for typed named/special workspace activation"
         )
+    if not isinstance(requirements, dict) or requirements.get("systemd") != ">=255":
+        failures.append(
+            "arch-hyprland-v1 must require systemd >=255 for bounded user-session application launch brokering"
+        )
 
     shell_qml = (root / "apps/linura-shell/shell.qml").read_text(encoding="utf-8")
     panel_qml = (
@@ -239,6 +243,9 @@ def validate(root: Path) -> list[str]:
     ).read_text(encoding="utf-8")
     workspace_controller_qml = (
         root / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"
+    ).read_text(encoding="utf-8")
+    application_controller_qml = (
+        root / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
     ).read_text(encoding="utf-8")
     ui_qml = "\n".join(
         (root / relative).read_text(encoding="utf-8")
@@ -268,6 +275,8 @@ def validate(root: Path) -> list[str]:
         + "\n"
         + workspace_controller_qml
         + "\n"
+        + application_controller_qml
+        + "\n"
         + ui_qml
     )
 
@@ -277,6 +286,7 @@ def validate(root: Path) -> list[str]:
         "import org.linura.ShellBridge 1.0",
         'import "plugins/command-palette"',
         'import "integrations/hyprland"',
+        'import "integrations/xdg"',
         "ShellRoot {",
         "IpcHandler {",
         'target: "linura.shell"',
@@ -286,11 +296,19 @@ def validate(root: Path) -> list[str]:
         'name: "commandPalette"',
         "ControlCenterPanel {",
         "WorkspaceNavigationController {",
+        "ApplicationLauncherController {",
+        "onLaunchCompleted: (status, requestGeneration) =>",
+        "commandPalette.completeApplicationRequest(status, requestGeneration)",
         "CommandPalette {",
         "workspaceCatalog: workspaceNavigation.workspaceEntries",
+        "applicationCatalog: applicationLauncher.applicationEntries",
         "onWorkspaceRequested: workspaceId =>",
         "workspaceNavigation.activateWorkspace(workspaceId)",
         "commandPalette.completeWorkspaceRequest(activated)",
+        "onApplicationRequested: (applicationId, requestGeneration) =>",
+        "const status = applicationLauncher.launchApplication(",
+        'if (status !== "accepted")',
+        "commandPalette.completeApplicationRequest(status, requestGeneration)",
     ):
         if fragment not in shell_qml:
             failures.append(f"Linura Shell root contract missing: {fragment}")
@@ -344,12 +362,40 @@ def validate(root: Path) -> list[str]:
             failures.append(
                 f"trusted shell QML contains forbidden authority/process/provider surface: {fragment}"
             )
+
+    broker_exempt_qml = application_controller_qml
+    ordinary_qml = (
+        shell_qml
+        + "\n"
+        + panel_qml
+        + "\n"
+        + palette_qml
+        + "\n"
+        + workspace_controller_qml
+        + "\n"
+        + ui_qml
+    )
+    for fragment in (
+        "import Quickshell.Io",
+        "Process {",
+    ):
+        if fragment in ordinary_qml:
+            failures.append(
+                f"trusted shell QML contains forbidden authority/process/provider surface: {fragment}"
+            )
+    if "import Quickshell.Io" not in broker_exempt_qml or "Process {" not in broker_exempt_qml:
+        failures.append(
+            "Application launcher controller must exclusively own the bounded Quickshell.Io Process broker"
+        )
     for fragment in (
         "PanelWindow {",
         "import org.linura.UI 1.0",
         "property var workspaceCatalog:",
+        "property var applicationCatalog:",
+        "property int sessionGeneration: 0",
         "signal controlCenterRequested()",
         "signal workspaceRequested(int workspaceId)",
+        "signal applicationRequested(string applicationId, int sessionGeneration)",
         'targetId: "navigation:control-center"',
         'targetId: "navigation:workspace:" + workspace.id',
         "workspaceId: workspace.id",
@@ -357,8 +403,16 @@ def validate(root: Path) -> list[str]:
         "workspace.focused ? qsTr(\"Current\") : qsTr(\"Enter\")",
         "for (let i = 0; i < workspaceCatalog.length; i++)",
         "workspaceRequested(entry.workspaceId)",
+        'targetId: "application:desktop-entry:" + application.id',
+        "applicationId: application.id",
+        "for (let i = 0; i < applicationCatalog.length; i++)",
+        "applicationRequested(entry.applicationId, sessionGeneration)",
         "function completeWorkspaceRequest(activated)",
+        "function completeApplicationRequest(status, requestGeneration)",
+        "if (!opened || requestGeneration !== sessionGeneration)",
+        "sessionGeneration++",
         "onWorkspaceCatalogChanged:",
+        "onApplicationCatalogChanged:",
         "LinuraTextField {",
         "LinuraActionRow {",
         "Keys.onDownPressed:",
@@ -405,6 +459,106 @@ def validate(root: Path) -> list[str]:
         failures.append(
             "Workspace navigation controller must read the live Hyprland workspace model once for descriptors and once immediately before activation"
         )
+
+    for fragment in (
+        "DesktopEntries.",
+        ".execute()",
+        "execString",
+        "workingDirectory",
+    ):
+        if fragment in palette_qml:
+            failures.append(
+                f"Command palette presentation must not retain desktop-entry launch/provider material: {fragment}"
+            )
+
+    for fragment in (
+        "import Quickshell",
+        "import Quickshell.Io",
+        "Scope {",
+        "readonly property var applicationEntries: buildApplicationEntries()",
+        "DesktopEntries.applications.values",
+        "application.runInTerminal",
+        "signal launchCompleted(string status, int requestGeneration)",
+        "function launchApplication(applicationId, requestGeneration)",
+        "Number.isInteger(requestGeneration)",
+        "launchRequestGeneration = requestGeneration",
+        "const requestGeneration = root.launchRequestGeneration",
+        'applicationId.length > 512',
+        "if (application.id !== applicationId)",
+        'return "terminal-unsupported"',
+        "function brokerCommand(application)",
+        "const command = application.command",
+        "const workingDirectory = application.workingDirectory || \"\"",
+        '"/usr/bin/systemd-run"',
+        '"--user"',
+        '"--collect"',
+        '"--quiet"',
+        '"--service-type=exec"',
+        '"--property=ExitType=cgroup"',
+        '"--slice=app.slice"',
+        '"--expand-environment=no"',
+        '"--unit=" + nextTransientUnitName()',
+        '"--working-directory=" + workingDirectory',
+        'broker.push("--")',
+        'return "accepted"',
+        "Process {",
+        "launchBroker.exec(command)",
+        'exitCode === 0 ? "launched" : "broker-failed",',
+        "requestGeneration",
+    ):
+        if fragment not in application_controller_qml:
+            failures.append(
+                f"Application launcher controller contract missing: {fragment}"
+            )
+
+    live_application_model = "const applications = DesktopEntries.applications.values"
+    if application_controller_qml.count(live_application_model) != 2:
+        failures.append(
+            "Application launcher controller must read the visible desktop-entry model once for descriptors and once immediately before launch"
+        )
+
+    for fragment in (
+        "application.execute()",
+        "launchBroker.exec({ command: command })",
+        "Quickshell.execDetached",
+        '["sh", "-c"',
+        '["bash", "-c"',
+        "pkexec",
+        "sudo",
+    ):
+        if fragment in application_controller_qml:
+            failures.append(
+                f"Application launcher controller must not bypass the fixed user-systemd broker: {fragment}"
+            )
+
+    if application_controller_qml.count('"/usr/bin/systemd-run"') != 1:
+        failures.append(
+            "Application launcher controller must expose exactly one fixed user-systemd broker executable"
+        )
+    if application_controller_qml.count('"--property=ExitType=cgroup"') != 1:
+        failures.append(
+            "Application launcher controller must keep transient GUI applications alive until their cgroup is empty"
+        )
+    if application_controller_qml.count("application.noDisplay") != 2:
+        failures.append(
+            "Application launcher controller must filter NoDisplay entries from discovery and recheck visibility before launch"
+        )
+    if application_controller_qml.count("Process {") != 1:
+        failures.append(
+            "Application launcher controller must own exactly one bounded systemd-run broker process"
+        )
+
+    for source_name, source in (
+        ("shell root", shell_qml),
+        ("Control Center", panel_qml),
+        ("command palette", palette_qml),
+        ("workspace controller", workspace_controller_qml),
+    ):
+        for fragment in ("import Quickshell.Io", "Process {"):
+            if fragment in source:
+                failures.append(
+                    f"{source_name} must not own process execution surface: {fragment}"
+                )
 
     raw_palette_control = re.search(
         r"(?m)^\s*(?:Rectangle|Label|Button|Slider|Switch|TextField|AbstractButton|Popup|Dialog)\s*\{",
@@ -575,17 +729,19 @@ def validate(root: Path) -> list[str]:
         "entry_point": "CommandPalette.qml",
         "trust": "first-party",
         "authority": "none",
-        "interaction_scope": "experience-navigation-only",
+        "interaction_scope": "experience-navigation-and-application-launcher",
         "navigation_targets": [
             "navigation:control-center",
             "navigation:workspace",
         ],
         "navigation_sources": ["hyprland.workspaces"],
+        "application_targets": ["application:desktop-entry"],
+        "application_sources": ["xdg.desktop-entries"],
         "protocol_requirements": [],
     }
     if palette_manifest != expected_palette_manifest:
         failures.append(
-            "Command palette manifest must remain exact, first-party, navigation-only and authority-free"
+            "Command palette manifest must remain exact, first-party, bounded-navigation/application and authority-free"
         )
     if "capabilities" in palette_manifest:
         failures.append("Command palette manifest must not become a capability grant")

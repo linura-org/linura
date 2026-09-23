@@ -581,6 +581,413 @@ class LinuraShellContractTests(unittest.TestCase):
                 )
             )
 
+    def test_application_controller_owns_visible_desktop_entry_model(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            marker = "const applications = DesktopEntries.applications.values"
+            self.assertEqual(text.count(marker), 2)
+            controller.write_text(
+                text.replace(marker, "const applications = []", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "must read the visible desktop-entry model once for descriptors "
+                    "and once immediately before launch" in item
+                    for item in failures
+                )
+            )
+
+    def test_application_controller_launches_only_exact_current_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            marker = "if (application.id !== applicationId)"
+            self.assertIn(marker, text)
+            controller.write_text(
+                text.replace(marker, "if (false)", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Application launcher controller contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_application_controller_rejects_terminal_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            marker = 'return "terminal-unsupported"'
+            self.assertIn(marker, text)
+            controller.write_text(
+                text.replace(marker, 'return "launched"', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Application launcher controller contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_application_controller_rejects_generic_process_material(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
+            )
+            controller.write_text(
+                controller.read_text(encoding="utf-8")
+                + '\n// forbidden regression\nQuickshell.execDetached({ command: ["sh"] })\n',
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "forbidden authority/process/provider surface: execDetached" in item
+                    or "must not bypass the fixed user-systemd broker" in item
+                    for item in failures
+                )
+            )
+
+    def test_application_catalog_filters_no_display_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            self.assertEqual(text.count("application.noDisplay"), 2)
+            controller.write_text(
+                text.replace("application.noDisplay", "false", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "must filter NoDisplay entries from discovery" in item
+                    for item in failures
+                )
+            )
+
+    def test_application_controller_preserves_forked_app_cgroup_lifetime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            marker = '"--property=ExitType=cgroup"'
+            self.assertIn(marker, text)
+            controller.write_text(
+                text.replace(marker, '"--property=ExitType=main"', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "must keep transient GUI applications alive until their cgroup is empty"
+                    in item
+                    for item in failures
+                )
+            )
+
+    def test_application_controller_uses_user_systemd_app_slice(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            for marker in (
+                '"/usr/bin/systemd-run"',
+                '"--user"',
+                '"--collect"',
+                '"--service-type=exec"',
+                '"--slice=app.slice"',
+                '"--expand-environment=no"',
+            ):
+                self.assertIn(marker, text)
+
+            marker = '"--slice=app.slice"'
+            controller.write_text(
+                text.replace(marker, '"--slice=linura-shell.slice"', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Application launcher controller contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_application_controller_never_directly_executes_desktop_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            self.assertNotIn("application.execute()", text)
+            controller.write_text(
+                text + "\n// forbidden regression\napplication.execute()\n",
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "must not bypass the fixed user-systemd broker" in item
+                    for item in failures
+                )
+            )
+
+    def test_application_controller_passes_argv_directly_to_process_exec(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            marker = "launchBroker.exec(command)"
+            self.assertIn(marker, text)
+            controller.write_text(
+                text.replace(marker, "launchBroker.exec({ command: command })", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "must not bypass the fixed user-systemd broker" in item
+                    or (
+                        "Application launcher controller contract missing" in item
+                        and marker in item
+                    )
+                    for item in failures
+                )
+            )
+
+    def test_application_controller_has_single_bounded_broker_process(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            self.assertEqual(text.count("Process {"), 1)
+            controller.write_text(
+                text + "\nProcess { }\n",
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "must own exactly one bounded systemd-run broker process" in item
+                    for item in failures
+                )
+            )
+
+    def test_application_launch_waits_for_broker_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            shell = root / "apps/linura-shell/shell.qml"
+            text = shell.read_text(encoding="utf-8")
+            marker = (
+                "onLaunchCompleted: (status, requestGeneration) =>"
+            )
+            self.assertIn(marker, text)
+            shell.write_text(
+                text.replace(marker, "onLaunchCompleted: status => {}", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura Shell root contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_application_launch_completion_is_bound_to_palette_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            text = palette.read_text(encoding="utf-8")
+            marker = "if (!opened || requestGeneration !== sessionGeneration)"
+            self.assertIn(marker, text)
+            palette.write_text(
+                text.replace(marker, "if (!opened)", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Command palette shell contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_application_launch_request_carries_palette_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            text = palette.read_text(encoding="utf-8")
+            marker = "applicationRequested(entry.applicationId, sessionGeneration)"
+            self.assertIn(marker, text)
+            palette.write_text(
+                text.replace(marker, "applicationRequested(entry.applicationId, 0)", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Command palette shell contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_cannot_gain_process_execution_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette.write_text(
+                palette.read_text(encoding="utf-8")
+                + "\nimport Quickshell.Io\nProcess { }\n",
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "command palette must not own process execution surface" in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_cannot_retain_desktop_entry_provider_material(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette.write_text(
+                palette.read_text(encoding="utf-8")
+                + "\n// forbidden regression\nDesktopEntries.byId(\"org.example.App\")\n",
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "presentation must not retain desktop-entry launch/provider material"
+                    in item
+                    for item in failures
+                )
+            )
+
+    def test_shell_routes_application_id_through_launcher_controller(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            shell = root / "apps/linura-shell/shell.qml"
+            text = shell.read_text(encoding="utf-8")
+            marker = "const status = applicationLauncher.launchApplication("
+            self.assertIn(marker, text)
+            shell.write_text(
+                text.replace(marker, 'const status = "invalid-target" // ', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura Shell root contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_command_palette_manifest_declares_application_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = root / "apps/linura-shell/plugins/command-palette/manifest.json"
+            text = manifest.read_text(encoding="utf-8")
+            marker = '"xdg.desktop-entries"'
+            self.assertIn(marker, text)
+            manifest.write_text(
+                text.replace(marker, '"arbitrary.processes"', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Command palette manifest must remain exact" in item
+                    for item in failures
+                )
+            )
+
+    def test_application_launcher_requires_systemd_255(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            profile = root / "profiles/arch-hyprland-v1.toml"
+            text = profile.read_text(encoding="utf-8")
+            marker = 'systemd = ">=255"'
+            self.assertIn(marker, text)
+            profile.write_text(
+                text.replace(marker, 'systemd = ">=253"', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "must require systemd >=255" in item
+                    for item in failures
+                )
+            )
+
     def test_workspace_navigation_requires_quickshell_031(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -94,29 +94,28 @@ The control plane is reusable without AI. The intelligence plane can be replaced
 ## Architecture
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│ EXPERIENCE                                                  │
-│ First Boot │ Agent UI │ Library │ Control Center │ Shell │ CLI │
-├─────────────────────────────────────────────────────────────┤
-│ INTELLIGENCE                                                │
-│ Intent │ Setups │ Profiles │ Context │ Specialists │ Planner│
-├─────────────────────────────────────────────────────────────┤
-│ AUTHORITY                                                   │
-│ Observe │ Plan │ Validate │ Authorize │ Prepare │ Execute | │
-│ Verify │ Commit │ Audit │ Reconcile                         │
-├─────────────────────────────────────────────────────────────┤
-│ SYSTEM GRAPH                                                │
-│ Setups │ Resources │ Dependencies │ Conflicts │ Ownership | │
-│ Why                                                         │
-├─────────────────────────────────────────────────────────────┤
-│ CAPABILITIES                                                │
-│ Blueprints │ Composition │ Workflows │ Derived Surfaces     │
-├─────────────────────────────────────────────────────────────┤
-│ PROVIDERS + NARROW PRIVILEGED EXECUTORS                     │
-│ systemd │ NetworkManager │ BlueZ │ PipeWire │ UDisks │ ...  │
-├─────────────────────────────────────────────────────────────┤
-│ LINUX                                                       │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│ EXPERIENCE                                                      │
+│ First Boot │ Agent UI │ Library │ Control Center │ Shell │ CLI  │
+├─────────────────────────────────────────────────────────────────┤
+│ INTELLIGENCE                                                    │
+│ Intent │ Setups │ Profiles │ Context │ Specialists │ Planner    │
+├─────────────────────────────────────────────────────────────────┤
+│ AUTHORITY                                                       │
+│ Observe │ Plan │ Validate │ Authorize │ Prepare │ Execute |     │
+│ Verify │ Commit │ Audit │ Reconcile                             │
+├─────────────────────────────────────────────────────────────────┤
+│ SYSTEM GRAPH                                                    │
+│ Setups │ Resources │ Dependencies │ Conflicts │ Ownership | Why │
+├─────────────────────────────────────────────────────────────────┤
+│ CAPABILITIES                                                    │
+│ Blueprints │ Composition │ Workflows │ Derived Surfaces         │
+├─────────────────────────────────────────────────────────────────┤
+│ PROVIDERS + NARROW PRIVILEGED EXECUTORS                         │
+│ systemd │ NetworkManager │ BlueZ │ PipeWire │ UDisks │ ...      │
+├─────────────────────────────────────────────────────────────────┤
+│ LINUX                                                           │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Non-negotiable invariants
