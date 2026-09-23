@@ -9,8 +9,10 @@ PanelWindow {
 
     property bool opened: false
     property int selectedIndex: 0
+    property int sessionGeneration: 0
     property var results: []
     property var workspaceCatalog: []
+    property var applicationCatalog: []
     property string statusText: ""
 
     readonly property var catalog: [
@@ -27,6 +29,7 @@ PanelWindow {
     signal closeRequested()
     signal controlCenterRequested()
     signal workspaceRequested(int workspaceId)
+    signal applicationRequested(string applicationId, int sessionGeneration)
 
     visible: opened
     implicitHeight: Math.min(560, paletteSurface.implicitHeight + theme.spacing2xl * 3)
@@ -74,6 +77,30 @@ PanelWindow {
         }
     }
 
+    function applicationEntry(application) {
+        const genericName = application.genericName || ""
+        const comment = application.comment || ""
+        const keywords = application.keywords ? application.keywords.join(" ") : ""
+        const categories = application.categories ? application.categories.join(" ") : ""
+        const description = genericName.length > 0
+            ? genericName
+            : (comment.length > 0 ? comment : qsTr("Launch desktop application"))
+
+        return {
+            kind: "application",
+            targetId: "application:desktop-entry:" + application.id,
+            applicationId: application.id,
+            title: application.name || application.id,
+            description: application.terminal
+                ? qsTr("%1 — terminal launch unsupported").arg(description)
+                : description,
+            keywords: "application app launcher " + application.id + " "
+                + keywords + " " + categories,
+            shortcut: application.terminal ? qsTr("Unavailable") : qsTr("Enter"),
+            disabled: application.terminal
+        }
+    }
+
     function matches(entry, needle) {
         if (needle.length === 0)
             return true
@@ -94,6 +121,12 @@ PanelWindow {
 
         for (let i = 0; i < workspaceCatalog.length; i++) {
             const entry = workspaceEntry(workspaceCatalog[i])
+            if (matches(entry, needle))
+                next.push(entry)
+        }
+
+        for (let i = 0; i < applicationCatalog.length; i++) {
+            const entry = applicationEntry(applicationCatalog[i])
             if (matches(entry, needle))
                 next.push(entry)
         }
@@ -158,6 +191,40 @@ PanelWindow {
         refreshResults()
     }
 
+    function completeApplicationRequest(status, requestGeneration) {
+        if (!opened || requestGeneration !== sessionGeneration)
+            return
+
+        if (status === "launched") {
+            statusText = ""
+            closeRequested()
+            return
+        }
+
+        if (status === "terminal-unsupported") {
+            statusText = qsTr("Terminal applications are not supported by this launcher yet.")
+            return
+        }
+
+        if (status === "busy") {
+            statusText = qsTr("An application launch is already in progress.")
+            return
+        }
+
+        if (status === "broker-failed") {
+            statusText = qsTr("The user session could not start that application.")
+            return
+        }
+
+        if (status === "not-found" || status === "not-visible") {
+            statusText = qsTr("That application is no longer available.")
+            refreshResults()
+            return
+        }
+
+        statusText = qsTr("That application target is invalid.")
+    }
+
     function activate(index) {
         if (index < 0 || index >= results.length)
             return
@@ -175,11 +242,23 @@ PanelWindow {
             return
         }
 
+        if (entry.kind === "application") {
+            if (entry.disabled) {
+                statusText = qsTr("Terminal applications are not supported by this launcher yet.")
+                return
+            }
+
+            statusText = ""
+            applicationRequested(entry.applicationId, sessionGeneration)
+            return
+        }
+
         statusText = qsTr("Unsupported palette target.")
     }
 
     onOpenedChanged: {
         if (opened) {
+            sessionGeneration++
             selectedIndex = 0
             statusText = ""
             queryField.text = ""
@@ -192,6 +271,11 @@ PanelWindow {
     }
 
     onWorkspaceCatalogChanged: {
+        if (opened)
+            refreshResults()
+    }
+
+    onApplicationCatalogChanged: {
         if (opened)
             refreshResults()
     }
@@ -237,7 +321,7 @@ PanelWindow {
 
                     LinuraText {
                         Layout.fillWidth: true
-                        text: qsTr("Find Linura surfaces and Hyprland workspaces")
+                        text: qsTr("Find Linura surfaces, applications and Hyprland workspaces")
                         muted: true
                         elide: Text.ElideRight
                         Accessible.name: text
@@ -315,7 +399,7 @@ PanelWindow {
             LinuraText {
                 Layout.fillWidth: true
                 visible: root.results.length === 0
-                text: qsTr("No Linura surface or workspace matches this search.")
+                text: qsTr("No Linura surface, application or workspace matches this search.")
                 muted: true
                 wrapMode: Text.WordWrap
                 Accessible.name: text
@@ -330,7 +414,7 @@ PanelWindow {
 
             LinuraText {
                 Layout.fillWidth: true
-                text: qsTr("Workspace switching is experience navigation. Effectful palette actions remain typed Control operations, never shell or compositor command strings.")
+                text: qsTr("Workspace switching and trusted desktop-entry application launch are bounded experience actions. Managed effects remain typed Control operations; the palette never accepts shell, Exec, or compositor command strings.")
                 role: "caption"
                 muted: true
                 wrapMode: Text.WordWrap

@@ -6,13 +6,19 @@
   "entry_point": "CommandPalette.qml",
   "trust": "first-party",
   "authority": "none",
-  "interaction_scope": "experience-navigation-only",
+  "interaction_scope": "experience-navigation-and-application-launcher",
   "navigation_targets": [
     "navigation:control-center",
     "navigation:workspace"
   ],
   "navigation_sources": [
     "hyprland.workspaces"
+  ],
+  "application_targets": [
+    "application:desktop-entry"
+  ],
+  "application_sources": [
+    "xdg.desktop-entries"
   ],
   "protocol_requirements": []
 }

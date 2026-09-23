@@ -5,6 +5,7 @@ import org.linura.ShellBridge 1.0
 import "plugins/control-center"
 import "plugins/command-palette"
 import "integrations/hyprland"
+import "integrations/xdg"
 
 ShellRoot {
     id: shell
@@ -52,6 +53,12 @@ ShellRoot {
         id: workspaceNavigation
     }
 
+    ApplicationLauncherController {
+        id: applicationLauncher
+        onLaunchCompleted: (status, requestGeneration) =>
+            commandPalette.completeApplicationRequest(status, requestGeneration)
+    }
+
     IpcHandler {
         target: "linura.shell"
 
@@ -97,11 +104,20 @@ ShellRoot {
         id: commandPalette
         opened: shell.commandPaletteOpen
         workspaceCatalog: workspaceNavigation.workspaceEntries
+        applicationCatalog: applicationLauncher.applicationEntries
         onCloseRequested: shell.hideCommandPalette()
         onControlCenterRequested: shell.showControlCenter()
         onWorkspaceRequested: workspaceId => {
             const activated = workspaceNavigation.activateWorkspace(workspaceId)
             commandPalette.completeWorkspaceRequest(activated)
+        }
+        onApplicationRequested: (applicationId, requestGeneration) => {
+            const status = applicationLauncher.launchApplication(
+                applicationId,
+                requestGeneration
+            )
+            if (status !== "accepted")
+                commandPalette.completeApplicationRequest(status, requestGeneration)
         }
     }
 }

@@ -39,7 +39,7 @@ v0.10 intentionally distinguishes trusted shipped shell surfaces from the future
 
 - `shell.qml` is the single trusted Quickshell root.
 - `plugins/control-center` is a first-party panel loaded by the trusted shell.
-- `plugins/command-palette` is a first-party overlay whose current catalog contains explicit experience-navigation targets only.
+- `plugins/command-palette` is a first-party overlay whose catalog contains bounded experience-navigation targets plus explicit visible desktop-application targets.
 - first-party manifests are descriptive metadata; they do not grant capabilities or authority.
 - arbitrary user QML is **not** loaded into the trusted shell process in this slice.
 - future third-party/custom UI remains governed by `docs/plugin-model.md`: isolated/out-of-process or otherwise capability-confined, never ambient shell authority.
@@ -62,13 +62,17 @@ The panel exposes keyboard and pointer operation, uses the shared Linura token v
 
 ## Command palette slice
 
-The command palette is an `ExperienceEphemeral` shell surface. Its static catalog contains the explicit `navigation:control-center` target and it receives plain workspace descriptors from the nonvisual `WorkspaceNavigationController` as `navigation:workspace` entries. Search/filtering, keyboard selection and pointer activation remain presentation behavior; the palette owns no Hyprland provider object or compositor-control API.
+The command palette is an `ExperienceEphemeral` shell surface. Its static catalog contains the explicit `navigation:control-center` target, it receives plain workspace descriptors from the nonvisual `WorkspaceNavigationController` as `navigation:workspace` entries, and it receives sanitized visible desktop-entry descriptors from `ApplicationLauncherController` as `application:desktop-entry` targets. Search/filtering, keyboard selection and pointer activation remain presentation behavior; the palette owns no Hyprland or desktop-entry provider object.
 
 `WorkspaceNavigationController` is the bounded shell integration adapter. It alone projects the live typed `Hyprland.workspaces` model into plain `{id, name, focused}` descriptors, uses the supported per-workspace `focused` state for current-workspace presentation, resolves an exact numeric workspace ID against the fresh live model immediately before activation, and then calls the typed `HyprlandWorkspace.activate()` API. The palette emits only `workspaceRequested(id)` navigation intent. It does not construct or dispatch Hyprland command strings, launch processes, carry shell text, hold provider/executor handles, or choose policy/risk/operation class. A stale/removed workspace fails closed and the palette refreshes instead of retargeting another workspace.
 
 The shell also registers the Hyprland global-shortcut identity `linura:commandPalette`. The qualified profile may bind a compositor key chord to that identity; registering the shortcut does not mutate Hyprland configuration or grant shell authority.
 
-Effectful palette entries are not added as QML callbacks. Future effectful entries must resolve through a typed controller to the same trusted registered operation and Control path used by other interfaces. Application discovery/launch remains a later bounded launcher slice rather than being approximated through arbitrary process execution here.
+`ApplicationLauncherController` owns Quickshell's visible `DesktopEntries.applications` index and projects only display/search metadata plus the immutable desktop-entry ID. Entries marked `NoDisplay` are filtered before they can enter the palette and are rechecked again immediately before launch. The palette never receives `Exec=`, parsed command arrays, working directories or executable handles. On activation the controller re-resolves the exact ID against the current visible index and rejects Linura's own launcher entries, stale/hidden targets and terminal-required entries.
+
+The controller does **not** call `DesktopEntry.execute()`: Quickshell documents that path as equivalent to detached child-process execution, which would leave ordinary applications under the sandboxed `linura-shell.service` ancestry. Instead the controller passes Quickshell's parsed argv and optional working directory only to one fixed `/usr/bin/systemd-run --user` broker invocation. The user service manager creates a transient `Type=exec` service in `app.slice`, with `ExitType=cgroup`, environment expansion disabled and a unique bounded unit name. `ExitType=cgroup` keeps self-forking graphical applications alive until their application cgroup is empty. The launched application therefore does not inherit the shell unit's `RestrictAddressFamilies=AF_UNIX` sandbox or its service cgroup lifetime. The palette closes only after the broker reports successful service startup; broker failure remains visible. Each palette opening has a generation token carried through the asynchronous launch request, so completion from an older closed palette session is ignored after close/reopen. This is a bounded ordinary desktop launch target, not a generic shell/process API and not application supervision.
+
+Effectful Linura-managed palette entries are not added as arbitrary QML callbacks. Transient or managed machine effects still resolve through the trusted registered operation/Control path. Durable desired application state, restart policy, resource limits or privileged supervision remain governed by `docs/application-supervision.md` and are not introduced by this launcher slice.
 
 ## Launch and idle behavior
 
