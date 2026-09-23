@@ -138,6 +138,14 @@ v0.10 inherits the earlier deterministic/authority qualification chain but adds 
 
 Passing the inherited Ubuntu VM lanes is therefore necessary continuity evidence, not sufficient v0.10 workstation support evidence.
 
+### v0.10 shell runtime development gate
+
+The v0.10 shell path also has an exact-source disposable **Arch** runtime gate in `.github/workflows/v010-shell-runtime-qualification.yml`. It boots a version-addressed official Arch cloud image under QEMU/TCG with an opt-in virtio GPU, installs the runtime from the dated Arch Linux Archive substrate, starts headless Hyprland and real Quickshell, and executes repository-owned qualification fixtures around the production application-launch and command-palette QML components.
+
+The gate proves externally observable shell/runtime properties including XDG visibility filtering, terminal-target rejection, exact-ID re-resolution, user-systemd `app.slice` dispatch, shell-service restart isolation, `ExitType=cgroup` survival for self-forking graphical applications, and palette-session generation isolation. Evidence is bound to the exact source SHA, version-addressed base-image digest, runtime/package versions, transcript and systemd/cgroup artifacts.
+
+This is **development runtime evidence**, not workstation support promotion. It does not replace Q11's maintained physical/interactive GPU-driver-display-input lane, reviewed visual/accessibility evidence, or the remaining v0.10 release requirements.
+
 Future scenarios such as general bare-metal OS installation, additional PlatformProfiles, broader hardware classes or product VM lifecycle management become release-gating only when their corresponding capability and release contract activate.
 
 Placeholder commands, scaffold applications and future architecture descriptions must never be interpreted as evidence of an implemented feature. Component maturity is governed by `contracts/components.toml`.

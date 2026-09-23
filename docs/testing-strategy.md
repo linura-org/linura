@@ -154,6 +154,7 @@ The repository includes executable harness boundaries:
 - `tools/image.py` for image planning/build where relevant;
 - `tools/visual.py` for reviewed visual-baseline comparison;
 - permanent milestone-specific workflows such as v0.4 durability/ENOSPC, v0.5 executor/verifier and v0.6 managed-lifecycle qualification;
+- `.github/workflows/v010-shell-runtime-qualification.yml` for exact-source disposable Arch/QEMU/Hyprland/Quickshell shell-runtime evidence; this development gate exercises production QML controllers and process/session boundaries but does not substitute for maintained interactive workstation/hardware evidence;
 - `hardware/fixtures/` and `hardware/support-matrix.json` for later support evidence.
 
 Release claims must identify the exact source, workflow/scenario, guest image/environment and successful evidence used to support the claim.

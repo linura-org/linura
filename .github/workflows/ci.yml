@@ -128,9 +128,19 @@ jobs:
           cmake --install "$ui_build_dir" --prefix "$install_dir"
 
           ui_module_dir="$install_dir/lib/qt6/qml/org/linura/UI"
+          ui_plugin="$ui_module_dir/liblinura-uiplugin.so"
+          ui_backing="$ui_module_dir/liblinura-ui.so"
           test -f "$ui_module_dir/qmldir"
           find "$ui_module_dir" -maxdepth 1 -type f -name '*.qmltypes' -print -quit | grep -q .
-          find "$ui_module_dir" -maxdepth 1 -type f -name '*.so*' -print -quit | grep -q .
+          test -f "$ui_plugin"
+          test -f "$ui_backing"
+          ui_linkage="$(ldd "$ui_plugin")"
+          printf '%s\n' "$ui_linkage"
+          if grep -Fq 'not found' <<<"$ui_linkage"; then
+            echo "Linura UI QML plugin has unresolved installed dependencies" >&2
+            exit 1
+          fi
+          grep -Fq "liblinura-ui.so => $ui_backing" <<<"$ui_linkage"
       - name: Run canonical Linura checks
         run: cargo xtask check
       - name: Verify canonical checks are non-mutating

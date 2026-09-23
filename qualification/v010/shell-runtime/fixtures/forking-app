@@ -1,0 +1,10 @@
+#!/usr/bin/bash
+set -euo pipefail
+mkdir -p /tmp/linura-shell-runtime
+(
+    printf '%s\n' "$BASHPID" > /tmp/linura-shell-runtime/fork-child.pid
+    cat "/proc/$BASHPID/cgroup" > /tmp/linura-shell-runtime/fork-child.cgroup
+    exec /usr/bin/sleep 120
+) &
+printf '%s\n' "$!" > /tmp/linura-shell-runtime/fork-background.pid
+exit 0

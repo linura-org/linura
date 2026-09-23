@@ -5,7 +5,7 @@ forbidden_legacy_roots = ["bootstrap"]
 [policy]
 implementation_roots = ["apps", "crates", "executors", "verifiers", "tools"]
 infrastructure_roots = [".cargo", ".github"]
-support_roots = ["docs", "scripts", "tests"]
+support_roots = ["docs", "qualification", "scripts", "tests"]
 rule = "Every tracked top-level directory, including hidden infrastructure roots, must own real implementation, declarative assets, evidence, packaging, tests, tooling, or infrastructure. README-only future placeholders are forbidden."
 
 [[roots]]
@@ -102,6 +102,12 @@ implementation = ["crates/linura-migrations"]
 path = "packaging"
 kind = "packaging"
 purpose = "Distribution, image, package-manager, and install packaging assets."
+allow_readme_only = false
+
+[[roots]]
+path = "qualification"
+kind = "test"
+purpose = "Version-scoped executable qualification harnesses, fixtures, and exact-source runtime evidence."
 allow_readme_only = false
 
 [[roots]]

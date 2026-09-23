@@ -1,0 +1,566 @@
+name: v0.10 shell runtime qualification
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact source SHA to qualify; defaults to selected ref
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v010-shell-runtime-${{ github.event.pull_request.number || inputs.source_sha || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+  RUNTIME_CONTRACT: contracts/v010-shell-runtime-qualification.toml
+  BASE_IMAGE_URL: https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2
+  BASE_IMAGE_CHECKSUM_URL: https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2.SHA256
+  ARCH_ARCHIVE_URL: https://archive.archlinux.org/repos/2026/09/16/$repo/os/$arch
+  VM_ACCELERATION: tcg
+  QUALIFICATION_NIC_MAC: 52:54:00:12:34:56
+  QUALIFICATION_GPU_PCI_BDF: "0000:00:02.0"
+  QUALIFICATION_GPU_VENDOR_ID: "0x1af4"
+  QUALIFICATION_GPU_DEVICE_ID: "0x1050"
+  QUALIFICATION_DISK_GIB: 16
+
+jobs:
+  runtime:
+    name: exact-source Arch/Hyprland/Quickshell runtime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.sha }}
+
+      - name: Assert exact source and runtime contract
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          python3 tools/check_v010_shell_runtime_qualification.py
+
+      - name: Install disposable graphical VM dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             cloud-image-utils             openssh-client             qemu-system-x86             qemu-utils
+
+      - name: Download and verify version-addressed Arch cloud image
+        run: |
+          set -euo pipefail
+          case "$BASE_IMAGE_URL" in
+            https://geo.mirror.pkgbuild.com/images/v*/Arch-Linux-x86_64-cloudimg-*.qcow2) ;;
+            *) echo "base image must be a version-addressed official Arch cloud image" >&2; exit 2 ;;
+          esac
+          [[ "$BASE_IMAGE_URL" != *"/latest/"* ]]
+          image="$RUNNER_TEMP/arch-v010-shell.qcow2"
+          checksum="$RUNNER_TEMP/arch-v010-shell.qcow2.SHA256"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3             --output "$image" "$BASE_IMAGE_URL"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3             --output "$checksum" "$BASE_IMAGE_CHECKSUM_URL"
+          expected_name="$(basename "$BASE_IMAGE_URL")"
+          digest="$(awk -v name="$expected_name" '$2 == name || $2 == "*" name {print $1}' "$checksum")"
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          printf '%s  %s\n' "$digest" "$image" | sha256sum --check --strict
+          qemu-img info "$image"
+          {
+            printf 'BASE_IMAGE=%s\n' "$image"
+            printf 'BASE_IMAGE_SHA256=%s\n' "$digest"
+          } >> "$GITHUB_ENV"
+
+      - name: Create disposable Arch cloud-init guest
+        run: |
+          set -euo pipefail
+          vm_image="$RUNNER_TEMP/linura-v010-shell.qcow2"
+          seed_image="$RUNNER_TEMP/linura-v010-shell-seed.img"
+          ssh_key="$RUNNER_TEMP/linura-v010-shell-key"
+          vm_log="$RUNNER_TEMP/linura-v010-shell-qemu.log"
+          artifact_dir="$RUNNER_TEMP/linura-v010-shell-artifacts"
+          user_data="$RUNNER_TEMP/v010-shell-user-data"
+          meta_data="$RUNNER_TEMP/v010-shell-meta-data"
+          network_config="$RUNNER_TEMP/v010-shell-network-config"
+
+          cp --reflink=auto "$BASE_IMAGE" "$vm_image"
+          qemu-img resize "$vm_image" "${QUALIFICATION_DISK_GIB}G"
+          ssh-keygen -q -t ed25519 -N '' -f "$ssh_key"
+          public_key="$(cat "$ssh_key.pub")"
+
+          cat > "$user_data" <<EOF
+          #cloud-config
+          users:
+            - default
+            - name: linura
+              groups: [wheel]
+              shell: /bin/bash
+              sudo:
+                - ALL=(ALL) NOPASSWD:ALL
+              ssh_authorized_keys:
+                - $public_key
+          ssh_pwauth: false
+          disable_root: true
+          package_update: false
+          growpart:
+            mode: auto
+            devices: ["/"]
+            ignore_growroot_disabled: false
+          resize_rootfs: true
+          EOF
+
+          cat > "$meta_data" <<EOF
+          instance-id: linura-v010-shell-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
+          local-hostname: linura-v010-shell
+          EOF
+
+          cat > "$network_config" <<EOF
+          version: 2
+          renderer: networkd
+          ethernets:
+            qualification:
+              match:
+                macaddress: "$QUALIFICATION_NIC_MAC"
+              set-name: eth0
+              dhcp4: true
+              dhcp6: false
+          EOF
+
+          cloud-localds --network-config="$network_config"             "$seed_image" "$user_data" "$meta_data"
+          mkdir -p "$artifact_dir"
+          {
+            printf 'VM_IMAGE=%s\n' "$vm_image"
+            printf 'SEED_IMAGE=%s\n' "$seed_image"
+            printf 'SSH_KEY=%s\n' "$ssh_key"
+            printf 'VM_LOG=%s\n' "$vm_log"
+            printf 'ARTIFACT_DIR=%s\n' "$artifact_dir"
+          } >> "$GITHUB_ENV"
+
+      - name: Start disposable Arch graphical guest
+        run: |
+          set -euo pipefail
+          bash qualification/v010/shell-runtime/start-vm.sh             --image "$VM_IMAGE"             --seed "$SEED_IMAGE"             --memory 6144             --cpus 4             --nic-mac "$QUALIFICATION_NIC_MAC"             --ssh-port 2223             >"$VM_LOG" 2>&1 &
+          printf 'VM_PID=%s\n' "$!" >> "$GITHUB_ENV"
+
+      - name: Wait for Arch guest and install pinned runtime packages
+        run: |
+          set -euo pipefail
+          ssh_common=(
+            -i "$SSH_KEY"
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            -o ConnectTimeout=3
+          )
+          ready=0
+          deadline=$((SECONDS + 420))
+          while (( SECONDS < deadline )); do
+            if ! kill -0 "$VM_PID" 2>/dev/null; then
+              echo "Arch VM exited before SSH readiness" >&2
+              cat "$VM_LOG" >&2
+              exit 1
+            fi
+            if ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 true >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$ready" -ne 1 ]]; then
+            echo "Arch VM SSH readiness deadline exceeded" >&2
+            cat "$VM_LOG" >&2
+            exit 1
+          fi
+
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'timeout 240 cloud-init status --wait --long'
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'lsblk -b -o NAME,SIZE,FSTYPE,MOUNTPOINTS; df -B1 /'             | tee "$ARTIFACT_DIR/guest-storage.txt"
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'set -eu; root_size="$(df -B1 --output=size / | tail -n 1 | tr -d " ")"; root_free="$(df -B1 --output=avail / | tail -n 1 | tr -d " ")"; if [ "$root_size" -lt 8589934592 ] || [ "$root_free" -lt 4294967296 ]; then echo "guest root filesystem capacity contract not met: size=$root_size free=$root_free" >&2; df -h / >&2; exit 1; fi'
+
+          archive_url="$ARCH_ARCHIVE_URL"
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             "printf '%s\n' 'Server = $archive_url' | sudo -n tee /etc/pacman.d/mirrorlist >/dev/null"
+          runtime_packages=(base-devel cmake ninja pkgconf dbus seatd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast)
+          install_succeeded=0
+          for attempt in 1 2 3; do
+            echo "pinned Arch runtime install attempt $attempt/3"
+            if ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+              "timeout --signal=TERM --kill-after=10s 720 sudo -n pacman -Syu --noconfirm --needed --disable-download-timeout ${runtime_packages[*]}"; then
+              install_succeeded=1
+              break
+            fi
+            if [[ "$attempt" -lt 3 ]]; then
+              sleep $((attempt * 5))
+            fi
+          done
+          if [[ "$install_succeeded" -ne 1 ]]; then
+            echo "pinned Arch runtime installation failed after 3 bounded attempts" >&2
+            exit 1
+          fi
+          set +e
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            "QUALIFICATION_GPU_PCI_BDF='$QUALIFICATION_GPU_PCI_BDF' QUALIFICATION_GPU_VENDOR_ID='$QUALIFICATION_GPU_VENDOR_ID' QUALIFICATION_GPU_DEVICE_ID='$QUALIFICATION_GPU_DEVICE_ID' bash -se" \
+            2>&1 <<'GUEST' | tee "$ARTIFACT_DIR/seat-drm-setup.log"
+          set -euo pipefail
+
+          dump_graphics_state() {
+              printf '%s\n' '--- seatd status ---'
+              sudo -n systemctl status seatd.service --no-pager || true
+              printf '%s\n' '--- seatd journal ---'
+              sudo -n journalctl -u seatd.service -b --no-pager || true
+              printf '%s\n' '--- seatd unit ---'
+              sudo -n systemctl cat seatd.service || true
+              printf '%s\n' '--- seatd socket ---'
+              stat /run/seatd.sock || true
+              printf '%s\n' '--- identity/groups ---'
+              id
+              getent group seat || true
+              getent group video || true
+              getent group render || true
+              printf '%s\n' '--- drm nodes ---'
+              ls -la /dev/dri 2>/dev/null || true
+              find /sys/class/drm -maxdepth 2 -type l -print -exec readlink -f {} \; 2>/dev/null || true
+              printf '%s\n' '--- DRM PCI identity ---'
+              for card in /sys/class/drm/card[0-9]*; do
+                  [[ -e "$card" ]] || continue
+                  device="$(readlink -f "$card/device" 2>/dev/null || true)"
+                  printf 'card=%s device=%s bdf=%s vendor=%s pci_device=%s transport_driver=%s\n' \
+                      "$(basename "$card")" "$device" "$(basename "$device")" \
+                      "$(cat "$device/vendor" 2>/dev/null || true)" \
+                      "$(cat "$device/device" 2>/dev/null || true)" \
+                      "$(basename "$(readlink -f "$device/driver" 2>/dev/null || true)")"
+              done
+              printf '%s\n' '--- virtio_gpu module ---'
+              lsmod | grep -E '^(virtio_gpu|drm|drm_kms_helper)\b' || true
+          }
+
+          on_exit() {
+              status=$?
+              if [[ "$status" -ne 0 ]]; then
+                  printf 'graphical seat provisioning failed with status %s\n' "$status" >&2
+                  dump_graphics_state >&2
+              fi
+              exit "$status"
+          }
+          trap on_exit EXIT
+
+          sudo -n modprobe virtio_gpu
+          sudo -n udevadm settle --timeout=30
+          sudo -n install -d -m 0755 /run/systemd/system/seatd.service.d
+          printf '%s\n' '[Service]' 'Environment=SEATD_VTBOUND=0' |
+              sudo -n tee /run/systemd/system/seatd.service.d/10-linura-qualification.conf >/dev/null
+          sudo -n systemctl daemon-reload
+          sudo -n systemctl enable seatd.service
+          sudo -n systemctl start seatd.service
+
+          seat_socket=/run/seatd.sock
+          for _ in $(seq 1 50); do
+              [[ -S "$seat_socket" ]] && break
+              sleep 0.1
+          done
+          [[ -S "$seat_socket" ]] || {
+              echo "seatd socket readiness deadline exceeded" >&2
+              exit 1
+          }
+
+          seat_group="$(stat -c '%G' "$seat_socket")"
+          [[ -n "$seat_group" ]] || {
+              echo "seatd socket has no owning group" >&2
+              exit 1
+          }
+          getent group "$seat_group" >/dev/null || {
+              echo "seatd socket group is unknown: $seat_group" >&2
+              exit 1
+          }
+
+          groups="video,$seat_group"
+          if getent group render >/dev/null; then
+              groups="$groups,render"
+          fi
+          sudo -n usermod -aG "$groups" linura
+
+          drm_cards=()
+          for node in /sys/class/drm/card*; do
+              [[ -e "$node" ]] || continue
+              card_name="$(basename "$node")"
+              [[ "$card_name" =~ ^card[0-9]+$ ]] || continue
+              drm_cards+=("$card_name")
+          done
+          [[ "${#drm_cards[@]}" -eq 1 ]] || {
+              echo "expected exactly one DRM card in the bounded qualification VM, found ${#drm_cards[@]}" >&2
+              exit 1
+          }
+
+          qualification_card="${drm_cards[0]}"
+          qualification_device="$(readlink -f "/sys/class/drm/$qualification_card/device")"
+          [[ -d "$qualification_device" ]] || {
+              echo "qualification DRM device sysfs path is unavailable: $qualification_card" >&2
+              exit 1
+          }
+          qualification_bdf="$(basename "$qualification_device")"
+          qualification_vendor="$(tr '[:upper:]' '[:lower:]' < "$qualification_device/vendor")"
+          qualification_device_id="$(tr '[:upper:]' '[:lower:]' < "$qualification_device/device")"
+          [[ "$qualification_bdf" == "$QUALIFICATION_GPU_PCI_BDF" ]] || {
+              echo "qualification DRM PCI BDF mismatch: expected $QUALIFICATION_GPU_PCI_BDF, got $qualification_bdf" >&2
+              exit 1
+          }
+          [[ "$qualification_vendor" == "$QUALIFICATION_GPU_VENDOR_ID" ]] || {
+              echo "qualification DRM PCI vendor mismatch: expected $QUALIFICATION_GPU_VENDOR_ID, got $qualification_vendor" >&2
+              exit 1
+          }
+          [[ "$qualification_device_id" == "$QUALIFICATION_GPU_DEVICE_ID" ]] || {
+              echo "qualification DRM PCI device mismatch: expected $QUALIFICATION_GPU_DEVICE_ID, got $qualification_device_id" >&2
+              exit 1
+          }
+          [[ -c "/dev/dri/$qualification_card" ]] || {
+              echo "qualification DRM character device is missing: /dev/dri/$qualification_card" >&2
+              exit 1
+          }
+
+          sudo -n loginctl enable-linger linura
+          uid="$(id -u linura)"
+          sudo -n systemctl restart "user@$uid.service"
+          dump_graphics_state
+          GUEST
+          seat_setup_pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+          if [[ "${#seat_setup_pipeline_status[@]}" -ne 2 ]]; then
+            echo "unexpected graphical seat setup pipeline width: ${#seat_setup_pipeline_status[@]}" >&2
+            exit 1
+          fi
+          seat_setup_status="${seat_setup_pipeline_status[0]}"
+          seat_setup_tee_status="${seat_setup_pipeline_status[1]}"
+          if [[ "$seat_setup_status" -ne 0 ]]; then
+            exit "$seat_setup_status"
+          fi
+          if [[ "$seat_setup_tee_status" -ne 0 ]]; then
+            exit "$seat_setup_tee_status"
+          fi
+
+          git archive --format=tar.gz --output="$RUNNER_TEMP/linura-source.tar.gz" "$SOURCE_SHA"
+          scp "${ssh_common[@]}" -P 2223             "$RUNNER_TEMP/linura-source.tar.gz"             linura@127.0.0.1:/tmp/linura-source.tar.gz
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'sudo -n rm -rf /opt/linura-source && sudo -n install -d -o root -g root -m 0755 /opt/linura-source && sudo -n tar -xzf /tmp/linura-source.tar.gz -C /opt/linura-source && rm -f /tmp/linura-source.tar.gz && sudo -n bash /opt/linura-source/qualification/v010/shell-runtime/provision-shell-runtime.sh linura /opt/linura-source'
+
+      - name: Run real shell runtime qualification
+        run: |
+          set -euo pipefail
+          ssh_common=(
+            -i "$SSH_KEY"
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            -o ConnectTimeout=5
+          )
+          set +e
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'bash /opt/linura-source/qualification/v010/shell-runtime/run-shell-runtime.sh /opt/linura-source /tmp/linura-shell-runtime/evidence'             | tee "$ARTIFACT_DIR/shell-runtime-transcript.log"
+          pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+          runtime_status="${pipeline_status[0]}"
+          transcript_status="${pipeline_status[1]}"
+
+          copy_status=0
+          scp "${ssh_common[@]}" -P 2223 -r             linura@127.0.0.1:/tmp/linura-shell-runtime/evidence/.             "$ARTIFACT_DIR/" || copy_status=$?
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'journalctl --user -u linura-shell-qualification.service -u linura-palette-qualification.service -u linura-hyprland-qualification.service --no-pager'             > "$ARTIFACT_DIR/user-journal.log" || true
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'sudo -n journalctl -u seatd.service --no-pager'             > "$ARTIFACT_DIR/seatd-journal.log" || true
+
+          if [[ "$runtime_status" -ne 0 ]]; then
+            exit "$runtime_status"
+          fi
+          if [[ "$transcript_status" -ne 0 ]]; then
+            exit "$transcript_status"
+          fi
+          if [[ "$copy_status" -ne 0 ]]; then
+            exit "$copy_status"
+          fi
+
+      - name: Bind exact-source runtime evidence
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import tomllib
+
+          root = pathlib.Path.cwd()
+          artifacts = pathlib.Path(os.environ["ARTIFACT_DIR"])
+          contract_path = root / os.environ["RUNTIME_CONTRACT"]
+          contract = tomllib.loads(contract_path.read_text(encoding="utf-8"))
+
+          def digest(path: pathlib.Path) -> str:
+              return hashlib.sha256(path.read_bytes()).hexdigest()
+
+          cases_path = artifacts / "cases.tsv"
+          transcript_path = artifacts / "shell-runtime-transcript.log"
+          versions_path = artifacts / "runtime-versions.txt"
+          package_versions_path = artifacts / "package-versions.txt"
+          visible_systemd = artifacts / "visible-application-systemd.txt"
+          forking_systemd = artifacts / "forking-application-systemd.txt"
+          palette_session = artifacts / "palette-session.txt"
+          hyprland_session = artifacts / "hyprland-session.env"
+          guest_storage = artifacts / "guest-storage.txt"
+          seat_drm_preflight = artifacts / "seat-drm-preflight.txt"
+          seat_drm_setup = artifacts / "seat-drm-setup.log"
+          ui_module_linkage = artifacts / "ui-module-linkage.txt"
+          qt_quick_rendering = artifacts / "qt-quick-rendering.env"
+          required_files = (
+              cases_path,
+              transcript_path,
+              versions_path,
+              package_versions_path,
+              visible_systemd,
+              forking_systemd,
+              palette_session,
+              hyprland_session,
+              guest_storage,
+              seat_drm_preflight,
+              seat_drm_setup,
+              ui_module_linkage,
+              qt_quick_rendering,
+          )
+          for path in required_files:
+              if not path.is_file() or path.is_symlink():
+                  raise SystemExit(f"runtime evidence missing or untrusted: {path.name}")
+
+          observed = {}
+          for line in cases_path.read_text(encoding="utf-8").splitlines():
+              case_id, result = line.split("\t", 1)
+              if case_id in observed:
+                  raise SystemExit(f"duplicate runtime case: {case_id}")
+              observed[case_id] = result
+          required = contract["required_cases"]
+          if set(observed) != set(required):
+              raise SystemExit(
+                  f"runtime case set mismatch: expected {sorted(required)}, got {sorted(observed)}"
+              )
+          if any(value != "passed" for value in observed.values()):
+              raise SystemExit("one or more runtime cases did not pass")
+
+          bindings = {}
+          for path in sorted(required_files):
+              bindings[path.name] = {
+                  "sha256": digest(path),
+                  "size": path.stat().st_size,
+              }
+
+          rendering_backend = None
+          for line in qt_quick_rendering.read_text(encoding="utf-8").splitlines():
+              if line.startswith("backend="):
+                  if rendering_backend is not None:
+                      raise SystemExit("duplicate Qt Quick rendering backend record")
+                  rendering_backend = line.split("=", 1)[1]
+          if rendering_backend != contract["qt_quick_backend"]:
+              raise SystemExit(
+                  f"Qt Quick rendering backend mismatch: expected {contract['qt_quick_backend']!r}, "
+                  f"got {rendering_backend!r}"
+              )
+
+          package_versions = {}
+          for line in package_versions_path.read_text(encoding="utf-8").splitlines():
+              name, version = line.split(" ", 1)
+              if name in package_versions or not name or not version:
+                  raise SystemExit(f"invalid or duplicate package version record: {line!r}")
+              package_versions[name] = version
+          required_packages = {
+              "systemd",
+              "hyprland",
+              "quickshell",
+              "qt6-base",
+              "qt6-declarative",
+              "qt6-wayland",
+              "mesa",
+              "vulkan-swrast",
+              "seatd",
+          }
+          if set(package_versions) != required_packages:
+              raise SystemExit(
+                  f"runtime package version set mismatch: expected {sorted(required_packages)}, "
+                  f"got {sorted(package_versions)}"
+              )
+
+          evidence = {
+              "schema_version": contract["evidence"]["schema_version"],
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "source_sha": os.environ["SOURCE_SHA"],
+              "result": "passed",
+              "claim": contract["claim"],
+              "target_profile": contract["target_profile"],
+              "runtime_contract": {
+                  "path": contract_path.relative_to(root).as_posix(),
+                  "sha256": digest(contract_path),
+              },
+              "base_image": {
+                  "url": os.environ["BASE_IMAGE_URL"],
+                  "sha256": os.environ["BASE_IMAGE_SHA256"],
+              },
+              "arch_archive": {
+                  "snapshot": contract["arch_archive_snapshot"],
+                  "url": contract["arch_archive_url"],
+              },
+              "virtualization": {
+                  "acceleration": os.environ["VM_ACCELERATION"],
+                  "gpu": "virtio-gpu-pci",
+                  "disk_size_gib": contract["vm_disk_size_gib"],
+              },
+              "rendering": {
+                  "qt_quick_backend": rendering_backend,
+                  "scope": "headless-development-runtime",
+              },
+              "cases": observed,
+              "runtime_packages": package_versions,
+              "artifacts": bindings,
+              "workflow": {
+                  "path": contract["workflow"],
+                  "run_id": int(os.environ["GITHUB_RUN_ID"]),
+                  "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+                  "event": os.environ["GITHUB_EVENT_NAME"],
+              },
+              "release_support_promotion": False,
+          }
+          output = artifacts / "V010-SHELL-RUNTIME-EVIDENCE.json"
+          output.write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          (artifacts / "V010-SHELL-RUNTIME-EVIDENCE.sha256").write_text(
+              f"{digest(output)}  {output.name}\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Stop disposable guest
+        if: always()
+        run: |
+          set +e
+          if [[ -n "${VM_PID:-}" ]]; then
+            kill "$VM_PID" 2>/dev/null || true
+            wait "$VM_PID" 2>/dev/null || true
+          fi
+
+      - name: Collect QEMU diagnostics
+        if: always()
+        run: |
+          set -euo pipefail
+          artifact_dir="${ARTIFACT_DIR:-$RUNNER_TEMP/linura-v010-shell-artifacts}"
+          mkdir -p "$artifact_dir"
+          if [[ -f "${VM_LOG:-}" ]]; then
+            cp "$VM_LOG" "$artifact_dir/qemu.log"
+          fi
+
+      - name: Upload exact-source shell runtime evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-v010-shell-runtime-${{ inputs.source_sha || github.sha }}
+          path: ${{ runner.temp }}/linura-v010-shell-artifacts/
+          if-no-files-found: warn
+          retention-days: 30

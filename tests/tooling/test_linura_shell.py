@@ -321,7 +321,7 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertIn(marker, text)
             workflow.write_text(text.replace(marker, "cmake -S unrelated", 1), encoding="utf-8")
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("canonical CI must build/install" in item for item in failures))
+            self.assertTrue(any("Linura Shell CI contract missing" in item for item in failures))
 
 
     def test_canonical_ci_must_compile_and_install_ui_sdk(self) -> None:
@@ -338,7 +338,7 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("canonical CI must build/install" in item for item in failures)
+                any("Linura Shell CI contract missing" in item for item in failures)
             )
 
 
@@ -1465,6 +1465,70 @@ class LinuraShellContractTests(unittest.TestCase):
                 any("design token control_size.md" in item for item in failures)
             )
 
+
+
+    def test_ui_qml_plugin_must_keep_origin_rpath(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            cmake = root / "apps/linura-shell/ui/CMakeLists.txt"
+            text = cmake.read_text(encoding="utf-8")
+            marker = 'INSTALL_RPATH "$ORIGIN"'
+            self.assertIn(marker, text)
+            cmake.write_text(
+                text.replace(marker, 'INSTALL_RPATH ""', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura UI SDK CMake contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_ui_qml_install_must_include_backing_library_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            cmake = root / "apps/linura-shell/ui/CMakeLists.txt"
+            text = cmake.read_text(encoding="utf-8")
+            marker = "TARGETS linura-ui linura-uiplugin"
+            self.assertIn(marker, text)
+            cmake.write_text(
+                text.replace(marker, "TARGETS linura-uiplugin", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura UI SDK CMake contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_canonical_ci_must_verify_ui_plugin_dependency_closure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/ci.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = 'ui_linkage="$(ldd "$ui_plugin")"'
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, 'ui_linkage="unchecked"', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura Shell CI contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Linura Qualification Stale
+Exec=/usr/local/lib/linura-qualification/linger-app stale
+NoDisplay=false
+Terminal=false

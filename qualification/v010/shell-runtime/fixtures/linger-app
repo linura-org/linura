@@ -1,0 +1,7 @@
+#!/usr/bin/bash
+set -euo pipefail
+label="${1:-visible}"
+mkdir -p /tmp/linura-shell-runtime
+printf '%s\n' "$$" > "/tmp/linura-shell-runtime/${label}.pid"
+cat "/proc/$$/cgroup" > "/tmp/linura-shell-runtime/${label}.cgroup"
+exec /usr/bin/sleep 120

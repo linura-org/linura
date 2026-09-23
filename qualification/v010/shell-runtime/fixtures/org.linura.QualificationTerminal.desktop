@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Linura Qualification Terminal
+Exec=/usr/local/lib/linura-qualification/linger-app terminal
+NoDisplay=false
+Terminal=true

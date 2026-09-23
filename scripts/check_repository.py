@@ -29,7 +29,12 @@ REQUIRED = [
     "contracts/layering.toml", "tools/check_layering.py", "tests/tooling/test_layering.py",
     "contracts/operation-semantics.toml", "tools/check_operation_semantics.py", "tests/tooling/test_operation_semantics.py",
     "contracts/components.toml", "tools/check_component_maturity.py", "tests/tooling/test_component_maturity.py",
-    "tools/check_linura_shell.py", "tests/tooling/test_linura_shell.py", "docs/plugin-model.md",
+    "tools/check_linura_shell.py", "tests/tooling/test_linura_shell.py",
+    "tools/check_v010_shell_runtime_qualification.py", "tests/tooling/test_v010_shell_runtime_qualification.py",
+    "contracts/v010-shell-runtime-qualification.toml", ".github/workflows/v010-shell-runtime-qualification.yml",
+    "qualification/v010/shell-runtime/provision-shell-runtime.sh", "qualification/v010/shell-runtime/run-shell-runtime.sh",
+    "qualification/v010/shell-runtime/start-vm.sh",
+    "docs/plugin-model.md",
     "profiles/arch-hyprland-v1.toml",
     "crates/linura-intent/Cargo.toml", "crates/linura-graph/Cargo.toml", "crates/linura-capability-sdk/Cargo.toml",
     "crates/linura-planner/Cargo.toml", "crates/linura-provenance/Cargo.toml", "crates/linura-library/Cargo.toml", "crates/linura-agent-runtime/Cargo.toml",
@@ -325,6 +330,16 @@ def main() -> int:
     if shell_result.returncode != 0:
         details = shell_result.stderr.strip() or shell_result.stdout.strip()
         failures.append(f"Linura Shell validation failed: {details}")
+
+    shell_runtime_result = subprocess.run(
+        [sys.executable, str(ROOT / "tools/check_v010_shell_runtime_qualification.py"), str(ROOT)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if shell_runtime_result.returncode != 0:
+        details = shell_runtime_result.stderr.strip() or shell_runtime_result.stdout.strip()
+        failures.append(f"v0.10 shell runtime qualification validation failed: {details}")
 
     if failures:
         for failure in failures:
