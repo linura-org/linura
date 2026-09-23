@@ -16,6 +16,15 @@ on:
   pull_request:
     paths:
       - ".github/workflows/v010-qualification.yml"
+      - ".github/workflows/v010-shell-runtime-qualification.yml"
+      - "contracts/v010-shell-runtime-qualification.toml"
+      - "apps/linura-shell/**"
+      - "packaging/systemd/user/linura-shell.service"
+      - "qualification/v010/shell-runtime/**"
+      - "tools/check_linura_shell.py"
+      - "tools/check_v010_shell_runtime_qualification.py"
+      - "tests/tooling/test_linura_shell.py"
+      - "tests/tooling/test_v010_shell_runtime_qualification.py"
       - "contracts/roadmap.toml"
       - "contracts/v010-workstation-qualification.toml"
       - "contracts/operation-semantics.toml"
@@ -87,10 +96,12 @@ jobs:
           python3 tools/check_machine_classes.py
           python3 tools/check_operation_semantics.py
           python3 tools/check_v010_workstation_qualification.py
+          python3 tools/check_v010_shell_runtime_qualification.py
           python3 -m unittest \
             tests.tooling.test_roadmap \
             tests.tooling.test_operation_semantics \
-            tests.tooling.test_v010_workstation_qualification
+            tests.tooling.test_v010_workstation_qualification \
+            tests.tooling.test_v010_shell_runtime_qualification
 
       - name: Test typed PlatformProfile candidate compatibility
         run: cargo test -p linura-hardware --locked
@@ -99,3 +110,12 @@ jobs:
         run: |
           cargo test -p linura-linux-observation --locked
           cargo test -p linura-control platform_compatibility --locked
+
+  shell-runtime:
+    name: v0.10 shell runtime qualification
+    needs: contract
+    uses: ./.github/workflows/v010-shell-runtime-qualification.yml
+    permissions:
+      contents: read
+    with:
+      source_sha: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}

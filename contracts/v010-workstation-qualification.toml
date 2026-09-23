@@ -11,6 +11,7 @@ support_matrix_path = "hardware/support-matrix.json"
 support_promotion_authority = "protected-post-release-closure"
 required_evidence = ["disposable-arch", "interactive-workstation", "inherited-v0.9"]
 operation_semantics_contract = "contracts/operation-semantics.toml"
+shell_runtime_qualification_contract = "contracts/v010-shell-runtime-qualification.toml"
 
 [experience]
 interaction_model = "one-model-many-interfaces"

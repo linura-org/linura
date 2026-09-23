@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Linura Qualification Forking
+Exec=/usr/local/lib/linura-qualification/forking-app
+NoDisplay=false
+Terminal=false

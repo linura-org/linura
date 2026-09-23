@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Linura Qualification Hidden
+Exec=/usr/local/lib/linura-qualification/linger-app hidden
+NoDisplay=true
+Terminal=false

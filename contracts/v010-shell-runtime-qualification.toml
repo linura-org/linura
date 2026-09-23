@@ -1,0 +1,61 @@
+schema_version = 1
+id = "qualification/v010-shell-runtime"
+milestone = "v0.10.0"
+state = "development-gate"
+claim = "development-runtime-evidence-only"
+target_profile = "arch-hyprland-v1"
+workflow = ".github/workflows/v010-shell-runtime-qualification.yml"
+runner = "github-hosted-ubuntu-qemu-tcg"
+vm_acceleration = "tcg"
+qt_quick_backend = "software"
+vm_network_mac = "52:54:00:12:34:56"
+vm_gpu_pci_bdf = "0000:00:02.0"
+vm_gpu_vendor_id = "0x1af4"
+vm_gpu_device_id = "0x1050"
+vm_disk_size_gib = 16
+base_image_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2"
+base_image_checksum_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2.SHA256"
+arch_archive_snapshot = "2026-09-16"
+arch_archive_url = "https://archive.archlinux.org/repos/2026/09/16/$repo/os/$arch"
+runtime_root = "qualification/v010/shell-runtime"
+
+required_components = [
+  "systemd-user",
+  "wayland",
+  "seatd-libseat",
+  "drm",
+  "hyprland",
+  "quickshell",
+  "qt6",
+  "xdg-desktop-entries",
+]
+
+required_cases = [
+  "seat-drm-readiness",
+  "headless-hyprland-runtime",
+  "visible-application-discovery",
+  "nodisplay-filtering",
+  "terminal-entry-rejection",
+  "exact-id-reresolution",
+  "bounded-systemd-run-dispatch",
+  "app-slice-isolation",
+  "shell-service-restart-survival",
+  "forking-application-cgroup-lifetime",
+  "palette-session-generation-isolation",
+]
+
+[evidence]
+schema_version = 1
+result = "passed"
+source_sha_required = true
+base_image_digest_required = true
+runtime_versions_required = true
+package_versions_required = true
+guest_transcript_digest_required = true
+systemd_unit_evidence_required = true
+process_cgroup_evidence_required = true
+storage_capacity_required = true
+seat_drm_preflight_required = true
+ui_module_linkage_required = true
+qt_quick_backend_required = true
+release_support_promotion = false

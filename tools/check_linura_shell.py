@@ -139,7 +139,14 @@ REQUIRED_CI = (
     'module_dir="$install_dir/lib/qt6/qml/org/linura/ShellBridge"',
     'test -f "$module_dir/qmldir"',
     'ui_module_dir="$install_dir/lib/qt6/qml/org/linura/UI"',
+    'ui_plugin="$ui_module_dir/liblinura-uiplugin.so"',
+    'ui_backing="$ui_module_dir/liblinura-ui.so"',
     'test -f "$ui_module_dir/qmldir"',
+    'test -f "$ui_plugin"',
+    'test -f "$ui_backing"',
+    'ui_linkage="$(ldd "$ui_plugin")"',
+    "Linura UI QML plugin has unresolved installed dependencies",
+    'grep -Fq "liblinura-ui.so => $ui_backing" <<<"$ui_linkage"',
 )
 
 REQUIRED_IMAGE = (
@@ -804,8 +811,15 @@ def validate(root: Path) -> list[str]:
         "qt_add_qml_module(linura-ui",
         "URI org.linura.UI",
         "VERSION 1.0",
+        "PLUGIN_TARGET linura-uiplugin",
         "Qt6::QuickControls2",
-        "lib/qt6/qml/org/linura/UI",
+        'set(LINURA_UI_QML_INSTALL_DIR "lib/qt6/qml/org/linura/UI")',
+        "set_target_properties(linura-uiplugin PROPERTIES",
+        'INSTALL_RPATH "$ORIGIN"',
+        "TARGETS linura-ui linura-uiplugin",
+        'LIBRARY DESTINATION "${LINURA_UI_QML_INSTALL_DIR}"',
+        'RUNTIME DESTINATION "${LINURA_UI_QML_INSTALL_DIR}"',
+        'ARCHIVE DESTINATION "${LINURA_UI_QML_INSTALL_DIR}"',
     ):
         if fragment not in ui_cmake:
             failures.append(f"Linura UI SDK CMake contract missing: {fragment}")
@@ -949,7 +963,7 @@ def validate(root: Path) -> list[str]:
     ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     for fragment in REQUIRED_CI:
         if fragment not in ci:
-            failures.append(f"canonical CI must build/install Linura Shell bridge: {fragment}")
+            failures.append(f"Linura Shell CI contract missing: {fragment}")
 
     readme = (root / "apps/linura-shell/README.md").read_text(encoding="utf-8")
     for fragment in (
