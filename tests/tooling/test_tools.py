@@ -135,6 +135,61 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("cargo build --release --locked -p linurad -p linuractl", workflow)
         self.assertIn("VM-ACCEPTANCE-EVIDENCE.json", workflow)
 
+    def test_v09_pr_routing_keeps_shared_changes_on_fast_regression(self) -> None:
+        import tomllib
+
+        contract = tomllib.loads(
+            (ROOT / "contracts/v09-qualification-routing.toml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(contract["pull_request_default_lane"], "exact-source-regression")
+        self.assertEqual(contract["workflow_call_lane"], "full-qualification")
+        self.assertEqual(contract["workflow_dispatch_lane"], "full-qualification")
+        self.assertNotIn("crates/linura-control/", contract["full_prefixes"])
+        self.assertNotIn("crates/linura-core/", contract["full_prefixes"])
+        self.assertIn("crates/linura-bootstrap/", contract["full_prefixes"])
+        self.assertIn("crates/linura-update/", contract["full_prefixes"])
+
+    def test_v09_full_vm_jobs_are_path_routed_but_release_calls_remain_full(self) -> None:
+        workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(encoding="utf-8")
+        self.assertIn("v0.9 qualification scope", workflow)
+        self.assertIn("contracts/v09-qualification-routing.toml", workflow)
+        self.assertIn("if [[ \"$GITHUB_EVENT_NAME\" != \"pull_request\" ]]", workflow)
+        self.assertGreaterEqual(
+            workflow.count("if: needs.scope.outputs.full_qualification == 'true'"),
+            4,
+        )
+        self.assertIn("v0.9 exact-source regression proof", workflow)
+        self.assertIn("if: needs.scope.outputs.full_qualification != 'true'", workflow)
+        self.assertIn("Test exact-source v0.9 regression contracts", workflow)
+        self.assertIn("Build exact-source adversarial qualification binaries", workflow)
+
+    def test_v09_pr_routing_uses_merge_base_and_classifies_rename_source(self) -> None:
+        workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            'merge_base="$(git merge-base "$BASE_SHA" "$SOURCE_SHA")"',
+            workflow,
+        )
+        self.assertIn(
+            'git diff --no-renames --name-only -z "$merge_base" "$SOURCE_SHA"',
+            workflow,
+        )
+        self.assertIn('changed_path.read_bytes().split(b"\\0")', workflow)
+        self.assertNotIn(
+            'git diff --name-only "$BASE_SHA" "$SOURCE_SHA"',
+            workflow,
+        )
+
+    def test_v09_regression_lane_cannot_skip_exact_source_contract_tests(self) -> None:
+        workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(encoding="utf-8")
+        self.assertIn("cargo fmt --all -- --check", workflow)
+        self.assertIn("-p linura-firstboot", workflow)
+        self.assertIn("-p linura-bootstrap", workflow)
+        self.assertIn("-p linura-migrations", workflow)
+        self.assertIn("-p linura-update", workflow)
+        self.assertIn("-p linura-hardware", workflow)
+        self.assertIn("./target/release/linura-firstboot --self-check", workflow)
+        self.assertNotIn("steps.cargo-cache.outputs.cache-hit", workflow)
+
     def test_vm_acceptance_artifacts_are_scenario_and_source_scoped(self) -> None:
         workflow = (ROOT / ".github/workflows/vm-acceptance.yml").read_text(encoding="utf-8")
         self.assertIn(

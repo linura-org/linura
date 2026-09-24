@@ -1,0 +1,29 @@
+schema_version = 1
+id = "qualification/v09-pr-routing"
+released_milestone = "v0.9.0"
+pull_request_default_lane = "exact-source-regression"
+workflow_call_lane = "full-qualification"
+workflow_dispatch_lane = "full-qualification"
+
+full_exact = [
+  ".github/workflows/v09-qualification.yml",
+  ".github/workflows/v09-adversarial-security.yml",
+  ".github/workflows/vm-acceptance.yml",
+  ".github/workflows/trusted-release-proof.yml",
+  "apps/linura-authorityd/Cargo.toml",
+  "apps/linura-authorityd/src/bin/linura-migrations-qualification.rs",
+  "contracts/v09-qualification-routing.toml",
+  "tests/tooling/test_v09_recovery_qualification.py",
+  "tests/tooling/test_v09_bootstrap_provisioning_contract.py",
+  "tests/tooling/test_v09_adversarial_fast_forward_contract.py",
+  "tests/tooling/test_v09_adversarial_transport_contract.py",
+  "tests/tooling/test_v09_adversarial_sharding_contract.py",
+]
+
+full_prefixes = [
+  "apps/linura-firstboot/",
+  "crates/linura-bootstrap/",
+  "crates/linura-migrations/",
+  "crates/linura-update/",
+  "tests/acceptance/",
+]
