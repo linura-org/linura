@@ -37,6 +37,7 @@ on:
       - "contracts/components.toml"
       - "contracts/operation-semantics.toml"
       - "contracts/roadmap.toml"
+      - "contracts/v09-qualification-routing.toml"
       - "hardware/support-matrix.json"
       - "docs/adr/0029-v09-first-boot-reference-and-provisioning-boundary.md"
       - "docs/first-boot.md"
@@ -78,7 +79,69 @@ env:
   SOURCE_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
 
 jobs:
+  scope:
+    name: v0.9 qualification scope
+    runs-on: ubuntu-24.04
+    outputs:
+      full_qualification: ${{ steps.route.outputs.full_qualification }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Resolve exact-source qualification lane
+        id: route
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+            printf 'full_qualification=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          merge_base="$(git merge-base "$BASE_SHA" "$SOURCE_SHA")"
+          [[ "$merge_base" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$merge_base" "$BASE_SHA"
+          git merge-base --is-ancestor "$merge_base" "$SOURCE_SHA"
+          changed="$RUNNER_TEMP/v09-changed-paths.bin"
+          # Disable rename detection so both the source and destination paths are
+          # classified. A protected v0.9 path cannot be moved out of scope and
+          # silently inherit the fast regression lane.
+          git diff --no-renames --name-only -z "$merge_base" "$SOURCE_SHA" > "$changed"
+          python3 - "$changed" "$GITHUB_OUTPUT" <<'PY'
+          import os
+          import pathlib
+          import sys
+          import tomllib
+
+          changed_path = pathlib.Path(sys.argv[1])
+          output_path = pathlib.Path(sys.argv[2])
+          contract = tomllib.loads(
+              pathlib.Path("contracts/v09-qualification-routing.toml").read_text(encoding="utf-8")
+          )
+          exact = set(contract["full_exact"])
+          prefixes = tuple(contract["full_prefixes"])
+          changed = sorted(
+              {
+                  os.fsdecode(path)
+                  for path in changed_path.read_bytes().split(b"\0")
+                  if path
+              }
+          )
+          full = any(path in exact or path.startswith(prefixes) for path in changed)
+          with output_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"full_qualification={'true' if full else 'false'}\n")
+          print("v0.9 lane:", "full-qualification" if full else "exact-source-regression")
+          for path in changed:
+              print(path)
+          PY
+
   contract:
+    needs: scope
     name: v0.9 exact-source contract
     runs-on: ubuntu-24.04
     steps:
@@ -120,7 +183,7 @@ jobs:
             tests.tooling.test_v09_adversarial_transport_contract \
             tests.tooling.test_v09_adversarial_sharding_contract
 
-      - name: Test First Boot, bootstrap, migration, update and hardware contracts
+      - name: Test exact-source v0.9 regression contracts
         run: |
           set -euo pipefail
           cargo fmt --all -- --check
@@ -131,16 +194,6 @@ jobs:
             -p linura-update \
             -p linura-hardware
           cargo build --locked --release -p linura-firstboot --bin linura-firstboot
-          cargo build --locked --release -p linura-bootstrap \
-            --features qualification-harness --bin linura-bootstrap-qualification
-          cargo build --locked --release -p linura-bootstrap \
-            --features qualification-harness --bin linura-bootstrap-transition-qualification
-          cargo build --locked --release -p linura-authorityd \
-            --features v09-migration-qualification --bin linura-migrations-qualification
-          cargo build --locked --release -p linura-update \
-            --features qualification-harness --bin linura-update-qualification
-          cargo build --locked --release -p linura-update \
-            --features qualification-harness --bin linura-update-evidence-verifier-qualification
           ./target/release/linura-firstboot --self-check
           ./target/release/linura-firstboot --qualification-environment | grep -Fx 'id=qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless'
           ./target/release/linura-firstboot --qualification-environment | grep -Fx 'kind=qualification-environment'
@@ -151,7 +204,23 @@ jobs:
           fi
           ./target/release/linura-firstboot --qualification-environment | grep -Fx "status=$expected_environment_status"
 
+      - name: Build exact-source adversarial qualification binaries
+        if: needs.scope.outputs.full_qualification == 'true'
+        run: |
+          set -euo pipefail
+          cargo build --locked --release -p linura-bootstrap \
+            --features qualification-harness --bin linura-bootstrap-qualification
+          cargo build --locked --release -p linura-bootstrap \
+            --features qualification-harness --bin linura-bootstrap-transition-qualification
+          cargo build --locked --release -p linura-authorityd \
+            --features v09-migration-qualification --bin linura-migrations-qualification
+          cargo build --locked --release -p linura-update \
+            --features qualification-harness --bin linura-update-qualification
+          cargo build --locked --release -p linura-update \
+            --features qualification-harness --bin linura-update-evidence-verifier-qualification
+
       - name: Upload exact-source adversarial qualification binaries
+        if: needs.scope.outputs.full_qualification == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: linura-v09-adversarial-binaries-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
@@ -167,7 +236,8 @@ jobs:
 
   offline-reference:
     name: v0.9 offline QualificationEnvironment VM
-    needs: contract
+    needs: [scope, contract]
+    if: needs.scope.outputs.full_qualification == 'true'
     uses: ./.github/workflows/vm-acceptance.yml
     permissions:
       contents: read
@@ -177,7 +247,8 @@ jobs:
 
   adversarial-security:
     name: v0.9 adversarial bootstrap and Q11
-    needs: contract
+    needs: [scope, contract]
+    if: needs.scope.outputs.full_qualification == 'true'
     uses: ./.github/workflows/v09-adversarial-security.yml
     permissions:
       actions: read
@@ -185,9 +256,24 @@ jobs:
     with:
       source_sha: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
 
+  regression-proof:
+    name: v0.9 exact-source regression proof
+    needs: [scope, contract]
+    if: needs.scope.outputs.full_qualification != 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Confirm bounded regression lane
+        run: |
+          set -euo pipefail
+          test "${{ needs.scope.result }}" = success
+          test "${{ needs.contract.result }}" = success
+          test "${{ needs.scope.outputs.full_qualification }}" = false
+          printf 'v0.9 exact-source regression passed for %s\n' "$SOURCE_SHA"
+
   qualification-proof:
     name: bind v0.9 qualification evidence
-    needs: [contract, offline-reference, adversarial-security]
+    needs: [scope, contract, offline-reference, adversarial-security]
+    if: needs.scope.outputs.full_qualification == 'true'
     runs-on: ubuntu-24.04
     env:
       EVIDENCE_ROOT: /tmp/linura-v09-vm
