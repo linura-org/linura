@@ -35,6 +35,10 @@ fn component_maturity() -> Result<(), String> {
     run("python3", &["tools/check_component_maturity.py"])
 }
 
+fn desktop_identity() -> Result<(), String> {
+    run("python3", &["tools/check_desktop_identity.py"])
+}
+
 fn check() -> Result<(), String> {
     run("cargo", &["fmt", "--all", "--check"])?;
     run(
@@ -58,6 +62,7 @@ fn check() -> Result<(), String> {
     component_maturity()?;
     authority_foundation()?;
     run("python3", &["scripts/validate_assets.py"])?;
+    desktop_identity()?;
     release_contracts()?;
     run(
         "python3",
@@ -79,6 +84,7 @@ fn repo() -> Result<(), String> {
     component_maturity()?;
     authority_foundation()?;
     run("python3", &["scripts/validate_assets.py"])?;
+    desktop_identity()?;
     release_contracts()
 }
 

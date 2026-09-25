@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Linura
+Comment=The intelligent system layer for Linux
+Exec=linura-control-center
+Icon=org.linura.Linura
+Terminal=false
+Categories=System;Settings;
+Keywords=Linux;automation;policy;system;
+StartupNotify=true
