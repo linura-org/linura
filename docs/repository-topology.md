@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Linura uses a mixed repository topology: executable/runtime implementation, reusable Rust crates, privileged boundaries, declarative product assets, qualification evidence, packaging, schemas, repository infrastructure, and documentation intentionally live in different roots.
+Linura uses a mixed repository topology: executable/runtime implementation, reusable Rust crates, language bindings, privileged boundaries, declarative product assets, qualification evidence, packaging, schemas, repository infrastructure, and documentation intentionally live in different roots.
 
 A top-level directory is therefore **not** evidence that a separate implementation should exist there. The repository must nevertheless avoid empty or README-only "future" shells because they make implemented subsystems look unfinished and create ambiguous ownership.
 
@@ -10,7 +10,7 @@ A top-level directory is therefore **not** evidence that a separate implementati
 
 ## Rules
 
-1. Runtime/product implementation belongs under `apps/`, `crates/`, `executors/`, `verifiers/`, or `tools/`.
+1. Runtime/product implementation belongs under `apps/`, `bindings/`, `crates/`, `executors/`, `verifiers/`, or `tools/`.
 2. Declarative/data roots may share a domain name with a crate only when their role is explicit in the topology contract.
 3. README-only top-level placeholders are forbidden. A future subsystem belongs in roadmap/docs until it owns a real artifact.
 4. Every new tracked top-level root, including dot-prefixed roots, requires an explicit topology-contract entry and a concrete purpose.
@@ -25,6 +25,7 @@ A top-level directory is therefore **not** evidence that a separate implementati
 | `.github/` | infrastructure | retain | Contribution metadata plus CI, security, qualification, and release automation. |
 | `agents/` | declarative | retain | Agent skills and specialist declarations; runtime is `crates/linura-agent-runtime`. |
 | `apps/` | implementation | retain | Runnable product entry points and daemons. |
+| `bindings/` | implementation | retain | Language bindings and package-native non-privileged client surfaces. |
 | `bootstrap/` | legacy placeholder | **remove** | Stale README-only shell. Bootstrap implementation is already split across First Boot/bootstrap/migration/update components. |
 | `capabilities/` | declarative | retain | Capability blueprints/configuration; implementation is `crates/linura-capability-sdk`. |
 | `contracts/` | contract | retain | Machine-readable repository/release/layering/stability contracts. |

@@ -75,6 +75,17 @@ authority_role = "package-facade"
 scope = "canonical top-level Rust package identity with an intentionally minimal public surface and no runtime, policy, provider, executor or persistence authority"
 
 [[component]]
+id = "linura-python"
+path = "bindings/python"
+kind = "binding"
+workspace_member = false
+maturity = "foundation"
+activation_milestone = "v0.10.0"
+release_artifact = false
+authority_role = "client"
+scope = "canonical PyPI package identity and dependency-free non-privileged Python entry point; no D-Bus connection, command execution, policy, provider, executor or persistence authority"
+
+[[component]]
 id = "linura-agent-runtime"
 path = "crates/linura-agent-runtime"
 kind = "crate"

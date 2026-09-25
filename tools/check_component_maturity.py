@@ -14,12 +14,12 @@ ALLOWED_MATURITY = (
     "integrated-experimental",
     "stable",
 )
-ALLOWED_KINDS = {"app", "crate", "executor", "verifier", "tool", "planned-app", "shell"}
+ALLOWED_KINDS = {"app", "binding", "crate", "executor", "verifier", "tool", "planned-app", "shell"}
 VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 RELEASE_BINARIES_COMMAND = "python3 tools/check_component_maturity.py --release-binaries"
-RELEASE_PAYLOAD_VERIFY_COMMAND = (
-    'python3 tools/release_verify.py "$PAYLOAD_DIR" --component-contract contracts/components.toml'
-)
+RELEASE_PAYLOAD_VERIFY_COMMAND = 'python3 tools/release_verify.py "$PAYLOAD_DIR"'
+RELEASE_PAYLOAD_COMPONENT_CONTRACT = "--component-contract contracts/components.toml"
+RELEASE_PAYLOAD_PYTHON_CONTRACT = "--python-package bindings/python/pyproject.toml"
 
 
 def version_key(value: str) -> tuple[int, int, int]:
@@ -288,9 +288,18 @@ def check(root: Path) -> list[str]:
         failures.append(
             "release workflow must derive both assembly and reproduction binary sets from contracts/components.toml"
         )
-    if RELEASE_PAYLOAD_VERIFY_COMMAND not in release_text:
+    required_payload_verification = (
+        RELEASE_PAYLOAD_VERIFY_COMMAND,
+        RELEASE_PAYLOAD_COMPONENT_CONTRACT,
+        RELEASE_PAYLOAD_PYTHON_CONTRACT,
+    )
+    missing_payload_verification = [
+        fragment for fragment in required_payload_verification if fragment not in release_text
+    ]
+    if missing_payload_verification:
         failures.append(
-            "release workflow must verify the complete payload against contracts/components.toml"
+            "release workflow must verify the complete payload against component and Python package "
+            f"contracts; missing {missing_payload_verification}"
         )
 
     try:

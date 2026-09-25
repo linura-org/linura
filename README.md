@@ -150,6 +150,8 @@ apps/
   linura-agent-ui/             planned conversational Linura Agent client
   linura-shell/                integrated-experimental Quickshell/QML desktop shell host
     ui/                       first-party Linura QML UI component foundation
+bindings/
+  python/                      canonical PyPI package and non-privileged Python entry point
 crates/
   linura/                      canonical top-level Rust crate
   linura-core/                 IDs, actions, semantic reasons, invariants

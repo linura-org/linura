@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 from typing import Callable
 
 ALLOWED = {"experimental", "preview", "stable"}
-KINDS = {"dbus-interface", "json-schema", "cli", "rust-sdk"}
+KINDS = {"dbus-interface", "json-schema", "cli", "rust-sdk", "python-sdk"}
 REGISTRY_PATH = "contracts/stability.toml"
 
 
@@ -230,8 +230,8 @@ def _artifact_compatible(kind: object, baseline: str, current: str) -> bool:
             return json.loads(baseline) == json.loads(current)
         except json.JSONDecodeError:
             return False
-    # CLI and Rust SDK stability are intentionally conservative until a typed semantic
-    # compatibility checker is introduced: a Stable same-generation source contract is immutable.
+    # CLI, Rust SDK and Python SDK stability are intentionally conservative until a typed
+    # semantic compatibility checker is introduced: a Stable same-generation source contract is immutable.
     return baseline == current
 
 

@@ -35,7 +35,6 @@ jobs:
       contents: read
       actions: read
       attestations: read
-      id-token: write
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_VERSION: ${{ inputs.version }}
@@ -256,13 +255,31 @@ jobs:
             --directory "$PROOF_DIR/release-payload" \
             --tag "$RELEASE_TAG" \
             --source-sha "$SOURCE_SHA"
-          python3 tools/release_verify.py "$PROOF_DIR/release-payload"
+          python3 tools/release_verify.py "$PROOF_DIR/release-payload" \
+            --component-contract contracts/components.toml \
+            --python-package bindings/python/pyproject.toml
           while IFS= read -r -d '' file; do
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
           done < <(find "$PROOF_DIR/release-payload" -maxdepth 1 -type f -print0)
           while IFS= read -r -d '' file; do
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
           done < <(find "$PROOF_DIR/qualification" -mindepth 2 -maxdepth 2 -type f -print0)
+
+      - name: Preflight PyPI package version
+        run: |
+          set -euo pipefail
+          wheel="$(find "$PROOF_DIR/release-payload" -maxdepth 1 -type f -name 'linura-*.whl' -print -quit)"
+          test -n "$wheel"
+          test "$(find "$PROOF_DIR/release-payload" -maxdepth 1 -type f -name 'linura-*.whl' | wc -l)" -eq 1
+          status="$(python3 tools/pypi_verify.py \
+            --pyproject bindings/python/pyproject.toml \
+            --artifact "$wheel" \
+            --allow-missing \
+            --download)"
+          case "$status" in
+            exact|missing) ;;
+            *) echo "unexpected PyPI preflight status: $status" >&2; exit 1 ;;
+          esac
 
       - name: Preflight immutable version identity
         run: |
@@ -280,7 +297,6 @@ jobs:
       contents: write
       actions: read
       attestations: read
-      id-token: write
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_VERSION: ${{ inputs.version }}
@@ -316,7 +332,9 @@ jobs:
             --directory "$PROOF_DIR/release-payload" \
             --tag "$RELEASE_TAG" \
             --source-sha "$SOURCE_SHA"
-          python3 tools/release_verify.py "$PROOF_DIR/release-payload"
+          python3 tools/release_verify.py "$PROOF_DIR/release-payload" \
+            --component-contract contracts/components.toml \
+            --python-package bindings/python/pyproject.toml
           while IFS= read -r -d '' file; do
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
           done < <(find "$PROOF_DIR/release-payload" -maxdepth 1 -type f -print0)
@@ -504,10 +522,141 @@ jobs:
           print(f"Published {release['html_url']}")
           PY
 
-  verification-dispatch:
-    name: dispatch independent verification
+  pypi-preflight:
+    name: prepare sealed Python wheel for PyPI
     needs: [validate, publish]
     if: ${{ needs.validate.result == 'success' && needs.publish.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      publish_required: ${{ steps.pypi.outputs.publish_required }}
+    permissions:
+      actions: read
+      contents: read
+      attestations: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      PROOF_RUN_ID: ${{ inputs.proof_run_id }}
+      PROOF_DIR: /tmp/linura-proof
+      PYPI_DIR: /tmp/linura-pypi
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha }}
+
+      - name: Download and verify exact proven Python artifact
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          rm -rf "$PROOF_DIR" "$PYPI_DIR"
+          mkdir -p "$PROOF_DIR" "$PYPI_DIR"
+          gh run download "$PROOF_RUN_ID" \
+            --name "linura-trusted-release-proof-$SOURCE_SHA" \
+            --dir "$PROOF_DIR"
+          python3 tools/release_verify.py "$PROOF_DIR/release-payload" \
+            --component-contract contracts/components.toml \
+            --python-package bindings/python/pyproject.toml
+          wheel="$(find "$PROOF_DIR/release-payload" -maxdepth 1 -type f -name 'linura-*.whl' -print -quit)"
+          test -n "$wheel"
+          test "$(find "$PROOF_DIR/release-payload" -maxdepth 1 -type f -name 'linura-*.whl' | wc -l)" -eq 1
+          gh attestation verify "$wheel" --repo "$GITHUB_REPOSITORY"
+          cp "$wheel" "$PYPI_DIR/"
+
+      - name: Determine PyPI publication requirement
+        id: pypi
+        run: |
+          set -euo pipefail
+          wheel="$(find "$PYPI_DIR" -maxdepth 1 -type f -name 'linura-*.whl' -print -quit)"
+          test -n "$wheel"
+          status="$(python3 tools/pypi_verify.py \
+            --pyproject bindings/python/pyproject.toml \
+            --artifact "$wheel" \
+            --allow-missing \
+            --download)"
+          case "$status" in
+            missing) printf 'publish_required=true\n' >> "$GITHUB_OUTPUT" ;;
+            exact) printf 'publish_required=false\n' >> "$GITHUB_OUTPUT" ;;
+            *) echo "unexpected PyPI publication status: $status" >&2; exit 1 ;;
+          esac
+
+      - name: Persist exact proven Python artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-pypi-${{ inputs.source_sha }}
+          path: /tmp/linura-pypi/
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
+  publish-pypi:
+    name: publish sealed Python wheel to PyPI
+    needs: pypi-preflight
+    if: ${{ needs.pypi-preflight.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/linura
+    permissions:
+      actions: read
+      id-token: write
+    steps:
+      - name: Download exact proven Python artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-pypi-${{ inputs.source_sha }}
+          path: /tmp/linura-pypi/
+
+      - name: Publish exact proven wheel to PyPI
+        if: needs.pypi-preflight.outputs.publish_required == 'true'
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: /tmp/linura-pypi/
+          print-hash: true
+
+  verify-pypi:
+    name: verify exact PyPI publication
+    needs: [pypi-preflight, publish-pypi]
+    if: ${{ needs.pypi-preflight.result == 'success' && needs.publish-pypi.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    env:
+      PYPI_DIR: /tmp/linura-pypi
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha }}
+
+      - name: Download exact proven Python artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-pypi-${{ inputs.source_sha }}
+          path: /tmp/linura-pypi/
+
+      - name: Verify exact PyPI publication
+        run: |
+          set -euo pipefail
+          wheel="$(find "$PYPI_DIR" -maxdepth 1 -type f -name 'linura-*.whl' -print -quit)"
+          test -n "$wheel"
+          python3 tools/pypi_verify.py \
+            --pyproject bindings/python/pyproject.toml \
+            --artifact "$wheel" \
+            --download \
+            --retries 12 \
+            --retry-delay 5
+
+  verification-dispatch:
+    name: dispatch independent verification
+    needs: [validate, publish, verify-pypi]
+    if: ${{ needs.validate.result == 'success' && needs.publish.result == 'success' && needs.verify-pypi.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
       actions: write

@@ -8,6 +8,11 @@ import re
 import sys
 import tomllib
 
+if __package__:
+    from .python_package_version import Pep440VersionError, wheel_version
+else:
+    from python_package_version import Pep440VersionError, wheel_version
+
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 FIXED_RELEASE_PAYLOAD_FILES = {
     "BUILD-ENVIRONMENT.json",
@@ -26,6 +31,18 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def declared_python_wheel(project_path: Path) -> str:
+    data = tomllib.loads(project_path.read_text(encoding="utf-8"))
+    project = data.get("project")
+    if not isinstance(project, dict):
+        raise ValueError("Python package metadata is missing [project]")
+    name = project.get("name")
+    version = project.get("version")
+    if name != "linura" or not isinstance(version, str) or not version:
+        raise ValueError("Python package identity must be linura with an explicit version")
+    return f"linura-{wheel_version(version)}-py3-none-any.whl"
 
 
 def declared_release_binaries(contract_path: Path) -> set[str]:
@@ -116,6 +133,7 @@ def main() -> int:
     parser.add_argument("directory", type=Path)
     parser.add_argument("--manifest", default="SHA256SUMS")
     parser.add_argument("--component-contract", type=Path)
+    parser.add_argument("--python-package", type=Path)
     args = parser.parse_args()
 
     directory = args.directory.resolve()
@@ -132,6 +150,11 @@ def main() -> int:
             failures.append(f"cannot load component release contract: {error}")
         else:
             expected_names = binaries | FIXED_RELEASE_PAYLOAD_FILES
+            if args.python_package is not None:
+                try:
+                    expected_names.add(declared_python_wheel(args.python_package.resolve()))
+                except (OSError, tomllib.TOMLDecodeError, ValueError, Pep440VersionError) as error:
+                    failures.append(f"cannot load Python package contract: {error}")
             if actual_names != expected_names:
                 unexpected = sorted(actual_names - expected_names)
                 missing = sorted(expected_names - actual_names)

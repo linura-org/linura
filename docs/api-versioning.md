@@ -38,7 +38,7 @@ Stable is a deliberate compatibility commitment.
 
 Stable compatibility is checked against an accepted historical tree, not only metadata in the current checkout. The canonical validator selects the pull-request merge base (or previous protected-main commit) and enforces that a Stable contract cannot be removed, downgraded or rewritten in place under the same generation.
 
-D-Bus validation permits additive members but preserves every previously published method, signal, property, interface annotation, argument shape and member annotation. JSON Schema, CLI and Rust SDK contracts currently use a conservative same-generation comparison: once Stable, their checked contract artifact is immutable until a typed compatibility checker can prove a change is backward-compatible.
+D-Bus validation permits additive members but preserves every previously published method, signal, property, interface annotation, argument shape and member annotation. JSON Schema, CLI, Rust SDK and Python SDK contracts currently use a conservative same-generation comparison: once Stable, their checked contract artifact is immutable until a typed compatibility checker can prove a change is backward-compatible.
 
 Protected CI fetches full Git history so historical comparison cannot silently degrade into current-tree-only checking. Source archives/specialized tooling can provide an explicit prior tree with `--baseline-root`; CI/local Git workflows can override baseline discovery with `--baseline-ref` or `LINURA_CONTRACT_BASELINE_REF`.
 
@@ -69,6 +69,15 @@ Downgrading a Stable contract is not an acceptable substitute for versioning a b
 ### Control1
 
 `org.linura.Control1` is the established Experimental non-privileged local control/planning/query lineage. Its generation number does not imply mutation authority.
+
+### Python package
+
+The `linura` PyPI distribution is an Experimental non-privileged client-package
+surface. Package SemVer and Linura D-Bus contract generations are independent axes.
+The initial `0.0.1` Python surface exposes project/Control1 metadata and local
+`linuractl` discovery only; it does not connect to D-Bus, execute the CLI, or add
+mutation authority. Its source contract is registered as `python.linura` so any
+future Stable promotion requires the same explicit compatibility process as other SDKs.
 
 ### Authority1
 

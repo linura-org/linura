@@ -276,6 +276,57 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("needs.firstboot-qualification.result == 'success'", workflow)
         self.assertIn("needs.aggregate-proof.result == 'success'", workflow)
 
+    def test_python_package_publication_is_proof_first_and_independently_verified(self) -> None:
+        build = (ROOT / ".github/workflows/reusable-release-build.yml").read_text(
+            encoding="utf-8"
+        )
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        verification = (ROOT / ".github/workflows/release-verification.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Build exact-source Python wheel", build)
+        self.assertIn("Rebuild Python wheel independently", build)
+        self.assertEqual(build.count('PYTHON_WHEEL_SOURCE_DATE_EPOCH: "315532800"'), 2)
+        self.assertEqual(
+            build.count("actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c"),
+            2,
+        )
+        self.assertEqual(build.count('python-version: "3.12.10"'), 2)
+        self.assertEqual(build.count("Install hash-locked Python build toolchain"), 2)
+        self.assertEqual(build.count("--require-hashes"), 2)
+        self.assertEqual(build.count("--only-binary=:all:"), 2)
+        self.assertEqual(build.count("--no-build-isolation"), 2)
+        self.assertIn('"python_wheel_source_date_epoch"', build)
+        self.assertIn('"python_build_requirements_lock_sha256"', build)
+        self.assertEqual(
+            build.count('SOURCE_DATE_EPOCH="$PYTHON_WHEEL_SOURCE_DATE_EPOCH" python3 -m pip wheel'),
+            2,
+        )
+        self.assertIn("--python-package bindings/python/pyproject.toml", build)
+        self.assertIn("Preflight PyPI package version", release)
+        self.assertIn("pypi-preflight:", release)
+        self.assertIn("needs: [validate, publish]", release)
+        self.assertIn("Determine PyPI publication requirement", release)
+        pypi_preflight = release.split("\n  pypi-preflight:", 1)[1].split(
+            "\n  publish-pypi:", 1
+        )[0]
+        self.assertIn("Persist exact proven Python artifact", pypi_preflight)
+        self.assertIn("overwrite: true", pypi_preflight)
+        self.assertIn("publish-pypi:", release)
+        self.assertIn("environment:\n      name: pypi", release)
+        self.assertEqual(release.count("id-token: write"), 1)
+        self.assertIn("needs.pypi-preflight.outputs.publish_required == 'true'", release)
+        self.assertIn("pypa/gh-action-pypi-publish@", release)
+        self.assertIn("packages-dir: /tmp/linura-pypi/", release)
+        self.assertNotIn("skip-existing: true", release)
+        self.assertIn("verify-pypi:", release)
+        self.assertIn("Verify exact PyPI publication", release)
+        self.assertIn("needs: [validate, publish, verify-pypi]", release)
+        self.assertIn("Verify PyPI publication matches complete sealed artifact set", verification)
+        self.assertIn("python3 tools/pypi_verify.py", verification)
+        self.assertFalse((ROOT / ".github/workflows/publish-pypi.yml").exists())
+
     def test_release_promotion_verifies_v09_qualification_bound_proof(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn('receipt.get("schema_version") != 2', workflow)
