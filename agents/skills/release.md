@@ -15,6 +15,7 @@ Configure:
 - no organization administration permission, no secrets permission, no environment permission, and **no ruleset bypass**;
 - default-branch ruleset required approval count = **0** while App-created mechanical release PRs are part of the normal automatic path;
 - `release` environment has **no required reviewer** in automatic mode. It may still restrict deployment to protected `main` and hold publication-scoped credentials.
+- `crates-io` environment has **no required reviewer**, is restricted to protected `main`, and holds **no registry secret**; crates.io publication uses OIDC Trusted Publishing only.
 
 The workflows mint short-lived installation tokens with `actions/create-github-app-token` pinned to an immutable commit. Cleanup requests a narrower token (`Contents: write`, `Pull requests: read`). The App private key is never passed to scripts or shell commands; only the token-minting action receives it.
 
@@ -33,11 +34,13 @@ A blanket approving-review requirement or a required reviewer on the `release` e
 
 After the reviewed readiness merge, the normal path is:
 
-`release: ready` → Release Preparation → protected mechanical preparation PR → Release Authorization → protected zero-diff authorization PR → native exact-main gates → Trusted Release Proof → Promotion → tag-last Release → exact-tag independent Release Verification → Release Closure Handoff → protected deterministic Post Release Closure PR → native closure-main gates → terminal leased cleanup.
+`release: ready` → Release Preparation → protected mechanical preparation PR → Release Authorization → protected zero-diff authorization PR → native exact-main gates → Trusted Release Proof → Promotion → tag-last Release → exact-tag independent Release Verification → crates.io Trusted Publication → Release Closure Handoff → protected deterministic Post Release Closure PR → native closure-main gates → terminal leased cleanup.
 
 No conversational review, environment approval, workflow approval, branch push, proof dispatch, release dispatch, closure dispatch, or cleanup command is part of the normal path after the reviewed readiness boundary.
 
 ### Release Preparation
+
+The canonical `linura` crate inherits `workspace.package.version`; `0.0.1` was only the bootstrap reservation release. Future crate publication versions are advanced by this preparation stage before any irreversible publication.
 
 `Release Preparation` triggers from the exact `release: ready ...` merge on protected `main`.
 
@@ -87,7 +90,7 @@ The `release` environment is an isolation boundary, not a second human gate in a
 
 `Verify published release` runs from the exact immutable tag in the normal path. The authenticated `verify-release/vX.Y.Z` branch is an emergency recovery mechanism only and is **not** pattern-deleted by terminal cleanup; exceptional recovery refs require an explicit exact-SHA ledger entry if cleanup is desired.
 
-A successful verifier dispatches `Release Closure Handoff`, which binds the exact verification run/tag/source/event/ref and dispatches `Post Release Closure`.
+A successful verifier persists bound tag/source/event/ref evidence and terminates. GitHub's terminal `workflow_run` event then starts the crates.io handoff, which authenticates that completed verifier (including the supported marker-only recovery shape), qualifies the canonical `linura` crate without OIDC authority, permits only a short-lived Trusted Publishing credential in the dependent publish job, requires any pre-existing immutable crate version to match the qualified package checksum, and independently verifies the registry checksum. Only after checksum verification and proof that the version is not yanked does the crates.io workflow persist exact publication evidence and dispatch `Release Closure Handoff`. The handoff and final `Post Release Closure` both authenticate the exact successful crates.io run plus bound version/checksum evidence before terminal state may advance.
 
 Post Release Closure:
 
@@ -125,7 +128,7 @@ Cleanup uses a narrower Release App token and is a separate retryable transactio
 - The automatic release-mode default-branch ruleset must not require approving reviews on machine-only post-readiness PRs. Semantic review is completed before the `release: ready` merge.
 - Machine PRs must be created by the Linura Release GitHub App, not repository `GITHUB_TOKEN`, because `GITHUB_TOKEN`-created PR activity may produce approval-gated `action_required` native runs.
 - Native PR checks are authoritative for PR merge. Explicit `workflow_dispatch` runs are supplemental exact-SHA evidence/recovery, never a substitute for the ruleset's native PR instances.
-- Read-only qualification/proof jobs continue using the narrower repository `GITHUB_TOKEN` where recursion is irrelevant. Workflow-to-workflow `workflow_dispatch` is acceptable for proof/promotion/release/verification/closure handoffs.
+- Read-only qualification/proof jobs continue using the narrower repository `GITHUB_TOKEN` where recursion is irrelevant. `workflow_dispatch` remains the explicit proof/promotion/release/verification/closure transport; the verifier-to-crates.io edge is intentionally a terminal `workflow_run` handoff so registry publication cannot begin before verification completes.
 - Every irreversible mutation is preceded by exact identity and evidence checks; retries re-prove state instead of assuming the previous attempt stopped before mutation.
 - A changed head invalidates prior structural evidence.
 - Permission drift, missing App configuration, unresolved findings, failed gates, source drift or policy drift stop the release rather than degrading to bypass or manual normal-path intervention.

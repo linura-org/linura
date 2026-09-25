@@ -28,7 +28,7 @@ This readiness merge is the **last semantic review boundary**. Automation does n
 
 ### Deterministic preparation
 
-Release Preparation changes workspace-owned Cargo version metadata only. Its candidate is a single-parent child of the exact readiness source and differs only in `Cargo.toml` and `Cargo.lock`, deterministically regenerated from that source.
+Release Preparation changes workspace-owned Cargo version metadata only. The canonical `linura` crate is workspace-versioned as well: its manually published `0.0.1` is a bootstrap reservation release, while all subsequent crate versions advance with `workspace.package.version` before proof, tagging, or publication. Its candidate is a single-parent child of the exact readiness source and differs only in `Cargo.toml` and `Cargo.lock`, deterministically regenerated from that source.
 
 A retried candidate is re-proved for branch/head/base/parent/path/byte identity before reuse and again immediately before merge. New machine branches are content-addressed as `automation/release-prep-vX.Y.Z-<full-candidate-sha>`; the full SHA is later also the cleanup deletion lease.
 
@@ -100,13 +100,13 @@ A human review finding remains blocking until resolved. Machine-only preparation
 
 Preparation is deterministic two-file metadata. Authorization is tree-identical zero-diff. Closure is generated only from independently verified immutable publication evidence, is restricted to terminal bookkeeping surfaces and preserves the frozen release contract byte-for-byte. All three still require exact structural proof, native protected checks and zero unresolved review threads.
 
-The Release workflow itself has no GitHub Environment dependency in the automatic mode. Trusted Release Proof plus Promotion/closure-readiness are the machine-verifiable publication boundary. Reintroducing an environment reviewer would be a release-contract change and would invalidate the claim that the lifecycle is automatic after readiness.
+The Release workflow itself has no GitHub Environment dependency in the automatic mode. Trusted Release Proof plus Promotion/closure-readiness are the machine-verifiable GitHub publication boundary. The separate `crates-io` environment is a credential-isolation boundary for OIDC Trusted Publishing only: it is restricted to protected `main`, stores no registry secret and has no required reviewer. Reintroducing an environment reviewer would be a release-contract change and would invalidate the claim that the lifecycle is automatic after readiness.
 
 ### One verification-to-closure path
 
 Normal immutable publication explicitly dispatches `Verify published release` from the exact release tag. The only alternate verifier trigger is the authenticated `verify-release/vX.Y.Z` emergency recovery branch.
 
-A successful verifier dispatches `Release Closure Handoff`. The handoff binds exact verification/tag/source/event/ref identity and dispatches `Post Release Closure`. There is One verification-to-closure path; Post Release Closure is dispatch-only.
+A successful verifier persists a bound verification-evidence artifact and terminates. The canonical crates.io workflow starts only from GitHub's persisted terminal `workflow_run` event for `Verify published release`; it authenticates the completed run plus exact tag/source/event/ref, including the marker-only `verify-release/vX.Y.Z` recovery shape, before qualification. Qualification runs without OIDC authority; only the dependent `crates-io` environment job may obtain a short-lived Trusted Publishing credential. It rejects stale-main/tag drift and requires any existing immutable crate version to have the exact qualified checksum. After independent registry checksum and non-yanked availability verification succeeds, the crates.io workflow persists a publication-evidence artifact binding its exact run ID, source, release tag, verification identity, crate version and checksum. It dispatches `Release Closure Handoff` with that exact crates.io run ID; both the handoff and `Post Release Closure` authenticate the successful crates.io run plus artifact and live non-yanked registry state before terminal mutation. There is one durable verification-to-registry-to-closure path; direct closure dispatch without matching registry evidence fails closed.
 
 Closure deterministically advances roadmap/qualification/current-release documentation, creates a Release App-owned protected PR on `automation/post-release-vX.Y.Z-<full-candidate-sha>`, waits for native PR gates and merges normally. It does not clean branches inline.
 

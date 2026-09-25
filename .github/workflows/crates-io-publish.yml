@@ -1,0 +1,457 @@
+name: Publish linura crate
+
+run-name: 'crates.io after verification ${{ github.event.workflow_run.id }}'
+
+on:
+  workflow_run:
+    workflows: ["Verify published release"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crates-io-verification-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  bind-verification:
+    name: bind completed release verification
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      release_tag: ${{ steps.bind.outputs.release_tag }}
+      source_sha: ${{ steps.bind.outputs.source_sha }}
+      verification_run_id: ${{ steps.bind.outputs.verification_run_id }}
+      verification_event: ${{ steps.bind.outputs.verification_event }}
+      verification_ref: ${{ steps.bind.outputs.verification_ref }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+      TRIGGER_EVENT: ${{ github.event.workflow_run.event }}
+      TRIGGER_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      TRIGGER_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - name: Download terminal verification evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-release-verification-${{ github.event.workflow_run.id }}
+          path: verification-evidence
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Read candidate verification identity
+        id: candidate
+        run: |
+          set -euo pipefail
+          evidence="verification-evidence/evidence.json"
+          test "$(jq -r .schema "$evidence")" = "1"
+          release_tag="$(jq -r .tag "$evidence")"
+          source_sha="$(jq -r .source_sha "$evidence")"
+          verification_run_id="$(jq -r .verification_run_id "$evidence")"
+          verification_event="$(jq -r .verification_event "$evidence")"
+          verification_ref="$(jq -r .verification_ref "$evidence")"
+          [[ "$release_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$verification_run_id" =~ ^[0-9]+$ ]]
+          {
+            printf 'release_tag=%s\n' "$release_tag"
+            printf 'source_sha=%s\n' "$source_sha"
+            printf 'verification_run_id=%s\n' "$verification_run_id"
+            printf 'verification_event=%s\n' "$verification_event"
+            printf 'verification_ref=%s\n' "$verification_ref"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ steps.candidate.outputs.source_sha }}
+
+      - name: Authenticate terminal verification and recovery identity
+        id: bind
+        env:
+          RELEASE_TAG: ${{ steps.candidate.outputs.release_tag }}
+          SOURCE_SHA: ${{ steps.candidate.outputs.source_sha }}
+          VERIFICATION_RUN_ID: ${{ steps.candidate.outputs.verification_run_id }}
+          VERIFICATION_EVENT: ${{ steps.candidate.outputs.verification_event }}
+          VERIFICATION_REF: ${{ steps.candidate.outputs.verification_ref }}
+        run: |
+          set -euo pipefail
+          test "$VERIFICATION_RUN_ID" = "$TRIGGER_RUN_ID"
+          test "$VERIFICATION_EVENT" = "$TRIGGER_EVENT"
+          test "$VERIFICATION_REF" = "$TRIGGER_HEAD_BRANCH"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VERIFICATION_RUN_ID")"
+          test "$(jq -r .path <<<"$run")" = ".github/workflows/release-verification.yml"
+          test "$(jq -r .status <<<"$run")" = "completed"
+          test "$(jq -r .conclusion <<<"$run")" = "success"
+          test "$(jq -r .event <<<"$run")" = "$VERIFICATION_EVENT"
+          test "$(jq -r .head_branch <<<"$run")" = "$VERIFICATION_REF"
+          test "$(jq -r .head_sha <<<"$run")" = "$TRIGGER_HEAD_SHA"
+
+          tag_source_sha="$(git rev-list -n1 "$RELEASE_TAG")"
+          test "$tag_source_sha" = "$SOURCE_SHA"
+          current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          test "$current_main" = "$SOURCE_SHA"
+
+          verification_head_sha="$(jq -r .head_sha <<<"$run")"
+          if [[ "$VERIFICATION_REF" == "$RELEASE_TAG" ]]; then
+            test "$VERIFICATION_EVENT" = "workflow_dispatch"
+            test "$verification_head_sha" = "$SOURCE_SHA"
+          elif [[ "$VERIFICATION_REF" == "verify-release/$RELEASE_TAG" ]]; then
+            test "$VERIFICATION_EVENT" = "push"
+            git fetch origin "refs/heads/$VERIFICATION_REF:refs/remotes/origin/$VERIFICATION_REF" --force
+            test "$(git rev-parse "origin/$VERIFICATION_REF")" = "$verification_head_sha"
+            parent_line="$(git rev-list --parents -n1 "$verification_head_sha")"
+            test "$(wc -w <<<"$parent_line")" -eq 2
+            recovery_base="$(awk '{print $2}' <<<"$parent_line")"
+            git merge-base --is-ancestor "$recovery_base" origin/main
+            marker_path=".github/release-verification-recovery/$RELEASE_TAG"
+            changed_paths="$(git diff --name-only "$recovery_base" "$verification_head_sha")"
+            test "$changed_paths" = "$marker_path"
+            test "$(git rev-parse "$recovery_base:.github/workflows/release-verification.yml")" = \
+              "$(git rev-parse "$verification_head_sha:.github/workflows/release-verification.yml")"
+          else
+            echo "verification ref is neither exact release tag nor approved recovery ref: $VERIFICATION_REF" >&2
+            exit 1
+          fi
+
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          test "$(jq -r .tag_name <<<"$release")" = "$RELEASE_TAG"
+          test "$(jq -r .draft <<<"$release")" = "false"
+          test "$(jq -r .immutable <<<"$release")" = "true"
+
+          {
+            printf 'release_tag=%s\n' "$RELEASE_TAG"
+            printf 'source_sha=%s\n' "$SOURCE_SHA"
+            printf 'verification_run_id=%s\n' "$VERIFICATION_RUN_ID"
+            printf 'verification_event=%s\n' "$VERIFICATION_EVENT"
+            printf 'verification_ref=%s\n' "$VERIFICATION_REF"
+          } >> "$GITHUB_OUTPUT"
+
+  qualify:
+    name: qualify crates.io candidate without publication authority
+    needs: bind-verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      crate_version: ${{ steps.package.outputs.crate_version }}
+      package_sha256: ${{ steps.package.outputs.package_sha256 }}
+      rust_version: ${{ steps.toolchain.outputs.rust_version }}
+    env:
+      RELEASE_TAG: ${{ needs.bind-verification.outputs.release_tag }}
+      SOURCE_SHA: ${{ needs.bind-verification.outputs.source_sha }}
+      VERIFICATION_RUN_ID: ${{ needs.bind-verification.outputs.verification_run_id }}
+      VERIFICATION_EVENT: ${{ needs.bind-verification.outputs.verification_event }}
+      VERIFICATION_REF: ${{ needs.bind-verification.outputs.verification_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ needs.bind-verification.outputs.source_sha }}
+
+      - name: Resolve repository toolchain contract as data
+        id: toolchain
+        run: |
+          set -euo pipefail
+          rust_version="$(python3 - <<'PY'
+          import pathlib
+          import re
+
+          contract = pathlib.Path("tools/codex/versions.env").read_text(encoding="utf-8").splitlines()
+          values = {}
+          for raw in contract:
+              line = raw.strip()
+              if not line or line.startswith("#"):
+                  continue
+              if "=" not in line:
+                  raise SystemExit(f"invalid toolchain contract line: {raw!r}")
+              key, value = line.split("=", 1)
+              if not re.fullmatch(r"[A-Z0-9_]+", key):
+                  raise SystemExit(f"invalid toolchain key: {key!r}")
+              if key in values:
+                  raise SystemExit(f"duplicate toolchain key: {key}")
+              values[key] = value
+
+          rust_version = values.get("RUST_VERSION")
+          if rust_version is None or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", rust_version) is None:
+              raise SystemExit(f"invalid RUST_VERSION: {rust_version!r}")
+          print(rust_version)
+          PY
+          )"
+          printf 'RUST_VERSION=%s\n' "$rust_version" >> "$GITHUB_ENV"
+          printf 'rust_version=%s\n' "$rust_version" >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+
+      - name: Re-prove immutable release source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$remote_main" = "$SOURCE_SHA"
+          tag_source_sha="$(git rev-list -n1 "$RELEASE_TAG")"
+          test "$tag_source_sha" = "$SOURCE_SHA"
+
+      - name: Test and package canonical crate
+        id: package
+        run: |
+          set -euo pipefail
+          cargo test --locked -p linura
+          cargo package --locked -p linura
+          crate_version="$(python3 - <<'PY'
+          import json
+          import pathlib
+          import subprocess
+          import tomllib
+
+          manifest_path = pathlib.Path("crates/linura/Cargo.toml").resolve()
+          package = tomllib.loads(manifest_path.read_text(encoding="utf-8"))["package"]
+          if package.get("name") != "linura":
+              raise SystemExit("canonical package name changed from 'linura'")
+          if package.get("publish") != ["crates-io"]:
+              raise SystemExit("linura publish registry contract changed")
+
+          metadata = json.loads(
+              subprocess.check_output(
+                  ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
+                  text=True,
+              )
+          )
+          matches = [
+              item
+              for item in metadata["packages"]
+              if item.get("name") == "linura"
+              and pathlib.Path(item["manifest_path"]).resolve() == manifest_path
+          ]
+          if len(matches) != 1:
+              raise SystemExit(f"expected exactly one canonical linura package, found {len(matches)}")
+          print(matches[0]["version"])
+          PY
+          )"
+          package_path="target/package/linura-$crate_version.crate"
+          test -f "$package_path"
+          package_sha256="$(sha256sum "$package_path" | awk '{print $1}')"
+          [[ "$package_sha256" =~ ^[0-9a-f]{64}$ ]]
+          mkdir -p crates-io-candidate
+          cp "$package_path" crates-io-candidate/
+          jq -n \
+            --arg source_sha "$SOURCE_SHA" \
+            --arg release_tag "$RELEASE_TAG" \
+            --arg verification_run_id "$VERIFICATION_RUN_ID" \
+            --arg verification_event "$VERIFICATION_EVENT" \
+            --arg verification_ref "$VERIFICATION_REF" \
+            --arg crate_version "$crate_version" \
+            --arg package_sha256 "$package_sha256" \
+            '{schema:1,source_sha:$source_sha,release_tag:$release_tag,verification_run_id:$verification_run_id,verification_event:$verification_event,verification_ref:$verification_ref,crate:"linura",crate_version:$crate_version,package_sha256:$package_sha256}' \
+            > crates-io-candidate/evidence.json
+          printf 'crate_version=%s\n' "$crate_version" >> "$GITHUB_OUTPUT"
+          printf 'package_sha256=%s\n' "$package_sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload validated crates.io candidate evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-crates-io-candidate-${{ needs.bind-verification.outputs.source_sha }}
+          path: crates-io-candidate
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish independently verified crate
+    needs: [bind-verification, qualify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: crates-io
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ needs.bind-verification.outputs.release_tag }}
+      SOURCE_SHA: ${{ needs.bind-verification.outputs.source_sha }}
+      VERIFICATION_RUN_ID: ${{ needs.bind-verification.outputs.verification_run_id }}
+      VERIFICATION_EVENT: ${{ needs.bind-verification.outputs.verification_event }}
+      VERIFICATION_REF: ${{ needs.bind-verification.outputs.verification_ref }}
+      CRATE_VERSION: ${{ needs.qualify.outputs.crate_version }}
+      PACKAGE_SHA256: ${{ needs.qualify.outputs.package_sha256 }}
+      RUST_VERSION: ${{ needs.qualify.outputs.rust_version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ needs.bind-verification.outputs.source_sha }}
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-crates-io-candidate-${{ needs.bind-verification.outputs.source_sha }}
+          path: crates-io-candidate
+
+      - name: Consume validated candidate evidence
+        id: registry
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PACKAGE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          evidence="crates-io-candidate/evidence.json"
+          test "$(jq -r .schema "$evidence")" = "1"
+          test "$(jq -r .source_sha "$evidence")" = "$SOURCE_SHA"
+          test "$(jq -r .release_tag "$evidence")" = "$RELEASE_TAG"
+          test "$(jq -r .verification_run_id "$evidence")" = "$VERIFICATION_RUN_ID"
+          test "$(jq -r .verification_event "$evidence")" = "$VERIFICATION_EVENT"
+          test "$(jq -r .verification_ref "$evidence")" = "$VERIFICATION_REF"
+          test "$(jq -r .crate "$evidence")" = "linura"
+          test "$(jq -r .crate_version "$evidence")" = "$CRATE_VERSION"
+          test "$(jq -r .package_sha256 "$evidence")" = "$PACKAGE_SHA256"
+          package="crates-io-candidate/linura-$CRATE_VERSION.crate"
+          test -f "$package"
+          echo "$PACKAGE_SHA256  $package" | sha256sum --check --strict
+          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$remote_main" = "$SOURCE_SHA"
+          test "$(git rev-list -n1 "$RELEASE_TAG")" = "$SOURCE_SHA"
+          status="$(curl --silent --show-error --location --retry 3 --output "$RUNNER_TEMP/crates-io-version.json" --write-out '%{http_code}' --header "User-Agent: linura-release/$RELEASE_TAG (https://github.com/linura-org/linura)" "https://crates.io/api/v1/crates/linura/$CRATE_VERSION")"
+          case "$status" in
+            200)
+              published_sha="$(jq -r '.version.checksum // empty' "$RUNNER_TEMP/crates-io-version.json")"
+              published_yanked="$(jq -r '.version.yanked' "$RUNNER_TEMP/crates-io-version.json")"
+              [[ "$published_sha" =~ ^[0-9a-f]{64}$ ]]
+              test "$published_sha" = "$PACKAGE_SHA256"
+              test "$published_yanked" = "false"
+              echo "already_published=true" >> "$GITHUB_OUTPUT"
+              ;;
+            404) echo "already_published=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "unexpected crates.io status: $status" >&2; exit 1 ;;
+          esac
+
+      - name: Install qualified Rust toolchain
+        if: steps.registry.outputs.already_published != 'true'
+        run: |
+          set -euo pipefail
+          [[ "$RUST_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+
+      - name: Reproduce validated package without executing crate code
+        if: steps.registry.outputs.already_published != 'true'
+        run: |
+          set -euo pipefail
+          cargo package --locked --no-verify -p linura
+          candidate="target/package/linura-$CRATE_VERSION.crate"
+          echo "$PACKAGE_SHA256  $candidate" | sha256sum --check --strict
+
+      - name: Revalidate current main immediately before authentication
+        if: steps.registry.outputs.already_published != 'true'
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$SOURCE_SHA"
+          test "$(git rev-list -n1 "$RELEASE_TAG")" = "$SOURCE_SHA"
+
+      - name: Acquire short-lived crates.io credential
+        if: steps.registry.outputs.already_published != 'true'
+        id: crates_io_auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+
+      - name: Publish canonical crate
+        if: steps.registry.outputs.already_published != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates_io_auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$SOURCE_SHA"
+          test "$(git rev-list -n1 "$RELEASE_TAG")" = "$SOURCE_SHA"
+          cargo publish --locked --no-verify -p linura --registry crates-io
+
+      - name: Independently verify crates.io package checksum and availability
+        run: |
+          set -euo pipefail
+          verified=false
+          for _ in $(seq 1 30); do
+            if curl --silent --show-error --fail --location \
+              --header "User-Agent: linura-release/$RELEASE_TAG (https://github.com/linura-org/linura)" \
+              "https://crates.io/api/v1/crates/linura/$CRATE_VERSION" > "$RUNNER_TEMP/crates-io-published.json"; then
+              published_sha="$(jq -r '.version.checksum // empty' "$RUNNER_TEMP/crates-io-published.json")"
+              published_yanked="$(jq -r '.version.yanked' "$RUNNER_TEMP/crates-io-published.json")"
+              if [[ "$published_sha" == "$PACKAGE_SHA256" && "$published_yanked" == "false" ]]; then
+                verified=true
+                break
+              fi
+            fi
+            sleep 2
+          done
+          test "$verified" = "true"
+
+          mkdir -p crates-io-publication
+          jq -n \
+            --arg crates_io_run_id "$GITHUB_RUN_ID" \
+            --arg source_sha "$SOURCE_SHA" \
+            --arg release_tag "$RELEASE_TAG" \
+            --arg verification_run_id "$VERIFICATION_RUN_ID" \
+            --arg verification_event "$VERIFICATION_EVENT" \
+            --arg verification_ref "$VERIFICATION_REF" \
+            --arg crate_version "$CRATE_VERSION" \
+            --arg package_sha256 "$PACKAGE_SHA256" \
+            '{
+              schema: 1,
+              crates_io_run_id: $crates_io_run_id,
+              source_sha: $source_sha,
+              release_tag: $release_tag,
+              verification_run_id: $verification_run_id,
+              verification_event: $verification_event,
+              verification_ref: $verification_ref,
+              crate: "linura",
+              crate_version: $crate_version,
+              package_sha256: $package_sha256,
+              yanked: false
+            }' > crates-io-publication/evidence.json
+          echo "verified available crates.io linura $CRATE_VERSION checksum $PACKAGE_SHA256"
+
+      - name: Persist verified crates.io publication evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-crates-io-publication-${{ needs.bind-verification.outputs.verification_run_id }}
+          path: crates-io-publication/evidence.json
+          if-no-files-found: error
+          retention-days: 7
+
+  dispatch-closure:
+    name: dispatch terminal closure after registry verification
+    needs: [bind-verification, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.bind-verification.outputs.release_tag }}
+      VERIFIED_SOURCE_SHA: ${{ needs.bind-verification.outputs.source_sha }}
+      VERIFICATION_RUN_ID: ${{ needs.bind-verification.outputs.verification_run_id }}
+      VERIFICATION_EVENT: ${{ needs.bind-verification.outputs.verification_event }}
+      VERIFICATION_REF: ${{ needs.bind-verification.outputs.verification_ref }}
+      CRATES_IO_RUN_ID: ${{ github.run_id }}
+    steps:
+      - name: Dispatch terminal closure handoff
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
+          test "$current" = "$VERIFIED_SOURCE_SHA"
+          gh workflow run release-closure-handoff.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f tag="$RELEASE_TAG" \
+            -f source_sha="$VERIFIED_SOURCE_SHA" \
+            -f verification_run_id="$VERIFICATION_RUN_ID" \
+            -f verification_event="$VERIFICATION_EVENT" \
+            -f verification_ref="$VERIFICATION_REF" \
+            -f crates_io_run_id="$CRATES_IO_RUN_ID"
+          echo "dispatched terminal closure handoff for $RELEASE_TAG after crates.io checksum verification"

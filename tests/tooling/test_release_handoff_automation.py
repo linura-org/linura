@@ -22,6 +22,7 @@ class ReleaseHandoffAutomationTests(unittest.TestCase):
         (root / "docs" / "qualification").mkdir(parents=True)
         (root / "crates" / "alpha").mkdir(parents=True)
         (root / "crates" / "beta").mkdir(parents=True)
+        (root / "crates" / "linura").mkdir(parents=True)
 
         (root / "contracts" / "roadmap.toml").write_text(
             '''next_release = "v0.8.0"
@@ -47,7 +48,7 @@ qualification = "docs/qualification/v0.8.0.md"
 
         (root / "Cargo.toml").write_text(
             f'''[workspace]
-members = ["crates/alpha", "crates/beta"]
+members = ["crates/alpha", "crates/beta", "crates/linura"]
 
 [workspace.package]
 version = "{workspace_version}"
@@ -55,7 +56,7 @@ edition = "2024"
 ''',
             encoding="utf-8",
         )
-        for name in ("alpha", "beta"):
+        for name in ("alpha", "beta", "linura"):
             (root / "crates" / name / "Cargo.toml").write_text(
                 f'''[package]
 name = "{name}"
@@ -76,6 +77,10 @@ name = "beta"
 version = "{workspace_version}"
 
 [[package]]
+name = "linura"
+version = "{workspace_version}"
+
+[[package]]
 name = "external"
 version = "9.9.9"
 ''',
@@ -91,8 +96,13 @@ version = "9.9.9"
             cargo = (root / "Cargo.toml").read_text(encoding="utf-8")
             lock = (root / "Cargo.lock").read_text(encoding="utf-8")
             self.assertIn('version = "0.8.0"', cargo)
-            self.assertEqual(lock.count('version = "0.8.0"'), 2)
+            self.assertEqual(lock.count('version = "0.8.0"'), 3)
             self.assertIn('version = "9.9.9"', lock)
+
+    def test_canonical_crate_inherits_workspace_release_version(self) -> None:
+        canonical = (ROOT / "crates" / "linura" / "Cargo.toml").read_text(encoding="utf-8")
+        self.assertIn("version.workspace = true", canonical)
+        self.assertNotIn('version = "0.0.1"', canonical)
 
     def test_prepare_release_is_idempotent_at_target_and_rejects_regression(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -208,6 +218,7 @@ version = "9.9.9"
         promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         verification = (ROOT / ".github/workflows/release-verification.yml").read_text(encoding="utf-8")
+        crates_io = (ROOT / ".github/workflows/crates-io-publish.yml").read_text(encoding="utf-8")
         handoff = (ROOT / ".github/workflows/release-closure-handoff.yml").read_text(encoding="utf-8")
 
         self.assertIn("trusted-release-proof.yml", proof)
@@ -218,8 +229,25 @@ version = "9.9.9"
         self.assertIn("Create or verify immutable version tag", release)
         self.assertIn("verification-dispatch:", release)
         self.assertIn("release-verification.yml", release)
-        self.assertIn("dispatch terminal closure handoff", verification)
+        self.assertIn("Persist terminal verification handoff evidence", verification)
+        self.assertIn("workflow_run:", crates_io)
+        self.assertIn('workflows: ["Verify published release"]', crates_io)
+        self.assertNotIn("workflow_dispatch:", crates_io)
+        self.assertIn("Dispatch terminal closure handoff", crates_io)
+        self.assertIn("release-closure-handoff.yml", crates_io)
+        self.assertIn("Persist verified crates.io publication evidence", crates_io)
+        self.assertIn('["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"]', crates_io)
+        publish_job = crates_io.split("\n  publish:\n", 1)[1].split("\n  dispatch-closure:\n", 1)[0]
+        self.assertNotIn("source tools/codex/versions.env", publish_job)
+        self.assertIn("RUST_VERSION: ${{ needs.qualify.outputs.rust_version }}", publish_job)
+        self.assertIn('test "$published_yanked" = "false"', crates_io)
+        self.assertIn("crates_io_run_id", handoff)
+        self.assertIn("linura-crates-io-publication-", handoff)
         self.assertIn("post-release-closure.yml", handoff)
+        closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
+        self.assertIn("crates_io_run_id", closure)
+        self.assertIn("linura-crates-io-publication-", closure)
+        self.assertIn(".version.yanked", closure)
 
     def test_release_automation_has_architecture_and_threat_contracts(self) -> None:
         adr = (ROOT / "docs/adr/0027-protected-release-handoff-automation.md").read_text(encoding="utf-8")

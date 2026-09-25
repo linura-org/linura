@@ -161,7 +161,7 @@ class PostReleaseAutomationAuthorityTests(unittest.TestCase):
         for workflow in (closure, promotion):
             self.assertNotIn("--credential-source github\n", workflow)
             self.assertNotIn("RELEASE_AUTOMATION_TOKEN || github.token", workflow)
-        self.assertNotIn("token: ${{ github.token }}", closure)
+        self.assertNotRegex(closure, r"(?m)^\s+token:\s+\$\{\{ github\.token \}\}\s*$")
 
 
 if __name__ == "__main__":

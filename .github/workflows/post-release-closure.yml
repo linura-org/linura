@@ -13,6 +13,10 @@ on:
         description: Exact successful Release Verification run ID
         required: true
         type: string
+      crates_io_run_id:
+        description: Exact successful crates.io publication run ID
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -37,20 +41,31 @@ jobs:
           fetch-depth: 0
           ref: main
 
+      - name: Download verified crates.io publication evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-crates-io-publication-${{ inputs.verification_run_id }}
+          path: crates-io-publication
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.crates_io_run_id }}
+
       - name: Resolve and verify terminal release evidence
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_VERIFICATION_RUN_ID: ${{ inputs.verification_run_id }}
+          INPUT_CRATES_IO_RUN_ID: ${{ inputs.crates_io_run_id }}
         run: |
           set -euo pipefail
           git fetch origin main --tags --force
 
           tag="$INPUT_TAG"
           verification_run_id="$INPUT_VERIFICATION_RUN_ID"
+          crates_io_run_id="$INPUT_CRATES_IO_RUN_ID"
           [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           [[ "$verification_run_id" =~ ^[0-9]+$ ]]
+          [[ "$crates_io_run_id" =~ ^[0-9]+$ ]]
 
           source_sha="$(git rev-list -n1 "$tag")"
           [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
@@ -85,6 +100,30 @@ jobs:
             exit 1
           fi
 
+          crates_io_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$crates_io_run_id")"
+          test "$(jq -r .path <<<"$crates_io_run")" = ".github/workflows/crates-io-publish.yml"
+          test "$(jq -r .event <<<"$crates_io_run")" = "workflow_run"
+          test "$(jq -r .status <<<"$crates_io_run")" = "completed"
+          test "$(jq -r .conclusion <<<"$crates_io_run")" = "success"
+
+          crates_io_evidence="crates-io-publication/evidence.json"
+          test "$(jq -r .schema "$crates_io_evidence")" = "1"
+          test "$(jq -r .crates_io_run_id "$crates_io_evidence")" = "$crates_io_run_id"
+          test "$(jq -r .source_sha "$crates_io_evidence")" = "$source_sha"
+          test "$(jq -r .release_tag "$crates_io_evidence")" = "$tag"
+          test "$(jq -r .verification_run_id "$crates_io_evidence")" = "$verification_run_id"
+          test "$(jq -r .crate "$crates_io_evidence")" = "linura"
+          test "$(jq -r .yanked "$crates_io_evidence")" = "false"
+          crate_version="$(jq -r .crate_version "$crates_io_evidence")"
+          package_sha256="$(jq -r .package_sha256 "$crates_io_evidence")"
+          [[ "$crate_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$ ]]
+          [[ "$package_sha256" =~ ^[0-9a-f]{64}$ ]]
+          curl --silent --show-error --fail --location \
+            --header "User-Agent: linura-release/$tag (https://github.com/linura-org/linura)" \
+            "https://crates.io/api/v1/crates/linura/$crate_version" > "$RUNNER_TEMP/crates-io-version.json"
+          test "$(jq -r '.version.checksum // empty' "$RUNNER_TEMP/crates-io-version.json")" = "$package_sha256"
+          test "$(jq -r '.version.yanked' "$RUNNER_TEMP/crates-io-version.json")" = "false"
+
           release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag")"
           test "$(jq -r .tag_name <<<"$release")" = "$tag"
           test "$(jq -r .draft <<<"$release")" = "false"
@@ -114,6 +153,9 @@ jobs:
             printf 'tag=%s\n' "$tag"
             printf 'source_sha=%s\n' "$source_sha"
             printf 'verification_run_id=%s\n' "$verification_run_id"
+            printf 'crates_io_run_id=%s\n' "$crates_io_run_id"
+            printf 'crate_version=%s\n' "$crate_version"
+            printf 'crate_package_sha256=%s\n' "$package_sha256"
             printf 'proof_run_id=%s\n' "$proof_run_id"
             printf 'promotion_run_id=%s\n' "$promotion_run_id"
             printf 'release_run_id=%s\n' "$release_run_id"
@@ -162,6 +204,9 @@ jobs:
           RELEASE_RUN_ID: ${{ steps.release.outputs.release_run_id }}
           RELEASE_ID: ${{ steps.release.outputs.release_id }}
           VERIFICATION_RUN_ID: ${{ steps.release.outputs.verification_run_id }}
+          CRATES_IO_RUN_ID: ${{ steps.release.outputs.crates_io_run_id }}
+          CRATE_VERSION: ${{ steps.release.outputs.crate_version }}
+          CRATE_PACKAGE_SHA256: ${{ steps.release.outputs.crate_package_sha256 }}
           PUBLISHED_AT: ${{ steps.release.outputs.published_at }}
         run: |
           set -euo pipefail
@@ -175,6 +220,9 @@ jobs:
             --release-run-id "$RELEASE_RUN_ID"
             --release-id "$RELEASE_ID"
             --verification-run-id "$VERIFICATION_RUN_ID"
+            --crates-io-run-id "$CRATES_IO_RUN_ID"
+            --crate-version "$CRATE_VERSION"
+            --crate-package-sha256 "$CRATE_PACKAGE_SHA256"
             --published-at "$PUBLISHED_AT"
           )
           python3 tools/post_release_close.py "${common[@]}"

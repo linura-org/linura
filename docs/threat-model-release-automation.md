@@ -8,7 +8,8 @@ This document extends the canonical [`threat-model.md`](threat-model.md) for the
 - reviewed readiness source, frozen release contract and reviewed source/tree identity;
 - Trusted Release Proof and sealed build/provenance evidence;
 - exact release tag and immutable GitHub Release assets/body;
-- independent verification evidence;
+- canonical crates.io `linura` package version, package checksum and Trusted Publisher identity;
+- independent GitHub Release and crates.io verification evidence;
 - terminal roadmap/publication bookkeeping and release-owned branch hygiene;
 - the Linura Release GitHub App identity, installation permissions and private key;
 - short-lived App installation tokens and job-scoped repository `GITHUB_TOKEN` dispatch/read authority.
@@ -35,7 +36,11 @@ This document extends the canonical [`threat-model.md`](threat-model.md) for the
 - ruleset bypass or over-broad GitHub App permissions;
 - Rotation, revocation and permission drift during a release;
 - a runner disappearing immediately after an irreversible protected merge;
-- a later protected-main push cancelling exact-source CI evidence needed by a release handoff.
+- a later protected-main push cancelling exact-source CI evidence needed by a release handoff;
+- a parallel crates.io publication path bypassing the reviewed release lifecycle;
+- OIDC publication authority being available while repository-controlled build/test code executes;
+- stale-main publication after a correction lands while registry publication is queued;
+- reuse of an existing immutable crates.io version whose checksum differs from the qualified package.
 
 ## Trust boundary
 
@@ -88,7 +93,7 @@ Irreversible merges are followed by event-driven observers instead of same-job f
 - authorization merge push starts native main gates; `Release Proof Dispatch` observes their completion and idempotently dispatches proof;
 - closure merge push starts native main gates; `Post Release Cleanup` observes their completion and performs terminal cleanup.
 
-Workflow-to-workflow proof/promotion/release/verification/closure transitions use supported `workflow_dispatch` calls. If a runner dies after a successful merge, the persisted GitHub event remains the durable next-stage authority.
+Workflow-to-workflow proof/promotion/release/verification/closure transitions use supported `workflow_dispatch` calls. The verification-to-crates.io transition deliberately uses the persisted terminal `workflow_run` event, so registry authority is never requested while the verifier is still running. If a runner dies after a successful merge or after terminal verification, the persisted GitHub event remains the durable next-stage authority.
 
 The permanent CI workflow keeps stale-run cancellation for topic/PR refs but disables cancellation for `refs/heads/main`. A later main push therefore cannot erase the exact closure or authorization gate run needed by an already-started transition.
 
@@ -124,13 +129,13 @@ Every machine mutation phase mints a fresh token and probes effective authority.
 
 Promotion repeats full closure-authority proof before immutable publication. Missing repository variable/secret, revoked installation, unapproved GitHub App permission changes, key rotation mistakes or reduced permissions stop release before publication.
 
-There is no fallback to long-lived PAT, ruleset bypass, manual normal-path approval or `GITHUB_TOKEN` PR creation.
+There is no fallback to long-lived PAT, crates.io API token, ruleset bypass, manual normal-path approval or `GITHUB_TOKEN` PR creation. crates.io publication uses the configured GitHub OIDC Trusted Publisher and fails closed on identity, source, tag or checksum drift.
 
 ### Verification and closure duplication
 
 Normal Release explicitly dispatches verification from the exact immutable tag. Emergency verification is accepted only from the authenticated `verify-release/vX.Y.Z` recovery branch under marker-only/single-parent/workflow-definition constraints.
 
-There is exactly one terminal handoff: successful verification → `Release Closure Handoff` → dispatch-only `Post Release Closure`. Closure is idempotent if terminal state is already present.
+There is exactly one terminal handoff: successful GitHub Release verification persists bound evidence and completes → a terminal `workflow_run` authenticates the exact normal-tag or marker-only recovery verifier → crates.io qualification/publication/checksum verification → `Release Closure Handoff` → dispatch-only `Post Release Closure`. The crates.io qualification job has no OIDC permission; only its dependent publish job has `id-token: write`, and that job executes no crate build/test code before authentication. Existing crate versions are accepted only when their registry checksum matches the qualified package exactly and the version is not yanked. The crates.io workflow persists exact run/version/checksum/availability evidence; both closure handoff and final Post Release Closure authenticate that evidence, so manually dispatching a closure endpoint cannot bypass failed or absent registry publication. Closure is idempotent if terminal state is already present.
 
 Cleanup is a separate transaction rather than an inline tail of closure merge. Multiple `workflow_run` wakeups are safe because branch absence is idempotent and every target deletion is exact-SHA leased.
 
