@@ -64,6 +64,17 @@ authority_role = "safety-guard"
 scope = "narrow fail-closed direct-upgrade guard; not the future update coordinator"
 
 [[component]]
+id = "linura"
+path = "crates/linura"
+kind = "crate"
+workspace_member = true
+maturity = "foundation"
+activation_milestone = "v0.10.0"
+release_artifact = false
+authority_role = "package-facade"
+scope = "canonical top-level Rust package identity with an intentionally minimal public surface and no runtime, policy, provider, executor or persistence authority"
+
+[[component]]
 id = "linura-agent-runtime"
 path = "crates/linura-agent-runtime"
 kind = "crate"

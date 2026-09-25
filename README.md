@@ -151,6 +151,7 @@ apps/
   linura-shell/                integrated-experimental Quickshell/QML desktop shell host
     ui/                       first-party Linura QML UI component foundation
 crates/
+  linura/                      canonical top-level Rust crate
   linura-core/                 IDs, actions, semantic reasons, invariants
   linura-intent/               intents, reusable setups, machine profiles
   linura-graph/                causal graph + removal/shared ownership analysis
