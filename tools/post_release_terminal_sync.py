@@ -10,6 +10,8 @@ import tomllib
 TAG_RE = re.compile(r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY_URL = "https://github.com/linura-org/linura"
+CRATE_VERSION_RE = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class TerminalSyncError(RuntimeError):
@@ -243,6 +245,7 @@ Linura {args.tag} released **{milestone.get('title')}** within its frozen {miles
 - Release publication: run `{args.release_run_id}` — success;
 - immutable GitHub Release: `{args.tag}`, release id `{args.release_id}`;
 - independent Release Verification: run `{args.verification_run_id}` — success;
+- crates.io publication: workflow run `{args.crates_io_run_id}`, `linura {args.crate_version}`, package SHA-256 `{args.crate_package_sha256}` — verified and non-yanked;
 - protected post-release closure advanced `current_release` to `{args.tag}` and `next_release` to `{next_release}`.
 
 The immutable `{args.tag}` tag and GitHub Release remain bound to source commit {source_url}.
@@ -308,9 +311,14 @@ def sync(args: argparse.Namespace) -> list[str]:
         raise TerminalSyncError(f"invalid tag: {args.tag!r}")
     if not SHA_RE.fullmatch(args.source_sha):
         raise TerminalSyncError("source_sha must be a lowercase 40-character SHA")
-    for field in ("proof_run_id", "promotion_run_id", "release_run_id", "release_id", "verification_run_id"):
+    for field in ("proof_run_id", "promotion_run_id", "release_run_id", "release_id", "verification_run_id", "crates_io_run_id"):
         if getattr(args, field) <= 0:
             raise TerminalSyncError(f"{field} must be positive")
+
+    if not CRATE_VERSION_RE.fullmatch(args.crate_version):
+        raise TerminalSyncError("crate_version must be a valid SemVer version")
+    if not SHA256_RE.fullmatch(args.crate_package_sha256):
+        raise TerminalSyncError("crate_package_sha256 must be a lowercase 64-character SHA-256")
 
     contract, milestone, next_release = _roadmap(root, args.tag)
     changed: list[str] = []
@@ -370,6 +378,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--release-run-id", type=int, required=True)
     parser.add_argument("--release-id", type=int, required=True)
     parser.add_argument("--verification-run-id", type=int, required=True)
+    parser.add_argument("--crates-io-run-id", type=int, required=True)
+    parser.add_argument("--crate-version", required=True)
+    parser.add_argument("--crate-package-sha256", required=True)
     parser.add_argument("--published-at", required=True)
     return parser.parse_args()
 

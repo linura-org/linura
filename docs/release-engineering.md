@@ -136,11 +136,11 @@ Release explicitly dispatches verification from the exact immutable tag. The ver
 
 Normal verification runs from the exact tag. `verify-release/vX.Y.Z` is an authenticated emergency recovery namespace only for an already-immutable release whose frozen verifier is defective; it is not part of the normal path and is not wildcard-selected for cleanup.
 
-Publication is not terminal until independent verification succeeds.
+GitHub Release publication is not terminal until independent verification succeeds. After exact-tag verification, the verifier serially dispatches the crates.io handoff for the canonical `linura` crate. The crate is tested and packaged in a no-OIDC job; a dependent `crates-io` environment job consumes the bound package evidence, re-proves current `main` and the immutable tag, obtains a short-lived crates.io OIDC credential only when publication is required, and verifies the registry checksum. Release closure is blocked until this registry handoff succeeds.
 
 ## Post-release closure
 
-A successful verifier dispatches `Release Closure Handoff`, which waits for exact verification terminal success, binds tag/source/event/ref identity, and dispatches `Post Release Closure`.
+A successful verifier writes bound tag/source/event/ref evidence and terminates. The crates.io workflow is awakened only by the verifier's successful terminal `workflow_run` event, authenticates the normal exact-tag or supported marker-only recovery identity, and performs no-OIDC qualification followed by narrow OIDC publication and independent checksum verification. Only a checksum-matching, non-yanked registry result may persist exact publication evidence and dispatch `Release Closure Handoff`. That handoff and final `Post Release Closure` both authenticate the exact successful crates.io run plus bound version/checksum evidence before terminal state may advance. Closure then persists the crates.io run ID, canonical crate version and package SHA-256 into the committed publication dossier and terminal release record so provenance survives short-lived workflow-artifact retention.
 
 On pending state, Post Release Closure:
 
@@ -186,7 +186,7 @@ readiness merge
   → authorization PR + merge
   → native main gates / proof-dispatch observer
   → proof → promotion → Release
-  → verification → closure handoff
+  → terminal verification event → crates.io trusted publication → closure handoff
   → closure PR + merge
   → native closure-main gates / cleanup observer
   → atomic leased cleanup

@@ -23,6 +23,10 @@ on:
         description: Exact tag ref or authenticated recovery branch used by verification
         required: true
         type: string
+      crates_io_run_id:
+        description: Exact successful crates.io publication workflow run ID
+        required: true
+        type: string
 
 permissions:
   actions: write
@@ -44,6 +48,7 @@ jobs:
       VERIFICATION_RUN_ID: ${{ inputs.verification_run_id }}
       VERIFICATION_EVENT: ${{ inputs.verification_event }}
       VERIFICATION_REF: ${{ inputs.verification_ref }}
+      CRATES_IO_RUN_ID: ${{ inputs.crates_io_run_id }}
     steps:
       - name: Await exact verification terminal success
         run: |
@@ -91,6 +96,56 @@ jobs:
             test "$verification_head_sha" = "$VERIFIED_SOURCE_SHA"
           fi
 
+      - name: Await exact crates.io publication terminal success
+        run: |
+          set -euo pipefail
+          [[ "$CRATES_IO_RUN_ID" =~ ^[0-9]+$ ]]
+          publication=""
+          for _ in $(seq 1 120); do
+            publication="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CRATES_IO_RUN_ID")"
+            status="$(jq -r .status <<<"$publication")"
+            case "$status" in
+              completed) break ;;
+              queued|in_progress|pending|waiting|requested) sleep 2 ;;
+              *) echo "unexpected crates.io publication status: $status" >&2; exit 1 ;;
+            esac
+          done
+          test "$(jq -r .path <<<"$publication")" = ".github/workflows/crates-io-publish.yml"
+          test "$(jq -r .event <<<"$publication")" = "workflow_run"
+          test "$(jq -r .status <<<"$publication")" = "completed"
+          test "$(jq -r .conclusion <<<"$publication")" = "success"
+
+      - name: Download verified crates.io publication evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-crates-io-publication-${{ inputs.verification_run_id }}
+          path: crates-io-publication
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.crates_io_run_id }}
+
+      - name: Authenticate crates.io publication evidence
+        run: |
+          set -euo pipefail
+          evidence="crates-io-publication/evidence.json"
+          test "$(jq -r .schema "$evidence")" = "1"
+          test "$(jq -r .crates_io_run_id "$evidence")" = "$CRATES_IO_RUN_ID"
+          test "$(jq -r .source_sha "$evidence")" = "$VERIFIED_SOURCE_SHA"
+          test "$(jq -r .release_tag "$evidence")" = "$RELEASE_TAG"
+          test "$(jq -r .verification_run_id "$evidence")" = "$VERIFICATION_RUN_ID"
+          test "$(jq -r .verification_event "$evidence")" = "$VERIFICATION_EVENT"
+          test "$(jq -r .verification_ref "$evidence")" = "$VERIFICATION_REF"
+          test "$(jq -r .crate "$evidence")" = "linura"
+          test "$(jq -r .yanked "$evidence")" = "false"
+          crate_version="$(jq -r .crate_version "$evidence")"
+          package_sha256="$(jq -r .package_sha256 "$evidence")"
+          [[ "$crate_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$ ]]
+          [[ "$package_sha256" =~ ^[0-9a-f]{64}$ ]]
+          curl --silent --show-error --fail --location \
+            --header "User-Agent: linura-release/$RELEASE_TAG (https://github.com/linura-org/linura)" \
+            "https://crates.io/api/v1/crates/linura/$crate_version" > "$RUNNER_TEMP/crates-io-version.json"
+          test "$(jq -r '.version.checksum // empty' "$RUNNER_TEMP/crates-io-version.json")" = "$package_sha256"
+          test "$(jq -r '.version.yanked' "$RUNNER_TEMP/crates-io-version.json")" = "false"
+
       - name: Dispatch protected post-release closure
         run: |
           set -euo pipefail
@@ -98,5 +153,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f tag="$RELEASE_TAG" \
-            -f verification_run_id="$VERIFICATION_RUN_ID"
-          echo "dispatched protected Post Release Closure for $RELEASE_TAG after exact verification run $VERIFICATION_RUN_ID completed successfully"
+            -f verification_run_id="$VERIFICATION_RUN_ID" \
+            -f crates_io_run_id="$CRATES_IO_RUN_ID"
+          echo "dispatched protected Post Release Closure for $RELEASE_TAG after exact verification run $VERIFICATION_RUN_ID and crates.io run $CRATES_IO_RUN_ID completed successfully"

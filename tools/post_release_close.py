@@ -10,6 +10,8 @@ import tomllib
 TAG_RE = re.compile(r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY_URL = "https://github.com/linura-org/linura"
+CRATE_VERSION_RE = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 RELEASE_GATE_HEADINGS = ("Release gate", "Exit criteria")
 RELEASE_CONTROL_CRITERIA: dict[str, frozenset[str]] = {
     "protected proof-first/tag-last publication and independent release verification complete before roadmap bookkeeping advances to v0.6": frozenset(
@@ -444,6 +446,7 @@ def terminal_body(args: argparse.Namespace, next_release: str) -> str:
 - Release publication: run `{args.release_run_id}` — success.
 - Immutable GitHub Release: `{args.tag}`, release id `{args.release_id}`, published `{args.published_at}`.
 - Independent Release Verification: run `{args.verification_run_id}` — success.
+- crates.io publication: workflow run `{args.crates_io_run_id}`, `linura {args.crate_version}`, package SHA-256 `{args.crate_package_sha256}` — verified and available.
 
 The immutable tag resolves to the exact source commit {source_url}. Independent verification checked out the frozen release tag and verified published digests, canonical release metadata, GitHub Release immutability/attestation, and build provenance for every published candidate asset.
 
@@ -475,6 +478,8 @@ Linura {args.tag} completed the repository-defined protected proof-first, tag-la
 - Release publication: run `{args.release_run_id}` — success.
 - Immutable GitHub Release: `{args.tag}`, release id `{args.release_id}`, published `{args.published_at}`.
 - Independent Release Verification: run `{args.verification_run_id}` — success.
+- crates.io publication workflow: run `{args.crates_io_run_id}` — success.
+- crates.io canonical package: `linura {args.crate_version}`, SHA-256 `{args.crate_package_sha256}`, verified non-yanked.
 
 Independent verification checked out and verified the frozen `{args.tag}` tag, including tag/source binding, published evidence and digests, canonical release metadata, GitHub Release immutability/attestation, and build provenance for every published candidate asset.
 
@@ -492,9 +497,13 @@ def close_release(args: argparse.Namespace) -> list[str]:
         raise ClosureError(f"invalid release tag: {args.tag!r}")
     if not SHA_RE.fullmatch(args.source_sha):
         raise ClosureError("source_sha must be a lowercase 40-character SHA")
-    for field in ("proof_run_id", "promotion_run_id", "release_run_id", "release_id", "verification_run_id"):
+    for field in ("proof_run_id", "promotion_run_id", "release_run_id", "release_id", "verification_run_id", "crates_io_run_id"):
         if getattr(args, field) <= 0:
             raise ClosureError(f"{field} must be positive")
+    if not CRATE_VERSION_RE.fullmatch(args.crate_version):
+        raise ClosureError("crate_version must be a valid SemVer version")
+    if not SHA256_RE.fullmatch(args.crate_package_sha256):
+        raise ClosureError("crate_package_sha256 must be a lowercase 64-character SHA-256")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T[^\s]+", args.published_at):
         raise ClosureError("published_at must be an ISO-8601 timestamp")
 
@@ -669,6 +678,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--release-run-id", type=int, required=True)
     parser.add_argument("--release-id", type=int, required=True)
     parser.add_argument("--verification-run-id", type=int, required=True)
+    parser.add_argument("--crates-io-run-id", type=int, required=True)
+    parser.add_argument("--crate-version", required=True)
+    parser.add_argument("--crate-package-sha256", required=True)
     parser.add_argument("--published-at", required=True)
     return parser.parse_args()
 

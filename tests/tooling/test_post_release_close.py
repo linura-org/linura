@@ -21,6 +21,9 @@ class Args:
     release_run_id = 103
     release_id = 104
     verification_run_id = 105
+    crates_io_run_id = 106
+    crate_version = "0.5.0"
+    crate_package_sha256 = "b" * 64
     published_at = "2026-09-05T12:57:27Z"
 
     def __init__(self, root: Path) -> None:
@@ -324,6 +327,10 @@ Terminal security evidence must be recorded only after final exact-head and rele
         self.assertGreaterEqual(publication.count(url), 2)
         self.assertNotIn(f"release authorization: `{args.source_sha}`", terminal)
         self.assertNotIn(f"release-authorization commit: `{args.source_sha}`", publication)
+        self.assertIn("crates.io publication workflow: run `106` — success.", publication)
+        self.assertIn("crates.io canonical package: `linura 0.5.0`", publication)
+        self.assertIn(args.crate_package_sha256, publication)
+        self.assertIn("crates.io publication: workflow run `106`", terminal)
 
     def test_split_release_gate_closes_each_evidenced_control_criterion(self) -> None:
         milestone = '''# v0.6.0
@@ -425,6 +432,9 @@ No widened claim.
             'test "$verification_event" = "push"',
             "python3 tools/post_release_close.py",
             "python3 tools/post_release_terminal_sync.py",
+            '--crates-io-run-id "$CRATES_IO_RUN_ID"',
+            '--crate-version "$CRATE_VERSION"',
+            '--crate-package-sha256 "$CRATE_PACKAGE_SHA256"',
             "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
             "--credential-source github-app",
             "tools/release_native_gates.py",

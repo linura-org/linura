@@ -118,31 +118,38 @@ jobs:
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
           done < <(find published -maxdepth 1 -type f -print0)
 
-  dispatch-closure-handoff:
-    name: dispatch terminal closure handoff
-    needs: verify
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: write
-      contents: read
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Dispatch verification-aware closure handoff
+      - name: Bind verified release evidence for terminal handoff
         env:
-          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
-          VERIFIED_SOURCE_SHA: ${{ needs.verify.outputs.source_sha }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+          VERIFIED_SOURCE_SHA: ${{ steps.evidence.outputs.source_sha }}
           VERIFICATION_EVENT: ${{ github.event_name }}
           VERIFICATION_REF: ${{ github.ref_name }}
+          VERIFICATION_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           [[ "$VERIFIED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          gh workflow run release-closure-handoff.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f tag="$RELEASE_TAG" \
-            -f source_sha="$VERIFIED_SOURCE_SHA" \
-            -f verification_run_id="$GITHUB_RUN_ID" \
-            -f verification_event="$VERIFICATION_EVENT" \
-            -f verification_ref="$VERIFICATION_REF"
+          [[ "$VERIFICATION_RUN_ID" =~ ^[0-9]+$ ]]
+          mkdir -p release-verification-evidence
+          jq -n \
+            --arg tag "$RELEASE_TAG" \
+            --arg source_sha "$VERIFIED_SOURCE_SHA" \
+            --arg verification_run_id "$VERIFICATION_RUN_ID" \
+            --arg verification_event "$VERIFICATION_EVENT" \
+            --arg verification_ref "$VERIFICATION_REF" \
+            '{
+              schema: 1,
+              tag: $tag,
+              source_sha: $source_sha,
+              verification_run_id: $verification_run_id,
+              verification_event: $verification_event,
+              verification_ref: $verification_ref
+            }' > release-verification-evidence/evidence.json
+
+      - name: Persist terminal verification handoff evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-release-verification-${{ github.run_id }}
+          path: release-verification-evidence/evidence.json
+          if-no-files-found: error
+          retention-days: 7

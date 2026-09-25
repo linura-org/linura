@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,6 +15,37 @@ SPEC.loader.exec_module(sync_tool)
 
 
 class TerminalSyncTests(unittest.TestCase):
+    def test_published_record_persists_crates_io_provenance(self) -> None:
+        args = SimpleNamespace(
+            tag="v0.9.0",
+            source_sha="a" * 40,
+            proof_run_id=101,
+            promotion_run_id=102,
+            release_run_id=103,
+            release_id=104,
+            verification_run_id=105,
+            crates_io_run_id=106,
+            crate_version="0.9.0",
+            crate_package_sha256="b" * 64,
+            published_at="2026-09-25T17:00:00Z",
+        )
+        record = sync_tool.published_record(
+            args,
+            {
+                "title": "fixture",
+                "claim_class": "Experimental",
+                "executor_state": "qualified",
+                "complete_lifecycle": True,
+                "managed_mutation_support": "narrow",
+                "platform_support": "reference",
+                "agent_role": "proposal",
+            },
+            "v0.10.0",
+        )
+        self.assertIn("crates.io publication: workflow run `106`", record)
+        self.assertIn("`linura 0.9.0`", record)
+        self.assertIn(args.crate_package_sha256, record)
+
     def test_qualification_state_and_terminal_matrix_are_normalized(self) -> None:
         text = """# qualification
 
