@@ -143,6 +143,8 @@ jobs:
           grep -Fq "liblinura-ui.so => $ui_backing" <<<"$ui_linkage"
       - name: Run canonical Linura checks
         run: cargo xtask check
+      - name: Verify canonical crates.io package
+        run: cargo package --locked -p linura
       - name: Verify canonical checks are non-mutating
         run: |
           set -euo pipefail

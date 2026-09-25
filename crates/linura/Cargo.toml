@@ -1,0 +1,17 @@
+[package]
+name = "linura"
+version = "0.0.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Canonical Rust entry point for Linura, the intelligent system layer for Linux."
+homepage = "https://linura.org"
+documentation = "https://docs.rs/linura"
+readme = "README.md"
+keywords = ["linux", "automation", "agents", "system-management", "control-plane"]
+categories = ["os"]
+publish = ["crates-io"]
+
+[lints]
+workspace = true
