@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Linura contributors -->
+<component type="desktop-application">
+  <id>org.linura.Linura</id>
+
+  <name>Linura</name>
+  <summary>The intelligent system layer for Linux</summary>
+
+  <developer id="org.linura">
+    <name>Linura</name>
+  </developer>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+
+  <description>
+    <p>
+      Linura Control Center is the graphical management client for Linura,
+      presenting observed and desired machine state, intents, plans, approvals,
+      provenance, audit information, explainability, drift, and recovery.
+    </p>
+    <p>
+      The client communicates through Linura's versioned protocol and remains
+      outside the privileged execution boundary: it contains no distro-specific
+      backend logic and receives no privileged executor handle.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">org.linura.Linura.desktop</launchable>
+
+  <url type="homepage">https://linura.org</url>
+  <url type="bugtracker">https://github.com/linura-org/linura/issues</url>
+  <url type="vcs-browser">https://github.com/linura-org/linura</url>
+  <url type="help">https://github.com/linura-org/linura/blob/main/docs/index.md</url>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#ADF2FF</color>
+    <color type="primary" scheme_preference="dark">#ADF2FF</color>
+  </branding>
+
+  <content_rating type="oars-1.1" />
+
+  <recommends>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </recommends>
+</component>
