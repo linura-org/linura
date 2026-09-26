@@ -18,16 +18,25 @@ PanelWindow {
     readonly property var catalog: [
         {
             kind: "surface",
+            targetId: "navigation:quick-settings",
+            title: qsTr("Quick Settings"),
+            description: qsTr("Open bounded authoritative session controls"),
+            keywords: "quick settings audio volume session",
+            shortcut: qsTr("Enter")
+        },
+        {
+            kind: "surface",
             targetId: "navigation:control-center",
             title: qsTr("Control Center"),
-            description: qsTr("Open authoritative current-session controls"),
-            keywords: "control center settings quick audio volume",
+            description: qsTr("Open detailed authoritative current-session controls"),
+            keywords: "control center settings audio volume details",
             shortcut: qsTr("Enter")
         }
     ]
 
     signal closeRequested()
     signal controlCenterRequested()
+    signal quickSettingsRequested()
     signal workspaceRequested(int workspaceId)
     signal applicationRequested(string applicationId, int sessionGeneration)
 
@@ -230,6 +239,12 @@ PanelWindow {
             return
 
         const entry = results[index]
+        if (entry.targetId === "navigation:quick-settings") {
+            statusText = ""
+            quickSettingsRequested()
+            return
+        }
+
         if (entry.targetId === "navigation:control-center") {
             statusText = ""
             controlCenterRequested()
@@ -321,7 +336,7 @@ PanelWindow {
 
                     LinuraText {
                         Layout.fillWidth: true
-                        text: qsTr("Find Linura surfaces, applications and Hyprland workspaces")
+                        text: qsTr("Find Linura controls, applications and Hyprland workspaces")
                         muted: true
                         elide: Text.ElideRight
                         Accessible.name: text

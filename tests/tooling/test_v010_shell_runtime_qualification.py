@@ -15,8 +15,36 @@ FIXTURE_PATHS = (
     ".github/workflows/v010-shell-runtime-qualification.yml",
     ".github/workflows/v010-qualification.yml",
     "packaging/systemd/user/linura-shell.service",
+    "packaging/systemd/user/linurad.service",
+    "packaging/wireplumber/linura-session-audio.lua",
+    "packaging/arch/archiso/packages.linura",
+    "apps/linurad/Cargo.toml",
+    "crates/linura-agent-runtime/Cargo.toml",
+    "crates/linura-capability-sdk/Cargo.toml",
+    "crates/linura-control/Cargo.toml",
+    "crates/linura-core/Cargo.toml",
+    "crates/linura-dbus/Cargo.toml",
+    "crates/linura-graph/Cargo.toml",
+    "crates/linura-hardware/Cargo.toml",
+    "crates/linura-intent/Cargo.toml",
+    "crates/linura-library/Cargo.toml",
+    "crates/linura-lifecycle/Cargo.toml",
+    "crates/linura-linux-observation/Cargo.toml",
+    "crates/linura-observation/Cargo.toml",
+    "crates/linura-observation-control/Cargo.toml",
+    "crates/linura-planner/Cargo.toml",
+    "crates/linura-policy/Cargo.toml",
+    "crates/linura-protocol/Cargo.toml",
+    "crates/linura-provenance/Cargo.toml",
+    "crates/linura-provider-sdk/Cargo.toml",
+    "crates/linura-transaction/Cargo.toml",
     "apps/linura-shell/qualification-controller.qml",
     "apps/linura-shell/qualification-palette.qml",
+    "apps/linura-shell/qualification-quick-settings.qml",
+    "apps/linura-shell/bridge/CMakeLists.txt",
+    "apps/linura-shell/bridge/audio_session_controller.h",
+    "apps/linura-shell/bridge/audio_session_controller.cpp",
+    "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml",
     "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml",
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
     "apps/linura-shell/ui/CMakeLists.txt",
@@ -27,6 +55,7 @@ FIXTURE_PATHS = (
     "qualification/v010/shell-runtime/fixtures/forking-app",
     "qualification/v010/shell-runtime/fixtures/linura-shell-qualification.service",
     "qualification/v010/shell-runtime/fixtures/linura-palette-qualification.service",
+    "qualification/v010/shell-runtime/fixtures/linura-quick-settings-qualification.service",
     "qualification/v010/shell-runtime/fixtures/org.linura.QualificationVisible.desktop",
     "qualification/v010/shell-runtime/fixtures/org.linura.QualificationHidden.desktop",
     "qualification/v010/shell-runtime/fixtures/org.linura.QualificationTerminal.desktop",
@@ -333,6 +362,69 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("continue-on-error:", result.stderr)
 
+    def test_parent_v010_workflow_must_trigger_on_session_authority_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = '      - "apps/linurad/**"'
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, '      - "apps/unrelated/**"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("apps/linurad/**", result.stderr)
+
+    def test_parent_v010_workflow_must_trigger_on_protocol_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = '      - "crates/linura-protocol/**"'
+            self.assertIn(marker, text)
+            workflow.write_text(text.replace(marker + "\n", "", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("crates/linura-protocol/**", result.stderr)
+
+    def test_production_arch_profile_must_ship_qualified_pipewire_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            packages = root / "packaging/arch/archiso/packages.linura"
+            lines = packages.read_text(encoding="utf-8").splitlines()
+            self.assertIn("pipewire-audio", lines)
+            packages.write_text(
+                "\n".join(line for line in lines if line != "pipewire-audio") + "\n",
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "production Arch package contract must include pipewire-audio",
+                result.stderr,
+            )
+
+    def test_parent_v010_workflow_must_cover_transitive_linurad_dependency_closure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = '      - "crates/linura-graph/**"'
+            self.assertIn(marker, text)
+            workflow.write_text(text.replace(marker + "\n", "", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                'missing linurad local dependency trigger: "crates/linura-graph/**"',
+                result.stderr,
+            )
+
     def test_parent_v010_workflow_must_call_runtime_gate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -607,6 +699,121 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertIn("palette IPC call failed", result.stderr)
 
 
+    def test_quick_settings_runtime_case_cannot_disappear(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'pass_case "quick-settings-session1-volume-effect"'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, 'echo "authority path omitted"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("quick-settings-session1-volume-effect", result.stderr)
+
+    def test_quick_settings_runtime_fixture_cannot_replace_real_bridge(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            fixture = root / "apps/linura-shell/qualification-quick-settings.qml"
+            text = fixture.read_text(encoding="utf-8")
+            marker = "AudioSessionController {"
+            self.assertIn(marker, text)
+            fixture.write_text(
+                text.replace(marker, "QtObject { // FakeAudio", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("real production binding", result.stderr)
+
+    def test_exact_source_linurad_build_cannot_be_omitted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "cargo build --locked --release -p linurad"
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, 'echo "linurad build omitted"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("cargo build --locked --release -p linurad", result.stderr)
+
+    def test_runtime_must_assert_durable_audit_filesystem_and_schema_hardening(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = '[[ "$audit_mode" == "600" ]]'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, '[[ -n "$audit_mode" ]]', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('audit_mode" == "600', result.stderr)
+
+    def test_runtime_must_bind_durable_transient_audit_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'SELECT count(*) FROM transient_effect_audit'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, "SELECT 0", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("all four durable-audit count checkpoints", result.stderr)
+
+    def test_runtime_must_prove_service_loss_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'pass_case "quick-settings-service-loss-fail-closed"'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, 'echo "service-loss proof omitted"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("quick-settings-service-loss-fail-closed", result.stderr)
+
+    def test_quick_settings_service_keeps_production_shell_sandbox(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            service = (
+                root
+                / "qualification/v010/shell-runtime/fixtures/linura-quick-settings-qualification.service"
+            )
+            text = service.read_text(encoding="utf-8")
+            marker = "NoNewPrivileges=yes"
+            self.assertIn(marker, text)
+            service.write_text(
+                text.replace(marker, "NoNewPrivileges=no", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("preserve production shell sandbox", result.stderr)
+
     def test_runtime_versions_must_use_installed_systemctl_interface(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -656,6 +863,158 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("ui_linkage_file", result.stderr)
 
+    def test_runtime_must_install_pipewire_audio_support_explicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "pipewire pipewire-audio wireplumber networkmanager sqlite"
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, "pipewire wireplumber networkmanager sqlite", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("pipewire-audio", result.stderr)
+
+    def test_runtime_must_prove_host_root_owned_exact_audio_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            self.assertIn('audio_helper_uid="$(stat -c \'%u\' "$audio_helper")"', text)
+            self.assertIn('audio_helper_gid="$(stat -c \'%g\' "$audio_helper")"', text)
+            self.assertIn('[[ "$audio_helper_uid" == "0" && "$audio_helper_gid" == "0" ]]', text)
+            self.assertIn('cmp -s "$audio_helper" "$source_root/packaging/wireplumber/linura-session-audio.lua"', text)
+
+    def test_pipewire_fixture_must_be_declarative_and_daemon_owned(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            self.assertIn("context.objects = [", text)
+            self.assertIn("factory.name = support.null-audio-sink", text)
+            self.assertIn("monitor.channel-volumes = true", text)
+            self.assertNotIn("pw-cli create-node adapter", text)
+            script.write_text(
+                text.replace("context.objects = [", "context.objects = [ # removed", 1)
+                + "\npw-cli create-node adapter\n",
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("daemon-owned declarative context.objects", result.stderr)
+
+    def test_pipewire_fixture_must_be_installed_before_pipewire_starts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            fixture = "context.objects = ["
+            start = "systemctl --user start pipewire.service"
+            self.assertLess(text.index(fixture), text.index(start))
+            script.write_text(
+                text.replace(fixture, "context.objects_disabled = [", 1)
+                + "\ncontext.objects = [\n",
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must be installed before PipeWire starts", result.stderr)
+
+    def test_pipewire_fixture_failure_must_retain_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = '} > "$evidence_root/pipewire-fixture-diagnostics.txt" 2>&1'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(
+                    marker,
+                    '} > "$evidence_root/discarded-pipewire-diagnostics.txt" 2>&1',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("pipewire-fixture-diagnostics.txt", result.stderr)
+
+    def test_audio_fixture_evidence_cannot_be_optionalized(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-shell-runtime-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            marker = "audio_fixture_evidence_required = true"
+            self.assertIn(marker, text)
+            contract.write_text(
+                text.replace(marker, "audio_fixture_evidence_required = false", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("audio_fixture_evidence_required", result.stderr)
+
+    def test_workflow_must_digest_bind_audio_fixture_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = 'quick_settings_audio_fixture = artifacts / "quick-settings-audio-fixture.txt"'
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(
+                    marker,
+                    'quick_settings_audio_fixture = artifacts / "unbound-audio-fixture.txt"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("quick-settings-audio-fixture.txt", result.stderr)
+
+    def test_runtime_must_prove_bridge_plugin_dependency_closure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'ldd "$bridge_plugin" > "$bridge_linkage_file"'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, ': > "$bridge_linkage_file"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("bridge_linkage_file", result.stderr)
+
+    def test_provisioning_must_reject_unresolved_bridge_plugin_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/provision-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'bridge_linkage="$(ldd "$bridge_plugin")"'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, 'bridge_linkage="unchecked"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("dependency-closure proof", result.stderr)
+
     def test_provisioning_must_reject_unresolved_ui_plugin_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -671,6 +1030,113 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("dependency-closure proof", result.stderr)
+
+
+    def test_session1_volume_failure_must_retain_bounded_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'quick-settings-session1-failure.txt'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, 'discarded-session1-failure.txt'),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("quick-settings-session1-failure.txt", result.stderr)
+
+    def test_session1_volume_wait_must_remain_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'quick_settings_effect_deadline=$((SECONDS + 30))'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, 'quick_settings_effect_deadline=$((SECONDS + 300))', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("SECONDS + 30", result.stderr)
+
+
+    def test_evidence_package_set_must_include_pipewire_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = '              "pipewire-audio",\n'
+            self.assertIn(marker, text)
+            evidence_start = text.index("required_packages = {")
+            marker_index = text.index(marker, evidence_start)
+            workflow.write_text(
+                text[:marker_index] + text[marker_index + len(marker):],
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("evidence package set must include pipewire-audio", result.stderr)
+
+
+    def test_quick_settings_draft_binding_must_be_atomic_with_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            atomic = "if quick_settings_bind_draft; then"
+            self.assertIn(atomic, text)
+            script.write_text(
+                text.replace(atomic, "if quick_settings_ready; then", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "must atomically acquire the Quick Settings draft",
+                result.stderr,
+            )
+
+    def test_quick_settings_audit_baseline_must_precede_panel_open(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            audit = 'audit_count_before="$(sqlite3 "$audio_audit" \'SELECT count(*) FROM transient_effect_audit;\' 2>/dev/null || printf \'0\')"'
+            opened = "checked_quick_settings_call linura.quick-settings-qualification openSettings >/dev/null"
+            self.assertLess(text.index(audit), text.index(opened))
+            text = text.replace(audit + "\n", "", 1)
+            text = text.replace(opened + "\n", opened + "\n" + audit + "\n", 1)
+            script.write_text(text, encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must capture the transient-audit baseline before opening Quick Settings", result.stderr)
+
+
+    def test_restart_recovery_must_use_a_defined_single_call_readiness_predicate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            definition = "quick_settings_recovered() {"
+            wait = 'wait_until "Quick Settings recovery after linurad restart" quick_settings_recovered'
+            self.assertIn(definition, text)
+            self.assertIn(wait, text)
+            script.write_text(
+                text.replace(definition, "quick_settings_recovery_removed() {", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("quick_settings_recovered", result.stderr)
 
 
 if __name__ == "__main__":

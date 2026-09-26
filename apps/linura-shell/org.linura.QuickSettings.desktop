@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Linura Quick Settings
+Comment=Open bounded authoritative current-session controls
+Exec=/usr/bin/qs -p /usr/share/linura/shell ipc call -- linura.shell toggleQuickSettings
+Icon=preferences-system
+Terminal=false

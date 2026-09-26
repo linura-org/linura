@@ -11,6 +11,21 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class LinuraShellContractTests(unittest.TestCase):
+    def test_control1_freshness_wire_value_matches_audio_client(self) -> None:
+        observation = (ROOT / "crates/linura-observation/src/lib.rs").read_text(
+            encoding="utf-8"
+        )
+        transport = (ROOT / "crates/linura-dbus/src/lib.rs").read_text(
+            encoding="utf-8"
+        )
+        client = (ROOT / "apps/linura-shell/bridge/audio_session_controller.cpp").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('Self::Current => "current"', observation)
+        self.assertIn("response.freshness.as_str().into()", transport)
+        self.assertIn('if (freshness != QStringLiteral("current"))', client)
+        self.assertIn('freshness_ = QStringLiteral("fresh")', client)
+
     def _copy_fixture(self, destination: Path) -> None:
         for relative in check_linura_shell.REQUIRED:
             source = ROOT / relative
@@ -125,7 +140,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(any("packaged launcher contract missing" in item for item in failures))
 
-    def test_audio_observation_must_be_inactive_while_panel_is_closed(self) -> None:
+    def test_audio_observation_must_be_inactive_without_audio_surface(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -134,19 +149,41 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertNotIn("refreshTimer_", text)
             source.write_text(text + "\n// refreshTimer_ regression\n", encoding="utf-8")
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("must not poll while Control Center is closed" in item for item in failures))
+            self.assertTrue(
+                any("must not poll while audio controls are inactive" in item for item in failures)
+            )
 
-    def test_panel_lifecycle_must_drive_bridge_activity(self) -> None:
+    def test_shell_root_must_own_shared_audio_controller_activity(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            panel = root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
-            text = panel.read_text(encoding="utf-8")
-            marker = "controller.setActive(opened)"
+            shell = root / "apps/linura-shell/shell.qml"
+            text = shell.read_text(encoding="utf-8")
+            marker = "active: shell.controlCenterOpen || shell.quickSettingsOpen"
             self.assertEqual(text.count(marker), 1)
-            panel.write_text(text.replace(marker, "controller.refresh()", 1), encoding="utf-8")
+            shell.write_text(
+                text.replace(marker, "active: shell.controlCenterOpen", 1),
+                encoding="utf-8",
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("activate observation only while opened" in item for item in failures))
+            self.assertTrue(
+                any("exclusively own shared audio-controller activation" in item for item in failures)
+            )
+
+    def test_audio_panels_cannot_own_shared_controller_activity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            panel.write_text(
+                panel.read_text(encoding="utf-8")
+                + "\n// forbidden lifecycle ownership\nConnections { target: controller; Component.onCompleted: controller.setActive(opened) }\n",
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("must not own shared audio-controller activation" in item for item in failures)
+            )
 
     def test_missing_control_service_must_be_unavailable_not_stale(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -197,11 +234,11 @@ class LinuraShellContractTests(unittest.TestCase):
             self._copy_fixture(root)
             source = root / "apps/linura-shell/bridge/audio_session_controller.cpp"
             text = source.read_text(encoding="utf-8")
-            marker = 'QStringLiteral("Control Center is closed.")'
+            marker = 'QStringLiteral("Audio controls are inactive.")'
             self.assertIn(marker, text)
             source.write_text(text.replace(marker, 'QStringLiteral("still loading")', 1), encoding="utf-8")
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("reset canceled panel observations to inactive" in item for item in failures))
+            self.assertTrue(any("reset canceled audio observations to inactive" in item for item in failures))
 
     def test_closing_panel_must_cancel_undispatched_effect(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1418,7 +1455,7 @@ class LinuraShellContractTests(unittest.TestCase):
                 )
             )
 
-    def test_command_palette_and_control_center_remain_mutually_exclusive(self) -> None:
+    def test_transient_shell_surfaces_remain_mutually_exclusive(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -1427,6 +1464,7 @@ class LinuraShellContractTests(unittest.TestCase):
             marker = (
                 "function showCommandPalette() {\n"
                 "        shell.controlCenterOpen = false\n"
+                "        shell.quickSettingsOpen = false\n"
                 "        shell.commandPaletteOpen = true\n"
                 "    }"
             )
@@ -1444,6 +1482,146 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     "transient surfaces must remain mutually exclusive" in item
+                    for item in failures
+                )
+            )
+
+    def test_quick_settings_open_focuses_always_enabled_close_control(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            text = panel.read_text(encoding="utf-8")
+            marker = "closeButton.forceActiveFocus(Qt.TabFocusReason)"
+            self.assertEqual(text.count(marker), 1)
+            self.assertNotIn("volumeSlider.forceActiveFocus(Qt.TabFocusReason)", text)
+            panel.write_text(
+                text.replace(marker, "volumeSlider.forceActiveFocus(Qt.TabFocusReason)", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Quick Settings shell panel contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_quick_settings_manifest_cannot_gain_capability_grant(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = root / "apps/linura-shell/plugins/quick-settings/manifest.json"
+            text = manifest.read_text(encoding="utf-8")
+            marker = '"authority": "none",'
+            self.assertIn(marker, text)
+            manifest.write_text(
+                text.replace(
+                    marker,
+                    marker + '\n  "capabilities": ["system.audio.control"],',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("Quick Settings manifest" in item for item in failures)
+            )
+
+    def test_quick_settings_cannot_gain_provider_or_process_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            panel.write_text(
+                panel.read_text(encoding="utf-8")
+                + '\n// forbidden provider bypass: wpctl\n',
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("forbidden authority/process/provider surface" in item for item in failures)
+            )
+
+    def test_quick_settings_manifest_must_bind_registered_volume_operation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = root / "apps/linura-shell/plugins/quick-settings/manifest.json"
+            text = manifest.read_text(encoding="utf-8")
+            marker = "operation:audio.output.set-session-volume"
+            self.assertIn(marker, text)
+            manifest.write_text(
+                text.replace(marker, "operation:audio.output.unregistered-volume", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("bound to the registered session-volume operation" in item for item in failures)
+            )
+
+    def test_quick_settings_must_have_a_packaged_launcher(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "apps/linura-shell/org.linura.QuickSettings.desktop"
+            text = launcher.read_text(encoding="utf-8")
+            marker = (
+                "Exec=/usr/bin/qs -p /usr/share/linura/shell "
+                "ipc call -- linura.shell toggleQuickSettings"
+            )
+            self.assertIn(marker, text)
+            launcher.write_text(
+                text.replace(marker, "Exec=/bin/false", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("Quick Settings packaged launcher contract missing" in item for item in failures)
+            )
+
+    def test_command_palette_must_retain_quick_settings_navigation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            text = palette.read_text(encoding="utf-8")
+            marker = 'targetId: "navigation:quick-settings"'
+            self.assertIn(marker, text)
+            palette.write_text(
+                text.replace(marker, 'targetId: "navigation:missing"', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Command palette shell contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_application_launcher_must_reserve_quick_settings_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            controller = (
+                root
+                / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
+            )
+            text = controller.read_text(encoding="utf-8")
+            marker = '"org.linura.QuickSettings.desktop"'
+            self.assertIn(marker, text)
+            controller.write_text(
+                text.replace(marker, '"org.linura.QuickSettings.unreserved"', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Application launcher controller contract missing" in item
+                    and marker in item
                     for item in failures
                 )
             )
@@ -1466,6 +1644,69 @@ class LinuraShellContractTests(unittest.TestCase):
             )
 
 
+
+    def test_shell_bridge_qml_plugin_must_keep_origin_rpath(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            cmake = root / "apps/linura-shell/bridge/CMakeLists.txt"
+            text = cmake.read_text(encoding="utf-8")
+            marker = 'INSTALL_RPATH "$ORIGIN"'
+            self.assertIn(marker, text)
+            cmake.write_text(
+                text.replace(marker, 'INSTALL_RPATH ""', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura Shell bridge CMake contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_shell_bridge_qml_install_must_include_backing_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            cmake = root / "apps/linura-shell/bridge/CMakeLists.txt"
+            text = cmake.read_text(encoding="utf-8")
+            marker = "TARGETS linura-shell-bridge linura-shell-bridgeplugin"
+            self.assertIn(marker, text)
+            cmake.write_text(
+                text.replace(marker, "TARGETS linura-shell-bridgeplugin", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura Shell bridge CMake contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
+
+    def test_canonical_ci_must_verify_shell_bridge_dependency_closure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/ci.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = 'bridge_linkage="$(ldd "$bridge_plugin")"'
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, 'bridge_linkage="unchecked"', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Linura Shell CI contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
 
     def test_ui_qml_plugin_must_keep_origin_rpath(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1529,6 +1770,98 @@ class LinuraShellContractTests(unittest.TestCase):
                     for item in failures
                 )
             )
+
+
+    def test_audio_bridge_dbus_demarshalling_must_use_read_side_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            bridge = root / "apps/linura-shell/bridge/audio_session_controller.cpp"
+            text = bridge.read_text(encoding="utf-8")
+            marker = "const QDBusArgument argument = qvariant_cast<QDBusArgument>(value);"
+            self.assertIn(marker, text)
+            bridge.write_text(
+                text.replace(marker, "QDBusArgument argument = qvariant_cast<QDBusArgument>(value);", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("Linura Shell bridge authority contract missing" in item and marker in item for item in failures)
+            )
+
+    def test_audio_receipt_demarshalling_must_use_read_side_argument(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            bridge = root / "apps/linura-shell/bridge/audio_session_controller.cpp"
+            text = bridge.read_text(encoding="utf-8")
+            marker = "const QDBusArgument wire = arguments.at(0).value<QDBusArgument>();"
+            self.assertIn(marker, text)
+            bridge.write_text(
+                text.replace(marker, "QDBusArgument wire = arguments.at(0).value<QDBusArgument>();", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("Linura Shell bridge authority contract missing" in item and marker in item for item in failures)
+            )
+
+
+    def test_audio_receipt_must_validate_dbus_structure_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            bridge = root / "apps/linura-shell/bridge/audio_session_controller.cpp"
+            text = bridge.read_text(encoding="utf-8")
+            marker = "wire.currentType() != QDBusArgument::StructureType"
+            self.assertIn(marker, text)
+            bridge.write_text(text.replace(marker, "false", 1), encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("Linura Shell bridge authority contract missing" in item and marker in item for item in failures)
+            )
+
+    def test_session1_client_deadline_covers_bounded_authority_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            bridge = root / "apps/linura-shell/bridge/audio_session_controller.cpp"
+            text = bridge.read_text(encoding="utf-8")
+            marker = "constexpr int kEffectTimeoutMs = 10'000;"
+            self.assertIn(marker, text)
+            bridge.write_text(
+                text.replace(marker, "constexpr int kEffectTimeoutMs = 5'000;", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("Linura Shell bridge authority contract missing" in item and marker in item for item in failures)
+            )
+
+
+    def test_bound_audio_draft_can_enter_fresh_pre_dispatch_revalidation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            source = root / "apps/linura-shell/bridge/audio_session_controller.cpp"
+            text = source.read_text(encoding="utf-8")
+            contract = "(!canApply() && !canCommitDraft())"
+            self.assertIn(contract, text)
+            source.write_text(text.replace(contract, "!canApply()", 1), encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(any("authority contract missing" in item and contract in item for item in failures))
+
+    def test_quick_settings_apply_uses_bound_draft_capability(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            text = panel.read_text(encoding="utf-8")
+            contract = "enabled: controller.canCommitDraft"
+            self.assertIn(contract, text)
+            panel.write_text(text.replace(contract, "enabled: controller.canApply", 1), encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(any("Quick Settings shell panel contract missing" in item for item in failures))
 
 
 if __name__ == "__main__":

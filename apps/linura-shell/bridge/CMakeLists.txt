@@ -13,6 +13,7 @@ qt_add_library(linura-shell-bridge SHARED)
 qt_add_qml_module(linura-shell-bridge
     URI org.linura.ShellBridge
     VERSION 1.0
+    PLUGIN_TARGET linura-shell-bridgeplugin
     OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/qml/org/linura/ShellBridge"
     SOURCES
         audio_session_controller.h
@@ -29,8 +30,24 @@ target_include_directories(linura-shell-bridge PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
+set(LINURA_SHELL_BRIDGE_QML_INSTALL_DIR "lib/qt6/qml/org/linura/ShellBridge")
+
+# The generated QML plugin links the backing linura-shell-bridge shared library.
+# Keep the installed module self-contained instead of depending on linker-cache
+# state that is unrelated to the QML import path.
+set_target_properties(linura-shell-bridgeplugin PROPERTIES
+    INSTALL_RPATH "$ORIGIN"
+)
+
 install(
     DIRECTORY "${CMAKE_BINARY_DIR}/qml/org/linura/ShellBridge/"
-    DESTINATION lib/qt6/qml/org/linura/ShellBridge
+    DESTINATION "${LINURA_SHELL_BRIDGE_QML_INSTALL_DIR}"
     USE_SOURCE_PERMISSIONS
+)
+
+install(
+    TARGETS linura-shell-bridge linura-shell-bridgeplugin
+    LIBRARY DESTINATION "${LINURA_SHELL_BRIDGE_QML_INSTALL_DIR}"
+    RUNTIME DESTINATION "${LINURA_SHELL_BRIDGE_QML_INSTALL_DIR}"
+    ARCHIVE DESTINATION "${LINURA_SHELL_BRIDGE_QML_INSTALL_DIR}"
 )
