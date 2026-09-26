@@ -24,6 +24,7 @@ concurrency:
 env:
   SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
   RUNTIME_CONTRACT: contracts/v010-shell-runtime-qualification.toml
+  SUBSTRATE_CONTRACT: contracts/v010-shell-runtime-substrate.toml
   BASE_IMAGE_URL: https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2
   BASE_IMAGE_CHECKSUM_URL: https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2.SHA256
   ARCH_ARCHIVE_URL: https://archive.archlinux.org/repos/2026/09/16/$repo/os/$arch
@@ -35,8 +36,110 @@ env:
   QUALIFICATION_DISK_GIB: 16
 
 jobs:
+  substrate:
+    name: prepared immutable Arch runtime substrate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.sha }}
+
+      - name: Assert exact source and substrate contract
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          python3 tools/check_v010_shell_runtime_qualification.py
+
+      - name: Restore prepared runtime substrate
+        id: prepared-substrate
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/arch-v010-shell-prepared.qcow2
+            ${{ runner.temp }}/arch-v010-shell-prepared.qcow2.sha256
+            ${{ runner.temp }}/arch-v010-shell-prepared.json
+          key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh') }}
+
+      - name: Install disposable substrate builder dependencies
+        if: steps.prepared-substrate.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cloud-image-utils \
+            openssh-client \
+            qemu-system-x86 \
+            qemu-utils
+
+      - name: Restore official Arch base-image cache
+        if: steps.prepared-substrate.outputs.cache-hit != 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/arch-v010-shell.qcow2
+          key: linura-v010-arch-base-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml') }}
+
+      - name: Download and verify official Arch base image
+        if: steps.prepared-substrate.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          image="$RUNNER_TEMP/arch-v010-shell.qcow2"
+          checksum="$RUNNER_TEMP/arch-v010-shell.qcow2.SHA256"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+            --output "$checksum" "$BASE_IMAGE_CHECKSUM_URL"
+          expected_name="$(basename "$BASE_IMAGE_URL")"
+          digest="$(awk -v name="$expected_name" '$2 == name || $2 == "*" name {print $1}' "$checksum")"
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          if [[ -f "$image" ]] && ! printf '%s  %s\n' "$digest" "$image" | sha256sum --check --strict; then
+            rm -f "$image"
+          fi
+          if [[ ! -f "$image" ]]; then
+            curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+              --output "$image" "$BASE_IMAGE_URL"
+          fi
+          printf '%s  %s\n' "$digest" "$image" | sha256sum --check --strict
+          printf 'BASE_IMAGE_SHA256=%s\n' "$digest" >> "$GITHUB_ENV"
+
+      - name: Build sanitized prepared runtime substrate
+        if: steps.prepared-substrate.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          bash qualification/v010/shell-runtime/prepare-substrate.sh \
+            "$SUBSTRATE_CONTRACT" \
+            "$RUNNER_TEMP/arch-v010-shell.qcow2" \
+            "$RUNNER_TEMP/arch-v010-shell-prepared.qcow2" \
+            "$RUNNER_TEMP/arch-v010-shell-prepared.json" \
+            "$RUNNER_TEMP/linura-v010-substrate-build"
+
+      - name: Save prepared runtime substrate
+        if: steps.prepared-substrate.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/arch-v010-shell-prepared.qcow2
+            ${{ runner.temp }}/arch-v010-shell-prepared.qcow2.sha256
+            ${{ runner.temp }}/arch-v010-shell-prepared.json
+          key: ${{ steps.prepared-substrate.outputs.cache-primary-key }}
+
+      - name: Verify prepared runtime substrate
+        run: |
+          set -euo pipefail
+          image="$RUNNER_TEMP/arch-v010-shell-prepared.qcow2"
+          manifest="$RUNNER_TEMP/arch-v010-shell-prepared.json"
+          python3 qualification/v010/shell-runtime/verify-substrate.py \
+            "$SUBSTRATE_CONTRACT" \
+            qualification/v010/shell-runtime/prepare-substrate.sh \
+            "$image" \
+            "$manifest"
+          expected="$(cut -d' ' -f1 "$RUNNER_TEMP/arch-v010-shell-prepared.qcow2.sha256")"
+          printf '%s  %s\n' "$expected" "$image" | sha256sum --check --strict
+
   runtime:
     name: exact-source Arch/Hyprland/Quickshell runtime
+    needs: substrate
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -65,6 +168,15 @@ jobs:
       - name: Use pinned Rust toolchain
         run: rustup default "$RUST_VERSION"
 
+      - name: Restore Cargo dependency cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: linura-cargo-deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.RUST_VERSION }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'tools/codex/versions.env') }}
+
       - name: Build exact-source Linura session authority
         run: |
           set -euo pipefail
@@ -87,26 +199,43 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends             cloud-image-utils             openssh-client             qemu-system-x86             qemu-utils
 
-      - name: Download and verify version-addressed Arch cloud image
+      - name: Restore prepared runtime substrate
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/arch-v010-shell-prepared.qcow2
+            ${{ runner.temp }}/arch-v010-shell-prepared.qcow2.sha256
+            ${{ runner.temp }}/arch-v010-shell-prepared.json
+          key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Verify prepared runtime substrate before boot
         run: |
           set -euo pipefail
-          case "$BASE_IMAGE_URL" in
-            https://geo.mirror.pkgbuild.com/images/v*/Arch-Linux-x86_64-cloudimg-*.qcow2) ;;
-            *) echo "base image must be a version-addressed official Arch cloud image" >&2; exit 2 ;;
-          esac
-          [[ "$BASE_IMAGE_URL" != *"/latest/"* ]]
-          image="$RUNNER_TEMP/arch-v010-shell.qcow2"
-          checksum="$RUNNER_TEMP/arch-v010-shell.qcow2.SHA256"
-          curl --fail --location --proto '=https' --tlsv1.2 --retry 3             --output "$image" "$BASE_IMAGE_URL"
-          curl --fail --location --proto '=https' --tlsv1.2 --retry 3             --output "$checksum" "$BASE_IMAGE_CHECKSUM_URL"
-          expected_name="$(basename "$BASE_IMAGE_URL")"
-          digest="$(awk -v name="$expected_name" '$2 == name || $2 == "*" name {print $1}' "$checksum")"
-          [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
-          printf '%s  %s\n' "$digest" "$image" | sha256sum --check --strict
-          qemu-img info "$image"
+          image="$RUNNER_TEMP/arch-v010-shell-prepared.qcow2"
+          manifest="$RUNNER_TEMP/arch-v010-shell-prepared.json"
+          prepared_sha="$(python3 qualification/v010/shell-runtime/verify-substrate.py \
+            "$SUBSTRATE_CONTRACT" \
+            qualification/v010/shell-runtime/prepare-substrate.sh \
+            "$image" \
+            "$manifest")"
+          expected="$(cut -d' ' -f1 "$RUNNER_TEMP/arch-v010-shell-prepared.qcow2.sha256")"
+          [[ "$prepared_sha" == "$expected" ]]
+          printf '%s  %s\n' "$prepared_sha" "$image" | sha256sum --check --strict
+          base_sha="$(python3 - "$manifest" <<'PY'
+          import json
+          import pathlib
+          import sys
+          data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          print(data["base_image"]["sha256"])
+          PY
+          )"
+          [[ "$base_sha" =~ ^[0-9a-f]{64}$ ]]
           {
-            printf 'BASE_IMAGE=%s\n' "$image"
-            printf 'BASE_IMAGE_SHA256=%s\n' "$digest"
+            printf 'PREPARED_IMAGE=%s\n' "$image"
+            printf 'PREPARED_IMAGE_SHA256=%s\n' "$prepared_sha"
+            printf 'PREPARED_MANIFEST=%s\n' "$manifest"
+            printf 'BASE_IMAGE_SHA256=%s\n' "$base_sha"
           } >> "$GITHUB_ENV"
 
       - name: Create disposable Arch cloud-init guest
@@ -121,7 +250,7 @@ jobs:
           meta_data="$RUNNER_TEMP/v010-shell-meta-data"
           network_config="$RUNNER_TEMP/v010-shell-network-config"
 
-          cp --reflink=auto "$BASE_IMAGE" "$vm_image"
+          cp --reflink=auto "$PREPARED_IMAGE" "$vm_image"
           qemu-img resize "$vm_image" "${QUALIFICATION_DISK_GIB}G"
           ssh-keygen -q -t ed25519 -N '' -f "$ssh_key"
           public_key="$(cat "$ssh_key.pub")"
@@ -180,7 +309,7 @@ jobs:
           bash qualification/v010/shell-runtime/start-vm.sh             --image "$VM_IMAGE"             --seed "$SEED_IMAGE"             --memory 6144             --cpus 4             --nic-mac "$QUALIFICATION_NIC_MAC"             --ssh-port 2223             >"$VM_LOG" 2>&1 &
           printf 'VM_PID=%s\n' "$!" >> "$GITHUB_ENV"
 
-      - name: Wait for Arch guest and install pinned runtime packages
+      - name: Wait for Arch guest and verify prepared runtime substrate
         run: |
           set -euo pipefail
           ssh_common=(
@@ -214,25 +343,25 @@ jobs:
           ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'lsblk -b -o NAME,SIZE,FSTYPE,MOUNTPOINTS; df -B1 /'             | tee "$ARTIFACT_DIR/guest-storage.txt"
           ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'set -eu; root_size="$(df -B1 --output=size / | tail -n 1 | tr -d " ")"; root_free="$(df -B1 --output=avail / | tail -n 1 | tr -d " ")"; if [ "$root_size" -lt 8589934592 ] || [ "$root_free" -lt 4294967296 ]; then echo "guest root filesystem capacity contract not met: size=$root_size free=$root_free" >&2; df -h / >&2; exit 1; fi'
 
-          archive_url="$ARCH_ARCHIVE_URL"
-          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             "printf '%s\n' 'Server = $archive_url' | sudo -n tee /etc/pacman.d/mirrorlist >/dev/null"
-          runtime_packages=(base-devel cmake ninja pkgconf dbus seatd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast pipewire pipewire-audio wireplumber networkmanager sqlite)
-          install_succeeded=0
-          for attempt in 1 2 3; do
-            echo "pinned Arch runtime install attempt $attempt/3"
-            if ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
-              "timeout --signal=TERM --kill-after=10s 720 sudo -n pacman -Syu --noconfirm --needed --disable-download-timeout ${runtime_packages[*]}"; then
-              install_succeeded=1
-              break
-            fi
-            if [[ "$attempt" -lt 3 ]]; then
-              sleep $((attempt * 5))
-            fi
-          done
-          if [[ "$install_succeeded" -ne 1 ]]; then
-            echo "pinned Arch runtime installation failed after 3 bounded attempts" >&2
-            exit 1
-          fi
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            'pacman -Q' | LC_ALL=C sort > "$ARTIFACT_DIR/prepared-substrate-packages.txt"
+          python3 - "$PREPARED_MANIFEST" "$ARTIFACT_DIR/prepared-substrate-packages.txt" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          observed = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8").splitlines()
+          expected = manifest.get("package_versions")
+          if observed != expected:
+              raise SystemExit("prepared substrate package universe drifted before qualification")
+          PY
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            "grep -Fx 'Server = $ARCH_ARCHIVE_URL' /etc/pacman.d/mirrorlist"
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            'test ! -e /opt/linura-source && test ! -e /usr/bin/linurad'
+          cp "$PREPARED_MANIFEST" "$ARTIFACT_DIR/prepared-substrate-manifest.json"
+
           set +e
           ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
             "QUALIFICATION_GPU_PCI_BDF='$QUALIFICATION_GPU_PCI_BDF' QUALIFICATION_GPU_VENDOR_ID='$QUALIFICATION_GPU_VENDOR_ID' QUALIFICATION_GPU_DEVICE_ID='$QUALIFICATION_GPU_DEVICE_ID' bash -se" \
@@ -440,6 +569,7 @@ jobs:
           root = pathlib.Path.cwd()
           artifacts = pathlib.Path(os.environ["ARTIFACT_DIR"])
           contract_path = root / os.environ["RUNTIME_CONTRACT"]
+          substrate_contract_path = root / os.environ["SUBSTRATE_CONTRACT"]
           contract = tomllib.loads(contract_path.read_text(encoding="utf-8"))
 
           def digest(path: pathlib.Path) -> str:
@@ -461,7 +591,10 @@ jobs:
           qt_quick_rendering = artifacts / "qt-quick-rendering.env"
           runtime_install_integrity = artifacts / "runtime-install-integrity.txt"
           authority_runtime_integrity = artifacts / "authority-runtime-integrity.txt"
+          prepared_substrate_manifest = artifacts / "prepared-substrate-manifest.json"
+          prepared_substrate_packages = artifacts / "prepared-substrate-packages.txt"
           pipewire_fixture_create = artifacts / "pipewire-fixture-create.txt"
+          pipewire_fixture_props = artifacts / "pipewire-fixture-props.txt"
           pipewire_snapshot_initial = artifacts / "pipewire-snapshot-initial.txt"
           quick_settings_audio_fixture = artifacts / "quick-settings-audio-fixture.txt"
           quick_settings_observation = artifacts / "quick-settings-observation.txt"
@@ -487,7 +620,10 @@ jobs:
               qt_quick_rendering,
               runtime_install_integrity,
               authority_runtime_integrity,
+              prepared_substrate_manifest,
+              prepared_substrate_packages,
               pipewire_fixture_create,
+              pipewire_fixture_props,
               pipewire_snapshot_initial,
               quick_settings_audio_fixture,
               quick_settings_observation,
@@ -573,9 +709,18 @@ jobs:
                   "path": contract_path.relative_to(root).as_posix(),
                   "sha256": digest(contract_path),
               },
+              "substrate_contract": {
+                  "path": substrate_contract_path.relative_to(root).as_posix(),
+                  "sha256": digest(substrate_contract_path),
+              },
               "base_image": {
                   "url": os.environ["BASE_IMAGE_URL"],
                   "sha256": os.environ["BASE_IMAGE_SHA256"],
+              },
+              "prepared_substrate": {
+                  "image_sha256": os.environ["PREPARED_IMAGE_SHA256"],
+                  "manifest_sha256": digest(prepared_substrate_manifest),
+                  "scope": "sanitized-non-authoritative-prerequisite",
               },
               "arch_archive": {
                   "snapshot": contract["arch_archive_snapshot"],

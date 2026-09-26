@@ -1,0 +1,43 @@
+schema_version = 1
+id = "qualification/v010-shell-runtime-substrate"
+state = "development-prerequisite"
+claim = "non-evidence-cacheable-substrate"
+cache_namespace = "linura-v010-shell-substrate-v2"
+builder = "qualification/v010/shell-runtime/prepare-substrate.sh"
+verifier = "qualification/v010/shell-runtime/verify-substrate.py"
+base_image_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2"
+base_image_checksum_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2.SHA256"
+arch_archive_snapshot = "2026-09-16"
+arch_archive_url = "https://archive.archlinux.org/repos/2026/09/16/$repo/os/$arch"
+architecture = "x86_64"
+vm_disk_size_gib = 16
+
+runtime_packages = [
+  "base-devel",
+  "cmake",
+  "ninja",
+  "pkgconf",
+  "dbus",
+  "seatd",
+  "hyprland",
+  "quickshell",
+  "qt6-base",
+  "qt6-declarative",
+  "qt6-wayland",
+  "mesa",
+  "vulkan-swrast",
+  "pipewire",
+  "pipewire-audio",
+  "wireplumber",
+  "networkmanager",
+  "sqlite",
+]
+
+[cache_policy]
+base_image_bytes = true
+prepared_guest_bytes = true
+cargo_dependency_bytes = true
+qualification_evidence = false
+linura_build_outputs = false
+guest_runtime_state = false
+release_support_promotion = false

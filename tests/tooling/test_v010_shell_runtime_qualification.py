@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 FIXTURE_PATHS = (
     "contracts/v010-shell-runtime-qualification.toml",
+    "contracts/v010-shell-runtime-substrate.toml",
     "contracts/v010-workstation-qualification.toml",
     ".github/workflows/v010-shell-runtime-qualification.yml",
     ".github/workflows/v010-qualification.yml",
@@ -51,6 +52,8 @@ FIXTURE_PATHS = (
     "qualification/v010/shell-runtime/provision-shell-runtime.sh",
     "qualification/v010/shell-runtime/run-shell-runtime.sh",
     "qualification/v010/shell-runtime/start-vm.sh",
+    "qualification/v010/shell-runtime/prepare-substrate.sh",
+    "qualification/v010/shell-runtime/verify-substrate.py",
     "qualification/v010/shell-runtime/fixtures/linger-app",
     "qualification/v010/shell-runtime/fixtures/forking-app",
     "qualification/v010/shell-runtime/fixtures/linura-shell-qualification.service",
@@ -87,6 +90,370 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
     def test_runtime_qualification_contract_is_valid(self) -> None:
         result = self._run(ROOT)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_substrate_cache_policy_cannot_cache_qualification_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            substrate = root / "contracts/v010-shell-runtime-substrate.toml"
+            text = substrate.read_text(encoding="utf-8")
+            marker = "qualification_evidence = false"
+            self.assertIn(marker, text)
+            substrate.write_text(
+                text.replace(marker, "qualification_evidence = true", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("cache_policy.qualification_evidence", result.stderr)
+
+    def test_substrate_cache_policy_cannot_cache_linura_build_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            substrate = root / "contracts/v010-shell-runtime-substrate.toml"
+            text = substrate.read_text(encoding="utf-8")
+            marker = "linura_build_outputs = false"
+            self.assertIn(marker, text)
+            substrate.write_text(
+                text.replace(marker, "linura_build_outputs = true", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("cache_policy.linura_build_outputs", result.stderr)
+
+    def test_builder_prepared_cache_key_must_bind_contract_and_builder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh') }}"
+            self.assertGreaterEqual(text.count(marker), 2)
+            workflow.write_text(
+                text.replace(marker, "key: linura-v010-prepared-v1-unbound", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("prepared runtime cache key must bind", result.stderr)
+
+    def test_runtime_prepared_cache_key_must_bind_contract_and_builder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh') }}"
+            index = text.rfind(marker)
+            self.assertGreaterEqual(index, 0)
+            workflow.write_text(
+                text[:index] + "key: linura-v010-prepared-v1-unbound" + text[index + len(marker):],
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("prepared runtime cache key must bind", result.stderr)
+
+    def test_builder_cached_base_image_must_still_be_digest_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "if [[ -f \"$image\" ]] && ! printf '%s  %s\\n' \"$digest\" \"$image\" | sha256sum --check --strict; then"
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, 'if [[ -f "$image" ]]; then', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("digest-verify a restored official base image", result.stderr)
+
+    def test_substrate_must_include_pipewire_audio_support(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            substrate = root / "contracts/v010-shell-runtime-substrate.toml"
+            text = substrate.read_text(encoding="utf-8")
+            marker = '  "pipewire-audio",\n'
+            self.assertIn(marker, text)
+            substrate.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("runtime_packages", result.stderr)
+
+    def test_prepared_substrate_builder_must_install_contract_package_set(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            builder = root / "qualification/v010/shell-runtime/prepare-substrate.sh"
+            text = builder.read_text(encoding="utf-8")
+            marker = "pacman -Syu"
+            self.assertIn(marker, text)
+            builder.write_text(
+                text.replace(marker, "pacman -S", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("prepared substrate builder missing fail-closed invariant", result.stderr)
+
+    def test_runtime_package_evidence_must_include_pipewire_audio_support(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = "seatd pipewire pipewire-audio wireplumber networkmanager sqlite"
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, "seatd pipewire wireplumber networkmanager sqlite", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("pipewire-audio", result.stderr)
+
+    def test_pipewire_fixture_must_be_declarative_and_daemon_owned(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            self.assertIn("context.objects = [", text)
+            self.assertIn("factory.name = support.null-audio-sink", text)
+            self.assertIn("monitor.channel-volumes = true", text)
+            self.assertIn("monitor.passthrough = true", text)
+            self.assertIn("adapter.auto-port-config = {", text)
+            self.assertIn("node.param.Props = {", text)
+            self.assertIn("channelVolumes = [ 0.064 0.064 ]", text)
+            self.assertNotIn("pw-cli create-node adapter", text)
+            script.write_text(
+                text.replace("context.objects = [", "context.objects_disabled = [", 1)
+                + "\npw-cli create-node adapter\n",
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("daemon-owned declarative context.objects", result.stderr)
+
+    def test_pipewire_fixture_must_be_installed_before_pipewire_starts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            fixture = "context.objects = ["
+            start = "systemctl --user start pipewire.service"
+            self.assertLess(text.index(fixture), text.index(start))
+            script.write_text(
+                text.replace(fixture, "context.objects_disabled = [", 1)
+                + "\ncontext.objects = [\n",
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must be installed before PipeWire starts", result.stderr)
+
+    def test_pipewire_fixture_must_enable_monitor_channel_volumes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = "      monitor.channel-volumes = true\n"
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, "", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("monitor.channel-volumes = true", result.stderr)
+
+    def test_pipewire_fixture_must_expose_mixer_controllable_props(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = """      node.param.Props = {
+        mute = false
+        channelVolumes = [ 0.064 0.064 ]
+      }
+"""
+            self.assertIn(marker, text)
+            script.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("node.param.Props = {", result.stderr)
+
+    def test_prepared_substrate_builder_must_sanitize_guest_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            builder = root / "qualification/v010/shell-runtime/prepare-substrate.sh"
+            text = builder.read_text(encoding="utf-8")
+            marker = "cloud-init clean --logs --seed"
+            self.assertIn(marker, text)
+            builder.write_text(
+                text.replace(marker, "cloud-init clean", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("prepared substrate builder missing fail-closed invariant", result.stderr)
+
+    def test_pipewire_fixture_must_discover_identity_without_production_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = "pipewire_fixture_identity()"
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, "audio_snapshot()", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("PipeWire fixture readiness stages", result.stderr)
+
+    def test_pipewire_fixture_must_establish_props_before_helper_observation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'pw-cli set-param "$qualification_sink_id" Props'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, 'printf "Props not established"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("pw-cli set-param", result.stderr)
+
+    def test_pipewire_fixture_must_verify_props_in_retained_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'pw-cli enum-params "$qualification_sink_id" Props > "$evidence_root/pipewire-fixture-props.txt"'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(
+                    marker,
+                    'pw-cli enum-params "$qualification_sink_id" Props >/dev/null',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("pipewire-fixture-props.txt", result.stderr)
+
+    def test_pipewire_fixture_must_wait_for_wireplumber_mixer_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'wpctl get-volume "$qualification_sink_id"'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, "true # mixer readiness bypassed", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("wpctl get-volume", result.stderr)
+
+    def test_qualified_runtime_must_not_use_wpctl_for_volume_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            script.write_text(
+                text + '\nwpctl set-volume "$qualification_sink_id" 50%\n',
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must not use wpctl set-volume", result.stderr)
+
+    def test_pipewire_fixture_failure_must_retain_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = '} > "$evidence_root/pipewire-fixture-diagnostics.txt" 2>&1'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(
+                    marker,
+                    '} > "$evidence_root/discarded-pipewire-diagnostics.txt" 2>&1',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("pipewire-fixture-diagnostics.txt", result.stderr)
+
+    def test_runtime_must_not_cache_qualification_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            workflow.write_text(
+                workflow.read_text(encoding="utf-8")
+                + "\n# linura-v010-evidence-cache\n",
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must not cache evidence or Linura build outputs", result.stderr)
+
+    def test_parent_contract_and_runtime_must_remain_parallel(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "  shell-runtime:\n    name: v0.10 shell runtime qualification\n"
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, marker + "    needs: contract\n", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("parallel independent gates", result.stderr)
+
+    def test_runtime_cargo_cache_must_not_include_target_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "            ~/.cargo/git/db\n"
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, marker + "            target\n", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Linura build outputs", result.stderr)
 
     def test_mutable_latest_arch_image_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -171,11 +538,11 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
-            text = workflow.read_text(encoding="utf-8")
+            builder = root / "qualification/v010/shell-runtime/prepare-substrate.sh"
+            text = builder.read_text(encoding="utf-8")
             marker = "timeout --signal=TERM --kill-after=10s 720"
             self.assertIn(marker, text)
-            workflow.write_text(
+            builder.write_text(
                 text.replace(marker, "sudo -n", 1),
                 encoding="utf-8",
             )
@@ -715,6 +1082,100 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("quick-settings-session1-volume-effect", result.stderr)
 
+    def test_precondition_drift_must_refresh_before_binding_second_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = (
+                'wait_until "fresh Quick Settings state before precondition-drift draft" '
+                "quick_settings_ready_for_drift\n"
+            )
+            self.assertIn(marker, text)
+            script.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("fresh Quick Settings state before precondition-drift draft", result.stderr)
+
+    def test_quick_settings_runtime_fixture_must_import_quickshell_io(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            fixture = root / "apps/linura-shell/qualification-quick-settings.qml"
+            text = fixture.read_text(encoding="utf-8")
+            marker = "import Quickshell.Io\n"
+            self.assertIn(marker, text)
+            fixture.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("import Quickshell.Io", result.stderr)
+
+    def test_quick_settings_service_must_own_quickshell_runtime_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            service = (
+                root
+                / "qualification/v010/shell-runtime/fixtures/linura-quick-settings-qualification.service"
+            )
+            text = service.read_text(encoding="utf-8")
+            marker = "RuntimeDirectory=quickshell\n"
+            self.assertIn(marker, text)
+            service.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("bounded Quickshell runtime directory", result.stderr)
+
+    def test_exact_source_runtime_must_not_reinstall_arch_substrate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            runtime_index = text.index("  runtime:")
+            workflow.write_text(
+                text[:runtime_index] + text[runtime_index:].replace(
+                    "Verify prepared runtime substrate before boot",
+                    "Verify prepared runtime substrate before boot\n        run: pacman -Syu",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must not rebuild the prepared Arch package substrate", result.stderr)
+
+    def test_runtime_prepared_restore_must_fail_closed_on_cache_miss(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "          fail-on-cache-miss: true\n"
+            self.assertIn(marker, text)
+            index = text.rfind(marker)
+            workflow.write_text(text[:index] + text[index + len(marker):], encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("fail closed if prepared substrate is unavailable", result.stderr)
+
+    def test_runtime_cannot_boot_prepared_substrate_persistently(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "--image \"$VM_IMAGE\""
+            self.assertIn(marker, text)
+            runtime_index = text.index("  runtime:")
+            runtime_text = text[runtime_index:]
+            runtime_text = runtime_text.replace(marker, '--persistent ' + marker, 1)
+            workflow.write_text(text[:runtime_index] + runtime_text, encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("snapshot/disposable", result.stderr)
+
     def test_quick_settings_runtime_fixture_cannot_replace_real_bridge(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -863,21 +1324,18 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("ui_linkage_file", result.stderr)
 
-    def test_runtime_must_install_pipewire_audio_support_explicitly(self) -> None:
+    def test_runtime_substrate_must_install_pipewire_audio_support_explicitly(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
-            text = workflow.read_text(encoding="utf-8")
-            marker = "pipewire pipewire-audio wireplumber networkmanager sqlite"
+            substrate = root / "contracts/v010-shell-runtime-substrate.toml"
+            text = substrate.read_text(encoding="utf-8")
+            marker = '  "pipewire-audio",\n'
             self.assertIn(marker, text)
-            workflow.write_text(
-                text.replace(marker, "pipewire wireplumber networkmanager sqlite", 1),
-                encoding="utf-8",
-            )
+            substrate.write_text(text.replace(marker, "", 1), encoding="utf-8")
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("pipewire-audio", result.stderr)
+            self.assertIn("runtime_packages drifted", result.stderr)
 
     def test_runtime_must_prove_host_root_owned_exact_audio_helper(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -982,6 +1440,26 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("quick-settings-audio-fixture.txt", result.stderr)
+
+    def test_workflow_must_digest_bind_pipewire_props_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = 'pipewire_fixture_props = artifacts / "pipewire-fixture-props.txt"'
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(
+                    marker,
+                    'pipewire_fixture_props = artifacts / "unbound-pipewire-fixture-props.txt"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("pipewire-fixture-props.txt", result.stderr)
 
     def test_runtime_must_prove_bridge_plugin_dependency_closure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
