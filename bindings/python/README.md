@@ -34,9 +34,9 @@ if installation is not None:
 
 ## Publication
 
-Normal PyPI publication is not driven by a package-specific tag or by a second
-release build path. Trusted Release Proof builds the wheel from the exact authorized
-Linura release source using Python 3.12.10 and a hash-locked wheels-only build-toolchain
+PyPI publication is not driven by a package-specific tag or by a second build
+path. Trusted Release Proof builds the wheel from the exact authorized Linura
+release source using Python 3.12.10 and a hash-locked wheels-only build-toolchain
 lock for pip plus every PEP 517 build requirement, with build isolation disabled
 and a fixed wheel timestamp epoch. It seals that wheel into the
 promotable payload, independently reproduces it byte-for-byte under the same pinned
@@ -54,15 +54,7 @@ sealed PyPI artifact before terminal release handoff. The only job allowed to mi
 PyPI OIDC credentials is a minimal GitHub Environment named `pypi`; artifact
 preflight and post-publication verification run without OIDC authority.
 
-The initial namespace claim has one explicitly bounded exception: `release.yml`
-may be manually dispatched in `bootstrap-pypi` mode only for `linura==0.0.1`.
-That path requires the exact current protected-`main` SHA and successful native
-main CI/Security/CodeQL, builds only `bindings/python`, uses the same hash-locked
-Python 3.12.10 toolchain and fixed wheel epoch, independently reproduces the wheel
-byte-for-byte, and then hands the verified wheel to the same minimal `pypi`
-Environment job used by normal releases. It creates no Linura version tag, GitHub
-Release, crates.io publication, release closure, or broader product artifact. After
-the first verified PyPI publication, this bootstrap mode is removed.
+The canonical `linura` project is established on PyPI. All subsequent publication is owned exclusively by the proof-first Linura release workflow described above.
 
 ## Compatibility
 

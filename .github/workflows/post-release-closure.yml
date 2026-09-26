@@ -135,25 +135,16 @@ jobs:
           runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$source_sha&event=workflow_dispatch&per_page=100")"
           select_run() {
             local path="$1"
-            local display_title="${2:-}"
-            jq -r --arg path "$path" --arg display_title "$display_title" \
-              '[.workflow_runs[] | select(.path == $path and .status == "completed" and .conclusion == "success" and ($display_title == "" or .display_title == $display_title))] | sort_by(.created_at) | last | .id // empty' \
+            jq -r --arg path "$path" \
+              '[.workflow_runs[] | select(.path == $path and .status == "completed" and .conclusion == "success")] | sort_by(.created_at) | last | .id // empty' \
               <<<"$runs"
           }
           proof_run_id="$(select_run .github/workflows/trusted-release-proof.yml)"
           promotion_run_id="$(select_run .github/workflows/release-promotion.yml)"
-          canonical_release_title="Release — release @ $source_sha"
-          release_run_id="$(select_run .github/workflows/release.yml "$canonical_release_title")"
+          release_run_id="$(select_run .github/workflows/release.yml)"
           for value in "$proof_run_id" "$promotion_run_id" "$release_run_id"; do
             [[ "$value" =~ ^[0-9]+$ ]]
           done
-          release_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$release_run_id")"
-          test "$(jq -r .path <<<"$release_run")" = ".github/workflows/release.yml"
-          test "$(jq -r .display_title <<<"$release_run")" = "$canonical_release_title"
-          test "$(jq -r .head_sha <<<"$release_run")" = "$source_sha"
-          test "$(jq -r .event <<<"$release_run")" = "workflow_dispatch"
-          test "$(jq -r .status <<<"$release_run")" = "completed"
-          test "$(jq -r .conclusion <<<"$release_run")" = "success"
 
           current_main="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)"
           test "$(git rev-parse HEAD)" = "$current_main"

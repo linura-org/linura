@@ -1,31 +1,21 @@
 name: Release
 
-run-name: Release — ${{ inputs.operation }} @ ${{ inputs.source_sha }}
+run-name: Release — v${{ inputs.version }} @ ${{ inputs.source_sha }}
 
 on:
   workflow_dispatch:
     inputs:
-      operation:
-        description: Canonical release or one-time PyPI namespace bootstrap
-        required: true
-        default: release
-        type: choice
-        options:
-          - release
-          - bootstrap-pypi
       version:
-        description: SemVer without v prefix (canonical release only)
-        required: false
-        default: ""
+        description: SemVer without v prefix
+        required: true
         type: string
       source_sha:
-        description: Exact current-main source SHA
+        description: Exact proven current-main source SHA
         required: true
         type: string
       proof_run_id:
-        description: Exact successful Trusted Release Proof run ID (canonical release only)
-        required: false
-        default: ""
+        description: Exact successful Trusted Release Proof run ID
+        required: true
         type: string
 
 permissions:
@@ -33,13 +23,12 @@ permissions:
   actions: read
 
 concurrency:
-  group: release-${{ inputs.operation }}-${{ inputs.version }}
+  group: release-${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
   validate:
     name: validate proven release
-    if: ${{ inputs.operation == 'release' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -533,236 +522,10 @@ jobs:
           print(f"Published {release['html_url']}")
           PY
 
-  bootstrap-pypi-build:
-    name: build one-time PyPI bootstrap wheel
-    if: ${{ inputs.operation == 'bootstrap-pypi' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      actions: read
-      contents: read
-    env:
-      GH_TOKEN: ${{ github.token }}
-      SOURCE_SHA: ${{ inputs.source_sha }}
-      PYTHON_WHEEL_SOURCE_DATE_EPOCH: "315532800"
-      BOOTSTRAP_DIR: /tmp/linura-pypi-bootstrap
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-          ref: ${{ inputs.source_sha }}
-
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
-        with:
-          python-version: "3.12.10"
-
-      - name: Prove exact protected-main bootstrap source
-        run: |
-          set -euo pipefail
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          test "$GITHUB_REF" = "refs/heads/main"
-          test "$GITHUB_SHA" = "$SOURCE_SHA"
-          git fetch origin main --force
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
-
-          runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SOURCE_SHA&per_page=100")"
-          for workflow in CI Security CodeQL; do
-            count="$(jq -r --arg workflow "$workflow" '[.workflow_runs[] | select(.path == (".github/workflows/" + ($workflow | ascii_downcase) + ".yml") and .head_sha == env.SOURCE_SHA and .event == "push" and .status == "completed" and .conclusion == "success")] | length' <<<"$runs")"
-            if [[ "$count" -lt 1 ]]; then
-              echo "missing successful protected-main push gate: $workflow" >&2
-              exit 1
-            fi
-          done
-
-      - name: Validate one-time bootstrap package contract
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import tomllib
-          from pathlib import Path
-
-          data = tomllib.loads(Path("bindings/python/pyproject.toml").read_text(encoding="utf-8"))
-          project = data.get("project", {})
-          if project.get("name") != "linura":
-              raise SystemExit("bootstrap package must be named linura")
-          if project.get("version") != "0.0.1":
-              raise SystemExit("bootstrap publication is restricted to linura==0.0.1")
-          if project.get("dependencies") != []:
-              raise SystemExit("bootstrap linura package must remain dependency-free")
-          packages = (
-              data.get("tool", {})
-              .get("hatch", {})
-              .get("build", {})
-              .get("targets", {})
-              .get("wheel", {})
-              .get("packages")
-          )
-          if packages != ["src/linura"]:
-              raise SystemExit("bootstrap wheel package surface changed")
-          PY
-          PYTHONPATH=bindings/python/src python3 -m unittest discover             -s bindings/python/tests -p 'test_*.py'
-
-      - name: Load pinned Python toolchain contract
-        run: |
-          set -euo pipefail
-          # shellcheck disable=SC1091
-          source tools/codex/versions.env
-          : "$PYTHON_RELEASE"
-          : "$PYTHON_PIP_VERSION"
-          test "$PYTHON_RELEASE" = "3.12.10"
-          test "$(python3 -c 'import platform; print(platform.python_version())')" = "$PYTHON_RELEASE"
-          {
-            printf 'PYTHON_RELEASE=%s\n' "$PYTHON_RELEASE"
-            printf 'PYTHON_PIP_VERSION=%s\n' "$PYTHON_PIP_VERSION"
-          } >> "$GITHUB_ENV"
-
-      - name: Install hash-locked Python bootstrap build toolchain
-        run: |
-          set -euo pipefail
-          python3 -m pip install             --disable-pip-version-check             --no-cache-dir             --no-deps             --only-binary=:all:             --require-hashes             -r bindings/python/build-requirements.lock
-          python3 - <<'PY'
-          import importlib.metadata
-          import os
-          import re
-          import tomllib
-          from pathlib import Path
-
-          data = tomllib.loads(Path("bindings/python/pyproject.toml").read_text(encoding="utf-8"))
-          expected = {"pip": os.environ["PYTHON_PIP_VERSION"]}
-          for requirement in data["build-system"]["requires"]:
-              match = re.fullmatch(r"([A-Za-z0-9_.-]+)==([A-Za-z0-9_.+-]+)", requirement)
-              if match is None:
-                  raise SystemExit(f"Python build requirement is not exactly pinned: {requirement!r}")
-              expected[match.group(1)] = match.group(2)
-          for name, version in expected.items():
-              actual = importlib.metadata.version(name)
-              if actual != version:
-                  raise SystemExit(
-                      f"Python build requirement mismatch: {name} expected {version}, got {actual}"
-                  )
-          PY
-
-      - name: Build exact bootstrap wheel
-        run: |
-          set -euo pipefail
-          rm -rf "$BOOTSTRAP_DIR"
-          mkdir -p "$BOOTSTRAP_DIR"
-          SOURCE_DATE_EPOCH="$PYTHON_WHEEL_SOURCE_DATE_EPOCH" python3 -m pip wheel             --disable-pip-version-check             --no-cache-dir             --no-deps             --no-build-isolation             --wheel-dir "$BOOTSTRAP_DIR"             ./bindings/python
-          test "$(find "$BOOTSTRAP_DIR" -maxdepth 1 -type f -name 'linura-*.whl' | wc -l)" -eq 1
-          wheel="$(find "$BOOTSTRAP_DIR" -maxdepth 1 -type f -name 'linura-*.whl' -print -quit)"
-          test "$(basename "$wheel")" = "linura-0.0.1-py3-none-any.whl"
-
-          install_dir="$RUNNER_TEMP/linura-bootstrap-install"
-          rm -rf "$install_dir"
-          mkdir -p "$install_dir"
-          python3 -m pip install             --disable-pip-version-check             --no-deps             --target "$install_dir"             "$wheel"
-          PYTHONPATH="$install_dir" python3 - <<'PY'
-          import linura
-          assert linura.__version__ == "0.0.1"
-          assert linura.CONTROL1_SERVICE == "org.linura.Control1"
-          assert linura.find_installation(path="") is None
-          PY
-
-      - name: Assert bootstrap build did not mutate source
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          git diff --exit-code -- .
-          git diff --cached --exit-code -- .
-
-      - name: Persist bootstrap wheel for independent reproduction
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: linura-pypi-bootstrap-${{ inputs.source_sha }}
-          path: /tmp/linura-pypi-bootstrap/linura-*.whl
-          if-no-files-found: error
-          retention-days: 7
-
-  bootstrap-pypi-reproduce:
-    name: independently reproduce one-time PyPI bootstrap wheel
-    needs: bootstrap-pypi-build
-    if: ${{ inputs.operation == 'bootstrap-pypi' && needs.bootstrap-pypi-build.result == 'success' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      actions: read
-      contents: read
-    env:
-      SOURCE_SHA: ${{ inputs.source_sha }}
-      PYTHON_WHEEL_SOURCE_DATE_EPOCH: "315532800"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-          ref: ${{ inputs.source_sha }}
-
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
-        with:
-          python-version: "3.12.10"
-
-      - name: Re-prove exact current main
-        run: |
-          set -euo pipefail
-          git fetch origin main --force
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
-
-      - name: Load pinned Python toolchain contract
-        run: |
-          set -euo pipefail
-          # shellcheck disable=SC1091
-          source tools/codex/versions.env
-          : "$PYTHON_RELEASE"
-          : "$PYTHON_PIP_VERSION"
-          test "$PYTHON_RELEASE" = "3.12.10"
-          test "$(python3 -c 'import platform; print(platform.python_version())')" = "$PYTHON_RELEASE"
-          {
-            printf 'PYTHON_RELEASE=%s\n' "$PYTHON_RELEASE"
-            printf 'PYTHON_PIP_VERSION=%s\n' "$PYTHON_PIP_VERSION"
-          } >> "$GITHUB_ENV"
-
-      - name: Install hash-locked Python bootstrap build toolchain
-        run: |
-          set -euo pipefail
-          python3 -m pip install             --disable-pip-version-check             --no-cache-dir             --no-deps             --only-binary=:all:             --require-hashes             -r bindings/python/build-requirements.lock
-
-      - name: Rebuild bootstrap wheel independently
-        run: |
-          set -euo pipefail
-          rm -rf reproduced-python
-          mkdir -p reproduced-python
-          SOURCE_DATE_EPOCH="$PYTHON_WHEEL_SOURCE_DATE_EPOCH" python3 -m pip wheel             --disable-pip-version-check             --no-cache-dir             --no-deps             --no-build-isolation             --wheel-dir reproduced-python             ./bindings/python
-          test "$(find reproduced-python -maxdepth 1 -type f -name 'linura-*.whl' | wc -l)" -eq 1
-
-      - name: Download first bootstrap build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: linura-pypi-bootstrap-${{ inputs.source_sha }}
-          path: proven-python
-
-      - name: Prove bootstrap wheel reproduces byte-for-byte
-        run: |
-          set -euo pipefail
-          reproduced="$(find reproduced-python -maxdepth 1 -type f -name 'linura-*.whl' -print -quit)"
-          proven="$(find proven-python -maxdepth 1 -type f -name 'linura-*.whl' -print -quit)"
-          test -n "$reproduced"
-          test -n "$proven"
-          test "$(basename "$reproduced")" = "linura-0.0.1-py3-none-any.whl"
-          test "$(basename "$proven")" = "linura-0.0.1-py3-none-any.whl"
-          cmp "$reproduced" "$proven" || {
-            sha256sum "$reproduced" "$proven" >&2
-            echo "bootstrap Python wheel reproducibility mismatch" >&2
-            exit 1
-          }
-
-
   pypi-preflight:
-    name: prepare verified Python wheel for PyPI
-    needs: [validate, publish, bootstrap-pypi-build, bootstrap-pypi-reproduce]
-    if: ${{ always() && ((inputs.operation == 'release' && needs.validate.result == 'success' && needs.publish.result == 'success') || (inputs.operation == 'bootstrap-pypi' && needs.bootstrap-pypi-build.result == 'success' && needs.bootstrap-pypi-reproduce.result == 'success')) }}
+    name: prepare sealed Python wheel for PyPI
+    needs: [validate, publish]
+    if: ${{ needs.validate.result == 'success' && needs.publish.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
@@ -785,7 +548,6 @@ jobs:
           ref: ${{ inputs.source_sha }}
 
       - name: Download and verify exact proven Python artifact
-        if: ${{ inputs.operation == 'release' }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
@@ -802,13 +564,6 @@ jobs:
           test "$(find "$PROOF_DIR/release-payload" -maxdepth 1 -type f -name 'linura-*.whl' | wc -l)" -eq 1
           gh attestation verify "$wheel" --repo "$GITHUB_REPOSITORY"
           cp "$wheel" "$PYPI_DIR/"
-
-      - name: Download independently reproduced bootstrap Python artifact
-        if: ${{ inputs.operation == 'bootstrap-pypi' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: linura-pypi-bootstrap-${{ inputs.source_sha }}
-          path: /tmp/linura-pypi/
 
       - name: Determine PyPI publication requirement
         id: pypi
@@ -839,7 +594,7 @@ jobs:
   publish-pypi:
     name: publish sealed Python wheel to PyPI
     needs: pypi-preflight
-    if: ${{ !cancelled() && needs.pypi-preflight.result == 'success' }}
+    if: ${{ needs.pypi-preflight.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment:
@@ -847,7 +602,6 @@ jobs:
       url: https://pypi.org/p/linura
     permissions:
       actions: read
-      contents: read
       id-token: write
     steps:
       - name: Download exact proven Python artifact
@@ -855,22 +609,6 @@ jobs:
         with:
           name: linura-pypi-${{ inputs.source_sha }}
           path: pypi-publish-dist/
-
-      - name: Revalidate bootstrap current-main source immediately before OIDC publication
-        if: ${{ inputs.operation == 'bootstrap-pypi' && needs.pypi-preflight.outputs.publish_required == 'true' }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        env:
-          EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const { owner, repo } = context.repo;
-            const ref = await github.rest.git.getRef({ owner, repo, ref: "heads/main" });
-            if (ref.data.object.sha !== process.env.EXPECTED_SOURCE_SHA) {
-              throw new Error(
-                `protected main moved before PyPI bootstrap publication: ${ref.data.object.sha} != ${process.env.EXPECTED_SOURCE_SHA}`
-              );
-            }
 
       - name: Publish exact proven wheel to PyPI
         if: needs.pypi-preflight.outputs.publish_required == 'true'
@@ -882,7 +620,7 @@ jobs:
   verify-pypi:
     name: verify exact PyPI publication
     needs: [pypi-preflight, publish-pypi]
-    if: ${{ !cancelled() && needs.pypi-preflight.result == 'success' && needs.publish-pypi.result == 'success' }}
+    if: ${{ needs.pypi-preflight.result == 'success' && needs.publish-pypi.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

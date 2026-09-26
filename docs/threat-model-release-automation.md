@@ -119,31 +119,6 @@ Preparation is constrained to deterministic two-file version metadata. Release A
 
 All machine PRs still require native protected checks and zero unresolved review threads. Any actual human finding remains blocking. Eliminating mandatory bot-authored `@codex review` requests removes an authentication deadlock without weakening the semantic boundary.
 
-### PyPI bootstrap namespace capture
-
-The one-time `bootstrap-pypi` operation exists only to convert the Pending Trusted
-Publisher into the initial `linura==0.0.1` project before the next full Linura
-release. Its main threats are stale-main publication, silently broadening the
-bootstrap into a product release path, build-dependency substitution, and obtaining
-OIDC authority before artifact qualification.
-
-Mitigations are deliberately redundant: exact supplied source must equal workflow
-SHA, checkout HEAD and live protected main; native main push CI/Security/CodeQL must
-already be successful; project identity/version/dependency and wheel-surface
-constraints are hard checked; the hash-locked wheels-only Python toolchain is used
-with disabled build isolation and a fixed wheel epoch; a separate runner must
-reproduce the wheel byte-for-byte; PyPI preflight occurs without OIDC; and the
-artifact is handed to the existing minimal `pypi` Environment job, which remains
-the workflow's only `id-token: write` job and executes no repository scripts.
-Fresh-download verification is again no-OIDC. Immediately before the OIDC
-publisher action, the minimal publisher job uses an immutable-SHA-pinned GitHub API
-action to require live protected `main` still equals the qualified bootstrap SHA;
-source drift therefore fails before authentication/upload. Canonical-release
-consumers bind `release.yml` runs to the explicit `Release — release @ <sha>`
-display identity so a bootstrap run cannot satisfy or suppress canonical release
-evidence. The bootstrap creates no Git tag, GitHub Release, crates.io handoff or
-release closure, and is removed after the first verified namespace claim.
-
 ### PyPI publication identity, races and partial publication
 
 Trusted Release Proof builds the Python wheel under exact Python, a wheels-only SHA-256 hash lock for pip and all PEP 517 build dependencies, disabled build isolation and a fixed wheel epoch. The lockfile digest and wheel-specific epoch are recorded in build evidence, and an independent runner must reproduce the wheel byte-for-byte before it can enter the sealed payload.
