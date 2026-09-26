@@ -854,6 +854,10 @@ def validate(root: Path) -> list[str]:
             failures.append(
                 "runtime protocol must not split Quick Settings readiness and draft binding across separate IPC calls"
             )
+        if "quick_settings_ready_for_drift()" in run_text:
+            failures.append(
+                "precondition-drift qualification must retry atomic draft binding instead of splitting readiness from beginDraft"
+            )
         if audit_index < 0 or open_index < 0 or audit_index > open_index:
             failures.append(
                 "runtime protocol must capture the transient-audit baseline before opening Quick Settings"
@@ -987,8 +991,10 @@ def validate(root: Path) -> list[str]:
             'quick-settings-session1-failure.txt',
             "'-- transient audit --'",
             'SELECT rowid,request_id,resource,disposition,failure_code,pre_effect_evidence_id,post_effect_evidence_id FROM transient_effect_audit ORDER BY rowid DESC LIMIT 3;',
-            "quick_settings_ready_for_drift() {",
-            'wait_until "fresh Quick Settings state before precondition-drift draft" quick_settings_ready_for_drift',
+            "quick_settings_bind_drift_draft() {",
+            'wait_until "bound fresh Quick Settings precondition-drift draft" quick_settings_bind_drift_draft',
+            '[[ "$(checked_quick_settings_call linura.quick-settings-qualification canCommitDraft 2>/dev/null)" == "true" ]]',
+            'Quick Settings precondition-drift draft did not bind authoritative volume 63',
             'pass_case "quick-settings-precondition-drift-rejection"',
             'pass_case "quick-settings-service-loss-fail-closed"',
             'quick_settings_recovered() {',

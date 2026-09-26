@@ -31,6 +31,8 @@ on:
       - "tests/tooling/test_v010_shell_runtime_qualification.py"
       - "contracts/roadmap.toml"
       - "contracts/v010-workstation-qualification.toml"
+      - "contracts/v010-workstation-slices.toml"
+      - "docs/adr/0033-v010-complete-workstation-product-boundary.md"
       - "contracts/operation-semantics.toml"
       - "contracts/components.toml"
       - "profiles/arch-hyprland-v1.toml"

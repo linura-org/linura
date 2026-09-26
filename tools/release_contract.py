@@ -49,6 +49,8 @@ PROFILES_RE = re.compile(r"^\*\*Supported platform profiles:\*\*\s*(.+?)\s*$", r
 STATUS_RE = re.compile(r"^\*\*Status:\*\*\s*(.+?)\s*$", re.MULTILINE)
 REVIEWED_SOURCE_RE = re.compile(r"^Reviewed-Source:\s*([0-9a-f]{40})\s*$", re.MULTILINE)
 REVIEWED_TREE_RE = re.compile(r"^Reviewed-Tree:\s*([0-9a-f]{40})\s*$", re.MULTILINE)
+QUALIFICATION_SOURCE_RE = re.compile(r"^Qualification-Source:\s*([0-9a-f]{40})\s*$", re.MULTILINE)
+QUALIFICATION_TREE_RE = re.compile(r"^Qualification-Tree:\s*([0-9a-f]{40})\s*$", re.MULTILINE)
 
 
 class ContractError(ValueError):
@@ -155,9 +157,15 @@ def validate_release_intent(source_sha: str, repository: Path = ROOT) -> dict[st
     message = _git(repository, "show", "-s", "--format=%B", source_sha)
     reviewed_sources = REVIEWED_SOURCE_RE.findall(message)
     reviewed_trees = REVIEWED_TREE_RE.findall(message)
+    qualification_sources = QUALIFICATION_SOURCE_RE.findall(message)
+    qualification_trees = QUALIFICATION_TREE_RE.findall(message)
     if len(reviewed_sources) != 1 or len(reviewed_trees) != 1:
         raise ContractError(
             "release-intent commit must contain exactly one Reviewed-Source and Reviewed-Tree trailer"
+        )
+    if len(qualification_sources) != 1 or len(qualification_trees) != 1:
+        raise ContractError(
+            "release-intent commit must contain exactly one Qualification-Source and Qualification-Tree trailer"
         )
     if reviewed_sources[0] != reviewed_source_sha:
         raise ContractError(
@@ -170,10 +178,42 @@ def validate_release_intent(source_sha: str, repository: Path = ROOT) -> dict[st
             f"recorded={reviewed_trees[0]} actual={source_tree_sha}"
         )
 
+    qualification_source_sha = qualification_sources[0]
+    qualification_tree_sha = qualification_trees[0]
+    try:
+        actual_qualification_tree = _git(
+            repository,
+            "rev-parse",
+            f"{qualification_source_sha}^{{tree}}",
+        )
+    except ContractError as error:
+        raise ContractError(
+            "release-intent Qualification-Source does not identify a repository commit"
+        ) from error
+    if actual_qualification_tree != qualification_tree_sha:
+        raise ContractError(
+            "release-intent Qualification-Tree does not match Qualification-Source: "
+            f"recorded={qualification_tree_sha} actual={actual_qualification_tree}"
+        )
+    try:
+        _git(
+            repository,
+            "merge-base",
+            "--is-ancestor",
+            qualification_source_sha,
+            reviewed_source_sha,
+        )
+    except ContractError as error:
+        raise ContractError(
+            "release-intent Qualification-Source must be an ancestor of Reviewed-Source"
+        ) from error
+
     return {
         "source_sha": source_sha,
         "reviewed_source_sha": reviewed_source_sha,
         "reviewed_tree_sha": source_tree_sha,
+        "qualification_source_sha": qualification_source_sha,
+        "qualification_tree_sha": qualification_tree_sha,
     }
 
 
@@ -360,7 +400,9 @@ def main() -> int:
                     "release intent valid: "
                     f"source={metadata['source_sha']} / "
                     f"reviewed-source={metadata['reviewed_source_sha']} / "
-                    f"reviewed-tree={metadata['reviewed_tree_sha']}"
+                    f"reviewed-tree={metadata['reviewed_tree_sha']} / "
+                    f"qualification-source={metadata['qualification_source_sha']} / "
+                    f"qualification-tree={metadata['qualification_tree_sha']}"
                 )
         elif args.command == "evidence":
             write_evidence(args.notes, args.tag, args.source_sha, args.artifacts, args.output)

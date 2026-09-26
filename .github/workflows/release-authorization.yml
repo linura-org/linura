@@ -23,6 +23,8 @@ jobs:
     outputs:
       source_sha: ${{ steps.qualify.outputs.source_sha }}
       tree_sha: ${{ steps.qualify.outputs.tree_sha }}
+      qualification_source_sha: ${{ steps.qualify.outputs.qualification_source_sha }}
+      qualification_tree_sha: ${{ steps.qualify.outputs.qualification_tree_sha }}
       tag: ${{ steps.qualify.outputs.tag }}
       theme: ${{ steps.qualify.outputs.theme }}
     env:
@@ -132,7 +134,20 @@ jobs:
 
           tree_sha="$(git rev-parse "$SOURCE_SHA^{tree}")"
           [[ "$tree_sha" =~ ^[0-9a-f]{40}$ ]]
-          printf 'tree_sha=%s\n' "$tree_sha" >> "$GITHUB_OUTPUT"
+          preparation_message="$(git show -s --format=%B "$SOURCE_SHA")"
+          mapfile -t qualification_sources < <(sed -n 's/^Qualification-Source: \([0-9a-f]\{40\}\)$/\1/p' <<<"$preparation_message")
+          mapfile -t qualification_trees < <(sed -n 's/^Qualification-Tree: \([0-9a-f]\{40\}\)$/\1/p' <<<"$preparation_message")
+          test "${#qualification_sources[@]}" -eq 1
+          test "${#qualification_trees[@]}" -eq 1
+          qualification_source_sha="${qualification_sources[0]}"
+          qualification_tree_sha="${qualification_trees[0]}"
+          test "$(git rev-parse "$qualification_source_sha^{tree}")" = "$qualification_tree_sha"
+          git merge-base --is-ancestor "$qualification_source_sha" "$SOURCE_SHA"
+          {
+            printf 'tree_sha=%s\n' "$tree_sha"
+            printf 'qualification_source_sha=%s\n' "$qualification_source_sha"
+            printf 'qualification_tree_sha=%s\n' "$qualification_tree_sha"
+          } >> "$GITHUB_OUTPUT"
 
   authorize:
     name: create and merge protected metadata-only authorization
@@ -142,6 +157,8 @@ jobs:
     env:
       SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
       TREE_SHA: ${{ needs.qualify.outputs.tree_sha }}
+      QUALIFICATION_SOURCE_SHA: ${{ needs.qualify.outputs.qualification_source_sha }}
+      QUALIFICATION_TREE_SHA: ${{ needs.qualify.outputs.qualification_tree_sha }}
       RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
       RELEASE_THEME: ${{ needs.qualify.outputs.theme }}
     steps:
@@ -214,6 +231,8 @@ jobs:
 
           Reviewed-Source: $SOURCE_SHA
           Reviewed-Tree: $TREE_SHA
+          Qualification-Source: $QUALIFICATION_SOURCE_SHA
+          Qualification-Tree: $QUALIFICATION_TREE_SHA
           EOF
           )"
 
@@ -236,6 +255,8 @@ jobs:
             test "$(jq '.parents | length' <<<"$candidate_payload")" = "1"
             test "$(jq -r '.parents[0].sha' <<<"$candidate_payload")" = "$SOURCE_SHA"
             test "$(jq -r .message <<<"$candidate_payload")" = "$message"
+            grep -Fx "Qualification-Source: $QUALIFICATION_SOURCE_SHA" <<<"$message"
+            grep -Fx "Qualification-Tree: $QUALIFICATION_TREE_SHA" <<<"$message"
           }
 
           existing_json="$(gh pr list --state open --base main --json number,title,headRefName,headRefOid)"
@@ -342,6 +363,8 @@ jobs:
 
           Reviewed-Source: $SOURCE_SHA
           Reviewed-Tree: $TREE_SHA
+          Qualification-Source: $QUALIFICATION_SOURCE_SHA
+          Qualification-Tree: $QUALIFICATION_TREE_SHA
           EOF
           )"
           result="$(gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
@@ -362,6 +385,8 @@ jobs:
           test "$(head -n1 <<<"$merged_message")" = "$commit_title"
           grep -Fx "Reviewed-Source: $SOURCE_SHA" <<<"$merged_message"
           grep -Fx "Reviewed-Tree: $TREE_SHA" <<<"$merged_message"
+          grep -Fx "Qualification-Source: $QUALIFICATION_SOURCE_SHA" <<<"$merged_message"
+          grep -Fx "Qualification-Tree: $QUALIFICATION_TREE_SHA" <<<"$merged_message"
           printf 'authorization_sha=%s\n' "$authorization_sha" >> "$GITHUB_OUTPUT"
 
       - name: Confirm event-driven proof handoff is installed

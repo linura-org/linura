@@ -22,6 +22,8 @@ jobs:
     timeout-minutes: 20
     outputs:
       source_sha: ${{ steps.qualify.outputs.source_sha }}
+      qualification_source_sha: ${{ steps.qualify.outputs.qualification_source_sha }}
+      qualification_tree_sha: ${{ steps.qualify.outputs.qualification_tree_sha }}
       tag: ${{ steps.qualify.outputs.tag }}
       theme: ${{ steps.qualify.outputs.theme }}
     env:
@@ -41,6 +43,19 @@ jobs:
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
+
+          mapfile -t lineage < <(git rev-list --parents -n 1 "$SOURCE_SHA")
+          read -r -a lineage_parts <<<"${lineage[0]}"
+          test "${#lineage_parts[@]}" -eq 2
+          qualification_source_sha="${lineage_parts[1]}"
+          qualification_tree_sha="$(git rev-parse "$qualification_source_sha^{tree}")"
+          [[ "$qualification_source_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$qualification_tree_sha" =~ ^[0-9a-f]{40}$ ]]
+          export LINURA_EXPECTED_SOURCE_SHA="$qualification_source_sha"
+          {
+            printf 'qualification_source_sha=%s\n' "$qualification_source_sha"
+            printf 'qualification_tree_sha=%s\n' "$qualification_tree_sha"
+          } >> "$GITHUB_OUTPUT"
 
           subject="$(git log -1 --pretty=%s)"
           python3 - "$subject" "$GITHUB_OUTPUT" <<'PY'
@@ -92,7 +107,10 @@ jobs:
                   raise SystemExit(f"release-readiness material is missing: {value!r}")
           PY
 
-          python3 tools/check_roadmap.py .
+          python3 tools/check_roadmap.py . --release-candidate "$tag"
+          if [[ "$tag" = "v0.10.0" ]]; then
+            python3 tools/check_v010_workstation_qualification.py .
+          fi
           python3 tools/check_release_publication_stability.py
           python3 tools/release_contract.py validate \
             --tag "$tag" \
@@ -140,8 +158,11 @@ jobs:
     timeout-minutes: 55
     env:
       SOURCE_SHA: ${{ needs.qualify.outputs.source_sha }}
+      QUALIFICATION_SOURCE_SHA: ${{ needs.qualify.outputs.qualification_source_sha }}
+      QUALIFICATION_TREE_SHA: ${{ needs.qualify.outputs.qualification_tree_sha }}
       RELEASE_TAG: ${{ needs.qualify.outputs.tag }}
       RELEASE_THEME: ${{ needs.qualify.outputs.theme }}
+      LINURA_EXPECTED_SOURCE_SHA: ${{ needs.qualify.outputs.qualification_source_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -198,7 +219,10 @@ jobs:
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$SOURCE_SHA"
 
           python3 tools/prepare_release.py --tag "$RELEASE_TAG"
-          python3 tools/check_roadmap.py .
+          python3 tools/check_roadmap.py . --release-candidate "$RELEASE_TAG"
+          if [[ "$RELEASE_TAG" = "v0.10.0" ]]; then
+            python3 tools/check_v010_workstation_qualification.py .
+          fi
           python3 tools/check_release_publication_stability.py
           python3 tools/release_contract.py validate \
             --tag "$RELEASE_TAG" \
@@ -247,7 +271,10 @@ jobs:
             candidate_payload="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$candidate_sha")"
             test "$(jq '.parents | length' <<<"$candidate_payload")" = "1"
             test "$(jq -r '.parents[0].sha' <<<"$candidate_payload")" = "$SOURCE_SHA"
-            test "$(jq -r '.message | split("\n")[0]' <<<"$candidate_payload")" = "$title"
+            candidate_message="$(jq -r .message <<<"$candidate_payload")"
+            test "$(head -n1 <<<"$candidate_message")" = "$title"
+            grep -Fx "Qualification-Source: $QUALIFICATION_SOURCE_SHA" <<<"$candidate_message"
+            grep -Fx "Qualification-Tree: $QUALIFICATION_TREE_SHA" <<<"$candidate_message"
             git fetch origin "refs/heads/$candidate_branch:refs/remotes/origin/$candidate_branch" --force
             mapfile -t candidate_changed < <(git diff --name-only "$SOURCE_SHA" "$candidate_sha")
             test "${#candidate_changed[@]}" -eq "$expected"
@@ -273,7 +300,12 @@ jobs:
             git config user.name "${RELEASE_APP_SLUG}[bot]"
             git config user.email "${app_user_id}+${RELEASE_APP_SLUG}[bot]@users.noreply.github.com"
             git add Cargo.toml Cargo.lock
-            git commit --allow-empty -m "$title"
+            commit_message="$(printf '%s\n\n%s\n\nQualification-Source: %s\nQualification-Tree: %s\n' \
+              "$title" \
+              "Deterministic release preparation for reviewed qualification source $QUALIFICATION_SOURCE_SHA." \
+              "$QUALIFICATION_SOURCE_SHA" \
+              "$QUALIFICATION_TREE_SHA")"
+            git commit --allow-empty -F - <<<"$commit_message"
             head_sha="$(git rev-parse HEAD)"
             [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
             branch="automation/release-prep-${RELEASE_TAG}-${head_sha}"
@@ -363,11 +395,15 @@ jobs:
           fi
           candidate_tree="$(jq -r .tree.sha <<<"$candidate_payload")"
 
+          merge_message="$(printf '%s\n\nQualification-Source: %s\nQualification-Tree: %s\n' \
+            "Deterministic release preparation for reviewed source $SOURCE_SHA. Product claims are unchanged." \
+            "$QUALIFICATION_SOURCE_SHA" \
+            "$QUALIFICATION_TREE_SHA")"
           result="$(gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
             -f merge_method=squash \
             -f sha="$HEAD_SHA" \
             -f commit_title="$title" \
-            -f commit_message="Deterministic release preparation for reviewed source $SOURCE_SHA. Product claims are unchanged.")"
+            -f commit_message="$merge_message")"
           test "$(jq -r .merged <<<"$result")" = "true"
           main_sha="$(jq -r .sha <<<"$result")"
           [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
@@ -377,7 +413,10 @@ jobs:
           test "$(jq '.parents | length' <<<"$merged")" = "1"
           test "$(jq -r '.parents[0].sha' <<<"$merged")" = "$SOURCE_SHA"
           test "$(jq -r .tree.sha <<<"$merged")" = "$candidate_tree"
-          test "$(jq -r '.message | split("\n")[0]' <<<"$merged")" = "$title"
+          merged_message="$(jq -r .message <<<"$merged")"
+          test "$(head -n1 <<<"$merged_message")" = "$title"
+          grep -Fx "Qualification-Source: $QUALIFICATION_SOURCE_SHA" <<<"$merged_message"
+          grep -Fx "Qualification-Tree: $QUALIFICATION_TREE_SHA" <<<"$merged_message"
           printf 'main_sha=%s\n' "$main_sha" >> "$GITHUB_OUTPUT"
 
       - name: Confirm event-driven authorization handoff

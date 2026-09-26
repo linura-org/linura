@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
@@ -16,23 +17,36 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class V010WorkstationQualificationTests(unittest.TestCase):
-    def _run(self, root: Path) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self,
+        root: Path,
+        *,
+        expected_source_sha: str | None = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        if expected_source_sha is None:
+            env.pop("LINURA_EXPECTED_SOURCE_SHA", None)
+        else:
+            env["LINURA_EXPECTED_SOURCE_SHA"] = expected_source_sha
         return subprocess.run(
             [sys.executable, str(ROOT / "tools/check_v010_workstation_qualification.py"), str(root)],
             capture_output=True,
             text=True,
             check=False,
+            env=env,
         )
 
     def _copy_fixture(self, destination: Path) -> None:
         paths = (
             "contracts/roadmap.toml",
             "contracts/v010-workstation-qualification.toml",
+            "contracts/v010-workstation-slices.toml",
             "contracts/operation-semantics.toml",
             "profiles/arch-hyprland-v1.toml",
             "hardware/support-matrix.json",
             "docs/qualification/v0.10.0.md",
             "docs/adr/0031-v010-many-interfaces-one-authority-path.md",
+            "docs/adr/0033-v010-complete-workstation-product-boundary.md",
             "packaging/arch/archiso/packages.linura",
             "visual/baselines/manifest.json",
         )
@@ -106,6 +120,181 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "release_qualification_ready = true",
         )
 
+    def _write_interactive_workstation_evidence(
+        self,
+        root: Path,
+        *,
+        physical_hardware: bool = True,
+        gpu_driver: str = "amdgpu",
+        source_commit_sha: str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ) -> Path:
+        evidence_dir = root / "qualification/v010/interactive-workstation"
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        case_observations = {
+            "physical-session-start": ["physical-hardware-present", "wayland-session-active", "hyprland-session-active"],
+            "shell-render-and-input": ["shell-rendered", "keyboard-input", "pointer-input"],
+            "display-scale-and-hidpi": ["display-enumerated", "scale-applied", "hidpi-render-captured"],
+            "provider-runtime-identities": ["networkmanager-version", "bluez-version", "pipewire-version", "wireplumber-version", "udisks2-version", "polkit-version"],
+            "restart-recovery": ["shell-restart", "authority-restart", "state-reobserved"],
+        }
+        source = {
+            "commit_sha": source_commit_sha,
+            "linurad_sha256": "b" * 64,
+            "shell_bridge_sha256": "c" * 64,
+        }
+        cases = []
+        for name, observations in case_observations.items():
+            evidence = evidence_dir / f"{name}.json"
+            payload = {
+                "schema_version": 1,
+                "attestation_type": "linura-v010-qualification-case",
+                "case": name,
+                "result": "passed",
+                "run_id": "q11-fixture-run",
+                "captured_at_utc": "2026-09-27T00:00:00Z",
+                "runner": {"id": "qualification/v010/workstation-runner", **source},
+                "observations": [
+                    {"name": observation, "result": "passed", "value": "fixture-observed"}
+                    for observation in observations
+                ],
+            }
+            evidence.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            cases.append({
+                "name": name,
+                "result": "passed",
+                "evidence": f"qualification/v010/interactive-workstation/{name}.json",
+                "sha256": hashlib.sha256(evidence.read_bytes()).hexdigest(),
+            })
+
+        manifest = root / "qualification/v010/interactive-workstation-evidence.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": 1,
+            "milestone": "v0.10.0",
+            "profile_id": "arch-hyprland-v1",
+            "machine_class": "workstation",
+            "evidence_type": "maintainer-physical-workstation",
+            "evidence_tier": "maintainer_hardware",
+            "physical_hardware": physical_hardware,
+            "result": "passed",
+            "run_id": "q11-fixture-run",
+            "captured_at_utc": "2026-09-27T00:00:00Z",
+            "source": source,
+            "hardware": {
+                "cpu": {"architecture": "x86_64", "vendor": "AuthenticAMD", "model": "fixture-cpu"},
+                "gpu": {"vendor_id": "1002", "device_id": "fixture-gpu", "driver": gpu_driver, "driver_version": "fixture-driver-1"},
+                "displays": [{"connector": "DP-1", "width": 2560, "height": 1440, "refresh_millihz": 60000, "scale": 1.0}],
+            },
+            "session": {
+                "protocol": "wayland",
+                "compositor": "hyprland",
+                "compositor_version": "fixture-hyprland",
+                "quickshell_version": "fixture-quickshell",
+                "qt_version": "fixture-qt",
+                "kernel_version": "fixture-kernel",
+                "systemd_version": "fixture-systemd",
+            },
+            "providers": {
+                "networkmanager": "fixture-networkmanager",
+                "bluez": "fixture-bluez",
+                "pipewire": "fixture-pipewire",
+                "wireplumber": "fixture-wireplumber",
+                "udisks2": "fixture-udisks2",
+                "polkit": "fixture-polkit",
+            },
+            "cases": cases,
+        }
+        manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        self._rewrite_contract(
+            root,
+            '[interactive_workstation]\nevidence_ready = false\nevidence_manifest = "qualification/v010/interactive-workstation-evidence.json"\nevidence_manifest_sha256 = ""',
+            '[interactive_workstation]\nevidence_ready = true\nevidence_manifest = "qualification/v010/interactive-workstation-evidence.json"\n'
+            f'evidence_manifest_sha256 = "{digest}"',
+        )
+        return manifest
+
+    def _write_release_matrix_evidence(
+        self,
+        root: Path,
+        *,
+        section: str,
+        manifest_name: str,
+        evidence_type: str,
+        case_observations: dict[str, list[str]],
+        source_commit_sha: str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ) -> Path:
+        run_id = f"{section}-fixture-run"
+        evidence_dir = root / "qualification/v010/release-matrix" / section
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        cases = []
+        for name, observations in case_observations.items():
+            evidence = evidence_dir / f"{name}.json"
+            payload = {
+                "schema_version": 1,
+                "attestation_type": "linura-v010-release-qualification-case",
+                "case": name,
+                "result": "passed",
+                "source_commit_sha": source_commit_sha,
+                "run_id": run_id,
+                "captured_at_utc": "2026-09-27T00:00:00Z",
+                "runner": {
+                    "id": "qualification/v010/release-matrix-runner",
+                    "version": "1.0",
+                    "commit_sha": source_commit_sha,
+                },
+                "observations": [
+                    {"name": observation, "result": "passed", "value": "fixture-observed"}
+                    for observation in observations
+                ],
+            }
+            evidence.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            cases.append(
+                {
+                    "name": name,
+                    "result": "passed",
+                    "evidence": evidence.relative_to(root).as_posix(),
+                    "sha256": hashlib.sha256(evidence.read_bytes()).hexdigest(),
+                }
+            )
+
+        manifest = root / "qualification/v010" / manifest_name
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest_payload = {
+            "schema_version": 1,
+            "milestone": "v0.10.0",
+            "evidence_type": evidence_type,
+            "result": "passed",
+            "source_commit_sha": source_commit_sha,
+            "run_id": run_id,
+            "captured_at_utc": "2026-09-27T00:00:00Z",
+            "cases": cases,
+        }
+        manifest.write_text(json.dumps(manifest_payload, indent=2) + "\n", encoding="utf-8")
+        digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+
+        contract = root / "contracts/v010-workstation-qualification.toml"
+        text = contract.read_text(encoding="utf-8")
+        data = tomllib.loads(text)
+        old_digest = data[section]["evidence_manifest_sha256"]
+        text = text.replace(
+            f"[{section}]\nevidence_ready = false",
+            f"[{section}]\nevidence_ready = true",
+            1,
+        )
+        if old_digest:
+            text = text.replace(old_digest, digest, 1)
+        else:
+            marker = f'[{section}]\nevidence_ready = true\nevidence_manifest = "qualification/v010/{manifest_name}"\nevidence_manifest_sha256 = ""'
+            replacement = (
+                f'[{section}]\nevidence_ready = true\nevidence_manifest = "qualification/v010/{manifest_name}"\n'
+                f'evidence_manifest_sha256 = "{digest}"'
+            )
+            self.assertIn(marker, text)
+            text = text.replace(marker, replacement, 1)
+        contract.write_text(text, encoding="utf-8")
+        return manifest
+
     def _png_bytes(
         self,
         width: int,
@@ -176,24 +365,37 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
+    def _complete_product_slices_for_q10(self, root: Path) -> None:
+        path = root / "contracts/v010-workstation-slices.toml"
+        text = path.read_text(encoding="utf-8")
+        parts = text.split("[[slice]]")
+        rewritten = [parts[0]]
+        for block in parts[1:]:
+            if any(f'id = "S{index:02d}"' in block for index in range(15, 29)):
+                block = block.replace('status = "planned"', 'status = "complete"', 1)
+                block = block.replace("evidence_prs = []", "evidence_prs = [999]", 1)
+            rewritten.append("[[slice]]" + block)
+        text = "".join(rewritten)
+        text = text.replace("completed_slice_count = 14", "completed_slice_count = 28", 1)
+        text = text.replace('next_slice = "S15"', 'next_slice = "S29"', 1)
+        path.write_text(text, encoding="utf-8")
+
     def _write_complete_experience_evidence(self, root: Path) -> None:
+        self._complete_product_slices_for_q10(root)
         baseline_manifest = root / "visual/baselines/manifest.json"
+        required_visual_surfaces = ["linura-firstboot","linura-installer","linura-control-center","command-palette","quick-settings","desktop-shell-integration","shell-panel-tray-status","launcher-workspace","notifications-osd","lock-session-controls","network-connectivity","bluetooth","audio-media","display-power","desktop-utilities","applications-packages","updates-snapshots-recovery","personalization"]
         baseline_records = [
             ("firstboot-1280x800-1x", "linura-firstboot", 1280, 800, 1.0),
             ("firstboot-1280x800-2x", "linura-firstboot", 1280, 800, 2.0),
             ("control-center-1440x900-1x", "linura-control-center", 1440, 900, 1.0),
-            ("command-palette-1280x800-1x", "command-palette", 1280, 800, 1.0),
-            ("quick-settings-1280x800-1x", "quick-settings", 1280, 800, 1.0),
-            (
-                "desktop-shell-integration-1440x900-1x",
-                "desktop-shell-integration",
-                1440,
-                900,
-                1.0,
-            ),
-            ("notifications-osd-1280x800-1x", "notifications-osd", 1280, 800, 1.0),
-            ("approval-1280x800-1x", "approval-dialog", 1280, 800, 1.0),
         ]
+        existing_surfaces = {record[1] for record in baseline_records}
+        for surface in required_visual_surfaces:
+            if surface in existing_surfaces:
+                continue
+            baseline_records.append(
+                (f"{surface}-1280x800-1x", surface, 1280, 800, 1.0)
+            )
         baselines = []
         visual_dir = root / "visual/baselines"
         visual_dir.mkdir(parents=True, exist_ok=True)
@@ -267,14 +469,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             diff_digest,
         )
 
-        required_surfaces = [
-            "linura-firstboot",
-            "linura-control-center",
-            "command-palette",
-            "quick-settings",
-            "desktop-shell-integration",
-            "notifications-osd",
-        ]
+        required_surfaces = ["linura-firstboot","linura-installer","linura-control-center","command-palette","quick-settings","desktop-shell-integration","shell-panel-tray-status","launcher-workspace","notifications-osd","lock-session-controls","network-connectivity","bluetooth","audio-media","display-power","desktop-utilities","applications-packages","updates-snapshots-recovery","personalization"]
         interaction_records = []
         for surface in required_surfaces:
             report_rel = f"qualification/v010/{surface}-interaction-accessibility.json"
@@ -344,6 +539,201 @@ class V010WorkstationQualificationTests(unittest.TestCase):
     def test_repository_contract_is_valid(self) -> None:
         result = self._run(ROOT)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_interactive_workstation_evidence_requires_digest_bound_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._rewrite_contract(
+                root,
+                '[interactive_workstation]\nevidence_ready = false',
+                '[interactive_workstation]\nevidence_ready = true',
+            )
+            manifest = root / "qualification/v010/interactive-workstation-evidence.json"
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            manifest.write_text("{}\n", encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "interactive workstation evidence manifest must carry a lowercase SHA-256 digest",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_evidence_requires_physical_hardware_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_interactive_workstation_evidence(
+                root,
+                physical_hardware=False,
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "interactive workstation evidence must attest physical_hardware=true",
+                result.stderr,
+            )
+
+    def test_digest_bound_interactive_workstation_evidence_is_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_interactive_workstation_evidence(root)
+            result = self._run(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_interactive_workstation_case_digest_is_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_interactive_workstation_evidence(root)
+            evidence = root / "qualification/v010/interactive-workstation/physical-session-start.json"
+            evidence.write_text("tampered\n", encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "interactive workstation case physical-session-start evidence digest mismatch",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_source_must_match_expected_release_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_interactive_workstation_evidence(root)
+            result = self._run(root, expected_source_sha="dddddddddddddddddddddddddddddddddddddddd")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "interactive workstation source.commit_sha does not match the expected release source",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_case_requires_structured_runner_attestation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = payload["cases"][0]
+            old_path = root / case["evidence"]
+            replacement = old_path.with_suffix(".txt")
+            replacement.write_text("self-authored summary\n", encoding="utf-8")
+            case["evidence"] = replacement.relative_to(root).as_posix()
+            case["sha256"] = hashlib.sha256(replacement.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must be a structured JSON runner attestation", result.stderr)
+
+    def test_q12_q13_release_matrix_runner_attestations_are_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_release_matrix_evidence(
+                root,
+                section="update_recovery_qualification",
+                manifest_name="update-recovery-evidence.json",
+                evidence_type="exact-source-q12-update-recovery",
+                case_observations={
+                    "update-success": ["candidate-applied", "post-update-state-reobserved", "update-audit-bound"],
+                    "migration-success": ["pre-migration-backup-created", "migration-completed", "persistent-state-reopened"],
+                    "update-interruption-recovery": ["interruption-injected", "restart-detected-incomplete-update", "recovery-converged"],
+                    "power-loss-recovery": ["power-loss-injected", "durable-state-recovered", "external-state-reconciled"],
+                    "snapshot-rollback": ["snapshot-identified", "rollback-applied", "rollback-state-verified"],
+                    "offline-repair": ["network-unavailable", "gui-unavailable", "local-repair-completed"],
+                },
+            )
+            self._write_release_matrix_evidence(
+                root,
+                section="security_qualification",
+                manifest_name="security-evidence.json",
+                evidence_type="exact-source-q13-workstation-security",
+                case_observations={
+                    "privilege-boundary": ["unprivileged-daemon-confirmed", "generic-root-shell-absent", "privileged-effect-denied-without-authority"],
+                    "polkit-authorization": ["polkit-policy-loaded", "unauthorized-caller-denied", "authorized-caller-bound"],
+                    "untrusted-package-source-denied": ["untrusted-source-presented", "source-rejected", "no-package-effect-dispatched"],
+                    "secret-redaction": ["secret-bearing-input-injected", "audit-redacted", "diagnostics-redacted"],
+                    "adversarial-input": ["malformed-input-rejected", "authority-not-widened", "no-effect-dispatched"],
+                    "recovery-boundary": ["gui-unavailable", "model-unavailable", "native-recovery-remains-available"],
+                },
+            )
+            result = self._run(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_q12_release_matrix_rejects_missing_runner_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_release_matrix_evidence(
+                root,
+                section="update_recovery_qualification",
+                manifest_name="update-recovery-evidence.json",
+                evidence_type="exact-source-q12-update-recovery",
+                case_observations={
+                    "update-success": ["candidate-applied", "post-update-state-reobserved", "update-audit-bound"],
+                    "migration-success": ["pre-migration-backup-created", "migration-completed", "persistent-state-reopened"],
+                    "update-interruption-recovery": ["interruption-injected", "restart-detected-incomplete-update", "recovery-converged"],
+                    "power-loss-recovery": ["power-loss-injected", "durable-state-recovered", "external-state-reconciled"],
+                    "snapshot-rollback": ["snapshot-identified", "rollback-applied", "rollback-state-verified"],
+                    "offline-repair": ["network-unavailable", "gui-unavailable", "local-repair-completed"],
+                },
+            )
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = payload["cases"][0]
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            del attestation["runner"]
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old = tomllib.loads(text)["update_recovery_qualification"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing runner provenance", result.stderr)
+
+    def test_q13_release_matrix_rejects_incomplete_case_observations(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_release_matrix_evidence(
+                root,
+                section="security_qualification",
+                manifest_name="security-evidence.json",
+                evidence_type="exact-source-q13-workstation-security",
+                case_observations={
+                    "privilege-boundary": ["unprivileged-daemon-confirmed", "generic-root-shell-absent", "privileged-effect-denied-without-authority"],
+                    "polkit-authorization": ["polkit-policy-loaded", "unauthorized-caller-denied", "authorized-caller-bound"],
+                    "untrusted-package-source-denied": ["untrusted-source-presented", "source-rejected", "no-package-effect-dispatched"],
+                    "secret-redaction": ["secret-bearing-input-injected", "audit-redacted", "diagnostics-redacted"],
+                    "adversarial-input": ["malformed-input-rejected", "authority-not-widened", "no-effect-dispatched"],
+                    "recovery-boundary": ["gui-unavailable", "model-unavailable", "native-recovery-remains-available"],
+                },
+            )
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "adversarial-input")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            attestation["observations"] = attestation["observations"][:-1]
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old = tomllib.loads(text)["security_qualification"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("observation set does not prove the required case", result.stderr)
 
     def test_profile_cannot_self_promote_before_release_closure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -558,6 +948,32 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("missing or not a regular file", result.stderr)
+
+    def test_experience_readiness_requires_all_product_slices(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            slices = root / "contracts/v010-workstation-slices.toml"
+            text = slices.read_text(encoding="utf-8")
+            parts = text.split("[[slice]]")
+            rewritten = [parts[0]]
+            for block in parts[1:]:
+                if 'id = "S28"' in block:
+                    block = block.replace('status = "complete"', 'status = "planned"', 1)
+                    block = block.replace("evidence_prs = [999]", "evidence_prs = []", 1)
+                rewritten.append("[[slice]]" + block)
+            text = "".join(rewritten)
+            text = text.replace("completed_slice_count = 28", "completed_slice_count = 27", 1)
+            text = text.replace('next_slice = "S29"', 'next_slice = "S28"', 1)
+            slices.write_text(text, encoding="utf-8")
+
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "experience evidence cannot be ready until product slices S01-S28 are complete: S28",
+                result.stderr,
+            )
 
     def test_complete_artifact_backed_experience_evidence_can_become_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -837,6 +1253,15 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("interaction ADR 0031 is missing", result.stderr)
+
+    def test_product_scope_adr_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            (root / "docs/adr/0033-v010-complete-workstation-product-boundary.md").unlink()
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("product-scope ADR 0033 is missing", result.stderr)
 
     def test_operation_semantics_contract_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

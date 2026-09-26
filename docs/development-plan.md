@@ -134,33 +134,39 @@ Make provisioning restart-safe and idempotent; keep remote access deny-by-defaul
 
 The v0.9 claim is Linura installation/adoption on the pinned Linux base, not a general bare-metal/full-disk/dual-boot OS installer or desktop experience. Declare the first Experimental reference support only when all version-specific acceptance evidence exists.
 
-## Phase 10 — meaningful end-user Experimental Linura (target v0.10.0)
+## Phase 10 — complete Experimental Linura workstation (target v0.10.0)
 
-Integrate the proven trust core into a coherent external-user experience without prematurely claiming Stable support:
+Turn the proven trust core into a complete daily-usable Experimental workstation on the exact `arch-hyprland-v1` support boundary. Product completeness and support maturity are separate gates: v0.10 must contain the ordinary workstation experience; Phase 11 proves the stronger Stable support contract for that experience.
 
-- First Boot, local Library and profile/setup workflows;
-- initial Control Center and bounded desktop/shell surfaces over the same typed control protocol;
-- versioned declarative configuration that compiles to typed, previewable, non-authorizing Linura input;
-- keyboard navigation, essential shortcuts and a command palette/launcher backed by registered typed operations or non-authoritative navigation;
-- bounded quick settings, launcher/workspace integration and lifecycle notifications/OSD for the qualified workstation slice;
-- a shared Linura visual/theme token foundation across First Boot, Control Center and bounded desktop surfaces;
-- keyboard/mouse parity for every supported v0.10 end-user workflow unless the release contract records an explicit exception;
-- essential system domains required by the Experimental reference environment;
-- manual operation that remains complete without AI;
-- bounded agent-assisted `IntentProposal` workflows;
-- explanation, diagnostics and audit surfaces;
-- install/update/recovery flows exercised by user-facing system acceptance;
-- explicit unsupported-domain/platform/compatibility boundaries.
+Required v0.10 product scope includes:
 
-Use v0.10 to discover and close product-level gaps under a truthful Experimental contract before the Stable threshold is attempted.
+- First Boot plus at least one bounded, qualified installation path for the exact workstation profile;
+- local Library, Setup and MachineProfile workflows;
+- Control Center over the same typed Control protocol as CLI/SDK surfaces;
+- versioned declarative configuration that remains typed, previewable and non-authorizing;
+- a first-party Linura workstation shell experience with panel/status/tray, launcher/workspace UX, command palette, quick settings, lifecycle notifications/OSD and lock/session controls;
+- qualified user-facing network, Bluetooth, audio/media, display/brightness/power and removable-storage workflows required by the reference profile;
+- screenshot/recording, clipboard/history and essential desktop utility integration;
+- application discovery plus supported package/application/default-app management;
+- coordinated update, snapshot, rollback/recovery and repair UX;
+- themes, wallpaper, fonts/icons and coherent personalization over the shared Linura design system;
+- keyboard, pointer, accessibility, reduced-motion and supported display-scaling/HiDPI behavior;
+- manual/no-AI operation that remains complete, with agent assistance remaining proposal-only;
+- explanation, diagnostics, audit and recovery surfaces;
+- deterministic virtual qualification plus explicit maintained interactive hardware evidence.
+
+“Complete workstation” is intentionally narrow in platform breadth. It does not imply generic Linux, every GPU/display/storage layout, arbitrary package sources, broad containers/virtualization, fleet authority or Stable support. Every supported external effect still requires trusted operation classification and the appropriate Control-owned authority path.
+
+The authoritative implementation ledger is `contracts/v010-workstation-slices.toml`. It records the 32 required vertical slices, their completion state and merged-PR evidence so implementation progress cannot silently redefine milestone scope.
 
 ## Phase 11 — Stable support qualification (target v1.0.0)
 
-`v1.0.0` is reserved by Linura's versioning policy for the first Stable supported end-user contract. Do not tag 1.0 merely because the product is usable or the feature list is large.
+`v1.0.0` is reserved by Linura's versioning policy for the first Stable supported end-user contract. Phase 11 stabilizes the complete workstation delivered by v0.10; it is not where ordinary workstation surfaces are first added.
 
 The declared Stable reference scope must qualify, at minimum:
 
-- supported distribution/desktop/hardware profiles;
+- the v0.10 complete workstation workflow set without removing product-critical surfaces to simplify qualification;
+- supported distribution/desktop/hardware profiles and an explicit compatibility matrix;
 - install/bootstrap and First Boot behavior;
 - migration, upgrade, backup/restore, rollback and recovery paths;
 - canonical lifecycle and privilege boundaries for every Stable mutating path;
@@ -175,13 +181,15 @@ Experimental providers and extensions may coexist with v1.0 only if the Stable r
 
 ## Phase 12 — broader system domains (post-v1 strategic expansion)
 
-Expand network, Bluetooth, audio, power, storage, packages, firewall, updates/snapshots, displays, containers/virtualization and other system domains. Every managed domain uses the same eleven-stage mutation lifecycle rather than defining a domain-specific authority shortcut.
+Deepen and broaden system authority beyond the bounded workstation-domain slices required by v0.10: advanced networking/storage/boot/package/firewall policy, additional provider backends, containers/virtualization and other system domains. Every managed domain uses the same eleven-stage mutation lifecycle rather than defining a domain-specific authority shortcut.
 
 Provider breadth does not automatically inherit Stable status. Each capability advances independently through domain maturity and version-specific evidence.
 
-## Phase 13 — personal operating environment, workflows and derived UI (post-v1 strategic expansion)
+## Phase 13 — advanced personal operating environment, workflows and derived UI (post-v1 strategic expansion)
 
-Build beyond the bounded v0.10 workstation baseline with a declarative workflow runtime, constrained derived surfaces, machine profile/personality composition, profile/setup capture from managed causal state, richer coherent shell/design-system behavior, and broader accessibility/input capabilities. Phase 13 extends the v0.10 visual/theme and keyboard/mouse-parity foundation; it does not defer those v0.10 qualification requirements.
+Build beyond the complete v0.10 workstation with capabilities that are genuinely additive rather than prerequisites for ordinary desktop use: declarative workflow runtime, constrained derived surfaces, richer machine profile/personality composition, profile/setup capture from managed causal state, advanced personalization, deeper accessibility and broader workflow automation.
+
+The complete first-party workstation shell, core personalization and ordinary workstation workflows are v0.10 requirements, not Phase 13 deferrals.
 
 Custom code uses isolated extensions only. Workflow steps still enter Linura Control through typed requests and cannot bypass the operation-class-specific Control path.
 

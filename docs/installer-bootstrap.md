@@ -19,7 +19,7 @@ Concrete installer-capable PlatformProfiles may own destructive OS-installation 
 9. user provisioning;
 10. first-boot-ready.
 
-`arch-hyprland-v1` remains the first interactive workstation PlatformProfile and the existing ArchISO work remains the development path for that kind of installer. Its installation/security requirements do not become v0.9 Ubuntu QualificationEnvironment claims.
+`arch-hyprland-v1` remains the first interactive workstation PlatformProfile. Under ADR 0033, the existing ArchISO path is now a required v0.10 product workstream: at least one exact installer lane must be independently qualified through disk/security setup, restart-safe provisioning and First Boot readiness. Those v0.10 requirements do not retroactively become v0.9 Ubuntu QualificationEnvironment claims.
 
 A persisted installer ledger must resume from the first incomplete stage and reject impossible out-of-order state.
 

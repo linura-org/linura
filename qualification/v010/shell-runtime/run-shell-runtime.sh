@@ -781,14 +781,18 @@ IFS=$'\t' read -r audit_principal audit_operation audit_provider audit_resource 
 } > "$evidence_root/quick-settings-audit.txt"
 pass_case "quick-settings-durable-audit-lineage"
 
-checked_quick_settings_call linura.quick-settings-qualification refresh >/dev/null
-quick_settings_ready_for_drift() {
-    [[ "$(checked_quick_settings_call linura.quick-settings-qualification state 2>/dev/null)" == "ready" ]] \
-        && [[ "$(checked_quick_settings_call linura.quick-settings-qualification volumePercent 2>/dev/null)" == "63" ]] \
-        && [[ "$(checked_quick_settings_call linura.quick-settings-qualification canApply 2>/dev/null)" == "true" ]]
+quick_settings_bind_drift_draft() {
+    local result
+    result="$(checked_quick_settings_call linura.quick-settings-qualification beginDraft 2>/dev/null)" || return 1
+    if [[ "$result" == "not-ready" ]]; then
+        checked_quick_settings_call linura.quick-settings-qualification refresh >/dev/null
+        return 1
+    fi
+    [[ "$result" == "begun" ]] || return 1
+    [[ "$(checked_quick_settings_call linura.quick-settings-qualification canCommitDraft 2>/dev/null)" == "true" ]]
 }
-wait_until "fresh Quick Settings state before precondition-drift draft" quick_settings_ready_for_drift
-[[ "$(checked_quick_settings_call linura.quick-settings-qualification beginDraft)" == "begun" ]] || fail "Quick Settings could not begin the precondition-drift qualification draft"
+wait_until "bound fresh Quick Settings precondition-drift draft" quick_settings_bind_drift_draft
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification volumePercent)" == "63" ]] || fail "Quick Settings precondition-drift draft did not bind authoritative volume 63"
 set_fixture_volume 72
 wait_until "external concurrent volume 72" audio_sink_matches_volume 72
 audit_count_before_drift="$(sqlite3 "$audio_audit" 'SELECT count(*) FROM transient_effect_audit;')"

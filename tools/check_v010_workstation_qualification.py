@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import struct
@@ -16,6 +17,8 @@ EXPECTED_PROFILE = "arch-hyprland-v1"
 EXPECTED_MACHINE_CLASS = "workstation"
 EXPECTED_EVIDENCE = ["disposable-arch", "interactive-workstation", "inherited-v0.9"]
 EXPECTED_INTERACTION_ADR = "docs/adr/0031-v010-many-interfaces-one-authority-path.md"
+EXPECTED_PRODUCT_SCOPE_ADR = "docs/adr/0033-v010-complete-workstation-product-boundary.md"
+EXPECTED_SLICE_CONTRACT = "contracts/v010-workstation-slices.toml"
 EXPECTED_OPERATION_SEMANTICS_CONTRACT = "contracts/operation-semantics.toml"
 EXPECTED_OPERATION_SEMANTICS_ADR = "docs/adr/0032-classify-operations-before-authority.md"
 EXPECTED_INTERACTION_SURFACES = [
@@ -30,18 +33,43 @@ EXPECTED_INTERACTION_SURFACES = [
     "command-palette",
     "quick-settings",
     "desktop-shell-integration",
+    "shell-panel-tray-status",
     "launcher-workspace",
     "notifications-osd",
+    "lock-session-controls",
+    "network-connectivity",
+    "bluetooth",
+    "audio-media",
+    "display-power",
+    "desktop-utilities",
+    "applications-packages",
+    "updates-snapshots-recovery",
+    "personalization",
+    "install-first-boot",
     "unified-visual-theme",
     "keyboard-mouse-parity",
+    "accessibility",
+    "diagnostics-explanation-audit",
 ]
 EXPECTED_REQUIRED_VISUAL_SURFACES = [
     "linura-firstboot",
+    "linura-installer",
     "linura-control-center",
     "command-palette",
     "quick-settings",
     "desktop-shell-integration",
+    "shell-panel-tray-status",
+    "launcher-workspace",
     "notifications-osd",
+    "lock-session-controls",
+    "network-connectivity",
+    "bluetooth",
+    "audio-media",
+    "display-power",
+    "desktop-utilities",
+    "applications-packages",
+    "updates-snapshots-recovery",
+    "personalization",
 ]
 EXPECTED_ALLOWED_VISUAL_SURFACES = set(EXPECTED_REQUIRED_VISUAL_SURFACES) | {"approval-dialog"}
 
@@ -49,29 +77,38 @@ EXPECTED_EXPERIENCE = {
     "interaction_model": "one-model-many-interfaces",
     "architecture_decision": EXPECTED_INTERACTION_ADR,
     "authority_convergence": "single-typed-machine-model-and-control-path",
+    "experience_scope": "complete-daily-usable-workstation",
     "required_surfaces": EXPECTED_INTERACTION_SURFACES,
     "declarative_configuration": "typed-versioned-previewable-non-authorizing",
     "command_palette": True,
     "keyboard_shortcuts": True,
     "quick_settings": True,
-    "desktop_shell_integration": "bounded",
+    "desktop_shell_integration": "complete-first-party",
+    "shell_panel_tray_status": True,
     "launcher_workspace": True,
     "notifications_osd": True,
+    "lock_session_controls": True,
+    "network_connectivity": True,
+    "bluetooth": True,
+    "audio_media": True,
+    "display_power": True,
+    "desktop_utilities": True,
+    "applications_packages": True,
+    "updates_snapshots_recovery": True,
+    "personalization": True,
+    "installation_path_required": True,
+    "ordinary_workflows_terminal_optional": True,
+    "complete_first_party_shell_required": True,
     "unified_visual_theme": True,
     "keyboard_mouse_parity": True,
+    "accessibility_required": True,
+    "noninteractive_surfaces_do_not_capture_input": True,
     "visual_baseline_manifest": "visual/baselines/manifest.json",
     "experience_evidence_manifest": "qualification/v010/experience-evidence.json",
     "representative_visual_scales": [1.0, 2.0],
     "representative_visual_resolutions": ["1280x800", "1440x900"],
     "required_visual_surfaces": EXPECTED_REQUIRED_VISUAL_SURFACES,
-    "required_accessibility_surfaces": [
-        "linura-firstboot",
-        "linura-control-center",
-        "command-palette",
-        "quick-settings",
-        "desktop-shell-integration",
-        "notifications-osd",
-    ],
+    "required_accessibility_surfaces": EXPECTED_REQUIRED_VISUAL_SURFACES,
     "require_reviewed_non_null_visual_baselines": True,
     "require_representative_resolution_scale_captures": True,
     "require_retained_visual_failure_diffs": True,
@@ -82,12 +119,12 @@ EXPECTED_EXPERIENCE = {
     "require_offline_error_states": True,
     "manual_no_ai_required": True,
     "agent_authority": "proposal-only",
-    "full_shell_replacement_required": False,
     "no_parallel_mutation_paths": True,
     "operation_classification": "trusted-registry-plus-control",
     "transient_external_effect": "unprivileged-user-state-only",
     "managed_external_effect": "canonical-eleven-stage-lifecycle",
 }
+
 EXPECTED_REQUIRED_PACKAGES_PATH = "packaging/arch/archiso/packages.linura"
 EXPECTED_MANIFEST_FORMAT = "linura-arch-package-manifest-v1"
 EXPECTED_MANIFEST_DIRECTORY = "qualification/v010"
@@ -117,8 +154,67 @@ EXPECTED_UPDATES = {
     "direct_upgrade_guard": True,
     "break_glass_override": "LINURA_ALLOW_DIRECT_PACMAN=1",
 }
+EXPECTED_Q11_CASE_OBSERVATIONS = {
+    "physical-session-start": ["physical-hardware-present", "wayland-session-active", "hyprland-session-active"],
+    "shell-render-and-input": ["shell-rendered", "keyboard-input", "pointer-input"],
+    "display-scale-and-hidpi": ["display-enumerated", "scale-applied", "hidpi-render-captured"],
+    "provider-runtime-identities": ["networkmanager-version", "bluez-version", "pipewire-version", "wireplumber-version", "udisks2-version", "polkit-version"],
+    "restart-recovery": ["shell-restart", "authority-restart", "state-reobserved"],
+}
+EXPECTED_INTERACTIVE_WORKSTATION = {
+    "evidence_manifest": "qualification/v010/interactive-workstation-evidence.json",
+    "evidence_type": "maintainer-physical-workstation",
+    "evidence_tier": "maintainer_hardware",
+    "required_profile": EXPECTED_PROFILE,
+    "required_machine_class": EXPECTED_MACHINE_CLASS,
+    "required_session": "wayland",
+    "required_compositor": "hyprland",
+    "require_physical_hardware": True,
+    "required_provider_ids": [
+        "networkmanager",
+        "bluez",
+        "pipewire",
+        "wireplumber",
+        "udisks2",
+        "polkit",
+    ],
+    "required_cases": [
+        "physical-session-start",
+        "shell-render-and-input",
+        "display-scale-and-hidpi",
+        "provider-runtime-identities",
+        "restart-recovery",
+    ],
+}
+EXPECTED_UPDATE_RECOVERY_QUALIFICATION = {
+    "evidence_manifest": "qualification/v010/update-recovery-evidence.json",
+    "evidence_type": "exact-source-q12-update-recovery",
+    "required_cases": ["update-success", "migration-success", "update-interruption-recovery", "power-loss-recovery", "snapshot-rollback", "offline-repair"],
+}
+EXPECTED_SECURITY_QUALIFICATION = {
+    "evidence_manifest": "qualification/v010/security-evidence.json",
+    "evidence_type": "exact-source-q13-workstation-security",
+    "required_cases": ["privilege-boundary", "polkit-authorization", "untrusted-package-source-denied", "secret-redaction", "adversarial-input", "recovery-boundary"],
+}
+EXPECTED_Q12_CASE_OBSERVATIONS = {
+    "update-success": ["candidate-applied", "post-update-state-reobserved", "update-audit-bound"],
+    "migration-success": ["pre-migration-backup-created", "migration-completed", "persistent-state-reopened"],
+    "update-interruption-recovery": ["interruption-injected", "restart-detected-incomplete-update", "recovery-converged"],
+    "power-loss-recovery": ["power-loss-injected", "durable-state-recovered", "external-state-reconciled"],
+    "snapshot-rollback": ["snapshot-identified", "rollback-applied", "rollback-state-verified"],
+    "offline-repair": ["network-unavailable", "gui-unavailable", "local-repair-completed"],
+}
+EXPECTED_Q13_CASE_OBSERVATIONS = {
+    "privilege-boundary": ["unprivileged-daemon-confirmed", "generic-root-shell-absent", "privileged-effect-denied-without-authority"],
+    "polkit-authorization": ["polkit-policy-loaded", "unauthorized-caller-denied", "authorized-caller-bound"],
+    "untrusted-package-source-denied": ["untrusted-source-presented", "source-rejected", "no-package-effect-dispatched"],
+    "secret-redaction": ["secret-bearing-input-injected", "audit-redacted", "diagnostics-redacted"],
+    "adversarial-input": ["malformed-input-rejected", "authority-not-widened", "no-effect-dispatched"],
+    "recovery-boundary": ["gui-unavailable", "model-unavailable", "native-recovery-remains-available"],
+}
 OFFICIAL_REPOSITORIES = {"core", "extra", "multilib"}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PACKAGE_NAME_RE = re.compile(r"^[a-z0-9@._+-]+$")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -527,6 +623,354 @@ def _validate_digest_bound_json_artifact(
         failures.append(f"{label} digest mismatch")
         return None
     return _load_json(path, label, failures)
+
+
+def _nonempty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _validate_runner_case_attestation(
+    evidence_path: Path,
+    *,
+    case_name: str,
+    manifest_run_id: object,
+    source: dict[str, object],
+    expected_observations: list[str],
+    label: str,
+    failures: list[str],
+) -> None:
+    if evidence_path.suffix != ".json":
+        failures.append(f"{label} must be a structured JSON runner attestation")
+        return
+    attestation = _load_json(evidence_path, label, failures)
+    if not attestation:
+        return
+    if attestation.get("schema_version") != 1:
+        failures.append(f"{label} schema_version must be 1")
+    if attestation.get("attestation_type") != "linura-v010-qualification-case":
+        failures.append(f"{label} attestation_type must be linura-v010-qualification-case")
+    if attestation.get("case") != case_name or attestation.get("result") != "passed":
+        failures.append(f"{label} must bind a passed {case_name} result")
+    if attestation.get("run_id") != manifest_run_id:
+        failures.append(f"{label} run_id must match the parent qualification run")
+    if not _nonempty_string(attestation.get("captured_at_utc")):
+        failures.append(f"{label} requires captured_at_utc")
+    runner = attestation.get("runner")
+    if not isinstance(runner, dict):
+        failures.append(f"{label} missing runner provenance")
+    else:
+        if runner.get("id") != "qualification/v010/workstation-runner":
+            failures.append(f"{label} runner.id must identify the v0.10 workstation runner")
+        for key in ("commit_sha", "linurad_sha256", "shell_bridge_sha256"):
+            if runner.get(key) != source.get(key):
+                failures.append(f"{label} runner.{key} must match the parent source identity")
+    observations = attestation.get("observations")
+    if not isinstance(observations, list):
+        failures.append(f"{label} observations must be an array")
+        return
+    by_name: dict[str, dict[str, object]] = {}
+    for index, observation in enumerate(observations):
+        if not isinstance(observation, dict):
+            failures.append(f"{label} observation {index} must be an object")
+            continue
+        name = observation.get("name")
+        if not isinstance(name, str) or name in by_name:
+            failures.append(f"{label} observation {index} has invalid or duplicate name")
+            continue
+        by_name[name] = observation
+    if set(by_name) != set(expected_observations):
+        failures.append(f"{label} observation set does not prove the required case")
+        return
+    for name in expected_observations:
+        item = by_name[name]
+        if item.get("result") != "passed":
+            failures.append(f"{label} observation {name} must have result=passed")
+        if item.get("value") in {None, ""}:
+            failures.append(f"{label} observation {name} requires an observable value")
+
+
+def _validate_interactive_workstation_evidence(
+    root: Path,
+    interactive: dict[str, object],
+    failures: list[str],
+    *,
+    expected_source_sha: str | None,
+) -> None:
+    manifest = _validate_digest_bound_json_artifact(
+        root,
+        interactive.get("evidence_manifest"),
+        interactive.get("evidence_manifest_sha256"),
+        label="interactive workstation evidence manifest",
+        failures=failures,
+    )
+    if manifest is None:
+        return
+    if manifest.get("schema_version") != 1:
+        failures.append("interactive workstation evidence schema_version must be 1")
+    if manifest.get("milestone") != "v0.10.0":
+        failures.append("interactive workstation evidence must bind milestone v0.10.0")
+    if manifest.get("profile_id") != EXPECTED_PROFILE:
+        failures.append("interactive workstation evidence must bind arch-hyprland-v1")
+    if manifest.get("machine_class") != EXPECTED_MACHINE_CLASS:
+        failures.append("interactive workstation evidence machine_class must be workstation")
+    if manifest.get("evidence_type") != "maintainer-physical-workstation":
+        failures.append("interactive workstation evidence_type must be maintainer-physical-workstation")
+    if manifest.get("evidence_tier") != "maintainer_hardware":
+        failures.append("interactive workstation evidence_tier must be maintainer_hardware")
+    if manifest.get("physical_hardware") is not True:
+        failures.append("interactive workstation evidence must attest physical_hardware=true")
+    if manifest.get("result") != "passed":
+        failures.append("interactive workstation evidence result must be passed")
+    if not _nonempty_string(manifest.get("run_id")):
+        failures.append("interactive workstation evidence requires a non-empty run_id")
+    if not _nonempty_string(manifest.get("captured_at_utc")):
+        failures.append("interactive workstation evidence requires captured_at_utc")
+
+    source = manifest.get("source")
+    source_valid = isinstance(source, dict)
+    if not source_valid:
+        failures.append("interactive workstation evidence missing source identities")
+        source = {}
+    else:
+        commit_sha = source.get("commit_sha")
+        if not isinstance(commit_sha, str) or not GIT_SHA_RE.fullmatch(commit_sha):
+            failures.append("interactive workstation source.commit_sha must be a lowercase 40-hex Git SHA")
+        elif expected_source_sha is None:
+            failures.append("interactive workstation evidence requires an expected release source SHA")
+        elif commit_sha != expected_source_sha:
+            failures.append("interactive workstation source.commit_sha does not match the expected release source")
+        for key in ("linurad_sha256", "shell_bridge_sha256"):
+            value = source.get(key)
+            if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
+                failures.append(f"interactive workstation source.{key} must be a lowercase SHA-256 digest")
+
+    hardware = manifest.get("hardware")
+    if not isinstance(hardware, dict):
+        failures.append("interactive workstation evidence missing hardware identities")
+    else:
+        cpu = hardware.get("cpu")
+        if not isinstance(cpu, dict) or any(not _nonempty_string(cpu.get(key)) for key in ("architecture", "vendor", "model")):
+            failures.append("interactive workstation CPU identity must include architecture, vendor and model")
+        gpu = hardware.get("gpu")
+        if not isinstance(gpu, dict) or any(not _nonempty_string(gpu.get(key)) for key in ("vendor_id", "device_id", "driver", "driver_version")):
+            failures.append("interactive workstation GPU identity must include vendor/device/driver/version")
+        displays = hardware.get("displays")
+        if not isinstance(displays, list) or not displays or len(displays) > 16:
+            failures.append("interactive workstation evidence requires 1..16 identified displays")
+        else:
+            for index, display in enumerate(displays):
+                if not isinstance(display, dict):
+                    failures.append(f"interactive workstation display {index} must be an object")
+                    continue
+                if not _nonempty_string(display.get("connector")):
+                    failures.append(f"interactive workstation display {index} requires connector identity")
+                for key in ("width", "height", "refresh_millihz"):
+                    value = display.get(key)
+                    if type(value) is not int or value <= 0:
+                        failures.append(f"interactive workstation display {index}.{key} must be a positive integer")
+                scale = display.get("scale")
+                if not isinstance(scale, (int, float)) or isinstance(scale, bool) or scale <= 0:
+                    failures.append(f"interactive workstation display {index}.scale must be positive")
+
+    session = manifest.get("session")
+    if not isinstance(session, dict):
+        failures.append("interactive workstation evidence missing session identities")
+    else:
+        if session.get("protocol") != "wayland":
+            failures.append("interactive workstation session.protocol must be wayland")
+        if session.get("compositor") != "hyprland":
+            failures.append("interactive workstation session.compositor must be hyprland")
+        for key in ("compositor_version", "quickshell_version", "qt_version", "kernel_version", "systemd_version"):
+            if not _nonempty_string(session.get(key)):
+                failures.append(f"interactive workstation session.{key} must be non-empty")
+
+    providers = manifest.get("providers")
+    required_provider_ids = EXPECTED_INTERACTIVE_WORKSTATION["required_provider_ids"]
+    if not isinstance(providers, dict) or set(providers) != set(required_provider_ids):
+        failures.append("interactive workstation provider identities must match the required provider set")
+    else:
+        for provider_id in required_provider_ids:
+            if not _nonempty_string(providers.get(provider_id)):
+                failures.append(f"interactive workstation provider {provider_id} requires an exact runtime version")
+
+    cases = manifest.get("cases")
+    required_cases = EXPECTED_INTERACTIVE_WORKSTATION["required_cases"]
+    if not isinstance(cases, list) or len(cases) != len(required_cases):
+        failures.append("interactive workstation evidence must contain exactly the required Q11 cases")
+        return
+    by_name: dict[str, dict[str, object]] = {}
+    for index, case in enumerate(cases):
+        if not isinstance(case, dict):
+            failures.append(f"interactive workstation case {index} must be an object")
+            continue
+        name = case.get("name")
+        if not isinstance(name, str) or name in by_name:
+            failures.append(f"interactive workstation case {index} has invalid or duplicate name")
+            continue
+        by_name[name] = case
+    if set(by_name) != set(required_cases):
+        failures.append("interactive workstation Q11 case set drifted from the qualification contract")
+        return
+    case_observations = (
+        EXPECTED_Q12_CASE_OBSERVATIONS
+        if expected["evidence_type"] == "exact-source-q12-update-recovery"
+        else EXPECTED_Q13_CASE_OBSERVATIONS
+    )
+    for name in required_cases:
+        case = by_name[name]
+        if case.get("result") != "passed":
+            failures.append(f"interactive workstation case {name} must have result=passed")
+        evidence_path = _bounded_regular_path(
+            root,
+            case.get("evidence"),
+            prefix="qualification/v010/interactive-workstation/",
+            label=f"interactive workstation case evidence {name}",
+            failures=failures,
+        )
+        digest = case.get("sha256")
+        if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+            failures.append(f"interactive workstation case {name} requires a lowercase SHA-256 digest")
+        elif evidence_path is not None and _sha256(evidence_path) != digest:
+            failures.append(f"interactive workstation case {name} evidence digest mismatch")
+        elif evidence_path is not None and source_valid:
+            _validate_runner_case_attestation(
+                evidence_path,
+                case_name=name,
+                manifest_run_id=manifest.get("run_id"),
+                source=source,
+                expected_observations=EXPECTED_Q11_CASE_OBSERVATIONS[name],
+                label=f"interactive workstation case evidence {name}",
+                failures=failures,
+            )
+
+
+def _validate_release_matrix_evidence(
+    root: Path,
+    section: dict[str, object],
+    expected: dict[str, object],
+    *,
+    label: str,
+    expected_source_sha: str | None,
+    failures: list[str],
+) -> None:
+    manifest = _validate_digest_bound_json_artifact(
+        root,
+        section.get("evidence_manifest"),
+        section.get("evidence_manifest_sha256"),
+        label=f"{label} evidence manifest",
+        failures=failures,
+    )
+    if manifest is None:
+        return
+    if manifest.get("schema_version") != 1:
+        failures.append(f"{label} evidence schema_version must be 1")
+    if manifest.get("milestone") != "v0.10.0":
+        failures.append(f"{label} evidence must bind milestone v0.10.0")
+    if manifest.get("evidence_type") != expected["evidence_type"]:
+        failures.append(f"{label} evidence_type drifted")
+    if manifest.get("result") != "passed":
+        failures.append(f"{label} evidence result must be passed")
+    manifest_run_id = manifest.get("run_id")
+    if not _nonempty_string(manifest_run_id):
+        failures.append(f"{label} evidence requires run_id")
+    if not _nonempty_string(manifest.get("captured_at_utc")):
+        failures.append(f"{label} evidence requires captured_at_utc")
+    source_sha = manifest.get("source_commit_sha")
+    if not isinstance(source_sha, str) or not GIT_SHA_RE.fullmatch(source_sha):
+        failures.append(f"{label} source_commit_sha must be a lowercase 40-hex Git SHA")
+    elif expected_source_sha is None:
+        failures.append(f"{label} evidence requires an expected release source SHA")
+    elif source_sha != expected_source_sha:
+        failures.append(f"{label} source_commit_sha does not match the expected release source")
+    cases = manifest.get("cases")
+    required_cases = expected["required_cases"]
+    if not isinstance(cases, list) or len(cases) != len(required_cases):
+        failures.append(f"{label} evidence must contain exactly the required cases")
+        return
+    by_name: dict[str, dict[str, object]] = {}
+    for index, case in enumerate(cases):
+        if not isinstance(case, dict):
+            failures.append(f"{label} case {index} must be an object")
+            continue
+        name = case.get("name")
+        if not isinstance(name, str) or name in by_name:
+            failures.append(f"{label} case {index} has invalid or duplicate name")
+            continue
+        by_name[name] = case
+    if set(by_name) != set(required_cases):
+        failures.append(f"{label} case set drifted from the qualification contract")
+        return
+    for name in required_cases:
+        case = by_name[name]
+        if case.get("result") != "passed":
+            failures.append(f"{label} case {name} must have result=passed")
+        evidence_path = _bounded_regular_path(
+            root,
+            case.get("evidence"),
+            prefix="qualification/v010/",
+            label=f"{label} case evidence {name}",
+            failures=failures,
+        )
+        digest = case.get("sha256")
+        if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+            failures.append(f"{label} case {name} requires a lowercase SHA-256 digest")
+            continue
+        if evidence_path is None or _sha256(evidence_path) != digest:
+            if evidence_path is not None:
+                failures.append(f"{label} case {name} evidence digest mismatch")
+            continue
+        if evidence_path.suffix != ".json":
+            failures.append(f"{label} case {name} must use a structured JSON runner attestation")
+            continue
+        attestation = _load_json(evidence_path, f"{label} case evidence {name}", failures)
+        if not attestation:
+            continue
+        if attestation.get("schema_version") != 1:
+            failures.append(f"{label} case {name} attestation schema_version must be 1")
+        if attestation.get("attestation_type") != "linura-v010-release-qualification-case":
+            failures.append(f"{label} case {name} attestation_type drifted")
+        if attestation.get("case") != name or attestation.get("result") != "passed":
+            failures.append(f"{label} case {name} attestation must bind a passed result")
+        if attestation.get("source_commit_sha") != source_sha:
+            failures.append(f"{label} case {name} attestation source must match the manifest")
+        if attestation.get("run_id") != manifest_run_id:
+            failures.append(f"{label} case {name} run_id must match the parent qualification run")
+        if not _nonempty_string(attestation.get("captured_at_utc")):
+            failures.append(f"{label} case {name} requires captured_at_utc")
+        runner = attestation.get("runner")
+        if not isinstance(runner, dict):
+            failures.append(f"{label} case {name} missing runner provenance")
+        else:
+            if runner.get("id") != "qualification/v010/release-matrix-runner":
+                failures.append(f"{label} case {name} runner.id must identify the v0.10 release-matrix runner")
+            if not _nonempty_string(runner.get("version")):
+                failures.append(f"{label} case {name} runner.version must be non-empty")
+            if runner.get("commit_sha") != source_sha:
+                failures.append(f"{label} case {name} runner.commit_sha must match the parent source identity")
+        observations = attestation.get("observations")
+        if not isinstance(observations, list):
+            failures.append(f"{label} case {name} observations must be an array")
+            continue
+        by_observation: dict[str, dict[str, object]] = {}
+        for index, observation in enumerate(observations):
+            if not isinstance(observation, dict):
+                failures.append(f"{label} case {name} observation {index} must be an object")
+                continue
+            observation_name = observation.get("name")
+            if not isinstance(observation_name, str) or observation_name in by_observation:
+                failures.append(f"{label} case {name} observation {index} has invalid or duplicate name")
+                continue
+            by_observation[observation_name] = observation
+        expected_observations = case_observations[name]
+        if set(by_observation) != set(expected_observations):
+            failures.append(f"{label} case {name} observation set does not prove the required case")
+            continue
+        for observation_name in expected_observations:
+            observation = by_observation[observation_name]
+            if observation.get("result") != "passed":
+                failures.append(f"{label} case {name} observation {observation_name} must pass")
+            if observation.get("value") in {None, ""}:
+                failures.append(f"{label} case {name} observation {observation_name} requires a value")
 
 
 def _matches_canonical_visual_diff(
@@ -1110,7 +1554,7 @@ def _validate_package_manifest(
         )
 
 
-def validate(root: Path) -> list[str]:
+def validate(root: Path, *, expected_source_sha: str | None = None) -> list[str]:
     failures: list[str] = []
     contract = _load_toml(root / CONTRACT_PATH, "v0.10 qualification contract", failures)
     roadmap = _load_toml(root / "contracts/roadmap.toml", "roadmap contract", failures)
@@ -1137,6 +1581,14 @@ def validate(root: Path) -> list[str]:
         failures.append("v0.10 operation_semantics_contract must bind the canonical operation-semantics contract")
     elif not (root / EXPECTED_OPERATION_SEMANTICS_CONTRACT).is_file():
         failures.append("v0.10 operation-semantics contract file is missing")
+    if contract.get("product_scope_decision") != EXPECTED_PRODUCT_SCOPE_ADR:
+        failures.append("v0.10 product_scope_decision must bind ADR 0033")
+    elif not (root / EXPECTED_PRODUCT_SCOPE_ADR).is_file():
+        failures.append("v0.10 product-scope ADR 0033 is missing")
+    if contract.get("slice_contract") != EXPECTED_SLICE_CONTRACT:
+        failures.append("v0.10 slice_contract must bind the canonical workstation slice ledger")
+    elif not (root / EXPECTED_SLICE_CONTRACT).is_file():
+        failures.append("v0.10 workstation slice ledger is missing")
     experience = contract.get("experience")
     if not isinstance(experience, dict):
         failures.append("v0.10 qualification contract missing experience")
@@ -1160,8 +1612,18 @@ def validate(root: Path) -> list[str]:
             failures.append("roadmap v0.10 interaction_model must remain one-model-many-interfaces")
         if milestone.get("required_interaction_surfaces") != EXPECTED_INTERACTION_SURFACES:
             failures.append("roadmap v0.10 required_interaction_surfaces drifted from the v0.10 experience contract")
-        if milestone.get("desktop_shell_scope") != "bounded-integration-not-full-replacement":
-            failures.append("roadmap v0.10 desktop_shell_scope must remain bounded-integration-not-full-replacement")
+        if milestone.get("desktop_shell_scope") != "complete-first-party-workstation-shell":
+            failures.append("roadmap v0.10 desktop_shell_scope must remain complete-first-party-workstation-shell")
+        if milestone.get("experience_scope") != "complete-daily-usable-workstation":
+            failures.append("roadmap v0.10 experience_scope must remain complete-daily-usable-workstation")
+        if milestone.get("installation_scope") != "bounded-qualified-install-plus-adoption":
+            failures.append("roadmap v0.10 installation_scope must remain bounded-qualified-install-plus-adoption")
+        if milestone.get("daily_use_target") is not True:
+            failures.append("roadmap v0.10 daily_use_target must remain true")
+        if milestone.get("product_scope_adr") != EXPECTED_PRODUCT_SCOPE_ADR:
+            failures.append("roadmap v0.10 product_scope_adr must bind ADR 0033")
+        if milestone.get("slice_contract") != EXPECTED_SLICE_CONTRACT:
+            failures.append("roadmap v0.10 slice_contract must bind the workstation slice ledger")
         if milestone.get("interaction_adr") != EXPECTED_INTERACTION_ADR:
             failures.append("roadmap v0.10 interaction_adr must bind ADR 0031")
         if milestone.get("operation_semantics_contract") != EXPECTED_OPERATION_SEMANTICS_CONTRACT:
@@ -1320,7 +1782,81 @@ def validate(root: Path) -> list[str]:
         if not isinstance(experience_ready, bool):
             failures.append("experience.experience_evidence_ready must be boolean")
         if experience_ready is True:
+            slice_contract = _load_toml(
+                root / EXPECTED_SLICE_CONTRACT,
+                "v0.10 workstation slice contract",
+                failures,
+            )
+            slice_items = slice_contract.get("slice") if slice_contract else None
+            status_by_id = {
+                item.get("id"): item.get("status")
+                for item in slice_items
+                if isinstance(item, dict)
+            } if isinstance(slice_items, list) else {}
+            required_product_slices = [f"S{index:02d}" for index in range(1, 29)]
+            incomplete_product_slices = [
+                slice_id
+                for slice_id in required_product_slices
+                if status_by_id.get(slice_id) != "complete"
+            ]
+            if incomplete_product_slices:
+                failures.append(
+                    "experience evidence cannot be ready until product slices S01-S28 are complete: "
+                    + ", ".join(incomplete_product_slices)
+                )
             _validate_experience_evidence(root, experience, failures)
+
+    interactive = contract.get("interactive_workstation")
+    if not isinstance(interactive, dict):
+        failures.append("v0.10 qualification contract missing interactive_workstation evidence contract")
+    else:
+        static_interactive = dict(interactive)
+        static_interactive.pop("evidence_ready", None)
+        static_interactive.pop("evidence_manifest_sha256", None)
+        if static_interactive != EXPECTED_INTERACTIVE_WORKSTATION:
+            failures.append("v0.10 interactive workstation evidence contract drifted")
+        evidence_ready = interactive.get("evidence_ready")
+        if not isinstance(evidence_ready, bool):
+            failures.append("interactive_workstation.evidence_ready must be boolean")
+        elif evidence_ready:
+            _validate_interactive_workstation_evidence(
+                root,
+                interactive,
+                failures,
+                expected_source_sha=expected_source_sha,
+            )
+        elif interactive.get("evidence_manifest_sha256") not in {"", None}:
+            failures.append(
+                "interactive_workstation evidence digest must remain empty until Q11 evidence is ready"
+            )
+
+    for section_name, expected, label in (
+        ("update_recovery_qualification", EXPECTED_UPDATE_RECOVERY_QUALIFICATION, "Q12 update/recovery"),
+        ("security_qualification", EXPECTED_SECURITY_QUALIFICATION, "Q13 workstation security"),
+    ):
+        section = contract.get(section_name)
+        if not isinstance(section, dict):
+            failures.append(f"v0.10 qualification contract missing {section_name}")
+            continue
+        static_section = dict(section)
+        static_section.pop("evidence_ready", None)
+        static_section.pop("evidence_manifest_sha256", None)
+        if static_section != expected:
+            failures.append(f"v0.10 {section_name} contract drifted")
+        evidence_ready = section.get("evidence_ready")
+        if not isinstance(evidence_ready, bool):
+            failures.append(f"{section_name}.evidence_ready must be boolean")
+        elif evidence_ready:
+            _validate_release_matrix_evidence(
+                root,
+                section,
+                expected,
+                label=label,
+                expected_source_sha=expected_source_sha,
+                failures=failures,
+            )
+        elif section.get("evidence_manifest_sha256") not in {"", None}:
+            failures.append(f"{section_name} evidence digest must remain empty until evidence is ready")
 
     if contract.get("security") != EXPECTED_SECURITY:
         failures.append("v0.10 contract security baseline must match the target PlatformProfile")
@@ -1332,7 +1868,11 @@ def validate(root: Path) -> list[str]:
 
 def main(argv: list[str]) -> int:
     root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[1]
-    failures = validate(root)
+    expected_source_sha = os.environ.get("LINURA_EXPECTED_SOURCE_SHA")
+    if expected_source_sha is not None and not GIT_SHA_RE.fullmatch(expected_source_sha):
+        print("ERROR: LINURA_EXPECTED_SOURCE_SHA must be a lowercase 40-hex Git SHA", file=sys.stderr)
+        return 1
+    failures = validate(root, expected_source_sha=expected_source_sha)
     if failures:
         for failure in failures:
             print(f"ERROR: {failure}", file=sys.stderr)
