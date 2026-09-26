@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED = [
     "README.md", "SECURITY.md", "AGENTS.md", "CONTRIBUTING.md", "Cargo.toml", "rust-toolchain.toml",
-    "docs/product-vision.md", "docs/vision-coverage.md", "docs/architecture.md", "docs/naming.md", "docs/sdk.md", "docs/intent-model.md",
+    "docs/product-vision.md", "docs/vision-coverage.md", "docs/architecture.md", "docs/naming.md", "docs/ecosystem-registry.md", "docs/sdk.md", "docs/intent-model.md",
     "docs/system-graph.md", "docs/capability-composition.md", "docs/semantic-provenance.md", "docs/reusable-setups.md",
     "docs/agent-architecture.md", "docs/provider-model.md", "docs/state-model.md", "docs/terminology.md",
     "docs/first-boot.md", "docs/machine-profiles.md", "docs/workflow-model.md",
@@ -29,6 +29,7 @@ REQUIRED = [
     "contracts/layering.toml", "tools/check_layering.py", "tests/tooling/test_layering.py",
     "contracts/operation-semantics.toml", "tools/check_operation_semantics.py", "tests/tooling/test_operation_semantics.py",
     "contracts/components.toml", "tools/check_component_maturity.py", "tests/tooling/test_component_maturity.py",
+    "contracts/namespaces.toml", "tools/check_namespaces.py", "tests/tooling/test_namespaces.py",
     "tools/check_linura_shell.py", "tests/tooling/test_linura_shell.py",
     "tools/check_v010_shell_runtime_qualification.py", "tests/tooling/test_v010_shell_runtime_qualification.py",
     "contracts/v010-shell-runtime-qualification.toml", ".github/workflows/v010-shell-runtime-qualification.yml",
@@ -323,6 +324,16 @@ def main() -> int:
     if maturity_result.returncode != 0:
         details = maturity_result.stderr.strip() or maturity_result.stdout.strip()
         failures.append(f"component maturity validation failed: {details}")
+
+    namespace_result = subprocess.run(
+        [sys.executable, str(ROOT / "tools/check_namespaces.py"), str(ROOT)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if namespace_result.returncode != 0:
+        details = namespace_result.stderr.strip() or namespace_result.stdout.strip()
+        failures.append(f"namespace contract validation failed: {details}")
 
     shell_result = subprocess.run(
         [sys.executable, str(ROOT / "tools/check_linura_shell.py"), str(ROOT)],
