@@ -339,6 +339,18 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("publish-pypi:", release)
         self.assertIn("environment:\n      name: pypi", release)
         self.assertEqual(release.count("id-token: write"), 1)
+        self.assertIn(
+            "if: ${{ !cancelled() && needs.pypi-preflight.result == 'success' }}",
+            release,
+        )
+        self.assertIn(
+            "if: ${{ !cancelled() && needs.pypi-preflight.result == 'success' && needs.publish-pypi.result == 'success' }}",
+            release,
+        )
+        self.assertNotIn(
+            "if: ${{ needs.pypi-preflight.result == 'success' }}",
+            release,
+        )
         self.assertIn("needs.pypi-preflight.outputs.publish_required == 'true'", release)
         self.assertIn("pypa/gh-action-pypi-publish@", release)
         self.assertIn("packages-dir: /tmp/linura-pypi/", release)
