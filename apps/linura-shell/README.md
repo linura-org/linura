@@ -2,7 +2,7 @@
 
 Linura Shell is the v0.10 desktop-shell candidate for the `arch-hyprland-v1` workstation profile.
 
-The shell runs as one supervised, long-lived Quickshell process. First-party shell surfaces are Qt Quick/QML components hosted inside that process. The current bounded surfaces are the Control Center audio panel and a navigation-only command palette with typed Hyprland workspace discovery/switching.
+The shell runs as one supervised, long-lived Quickshell process. First-party shell surfaces are Qt Quick/QML components hosted inside that process. The current bounded surfaces are the Control Center audio panel, compact Quick Settings over the same authoritative session-volume path, and a navigation-only command palette with typed Hyprland workspace discovery/switching.
 
 ## Architecture
 
@@ -38,7 +38,8 @@ The UI SDK is presentation-only. It receives no provider handles, D-Bus authorit
 v0.10 intentionally distinguishes trusted shipped shell surfaces from the future extension runtime.
 
 - `shell.qml` is the single trusted Quickshell root.
-- `plugins/control-center` is a first-party panel loaded by the trusted shell.
+- `plugins/control-center` is a first-party detailed panel loaded by the trusted shell.
+- `plugins/quick-settings` is a first-party compact panel that reuses the same typed audio-session controller and registered Session1 operation; it owns no provider or executor authority.
 - `plugins/command-palette` is a first-party overlay whose catalog contains bounded experience-navigation targets plus explicit visible desktop-application targets.
 - first-party manifests are descriptive metadata; they do not grant capabilities or authority.
 - arbitrary user QML is **not** loaded into the trusted shell process in this slice.
@@ -60,6 +61,16 @@ The current Control Center panel provides current-session default-output volume:
 
 The panel exposes keyboard and pointer operation, uses the shared Linura token vocabulary, and requires no animation to communicate state.
 
+## Quick Settings slice
+
+Quick Settings exposes the same current-session default-output volume operation in a compact shell panel. It does **not** introduce a second audio path: the shell owns one shared `AudioSessionController`, activates it only while Control Center or Quick Settings is open, and both surfaces bind to the same authenticated `Control1.Observe` and registered `Session1.SetAudioOutputVolume` flow.
+
+The quick surface shows authoritative sink identity/state, explicit freshness/status, read-only mute state and a bounded 0–100% volume draft. Stale, unavailable or busy state disables apply. Applying a draft still performs fresh pre-dispatch re-observation, exact-node identity/state comparison, the registered transient effect, receipt correlation and independent post-effect verification. The manifest is descriptive and authority-free; QML cannot select operation class, risk, policy, provider or executor.
+
+Control Center, Quick Settings and command palette are mutually exclusive transient surfaces. Switching between them cancels any undispatched audio draft before the next surface takes ownership. The shell root, rather than an individual panel, owns shared audio-observation activation so one consumer cannot deactivate the controller while another supported consumer is open.
+
+The exact-source shell development gate exercises this surface against a real session authority stack. It builds the exact `linurad` source, installs the production root-owned WirePlumber helper and compiled ShellBridge module, starts PipeWire/WirePlumber in the disposable Arch user session, creates one deterministic qualification-only virtual sink, and drives the real `QuickSettingsPanel` through `AudioSessionController`. The gate proves authoritative observation, a verified Session1 volume effect, exact-node post-state, durable SQLite/WAL audit lineage, pre-dispatch state-drift rejection, service-loss fail-closed behavior, and recovery after `linurad` restart. Fixture-only sink creation/default selection and initial/concurrent volume setup are explicitly outside the product mutation path; the effect under qualification reaches PipeWire only through the registered Linura operation.
+
 ## Command palette slice
 
 The command palette is an `ExperienceEphemeral` shell surface. Its static catalog contains the explicit `navigation:control-center` target, it receives plain workspace descriptors from the nonvisual `WorkspaceNavigationController` as `navigation:workspace` entries, and it receives sanitized visible desktop-entry descriptors from `ApplicationLauncherController` as `application:desktop-entry` targets. Search/filtering, keyboard selection and pointer activation remain presentation behavior; the palette owns no Hyprland or desktop-entry provider object.
@@ -76,14 +87,15 @@ Effectful Linura-managed palette entries are not added as arbitrary QML callback
 
 ## Launch and idle behavior
 
-The image installs `Linura Control Center` and `Linura Command Palette` desktop entries that call the running shell through Quickshell IPC:
+The image installs `Linura Control Center`, `Linura Quick Settings` and `Linura Command Palette` desktop entries that call the running shell through Quickshell IPC:
 
 ```sh
 qs -p /usr/share/linura/shell ipc call -- linura.shell toggleControlCenter
+qs -p /usr/share/linura/shell ipc call -- linura.shell toggleQuickSettings
 qs -p /usr/share/linura/shell ipc call -- linura.shell toggleCommandPalette
 ```
 
-The shell keeps the Control Center and command palette mutually exclusive so keyboard focus is owned by at most one transient Linura surface. The shell does not poll PipeWire while the panel is closed. Opening the panel activates the bridge, obtains fresh authoritative state, and arms refresh only from the returned freshness lifetime. Closing the panel disables future observation refreshes while allowing an already-dispatched effect to finish its post-effect verification path.
+The shell keeps Control Center, Quick Settings and command palette mutually exclusive so keyboard focus is owned by at most one transient Linura surface. The shared audio controller is active only while Control Center or Quick Settings is open. When neither audio surface is open it stops future freshness/retry observation work, while an already-dispatched effect is still allowed to finish its independent post-effect verification path.
 
 ## Runtime and qualification boundary
 
@@ -91,4 +103,4 @@ The Arch workstation image includes the official Arch `quickshell` package and t
 
 Shell supervision is attached to the systemd graphical-session lifecycle, not to a compositor child process. `linura-shell.service` is `WantedBy`, `BindsTo` and `PartOf` `graphical-session.target`. The qualified Hyprland startup path must activate `hyprland-session.target` / `graphical-session.target`, and Q11 must prove both activation and teardown. A workstation session that sets `HYPRLAND_NO_SD_TARGET` is outside this candidate profile unless a separately qualified session manager supplies the equivalent target lifecycle.
 
-This implementation does **not** promote `arch-hyprland-v1`, Linura Shell, Control Center, Quickshell, or the PipeWire volume operation to release-qualified support. Q10/Q11 retained visual, accessibility, interaction, compositor, restart, package-identity and real-workstation evidence remain required.
+This implementation does **not** promote `arch-hyprland-v1`, Linura Shell, Control Center, Quick Settings, Quickshell, or the PipeWire volume operation to release-qualified support. Q10/Q11 retained visual, accessibility, interaction, compositor, restart, package-identity and real-workstation evidence remain required.

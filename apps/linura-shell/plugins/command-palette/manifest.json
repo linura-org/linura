@@ -8,6 +8,7 @@
   "authority": "none",
   "interaction_scope": "experience-navigation-and-application-launcher",
   "navigation_targets": [
+    "navigation:quick-settings",
     "navigation:control-center",
     "navigation:workspace"
   ],

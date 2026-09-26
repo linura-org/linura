@@ -31,6 +31,8 @@ REQUIRED = (
     "apps/linura-shell/ui/LinuraSlider.qml",
     "apps/linura-shell/plugins/control-center/manifest.json",
     "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml",
+    "apps/linura-shell/plugins/quick-settings/manifest.json",
+    "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml",
     "apps/linura-shell/plugins/command-palette/manifest.json",
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
     "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml",
@@ -39,6 +41,7 @@ REQUIRED = (
     "apps/linura-shell/bridge/audio_session_controller.h",
     "apps/linura-shell/bridge/audio_session_controller.cpp",
     "apps/linura-shell/org.linura.ControlCenter.desktop",
+    "apps/linura-shell/org.linura.QuickSettings.desktop",
     "apps/linura-shell/org.linura.CommandPalette.desktop",
     "apps/linura-control-center/README.md",
     "contracts/components.toml",
@@ -89,6 +92,7 @@ FORBIDDEN_BRIDGE = (
 REQUIRED_BRIDGE = (
     "QML_ELEMENT",
     "Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)",
+    "Q_PROPERTY(bool canCommitDraft READ canCommitDraft NOTIFY availabilityChanged)",
     "QDBusConnection::sessionBus()",
     '"org.linura.Control1"',
     '"/org/linura/Control1"',
@@ -100,6 +104,7 @@ REQUIRED_BRIDGE = (
     '"operation:audio.output.set-session-volume"',
     "samePrecondition(",
     "sameIdentity(",
+    "bool AudioSessionController::canCommitDraft() const",
     "draftBase_.value_or(*current_)",
     "ObservePurpose::PreApply",
     "ObservePurpose::PostApply",
@@ -112,6 +117,10 @@ REQUIRED_BRIDGE = (
     "armFreshnessExpiry(snapshot)",
     "control.setTimeout(kObserveTimeoutMs)",
     "session.setTimeout(kEffectTimeoutMs)",
+    "constexpr int kEffectTimeoutMs = 10'000;",
+    "const QDBusArgument argument = qvariant_cast<QDBusArgument>(value);",
+    "const QDBusArgument wire = arguments.at(0).value<QDBusArgument>();",
+    "wire.currentType() != QDBusArgument::StructureType",
     "isBoundedControlFree(receipt.planId, 256)",
     'QStringLiteral("org.freedesktop.DBus.Error.ServiceUnknown")',
     'QStringLiteral("org.freedesktop.DBus.Error.NameHasNoOwner")',
@@ -125,7 +134,8 @@ REQUIRED_BRIDGE = (
     "bool dispatched = false;",
     "pending_.has_value() && !pending_->dispatched",
     "pending_->dispatched = true;",
-    'QStringLiteral("Control Center is closed.")',
+    "(!canApply() && !canCommitDraft())",
+    'QStringLiteral("Audio controls are inactive.")',
     "observe(ObservePurpose::PostApply)",
 )
 
@@ -137,7 +147,14 @@ REQUIRED_CI = (
     "cmake --install",
     "cmake -S apps/linura-shell/ui",
     'module_dir="$install_dir/lib/qt6/qml/org/linura/ShellBridge"',
+    'bridge_plugin="$module_dir/liblinura-shell-bridgeplugin.so"',
+    'bridge_backing="$module_dir/liblinura-shell-bridge.so"',
     'test -f "$module_dir/qmldir"',
+    'test -f "$bridge_plugin"',
+    'test -f "$bridge_backing"',
+    'bridge_linkage="$(ldd "$bridge_plugin")"',
+    "Linura ShellBridge QML plugin has unresolved installed dependencies",
+    'grep -Fq "liblinura-shell-bridge.so => $bridge_backing" <<<"$bridge_linkage"',
     'ui_module_dir="$install_dir/lib/qt6/qml/org/linura/UI"',
     'ui_plugin="$ui_module_dir/liblinura-uiplugin.so"',
     'ui_backing="$ui_module_dir/liblinura-ui.so"',
@@ -153,12 +170,16 @@ REQUIRED_IMAGE = (
     'ROOT / "apps/linura-shell/shell.qml"',
     'ROOT / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"',
     'ROOT / "apps/linura-shell/plugins/control-center/manifest.json"',
+    'ROOT / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"',
+    'ROOT / "apps/linura-shell/plugins/quick-settings/manifest.json"',
     'ROOT / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"',
     'ROOT / "apps/linura-shell/plugins/command-palette/manifest.json"',
     'ROOT / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"',
     'ROOT / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"',
     'ROOT / "apps/linura-shell/org.linura.ControlCenter.desktop"',
     '"usr/share/applications/org.linura.ControlCenter.desktop"',
+    'ROOT / "apps/linura-shell/org.linura.QuickSettings.desktop"',
+    '"usr/share/applications/org.linura.QuickSettings.desktop"',
     'ROOT / "apps/linura-shell/org.linura.CommandPalette.desktop"',
     '"usr/share/applications/org.linura.CommandPalette.desktop"',
     'ROOT / "packaging/systemd/user/linura-shell.service"',
@@ -245,6 +266,9 @@ def validate(root: Path) -> list[str]:
     panel_qml = (
         root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
     ).read_text(encoding="utf-8")
+    quick_settings_qml = (
+        root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+    ).read_text(encoding="utf-8")
     palette_qml = (
         root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
     ).read_text(encoding="utf-8")
@@ -278,6 +302,8 @@ def validate(root: Path) -> list[str]:
         + "\n"
         + panel_qml
         + "\n"
+        + quick_settings_qml
+        + "\n"
         + palette_qml
         + "\n"
         + workspace_controller_qml
@@ -291,22 +317,28 @@ def validate(root: Path) -> list[str]:
         "import Quickshell",
         "import Quickshell.Hyprland",
         "import org.linura.ShellBridge 1.0",
+        'import "plugins/quick-settings"',
         'import "plugins/command-palette"',
         'import "integrations/hyprland"',
         'import "integrations/xdg"',
         "ShellRoot {",
         "IpcHandler {",
         'target: "linura.shell"',
+        "function toggleQuickSettings()",
         "function toggleCommandPalette()",
         "GlobalShortcut {",
         'appid: "linura"',
+        'name: "quickSettings"',
         'name: "commandPalette"',
         "ControlCenterPanel {",
+        "QuickSettingsPanel {",
         "WorkspaceNavigationController {",
         "ApplicationLauncherController {",
         "onLaunchCompleted: (status, requestGeneration) =>",
         "commandPalette.completeApplicationRequest(status, requestGeneration)",
+        "active: shell.controlCenterOpen || shell.quickSettingsOpen",
         "CommandPalette {",
+        "onQuickSettingsRequested: shell.showQuickSettings()",
         "workspaceCatalog: workspaceNavigation.workspaceEntries",
         "applicationCatalog: applicationLauncher.applicationEntries",
         "onWorkspaceRequested: workspaceId =>",
@@ -328,6 +360,9 @@ def validate(root: Path) -> list[str]:
             "showControlCenter",
             "hideControlCenter",
             "toggleControlCenter",
+            "showQuickSettings",
+            "hideQuickSettings",
+            "toggleQuickSettings",
             "showCommandPalette",
             "hideCommandPalette",
             "toggleCommandPalette",
@@ -348,7 +383,6 @@ def validate(root: Path) -> list[str]:
         "WlrLayershell.keyboardFocus:",
         "controller.beginVolumeDraft()",
         "controller.cancelVolumeDraft()",
-        "controller.setActive(opened)",
         "closeButton.forceActiveFocus(Qt.TabFocusReason)",
         "controller.setVolume(root.draftVolume)",
         "import org.linura.UI 1.0",
@@ -364,6 +398,47 @@ def validate(root: Path) -> list[str]:
         if fragment not in panel_qml:
             failures.append(f"Control Center shell panel contract missing: {fragment}")
 
+    if "controller.setActive(opened)" in panel_qml:
+        failures.append(
+            "Control Center panel must not own shared audio-controller activation"
+        )
+
+    for fragment in (
+        "PanelWindow {",
+        'WlrLayershell.namespace: "linura-quick-settings"',
+        "required property var controller",
+        "controller.beginVolumeDraft()",
+        "controller.cancelVolumeDraft()",
+        "controller.setVolume(root.draftVolume)",
+        "controller.refresh()",
+        "enabled: controller.canCommitDraft",
+        "closeButton.forceActiveFocus(Qt.TabFocusReason)",
+        'controller.muted ? qsTr("Muted") : qsTr("Output active")',
+        "signal controlCenterRequested()",
+        "import org.linura.UI 1.0",
+        "LinuraSurface {",
+        "LinuraText {",
+        "LinuraButton {",
+        "LinuraSlider {",
+        "LinuraStatus {",
+        "Accessible.name:",
+        "Keys.onLeftPressed:",
+        "Keys.onRightPressed:",
+        'controller.state === "ready"',
+    ):
+        if fragment not in quick_settings_qml:
+            failures.append(f"Quick Settings shell panel contract missing: {fragment}")
+    if "controller.setActive(opened)" in quick_settings_qml:
+        failures.append(
+            "Quick Settings panel must not own shared audio-controller activation"
+        )
+    if shell_qml.count(
+        "active: shell.controlCenterOpen || shell.quickSettingsOpen"
+    ) != 1:
+        failures.append(
+            "Linura Shell root must exclusively own shared audio-controller activation"
+        )
+
     for fragment in FORBIDDEN_QML:
         if fragment in combined_qml:
             failures.append(
@@ -375,6 +450,8 @@ def validate(root: Path) -> list[str]:
         shell_qml
         + "\n"
         + panel_qml
+        + "\n"
+        + quick_settings_qml
         + "\n"
         + palette_qml
         + "\n"
@@ -401,9 +478,12 @@ def validate(root: Path) -> list[str]:
         "property var applicationCatalog:",
         "property int sessionGeneration: 0",
         "signal controlCenterRequested()",
+        "signal quickSettingsRequested()",
         "signal workspaceRequested(int workspaceId)",
         "signal applicationRequested(string applicationId, int sessionGeneration)",
+        'targetId: "navigation:quick-settings"',
         'targetId: "navigation:control-center"',
+        "quickSettingsRequested()",
         'targetId: "navigation:workspace:" + workspace.id',
         "workspaceId: workspace.id",
         "if (workspace.focused)",
@@ -491,6 +571,8 @@ def validate(root: Path) -> list[str]:
         "launchRequestGeneration = requestGeneration",
         "const requestGeneration = root.launchRequestGeneration",
         'applicationId.length > 512',
+        '"org.linura.QuickSettings"',
+        '"org.linura.QuickSettings.desktop"',
         "if (application.id !== applicationId)",
         'return "terminal-unsupported"',
         "function brokerCommand(application)",
@@ -558,6 +640,7 @@ def validate(root: Path) -> list[str]:
     for source_name, source in (
         ("shell root", shell_qml),
         ("Control Center", panel_qml),
+        ("Quick Settings", quick_settings_qml),
         ("command palette", palette_qml),
         ("workspace controller", workspace_controller_qml),
     ):
@@ -581,28 +664,46 @@ def validate(root: Path) -> list[str]:
     )
     show_control_center_is_exclusive = re.search(
         r"function\s+showControlCenter\(\)\s*\{"
+        r"\s*shell\.quickSettingsOpen\s*=\s*false"
         r"\s*shell\.commandPaletteOpen\s*=\s*false"
         r"\s*shell\.controlCenterOpen\s*=\s*true\s*\}",
+        root_navigation_scope,
+        re.DOTALL,
+    )
+    show_quick_settings_is_exclusive = re.search(
+        r"function\s+showQuickSettings\(\)\s*\{"
+        r"\s*shell\.controlCenterOpen\s*=\s*false"
+        r"\s*shell\.commandPaletteOpen\s*=\s*false"
+        r"\s*shell\.quickSettingsOpen\s*=\s*true\s*\}",
         root_navigation_scope,
         re.DOTALL,
     )
     show_command_palette_is_exclusive = re.search(
         r"function\s+showCommandPalette\(\)\s*\{"
         r"\s*shell\.controlCenterOpen\s*=\s*false"
+        r"\s*shell\.quickSettingsOpen\s*=\s*false"
         r"\s*shell\.commandPaletteOpen\s*=\s*true\s*\}",
         root_navigation_scope,
         re.DOTALL,
     )
     if (
         show_control_center_is_exclusive is None
+        or show_quick_settings_is_exclusive is None
         or show_command_palette_is_exclusive is None
     ):
         failures.append("Linura Shell transient surfaces must remain mutually exclusive")
 
-    if panel_qml.count("controller.setActive(opened)") != 1:
-        failures.append("Control Center panel must activate observation only while opened")
     if "volumeSlider.value =" in panel_qml:
         failures.append("Control Center keyboard handling must preserve the slider value binding")
+    raw_quick_settings_control = re.search(
+        r"(?m)^\s*(?:Rectangle|Label|Button|Slider|Switch|TextField|AbstractButton|Popup|Dialog)\s*\{",
+        quick_settings_qml,
+    )
+    if raw_quick_settings_control is not None:
+        failures.append(
+            "Quick Settings product surface must consume Linura UI primitives instead of raw Qt visual controls"
+        )
+
     raw_visual_control = re.search(
         r"(?m)^\s*(?:Rectangle|Label|Button|Slider|Switch|TextField|AbstractButton|Popup|Dialog)\s*\{",
         panel_qml,
@@ -723,6 +824,35 @@ def validate(root: Path) -> list[str]:
     if not isinstance(protocols, list) or set(protocols) != expected_protocols:
         failures.append("Control Center shell manifest protocol requirements drifted")
 
+    quick_settings_manifest = json.loads(
+        (
+            root / "apps/linura-shell/plugins/quick-settings/manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    expected_quick_settings_manifest = {
+        "schema_version": 1,
+        "id": "linura.quick-settings",
+        "name": "Linura Quick Settings",
+        "kind": "panel",
+        "entry_point": "QuickSettingsPanel.qml",
+        "trust": "first-party",
+        "authority": "none",
+        "interaction_scope": "bounded-authoritative-session-control",
+        "registered_operations": [
+            "operation:audio.output.set-session-volume",
+        ],
+        "protocol_requirements": [
+            "org.linura.Control1.Observe",
+            "org.linura.Session1.SetAudioOutputVolume",
+        ],
+    }
+    if quick_settings_manifest != expected_quick_settings_manifest:
+        failures.append(
+            "Quick Settings manifest must remain exact, first-party, authority-free and bound to the registered session-volume operation"
+        )
+    if "capabilities" in quick_settings_manifest:
+        failures.append("Quick Settings manifest must not become a capability grant")
+
     palette_manifest = json.loads(
         (
             root / "apps/linura-shell/plugins/command-palette/manifest.json"
@@ -738,6 +868,7 @@ def validate(root: Path) -> list[str]:
         "authority": "none",
         "interaction_scope": "experience-navigation-and-application-launcher",
         "navigation_targets": [
+            "navigation:quick-settings",
             "navigation:control-center",
             "navigation:workspace",
         ],
@@ -781,7 +912,7 @@ def validate(root: Path) -> list[str]:
             "Linura Shell bridge must classify Control1 and Session1 service disappearance"
         )
     if "refreshTimer_" in bridge:
-        failures.append("Linura Shell bridge must not poll while Control Center is closed")
+        failures.append("Linura Shell bridge must not poll while audio controls are inactive")
     if bridge.count('QStringLiteral("org.freedesktop.DBus.Error.NoReply")') != 1:
         failures.append("Linura Shell bridge must classify D-Bus NoReply as service unavailable")
     if "retryTimer_.start(delay)" not in bridge or "kRetryMaximumMs" not in bridge:
@@ -789,13 +920,13 @@ def validate(root: Path) -> list[str]:
     close_inactive_contract = re.search(
         r'if \(!active_\) \{.*?setState\(\s*'
         r'QStringLiteral\("inactive"\),\s*'
-        r'QStringLiteral\("Control Center is closed\."\)\s*\);'
+        r'QStringLiteral\("Audio controls are inactive\."\)\s*\);'
         r'.*?return;\s*\}',
         bridge_source,
         re.DOTALL,
     )
     if close_inactive_contract is None:
-        failures.append("Linura Shell bridge must reset canceled panel observations to inactive")
+        failures.append("Linura Shell bridge must reset canceled audio observations to inactive")
     if bridge.count("pending_->dispatched = true;") != 1:
         failures.append("Linura Shell bridge must distinguish pre-dispatch from dispatched effects")
 
@@ -829,8 +960,16 @@ def validate(root: Path) -> list[str]:
         "qt_add_library(linura-shell-bridge SHARED)",
         "qt_add_qml_module(linura-shell-bridge",
         "URI org.linura.ShellBridge",
+        "PLUGIN_TARGET linura-shell-bridgeplugin",
         "Qt6::DBus",
         "Qt6::Qml",
+        'set(LINURA_SHELL_BRIDGE_QML_INSTALL_DIR "lib/qt6/qml/org/linura/ShellBridge")',
+        "set_target_properties(linura-shell-bridgeplugin PROPERTIES",
+        'INSTALL_RPATH "$ORIGIN"',
+        "TARGETS linura-shell-bridge linura-shell-bridgeplugin",
+        'LIBRARY DESTINATION "${LINURA_SHELL_BRIDGE_QML_INSTALL_DIR}"',
+        'RUNTIME DESTINATION "${LINURA_SHELL_BRIDGE_QML_INSTALL_DIR}"',
+        'ARCHIVE DESTINATION "${LINURA_SHELL_BRIDGE_QML_INSTALL_DIR}"',
     ):
         if fragment not in cmake:
             failures.append(f"Linura Shell bridge CMake contract missing: {fragment}")
@@ -943,6 +1082,18 @@ def validate(root: Path) -> list[str]:
         if fragment not in launcher:
             failures.append(f"Control Center packaged launcher contract missing: {fragment}")
 
+    quick_settings_launcher = (
+        root / "apps/linura-shell/org.linura.QuickSettings.desktop"
+    ).read_text(encoding="utf-8")
+    for fragment in (
+        "[Desktop Entry]",
+        "Name=Linura Quick Settings",
+        "Exec=/usr/bin/qs -p /usr/share/linura/shell ipc call -- linura.shell toggleQuickSettings",
+        "Terminal=false",
+    ):
+        if fragment not in quick_settings_launcher:
+            failures.append(f"Quick Settings packaged launcher contract missing: {fragment}")
+
     palette_launcher = (
         root / "apps/linura-shell/org.linura.CommandPalette.desktop"
     ).read_text(encoding="utf-8")
@@ -971,11 +1122,14 @@ def validate(root: Path) -> list[str]:
         "presentation and interaction infrastructure, not an authority plane",
         "arbitrary user QML is **not** loaded",
         "qs -p /usr/share/linura/shell ipc call -- linura.shell toggleControlCenter",
-        "does not poll PipeWire while the panel is closed",
+        "stops future freshness/retry observation work",
         "Linura QML UI SDK",
         "org.linura.UI 1.0",
         "navigation-only command palette",
         "linura:commandPalette",
+        "toggleQuickSettings",
+        "Quick Settings",
+        "active only while Control Center or Quick Settings is open",
         "toggleCommandPalette",
         "HYPRLAND_NO_SD_TARGET",
         "does **not** promote",

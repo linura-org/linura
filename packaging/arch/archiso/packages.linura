@@ -7,6 +7,7 @@ networkmanager
 bluez
 bluez-utils
 pipewire
+pipewire-audio
 wireplumber
 udisks2
 polkit

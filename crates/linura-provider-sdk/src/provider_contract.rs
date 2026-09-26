@@ -52,6 +52,17 @@ pub trait Observer: Send + Sync {
     fn observation_capabilities(&self) -> Vec<Capability>;
     fn health(&self) -> ProviderHealth;
     fn resources(&self) -> Result<Vec<ResourceId>, ProviderError>;
+
+    /// Whether Control must run a live health probe before an authoritative read.
+    ///
+    /// The default preserves the fail-closed provider-health gate. An observer may
+    /// opt out only when `observe_authoritative` independently checks every
+    /// readiness condition needed for the requested observation and reports loss
+    /// of provider readiness as `ProviderError::Unavailable`.
+    fn requires_live_health_preflight(&self) -> bool {
+        true
+    }
+
     fn observe_authoritative(
         &self,
         resource: &ResourceId,

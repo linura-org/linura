@@ -28,6 +28,12 @@ required_components = [
   "quickshell",
   "qt6",
   "xdg-desktop-entries",
+  "pipewire",
+  "wireplumber",
+  "linurad",
+  "session1",
+  "sqlite-transient-audit",
+  "quick-settings",
 ]
 
 required_cases = [
@@ -42,6 +48,12 @@ required_cases = [
   "shell-service-restart-survival",
   "forking-application-cgroup-lifetime",
   "palette-session-generation-isolation",
+  "quick-settings-authoritative-observation",
+  "quick-settings-session1-volume-effect",
+  "quick-settings-durable-audit-lineage",
+  "quick-settings-precondition-drift-rejection",
+  "quick-settings-service-loss-fail-closed",
+  "quick-settings-restart-recovery",
 ]
 
 [evidence]
@@ -58,4 +70,8 @@ storage_capacity_required = true
 seat_drm_preflight_required = true
 ui_module_linkage_required = true
 qt_quick_backend_required = true
+authority_runtime_integrity_required = true
+audio_fixture_evidence_required = true
+transient_audit_evidence_required = true
+quick_settings_authority_path_required = true
 release_support_promotion = false

@@ -1,10 +1,10 @@
 [Unit]
-Description=Linura command palette runtime qualification
-After=graphical-session.target
+Description=Linura Quick Settings runtime qualification
+After=graphical-session.target linurad.service pipewire.service wireplumber.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-palette.qml
+ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-quick-settings.qml
 Restart=no
 NoNewPrivileges=yes
 PrivateTmp=yes
@@ -12,6 +12,7 @@ ProtectSystem=strict
 RuntimeDirectory=quickshell
 RuntimeDirectoryMode=0700
 ReadWritePaths=%t/quickshell
+ProtectHome=read-only
 RestrictAddressFamilies=AF_UNIX
 RestrictSUIDSGID=yes
 LockPersonality=yes

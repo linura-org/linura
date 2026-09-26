@@ -813,6 +813,7 @@ dependencies = [
  "linura-observation-control",
  "linura-protocol",
  "linura-provider-sdk",
+ "rustix",
  "rusqlite",
 ]
 

@@ -514,7 +514,11 @@ def validate(root: Path) -> list[str]:
             "verify_same_sink_identity(\n            effect.pre_effect_observation(),\n            post_effect,\n            effect.resource(),\n            node_id,\n        )",
             "verify_packaged_session_audio_helper()",
             "WIREPLUMBER_EXECUTABLE_PATH",
-            "LINURA_SESSION_AUDIO_HELPER_PATH",
+            "TRUSTED_SESSION_AUDIO_HELPER",
+            "memfd_create(",
+            "fcntl_add_seals(",
+            '.arg("/dev/fd/0")',
+            ".stdin(Stdio::from(trusted_helper))",
             ".env_clear()",
             "volume_percent > 100",
             "pipewire_output_node_id(effect.resource())",
@@ -528,7 +532,12 @@ def validate(root: Path) -> list[str]:
         default_alias_dispatch = (
             '"audio:session:default-output"' in session_runtime_production_text
         )
-        for forbidden in ('"/usr/bin/wpctl"', '"--limit"', "revalidate_identity("):
+        for forbidden in (
+            '"/usr/bin/wpctl"',
+            '"--limit"',
+            "revalidate_identity(",
+            ".arg(LINURA_SESSION_AUDIO_HELPER_PATH)",
+        ):
             if forbidden in session_runtime_production_text:
                 failures.append(
                     f"PipeWire session-volume runtime retains obsolete split wpctl authority: {forbidden}"
@@ -592,9 +601,14 @@ def validate(root: Path) -> list[str]:
     if helper.is_file() and not helper.is_symlink():
         helper_text = helper.read_text(encoding="utf-8")
         required_helper_fragments = (
+            "local raw_args = ...",
+            "raw_args:parse(2)",
+            "pcall(function()",
             'Constraint { "media.class", "equals", "Audio/Sink", type = "pw-global" }',
+            'local properties = node["global-properties"]',
             'properties["object.serial"] == args.object_serial',
             'properties["node.name"] == args.node_name',
+            'properties["media.class"] == "Audio/Sink"',
             'bound_id == args.node_id',
             'mixer:call("set-volume", matched_id, args.volume_percent / 100.0)',
             'mixer["scale"] = "cubic"',
@@ -608,6 +622,7 @@ def validate(root: Path) -> list[str]:
                 )
         identity_indices = [
             helper_text.find('bound_id == args.node_id'),
+            helper_text.find('local properties = node["global-properties"]'),
             helper_text.find('properties["object.serial"] == args.object_serial'),
             helper_text.find('properties["node.name"] == args.node_name'),
         ]
@@ -622,7 +637,11 @@ def validate(root: Path) -> list[str]:
             failures.append(
                 "WirePlumber session-audio mutation must remain downstream of exact object identity resolution"
             )
-        for forbidden in ("os.execute", "io.", "/usr/bin/wpctl"):
+        if "local properties = node.properties" in helper_text:
+            failures.append(
+                "WirePlumber session-audio helper must bind identity from immutable PipeWire global properties"
+            )
+        for forbidden in ("os.execute", "io.", "/usr/bin/wpctl", "load(", "loadstring", "dofile"):
             if forbidden in helper_text:
                 failures.append(
                     f"WirePlumber session-audio helper contains forbidden execution surface: {forbidden}"
@@ -636,6 +655,9 @@ def validate(root: Path) -> list[str]:
             'LINURA_SESSION_AUDIO_HELPER_PATH',
             "parse_wireplumber_sink_snapshot",
             "verify_packaged_session_audio_helper",
+            "open_file_descriptor(",
+            "OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK",
+            "Mode::empty()",
             ".env_clear()",
         ):
             if fragment not in linux_observation_text:

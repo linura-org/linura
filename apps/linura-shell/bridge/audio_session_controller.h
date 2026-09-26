@@ -24,6 +24,7 @@ class AudioSessionController : public QObject
     Q_PROPERTY(QString freshness READ freshness NOTIFY snapshotChanged)
     Q_PROPERTY(QString observationDetail READ observationDetail NOTIFY snapshotChanged)
     Q_PROPERTY(bool canApply READ canApply NOTIFY availabilityChanged)
+    Q_PROPERTY(bool canCommitDraft READ canCommitDraft NOTIFY availabilityChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY availabilityChanged)
     Q_PROPERTY(QString lastReceiptStatus READ lastReceiptStatus NOTIFY receiptChanged)
     Q_PROPERTY(QString lastEvidenceId READ lastEvidenceId NOTIFY receiptChanged)
@@ -42,6 +43,7 @@ public:
     [[nodiscard]] QString freshness() const;
     [[nodiscard]] QString observationDetail() const;
     [[nodiscard]] bool canApply() const;
+    [[nodiscard]] bool canCommitDraft() const;
     [[nodiscard]] bool busy() const;
     [[nodiscard]] QString lastReceiptStatus() const;
     [[nodiscard]] QString lastEvidenceId() const;

@@ -25,6 +25,7 @@ const SESSION_CONTRACT_ANNOTATIONS: [(&str, &str); 3] = [
 ];
 
 pub type SessionEffectReceiptWire = (String, String, String, String, String, String, String);
+type SessionEffectReplyWire = (SessionEffectReceiptWire,);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionEffectReceipt {
@@ -97,6 +98,7 @@ impl Session1Service {
 
 #[zbus::interface(name = "org.linura.Session1")]
 impl Session1Service {
+    #[zbus(out_args("receipt"))]
     async fn set_audio_output_volume(
         &self,
         request_id: &str,
@@ -105,7 +107,7 @@ impl Session1Service {
         reason: &str,
         #[zbus(connection)] connection: &zbus::Connection,
         #[zbus(header)] header: Header<'_>,
-    ) -> zbus::fdo::Result<SessionEffectReceiptWire> {
+    ) -> zbus::fdo::Result<(SessionEffectReceiptWire,)> {
         let caller = authenticated_caller(connection, &header).await?;
         let service_uid = session_service_uid(connection).await?;
         require_same_session_uid(caller.uid, service_uid)?;
@@ -122,7 +124,10 @@ impl Session1Service {
         self.with_handler(move |handler| {
             handler
                 .set_audio_output_volume(context, request)
-                .map(receipt_wire)
+                // zbus treats a top-level tuple return as multiple D-Bus out arguments.
+                // Wrap the receipt tuple once so Session1 emits the canonical single
+                // `(sssssss)` struct declared by org.linura.Session1.xml.
+                .map(|receipt| (receipt_wire(receipt),))
         })
         .await
     }
@@ -267,7 +272,7 @@ impl Session1Client {
         volume_percent: u16,
         reason: &str,
     ) -> Result<SessionEffectReceipt, TransportError> {
-        let wire: SessionEffectReceiptWire = self
+        let (wire,): SessionEffectReplyWire = self
             .proxy()?
             .call(
                 "SetAudioOutputVolume",
@@ -354,7 +359,7 @@ mod tests {
             assert!(canonical.contains(&marker), "canonical {name}");
             assert!(live.contains(&marker), "live {name}");
         }
-        let receipt_marker = "type=\"(sssssss)\" direction=\"out\"";
+        let receipt_marker = "name=\"receipt\" type=\"(sssssss)\" direction=\"out\"";
         assert_eq!(canonical.matches(receipt_marker).count(), 1);
         assert_eq!(live.matches(receipt_marker).count(), 1);
     }

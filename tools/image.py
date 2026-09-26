@@ -46,6 +46,10 @@ RUNTIME_ASSETS = {
         "usr/share/linura/shell/plugins/control-center/ControlCenterPanel.qml",
     ROOT / "apps/linura-shell/plugins/control-center/manifest.json":
         "usr/share/linura/shell/plugins/control-center/manifest.json",
+    ROOT / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml":
+        "usr/share/linura/shell/plugins/quick-settings/QuickSettingsPanel.qml",
+    ROOT / "apps/linura-shell/plugins/quick-settings/manifest.json":
+        "usr/share/linura/shell/plugins/quick-settings/manifest.json",
     ROOT / "apps/linura-shell/plugins/command-palette/CommandPalette.qml":
         "usr/share/linura/shell/plugins/command-palette/CommandPalette.qml",
     ROOT / "apps/linura-shell/plugins/command-palette/manifest.json":
@@ -56,6 +60,8 @@ RUNTIME_ASSETS = {
         "usr/share/linura/shell/integrations/xdg/ApplicationLauncherController.qml",
     ROOT / "apps/linura-shell/org.linura.ControlCenter.desktop":
         "usr/share/applications/org.linura.ControlCenter.desktop",
+    ROOT / "apps/linura-shell/org.linura.QuickSettings.desktop":
+        "usr/share/applications/org.linura.QuickSettings.desktop",
     ROOT / "apps/linura-shell/org.linura.CommandPalette.desktop":
         "usr/share/applications/org.linura.CommandPalette.desktop",
 }
