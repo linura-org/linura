@@ -306,8 +306,31 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("--python-package bindings/python/pyproject.toml", build)
         self.assertIn("Preflight PyPI package version", release)
         self.assertIn("pypi-preflight:", release)
-        self.assertIn("needs: [validate, publish]", release)
+        self.assertIn(
+            "needs: [validate, publish, bootstrap-pypi-build, bootstrap-pypi-reproduce]",
+            release,
+        )
         self.assertIn("Determine PyPI publication requirement", release)
+        self.assertIn("bootstrap-pypi-build:", release)
+        self.assertIn("bootstrap-pypi-reproduce:", release)
+        self.assertIn("bootstrap publication is restricted to linura==0.0.1", release)
+        self.assertEqual(release.count('python-version: "3.12.10"'), 2)
+        self.assertEqual(
+            release.count("Install hash-locked Python bootstrap build toolchain"),
+            2,
+        )
+        self.assertEqual(release.count('PYTHON_WHEEL_SOURCE_DATE_EPOCH: "315532800"'), 2)
+        self.assertIn('test "$GITHUB_SHA" = "$SOURCE_SHA"', release)
+        self.assertIn('.event == "push"', release)
+        self.assertIn("Prove bootstrap wheel reproduces byte-for-byte", release)
+        self.assertIn(
+            "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3",
+            release,
+        )
+        self.assertIn(
+            "Revalidate bootstrap current-main source immediately before OIDC publication",
+            release,
+        )
         pypi_preflight = release.split("\n  pypi-preflight:", 1)[1].split(
             "\n  publish-pypi:", 1
         )[0]

@@ -209,6 +209,9 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
         self.assertIn("tools/probe_release_automation_authority.py", workflow)
         self.assertIn("--credential-source github-app", workflow)
         self.assertIn("needs: [validate, closure-readiness]", workflow)
+        self.assertIn("-f operation=release", workflow)
+        self.assertIn('canonical_title="Release — release @ $SOURCE_SHA"', workflow)
+        self.assertIn(".display_title == $canonical_title", workflow)
 
         readiness_index = workflow.index("closure-readiness:")
         app_index = workflow.index("actions/create-github-app-token@")
@@ -237,13 +240,18 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
         self.assertNotIn("environment:", publish)
         self.assertIn("environment:\n      name: pypi", pypi)
         self.assertIn("id-token: write", pypi)
+        self.assertIn(
+            "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3",
+            pypi,
+        )
+        self.assertIn("protected main moved before PyPI bootstrap publication", pypi)
         self.assertNotIn("actions/checkout@", pypi)
         self.assertNotIn("run:", pypi)
 
     def test_normal_publication_still_dispatches_exact_tag_verification(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("verification-dispatch:", workflow)
-        self.assertIn("needs: [validate, publish]", workflow)
+        self.assertIn("needs: [validate, publish, verify-pypi]", workflow)
         self.assertIn(
             'gh workflow run release-verification.yml --repo "$GITHUB_REPOSITORY" --ref "$RELEASE_TAG" -f tag="$RELEASE_TAG"',
             workflow,

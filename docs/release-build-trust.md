@@ -103,6 +103,20 @@ by Trusted Release Proof, never a tag-triggered or publication-time rebuild. PyP
 bound to the dedicated `pypi` GitHub Environment and only the minimal registry-upload job has
 `id-token: write`; preflight and verification jobs have no PyPI credential-minting authority.
 
+## Initial PyPI namespace bootstrap exception
+
+The first `linura==0.0.1` PyPI upload may use the temporary
+`bootstrap-pypi` operation in `release.yml`. This is a namespace/bootstrap
+publication only, not a Linura release proof. It builds no Rust product artifacts
+and creates no Linura tag or GitHub Release.
+
+The exception still requires exact protected `main`, successful native main
+CI/Security/CodeQL, the same hash-locked Python build toolchain and fixed wheel
+epoch, a fresh-runner byte-for-byte wheel reproduction, no-OIDC preflight, the
+same isolated `pypi` Trusted Publisher job, and no-OIDC fresh-download
+verification. The workflow retains exactly one PyPI-capable `id-token: write`
+job. The bootstrap mode is removed after the first verified namespace claim.
+
 ## Authority boundary
 
 The reusable builder has no repository-content write permission and no tag/GitHub Release authority. System qualification workflows also do not receive publication authority merely because they can execute privileged actions inside disposable guests.

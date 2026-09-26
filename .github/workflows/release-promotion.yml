@@ -179,7 +179,8 @@ jobs:
           test "$RELEASE_VERSION" = "${RELEASE_TAG#v}"
 
           release_runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?head_sha=$SOURCE_SHA&event=workflow_dispatch&per_page=100")"
-          active="$(jq -r '[.workflow_runs[] | select(.head_sha == env.SOURCE_SHA and .event == "workflow_dispatch" and (.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested"))] | .[0].id // empty' <<<"$release_runs")"
+          canonical_title="Release — release @ $SOURCE_SHA"
+          active="$(jq -r --arg canonical_title "$canonical_title" '[.workflow_runs[] | select(.head_sha == env.SOURCE_SHA and .event == "workflow_dispatch" and .display_title == $canonical_title and (.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested"))] | .[0].id // empty' <<<"$release_runs")"
           if [[ -n "$active" ]]; then
             echo "active Release run already exists for $SOURCE_SHA: $active"
             exit 0
@@ -194,6 +195,7 @@ jobs:
           gh workflow run release.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
+            -f operation=release \
             -f version="$RELEASE_VERSION" \
             -f source_sha="$SOURCE_SHA" \
             -f proof_run_id="$PROOF_RUN_ID"
