@@ -220,34 +220,27 @@ Target capabilities:
 
 v0.9 does not claim a general-purpose full-disk/dual-boot/bare-metal Linux installer or a desktop/workstation experience. The pinned Ubuntu image is the base QualificationEnvironment; broader installer/PlatformProfile support and Control Center/shell/desktop surfaces require later explicit activation and evidence.
 
-## v0.10.0 — meaningful end-user Experimental Linura
+## v0.10.0 — complete Experimental Linura workstation
 
 **Status:** planned  
 **Target claim class:** Experimental
 
-Deliver the first coherent end-user Linura workstation experience while keeping the product/support contract explicitly Experimental.
+Deliver a complete daily-usable Linura workstation on the exact `arch-hyprland-v1` boundary while keeping the support claim explicitly Experimental. “Complete” describes the ordinary end-user product surface inside that declared profile; it does not imply generic Linux breadth or Stable support.
 
-Target experience:
+The required experience includes:
 
-- **intent/state-centric:** durable typed intent, desired state, authoritative observation, deterministic planning and verified convergence remain the product model;
-- **control-plane-centric:** every Linura-managed durable external mutation converges on the canonical Control authority lifecycle; lighter operation classes retain typed semantics and cannot gain a UI-, config-, shortcut- or agent-specific authority bypass;
-- **agent/conversational:** bounded model assistance produces proposal-only typed input and remains optional;
-- **manual/no-AI:** the supported workstation remains fully usable through deterministic local interfaces without any model provider;
-- **Library/Setups/Profiles:** local versioned reusable definitions are normal workstation workflows rather than specialist tooling;
-- **GUI Control Center:** the first supported graphical management client exposes observation, plans, approval/risk, execution, verification, provenance, diagnostics and recovery guidance;
-- **configuration-centric:** a versioned declarative configuration surface can express supported state and setup/profile selections as typed, non-authorizing input with deterministic preview before mutation;
-- **keyboard-centric:** supported workstation workflows expose coherent keyboard navigation and essential shortcuts without turning shortcuts into authority;
-- **command palette:** a keyboard-first palette/launcher resolves registered typed actions, intents, setups and navigation targets instead of arbitrary privileged shell text;
-- **quick settings:** bounded workstation toggles/actions for supported domains use authoritative state and the same typed Control path as other clients;
-- **desktop shell integration:** a bounded Linura workstation integration layer connects Control Center, Library, Agent, status, command palette and quick settings to the Hyprland session;
-- **launcher/workspace UX:** application/action discovery and workspace/session navigation are coherent with the Linura desktop experience;
-- **notifications/OSD:** operation progress, verification outcomes and relevant workstation feedback are presented without treating UI state or executor self-report as authoritative success;
-- **unified visual/theme system:** First Boot, Control Center and bounded desktop surfaces share a coherent Linura design/token foundation and first-party QML component layer rather than per-surface raw Qt styling;
-- **keyboard/mouse parity:** every supported v0.10 end-user workflow has both keyboard-accessible and pointer-accessible operation, with any exception explicit in the release contract;
-- supported Experimental install/adoption/update/recovery on the exact qualified workstation profile;
-- diagnostics, explanation and audit surfaces appropriate to the supported scope;
-- explicit unsupported-domain, machine-class, platform, hardware and compatibility boundaries;
-- user-facing acceptance evidence sufficient to discover the remaining gaps before Stable support is attempted.
+- **one machine model / one authority path:** intent, config, Control Center, keyboard, palette, quick settings, CLI and accepted agent proposals converge on trusted typed operations and Linura Control;
+- **manual/no-AI completeness:** all supported ordinary workstation workflows remain usable without a model provider;
+- **first-party shell experience:** Linura owns the supported panel/status/tray, launcher/workspace, command palette, quick settings, lifecycle notifications/OSD and lock/session experience;
+- **core workstation controls:** supported network, Bluetooth, audio/media, display/brightness/power and removable-storage workflows use authoritative state and typed operation semantics;
+- **desktop utilities:** screenshot/recording, clipboard/history, media integration and essential workstation entry points are coherent with the Linura shell;
+- **applications and packages:** discovery plus supported installation/removal/default-app and package workflows remain typed, bounded and policy-controlled;
+- **updates and recovery:** coordinated updates, snapshots, rollback/recovery and repair are normal user-facing workflows rather than specialist-only tooling;
+- **personalization:** themes, wallpaper, fonts/icons and cross-surface visual behavior use the shared Linura design/token foundation;
+- **Library/Setups/Profiles:** reusable local definitions and declarative configuration are first-class workstation workflows;
+- **installation and First Boot:** at least one exact, bounded, independently qualified installation path reaches the supported encrypted `arch-hyprland-v1` workstation and its owner-enrollment flow; generic dual-boot/custom-partitioning/RAID support is not implied;
+- **input and accessibility:** supported workflows have keyboard and pointer parity, semantic accessibility, reduced-motion behavior and qualified display-scaling/HiDPI states;
+- **diagnostics and explanation:** authority, verification, audit, failures and recovery guidance remain inspectable.
 
 The v0.10 interaction invariant is **many interfaces, one machine model, one authority path**:
 
@@ -264,24 +257,27 @@ intent / config / Control Center / keyboard / palette / quick settings / CLI / a
                             verified machine state
 ```
 
-Declarative configuration is data, not an executable script or authority grant. Keyboard shortcuts and graphical controls are invocation surfaces, not alternate privilege paths. Ephemeral desktop navigation such as focusing a window or changing workspace does not need to masquerade as a durable managed mutation. Durable Linura-managed external machine-state changes preserve the canonical lifecycle and support boundary; transient external effects and other lighter classes remain constrained by ADR 0032 and may not bypass Control-owned authority.
+Declarative configuration is data, not executable authority. Keyboard shortcuts and graphical controls are invocation surfaces, not alternate privilege paths. Ephemeral desktop navigation does not need to masquerade as a durable managed mutation. External effects remain bound to ADR 0032 operation classes and the appropriate Control-owned lifecycle.
 
-v0.10 requires a **bounded desktop integration**, not a complete replacement desktop shell. Existing qualified Hyprland/upstream desktop components may remain in use while Linura supplies the coherent management, command, quick-setting, notification and visual surfaces required by this milestone. A complete Linura-owned shell/panel/lock-screen/widget environment may deepen after v0.10 without weakening the v0.10 interaction invariant.
+ADR 0031 remains authoritative for interface/authority convergence. ADR 0033 refines the product boundary: v0.10 now requires a **complete first-party workstation shell experience** rather than deferring panel, lock/session or other ordinary workstation surfaces until after v1. Hyprland remains the qualified compositor and upstream components may remain implementation dependencies, but an ordinary user-facing workflow required by the release contract cannot be omitted merely because an upstream component could supply it.
 
-v0.10.0 is where Linura should become meaningfully usable by external experimental users. It is deliberately **not** the point where Stable/production support is declared.
+Implementation progress is machine-locked by `contracts/v010-workstation-slices.toml`: 32 required slices, a contiguous completed prefix, merged-PR evidence for completed slices and an explicit next slice. Code presence outside that ledger cannot silently broaden or shrink the milestone.
+
+v0.10.0 is deliberately **Experimental**. Complete product scope at v0.10 does not imply Stable support.
 
 ## v1.0.0 — first Stable supported end-user Linura
 
 **Status:** planned  
 **Target claim class:** Stable
 
-Promote Linura to its first Stable supported end-user contract only when the declared reference scope has production-support evidence appropriate to a system layer. This preserves Linura's existing Semantic Versioning policy rather than making `1.0` a cosmetic product milestone.
+Promote the already-complete v0.10 workstation to Linura's first Stable supported end-user contract only when the declared reference scope has production-support evidence appropriate to a system layer. Phase 11 is therefore a support-maturity transition, not a deferred product-completeness phase.
 
 The v1.0 release contract must bound exactly what is Stable and supported. Experimental providers/extensions may still coexist outside that boundary, but they must be visibly separate and cannot silently inherit the Stable claim.
 
 Required v1.0 evidence includes, at minimum:
 
-- explicitly declared supported machine class, distribution/desktop-or-headless, architecture and hardware profiles with a qualification matrix;
+- the complete v0.10 ordinary-workstation workflow set remains coherent inside the Stable reference scope;
+- explicitly declared supported machine class, distribution/desktop, architecture and hardware profiles with a qualification matrix;
 - install/bootstrap, First Boot, update, migration and upgrade behavior for supported persistent state;
 - backup/restore, recovery, rollback and indeterminate-operation procedures exercised under failure injection;
 - complete privilege-boundary and threat-model review for every Stable mutating path;
@@ -292,7 +288,7 @@ Required v1.0 evidence includes, at minimum:
 - diagnostics/support bundles with privacy/redaction guarantees;
 - documented security-response, support and known-limitations expectations.
 
-`v1.0.0` does not mean every Linura domain, machine class, provider, model adapter or enterprise feature is Stable. It means the exact end-user reference contract named by the release has crossed the Stable support threshold with evidence.
+`v1.0.0` does not mean every Linura domain, machine class, provider, model adapter or enterprise feature is Stable. It means the exact complete-workstation reference contract named by the release has crossed the Stable support threshold with evidence.
 
 ## Beyond v1.0 — broader support and product expansion
 
@@ -306,15 +302,15 @@ These tracks preserve Linura's long-term product ambitions without assigning spe
 
 ### Personal operating environment
 
-v0.10 establishes the first bounded desktop-integration, design-system and keyboard/mouse-parity baseline. This later track deepens that foundation rather than postponing its first usable form.
+v0.10 establishes the complete first-party workstation baseline. This later track adds higher-order personal-environment capabilities rather than postponing ordinary desktop completeness.
 
 - richer machine profile/personality composition;
 - profile/setup capture from managed causal state;
 - reusable workflow/Library integration and replay UX;
-- expand the v0.10 bounded desktop integration into a complete Linura-owned shell/panel/lock-screen/widget environment where justified;
-- advanced theming, personalization and cross-surface design-system evolution;
+- advanced theming, personalization and cross-surface design-system evolution beyond the v0.10 baseline;
 - declarative workflows and constrained derived UI surfaces;
-- deeper accessibility beyond the v0.10 keyboard/mouse parity release gate.
+- deeper accessibility and adaptive interaction beyond the v0.10 release gate;
+- richer shell/widget composition that extends, rather than completes, the v0.10 workstation.
 
 ### Extension and sharing ecosystem
 

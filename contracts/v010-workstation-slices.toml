@@ -1,0 +1,265 @@
+schema_version = 1
+milestone = "v0.10.0"
+target = "complete-experimental-workstation"
+slice_count = 32
+completed_slice_count = 14
+next_slice = "S15"
+completion_policy = "contiguous-prefix-with-merged-pr-evidence"
+scope_change_policy = "explicit-roadmap-rebaseline"
+
+[[slice]]
+id = "S01"
+title = "v0.10 workstation contract and qualification foundation"
+status = "complete"
+depends_on = []
+evidence_prs = [144, 145]
+required_for_release = true
+
+[[slice]]
+id = "S02"
+title = "typed arch-hyprland-v1 PlatformProfile compatibility"
+status = "complete"
+depends_on = ["S01"]
+evidence_prs = [146]
+required_for_release = true
+
+[[slice]]
+id = "S03"
+title = "native platform discovery and bounded probes"
+status = "complete"
+depends_on = ["S02"]
+evidence_prs = [147]
+required_for_release = true
+
+[[slice]]
+id = "S04"
+title = "multi-interface and operation-semantics contracts"
+status = "complete"
+depends_on = ["S03"]
+evidence_prs = [148, 149, 150]
+required_for_release = true
+
+[[slice]]
+id = "S05"
+title = "trusted operation registry and Control resolution"
+status = "complete"
+depends_on = ["S04"]
+evidence_prs = [151]
+required_for_release = true
+
+[[slice]]
+id = "S06"
+title = "managed-effect reference operation"
+status = "complete"
+depends_on = ["S05"]
+evidence_prs = [152]
+required_for_release = true
+
+[[slice]]
+id = "S07"
+title = "bounded transient-effect Control path"
+status = "complete"
+depends_on = ["S06"]
+evidence_prs = [153]
+required_for_release = true
+
+[[slice]]
+id = "S08"
+title = "PipeWire/WirePlumber session-volume authority slice"
+status = "complete"
+depends_on = ["S07"]
+evidence_prs = [154]
+required_for_release = true
+
+[[slice]]
+id = "S09"
+title = "unified Linura Shell and Control Center host"
+status = "complete"
+depends_on = ["S08"]
+evidence_prs = [155]
+required_for_release = true
+
+[[slice]]
+id = "S10"
+title = "Linura QML UI SDK and design-system foundation"
+status = "complete"
+depends_on = ["S09"]
+evidence_prs = [156]
+required_for_release = true
+
+[[slice]]
+id = "S11"
+title = "bounded command palette"
+status = "complete"
+depends_on = ["S10"]
+evidence_prs = [157]
+required_for_release = true
+
+[[slice]]
+id = "S12"
+title = "typed workspace navigation and application launcher"
+status = "complete"
+depends_on = ["S11"]
+evidence_prs = [158, 159]
+required_for_release = true
+
+[[slice]]
+id = "S13"
+title = "authoritative Quick Settings"
+status = "complete"
+depends_on = ["S12"]
+evidence_prs = [162]
+required_for_release = true
+
+[[slice]]
+id = "S14"
+title = "exact-source shell runtime qualification and immutable Arch substrate"
+status = "complete"
+depends_on = ["S13"]
+evidence_prs = [160, 163]
+required_for_release = true
+
+[[slice]]
+id = "S15"
+title = "lifecycle notifications and OSD"
+status = "planned"
+depends_on = ["S14"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S16"
+title = "first-party panel, tray, status and workstation entry points"
+status = "planned"
+depends_on = ["S15"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S17"
+title = "lock screen and session/power controls"
+status = "planned"
+depends_on = ["S16"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S18"
+title = "NetworkManager connectivity experience"
+status = "planned"
+depends_on = ["S17"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S19"
+title = "BlueZ Bluetooth experience"
+status = "planned"
+depends_on = ["S18"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S20"
+title = "complete audio and media experience"
+status = "planned"
+depends_on = ["S19"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S21"
+title = "display, brightness, power and removable-storage experience"
+status = "planned"
+depends_on = ["S20"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S22"
+title = "desktop utilities, screenshot/recording and clipboard history"
+status = "planned"
+depends_on = ["S21"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S23"
+title = "applications, packages and default-app management"
+status = "planned"
+depends_on = ["S22"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S24"
+title = "updates, snapshots, rollback and recovery experience"
+status = "planned"
+depends_on = ["S23"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S25"
+title = "themes, wallpaper, fonts, icons and personalization"
+status = "planned"
+depends_on = ["S24"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S26"
+title = "Library, Setups and MachineProfiles workstation workflows"
+status = "planned"
+depends_on = ["S25"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S27"
+title = "declarative configuration, manual/no-AI and agent convergence"
+status = "planned"
+depends_on = ["S26"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S28"
+title = "bounded installer and First Boot workstation path"
+status = "planned"
+depends_on = ["S27"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S29"
+title = "Q10 complete experience, visual, accessibility and input qualification"
+status = "planned"
+depends_on = ["S28"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S30"
+title = "Q11 maintained real Arch/Hyprland hardware qualification"
+status = "planned"
+depends_on = ["S29"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S31"
+title = "Q12/Q13 recovery, power-loss and workstation security qualification"
+status = "planned"
+depends_on = ["S30"]
+evidence_prs = []
+required_for_release = true
+
+[[slice]]
+id = "S32"
+title = "Q14/Q15 inherited qualification, support promotion and release closure"
+status = "planned"
+depends_on = ["S31"]
+evidence_prs = []
+required_for_release = true
+

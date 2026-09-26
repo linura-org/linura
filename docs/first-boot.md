@@ -193,4 +193,4 @@ Those results qualify only `qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headle
 
 ## v0.10 boundary
 
-The first coherent broader end-user UI experience remains v0.10 work. The v0.9 headless reference profile does not require Control Center, desktop shell, display/audio/theme/input integration or a general workstation experience, and v0.9 must not pull those claims forward merely to make First Boot appear more complete.
+The complete first workstation product experience is v0.10 work. The v0.9 headless reference profile does not require Control Center, installer ownership, desktop shell, display/audio/theme/input integration or a general workstation experience, and v0.9 must not pull those claims forward merely to make First Boot appear more complete.
