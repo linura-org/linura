@@ -839,7 +839,7 @@ jobs:
   publish-pypi:
     name: publish sealed Python wheel to PyPI
     needs: pypi-preflight
-    if: ${{ needs.pypi-preflight.result == 'success' }}
+    if: ${{ !cancelled() && needs.pypi-preflight.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment:
@@ -882,7 +882,7 @@ jobs:
   verify-pypi:
     name: verify exact PyPI publication
     needs: [pypi-preflight, publish-pypi]
-    if: ${{ needs.pypi-preflight.result == 'success' && needs.publish-pypi.result == 'success' }}
+    if: ${{ !cancelled() && needs.pypi-preflight.result == 'success' && needs.publish-pypi.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

@@ -215,6 +215,17 @@ version = "9.9.9"
         self.assertIn("environment:\n      name: pypi", pypi)
         self.assertIn("id-token: write", pypi)
         self.assertEqual(release.count("id-token: write"), 1)
+        self.assertIn(
+            "if: ${{ !cancelled() && needs.pypi-preflight.result == 'success' }}",
+            pypi,
+        )
+        verify_pypi = release.split("\n  verify-pypi:", 1)[1].split(
+            "\n  verification-dispatch:", 1
+        )[0]
+        self.assertIn(
+            "if: ${{ !cancelled() && needs.pypi-preflight.result == 'success' && needs.publish-pypi.result == 'success' }}",
+            verify_pypi,
+        )
         self.assertIn("bootstrap-pypi-build:", release)
         self.assertIn("bootstrap-pypi-reproduce:", release)
         self.assertNotIn("environment:", release.split("\n  bootstrap-pypi-build:", 1)[1].split("\n  pypi-preflight:", 1)[0])
