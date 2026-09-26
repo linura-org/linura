@@ -16,6 +16,8 @@ EXPECTED_PROFILE = "arch-hyprland-v1"
 EXPECTED_MACHINE_CLASS = "workstation"
 EXPECTED_EVIDENCE = ["disposable-arch", "interactive-workstation", "inherited-v0.9"]
 EXPECTED_INTERACTION_ADR = "docs/adr/0031-v010-many-interfaces-one-authority-path.md"
+EXPECTED_PRODUCT_SCOPE_ADR = "docs/adr/0033-v010-complete-workstation-product-boundary.md"
+EXPECTED_SLICE_CONTRACT = "contracts/v010-workstation-slices.toml"
 EXPECTED_OPERATION_SEMANTICS_CONTRACT = "contracts/operation-semantics.toml"
 EXPECTED_OPERATION_SEMANTICS_ADR = "docs/adr/0032-classify-operations-before-authority.md"
 EXPECTED_INTERACTION_SURFACES = [
@@ -30,18 +32,43 @@ EXPECTED_INTERACTION_SURFACES = [
     "command-palette",
     "quick-settings",
     "desktop-shell-integration",
+    "shell-panel-tray-status",
     "launcher-workspace",
     "notifications-osd",
+    "lock-session-controls",
+    "network-connectivity",
+    "bluetooth",
+    "audio-media",
+    "display-power",
+    "desktop-utilities",
+    "applications-packages",
+    "updates-snapshots-recovery",
+    "personalization",
+    "install-first-boot",
     "unified-visual-theme",
     "keyboard-mouse-parity",
+    "accessibility",
+    "diagnostics-explanation-audit",
 ]
 EXPECTED_REQUIRED_VISUAL_SURFACES = [
     "linura-firstboot",
+    "linura-installer",
     "linura-control-center",
     "command-palette",
     "quick-settings",
     "desktop-shell-integration",
+    "shell-panel-tray-status",
+    "launcher-workspace",
     "notifications-osd",
+    "lock-session-controls",
+    "network-connectivity",
+    "bluetooth",
+    "audio-media",
+    "display-power",
+    "desktop-utilities",
+    "applications-packages",
+    "updates-snapshots-recovery",
+    "personalization",
 ]
 EXPECTED_ALLOWED_VISUAL_SURFACES = set(EXPECTED_REQUIRED_VISUAL_SURFACES) | {"approval-dialog"}
 
@@ -49,29 +76,37 @@ EXPECTED_EXPERIENCE = {
     "interaction_model": "one-model-many-interfaces",
     "architecture_decision": EXPECTED_INTERACTION_ADR,
     "authority_convergence": "single-typed-machine-model-and-control-path",
+    "experience_scope": "complete-daily-usable-workstation",
     "required_surfaces": EXPECTED_INTERACTION_SURFACES,
     "declarative_configuration": "typed-versioned-previewable-non-authorizing",
     "command_palette": True,
     "keyboard_shortcuts": True,
     "quick_settings": True,
-    "desktop_shell_integration": "bounded",
+    "desktop_shell_integration": "complete-first-party",
+    "shell_panel_tray_status": True,
     "launcher_workspace": True,
     "notifications_osd": True,
+    "lock_session_controls": True,
+    "network_connectivity": True,
+    "bluetooth": True,
+    "audio_media": True,
+    "display_power": True,
+    "desktop_utilities": True,
+    "applications_packages": True,
+    "updates_snapshots_recovery": True,
+    "personalization": True,
+    "installation_path_required": True,
+    "ordinary_workflows_terminal_optional": True,
+    "complete_first_party_shell_required": True,
     "unified_visual_theme": True,
     "keyboard_mouse_parity": True,
+    "accessibility_required": True,
     "visual_baseline_manifest": "visual/baselines/manifest.json",
     "experience_evidence_manifest": "qualification/v010/experience-evidence.json",
     "representative_visual_scales": [1.0, 2.0],
     "representative_visual_resolutions": ["1280x800", "1440x900"],
     "required_visual_surfaces": EXPECTED_REQUIRED_VISUAL_SURFACES,
-    "required_accessibility_surfaces": [
-        "linura-firstboot",
-        "linura-control-center",
-        "command-palette",
-        "quick-settings",
-        "desktop-shell-integration",
-        "notifications-osd",
-    ],
+    "required_accessibility_surfaces": EXPECTED_REQUIRED_VISUAL_SURFACES,
     "require_reviewed_non_null_visual_baselines": True,
     "require_representative_resolution_scale_captures": True,
     "require_retained_visual_failure_diffs": True,
@@ -82,12 +117,12 @@ EXPECTED_EXPERIENCE = {
     "require_offline_error_states": True,
     "manual_no_ai_required": True,
     "agent_authority": "proposal-only",
-    "full_shell_replacement_required": False,
     "no_parallel_mutation_paths": True,
     "operation_classification": "trusted-registry-plus-control",
     "transient_external_effect": "unprivileged-user-state-only",
     "managed_external_effect": "canonical-eleven-stage-lifecycle",
 }
+
 EXPECTED_REQUIRED_PACKAGES_PATH = "packaging/arch/archiso/packages.linura"
 EXPECTED_MANIFEST_FORMAT = "linura-arch-package-manifest-v1"
 EXPECTED_MANIFEST_DIRECTORY = "qualification/v010"
@@ -1137,6 +1172,14 @@ def validate(root: Path) -> list[str]:
         failures.append("v0.10 operation_semantics_contract must bind the canonical operation-semantics contract")
     elif not (root / EXPECTED_OPERATION_SEMANTICS_CONTRACT).is_file():
         failures.append("v0.10 operation-semantics contract file is missing")
+    if contract.get("product_scope_decision") != EXPECTED_PRODUCT_SCOPE_ADR:
+        failures.append("v0.10 product_scope_decision must bind ADR 0033")
+    elif not (root / EXPECTED_PRODUCT_SCOPE_ADR).is_file():
+        failures.append("v0.10 product-scope ADR 0033 is missing")
+    if contract.get("slice_contract") != EXPECTED_SLICE_CONTRACT:
+        failures.append("v0.10 slice_contract must bind the canonical workstation slice ledger")
+    elif not (root / EXPECTED_SLICE_CONTRACT).is_file():
+        failures.append("v0.10 workstation slice ledger is missing")
     experience = contract.get("experience")
     if not isinstance(experience, dict):
         failures.append("v0.10 qualification contract missing experience")
@@ -1160,8 +1203,18 @@ def validate(root: Path) -> list[str]:
             failures.append("roadmap v0.10 interaction_model must remain one-model-many-interfaces")
         if milestone.get("required_interaction_surfaces") != EXPECTED_INTERACTION_SURFACES:
             failures.append("roadmap v0.10 required_interaction_surfaces drifted from the v0.10 experience contract")
-        if milestone.get("desktop_shell_scope") != "bounded-integration-not-full-replacement":
-            failures.append("roadmap v0.10 desktop_shell_scope must remain bounded-integration-not-full-replacement")
+        if milestone.get("desktop_shell_scope") != "complete-first-party-workstation-shell":
+            failures.append("roadmap v0.10 desktop_shell_scope must remain complete-first-party-workstation-shell")
+        if milestone.get("experience_scope") != "complete-daily-usable-workstation":
+            failures.append("roadmap v0.10 experience_scope must remain complete-daily-usable-workstation")
+        if milestone.get("installation_scope") != "bounded-qualified-install-plus-adoption":
+            failures.append("roadmap v0.10 installation_scope must remain bounded-qualified-install-plus-adoption")
+        if milestone.get("daily_use_target") is not True:
+            failures.append("roadmap v0.10 daily_use_target must remain true")
+        if milestone.get("product_scope_adr") != EXPECTED_PRODUCT_SCOPE_ADR:
+            failures.append("roadmap v0.10 product_scope_adr must bind ADR 0033")
+        if milestone.get("slice_contract") != EXPECTED_SLICE_CONTRACT:
+            failures.append("roadmap v0.10 slice_contract must bind the workstation slice ledger")
         if milestone.get("interaction_adr") != EXPECTED_INTERACTION_ADR:
             failures.append("roadmap v0.10 interaction_adr must bind ADR 0031")
         if milestone.get("operation_semantics_contract") != EXPECTED_OPERATION_SEMANTICS_CONTRACT:
@@ -1320,6 +1373,28 @@ def validate(root: Path) -> list[str]:
         if not isinstance(experience_ready, bool):
             failures.append("experience.experience_evidence_ready must be boolean")
         if experience_ready is True:
+            slice_contract = _load_toml(
+                root / EXPECTED_SLICE_CONTRACT,
+                "v0.10 workstation slice contract",
+                failures,
+            )
+            slice_items = slice_contract.get("slice") if slice_contract else None
+            status_by_id = {
+                item.get("id"): item.get("status")
+                for item in slice_items
+                if isinstance(item, dict)
+            } if isinstance(slice_items, list) else {}
+            required_product_slices = [f"S{index:02d}" for index in range(1, 29)]
+            incomplete_product_slices = [
+                slice_id
+                for slice_id in required_product_slices
+                if status_by_id.get(slice_id) != "complete"
+            ]
+            if incomplete_product_slices:
+                failures.append(
+                    "experience evidence cannot be ready until product slices S01-S28 are complete: "
+                    + ", ".join(incomplete_product_slices)
+                )
             _validate_experience_evidence(root, experience, failures)
 
     if contract.get("security") != EXPECTED_SECURITY:

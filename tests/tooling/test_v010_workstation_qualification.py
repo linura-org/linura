@@ -28,11 +28,13 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         paths = (
             "contracts/roadmap.toml",
             "contracts/v010-workstation-qualification.toml",
+            "contracts/v010-workstation-slices.toml",
             "contracts/operation-semantics.toml",
             "profiles/arch-hyprland-v1.toml",
             "hardware/support-matrix.json",
             "docs/qualification/v0.10.0.md",
             "docs/adr/0031-v010-many-interfaces-one-authority-path.md",
+            "docs/adr/0033-v010-complete-workstation-product-boundary.md",
             "packaging/arch/archiso/packages.linura",
             "visual/baselines/manifest.json",
         )
@@ -176,24 +178,37 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
+    def _complete_product_slices_for_q10(self, root: Path) -> None:
+        path = root / "contracts/v010-workstation-slices.toml"
+        text = path.read_text(encoding="utf-8")
+        parts = text.split("[[slice]]")
+        rewritten = [parts[0]]
+        for block in parts[1:]:
+            if any(f'id = "S{index:02d}"' in block for index in range(15, 29)):
+                block = block.replace('status = "planned"', 'status = "complete"', 1)
+                block = block.replace("evidence_prs = []", "evidence_prs = [999]", 1)
+            rewritten.append("[[slice]]" + block)
+        text = "".join(rewritten)
+        text = text.replace("completed_slice_count = 14", "completed_slice_count = 28", 1)
+        text = text.replace('next_slice = "S15"', 'next_slice = "S29"', 1)
+        path.write_text(text, encoding="utf-8")
+
     def _write_complete_experience_evidence(self, root: Path) -> None:
+        self._complete_product_slices_for_q10(root)
         baseline_manifest = root / "visual/baselines/manifest.json"
+        required_visual_surfaces = ["linura-firstboot","linura-installer","linura-control-center","command-palette","quick-settings","desktop-shell-integration","shell-panel-tray-status","launcher-workspace","notifications-osd","lock-session-controls","network-connectivity","bluetooth","audio-media","display-power","desktop-utilities","applications-packages","updates-snapshots-recovery","personalization"]
         baseline_records = [
             ("firstboot-1280x800-1x", "linura-firstboot", 1280, 800, 1.0),
             ("firstboot-1280x800-2x", "linura-firstboot", 1280, 800, 2.0),
             ("control-center-1440x900-1x", "linura-control-center", 1440, 900, 1.0),
-            ("command-palette-1280x800-1x", "command-palette", 1280, 800, 1.0),
-            ("quick-settings-1280x800-1x", "quick-settings", 1280, 800, 1.0),
-            (
-                "desktop-shell-integration-1440x900-1x",
-                "desktop-shell-integration",
-                1440,
-                900,
-                1.0,
-            ),
-            ("notifications-osd-1280x800-1x", "notifications-osd", 1280, 800, 1.0),
-            ("approval-1280x800-1x", "approval-dialog", 1280, 800, 1.0),
         ]
+        existing_surfaces = {record[1] for record in baseline_records}
+        for surface in required_visual_surfaces:
+            if surface in existing_surfaces:
+                continue
+            baseline_records.append(
+                (f"{surface}-1280x800-1x", surface, 1280, 800, 1.0)
+            )
         baselines = []
         visual_dir = root / "visual/baselines"
         visual_dir.mkdir(parents=True, exist_ok=True)
@@ -267,14 +282,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             diff_digest,
         )
 
-        required_surfaces = [
-            "linura-firstboot",
-            "linura-control-center",
-            "command-palette",
-            "quick-settings",
-            "desktop-shell-integration",
-            "notifications-osd",
-        ]
+        required_surfaces = ["linura-firstboot","linura-installer","linura-control-center","command-palette","quick-settings","desktop-shell-integration","shell-panel-tray-status","launcher-workspace","notifications-osd","lock-session-controls","network-connectivity","bluetooth","audio-media","display-power","desktop-utilities","applications-packages","updates-snapshots-recovery","personalization"]
         interaction_records = []
         for surface in required_surfaces:
             report_rel = f"qualification/v010/{surface}-interaction-accessibility.json"
@@ -559,6 +567,32 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("missing or not a regular file", result.stderr)
 
+    def test_experience_readiness_requires_all_product_slices(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            slices = root / "contracts/v010-workstation-slices.toml"
+            text = slices.read_text(encoding="utf-8")
+            parts = text.split("[[slice]]")
+            rewritten = [parts[0]]
+            for block in parts[1:]:
+                if 'id = "S28"' in block:
+                    block = block.replace('status = "complete"', 'status = "planned"', 1)
+                    block = block.replace("evidence_prs = [999]", "evidence_prs = []", 1)
+                rewritten.append("[[slice]]" + block)
+            text = "".join(rewritten)
+            text = text.replace("completed_slice_count = 28", "completed_slice_count = 27", 1)
+            text = text.replace('next_slice = "S29"', 'next_slice = "S28"', 1)
+            slices.write_text(text, encoding="utf-8")
+
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "experience evidence cannot be ready until product slices S01-S28 are complete: S28",
+                result.stderr,
+            )
+
     def test_complete_artifact_backed_experience_evidence_can_become_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -837,6 +871,15 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("interaction ADR 0031 is missing", result.stderr)
+
+    def test_product_scope_adr_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            (root / "docs/adr/0033-v010-complete-workstation-product-boundary.md").unlink()
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("product-scope ADR 0033 is missing", result.stderr)
 
     def test_operation_semantics_contract_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

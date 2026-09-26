@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -34,6 +35,9 @@ class RoadmapContractTests(unittest.TestCase):
         contract = tomllib.loads((ROOT / "contracts/roadmap.toml").read_text(encoding="utf-8"))
         paths = {
             "contracts/roadmap.toml",
+            "contracts/v010-workstation-slices.toml",
+            "contracts/v010-workstation-qualification.toml",
+            "docs/adr/0033-v010-complete-workstation-product-boundary.md",
             "crates/linura-intent/src/model.rs",
             "crates/linura-sdk/src/lib.rs",
             "docs/roadmap.md",
@@ -259,6 +263,286 @@ class RoadmapContractTests(unittest.TestCase):
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("development plan missing roadmap alignment marker", result.stderr)
+
+    def test_v010_slice_ledger_cannot_silently_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8").replace(
+                "completed_slice_count = 14",
+                "completed_slice_count = 15",
+                1,
+            )
+            contract.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("completed_slice_count does not match", result.stderr)
+
+    def test_v010_slice_scope_cannot_silently_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8").replace(
+                'title = "lifecycle notifications and OSD"',
+                'title = "unrelated trivial feature"',
+                1,
+            )
+            contract.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("S15: slice title/scope drifted", result.stderr)
+
+    def test_v010_release_requires_all_release_slices_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/roadmap.toml"
+            text = contract.read_text(encoding="utf-8")
+            text = text.replace(
+                'current_release = "v0.9.0"',
+                'current_release = "v0.10.0"',
+                1,
+            ).replace(
+                'next_release = "v0.10.0"',
+                'next_release = "v1.0.0"',
+                1,
+            )
+            text = self._mutate_milestone_field(
+                text,
+                "v0.10.0",
+                'status = "planned"',
+                'status = "released"',
+            )
+            text = self._mutate_milestone_field(
+                text,
+                "v0.10.0",
+                'qualification = "docs/qualification/v0.10.0.md"',
+                'qualification = "docs/qualification/v0.10.0.md"\nrelease_contract = "docs/releases/v0.10.0.md"',
+            )
+            contract.write_text(text, encoding="utf-8")
+
+            release_contract = root / "docs/releases/v0.10.0.md"
+            release_contract.parent.mkdir(parents=True, exist_ok=True)
+            release_contract.write_text("# v0.10.0 release fixture\n", encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "released v0.10 requires all release-required slices complete",
+                result.stderr,
+            )
+            self.assertIn("released v0.10 must not retain a next_slice", result.stderr)
+
+
+    def _promote_v010_fixture_to_released(self, root: Path) -> None:
+        contract = root / "contracts/roadmap.toml"
+        text = contract.read_text(encoding="utf-8")
+        text = text.replace(
+            'current_release = "v0.9.0"',
+            'current_release = "v0.10.0"',
+            1,
+        ).replace(
+            'next_release = "v0.10.0"',
+            'next_release = "v1.0.0"',
+            1,
+        )
+        text = self._mutate_milestone_field(
+            text,
+            "v0.10.0",
+            'status = "planned"',
+            'status = "released"',
+        )
+        text = self._mutate_milestone_field(
+            text,
+            "v0.10.0",
+            'qualification = "docs/qualification/v0.10.0.md"',
+            'qualification = "docs/qualification/v0.10.0.md"\nrelease_contract = "docs/releases/v0.10.0.md"',
+        )
+        contract.write_text(text, encoding="utf-8")
+        release_contract = root / "docs/releases/v0.10.0.md"
+        release_contract.parent.mkdir(parents=True, exist_ok=True)
+        release_contract.write_text("# v0.10.0 release fixture\n", encoding="utf-8")
+
+    def _complete_v010_slice_fixture(self, root: Path) -> None:
+        contract = root / "contracts/v010-workstation-slices.toml"
+        text = contract.read_text(encoding="utf-8")
+        text = text.replace("completed_slice_count = 14", "completed_slice_count = 32", 1)
+        text = text.replace('next_slice = "S15"', 'next_slice = ""', 1)
+        text = text.replace('status = "planned"', 'status = "complete"')
+        text = text.replace("evidence_prs = []", "evidence_prs = [999999]")
+        contract.write_text(text, encoding="utf-8")
+
+    def test_v010_slice_evidence_rejects_boolean_pr_numbers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8").replace(
+                "evidence_prs = [144, 145]",
+                "evidence_prs = [true]",
+                1,
+            )
+            contract.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("S01: evidence_prs must be positive PR numbers", result.stderr)
+
+    def test_v010_planned_release_candidate_requires_qualification_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._complete_v010_slice_fixture(root)
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("released v0.10 requires frozen immutable Arch substrate", result.stderr)
+            self.assertIn(
+                "released v0.10 requires substrate.release_qualification_ready=true",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 requires experience.experience_evidence_ready=true",
+                result.stderr,
+            )
+
+    def test_v010_release_hashes_do_not_replace_semantic_qualification(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._complete_v010_slice_fixture(root)
+
+            package_manifest = root / "qualification/v010/arch-packages.tsv"
+            visual_manifest = root / "visual/baselines/manifest.json"
+            experience_manifest = root / "qualification/v010/experience-evidence.json"
+            package_manifest.parent.mkdir(parents=True, exist_ok=True)
+            visual_manifest.parent.mkdir(parents=True, exist_ok=True)
+            experience_manifest.parent.mkdir(parents=True, exist_ok=True)
+            package_manifest.write_text("not a package manifest\n", encoding="utf-8")
+            visual_manifest.write_text("not json\n", encoding="utf-8")
+            experience_manifest.write_text("not json\n", encoding="utf-8")
+
+            qualification = root / "contracts/v010-workstation-qualification.toml"
+            text = qualification.read_text(encoding="utf-8")
+            text = text.replace(
+                'state = "source-pinned-package-set-pending"',
+                'state = "frozen"',
+                1,
+            ).replace(
+                'package_manifest = ""',
+                'package_manifest = "qualification/v010/arch-packages.tsv"',
+                1,
+            ).replace(
+                'package_manifest_sha256 = ""',
+                f'package_manifest_sha256 = "{hashlib.sha256(package_manifest.read_bytes()).hexdigest()}"',
+                1,
+            ).replace(
+                "release_qualification_ready = false",
+                "release_qualification_ready = true",
+                1,
+            ).replace(
+                "experience_evidence_ready = false",
+                "experience_evidence_ready = true",
+                1,
+            ).replace(
+                'visual_baseline_manifest_sha256 = ""',
+                f'visual_baseline_manifest_sha256 = "{hashlib.sha256(visual_manifest.read_bytes()).hexdigest()}"',
+                1,
+            ).replace(
+                'experience_evidence_manifest_sha256 = ""',
+                f'experience_evidence_manifest_sha256 = "{hashlib.sha256(experience_manifest.read_bytes()).hexdigest()}"',
+                1,
+            )
+            qualification.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "v0.10 semantic qualification: frozen package manifest identity headers do not match",
+                result.stderr,
+            )
+            self.assertIn(
+                "v0.10 semantic qualification: invalid v0.10 visual baseline manifest:",
+                result.stderr,
+            )
+
+    def test_v010_release_requires_qualification_readiness_after_slices_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._promote_v010_fixture_to_released(root)
+            self._complete_v010_slice_fixture(root)
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("released v0.10 requires frozen immutable Arch substrate", result.stderr)
+            self.assertIn(
+                "released v0.10 requires substrate.release_qualification_ready=true",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 requires experience.experience_evidence_ready=true",
+                result.stderr,
+            )
+
+    def test_v010_release_requires_digest_bound_qualification_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._promote_v010_fixture_to_released(root)
+            self._complete_v010_slice_fixture(root)
+
+            qualification = root / "contracts/v010-workstation-qualification.toml"
+            text = qualification.read_text(encoding="utf-8")
+            text = text.replace(
+                'state = "source-pinned-package-set-pending"',
+                'state = "frozen"',
+                1,
+            ).replace(
+                'package_manifest = ""',
+                'package_manifest = "qualification/v010/arch-packages.tsv"',
+                1,
+            ).replace(
+                'package_manifest_sha256 = ""',
+                'package_manifest_sha256 = "' + ("0" * 64) + '"',
+                1,
+            ).replace(
+                "release_qualification_ready = false",
+                "release_qualification_ready = true",
+                1,
+            ).replace(
+                "experience_evidence_ready = false",
+                "experience_evidence_ready = true",
+                1,
+            ).replace(
+                'visual_baseline_manifest_sha256 = ""',
+                'visual_baseline_manifest_sha256 = "' + ("0" * 64) + '"',
+                1,
+            ).replace(
+                'experience_evidence_manifest_sha256 = ""',
+                'experience_evidence_manifest_sha256 = "' + ("0" * 64) + '"',
+                1,
+            )
+            qualification.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "released v0.10 qualification artifact missing or unsafe: qualification/v010/arch-packages.tsv",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 qualification artifact missing or unsafe: visual/baselines/manifest.json",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 qualification artifact missing or unsafe: qualification/v010/experience-evidence.json",
+                result.stderr,
+            )
 
     def test_v010_remains_explicitly_experimental(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
