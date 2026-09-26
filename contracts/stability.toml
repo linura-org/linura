@@ -32,6 +32,13 @@ version = "0"
 stability = "experimental"
 
 [[contract]]
+id = "python.linura"
+kind = "python-sdk"
+path = "bindings/python/src/linura/__init__.py"
+version = "0"
+stability = "experimental"
+
+[[contract]]
 id = "schema.acceptance-scenario.v1"
 kind = "json-schema"
 path = "schemas/acceptance-scenario.v1.schema.json"

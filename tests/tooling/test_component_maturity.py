@@ -273,18 +273,26 @@ class ComponentMaturityContractTests(unittest.TestCase):
             self.assertIn("derive both assembly and reproduction binary sets", result.stderr)
 
     def test_release_builder_must_validate_complete_payload_membership(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            self._copy_fixture(root)
-            workflow = root / ".github/workflows/reusable-release-build.yml"
-            text = workflow.read_text(encoding="utf-8")
-            marker = 'python3 tools/release_verify.py "$PAYLOAD_DIR" --component-contract contracts/components.toml'
-            self.assertIn(marker, text)
-            workflow.write_text(text.replace(marker, 'python3 tools/release_verify.py "$PAYLOAD_DIR"', 1), encoding="utf-8")
+        required_fragments = (
+            "--component-contract contracts/components.toml",
+            "--python-package bindings/python/pyproject.toml",
+        )
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                workflow = root / ".github/workflows/reusable-release-build.yml"
+                text = workflow.read_text(encoding="utf-8")
+                self.assertIn('python3 tools/release_verify.py "$PAYLOAD_DIR"', text)
+                self.assertIn(fragment, text)
+                workflow.write_text(text.replace(fragment, "", 1), encoding="utf-8")
 
-            result = self._run_checker(root)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("verify the complete payload against contracts/components.toml", result.stderr)
+                result = self._run_checker(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "verify the complete payload against component and Python package contracts",
+                    result.stderr,
+                )
 
     def test_workspace_member_cannot_exist_without_maturity_ownership(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

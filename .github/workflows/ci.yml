@@ -145,6 +145,35 @@ jobs:
         run: cargo xtask check
       - name: Verify canonical crates.io package
         run: cargo package --locked -p linura
+      - name: Verify canonical PyPI package
+        run: |
+          set -euo pipefail
+          PYTHONPATH=bindings/python/src python3 -m unittest discover \
+            -s bindings/python/tests -p 'test_*.py'
+
+          dist_dir="$RUNNER_TEMP/linura-python-dist"
+          install_dir="$RUNNER_TEMP/linura-python-install"
+          rm -rf "$dist_dir" "$install_dir"
+          mkdir -p "$dist_dir" "$install_dir"
+
+          python3 -m pip wheel \
+            --disable-pip-version-check \
+            --no-deps \
+            --wheel-dir "$dist_dir" \
+            ./bindings/python
+          python3 -m pip install \
+            --disable-pip-version-check \
+            --no-deps \
+            --target "$install_dir" \
+            "$dist_dir"/linura-*.whl
+
+          PYTHONPATH="$install_dir" python3 - <<'PY'
+          import linura
+
+          assert linura.__version__ == "0.0.1"
+          assert linura.CONTROL1_SERVICE == "org.linura.Control1"
+          assert linura.find_installation(path="") is None
+          PY
       - name: Verify canonical checks are non-mutating
         run: |
           set -euo pipefail

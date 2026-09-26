@@ -103,7 +103,7 @@ If an Actions runner disappears immediately after the authorization merge, GitHu
 
 Trusted Release Proof is `workflow_dispatch`-only and read-only with respect to repository contents. It requires `github.sha`, checkout `HEAD` and `origin/main` to equal the exact release-intent SHA; validates the frozen release contract; and re-verifies permanent exact-SHA CI/Security/CodeQL evidence.
 
-It then executes the mandatory claim/version-scoped qualification graph before construction. Only after qualification succeeds may the reusable trusted builder construct the release once with locked dependencies. The proof payload contains canonical source/tag/notes/build environment/SBOM/release evidence/checksums/proof receipt and build provenance. A fresh runner reproduces distributable binary bytes. Promotion and publication consume those sealed bytes; they do not rebuild.
+It then executes the mandatory claim/version-scoped qualification graph before construction. Only after qualification succeeds may the reusable trusted builder construct the release once with locked dependencies. The proof payload contains canonical source/tag/notes/build environment/SBOM/release evidence/checksums/proof receipt and build provenance. It also contains the canonical `linura` Python wheel when the Python package is present in the source. Python wheel construction uses exact Python 3.12.10 plus a wheels-only SHA-256 hash lock for exact pip and the complete PEP 517 backend dependency set, enforced with `--require-hashes`, disabled build isolation and a fixed ZIP-safe `SOURCE_DATE_EPOCH` independent of the outer Linura release commit. A fresh runner recreates that same Python build envelope and reproduces distributable binary bytes and the Python wheel byte-for-byte. Promotion and publication consume those sealed bytes; they do not rebuild.
 
 Any SHA change invalidates exact-source evidence. History cleanup/rebase/amend therefore occurs before final release gates.
 
@@ -128,11 +128,15 @@ Only the final `publish` job receives `contents: write`. It has no GitHub Enviro
 5. reconciles the asset set to the sealed proof payload and verifies every digest;
 6. publishes only after the remote set is exact.
 
+Before the immutable GitHub tag/Release boundary, validation queries the independently versioned Python package on PyPI. A missing version is eligible for publication. An existing version is accepted only when its complete remote filename set exactly equals the sealed artifact set, no file is yanked, every advertised SHA-256 matches, and fresh downloads match the sealed bytes. Any mismatch fails before GitHub publication.
+
+After the immutable GitHub publication succeeds, a no-OIDC preflight job re-verifies the sealed Python artifact and persists only that wheel for the registry handoff. The handoff artifact name is source-SHA scoped and explicitly overwrite-safe, so rerunning the same workflow attempt replaces only the rederived exact sealed wheel instead of failing on GitHub artifact immutability. A separate minimal job bound to the non-review-gated GitHub Environment `pypi` has no repository checkout or repository scripts and receives the workflow's only `id-token: write` permission. Its sole mutable action is the SHA-pinned PyPI Trusted Publishing action, and that upload step runs only when preflight proved the version absent. Exact existing bytes are reused without a second upload. A following no-OIDC job independently re-verifies the registry bytes before release verification may be dispatched. The workflow never rebuilds at publication time and does not use `skip-existing` to mask races or conflicting immutable versions.
+
 The immutable tag is an output of successful proof, never the trigger that grants proof authority.
 
 ## Independent publication verification
 
-Release explicitly dispatches verification from the exact immutable tag. The verifier downloads published assets afresh and verifies tag/source binding, evidence, checksums, canonical Release body, immutable Release state, per-asset release verification and build provenance. Downloaded files are treated as content blobs; executable mode is not a portable publication-integrity property.
+Release explicitly dispatches verification from the exact immutable tag only after both GitHub Release publication and the PyPI handoff have succeeded. The verifier downloads published GitHub assets afresh and verifies tag/source binding, evidence, checksums, canonical Release body, immutable Release state, per-asset release verification and build provenance. It also queries PyPI for the exact package version, requires the complete PyPI release filename set to equal the sealed Python artifact set, rejects yanked or extra distributions, checks every advertised SHA-256, downloads every sealed artifact afresh, and requires each digest to match the proof payload. Downloaded files are treated as content blobs; executable mode is not a portable publication-integrity property.
 
 Normal verification runs from the exact tag. `verify-release/vX.Y.Z` is an authenticated emergency recovery namespace only for an already-immutable release whose frozen verifier is defective; it is not part of the normal path and is not wildcard-selected for cleanup.
 
@@ -185,7 +189,7 @@ readiness merge
   → native main gates / authorization trigger
   → authorization PR + merge
   → native main gates / proof-dispatch observer
-  → proof → promotion → Release
+  → proof → promotion → GitHub Release + sealed PyPI publication
   → terminal verification event → crates.io trusted publication → closure handoff
   → closure PR + merge
   → native closure-main gates / cleanup observer

@@ -229,11 +229,16 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
         self.assertNotIn("contents: write", dispatch)
         self.assertNotIn("pull-requests: write", dispatch)
 
-    def test_publication_has_no_hidden_environment_approval(self) -> None:
+    def test_publication_environment_is_limited_to_pypi_identity(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        publish = workflow.split("\n  publish:", 1)[1].split("\n  verification-dispatch:", 1)[0]
+        publish = workflow.split("\n  publish:", 1)[1].split("\n  pypi-preflight:", 1)[0]
+        pypi = workflow.split("\n  publish-pypi:", 1)[1].split("\n  verify-pypi:", 1)[0]
         self.assertIn("contents: write", publish)
         self.assertNotIn("environment:", publish)
+        self.assertIn("environment:\n      name: pypi", pypi)
+        self.assertIn("id-token: write", pypi)
+        self.assertNotIn("actions/checkout@", pypi)
+        self.assertNotIn("run:", pypi)
 
     def test_normal_publication_still_dispatches_exact_tag_verification(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")

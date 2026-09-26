@@ -48,6 +48,7 @@ The reusable builder:
 
 - runs on the explicit `ubuntu-24.04` runner family rather than moving `ubuntu-latest`;
 - installs the repository-pinned Rust toolchain and explicit release target;
+- installs exact Python 3.12.10 for Python release artifacts and installs pip plus every PEP 517 build-backend dependency from a wheels-only SHA-256 hash lock with `--require-hashes` before disabling build isolation;
 - builds with locked dependencies and disabled incremental compilation;
 - derives `SOURCE_DATE_EPOCH` from the source commit;
 - normalizes timezone and locale;
@@ -90,13 +91,17 @@ The promotable proof artifact binds at least:
 - exact source SHA;
 - release tag/version and frozen release notes;
 - build environment;
-- distributable payload;
+- distributable payload, including the canonical Python wheel when present;
 - SPDX SBOM;
 - `RELEASE-EVIDENCE.json`;
 - `SHA256SUMS`;
 - proof receipt and provenance/attestation material.
 
-Promotion/publication consume these exact bytes. They do not rebuild the release.
+Promotion/publication consume these exact bytes. They do not rebuild the release. The Python
+wheel follows the same rule: PyPI Trusted Publishing receives the sealed, attested wheel produced
+by Trusted Release Proof, never a tag-triggered or publication-time rebuild. PyPI OIDC trust is
+bound to the dedicated `pypi` GitHub Environment and only the minimal registry-upload job has
+`id-token: write`; preflight and verification jobs have no PyPI credential-minting authority.
 
 ## Authority boundary
 

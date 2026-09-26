@@ -8,8 +8,9 @@ This document extends the canonical [`threat-model.md`](threat-model.md) for the
 - reviewed readiness source, frozen release contract and reviewed source/tree identity;
 - Trusted Release Proof and sealed build/provenance evidence;
 - exact release tag and immutable GitHub Release assets/body;
+- canonical PyPI `linura` distribution version, complete filename set, artifact SHA-256 and Trusted Publisher identity;
 - canonical crates.io `linura` package version, package checksum and Trusted Publisher identity;
-- independent GitHub Release and crates.io verification evidence;
+- independent GitHub Release, PyPI and crates.io verification evidence;
 - terminal roadmap/publication bookkeeping and release-owned branch hygiene;
 - the Linura Release GitHub App identity, installation permissions and private key;
 - short-lived App installation tokens and job-scoped repository `GITHUB_TOKEN` dispatch/read authority.
@@ -37,8 +38,13 @@ This document extends the canonical [`threat-model.md`](threat-model.md) for the
 - Rotation, revocation and permission drift during a release;
 - a runner disappearing immediately after an irreversible protected merge;
 - a later protected-main push cancelling exact-source CI evidence needed by a release handoff;
-- a parallel crates.io publication path bypassing the reviewed release lifecycle;
+- a parallel PyPI or crates.io publication path bypassing the reviewed release lifecycle;
+- PyPI Trusted Publisher identity being scoped only to workflow identity instead of the dedicated `pypi` environment;
 - OIDC publication authority being available while repository-controlled build/test code executes;
+- compromise or substitution of Python build-backend bytes despite version pins;
+- a PyPI race where an immutable version appears after preflight but before upload;
+- reuse of an existing PyPI version with extra, yanked or byte-mismatched distributions;
+- partial publication where GitHub Release succeeds but PyPI publication or post-upload verification fails;
 - stale-main publication after a correction lands while registry publication is queued;
 - reuse of an existing immutable crates.io version whose checksum differs from the qualified package.
 
@@ -48,9 +54,11 @@ The **Linura Release GitHub App** is repository delivery infrastructure, not pro
 
 The App private key is stored only as `LINURA_RELEASE_APP_PRIVATE_KEY` in GitHub repository secrets. `LINURA_RELEASE_APP_CLIENT_ID` is a non-secret repository variable. The private key is consumed only by the pinned token-minting action and is not exposed to shell steps, artifacts, evidence, model context or Linura state.
 
-Machine preparation, authorization and closure mutations reach `main` only through the normal PR ruleset and GitHub-native PR checks. The App cannot bypass required checks. Tag/GitHub Release publication remains isolated in the Release workflow behind exact-source Trusted Release Proof, Promotion/closure-readiness and tag-last validation. The normal Release job has no GitHub Environment dependency, so a deployment reviewer cannot silently become a hidden post-readiness approval gate.
+Machine preparation, authorization and closure mutations reach `main` only through the normal PR ruleset and GitHub-native PR checks. The App cannot bypass required checks. Tag/GitHub Release publication remains isolated in the Release workflow behind exact-source Trusted Release Proof, Promotion/closure-readiness and tag-last validation. The GitHub Release publication job itself has no GitHub Environment dependency.
 
-Repository `GITHUB_TOKEN` remains appropriate for read-only qualification and supported workflow-to-workflow dispatches. It is not the identity used to create machine PRs.
+PyPI is a separate registry trust boundary. Its Trusted Publisher identity is bound to repository `linura-org/linura`, workflow `release.yml` and GitHub Environment `pypi`. That environment is non-review-gated and stores no registry secret. Only the minimal upload job receives `id-token: write`; it has no repository checkout or repository script execution. Preflight and post-upload verification are separate no-OIDC jobs. The existing `crates-io` environment follows the same credential-isolation principle after terminal release verification.
+
+Repository `GITHUB_TOKEN` remains appropriate for read-only qualification and supported workflow-to-workflow dispatches. It is not the identity used to create machine PRs or to authenticate to PyPI/crates.io.
 
 ## Mitigations
 
@@ -111,6 +119,16 @@ Preparation is constrained to deterministic two-file version metadata. Release A
 
 All machine PRs still require native protected checks and zero unresolved review threads. Any actual human finding remains blocking. Eliminating mandatory bot-authored `@codex review` requests removes an authentication deadlock without weakening the semantic boundary.
 
+### PyPI publication identity, races and partial publication
+
+Trusted Release Proof builds the Python wheel under exact Python, a wheels-only SHA-256 hash lock for pip and all PEP 517 build dependencies, disabled build isolation and a fixed wheel epoch. The lockfile digest and wheel-specific epoch are recorded in build evidence, and an independent runner must reproduce the wheel byte-for-byte before it can enter the sealed payload.
+
+Release validation checks PyPI before irreversible GitHub publication. An existing Python version is accepted only when the complete remote filename set equals the sealed set, no file is yanked, advertised SHA-256 values match and fresh downloads match the sealed bytes. Absence permits the later registry handoff but does not itself grant credentials.
+
+After GitHub Release publication, a no-OIDC preflight re-verifies the sealed wheel and persists only that wheel as the handoff artifact. The `pypi` environment job receives the only PyPI-capable OIDC authority and performs no repository-controlled computation before the pinned publish action. A race that creates the version after preflight causes the upload to fail rather than silently accepting unknown bytes. The following no-OIDC verifier then requires the live PyPI release to exactly match the sealed artifact. Verification dispatch is blocked until that succeeds.
+
+Therefore a partial state in which GitHub Release is immutable but PyPI is missing or mismatched is explicitly non-terminal. Retrying re-proves the existing GitHub publication and PyPI state; it does not rebuild or broaden authority. crates.io publication and terminal closure cannot begin from that partial state.
+
 ### Credential compromise
 
 A compromised short-lived App token can attempt repository writes/PR operations during its lifetime and can create noise or denial of service. It cannot alone satisfy exact parent/tree/message/path invariants, native protected rules, unresolved-thread policy, Trusted Release Proof, Promotion source/closure-readiness checks, tag-last publication, immutable asset verification or independent verification.
@@ -129,13 +147,13 @@ Every machine mutation phase mints a fresh token and probes effective authority.
 
 Promotion repeats full closure-authority proof before immutable publication. Missing repository variable/secret, revoked installation, unapproved GitHub App permission changes, key rotation mistakes or reduced permissions stop release before publication.
 
-There is no fallback to long-lived PAT, crates.io API token, ruleset bypass, manual normal-path approval or `GITHUB_TOKEN` PR creation. crates.io publication uses the configured GitHub OIDC Trusted Publisher and fails closed on identity, source, tag or checksum drift.
+There is no fallback to long-lived PAT, PyPI/crates.io API token, ruleset bypass, manual normal-path approval or `GITHUB_TOKEN` PR creation. PyPI publication uses the `pypi` GitHub Environment-bound Trusted Publisher and fails closed on identity, sealed-byte, complete-set, yanked-file or post-upload verification drift. crates.io publication uses its dedicated GitHub OIDC Trusted Publisher and fails closed on identity, source, tag or checksum drift.
 
 ### Verification and closure duplication
 
 Normal Release explicitly dispatches verification from the exact immutable tag. Emergency verification is accepted only from the authenticated `verify-release/vX.Y.Z` recovery branch under marker-only/single-parent/workflow-definition constraints.
 
-There is exactly one terminal handoff: successful GitHub Release verification persists bound evidence and completes → a terminal `workflow_run` authenticates the exact normal-tag or marker-only recovery verifier → crates.io qualification/publication/checksum verification → `Release Closure Handoff` → dispatch-only `Post Release Closure`. The crates.io qualification job has no OIDC permission; only its dependent publish job has `id-token: write`, and that job executes no crate build/test code before authentication. Existing crate versions are accepted only when their registry checksum matches the qualified package exactly and the version is not yanked. The crates.io workflow persists exact run/version/checksum/availability evidence; both closure handoff and final Post Release Closure authenticate that evidence, so manually dispatching a closure endpoint cannot bypass failed or absent registry publication. Closure is idempotent if terminal state is already present.
+There is exactly one terminal handoff: sealed GitHub Release publication → exact PyPI handoff and no-OIDC registry verification → successful independent GitHub/PyPI Release verification persists bound evidence and completes → a terminal `workflow_run` authenticates the exact normal-tag or marker-only recovery verifier → crates.io qualification/publication/checksum verification → `Release Closure Handoff` → dispatch-only `Post Release Closure`. The crates.io qualification job has no OIDC permission; only its dependent publish job has `id-token: write`, and that job executes no crate build/test code before authentication. Existing crate versions are accepted only when their registry checksum matches the qualified package exactly and the version is not yanked. The crates.io workflow persists exact run/version/checksum/availability evidence; both closure handoff and final Post Release Closure authenticate that evidence, so manually dispatching a closure endpoint cannot bypass failed or absent registry publication. Closure is idempotent if terminal state is already present.
 
 Cleanup is a separate transaction rather than an inline tail of closure merge. Multiple `workflow_run` wakeups are safe because branch absence is idempotent and every target deletion is exact-SHA leased.
 
@@ -159,6 +177,6 @@ Native required contexts remain GitHub Actions `canonical-check`, `dependency-au
 
 The Release App private key is a high-value repository automation secret. A compromised GitHub organization/repository administrator can change app installation permissions, secrets, workflows or rulesets; those platform-administration threats require GitHub account security, audit and organizational controls beyond Linura runtime authority.
 
-GitHub itself remains part of the release trust base for ruleset evaluation, workflow event delivery, App token issuance, immutable Release state and attestations.
+GitHub itself remains part of the release trust base for ruleset evaluation, workflow event delivery, App token issuance, OIDC claims, Environment identity, immutable Release state and attestations. PyPI and crates.io remain part of the registry trust base for immutable version storage and registry metadata; Linura mitigates registry drift with exact preflight and independent fresh-download verification but cannot eliminate compromise of those external services.
 
 No release-automation credential or GitHub event is accepted as evidence about Linux system state, user intent, policy approval, executor authority, agent authority, Library adoption or managed mutation.

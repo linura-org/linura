@@ -3,7 +3,7 @@ version = 1
 forbidden_legacy_roots = ["bootstrap"]
 
 [policy]
-implementation_roots = ["apps", "crates", "executors", "verifiers", "tools"]
+implementation_roots = ["apps", "bindings", "crates", "executors", "verifiers", "tools"]
 infrastructure_roots = [".cargo", ".github"]
 support_roots = ["docs", "qualification", "scripts", "tests"]
 rule = "Every tracked top-level directory, including hidden infrastructure roots, must own real implementation, declarative assets, evidence, packaging, tests, tooling, or infrastructure. README-only future placeholders are forbidden."
@@ -31,6 +31,12 @@ implementation = ["crates/linura-agent-runtime"]
 path = "apps"
 kind = "implementation"
 purpose = "Runnable product entry points and long-lived processes."
+allow_readme_only = false
+
+[[roots]]
+path = "bindings"
+kind = "implementation"
+purpose = "Language bindings and package-native non-privileged client surfaces."
 allow_readme_only = false
 
 [[roots]]

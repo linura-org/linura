@@ -1,0 +1,47 @@
+[build-system]
+requires = [
+  "hatchling==1.27.0",
+  "packaging==24.2",
+  "pathspec==0.12.1",
+  "pluggy==1.5.0",
+  "trove-classifiers==2025.1.15.22",
+]
+build-backend = "hatchling.build"
+
+[project]
+name = "linura"
+version = "0.0.1"
+description = "Official Python entry point for Linura, the intelligent system layer for Linux."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "Linura contributors" }]
+keywords = ["linux", "automation", "agents", "system-management", "control-plane"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: System :: Operating System",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://linura.org"
+Repository = "https://github.com/linura-org/linura"
+Documentation = "https://github.com/linura-org/linura/blob/main/docs/index.md"
+Issues = "https://github.com/linura-org/linura/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/linura"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src/linura",
+  "/tests",
+  "/README.md",
+  "/LICENSE",
+  "/pyproject.toml",
+  "/build-requirements.lock",
+]

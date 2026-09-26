@@ -201,14 +201,21 @@ version = "9.9.9"
             self.assertNotIn("@codex review", workflow)
             self.assertNotIn("chatgpt-codex-connector", workflow)
 
-    def test_release_chain_has_no_environment_or_manual_gate_after_readiness(self) -> None:
+    def test_release_chain_has_only_noninteractive_pypi_identity_environment(self) -> None:
         promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("prove Release App closure authority before publication", promotion)
-        self.assertFalse(
-            any(line.startswith("    environment:") for line in release.splitlines()),
-            "release jobs must not use a GitHub Environment/manual-approval gate",
-        )
+        environments = [
+            line.strip()
+            for line in release.splitlines()
+            if line.startswith("    environment:")
+        ]
+        self.assertEqual(environments, ["environment:"])
+        pypi = release.split("\n  publish-pypi:", 1)[1].split("\n  verify-pypi:", 1)[0]
+        self.assertIn("environment:\n      name: pypi", pypi)
+        self.assertIn("id-token: write", pypi)
+        self.assertNotIn("actions/checkout@", pypi)
+        self.assertNotIn("run:", pypi)
         self.assertNotIn("required reviewers", release.casefold())
         self.assertNotIn("@codex review", release)
 
@@ -257,8 +264,10 @@ version = "9.9.9"
             "protected `main`",
             "zero-diff",
             "tag-last",
-            "One verification-to-closure path",
+            "Registry publication boundaries and one verification-to-closure path",
             "Linura Release GitHub App",
+            "`pypi`",
+            "PyPI",
             "--force-with-lease",
         ):
             self.assertIn(marker, adr)
@@ -269,6 +278,8 @@ version = "9.9.9"
             "Rotation, revocation and permission drift",
             "exact release tag",
             "native PR",
+            "PyPI publication identity, races and partial publication",
+            "`pypi`",
             "--force-with-lease",
         ):
             self.assertIn(marker, threat)
