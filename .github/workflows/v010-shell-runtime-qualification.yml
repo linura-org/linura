@@ -53,6 +53,34 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           python3 tools/check_v010_shell_runtime_qualification.py
 
+      - name: Load repository toolchain contract
+        run: |
+          set -euo pipefail
+          source tools/codex/versions.env
+          printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+
+      - name: Use pinned Rust toolchain
+        run: rustup default "$RUST_VERSION"
+
+      - name: Build exact-source Linura session authority
+        run: |
+          set -euo pipefail
+          cargo build --locked --release -p linurad
+          linurad_binary="$GITHUB_WORKSPACE/target/release/linurad"
+          test -x "$linurad_binary"
+          linurad_sha256="$(sha256sum "$linurad_binary" | awk '{print $1}')"
+          helper_sha256="$(sha256sum packaging/wireplumber/linura-session-audio.lua | awk '{print $1}')"
+          [[ "$linurad_sha256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$helper_sha256" =~ ^[0-9a-f]{64}$ ]]
+          {
+            printf 'LINURAD_BINARY=%s\n' "$linurad_binary"
+            printf 'LINURAD_SHA256=%s\n' "$linurad_sha256"
+            printf 'SESSION_AUDIO_HELPER_SHA256=%s\n' "$helper_sha256"
+          } >> "$GITHUB_ENV"
+
       - name: Install disposable graphical VM dependencies
         run: |
           set -euo pipefail
@@ -188,7 +216,7 @@ jobs:
 
           archive_url="$ARCH_ARCHIVE_URL"
           ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             "printf '%s\n' 'Server = $archive_url' | sudo -n tee /etc/pacman.d/mirrorlist >/dev/null"
-          runtime_packages=(base-devel cmake ninja pkgconf dbus seatd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast)
+          runtime_packages=(base-devel cmake ninja pkgconf dbus seatd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast pipewire pipewire-audio wireplumber networkmanager sqlite)
           install_succeeded=0
           for attempt in 1 2 3; do
             echo "pinned Arch runtime install attempt $attempt/3"
@@ -347,7 +375,25 @@ jobs:
 
           git archive --format=tar.gz --output="$RUNNER_TEMP/linura-source.tar.gz" "$SOURCE_SHA"
           scp "${ssh_common[@]}" -P 2223             "$RUNNER_TEMP/linura-source.tar.gz"             linura@127.0.0.1:/tmp/linura-source.tar.gz
-          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'sudo -n rm -rf /opt/linura-source && sudo -n install -d -o root -g root -m 0755 /opt/linura-source && sudo -n tar -xzf /tmp/linura-source.tar.gz -C /opt/linura-source && rm -f /tmp/linura-source.tar.gz && sudo -n bash /opt/linura-source/qualification/v010/shell-runtime/provision-shell-runtime.sh linura /opt/linura-source'
+          scp "${ssh_common[@]}" -P 2223             "$LINURAD_BINARY"             linura@127.0.0.1:/tmp/linurad-qualification
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'sudo -n rm -rf /opt/linura-source && sudo -n install -d -o root -g root -m 0755 /opt/linura-source && sudo -n tar -xzf /tmp/linura-source.tar.gz -C /opt/linura-source && rm -f /tmp/linura-source.tar.gz && sudo -n bash /opt/linura-source/qualification/v010/shell-runtime/provision-shell-runtime.sh linura /opt/linura-source /tmp/linurad-qualification && rm -f /tmp/linurad-qualification'
+
+          installed_linurad_sha="$(ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 'sha256sum /usr/bin/linurad | awk "{print \$1}"')"
+          installed_helper_sha="$(ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 'sha256sum /usr/lib/linura/linura-session-audio.lua | awk "{print \$1}"')"
+          [[ "$installed_linurad_sha" == "$LINURAD_SHA256" ]] || {
+            echo "installed linurad digest does not match exact-source build" >&2
+            exit 1
+          }
+          [[ "$installed_helper_sha" == "$SESSION_AUDIO_HELPER_SHA256" ]] || {
+            echo "installed session-audio helper digest does not match exact source" >&2
+            exit 1
+          }
+          {
+            printf 'source_sha=%s\n' "$SOURCE_SHA"
+            printf 'linurad_sha256=%s\n' "$installed_linurad_sha"
+            printf 'session_audio_helper_sha256=%s\n' "$installed_helper_sha"
+            ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1               "stat -c '%U:%G %a %h %n' /usr/bin/linurad /usr/lib/linura/linura-session-audio.lua"
+          } > "$ARTIFACT_DIR/runtime-install-integrity.txt"
 
       - name: Run real shell runtime qualification
         run: |
@@ -368,7 +414,7 @@ jobs:
 
           copy_status=0
           scp "${ssh_common[@]}" -P 2223 -r             linura@127.0.0.1:/tmp/linura-shell-runtime/evidence/.             "$ARTIFACT_DIR/" || copy_status=$?
-          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'journalctl --user -u linura-shell-qualification.service -u linura-palette-qualification.service -u linura-hyprland-qualification.service --no-pager'             > "$ARTIFACT_DIR/user-journal.log" || true
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'journalctl --user -u linura-shell-qualification.service -u linura-palette-qualification.service -u linura-quick-settings-qualification.service -u linurad.service -u pipewire.service -u wireplumber.service -u linura-hyprland-qualification.service --no-pager'             > "$ARTIFACT_DIR/user-journal.log" || true
           ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'sudo -n journalctl -u seatd.service --no-pager'             > "$ARTIFACT_DIR/seatd-journal.log" || true
 
           if [[ "$runtime_status" -ne 0 ]]; then
@@ -411,7 +457,19 @@ jobs:
           seat_drm_preflight = artifacts / "seat-drm-preflight.txt"
           seat_drm_setup = artifacts / "seat-drm-setup.log"
           ui_module_linkage = artifacts / "ui-module-linkage.txt"
+          bridge_module_linkage = artifacts / "bridge-module-linkage.txt"
           qt_quick_rendering = artifacts / "qt-quick-rendering.env"
+          runtime_install_integrity = artifacts / "runtime-install-integrity.txt"
+          authority_runtime_integrity = artifacts / "authority-runtime-integrity.txt"
+          pipewire_fixture_create = artifacts / "pipewire-fixture-create.txt"
+          pipewire_snapshot_initial = artifacts / "pipewire-snapshot-initial.txt"
+          quick_settings_audio_fixture = artifacts / "quick-settings-audio-fixture.txt"
+          quick_settings_observation = artifacts / "quick-settings-observation.txt"
+          quick_settings_effect = artifacts / "quick-settings-session1-effect.txt"
+          quick_settings_audit = artifacts / "quick-settings-audit.txt"
+          quick_settings_drift = artifacts / "quick-settings-precondition-drift.txt"
+          quick_settings_service_loss = artifacts / "quick-settings-service-loss.txt"
+          quick_settings_recovery = artifacts / "quick-settings-restart-recovery.txt"
           required_files = (
               cases_path,
               transcript_path,
@@ -425,7 +483,19 @@ jobs:
               seat_drm_preflight,
               seat_drm_setup,
               ui_module_linkage,
+              bridge_module_linkage,
               qt_quick_rendering,
+              runtime_install_integrity,
+              authority_runtime_integrity,
+              pipewire_fixture_create,
+              pipewire_snapshot_initial,
+              quick_settings_audio_fixture,
+              quick_settings_observation,
+              quick_settings_effect,
+              quick_settings_audit,
+              quick_settings_drift,
+              quick_settings_service_loss,
+              quick_settings_recovery,
           )
           for path in required_files:
               if not path.is_file() or path.is_symlink():
@@ -480,6 +550,11 @@ jobs:
               "mesa",
               "vulkan-swrast",
               "seatd",
+              "pipewire",
+              "pipewire-audio",
+              "wireplumber",
+              "networkmanager",
+              "sqlite",
           }
           if set(package_versions) != required_packages:
               raise SystemExit(
@@ -514,6 +589,11 @@ jobs:
               "rendering": {
                   "qt_quick_backend": rendering_backend,
                   "scope": "headless-development-runtime",
+              },
+              "authority_runtime": {
+                  "linurad_sha256": os.environ["LINURAD_SHA256"],
+                  "session_audio_helper_sha256": os.environ["SESSION_AUDIO_HELPER_SHA256"],
+                  "scope": "real-session-authority",
               },
               "cases": observed,
               "runtime_packages": package_versions,

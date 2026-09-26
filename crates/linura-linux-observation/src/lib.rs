@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::ffi::OsString;
 use std::fmt::{Debug, Formatter};
-use std::fs;
-use std::io::Read;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -22,6 +22,10 @@ use linura_observation::{
     ObservationAuthority, ObservationEnvelope, ObservedValue, ProviderAvailability, ProviderHealth,
 };
 use linura_provider_sdk::{Observer, ProviderError};
+use rustix::fs::{
+    MemfdFlags, Mode, OFlags, SealFlags, fcntl_add_seals, fcntl_get_seals, memfd_create,
+    open as open_file_descriptor,
+};
 use zbus::blocking::{Connection, Proxy};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 
@@ -53,6 +57,8 @@ pub const PIPEWIRE_OUTPUT_RESOURCE_PREFIX: &str = "audio:session:output:";
 pub const PIPEWIRE_DEFAULT_OUTPUT_RESOURCE: &str = "audio:session:default-output";
 pub const WIREPLUMBER_EXECUTABLE_PATH: &str = "/usr/bin/wpexec";
 pub const LINURA_SESSION_AUDIO_HELPER_PATH: &str = "/usr/lib/linura/linura-session-audio.lua";
+pub const TRUSTED_SESSION_AUDIO_HELPER: &[u8] =
+    include_bytes!("../../../packaging/wireplumber/linura-session-audio.lua");
 const WIREPLUMBER_HELPER_TIMEOUT: Duration = Duration::from_secs(2);
 const WIREPLUMBER_HELPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const WIREPLUMBER_HELPER_MAX_OUTPUT_BYTES: u64 = 64 * 1024;
@@ -497,6 +503,14 @@ impl Observer for PipeWireSessionObserver {
         provider_id(PIPEWIRE_SESSION_PROVIDER)
     }
 
+    fn supports_observation(&self, capability: &CapabilityId) -> bool {
+        capability.as_str() == PIPEWIRE_SESSION_CAPABILITY
+    }
+
+    fn requires_live_health_preflight(&self) -> bool {
+        false
+    }
+
     fn observation_capabilities(&self) -> Vec<Capability> {
         let health = self.health();
         vec![capability(
@@ -623,22 +637,147 @@ pub fn pipewire_output_node_id(resource: &ResourceId) -> Result<u32, ProviderErr
     Ok(node_id)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PackagedHelperOwnership {
+    RootVisible,
+    ObscuredByUserNamespace,
+}
+
+fn packaged_helper_ownership(
+    file_uid: u32,
+    directory_uid: u32,
+    uid_map: &str,
+) -> Option<PackagedHelperOwnership> {
+    let mut mapping_count = 0_usize;
+    let mut host_root_mapped = false;
+    for line in uid_map.lines() {
+        let mut fields = line.split_whitespace();
+        let (Some(inside), Some(outside), Some(count), None) =
+            (fields.next(), fields.next(), fields.next(), fields.next())
+        else {
+            return None;
+        };
+        let (Ok(inside), Ok(outside), Ok(count)) = (
+            inside.parse::<u64>(),
+            outside.parse::<u64>(),
+            count.parse::<u64>(),
+        ) else {
+            return None;
+        };
+        if count == 0 || inside.checked_add(count).is_none() || outside.checked_add(count).is_none()
+        {
+            return None;
+        }
+        if outside == 0 {
+            host_root_mapped = true;
+        }
+        mapping_count += 1;
+    }
+    if mapping_count == 0 {
+        return None;
+    }
+
+    match (file_uid, directory_uid, host_root_mapped) {
+        (0, 0, true) => Some(PackagedHelperOwnership::RootVisible),
+        // In an unprivileged per-user systemd filesystem namespace host UID 0
+        // may be unmapped and therefore reported as the overflow UID. This does
+        // NOT prove host-root ownership; callers may use it only as an
+        // "ownership obscured" state and must never execute this path directly.
+        (65534, 65534, false) => Some(PackagedHelperOwnership::ObscuredByUserNamespace),
+        _ => None,
+    }
+}
+
 pub fn verify_packaged_session_audio_helper() -> Result<(), ProviderError> {
-    let metadata = fs::symlink_metadata(LINURA_SESSION_AUDIO_HELPER_PATH).map_err(|_| {
+    let path_metadata = fs::symlink_metadata(LINURA_SESSION_AUDIO_HELPER_PATH).map_err(|_| {
         ProviderError::Unavailable(
             "Linura WirePlumber session-audio helper is not installed".into(),
         )
     })?;
-    if !metadata.file_type().is_file()
-        || metadata.uid() != 0
+    let invalid = || {
+        ProviderError::InvalidState(
+            "Linura WirePlumber session-audio helper integrity check failed".into(),
+        )
+    };
+    let fd = open_file_descriptor(
+        LINURA_SESSION_AUDIO_HELPER_PATH,
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    )
+    .map_err(|_| invalid())?;
+    let file = File::from(fd);
+    let metadata = file.metadata().map_err(|_| invalid())?;
+    let directory = fs::symlink_metadata("/usr/lib/linura").map_err(|_| invalid())?;
+    let uid_map = fs::read_to_string("/proc/self/uid_map").map_err(|_| invalid())?;
+    let ownership = packaged_helper_ownership(metadata.uid(), directory.uid(), &uid_map);
+
+    if !path_metadata.file_type().is_file()
+        || path_metadata.dev() != metadata.dev()
+        || path_metadata.ino() != metadata.ino()
+        || !metadata.is_file()
+        || !directory.is_dir()
+        || directory.mode() & 0o022 != 0
+        || ownership.is_none()
         || metadata.nlink() != 1
         || metadata.mode() & 0o022 != 0
+        || metadata.len() != TRUSTED_SESSION_AUDIO_HELPER.len() as u64
     {
-        return Err(ProviderError::InvalidState(
-            "Linura WirePlumber session-audio helper integrity check failed".into(),
-        ));
+        return Err(invalid());
+    }
+
+    let mut bytes = Vec::with_capacity(TRUSTED_SESSION_AUDIO_HELPER.len());
+    file.take(TRUSTED_SESSION_AUDIO_HELPER.len() as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| invalid())?;
+    if bytes.as_slice() != TRUSTED_SESSION_AUDIO_HELPER {
+        return Err(invalid());
     }
     Ok(())
+}
+
+fn sealed_session_audio_helper_bytes(bytes: &[u8]) -> Result<File, ProviderError> {
+    let fd = memfd_create(
+        "linura-session-audio",
+        MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING,
+    )
+    .map_err(|_| ProviderError::Internal("cannot create sealed WirePlumber helper image".into()))?;
+    let mut file = File::from(fd);
+    file.write_all(bytes).map_err(|_| {
+        ProviderError::Internal("cannot materialize trusted WirePlumber helper image".into())
+    })?;
+    file.flush().map_err(|_| {
+        ProviderError::Internal("cannot flush trusted WirePlumber helper image".into())
+    })?;
+
+    let required_seals = SealFlags::SEAL | SealFlags::SHRINK | SealFlags::GROW | SealFlags::WRITE;
+    fcntl_add_seals(&file, required_seals).map_err(|_| {
+        ProviderError::Internal("cannot seal trusted WirePlumber helper image".into())
+    })?;
+    let actual_seals = fcntl_get_seals(&file).map_err(|_| {
+        ProviderError::Internal("cannot verify trusted WirePlumber helper seals".into())
+    })?;
+    if !actual_seals.contains(required_seals) {
+        return Err(ProviderError::Internal(
+            "trusted WirePlumber helper image is not fully sealed".into(),
+        ));
+    }
+    file.seek(SeekFrom::Start(0)).map_err(|_| {
+        ProviderError::Internal("cannot rewind trusted WirePlumber helper image".into())
+    })?;
+    Ok(file)
+}
+
+fn sealed_session_audio_helper() -> Result<File, ProviderError> {
+    // Validate the installed artifact for packaging drift, but never execute its
+    // pathname. User-service filesystem namespaces can obscure host ownership,
+    // so authority is anchored to the exact helper bytes compiled into linurad.
+    verify_packaged_session_audio_helper()?;
+    sealed_session_audio_helper_bytes(TRUSTED_SESSION_AUDIO_HELPER)
+}
+
+#[cfg(test)]
+fn sealed_session_audio_helper_bytes_for_test() -> Result<File, ProviderError> {
+    sealed_session_audio_helper_bytes(TRUSTED_SESSION_AUDIO_HELPER)
 }
 
 fn wireplumber_runtime_dir() -> Result<OsString, ProviderError> {
@@ -786,15 +925,15 @@ fn parse_binary_flag(value: &str, label: &str) -> Result<bool, ProviderError> {
 }
 
 fn run_wireplumber_audio_helper(arguments: &str) -> Result<String, ProviderError> {
-    verify_packaged_session_audio_helper()?;
+    let trusted_helper = sealed_session_audio_helper()?;
     let runtime_dir = wireplumber_runtime_dir()?;
     let mut child = Command::new(WIREPLUMBER_EXECUTABLE_PATH)
-        .arg(LINURA_SESSION_AUDIO_HELPER_PATH)
+        .arg("/dev/fd/0")
         .arg(arguments)
         .env_clear()
         .env("XDG_RUNTIME_DIR", runtime_dir)
         .env("LC_ALL", "C")
-        .stdin(Stdio::null())
+        .stdin(Stdio::from(trusted_helper))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -1061,6 +1200,34 @@ mod tests {
             let resource = ResourceId::new(value).unwrap_or_else(|error| unreachable!("{error}"));
             assert!(pipewire_output_node_id(&resource).is_err(), "{value}");
         }
+    }
+
+    #[test]
+    fn packaged_audio_helper_never_equates_overflow_uid_with_root() {
+        assert_eq!(
+            packaged_helper_ownership(0, 0, "0 0 4294967295\n"),
+            Some(PackagedHelperOwnership::RootVisible)
+        );
+        assert_eq!(
+            packaged_helper_ownership(65534, 65534, "1000 1000 1\n"),
+            Some(PackagedHelperOwnership::ObscuredByUserNamespace)
+        );
+        assert_eq!(
+            packaged_helper_ownership(65534, 65534, "0 0 1\n1000 1000 1\n"),
+            None
+        );
+        assert_eq!(packaged_helper_ownership(1000, 1000, "1000 1000 1\n"), None);
+        assert_eq!(packaged_helper_ownership(65534, 65534, ""), None);
+    }
+
+    #[test]
+    fn trusted_audio_helper_memfd_is_immutable_after_sealing() {
+        let mut file = sealed_session_audio_helper_bytes_for_test()
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let seals = fcntl_get_seals(&file).unwrap_or_else(|error| unreachable!("{error}"));
+        let required = SealFlags::SEAL | SealFlags::SHRINK | SealFlags::GROW | SealFlags::WRITE;
+        assert!(seals.contains(required));
+        assert!(file.write_all(b"tamper").is_err());
     }
 
     #[test]

@@ -286,14 +286,24 @@ impl ObservationCoordinator {
                 provider: request.provider.clone(),
             }
         })?;
-        validate_observer_identity(observer.as_ref(), &request.provider)?;
-
-        let health = observer.health();
-        if health.availability == ProviderAvailability::Unavailable {
-            return Err(ObservationControlError::ProviderUnavailable {
-                provider: request.provider.clone(),
-                reason: health.reason,
-            });
+        // Registration already validates the observer/provider and capability/provider
+        // bindings. Providers keep the live health preflight by default; an observer
+        // may skip it only when its authoritative read independently gates readiness
+        // and returns ProviderError::Unavailable for loss of provider availability.
+        if observer.requires_live_health_preflight() {
+            let health = observer.health();
+            if health.provider != request.provider {
+                return Err(ObservationControlError::ProviderIdentityMismatch {
+                    expected: request.provider.clone(),
+                    actual: health.provider,
+                });
+            }
+            if health.availability == ProviderAvailability::Unavailable {
+                return Err(ObservationControlError::ProviderUnavailable {
+                    provider: request.provider.clone(),
+                    reason: health.reason,
+                });
+            }
         }
         if !observer.supports_observation(&request.capability) {
             return Err(ObservationControlError::UnsupportedCapability {
@@ -304,7 +314,15 @@ impl ObservationCoordinator {
 
         let observation = observer
             .observe_authoritative(&request.resource, &request.capability)
-            .map_err(ObservationControlError::Provider)?;
+            .map_err(|error| match error {
+                ProviderError::Unavailable(reason) => {
+                    ObservationControlError::ProviderUnavailable {
+                        provider: request.provider.clone(),
+                        reason: Some(reason),
+                    }
+                }
+                error => ObservationControlError::Provider(error),
+            })?;
         observation
             .validate(&request.provider, &request.resource, &request.capability)
             .map_err(ObservationControlError::InvalidObservation)?;
@@ -562,7 +580,8 @@ fn validate_observer_identity(
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, VecDeque};
-    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use linura_core::{Capability, SupportLevel, ValidationError};
@@ -633,6 +652,122 @@ mod tests {
         }
     }
 
+    struct CountingObserver {
+        inner: QueueObserver,
+        health_calls: Arc<AtomicUsize>,
+    }
+
+    impl Observer for CountingObserver {
+        fn observer_id(&self) -> ProviderId {
+            self.inner.observer_id()
+        }
+
+        fn observation_capabilities(&self) -> Vec<Capability> {
+            self.inner.observation_capabilities()
+        }
+
+        fn health(&self) -> ProviderHealth {
+            self.health_calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.health()
+        }
+
+        fn resources(&self) -> Result<Vec<ResourceId>, ProviderError> {
+            self.inner.resources()
+        }
+
+        fn requires_live_health_preflight(&self) -> bool {
+            false
+        }
+
+        fn supports_observation(&self, capability: &CapabilityId) -> bool {
+            capability == &self.inner.capability.id
+        }
+
+        fn observe_authoritative(
+            &self,
+            resource: &ResourceId,
+            capability: &CapabilityId,
+        ) -> Result<ObservationEnvelope, ProviderError> {
+            self.inner.observe_authoritative(resource, capability)
+        }
+    }
+
+    struct DefaultPreflightCountingObserver {
+        inner: QueueObserver,
+        health_calls: Arc<AtomicUsize>,
+    }
+
+    impl Observer for DefaultPreflightCountingObserver {
+        fn observer_id(&self) -> ProviderId {
+            self.inner.observer_id()
+        }
+
+        fn observation_capabilities(&self) -> Vec<Capability> {
+            self.inner.observation_capabilities()
+        }
+
+        fn health(&self) -> ProviderHealth {
+            self.health_calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.health()
+        }
+
+        fn resources(&self) -> Result<Vec<ResourceId>, ProviderError> {
+            self.inner.resources()
+        }
+
+        fn supports_observation(&self, capability: &CapabilityId) -> bool {
+            capability == &self.inner.capability.id
+        }
+
+        fn observe_authoritative(
+            &self,
+            resource: &ResourceId,
+            capability: &CapabilityId,
+        ) -> Result<ObservationEnvelope, ProviderError> {
+            self.inner.observe_authoritative(resource, capability)
+        }
+    }
+
+    struct ChangingHealthIdentityObserver {
+        inner: QueueObserver,
+        health_calls: Arc<AtomicUsize>,
+    }
+
+    impl Observer for ChangingHealthIdentityObserver {
+        fn observer_id(&self) -> ProviderId {
+            self.inner.observer_id()
+        }
+
+        fn observation_capabilities(&self) -> Vec<Capability> {
+            self.inner.observation_capabilities()
+        }
+
+        fn health(&self) -> ProviderHealth {
+            let call = self.health_calls.fetch_add(1, Ordering::SeqCst);
+            let mut health = self.inner.health();
+            if call > 0 {
+                health.provider = id(ProviderId::new("networkmanager"));
+            }
+            health
+        }
+
+        fn resources(&self) -> Result<Vec<ResourceId>, ProviderError> {
+            self.inner.resources()
+        }
+
+        fn supports_observation(&self, capability: &CapabilityId) -> bool {
+            capability == &self.inner.capability.id
+        }
+
+        fn observe_authoritative(
+            &self,
+            resource: &ResourceId,
+            capability: &CapabilityId,
+        ) -> Result<ObservationEnvelope, ProviderError> {
+            self.inner.observe_authoritative(resource, capability)
+        }
+    }
+
     fn envelope(observed_at_unix_ms: u64, sequence: u64, state: &str) -> ObservationEnvelope {
         envelope_for(
             "systemd:unit:sshd.service",
@@ -689,6 +824,74 @@ mod tests {
             .unwrap_or_else(|error| unreachable!("{error}"));
         assert_eq!(explanation.provider.as_str(), "systemd");
         assert_eq!(coordinator.graph().nodes().count(), 4);
+    }
+
+    #[test]
+    fn authoritative_observe_does_not_repeat_live_health_probe_after_registration() {
+        let health_calls = Arc::new(AtomicUsize::new(0));
+        let observer = CountingObserver {
+            inner: QueueObserver::new(vec![envelope(1_000, 1, "active")]),
+            health_calls: Arc::clone(&health_calls),
+        };
+        let mut coordinator = ObservationCoordinator::new();
+        assert_eq!(coordinator.register_observer(Box::new(observer)), Ok(()));
+        assert_eq!(health_calls.load(Ordering::SeqCst), 1);
+        assert!(coordinator.observe_at(&request(), 1_100).is_ok());
+        assert_eq!(health_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn default_observer_retains_live_health_preflight() {
+        let health_calls = Arc::new(AtomicUsize::new(0));
+        let observer = DefaultPreflightCountingObserver {
+            inner: QueueObserver::new(vec![envelope(1_000, 1, "active")]),
+            health_calls: Arc::clone(&health_calls),
+        };
+        let mut coordinator = ObservationCoordinator::new();
+        assert_eq!(coordinator.register_observer(Box::new(observer)), Ok(()));
+        assert_eq!(health_calls.load(Ordering::SeqCst), 1);
+        assert!(coordinator.observe_at(&request(), 1_100).is_ok());
+        assert_eq!(health_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn live_health_preflight_rejects_provider_identity_drift() {
+        let health_calls = Arc::new(AtomicUsize::new(0));
+        let observer = ChangingHealthIdentityObserver {
+            inner: QueueObserver::new(vec![envelope(1_000, 1, "active")]),
+            health_calls: Arc::clone(&health_calls),
+        };
+        let mut coordinator = ObservationCoordinator::new();
+        assert_eq!(coordinator.register_observer(Box::new(observer)), Ok(()));
+        assert_eq!(health_calls.load(Ordering::SeqCst), 1);
+
+        let result = coordinator.observe_at(&request(), 1_100);
+        assert!(matches!(
+            result,
+            Err(ObservationControlError::ProviderIdentityMismatch {
+                expected,
+                actual,
+            }) if expected.as_str() == "systemd" && actual.as_str() == "networkmanager"
+        ));
+        assert_eq!(health_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn authoritative_unavailable_result_preserves_provider_unavailable_classification() {
+        let observer = CountingObserver {
+            inner: QueueObserver::new(vec![]),
+            health_calls: Arc::new(AtomicUsize::new(0)),
+        };
+        let mut coordinator = ObservationCoordinator::new();
+        assert_eq!(coordinator.register_observer(Box::new(observer)), Ok(()));
+        let result = coordinator.observe_at(&request(), 1_100);
+        assert!(matches!(
+            result,
+            Err(ObservationControlError::ProviderUnavailable {
+                reason: Some(reason),
+                ..
+            }) if reason == "no queued observation"
+        ));
     }
 
     #[test]

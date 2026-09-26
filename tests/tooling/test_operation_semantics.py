@@ -847,6 +847,67 @@ class OperationSemanticsContractTests(unittest.TestCase):
                 )
             )
 
+    def test_wireplumber_helper_must_parse_wpexec_spa_json_without_evaluation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            helper = root / "packaging/wireplumber/linura-session-audio.lua"
+            text = helper.read_text(encoding="utf-8")
+            marker = "raw_args:parse(2)"
+            self.assertIn(marker, text)
+            helper.write_text(
+                text.replace(marker, "raw_args", 1),
+                encoding="utf-8",
+            )
+            failures = check_operation_semantics.validate(root)
+            self.assertTrue(
+                any(
+                    "WirePlumber session-audio helper missing identity-bound fragment: raw_args:parse(2)"
+                    in failure
+                    for failure in failures
+                ),
+                failures,
+            )
+
+    def test_wireplumber_helper_cannot_add_dynamic_lua_evaluation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            helper = root / "packaging/wireplumber/linura-session-audio.lua"
+            helper.write_text(
+                helper.read_text(encoding="utf-8") + "\nlocal unsafe = load(\"return {}\")\n",
+                encoding="utf-8",
+            )
+            failures = check_operation_semantics.validate(root)
+            self.assertTrue(
+                any(
+                    "forbidden execution surface: load(" in failure
+                    for failure in failures
+                ),
+                failures,
+            )
+
+    def test_wireplumber_helper_must_bind_identity_from_global_properties(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            helper = root / "packaging/wireplumber/linura-session-audio.lua"
+            text = helper.read_text(encoding="utf-8")
+            marker = 'local properties = node["global-properties"]'
+            self.assertIn(marker, text)
+            helper.write_text(
+                text.replace(marker, "local properties = node.properties", 1),
+                encoding="utf-8",
+            )
+            failures = check_operation_semantics.validate(root)
+            self.assertTrue(
+                any(
+                    "must bind identity from immutable PipeWire global properties" in failure
+                    for failure in failures
+                ),
+                failures,
+            )
+
     def test_wireplumber_helper_cannot_move_mutation_before_identity_match(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1025,6 +1086,46 @@ class OperationSemanticsContractTests(unittest.TestCase):
                 )
             )
 
+
+
+    def test_pipewire_mutation_helper_cannot_reopen_installed_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            runtime = root / "apps/linurad/src/session_audio.rs"
+            text = runtime.read_text(encoding="utf-8")
+            marker = '.arg("/dev/fd/0")'
+            self.assertIn(marker, text)
+            runtime.write_text(
+                text.replace(marker, ".arg(LINURA_SESSION_AUDIO_HELPER_PATH)", 1),
+                encoding="utf-8",
+            )
+            failures = check_operation_semantics.validate(root)
+            self.assertTrue(
+                any("PipeWire session-volume runtime" in failure for failure in failures)
+            )
+
+
+    def test_packaged_audio_helper_open_must_be_nonblocking_and_nofollow(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            observer = root / "crates/linura-linux-observation/src/lib.rs"
+            text = observer.read_text(encoding="utf-8")
+            marker = "OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK"
+            self.assertIn(marker, text)
+            observer.write_text(
+                text.replace(marker, "OFlags::RDONLY | OFlags::CLOEXEC", 1),
+                encoding="utf-8",
+            )
+            failures = check_operation_semantics.validate(root)
+            self.assertTrue(
+                any(
+                    "PipeWire observer missing trusted WirePlumber helper fragment" in failure
+                    and "OFlags::RDONLY" in failure
+                    for failure in failures
+                )
+            )
 
 
 if __name__ == "__main__":

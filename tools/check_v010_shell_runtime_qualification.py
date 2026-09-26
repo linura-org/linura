@@ -13,6 +13,23 @@ CONTRACT = "contracts/v010-shell-runtime-qualification.toml"
 WORKFLOW = ".github/workflows/v010-shell-runtime-qualification.yml"
 PARENT_WORKFLOW = ".github/workflows/v010-qualification.yml"
 
+EXPECTED_COMPONENTS = [
+    "systemd-user",
+    "wayland",
+    "seatd-libseat",
+    "drm",
+    "hyprland",
+    "quickshell",
+    "qt6",
+    "xdg-desktop-entries",
+    "pipewire",
+    "wireplumber",
+    "linurad",
+    "session1",
+    "sqlite-transient-audit",
+    "quick-settings",
+]
+
 EXPECTED_CASES = [
     "seat-drm-readiness",
     "headless-hyprland-runtime",
@@ -25,11 +42,22 @@ EXPECTED_CASES = [
     "shell-service-restart-survival",
     "forking-application-cgroup-lifetime",
     "palette-session-generation-isolation",
+    "quick-settings-authoritative-observation",
+    "quick-settings-session1-volume-effect",
+    "quick-settings-durable-audit-lineage",
+    "quick-settings-precondition-drift-rejection",
+    "quick-settings-service-loss-fail-closed",
+    "quick-settings-restart-recovery",
 ]
 
 RUNTIME_FILES = (
     "apps/linura-shell/qualification-controller.qml",
     "apps/linura-shell/qualification-palette.qml",
+    "apps/linura-shell/qualification-quick-settings.qml",
+    "apps/linura-shell/bridge/CMakeLists.txt",
+    "apps/linura-shell/bridge/audio_session_controller.h",
+    "apps/linura-shell/bridge/audio_session_controller.cpp",
+    "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml",
     "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml",
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
     "apps/linura-shell/ui/CMakeLists.txt",
@@ -40,6 +68,10 @@ RUNTIME_FILES = (
     "qualification/v010/shell-runtime/fixtures/forking-app",
     "qualification/v010/shell-runtime/fixtures/linura-shell-qualification.service",
     "qualification/v010/shell-runtime/fixtures/linura-palette-qualification.service",
+    "qualification/v010/shell-runtime/fixtures/linura-quick-settings-qualification.service",
+    "packaging/systemd/user/linurad.service",
+    "packaging/wireplumber/linura-session-audio.lua",
+    "packaging/arch/archiso/packages.linura",
     "qualification/v010/shell-runtime/fixtures/org.linura.QualificationVisible.desktop",
     "qualification/v010/shell-runtime/fixtures/org.linura.QualificationHidden.desktop",
     "qualification/v010/shell-runtime/fixtures/org.linura.QualificationTerminal.desktop",
@@ -67,6 +99,78 @@ def _load_toml(path: Path, label: str, failures: list[str]) -> dict:
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
         failures.append(f"{label} is invalid: {error}")
         return {}
+
+
+def _runtime_dependency_tables(document: dict) -> list[dict]:
+    tables: list[dict] = []
+    for key in ("dependencies", "build-dependencies"):
+        table = document.get(key)
+        if isinstance(table, dict):
+            tables.append(table)
+    targets = document.get("target")
+    if isinstance(targets, dict):
+        for target in targets.values():
+            if not isinstance(target, dict):
+                continue
+            for key in ("dependencies", "build-dependencies"):
+                table = target.get(key)
+                if isinstance(table, dict):
+                    tables.append(table)
+    return tables
+
+
+def _local_runtime_dependency_paths(
+    root: Path,
+    start_manifest: str,
+    failures: list[str],
+) -> list[str]:
+    root_resolved = root.resolve()
+    start = root / start_manifest
+    if not start.is_file() or start.is_symlink():
+        failures.append(f"linurad runtime manifest missing or untrusted: {start_manifest}")
+        return []
+
+    pending = [start]
+    seen: set[Path] = set()
+    dependency_paths: set[str] = set()
+    while pending:
+        manifest = pending.pop()
+        resolved_manifest = manifest.resolve()
+        if resolved_manifest in seen:
+            continue
+        seen.add(resolved_manifest)
+        document = _load_toml(
+            manifest,
+            f"runtime Cargo manifest {manifest.relative_to(root)}",
+            failures,
+        )
+        if not document:
+            continue
+        for table in _runtime_dependency_tables(document):
+            for specification in table.values():
+                if not isinstance(specification, dict):
+                    continue
+                relative_path = specification.get("path")
+                if not isinstance(relative_path, str):
+                    continue
+                raw_manifest = manifest.parent / relative_path / "Cargo.toml"
+                if not raw_manifest.is_file() or raw_manifest.is_symlink():
+                    failures.append(
+                        f"local runtime dependency manifest missing or untrusted: {raw_manifest}"
+                    )
+                    continue
+                resolved_dependency = raw_manifest.resolve()
+                try:
+                    relative_manifest = resolved_dependency.relative_to(root_resolved)
+                except ValueError:
+                    failures.append(
+                        f"local runtime dependency escapes repository root: {relative_path}"
+                    )
+                    continue
+                dependency_paths.add(relative_manifest.parent.as_posix())
+                if resolved_dependency not in seen:
+                    pending.append(raw_manifest)
+    return sorted(dependency_paths)
 
 
 def validate(root: Path) -> list[str]:
@@ -105,6 +209,8 @@ def validate(root: Path) -> list[str]:
         if contract.get(key) != expected:
             failures.append(f"shell runtime contract {key} must remain {expected!r}")
 
+    if contract.get("required_components") != EXPECTED_COMPONENTS:
+        failures.append("shell runtime required_components drifted from the real authority/runtime matrix")
     if contract.get("required_cases") != EXPECTED_CASES:
         failures.append("shell runtime required_cases drifted from the executable qualification matrix")
 
@@ -145,6 +251,10 @@ def validate(root: Path) -> list[str]:
             "seat_drm_preflight_required",
             "ui_module_linkage_required",
             "qt_quick_backend_required",
+            "authority_runtime_integrity_required",
+            "audio_fixture_evidence_required",
+            "transient_audit_evidence_required",
+            "quick_settings_authority_path_required",
         ):
             if evidence.get(key) is not True:
                 failures.append(f"shell runtime evidence.{key} must remain true")
@@ -170,6 +280,11 @@ def validate(root: Path) -> list[str]:
         'runs-on: ubuntu-24.04',
         'timeout-minutes: 90',
         'python3 tools/check_v010_shell_runtime_qualification.py',
+        "source tools/codex/versions.env",
+        'rustup toolchain install "$RUST_VERSION" --profile minimal',
+        "cargo build --locked --release -p linurad",
+        'LINURAD_SHA256=%s',
+        'SESSION_AUDIO_HELPER_SHA256=%s',
         "bash qualification/v010/shell-runtime/start-vm.sh",
         "cloud-localds",
         "QUALIFICATION_NIC_MAC: 52:54:00:12:34:56",
@@ -193,7 +308,12 @@ def validate(root: Path) -> list[str]:
         "timeout --signal=TERM --kill-after=10s 720",
         "for attempt in 1 2 3",
         "pinned Arch runtime installation failed after 3 bounded attempts",
+        "pipewire pipewire-audio wireplumber networkmanager sqlite",
         "git archive --format=tar.gz",
+        'linura@127.0.0.1:/tmp/linurad-qualification',
+        "installed linurad digest does not match exact-source build",
+        "installed session-audio helper digest does not match exact source",
+        "runtime-install-integrity.txt",
         "provision-shell-runtime.sh",
         "run-shell-runtime.sh",
         "sudo -n modprobe virtio_gpu",
@@ -215,11 +335,25 @@ def validate(root: Path) -> list[str]:
         'pipeline_status=("${PIPESTATUS[@]}")',
         '"$ARTIFACT_DIR/seatd-journal.log"',
         "ui-module-linkage.txt",
+        "bridge-module-linkage.txt",
         "qt-quick-rendering.env",
+        "authority-runtime-integrity.txt",
+        "pipewire-fixture-create.txt",
+        "pipewire-snapshot-initial.txt",
+        "quick-settings-audio-fixture.txt",
+        "quick-settings-observation.txt",
+        "quick-settings-session1-effect.txt",
+        "quick-settings-audit.txt",
+        "quick-settings-precondition-drift.txt",
+        "quick-settings-service-loss.txt",
+        "quick-settings-restart-recovery.txt",
         '"qt_quick_backend": rendering_backend',
         'contract["qt_quick_backend"]',
         "package-versions.txt",
         '"runtime_packages": package_versions',
+        '"linurad_sha256": os.environ["LINURAD_SHA256"]',
+        '"session_audio_helper_sha256": os.environ["SESSION_AUDIO_HELPER_SHA256"]',
+        '"scope": "real-session-authority"',
         '"disk_size_gib": contract["vm_disk_size_gib"]',
         "V010-SHELL-RUNTIME-EVIDENCE.json",
         "V010-SHELL-RUNTIME-EVIDENCE.sha256",
@@ -228,6 +362,14 @@ def validate(root: Path) -> list[str]:
     for fragment in required_workflow_fragments:
         if fragment not in workflow:
             failures.append(f"shell runtime workflow missing: {fragment}")
+    package_set_marker = "required_packages = {"
+    if package_set_marker not in workflow:
+        failures.append("shell runtime workflow missing exact runtime package evidence set")
+    else:
+        package_set = workflow.split(package_set_marker, 1)[1].split("}", 1)[0]
+        if '"pipewire-audio"' not in package_set:
+            failures.append("shell runtime evidence package set must include pipewire-audio")
+
     if isinstance(base_url, str) and f"BASE_IMAGE_URL: {base_url}" not in workflow:
         failures.append("shell runtime workflow base image does not match its contract")
     if isinstance(checksum_url, str) and f"BASE_IMAGE_CHECKSUM_URL: {checksum_url}" not in workflow:
@@ -243,6 +385,21 @@ def validate(root: Path) -> list[str]:
         '".github/workflows/v010-shell-runtime-qualification.yml"',
         '"contracts/v010-shell-runtime-qualification.toml"',
         '"apps/linura-shell/**"',
+        '"apps/linurad/**"',
+        '"packaging/systemd/user/linurad.service"',
+        '"packaging/wireplumber/linura-session-audio.lua"',
+        '"crates/linura-core/**"',
+        '"crates/linura-dbus/**"',
+        '"crates/linura-observation/**"',
+        '"crates/linura-observation-control/**"',
+        '"crates/linura-linux-observation/**"',
+        '"crates/linura-protocol/**"',
+        '"crates/linura-planner/**"',
+        '"crates/linura-policy/**"',
+        '"crates/linura-provider-sdk/**"',
+        '"crates/linura-control/**"',
+        '"Cargo.toml"',
+        '"Cargo.lock"',
         '"qualification/v010/shell-runtime/**"',
         "shell-runtime:",
         "uses: ./.github/workflows/v010-shell-runtime-qualification.yml",
@@ -252,6 +409,29 @@ def validate(root: Path) -> list[str]:
     for fragment in parent_fragments:
         if fragment not in parent:
             failures.append(f"v0.10 parent qualification workflow missing shell runtime gate: {fragment}")
+
+    for dependency_path in _local_runtime_dependency_paths(
+        root,
+        "apps/linurad/Cargo.toml",
+        failures,
+    ):
+        trigger = f'"{dependency_path}/**"'
+        if trigger not in parent:
+            failures.append(
+                f"v0.10 parent qualification workflow missing linurad local dependency trigger: {trigger}"
+            )
+
+    production_packages_path = root / "packaging/arch/archiso/packages.linura"
+    if production_packages_path.is_file() and not production_packages_path.is_symlink():
+        production_packages = {
+            line.strip()
+            for line in production_packages_path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        if "pipewire-audio" not in production_packages:
+            failures.append(
+                "production Arch package contract must include pipewire-audio exercised by Quick Settings qualification"
+            )
 
     production_service = (root / "packaging/systemd/user/linura-shell.service").read_text(encoding="utf-8")
     production_service_lines = set(production_service.splitlines())
@@ -267,6 +447,8 @@ def validate(root: Path) -> list[str]:
             "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-controller.qml",
         "linura-palette-qualification.service":
             "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-palette.qml",
+        "linura-quick-settings-qualification.service":
+            "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-quick-settings.qml",
     }
     for service_name, expected_exec_start in qualification_services.items():
         service = (
@@ -316,6 +498,29 @@ def validate(root: Path) -> list[str]:
     if "qs.plugins.command-palette" in palette:
         failures.append("palette runtime fixture must not use an invalid hyphenated qs module path")
 
+    quick_settings = (root / "apps/linura-shell/qualification-quick-settings.qml").read_text(
+        encoding="utf-8"
+    )
+    for fragment in (
+        "//@ pragma ShellId linura-qualification-quick-settings",
+        "import org.linura.ShellBridge 1.0",
+        'import "plugins/quick-settings" as QuickSettings',
+        "AudioSessionController {",
+        "QuickSettings.QuickSettingsPanel {",
+        'target: "linura.quick-settings-qualification"',
+        "audioController.beginVolumeDraft()",
+        "audioController.setVolume(volumePercent)",
+    ):
+        if fragment not in quick_settings:
+            failures.append(
+                f"Quick Settings runtime fixture missing real production binding: {fragment}"
+            )
+    for forbidden in ("MockAudio", "FakeAudio", "wpctl", "wpexec", "SetAudioOutputVolume"):
+        if forbidden in quick_settings:
+            failures.append(
+                f"Quick Settings runtime fixture must not bypass the production bridge: {forbidden}"
+            )
+
     run_script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
     provision_script = root / "qualification/v010/shell-runtime/provision-shell-runtime.sh"
     vm_launcher = root / "qualification/v010/shell-runtime/start-vm.sh"
@@ -329,10 +534,21 @@ def validate(root: Path) -> list[str]:
             'ui_linkage="$(ldd "$ui_plugin")"',
             "Linura UI QML plugin has unresolved installed dependencies",
             "Linura UI QML plugin did not resolve its backing library from the module directory",
+            'bridge_module_dir=/usr/local/lib/qt6/qml/org/linura/ShellBridge',
+            'bridge_plugin="$bridge_module_dir/liblinura-shell-bridgeplugin.so"',
+            'bridge_backing="$bridge_module_dir/liblinura-shell-bridge.so"',
+            'bridge_linkage="$(ldd "$bridge_plugin")"',
+            "Linura ShellBridge QML plugin has unresolved installed dependencies",
+            "Linura ShellBridge QML plugin did not resolve its backing library from the module directory",
+            "cmake --build",
+            "cmake --install",
+            "install -o root -g root -m 0755 \"$linurad_binary\" /usr/bin/linurad",
+            "install -o root -g root -m 0644",
+            "/usr/lib/linura/linura-session-audio.lua",
         ):
             if fragment not in provision_text:
                 failures.append(
-                    f"shell runtime provisioning missing UI module dependency-closure proof: {fragment}"
+                    f"shell runtime provisioning missing QML module dependency-closure proof: {fragment}"
                 )
 
     for script in (run_script, provision_script, vm_launcher):
@@ -347,9 +563,59 @@ def validate(root: Path) -> list[str]:
 
     if run_script.is_file():
         run_text = run_script.read_text(encoding="utf-8")
+        if "pw-cli create-node adapter" in run_text:
+            failures.append(
+                "runtime PipeWire fixture must be daemon-owned declarative context.objects, not pw-cli create-node"
+            )
+        fixture_index = run_text.find("context.objects = [")
+        pipewire_start_index = run_text.find("systemctl --user start pipewire.service")
+        if fixture_index < 0 or pipewire_start_index < 0 or fixture_index > pipewire_start_index:
+            failures.append(
+                "runtime PipeWire fixture config must be installed before PipeWire starts"
+            )
         for case_id in EXPECTED_CASES:
             if f'pass_case "{case_id}"' not in run_text:
                 failures.append(f"runtime protocol does not positively record required case: {case_id}")
+        if run_text.count("SELECT count(*) FROM transient_effect_audit") != 4:
+            failures.append(
+                "runtime protocol must retain all four durable-audit count checkpoints "
+                "(before/after verified effect and before/after precondition-drift rejection)"
+            )
+        if run_text.count("quick-settings-session1-failure.txt") != 2:
+            failures.append(
+                "runtime protocol must retain both write/read references for Session1 failure diagnostics"
+            )
+        draft_wait = "quick_settings_bind_draft() {"
+        draft_attempt = 'checked_quick_settings_call linura.quick-settings-qualification beginDraft 2>/dev/null'
+        draft_accept = "if quick_settings_bind_draft; then"
+        authority_probe = '[[ "$(checked_quick_settings_call linura.quick-settings-qualification authority)" == "native-api" ]]'
+        audit_baseline = 'audit_count_before="$(sqlite3 "$audio_audit" \'SELECT count(*) FROM transient_effect_audit;\' 2>/dev/null || printf \'0\')"'
+        draft_wait_index = run_text.find(draft_wait)
+        draft_attempt_index = run_text.find(draft_attempt)
+        draft_accept_index = run_text.find(draft_accept)
+        authority_index = run_text.find(authority_probe)
+        audit_index = run_text.find(audit_baseline)
+        open_index = run_text.find("checked_quick_settings_call linura.quick-settings-qualification openSettings")
+        if (
+            draft_wait_index < 0
+            or draft_attempt_index < 0
+            or draft_accept_index < 0
+            or authority_index < 0
+            or draft_wait_index > draft_attempt_index
+            or draft_attempt_index > draft_accept_index
+            or draft_accept_index > authority_index
+        ):
+            failures.append(
+                "runtime protocol must atomically acquire the Quick Settings draft before post-bind evidence reads"
+            )
+        if "quick_settings_ready()" in run_text:
+            failures.append(
+                "runtime protocol must not split Quick Settings readiness and draft binding across separate IPC calls"
+            )
+        if audit_index < 0 or open_index < 0 or audit_index > open_index:
+            failures.append(
+                "runtime protocol must capture the transient-audit baseline before opening Quick Settings"
+            )
         for fragment in (
             "systemctl --user restart linura-shell-qualification.service",
             'command -v systemctl >/dev/null || fail "systemctl is missing"',
@@ -357,6 +623,7 @@ def validate(root: Path) -> list[str]:
             'shell_root="$source_root/apps/linura-shell"',
             'controller_config="$shell_root/qualification-controller.qml"',
             'palette_config="$shell_root/qualification-palette.qml"',
+            'quick_settings_config="$shell_root/qualification-quick-settings.qml"',
             "wait_for_ipc_target()",
             'fail "$service_name exited before publishing $target"',
             "ExitType --value",
@@ -377,6 +644,11 @@ def validate(root: Path) -> list[str]:
             'ldd "$ui_plugin" > "$ui_linkage_file"',
             "Linura UI QML plugin has unresolved installed dependencies",
             "Linura UI QML plugin did not resolve its backing library from the module directory",
+            'bridge_module_dir=/usr/local/lib/qt6/qml/org/linura/ShellBridge',
+            'bridge_linkage_file="$evidence_root/bridge-module-linkage.txt"',
+            'ldd "$bridge_plugin" > "$bridge_linkage_file"',
+            "Linura ShellBridge QML plugin has unresolved installed dependencies",
+            "Linura ShellBridge QML plugin did not resolve its backing library from the module directory",
             "seat_group=\"$(stat -c '%G' \"$seat_socket\")\"",
             'qualification_gpu_pci_bdf="0000:00:02.0"',
             'qualification_gpu_vendor_id="0x1af4"',
@@ -395,8 +667,64 @@ def validate(root: Path) -> list[str]:
             'fail "$service_name did not retain the qualification-only Qt Quick software backend"',
             "checked_palette_call()",
             'fail "palette IPC call failed with status $status: $*"',
+            "checked_quick_settings_call()",
+            'fail "Quick Settings IPC call failed with status $status: $*"',
+            'quick_settings_bind_draft() {',
+            'checked_quick_settings_call linura.quick-settings-qualification beginDraft 2>/dev/null',
+            'if quick_settings_bind_draft; then',
+            'checked_quick_settings_call linura.quick-settings-qualification canCommitDraft',
+            'pipewire_fixture_config="$pipewire_fixture_dir/90-linura-qualification-sink.conf"',
+            "context.objects = [",
+            "factory = adapter",
+            "factory.name = support.null-audio-sink",
+            "node.name = linura-qualification-sink",
+            'node.description = "Linura Qualification Sink"',
+            "media.class = Audio/Sink",
+            "object.linger = true",
+            "audio.position = [ FL FR ]",
+            "monitor.channel-volumes = true",
+            'chmod 0600 "$pipewire_fixture_config"',
+            'cp "$pipewire_fixture_config" "$evidence_root/pipewire-fixture-create.txt"',
+            'systemctl --user start pipewire.service',
+            'systemctl --user start wireplumber.service',
+            '} > "$evidence_root/pipewire-fixture-diagnostics.txt" 2>&1',
+            'cat "$evidence_root/pipewire-fixture-diagnostics.txt" >&2',
+            "pw-cli ls Node",
+            'pipewire-fixture-create.txt',
+            'pipewire-snapshot-initial.txt',
+            'quick-settings-audio-fixture.txt',
+            'wpctl set-default "$qualification_sink_id"',
+            '/usr/bin/wpexec "$audio_helper"',
+            'systemctl --user start linurad.service',
+            'busctl --user status org.linura.Control1',
+            'operation:audio.output.set-session-volume',
+            'audio:session:output:$qualification_sink_id',
+            'SELECT count(*) FROM transient_effect_audit',
+            '[[ "$audit_mode" == "600" ]]',
+            '[[ "$audit_links" == "1" ]]',
+            "PRAGMA application_id;",
+            "PRAGMA user_version;",
+            '[[ "$audit_application_id" == "1280201810" ]]',
+            '[[ "$audit_user_version" == "1" ]]',
+            '[[ "${audit_journal_mode,,}" == "wal" ]]',
+            '[[ "$audit_synchronous" == "2" ]]',
+            '[[ "$audit_quick_check" == "ok" ]]',
+            "sqlite_schema",
+            '[[ "$audit_table_sql" == *"STRICT"* ]]',
+            'audit_wal="${audio_audit}-wal"',
+            '(( audit_wal_size <= 16777216 ))',
+            '$audit_disposition" == "verified"',
+            'quick_settings_effect_deadline=$((SECONDS + 30))',
+            'quick-settings-session1-failure.txt',
+            "'-- transient audit --'",
+            'SELECT rowid,request_id,resource,disposition,failure_code,pre_effect_evidence_id,post_effect_evidence_id FROM transient_effect_audit ORDER BY rowid DESC LIMIT 3;',
+            'pass_case "quick-settings-precondition-drift-rejection"',
+            'pass_case "quick-settings-service-loss-fail-closed"',
+            'quick_settings_recovered() {',
+            'wait_until "Quick Settings recovery after linurad restart" quick_settings_recovered',
+            'pass_case "quick-settings-restart-recovery"',
             "seat-drm-preflight.txt",
-            'pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd',
+            'pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite',
             'package-versions.txt',
         ):
             if fragment not in run_text:

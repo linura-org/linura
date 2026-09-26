@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Wayland
-import org.linura.ShellBridge 1.0
 import org.linura.UI 1.0
 
 PanelWindow {
@@ -14,10 +13,11 @@ PanelWindow {
     property bool draftDirty: false
 
     signal closeRequested()
+    signal controlCenterRequested()
 
     visible: opened
-    implicitWidth: 420
-    implicitHeight: 520
+    implicitWidth: 360
+    implicitHeight: quickColumn.implicitHeight + theme.spacingXl * 2
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
 
@@ -31,7 +31,7 @@ PanelWindow {
         right: theme.spacingLg
     }
 
-    WlrLayershell.namespace: "linura-control-center"
+    WlrLayershell.namespace: "linura-quick-settings"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: opened
         ? WlrKeyboardFocus.OnDemand
@@ -41,27 +41,30 @@ PanelWindow {
         id: theme
     }
 
-    function stateColor(state) {
+    function stateTone(state) {
         if (state === "ready")
-            return theme.success
+            return "success"
         if (state === "loading" || state === "applying")
-            return theme.accent
+            return "accent"
         if (state === "stale" || state === "unavailable")
-            return theme.warning
-        return theme.danger
+            return "warning"
+        return "danger"
+    }
+
+    function resetDraft() {
+        draftDirty = false
+        controller.cancelVolumeDraft()
+        draftVolume = Math.min(100, controller.volumePercent)
     }
 
     function closePanel() {
-        root.draftDirty = false
-        root.controller.cancelVolumeDraft()
-        root.closeRequested()
+        resetDraft()
+        closeRequested()
     }
 
     onOpenedChanged: {
         if (opened) {
-            draftDirty = false
-            controller.cancelVolumeDraft()
-            draftVolume = Math.min(100, controller.volumePercent)
+            resetDraft()
             Qt.callLater(function() {
                 if (root.opened)
                     closeButton.forceActiveFocus(Qt.TabFocusReason)
@@ -98,7 +101,10 @@ PanelWindow {
         cornerRadius: theme.radiusXl
 
         ColumnLayout {
-            anchors.fill: parent
+            id: quickColumn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
             anchors.margins: theme.spacingXl
             spacing: theme.spacingLg
 
@@ -110,7 +116,7 @@ PanelWindow {
                     spacing: theme.spacingXs
 
                     LinuraText {
-                        text: qsTr("Control Center")
+                        text: qsTr("Quick Settings")
                         role: "display"
                         Accessible.name: text
                     }
@@ -128,7 +134,7 @@ PanelWindow {
                     id: closeButton
                     text: qsTr("Close")
                     onClicked: root.closePanel()
-                    Accessible.name: qsTr("Close Control Center")
+                    Accessible.name: qsTr("Close Quick Settings")
                 }
             }
 
@@ -183,7 +189,7 @@ PanelWindow {
                         enabled: controller.canApply && !controller.busy
 
                         Accessible.name: qsTr("Output volume")
-                        Accessible.description: qsTr("Changes are applied only after authoritative state is revalidated.")
+                        Accessible.description: qsTr("Apply uses fresh authoritative preconditions and independent verification.")
 
                         onPressedChanged: {
                             if (pressed) {
@@ -218,28 +224,20 @@ PanelWindow {
                     RowLayout {
                         Layout.fillWidth: true
 
-                        LinuraButton {
-                            text: qsTr("Reset")
-                            enabled: !controller.busy
-                            onClicked: {
-                                root.draftDirty = false
-                                root.draftVolume = Math.min(100, controller.volumePercent)
-                                controller.cancelVolumeDraft()
-                            }
-                            Accessible.name: qsTr("Reset selected volume")
-                        }
-
-                        Item {
+                        LinuraText {
                             Layout.fillWidth: true
+                            text: controller.muted ? qsTr("Muted") : qsTr("Output active")
+                            role: "caption"
+                            muted: true
+                            Accessible.name: text
                         }
 
                         LinuraButton {
-                            text: qsTr("Apply volume")
-                            enabled: controller.canApply
-                                && !controller.busy
+                            text: qsTr("Apply")
+                            highlighted: true
+                            enabled: controller.canCommitDraft
                                 && root.draftDirty
                                 && root.draftVolume !== controller.volumePercent
-                            highlighted: true
                             onClicked: {
                                 root.draftDirty = false
                                 controller.setVolume(root.draftVolume)
@@ -250,67 +248,44 @@ PanelWindow {
                 }
             }
 
-            LinuraSurface {
+            LinuraStatus {
                 Layout.fillWidth: true
-                implicitHeight: statusColumn.implicitHeight + theme.spacingXl * 2
-                outlineColor: root.stateColor(controller.state)
+                text: controller.statusText
+                tone: root.stateTone(controller.state)
+                Accessible.name: qsTr("%1. Observation %2, %3.")
+                    .arg(controller.statusText)
+                    .arg(controller.authority)
+                    .arg(controller.freshness)
+            }
 
-                ColumnLayout {
-                    id: statusColumn
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.margins: theme.spacingXl
-                    spacing: theme.spacingSm
+            RowLayout {
+                Layout.fillWidth: true
 
-                    LinuraText {
-                        text: qsTr("Authority status")
-                        role: "title"
-                        Accessible.name: text
-                    }
+                LinuraButton {
+                    text: qsTr("Refresh")
+                    enabled: !controller.busy
+                    onClicked: controller.refresh()
+                    Accessible.name: qsTr("Refresh authoritative audio state")
+                }
 
-                    LinuraText {
-                        Layout.fillWidth: true
-                        text: controller.statusText
-                        wrapMode: Text.WordWrap
-                        Accessible.name: text
-                    }
+                Item {
+                    Layout.fillWidth: true
+                }
 
-                    LinuraText {
-                        Layout.fillWidth: true
-                        text: qsTr("Observation: %1 · %2")
-                            .arg(controller.authority)
-                            .arg(controller.freshness)
-                        role: "caption"
-                        muted: true
-                        Accessible.name: text
-                    }
-
-                    LinuraText {
-                        Layout.fillWidth: true
-                        visible: controller.lastReceiptStatus.length > 0
-                        text: qsTr("Last Session1 receipt: %1 · evidence %2")
-                            .arg(controller.lastReceiptStatus)
-                            .arg(controller.lastEvidenceId)
-                        role: "caption"
-                        muted: true
-                        elide: Text.ElideMiddle
-                        Accessible.name: text
-                    }
+                LinuraButton {
+                    text: qsTr("Control Center")
+                    onClicked: root.controlCenterRequested()
+                    Accessible.name: qsTr("Open Control Center details")
                 }
             }
 
             LinuraText {
                 Layout.fillWidth: true
-                text: qsTr("This panel is a Linura client, not an executor. It cannot run provider commands or choose policy, risk, or operation class.")
+                text: qsTr("Quick Settings is a client of the same registered Session1 volume operation. It cannot choose operation class, policy, risk, provider, or executor authority.")
                 role: "caption"
                 muted: true
                 wrapMode: Text.WordWrap
                 Accessible.name: text
-            }
-
-            Item {
-                Layout.fillHeight: true
             }
         }
     }

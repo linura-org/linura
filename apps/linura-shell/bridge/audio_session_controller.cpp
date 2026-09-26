@@ -28,7 +28,11 @@ constexpr auto kReason = "Linura Shell Control Center audio quick setting";
 constexpr qint64 kFutureSkewMs = 1'000;
 constexpr quint64 kMaximumObservationValidityMs = 10'000;
 constexpr int kObserveTimeoutMs = 3'000;
-constexpr int kEffectTimeoutMs = 5'000;
+// Session1 performs a fresh authoritative read, one bounded mutation helper,
+// and an independent authoritative post-effect read. Each provider/helper stage
+// has a two-second hard deadline; leave bounded headroom for durable audit I/O
+// and D-Bus scheduling without weakening any server-side deadline.
+constexpr int kEffectTimeoutMs = 10'000;
 constexpr int kRetryInitialMs = 1'000;
 constexpr int kRetryMaximumMs = 10'000;
 constexpr qsizetype kMaximumDisplayText = 1'024;
@@ -116,7 +120,7 @@ bool decodeStringMap(const QVariant &value, QMap<QString, QString> *result)
         return false;
     }
 
-    QDBusArgument argument = qvariant_cast<QDBusArgument>(value);
+    const QDBusArgument argument = qvariant_cast<QDBusArgument>(value);
     QMap<QString, QString> decoded;
     argument.beginArray();
     while (!argument.atEnd()) {
@@ -229,6 +233,14 @@ bool AudioSessionController::canApply() const
         && current_->volumePercent <= 100;
 }
 
+bool AudioSessionController::canCommitDraft() const
+{
+    return active_
+        && draftBase_.has_value()
+        && current_.has_value()
+        && !busy();
+}
+
 bool AudioSessionController::busy() const
 {
     return state_ == QStringLiteral("loading")
@@ -274,7 +286,7 @@ void AudioSessionController::setActive(bool active)
             emit snapshotChanged();
             setState(
                 QStringLiteral("inactive"),
-                QStringLiteral("Control Center is closed."));
+                QStringLiteral("Audio controls are inactive."));
         }
         return;
     }
@@ -308,12 +320,16 @@ void AudioSessionController::beginVolumeDraft()
 {
     if (!draftBase_.has_value() && canApply() && current_.has_value()) {
         draftBase_ = *current_;
+        emit availabilityChanged();
     }
 }
 
 void AudioSessionController::cancelVolumeDraft()
 {
-    draftBase_.reset();
+    if (draftBase_.has_value()) {
+        draftBase_.reset();
+        emit availabilityChanged();
+    }
 }
 
 void AudioSessionController::setVolume(int requestedVolume)
@@ -324,15 +340,16 @@ void AudioSessionController::setVolume(int requestedVolume)
             QStringLiteral("Volume must be between 0% and 100%."));
         return;
     }
-    if (!canApply() || !current_.has_value()) {
+    if (!current_.has_value() || (!canApply() && !canCommitDraft())) {
         setState(
             QStringLiteral("stale"),
-            QStringLiteral("A fresh qualified audio observation is required before applying."));
+            QStringLiteral("A bound audio draft or fresh qualified observation is required before applying."));
         return;
     }
 
     const SinkSnapshot displayed = draftBase_.value_or(*current_);
     draftBase_.reset();
+    emit availabilityChanged();
     freshnessTimer_.stop();
     pending_ = PendingEffect {
         .displayed = displayed,
@@ -492,7 +509,9 @@ AudioSessionController::parseObservation(
         *error = QStringLiteral("Control1 audio observation identity/authority mismatch.");
         return std::nullopt;
     }
-    if (freshness != QStringLiteral("fresh")) {
+    // Control1 sends FreshnessState::Current; the panel exposes "fresh" only
+    // after the complete authoritative reply has passed validation.
+    if (freshness != QStringLiteral("current")) {
         *error = QStringLiteral("Audio state is stale or unknown; mutation remains disabled.");
         return std::nullopt;
     }
@@ -799,13 +818,16 @@ AudioSessionController::parseReceipt(
     QString *error) const
 {
     const QList<QVariant> arguments = message.arguments();
-    if (arguments.size() != 1
-        || !arguments.at(0).canConvert<QDBusArgument>()) {
+    if (arguments.size() != 1) {
         *error = QStringLiteral("Session1 returned an unexpected effect receipt shape.");
         return std::nullopt;
     }
 
-    QDBusArgument wire = qvariant_cast<QDBusArgument>(arguments.at(0));
+    const QDBusArgument wire = arguments.at(0).value<QDBusArgument>();
+    if (wire.currentType() != QDBusArgument::StructureType) {
+        *error = QStringLiteral("Session1 returned an unexpected effect receipt shape.");
+        return std::nullopt;
+    }
     EffectReceipt receipt;
     wire.beginStructure();
     wire >> receipt.operationId

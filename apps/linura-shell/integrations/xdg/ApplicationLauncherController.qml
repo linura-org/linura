@@ -14,7 +14,9 @@ Scope {
         "org.linura.CommandPalette",
         "org.linura.CommandPalette.desktop",
         "org.linura.ControlCenter",
-        "org.linura.ControlCenter.desktop"
+        "org.linura.ControlCenter.desktop",
+        "org.linura.QuickSettings",
+        "org.linura.QuickSettings.desktop"
     ]
 
     signal launchCompleted(string status, int requestGeneration)

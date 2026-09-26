@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "linura.quick-settings",
+  "name": "Linura Quick Settings",
+  "kind": "panel",
+  "entry_point": "QuickSettingsPanel.qml",
+  "trust": "first-party",
+  "authority": "none",
+  "interaction_scope": "bounded-authoritative-session-control",
+  "registered_operations": [
+    "operation:audio.output.set-session-volume"
+  ],
+  "protocol_requirements": [
+    "org.linura.Control1.Observe",
+    "org.linura.Session1.SetAudioOutputVolume"
+  ]
+}

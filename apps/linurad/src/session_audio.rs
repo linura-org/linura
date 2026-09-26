@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
-use std::fs;
-use std::io::Read;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -19,12 +19,13 @@ use linura_core::{
 };
 use linura_dbus::{Session1AudioVolumeRequest, Session1Context, Session1Handler};
 use linura_linux_observation::{
-    LINURA_SESSION_AUDIO_HELPER_PATH, PipeWireSessionObserver, WIREPLUMBER_EXECUTABLE_PATH,
+    PipeWireSessionObserver, TRUSTED_SESSION_AUDIO_HELPER, WIREPLUMBER_EXECUTABLE_PATH,
     pipewire_output_node_id, verify_packaged_session_audio_helper,
 };
 use linura_observation::{ObservationAuthority, ObservationEnvelope, ObservedValue};
 use linura_observation_control::ObservationCoordinator;
 use linura_protocol::PlanDesiredStateRequest;
+use rustix::fs::{MemfdFlags, SealFlags, fcntl_add_seals, fcntl_get_seals, memfd_create};
 
 use crate::session_audit::SqliteTransientAudit;
 
@@ -299,14 +300,46 @@ fn verify_same_sink_identity(
     Ok(())
 }
 
+fn sealed_session_audio_helper_bytes(bytes: &[u8]) -> Result<File, TransientEffectExecutorError> {
+    let fd = memfd_create(
+        "linura-session-audio",
+        MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING,
+    )
+    .map_err(|_| executor_error("cannot create sealed WirePlumber helper image"))?;
+    let mut file = File::from(fd);
+    file.write_all(bytes)
+        .map_err(|_| executor_error("cannot materialize trusted WirePlumber helper image"))?;
+    file.flush()
+        .map_err(|_| executor_error("cannot flush trusted WirePlumber helper image"))?;
+
+    let required_seals = SealFlags::SEAL | SealFlags::SHRINK | SealFlags::GROW | SealFlags::WRITE;
+    fcntl_add_seals(&file, required_seals)
+        .map_err(|_| executor_error("cannot seal trusted WirePlumber helper image"))?;
+    let actual_seals = fcntl_get_seals(&file)
+        .map_err(|_| executor_error("cannot verify trusted WirePlumber helper seals"))?;
+    if !actual_seals.contains(required_seals) {
+        return Err(executor_error(
+            "trusted WirePlumber helper image is not fully sealed",
+        ));
+    }
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| executor_error("cannot rewind trusted WirePlumber helper image"))?;
+    Ok(file)
+}
+
+fn sealed_session_audio_helper() -> Result<File, TransientEffectExecutorError> {
+    verify_packaged_session_audio_helper()
+        .map_err(|_| executor_error("WirePlumber helper integrity validation failed"))?;
+    sealed_session_audio_helper_bytes(TRUSTED_SESSION_AUDIO_HELPER)
+}
+
 fn run_identity_bound_volume_update(
     node_id: u32,
     object_serial: u64,
     node_name: &str,
     volume_percent: u16,
 ) -> Result<(), TransientEffectExecutorError> {
-    verify_packaged_session_audio_helper()
-        .map_err(|_| executor_error("WirePlumber helper integrity validation failed"))?;
+    let trusted_helper = sealed_session_audio_helper()?;
     let runtime_dir = wireplumber_runtime_dir()?;
     let node_name = spa_json_string(node_name)?;
     let arguments = format!(
@@ -314,12 +347,12 @@ fn run_identity_bound_volume_update(
     );
 
     let mut child = Command::new(WIREPLUMBER_EXECUTABLE_PATH)
-        .arg(LINURA_SESSION_AUDIO_HELPER_PATH)
+        .arg("/dev/fd/0")
         .arg(arguments)
         .env_clear()
         .env("XDG_RUNTIME_DIR", runtime_dir)
         .env("LC_ALL", "C")
-        .stdin(Stdio::null())
+        .stdin(Stdio::from(trusted_helper))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -510,6 +543,16 @@ mod tests {
         for value in ["", "00", "040", "+40", "-1", "101", "40.0", " 40"] {
             assert!(parse_volume_percent(value).is_err(), "{value}");
         }
+    }
+
+    #[test]
+    fn mutation_helper_memfd_is_immutable_after_sealing() {
+        let mut file = sealed_session_audio_helper_bytes(TRUSTED_SESSION_AUDIO_HELPER)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let seals = fcntl_get_seals(&file).unwrap_or_else(|error| unreachable!("{error}"));
+        let required = SealFlags::SEAL | SealFlags::SHRINK | SealFlags::GROW | SealFlags::WRITE;
+        assert!(seals.contains(required));
+        assert!(file.write_all(b"tamper").is_err());
     }
 
     #[test]

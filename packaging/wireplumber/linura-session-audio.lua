@@ -4,7 +4,22 @@
 -- exposes two fixed operations: a canonical Audio/Sink snapshot and an
 -- identity-bound volume update. It never executes arbitrary input as code.
 
-local args = ...
+local raw_args = ...
+local args = raw_args
+
+-- wpexec passes its optional SPA-JSON object as a WirePlumber Json value.
+-- Convert that value through the sandboxed Json API; never evaluate argument
+-- text as Lua code. A small recursion bound is sufficient for this flat typed
+-- request and keeps malformed/unexpected inputs fail-closed.
+if type(raw_args) ~= "table" then
+  local parsed_ok, parsed_args = pcall(function()
+    return raw_args:parse(2)
+  end)
+  if not parsed_ok or type(parsed_args) ~= "table" then
+    error("linura-session-audio:invalid-arguments")
+  end
+  args = parsed_args
+end
 
 local MAX_SINKS = 256
 local MAX_NODE_NAME_BYTES = 1024
@@ -59,7 +74,7 @@ Core.require_api("default-nodes", "mixer", function(default_nodes, mixer)
           fail("sink-limit")
         end
 
-        local properties = node.properties
+        local properties = node["global-properties"]
         local bound_id = node["bound-id"]
         local object_serial = properties["object.serial"]
         local node_name = properties["node.name"]
@@ -128,7 +143,7 @@ Core.require_api("default-nodes", "mixer", function(default_nodes, mixer)
       local matched = nil
       local match_count = 0
       for node in object_manager:iterate() do
-        local properties = node.properties
+        local properties = node["global-properties"]
         local bound_id = node["bound-id"]
         if bound_id == args.node_id
             and properties["object.serial"] == args.object_serial
