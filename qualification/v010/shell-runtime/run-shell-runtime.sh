@@ -63,6 +63,7 @@ command -v systemd-run >/dev/null || fail "systemd-run is missing"
 command -v systemctl >/dev/null || fail "systemctl is missing"
 command -v busctl >/dev/null || fail "busctl is missing"
 command -v pw-cli >/dev/null || fail "pw-cli is missing"
+command -v pw-dump >/dev/null || fail "pw-dump is missing"
 command -v wpctl >/dev/null || fail "wpctl is missing"
 command -v wpexec >/dev/null || fail "wpexec is missing"
 command -v sqlite3 >/dev/null || fail "sqlite3 is missing"
@@ -263,6 +264,16 @@ context.objects = [
       object.linger = true
       audio.position = [ FL FR ]
       monitor.channel-volumes = true
+      monitor.passthrough = true
+      adapter.auto-port-config = {
+        mode = dsp
+        monitor = true
+        position = preserve
+      }
+      node.param.Props = {
+        mute = false
+        channelVolumes = [ 0.064 0.064 ]
+      }
     }
   }
 ]
@@ -275,13 +286,91 @@ systemctl --user start wireplumber.service
 wait_until "PipeWire user service" systemctl --user is-active --quiet pipewire.service
 wait_until "WirePlumber user service" systemctl --user is-active --quiet wireplumber.service
 
+pipewire_fixture_identity() {
+    pw-dump | python3 -c '
+import json
+import sys
+
+objects = json.load(sys.stdin)
+matches = []
+for obj in objects:
+    if obj.get("type") != "PipeWire:Interface:Node":
+        continue
+    info = obj.get("info") or {}
+    props = info.get("props") or {}
+    if props.get("node.name") != "linura-qualification-sink":
+        continue
+    if props.get("media.class") != "Audio/Sink":
+        continue
+    node_id = obj.get("id")
+    serial = props.get("object.serial")
+    serial_text = str(serial) if serial is not None else ""
+    if not isinstance(node_id, int) or node_id < 0 or not serial_text.isdecimal():
+        continue
+    matches.append((node_id, serial_text, props.get("node.name")))
+
+if len(matches) != 1:
+    raise SystemExit(1)
+
+node_id, serial, name = matches[0]
+print(f"{node_id}\t{serial}\t{name}")
+'
+}
+
+fixture_identity=""
+for _ in $(seq 1 100); do
+    fixture_identity="$(pipewire_fixture_identity 2>/dev/null || true)"
+    [[ -n "$fixture_identity" ]] && break
+    sleep 0.1
+done
+if [[ -z "$fixture_identity" ]]; then
+    {
+        printf '%s\n' '--- fixture config ---'
+        cat "$pipewire_fixture_config"
+        printf '%s\n' '--- PipeWire nodes ---'
+        pw-cli ls Node || true
+        printf '%s\n' '--- PipeWire graph ---'
+        pw-dump || true
+        printf '%s\n' '--- PipeWire/WirePlumber status ---'
+        systemctl --user status pipewire.service wireplumber.service --no-pager || true
+        printf '%s\n' '--- PipeWire/WirePlumber journal ---'
+        journalctl --user -u pipewire.service -u wireplumber.service --no-pager || true
+    } > "$evidence_root/pipewire-fixture-diagnostics.txt" 2>&1
+    cat "$evidence_root/pipewire-fixture-diagnostics.txt" >&2
+    fail "timeout waiting for exact deterministic PipeWire qualification sink identity"
+fi
+
+IFS=$'\t' read -r qualification_sink_id qualification_sink_serial qualification_sink_name <<<"$fixture_identity"
+[[ "$qualification_sink_id" =~ ^[0-9]+$ && "$qualification_sink_serial" =~ ^[0-9]+$ ]] || fail "qualification audio sink identity is not canonical"
+[[ "$qualification_sink_name" == "linura-qualification-sink" ]] || fail "qualification audio sink name drifted"
+
+# The fixture is qualification setup, not the product mutation path. Establish a
+# concrete Props param that WirePlumber's mixer API requires before asking the
+# unchanged production Linura helper to observe or mutate this synthetic sink.
+pw-cli set-param "$qualification_sink_id" Props '{ mute = false channelVolumes = [ 0.064 0.064 ] }' >/dev/null
+
+pipewire_fixture_props_ready() {
+    local props
+    props="$(pw-cli enum-params "$qualification_sink_id" Props 2>/dev/null)" || return 1
+    grep -Fq 'Props:mute' <<<"$props" || return 1
+    grep -Fq 'Props:channelVolumes' <<<"$props" || return 1
+}
+
+wait_until "qualification sink Props" pipewire_fixture_props_ready
+pw-cli enum-params "$qualification_sink_id" Props > "$evidence_root/pipewire-fixture-props.txt"
+
+wireplumber_fixture_mixer_ready() {
+    wpctl get-volume "$qualification_sink_id" >/dev/null 2>&1
+}
+wait_until "WirePlumber mixer state for qualification sink" wireplumber_fixture_mixer_ready
+
 audio_snapshot() {
     /usr/bin/wpexec "$audio_helper" '{ action = "observe" }'
 }
 
 audio_sink_present() {
-    audio_snapshot 2>/dev/null | awk -F '\t' '
-        $1 == "sink" && $4 == "linura-qualification-sink" { count += 1 }
+    audio_snapshot 2>/dev/null | awk -F '\t' -v id="$qualification_sink_id" -v serial="$qualification_sink_serial" '
+        $1 == "sink" && $2 == id && $3 == serial && $4 == "linura-qualification-sink" { count += 1 }
         END { exit count == 1 ? 0 : 1 }
     '
 }
@@ -300,24 +389,28 @@ if [[ "$audio_fixture_ready" -ne 1 ]]; then
         cat "$pipewire_fixture_config"
         printf '%s\n' '--- PipeWire nodes ---'
         pw-cli ls Node || true
+        printf '%s\n' '--- qualification sink Props ---'
+        pw-cli enum-params "$qualification_sink_id" Props || true
+        printf '%s\n' '--- WirePlumber mixer view ---'
+        wpctl get-volume "$qualification_sink_id" || true
         printf '%s\n' '--- authoritative audio snapshot ---'
-        audio_snapshot || true
+        WIREPLUMBER_DEBUG=4 /usr/bin/wpexec "$audio_helper" '{ action = "observe" }' || true
         printf '%s\n' '--- PipeWire/WirePlumber status ---'
         systemctl --user status pipewire.service wireplumber.service --no-pager || true
         printf '%s\n' '--- PipeWire/WirePlumber journal ---'
         journalctl --user -u pipewire.service -u wireplumber.service --no-pager || true
     } > "$evidence_root/pipewire-fixture-diagnostics.txt" 2>&1
     cat "$evidence_root/pipewire-fixture-diagnostics.txt" >&2
-    fail "timeout waiting for deterministic PipeWire qualification sink"
+    fail "production audio helper did not observe the exact mixer-ready qualification sink"
 fi
 
 sink_snapshot="$(audio_snapshot)"
 printf '%s\n' "$sink_snapshot" > "$evidence_root/pipewire-snapshot-initial.txt"
-sink_record="$(printf '%s\n' "$sink_snapshot" | awk -F '\t' '$1 == "sink" && $4 == "linura-qualification-sink" { print }')"
+sink_record="$(printf '%s\n' "$sink_snapshot" | awk -F '\t' -v id="$qualification_sink_id" -v serial="$qualification_sink_serial" '$1 == "sink" && $2 == id && $3 == serial && $4 == "linura-qualification-sink" { print }')"
 [[ "$(printf '%s\n' "$sink_record" | sed '/^$/d' | wc -l)" -eq 1 ]] || fail "qualification audio sink identity is ambiguous"
-IFS=$'\t' read -r sink_tag qualification_sink_id qualification_sink_serial qualification_sink_name qualification_sink_default qualification_sink_volume qualification_sink_muted <<<"$sink_record"
-[[ "$sink_tag" == "sink" && "$qualification_sink_name" == "linura-qualification-sink" ]] || fail "qualification audio sink record is malformed"
-[[ "$qualification_sink_id" =~ ^[0-9]+$ && "$qualification_sink_serial" =~ ^[0-9]+$ ]] || fail "qualification audio sink identity is not canonical"
+IFS=$'\t' read -r sink_tag observed_sink_id observed_sink_serial observed_sink_name qualification_sink_default qualification_sink_volume qualification_sink_muted <<<"$sink_record"
+[[ "$sink_tag" == "sink" && "$observed_sink_name" == "$qualification_sink_name" ]] || fail "qualification audio sink record is malformed"
+[[ "$observed_sink_id" == "$qualification_sink_id" && "$observed_sink_serial" == "$qualification_sink_serial" ]] || fail "production audio helper identity does not match the PipeWire fixture identity"
 
 wpctl set-default "$qualification_sink_id"
 audio_sink_default() {
@@ -688,6 +781,13 @@ IFS=$'\t' read -r audit_principal audit_operation audit_provider audit_resource 
 } > "$evidence_root/quick-settings-audit.txt"
 pass_case "quick-settings-durable-audit-lineage"
 
+checked_quick_settings_call linura.quick-settings-qualification refresh >/dev/null
+quick_settings_ready_for_drift() {
+    [[ "$(checked_quick_settings_call linura.quick-settings-qualification state 2>/dev/null)" == "ready" ]] \
+        && [[ "$(checked_quick_settings_call linura.quick-settings-qualification volumePercent 2>/dev/null)" == "63" ]] \
+        && [[ "$(checked_quick_settings_call linura.quick-settings-qualification canApply 2>/dev/null)" == "true" ]]
+}
+wait_until "fresh Quick Settings state before precondition-drift draft" quick_settings_ready_for_drift
 [[ "$(checked_quick_settings_call linura.quick-settings-qualification beginDraft)" == "begun" ]] || fail "Quick Settings could not begin the precondition-drift qualification draft"
 set_fixture_volume 72
 wait_until "external concurrent volume 72" audio_sink_matches_volume 72

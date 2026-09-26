@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = "contracts/v010-shell-runtime-qualification.toml"
+SUBSTRATE_CONTRACT = "contracts/v010-shell-runtime-substrate.toml"
 WORKFLOW = ".github/workflows/v010-shell-runtime-qualification.yml"
 PARENT_WORKFLOW = ".github/workflows/v010-qualification.yml"
 
@@ -28,6 +29,27 @@ EXPECTED_COMPONENTS = [
     "session1",
     "sqlite-transient-audit",
     "quick-settings",
+]
+
+EXPECTED_RUNTIME_PACKAGES = [
+    "base-devel",
+    "cmake",
+    "ninja",
+    "pkgconf",
+    "dbus",
+    "seatd",
+    "hyprland",
+    "quickshell",
+    "qt6-base",
+    "qt6-declarative",
+    "qt6-wayland",
+    "mesa",
+    "vulkan-swrast",
+    "pipewire",
+    "pipewire-audio",
+    "wireplumber",
+    "networkmanager",
+    "sqlite",
 ]
 
 EXPECTED_CASES = [
@@ -64,6 +86,8 @@ RUNTIME_FILES = (
     "qualification/v010/shell-runtime/provision-shell-runtime.sh",
     "qualification/v010/shell-runtime/run-shell-runtime.sh",
     "qualification/v010/shell-runtime/start-vm.sh",
+    "qualification/v010/shell-runtime/prepare-substrate.sh",
+    "qualification/v010/shell-runtime/verify-substrate.py",
     "qualification/v010/shell-runtime/fixtures/linger-app",
     "qualification/v010/shell-runtime/fixtures/forking-app",
     "qualification/v010/shell-runtime/fixtures/linura-shell-qualification.service",
@@ -181,11 +205,18 @@ def validate(root: Path) -> list[str]:
         "v0.10 workstation qualification contract",
         failures,
     )
-    if not contract or not workstation:
+    cache_substrate = _load_toml(
+        root / SUBSTRATE_CONTRACT,
+        "v0.10 shell runtime substrate contract",
+        failures,
+    )
+    if not contract or not workstation or not cache_substrate:
         return failures
 
     if workstation.get("shell_runtime_qualification_contract") != CONTRACT:
         failures.append("v0.10 workstation qualification must bind the shell runtime qualification contract")
+    if contract.get("substrate_contract") != SUBSTRATE_CONTRACT:
+        failures.append("shell runtime qualification must bind the cacheable substrate contract")
 
     expected_scalars = {
         "schema_version": 1,
@@ -209,6 +240,46 @@ def validate(root: Path) -> list[str]:
         if contract.get(key) != expected:
             failures.append(f"shell runtime contract {key} must remain {expected!r}")
 
+    expected_cache_substrate = {
+        "schema_version": 1,
+        "id": "qualification/v010-shell-runtime-substrate",
+        "state": "development-prerequisite",
+        "claim": "non-evidence-cacheable-substrate",
+        "cache_namespace": "linura-v010-shell-substrate-v2",
+        "builder": "qualification/v010/shell-runtime/prepare-substrate.sh",
+        "verifier": "qualification/v010/shell-runtime/verify-substrate.py",
+        "base_image_url": contract.get("base_image_url"),
+        "base_image_checksum_url": contract.get("base_image_checksum_url"),
+        "arch_archive_snapshot": contract.get("arch_archive_snapshot"),
+        "arch_archive_url": contract.get("arch_archive_url"),
+        "architecture": "x86_64",
+        "vm_disk_size_gib": contract.get("vm_disk_size_gib"),
+    }
+    for key, expected in expected_cache_substrate.items():
+        if cache_substrate.get(key) != expected:
+            failures.append(f"shell runtime substrate {key} must remain {expected!r}")
+
+    if cache_substrate.get("runtime_packages") != EXPECTED_RUNTIME_PACKAGES:
+        failures.append(
+            "shell runtime substrate runtime_packages drifted from the pinned runtime package set"
+        )
+
+    cache_policy = cache_substrate.get("cache_policy")
+    if not isinstance(cache_policy, dict):
+        failures.append("shell runtime substrate cache_policy is missing")
+    else:
+        for key in ("base_image_bytes", "prepared_guest_bytes", "cargo_dependency_bytes"):
+            if cache_policy.get(key) is not True:
+                failures.append(f"shell runtime substrate cache_policy.{key} must remain true")
+        for key in (
+            "qualification_evidence",
+            "linura_build_outputs",
+            "guest_runtime_state",
+            "release_support_promotion",
+        ):
+            if cache_policy.get(key) is not False:
+                failures.append(f"shell runtime substrate cache_policy.{key} must remain false")
+
     if contract.get("required_components") != EXPECTED_COMPONENTS:
         failures.append("shell runtime required_components drifted from the real authority/runtime matrix")
     if contract.get("required_cases") != EXPECTED_CASES:
@@ -229,10 +300,10 @@ def validate(root: Path) -> list[str]:
     if not isinstance(checksum_url, str) or not isinstance(base_url, str) or checksum_url != base_url + ".SHA256":
         failures.append("shell runtime checksum URL must bind the exact version-addressed base image")
 
-    substrate = workstation.get("substrate", {})
-    if contract.get("arch_archive_snapshot") != substrate.get("snapshot_date"):
+    workstation_substrate = workstation.get("substrate", {})
+    if contract.get("arch_archive_snapshot") != workstation_substrate.get("snapshot_date"):
         failures.append("shell runtime Arch archive snapshot must match the v0.10 workstation substrate")
-    if contract.get("arch_archive_url") != substrate.get("repository_url"):
+    if contract.get("arch_archive_url") != workstation_substrate.get("repository_url"):
         failures.append("shell runtime Arch archive URL must match the v0.10 workstation substrate")
 
     evidence = contract.get("evidence")
@@ -242,6 +313,7 @@ def validate(root: Path) -> list[str]:
         for key in (
             "source_sha_required",
             "base_image_digest_required",
+            "prepared_substrate_digest_required",
             "runtime_versions_required",
             "package_versions_required",
             "guest_transcript_digest_required",
@@ -282,6 +354,44 @@ def validate(root: Path) -> list[str]:
         'python3 tools/check_v010_shell_runtime_qualification.py',
         "source tools/codex/versions.env",
         'rustup toolchain install "$RUST_VERSION" --profile minimal',
+        "growpart:",
+        'devices: ["/"]',
+        "resize_rootfs: true",
+        "guest root filesystem capacity contract not met",
+        "set-name: eth0",
+        "renderer: networkd",
+        '--nic-mac "$QUALIFICATION_NIC_MAC"',
+        "deadline=$((SECONDS + 420))",
+        "'timeout 240 cloud-init status --wait --long'",
+        "sudo -n modprobe virtio_gpu",
+        'sudo -n systemctl enable seatd.service',
+        'sudo -n systemctl start seatd.service',
+        "dump_graphics_state",
+        "sudo -n journalctl -u seatd.service -b --no-pager",
+        'seat_group="$(stat -c \'%G\' "$seat_socket")"',
+        '[[ "$card_name" =~ ^card[0-9]+$ ]] || continue',
+        '[[ "${#drm_cards[@]}" -eq 1 ]]',
+        'qualification_bdf="$(basename "$qualification_device")"',
+        '[[ "$qualification_bdf" == "$QUALIFICATION_GPU_PCI_BDF" ]]',
+        '[[ "$qualification_vendor" == "$QUALIFICATION_GPU_VENDOR_ID" ]]',
+        '[[ "$qualification_device_id" == "$QUALIFICATION_GPU_DEVICE_ID" ]]',
+        "unexpected graphical seat setup pipeline width",
+        'pipeline_status=("${PIPESTATUS[@]}")',
+        '"$ARTIFACT_DIR/seatd-journal.log"',
+        "pipewire-snapshot-initial.txt",
+        "quick-settings-audio-fixture.txt",
+        '"disk_size_gib": contract["vm_disk_size_gib"]',
+        "prepared immutable Arch runtime substrate",
+        "needs: substrate",
+        "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+        "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+        "linura-v010-prepared-v1-",
+        "hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh')",
+        "qualification/v010/shell-runtime/prepare-substrate.sh",
+        "qualification/v010/shell-runtime/verify-substrate.py",
+        "fail-on-cache-miss: true",
+        "Restore Cargo dependency cache",
+        "linura-cargo-deps-v1-",
         "cargo build --locked --release -p linurad",
         'LINURAD_SHA256=%s',
         'SESSION_AUDIO_HELPER_SHA256=%s',
@@ -293,22 +403,16 @@ def validate(root: Path) -> list[str]:
         'QUALIFICATION_GPU_DEVICE_ID: "0x1050"',
         "QUALIFICATION_DISK_GIB: 16",
         'qemu-img resize "$vm_image" "${QUALIFICATION_DISK_GIB}G"',
-        "growpart:",
-        'devices: ["/"]',
-        "resize_rootfs: true",
-        '"$ARTIFACT_DIR/guest-storage.txt"',
-        "guest root filesystem capacity contract not met",
         'macaddress: "$QUALIFICATION_NIC_MAC"',
-        "set-name: eth0",
-        "renderer: networkd",
-        '--nic-mac "$QUALIFICATION_NIC_MAC"',
-        "deadline=$((SECONDS + 420))",
-        "'timeout 240 cloud-init status --wait --long'",
-        "--disable-download-timeout",
-        "timeout --signal=TERM --kill-after=10s 720",
-        "for attempt in 1 2 3",
-        "pinned Arch runtime installation failed after 3 bounded attempts",
-        "pipewire pipewire-audio wireplumber networkmanager sqlite",
+        "Environment=SEATD_VTBOUND=0",
+        '"$ARTIFACT_DIR/seat-drm-setup.log"',
+        'seat_setup_pipeline_status=("${PIPESTATUS[@]}")',
+        'pipewire_fixture_props = artifacts / "pipewire-fixture-props.txt"',
+        'cp --reflink=auto "$PREPARED_IMAGE" "$vm_image"',
+        '"$ARTIFACT_DIR/guest-storage.txt"',
+        "prepared-substrate-manifest.json",
+        "prepared-substrate-packages.txt",
+        "prepared substrate package universe drifted before qualification",
         "git archive --format=tar.gz",
         'linura@127.0.0.1:/tmp/linurad-qualification',
         "installed linurad digest does not match exact-source build",
@@ -316,37 +420,19 @@ def validate(root: Path) -> list[str]:
         "runtime-install-integrity.txt",
         "provision-shell-runtime.sh",
         "run-shell-runtime.sh",
-        "sudo -n modprobe virtio_gpu",
-        "Environment=SEATD_VTBOUND=0",
-        'sudo -n systemctl enable seatd.service',
-        'sudo -n systemctl start seatd.service',
-        '"$ARTIFACT_DIR/seat-drm-setup.log"',
-        "dump_graphics_state",
-        "sudo -n journalctl -u seatd.service -b --no-pager",
-        'seat_group="$(stat -c \'%G\' "$seat_socket")"',
-        '[[ "$card_name" =~ ^card[0-9]+$ ]] || continue',
-        '[[ "${#drm_cards[@]}" -eq 1 ]]',
-        'qualification_bdf="$(basename "$qualification_device")"',
-        '[[ "$qualification_bdf" == "$QUALIFICATION_GPU_PCI_BDF" ]]',
-        '[[ "$qualification_vendor" == "$QUALIFICATION_GPU_VENDOR_ID" ]]',
-        '[[ "$qualification_device_id" == "$QUALIFICATION_GPU_DEVICE_ID" ]]',
-        'seat_setup_pipeline_status=("${PIPESTATUS[@]}")',
-        "unexpected graphical seat setup pipeline width",
-        'pipeline_status=("${PIPESTATUS[@]}")',
-        '"$ARTIFACT_DIR/seatd-journal.log"',
         "ui-module-linkage.txt",
         "bridge-module-linkage.txt",
         "qt-quick-rendering.env",
         "authority-runtime-integrity.txt",
         "pipewire-fixture-create.txt",
-        "pipewire-snapshot-initial.txt",
-        "quick-settings-audio-fixture.txt",
         "quick-settings-observation.txt",
         "quick-settings-session1-effect.txt",
         "quick-settings-audit.txt",
         "quick-settings-precondition-drift.txt",
         "quick-settings-service-loss.txt",
         "quick-settings-restart-recovery.txt",
+        '"prepared_substrate": {',
+        "PREPARED_IMAGE_SHA256",
         '"qt_quick_backend": rendering_backend',
         'contract["qt_quick_backend"]',
         "package-versions.txt",
@@ -354,7 +440,8 @@ def validate(root: Path) -> list[str]:
         '"linurad_sha256": os.environ["LINURAD_SHA256"]',
         '"session_audio_helper_sha256": os.environ["SESSION_AUDIO_HELPER_SHA256"]',
         '"scope": "real-session-authority"',
-        '"disk_size_gib": contract["vm_disk_size_gib"]',
+        '"substrate_contract": {',
+        "SUBSTRATE_CONTRACT",
         "V010-SHELL-RUNTIME-EVIDENCE.json",
         "V010-SHELL-RUNTIME-EVIDENCE.sha256",
         "release_support_promotion",
@@ -370,6 +457,78 @@ def validate(root: Path) -> list[str]:
         if '"pipewire-audio"' not in package_set:
             failures.append("shell runtime evidence package set must include pipewire-audio")
 
+    def workflow_step_block(text: str, step_name: str) -> str:
+        marker = f"- name: {step_name}"
+        if marker not in text:
+            return ""
+        remainder = text.split(marker, 1)[1]
+        return remainder.split("\n      - name:", 1)[0]
+
+    prepared_hash = (
+        "hashFiles('contracts/v010-shell-runtime-substrate.toml', "
+        "'qualification/v010/shell-runtime/prepare-substrate.sh')"
+    )
+    restore_blocks = workflow.split("- name: Restore prepared runtime substrate")
+    if len(restore_blocks) != 3:
+        failures.append(
+            "shell runtime workflow must restore prepared substrate exactly once in builder and runtime jobs"
+        )
+    for block in restore_blocks[1:]:
+        block = block.split("\n      - name:", 1)[0]
+        if "linura-v010-prepared-v1-" not in block or prepared_hash not in block:
+            failures.append(
+                "prepared runtime cache key must bind substrate contract and builder"
+            )
+
+    save_block = workflow_step_block(workflow, "Save prepared runtime substrate")
+    if "cache-primary-key" not in save_block:
+        failures.append("prepared runtime substrate must be saved under the exact restored key")
+
+    runtime_restore_index = workflow.rfind("- name: Restore prepared runtime substrate")
+    runtime_restore = ""
+    if runtime_restore_index >= 0:
+        runtime_restore = workflow[runtime_restore_index:].split("\n      - name:", 1)[0]
+    if "fail-on-cache-miss: true" not in runtime_restore:
+        failures.append("exact-source runtime must fail closed if prepared substrate is unavailable")
+
+    builder_step = workflow_step_block(workflow, "Build sanitized prepared runtime substrate")
+    if "prepare-substrate.sh" not in builder_step:
+        failures.append("prepared substrate cache miss must invoke the repository-owned builder")
+
+    base_image_step = workflow_step_block(
+        workflow, "Download and verify official Arch base image"
+    )
+    cached_base_check = (
+        'if [[ -f "$image" ]] && ! printf \'%s  %s\\n\' "$digest" "$image" '
+        "| sha256sum --check --strict; then"
+    )
+    final_base_check = (
+        "printf '%s  %s\\n' \"$digest\" \"$image\" | sha256sum --check --strict"
+    )
+    if cached_base_check not in base_image_step:
+        failures.append(
+            "prepared substrate builder must digest-verify a restored official base image before reuse"
+        )
+    if final_base_check not in base_image_step:
+        failures.append(
+            "prepared substrate builder must digest-verify the official base image before construction"
+        )
+
+    runtime_job_index = workflow.find("  runtime:")
+    if runtime_job_index < 0:
+        failures.append("shell runtime workflow missing runtime job")
+        runtime_job = ""
+    else:
+        runtime_job = workflow[runtime_job_index:]
+    if "pacman -Syu" in runtime_job:
+        failures.append("exact-source runtime job must not rebuild the prepared Arch package substrate")
+    if "linura-v010-pacman" in workflow:
+        failures.append("v0.10 runtime must not use the obsolete package-payload cache")
+    if "--persistent" in runtime_job:
+        failures.append("exact-source qualification runtime must remain snapshot/disposable")
+    if 'cp --reflink=auto "$PREPARED_IMAGE" "$vm_image"' not in runtime_job:
+        failures.append("exact-source runtime must clone the verified prepared substrate")
+
     if isinstance(base_url, str) and f"BASE_IMAGE_URL: {base_url}" not in workflow:
         failures.append("shell runtime workflow base image does not match its contract")
     if isinstance(checksum_url, str) and f"BASE_IMAGE_CHECKSUM_URL: {checksum_url}" not in workflow:
@@ -380,10 +539,33 @@ def validate(root: Path) -> list[str]:
     for forbidden in ("continue-on-error:", "/images/latest/", "runs-on: self-hosted"):
         if forbidden in workflow:
             failures.append(f"shell runtime workflow contains forbidden weakening: {forbidden}")
+    for forbidden_cache_path in (
+        "linura-v010-evidence-cache",
+        "linura-v010-runtime-binary-cache",
+        "linura-v010-pacman",
+    ):
+        if forbidden_cache_path in workflow or forbidden_cache_path in parent:
+            failures.append(
+                f"shell runtime qualification must not cache evidence or Linura build outputs: {forbidden_cache_path}"
+            )
+
+    for cache_workflow, label, build_marker in (
+        (workflow, "runtime", "- name: Build exact-source Linura session authority"),
+        (parent, "parent", "- name: Verify roadmap, support and v0.10 qualification contracts"),
+    ):
+        if "- name: Restore Cargo dependency cache" in cache_workflow:
+            cache_block = cache_workflow.split(
+                "- name: Restore Cargo dependency cache", 1
+            )[1].split(build_marker, 1)[0]
+            if re.search(r"(?m)^\s+target/?\s*$", cache_block):
+                failures.append(
+                    f"shell runtime {label} Cargo cache must not contain Linura build outputs"
+                )
 
     parent_fragments = (
         '".github/workflows/v010-shell-runtime-qualification.yml"',
         '"contracts/v010-shell-runtime-qualification.toml"',
+        '"contracts/v010-shell-runtime-substrate.toml"',
         '"apps/linura-shell/**"',
         '"apps/linurad/**"',
         '"packaging/systemd/user/linurad.service"',
@@ -403,7 +585,6 @@ def validate(root: Path) -> list[str]:
         '"qualification/v010/shell-runtime/**"',
         "shell-runtime:",
         "uses: ./.github/workflows/v010-shell-runtime-qualification.yml",
-        "needs: contract",
         "source_sha: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}",
     )
     for fragment in parent_fragments:
@@ -431,6 +612,14 @@ def validate(root: Path) -> list[str]:
         if "pipewire-audio" not in production_packages:
             failures.append(
                 "production Arch package contract must include pipewire-audio exercised by Quick Settings qualification"
+            )
+
+    parent_runtime_index = parent.find("  shell-runtime:")
+    if parent_runtime_index >= 0:
+        parent_runtime_block = parent[parent_runtime_index:]
+        if re.search(r"(?m)^\s+needs:", parent_runtime_block):
+            failures.append(
+                "v0.10 contract and shell runtime qualification must remain parallel independent gates"
             )
 
     production_service = (root / "packaging/systemd/user/linura-shell.service").read_text(encoding="utf-8")
@@ -463,6 +652,15 @@ def validate(root: Path) -> list[str]:
             failures.append(
                 f"{service_name} must pin QT_QUICK_BACKEND=software for the QEMU/TCG development gate"
             )
+        for runtime_line in (
+            "RuntimeDirectory=quickshell",
+            "RuntimeDirectoryMode=0700",
+            "ReadWritePaths=%t/quickshell",
+        ):
+            if runtime_line not in service_lines:
+                failures.append(
+                    f"{service_name} must explicitly own the bounded Quickshell runtime directory: {runtime_line}"
+                )
         for line in SANDBOX_LINES:
             if line not in production_service_lines:
                 failures.append(f"production shell service unexpectedly lacks sandbox line: {line}")
@@ -503,6 +701,7 @@ def validate(root: Path) -> list[str]:
     )
     for fragment in (
         "//@ pragma ShellId linura-qualification-quick-settings",
+        "import Quickshell.Io",
         "import org.linura.ShellBridge 1.0",
         'import "plugins/quick-settings" as QuickSettings',
         "AudioSessionController {",
@@ -524,6 +723,8 @@ def validate(root: Path) -> list[str]:
     run_script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
     provision_script = root / "qualification/v010/shell-runtime/provision-shell-runtime.sh"
     vm_launcher = root / "qualification/v010/shell-runtime/start-vm.sh"
+    prepare_substrate_script = root / "qualification/v010/shell-runtime/prepare-substrate.sh"
+    verify_substrate_script = root / "qualification/v010/shell-runtime/verify-substrate.py"
 
     if provision_script.is_file():
         provision_text = provision_script.read_text(encoding="utf-8")
@@ -551,7 +752,7 @@ def validate(root: Path) -> list[str]:
                     f"shell runtime provisioning missing QML module dependency-closure proof: {fragment}"
                 )
 
-    for script in (run_script, provision_script, vm_launcher):
+    for script in (run_script, provision_script, vm_launcher, prepare_substrate_script):
         completed = subprocess.run(
             ["bash", "-n", str(script)],
             check=False,
@@ -561,18 +762,59 @@ def validate(root: Path) -> list[str]:
         if completed.returncode != 0:
             failures.append(f"invalid shell runtime script {script.relative_to(root)}: {completed.stderr.strip()}")
 
+    if verify_substrate_script.is_file():
+        verify_source = verify_substrate_script.read_text(encoding="utf-8")
+        try:
+            compile(verify_source, str(verify_substrate_script), "exec")
+        except SyntaxError as error:
+            failures.append(f"invalid prepared-substrate verifier: {error}")
+
+    if prepare_substrate_script.is_file():
+        prepare_text = prepare_substrate_script.read_text(encoding="utf-8")
+        for fragment in (
+            "--persistent",
+            "pacman -Syu",
+            "timeout --signal=TERM --kill-after=10s 720",
+            "--disable-download-timeout",
+            "for attempt in 1 2 3",
+            "prepared substrate package installation failed after 3 bounded attempts",
+            "cloud-init clean --logs --seed",
+            "test ! -e /opt/linura-source",
+            "test ! -e /usr/bin/linurad",
+            "rm -f /home/linura/.ssh/authorized_keys",
+            "rm -f /etc/ssh/ssh_host_*",
+            "truncate -s 0 /etc/machine-id",
+            "qemu-img convert",
+            '"contains_linura_source": False',
+            '"contains_linura_build_outputs": False',
+            '"qualification_evidence": False',
+            '"release_support_promotion": False',
+        ):
+            if fragment not in prepare_text:
+                failures.append(f"prepared substrate builder missing fail-closed invariant: {fragment}")
+
+    if verify_substrate_script.is_file():
+        verify_text = verify_substrate_script.read_text(encoding="utf-8")
+        for fragment in (
+            "prepared substrate contract digest mismatch",
+            "prepared substrate builder digest mismatch",
+            "prepared substrate image digest mismatch",
+            '("contains_linura_source", False)',
+            '("contains_linura_build_outputs", False)',
+            '("qualification_evidence", False)',
+            '("release_support_promotion", False)',
+        ):
+            if fragment not in verify_text:
+                failures.append(f"prepared substrate verifier missing invariant: {fragment}")
+
+    if vm_launcher.is_file():
+        launcher_text = vm_launcher.read_text(encoding="utf-8")
+        for fragment in ("--persistent", "snapshot_args=(-snapshot)", "snapshot_args=()", '"${snapshot_args[@]}"'):
+            if fragment not in launcher_text:
+                failures.append(f"shell runtime VM launcher missing bounded persistence contract: {fragment}")
+
     if run_script.is_file():
         run_text = run_script.read_text(encoding="utf-8")
-        if "pw-cli create-node adapter" in run_text:
-            failures.append(
-                "runtime PipeWire fixture must be daemon-owned declarative context.objects, not pw-cli create-node"
-            )
-        fixture_index = run_text.find("context.objects = [")
-        pipewire_start_index = run_text.find("systemctl --user start pipewire.service")
-        if fixture_index < 0 or pipewire_start_index < 0 or fixture_index > pipewire_start_index:
-            failures.append(
-                "runtime PipeWire fixture config must be installed before PipeWire starts"
-            )
         for case_id in EXPECTED_CASES:
             if f'pass_case "{case_id}"' not in run_text:
                 failures.append(f"runtime protocol does not positively record required case: {case_id}")
@@ -615,6 +857,16 @@ def validate(root: Path) -> list[str]:
         if audit_index < 0 or open_index < 0 or audit_index > open_index:
             failures.append(
                 "runtime protocol must capture the transient-audit baseline before opening Quick Settings"
+            )
+        if "pw-cli create-node adapter" in run_text:
+            failures.append(
+                "runtime PipeWire fixture must be daemon-owned declarative context.objects, not pw-cli create-node"
+            )
+        fixture_index = run_text.find("context.objects = [")
+        pipewire_start_index = run_text.find("systemctl --user start pipewire.service")
+        if fixture_index < 0 or pipewire_start_index < 0 or fixture_index > pipewire_start_index:
+            failures.append(
+                "runtime PipeWire fixture config must be installed before PipeWire starts"
             )
         for fragment in (
             "systemctl --user restart linura-shell-qualification.service",
@@ -683,14 +935,31 @@ def validate(root: Path) -> list[str]:
             "object.linger = true",
             "audio.position = [ FL FR ]",
             "monitor.channel-volumes = true",
+            "monitor.passthrough = true",
+            "adapter.auto-port-config = {",
+            "mode = dsp",
+            "monitor = true",
+            "position = preserve",
+            "node.param.Props = {",
+            "mute = false",
+            "channelVolumes = [ 0.064 0.064 ]",
             'chmod 0600 "$pipewire_fixture_config"',
             'cp "$pipewire_fixture_config" "$evidence_root/pipewire-fixture-create.txt"',
             'systemctl --user start pipewire.service',
             'systemctl --user start wireplumber.service',
+            'command -v pw-dump >/dev/null || fail "pw-dump is missing"',
+            "pipewire_fixture_identity()",
+            "pw-dump | python3 -c",
+            'pw-cli set-param "$qualification_sink_id" Props',
+            "pipewire_fixture_props_ready()",
+            'pw-cli enum-params "$qualification_sink_id" Props > "$evidence_root/pipewire-fixture-props.txt"',
+            "wireplumber_fixture_mixer_ready()",
+            'wpctl get-volume "$qualification_sink_id"',
+            'fail "production audio helper identity does not match the PipeWire fixture identity"',
             '} > "$evidence_root/pipewire-fixture-diagnostics.txt" 2>&1',
             'cat "$evidence_root/pipewire-fixture-diagnostics.txt" >&2',
             "pw-cli ls Node",
-            'pipewire-fixture-create.txt',
+            "pipewire-fixture-props.txt",
             'pipewire-snapshot-initial.txt',
             'quick-settings-audio-fixture.txt',
             'wpctl set-default "$qualification_sink_id"',
@@ -718,6 +987,8 @@ def validate(root: Path) -> list[str]:
             'quick-settings-session1-failure.txt',
             "'-- transient audit --'",
             'SELECT rowid,request_id,resource,disposition,failure_code,pre_effect_evidence_id,post_effect_evidence_id FROM transient_effect_audit ORDER BY rowid DESC LIMIT 3;',
+            "quick_settings_ready_for_drift() {",
+            'wait_until "fresh Quick Settings state before precondition-drift draft" quick_settings_ready_for_drift',
             'pass_case "quick-settings-precondition-drift-rejection"',
             'pass_case "quick-settings-service-loss-fail-closed"',
             'quick_settings_recovered() {',
@@ -729,6 +1000,40 @@ def validate(root: Path) -> list[str]:
         ):
             if fragment not in run_text:
                 failures.append(f"runtime protocol missing externally observable proof: {fragment}")
+
+    if run_script.is_file():
+        mixer_readiness_contract = """wireplumber_fixture_mixer_ready() {
+    wpctl get-volume "$qualification_sink_id" >/dev/null 2>&1
+}
+wait_until "WirePlumber mixer state for qualification sink" wireplumber_fixture_mixer_ready
+"""
+        if mixer_readiness_contract not in run_text:
+            failures.append(
+                'WirePlumber mixer readiness must call wpctl get-volume on the exact qualification sink'
+            )
+
+        diagnostics_redirect = '} > "$evidence_root/pipewire-fixture-diagnostics.txt" 2>&1'
+        if run_text.count(diagnostics_redirect) != 2:
+            failures.append(
+                "both PipeWire fixture failure paths must retain pipewire-fixture-diagnostics.txt"
+            )
+
+        if "wpctl set-volume" in run_text:
+            failures.append(
+                "qualification runtime must not use wpctl set-volume for the qualified product effect"
+            )
+        native_identity = run_text.find("pipewire_fixture_identity()")
+        helper_observation = run_text.find("audio_snapshot()")
+        props_establish = run_text.find('pw-cli set-param "$qualification_sink_id" Props')
+        mixer_ready = run_text.find("wireplumber_fixture_mixer_ready()")
+        if min(native_identity, helper_observation, props_establish, mixer_ready) < 0:
+            failures.append(
+                "qualification runtime is missing ordered PipeWire fixture readiness stages"
+            )
+        elif not (native_identity < props_establish < mixer_ready < helper_observation):
+            failures.append(
+                "qualification runtime must establish native identity, Props and mixer readiness before production helper observation"
+            )
 
     if vm_launcher.is_file():
         launcher_text = vm_launcher.read_text(encoding="utf-8")
