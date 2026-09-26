@@ -289,7 +289,7 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("Rebuild Python wheel independently", build)
         self.assertEqual(build.count('PYTHON_WHEEL_SOURCE_DATE_EPOCH: "315532800"'), 2)
         self.assertEqual(
-            build.count("actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c"),
+            build.count("actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"),
             2,
         )
         self.assertEqual(build.count('python-version: "3.12.10"'), 2)
