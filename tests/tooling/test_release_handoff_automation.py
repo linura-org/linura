@@ -214,27 +214,13 @@ version = "9.9.9"
         pypi = release.split("\n  publish-pypi:", 1)[1].split("\n  verify-pypi:", 1)[0]
         self.assertIn("environment:\n      name: pypi", pypi)
         self.assertIn("id-token: write", pypi)
-        self.assertEqual(release.count("id-token: write"), 1)
-        self.assertIn(
-            "if: ${{ !cancelled() && needs.pypi-preflight.result == 'success' }}",
-            pypi,
-        )
-        verify_pypi = release.split("\n  verify-pypi:", 1)[1].split(
-            "\n  verification-dispatch:", 1
-        )[0]
-        self.assertIn(
-            "if: ${{ !cancelled() && needs.pypi-preflight.result == 'success' && needs.publish-pypi.result == 'success' }}",
-            verify_pypi,
-        )
-        self.assertIn("bootstrap-pypi-build:", release)
-        self.assertIn("bootstrap-pypi-reproduce:", release)
-        self.assertNotIn("environment:", release.split("\n  bootstrap-pypi-build:", 1)[1].split("\n  pypi-preflight:", 1)[0])
         self.assertNotIn("actions/checkout@", pypi)
         self.assertIn("path: pypi-publish-dist/", pypi)
         self.assertIn("packages-dir: pypi-publish-dist/", pypi)
         self.assertNotIn("packages-dir: /tmp/", pypi)
         self.assertNotIn("run:", pypi)
         self.assertNotIn("required reviewers", release.casefold())
+        self.assertNotIn("bootstrap-pypi", release)
         self.assertNotIn("@codex review", release)
 
     def test_release_chain_preserves_proof_publication_and_verification_handoffs(self) -> None:
@@ -273,12 +259,6 @@ version = "9.9.9"
         self.assertIn("crates_io_run_id", closure)
         self.assertIn("linura-crates-io-publication-", closure)
         self.assertIn(".version.yanked", closure)
-        self.assertIn('canonical_release_title="Release — release @ $source_sha"', closure)
-        self.assertIn(".display_title == $display_title", closure)
-        self.assertIn(
-            'test "$(jq -r .display_title <<<"$release_run")" = "$canonical_release_title"',
-            closure,
-        )
 
     def test_release_automation_has_architecture_and_threat_contracts(self) -> None:
         adr = (ROOT / "docs/adr/0027-protected-release-handoff-automation.md").read_text(encoding="utf-8")

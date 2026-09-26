@@ -30,20 +30,6 @@ Every machine mutation phase proves the minted token non-mutatingly before use. 
 
 A blanket approving-review requirement or a required reviewer on the `release` environment would contradict the automatic-after-readiness contract. If that policy is intentionally introduced later, the release contract must explicitly acknowledge the new manual boundary instead of silently stalling automation.
 
-## One-time PyPI namespace bootstrap
-
-The initial `linura==0.0.1` PyPI namespace claim may use the temporary
-`bootstrap-pypi` operation in `.github/workflows/release.yml`. This is the only
-supported pre-release bootstrap exception.
-
-It must use an exact current protected-`main` SHA after native push CI/Security/
-CodeQL are green, build only `bindings/python`, preserve the exact hash-locked
-Python build envelope, independently reproduce the wheel, use the existing minimal
-`pypi` Environment publisher job, and independently verify the registry bytes.
-It must not create a Linura tag/GitHub Release, publish crates.io, or enter release
-closure. Remove the bootstrap operation immediately after the first verified PyPI
-publication; all later Python publication stays on the canonical release path.
-
 ## Automatic machine handoff
 
 After the reviewed readiness merge, the normal path is:

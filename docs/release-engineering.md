@@ -115,47 +115,6 @@ Before Promotion can dispatch Release, an isolated `closure-readiness` job mints
 
 If App configuration is missing, its installation permissions were not approved, the private key was rotated incorrectly, or permission drift occurred, Promotion fails closed before publication. The final Release-dispatch job returns to narrow repository `GITHUB_TOKEN` permissions (`actions: write`, `contents: read`) and never inherits the App private key or token.
 
-## One-time PyPI namespace bootstrap
-
-The initial `linura==0.0.1` PyPI namespace claim is a deliberately narrower
-exception to the normal version-release graph. It exists only because a PyPI
-Pending Trusted Publisher does not reserve a project name until the first upload.
-
-`.github/workflows/release.yml` therefore exposes a temporary
-`bootstrap-pypi` dispatch operation. It is not a Linura release and cannot create
-a Git tag, GitHub Release, crates.io publication, release-verification handoff, or
-terminal closure. The bootstrap path:
-
-1. requires an explicitly supplied 40-hex source SHA to equal workflow
-   `GITHUB_SHA`, checkout `HEAD`, and live protected `origin/main`;
-2. requires successful native protected-main **push** CI, Security, and CodeQL for
-   that exact SHA;
-3. requires the Python project to remain exactly `linura==0.0.1`,
-   dependency-free, with the bounded `src/linura` wheel surface;
-4. runs the package tests;
-5. builds only the Python wheel under exact Python 3.12.10, the repository
-   wheels-only SHA-256 build lock, disabled build isolation, and the fixed
-   wheel-specific `SOURCE_DATE_EPOCH`;
-6. independently rebuilds the wheel on a fresh runner and requires byte identity;
-7. performs no-OIDC PyPI preflight;
-8. reuses the same single minimal `publish-pypi` Environment job as canonical
-   releases; and
-9. immediately before the OIDC upload, rechecks live protected `main` through a
-   SHA-pinned GitHub API action inside the minimal publisher job; and
-10. re-downloads the live PyPI artifact and verifies the complete filename set and
-    SHA-256 bytes with no OIDC authority.
-
-Because bootstrap and canonical publication share `release.yml` only to preserve
-the configured PyPI Trusted Publisher identity, their workflow-run identities are
-explicitly disjoint: canonical runs are titled `Release — release @ <source-sha>`
-and release promotion/closure accept only that title. `Release — bootstrap-pypi @
-<source-sha>` can never suppress or satisfy canonical release evidence.
-
-The bootstrap operation is idempotent only for exact already-published bytes. A
-conflicting existing version fails closed. Once the first publication is verified,
-the temporary bootstrap operation is removed; subsequent Python publication occurs
-only as part of the normal proof-first Linura release lifecycle.
-
 ## Release validation and tag-last publication
 
 Release validation requires the exact promoted current-main source, exact successful proof run, frozen contract, permanent exact-SHA gates, sealed proof payload, checksums and provenance. Success is the release source-selection commit point.

@@ -107,26 +107,6 @@ The GitHub tag/Release publication job has no GitHub Environment dependency in a
 
 Both environments store no registry secret and have no required reviewer. Adding an environment reviewer, widening OIDC to build/test jobs, or attaching either environment to a broader job is a release-contract change and invalidates the automatic-after-readiness claim.
 
-### One-time PyPI namespace bootstrap
-
-Before the first PyPI project exists, a Pending Trusted Publisher does not reserve
-the `linura` name. A narrowly bounded bootstrap exception is therefore permitted
-inside the already-trusted `release.yml` workflow for `linura==0.0.1` only.
-
-The bootstrap is not a Linura release and grants no tag, GitHub Release, crates.io,
-release-verification, or closure authority. It must bind to exact protected
-`main`, require native main push CI/Security/CodeQL, build only the dependency-free
-Python package under the hash-locked Python toolchain, independently reproduce the
-wheel byte-for-byte, and reuse the same single minimal `pypi` OIDC upload job plus
-a no-OIDC registry verifier. Immediately before authentication/upload, that minimal
-job revalidates live protected `main` through a SHA-pinned GitHub API action.
-Because bootstrap and canonical publication share the `release.yml` workflow
-identity, canonical promotion and closure additionally bind acceptable publication
-runs to the exact `Release — release @ <source-sha>` display identity and reject
-bootstrap run identities. A pre-existing exact version is verified and reused; any
-conflicting filename set or bytes fail closed. This exception is removed after the
-first verified namespace claim.
-
 ### Registry publication boundaries and one verification-to-closure path
 
 The canonical Python wheel is produced only inside Trusted Release Proof from the exact release source under the hash-locked Python build toolchain, sealed into the proof payload, independently reproduced byte-for-byte and attested. Release performs a no-OIDC PyPI preflight against that exact sealed wheel. If the version is absent, only the minimal `pypi` environment job may exchange GitHub OIDC for PyPI publication authority; if the version already exists, its complete distribution set and bytes must exactly match the sealed artifact or the release fails closed. A no-OIDC post-upload job re-downloads/verifies PyPI before downstream release verification is dispatched. A failure after GitHub Release publication but before PyPI verification leaves the lifecycle incomplete and retryable; it does not authorize verification, crates.io publication or closure.
