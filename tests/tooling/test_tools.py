@@ -353,7 +353,12 @@ class ToolingTests(unittest.TestCase):
         )
         self.assertIn("needs.pypi-preflight.outputs.publish_required == 'true'", release)
         self.assertIn("pypa/gh-action-pypi-publish@", release)
-        self.assertIn("packages-dir: /tmp/linura-pypi/", release)
+        publish_pypi = release.split("\n  publish-pypi:", 1)[1].split(
+            "\n  verify-pypi:", 1
+        )[0]
+        self.assertIn("path: pypi-publish-dist/", publish_pypi)
+        self.assertIn("packages-dir: pypi-publish-dist/", publish_pypi)
+        self.assertNotIn("packages-dir: /tmp/", publish_pypi)
         self.assertNotIn("skip-existing: true", release)
         self.assertIn("verify-pypi:", release)
         self.assertIn("Verify exact PyPI publication", release)
