@@ -148,12 +148,23 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         package_manifest = self._write_frozen_manifest(root)
         self._freeze_contract(root, package_manifest)
         package_manifest_digest = hashlib.sha256(package_manifest.read_bytes()).hexdigest()
-        provider_versions = {
-            provider_id: "1:1.0.0-1"
-            for provider_id in ("networkmanager", "bluez", "pipewire", "wireplumber", "udisks2", "polkit")
-        }
+        package_versions: dict[str, str] = {}
+        for line in package_manifest.read_text(encoding="utf-8").splitlines():
+            if not line or line.startswith("#"):
+                continue
+            _repository, name, version, _architecture = line.split("\t")
+            package_versions[name] = version
+
+        provider_ids = ("networkmanager", "bluez", "pipewire", "wireplumber", "udisks2", "polkit")
+        provider_versions = {provider_id: package_versions[provider_id] for provider_id in provider_ids}
         evidence_dir = root / "qualification/v010/interactive-workstation"
-        evidence_dir.mkdir(parents=True, exist_ok=True)
+        machine_dir = evidence_dir / "machine"
+        provenance_dir = evidence_dir / "provenance"
+        machine_dir.mkdir(parents=True, exist_ok=True)
+        provenance_dir.mkdir(parents=True, exist_ok=True)
+
+        run_id = "q11-fixture-run"
+        boot_id = "11111111-2222-3333-4444-555555555555"
         case_observations = {
             "physical-session-start": ["physical-hardware-present", "wayland-session-active", "hyprland-session-active"],
             "session-supervision": [
@@ -174,6 +185,356 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "linurad_sha256": "b" * 64,
             "shell_bridge_sha256": "c" * 64,
         }
+        hardware = {
+            "cpu": {"architecture": "x86_64", "vendor": "AuthenticAMD", "model": "fixture-cpu"},
+            "gpu": {
+                "vendor_id": "1002",
+                "device_id": "fixture-gpu",
+                "driver": gpu_driver,
+                "driver_version": "fixture-driver-1",
+            },
+            "displays": [
+                {
+                    "connector": "DP-1",
+                    "width": 2560,
+                    "height": 1440,
+                    "refresh_millihz": 60000,
+                    "scale": 1.0,
+                }
+            ],
+        }
+
+        def binding(path: Path) -> dict[str, str]:
+            return {
+                "path": path.relative_to(root).as_posix(),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+
+        package_inventory = machine_dir / "package-inventory.tsv"
+        package_inventory.write_text(
+            "".join(f"{name}\t{package_versions[name]}\n" for name in sorted(package_versions)),
+            encoding="utf-8",
+        )
+        os_release = machine_dir / "os-release.txt"
+        os_release.write_text("ID=arch\n", encoding="utf-8")
+        root_filesystem = machine_dir / "root-filesystem.txt"
+        root_filesystem.write_text("btrfs\n", encoding="utf-8")
+        virtualization = machine_dir / "virtualization.txt"
+        virtualization.write_text("none\n", encoding="utf-8")
+        boot_id_probe = machine_dir / "boot-id.txt"
+        boot_id_probe.write_text(boot_id + "\n", encoding="utf-8")
+        hardware_probe = machine_dir / "hardware.json"
+        hardware_probe.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "artifact_type": "linura-v010-physical-hardware-probe",
+                    "source_commit_sha": source_commit_sha,
+                    "run_id": run_id,
+                    "hardware": hardware,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        contract_path = root / "contracts/v010-workstation-qualification.toml"
+        contract_data = tomllib.loads(contract_path.read_text(encoding="utf-8"))
+        environment_path = machine_dir / "environment.json"
+        environment_payload = {
+            "schema_version": 1,
+            "artifact_type": "linura-v010-physical-workstation-environment",
+            "source_commit_sha": source_commit_sha,
+            "run_id": run_id,
+            "profile_id": "arch-hyprland-v1",
+            "profile_sha256": contract_data["profile_sha256"],
+            "machine_class": "workstation",
+            "package_manifest_sha256": package_manifest_digest,
+            "execution": {
+                "scope": "machine",
+                "kind": "physical",
+                "architecture": "x86_64",
+                "boot_id": boot_id,
+                "virtualization": "none",
+            },
+            "package_inventory": binding(package_inventory),
+            "hardware_probe": binding(hardware_probe),
+            "probes": {
+                "os_release": binding(os_release),
+                "root_filesystem": binding(root_filesystem),
+                "virtualization": binding(virtualization),
+                "boot_id": binding(boot_id_probe),
+            },
+        }
+        environment_path.write_text(
+            json.dumps(environment_payload, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        environment_binding = binding(environment_path)
+
+        cases = []
+        mechanisms = {
+            "physical-session-start": "physical-session-observation",
+            "session-supervision": "systemd-session-observation",
+            "shell-render-and-input": "physical-input-observation",
+            "display-scale-and-hidpi": "physical-display-observation",
+            "provider-runtime-identities": "physical-provider-observation",
+            "restart-recovery": "physical-restart-observation",
+        }
+        for name, observations in case_observations.items():
+            mechanism = mechanisms[name]
+            event_log = provenance_dir / f"{name}.log"
+            event_log.write_text(
+                f"case={name}\n"
+                "controller=maintainer-console\n"
+                f"mechanism={mechanism}\n"
+                f"boot_id={boot_id}\n",
+                encoding="utf-8",
+            )
+            provenance_path = provenance_dir / f"{name}.json"
+            provenance_payload = {
+                "schema_version": 1,
+                "artifact_type": "linura-v010-physical-workstation-case-provenance",
+                "source_commit_sha": source_commit_sha,
+                "run_id": run_id,
+                "case": name,
+                "environment_sha256": environment_binding["sha256"],
+                "boot_id": boot_id,
+                "scope": "machine",
+                "controller": "maintainer-console",
+                "mechanism": mechanism,
+                "external_controller": True,
+                "process_local_mock": False,
+                "event_log": binding(event_log),
+            }
+            provenance_path.write_text(
+                json.dumps(provenance_payload, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            evidence = evidence_dir / f"{name}.json"
+            payload = {
+                "schema_version": 1,
+                "attestation_type": "linura-v010-qualification-case",
+                "case": name,
+                "result": "passed",
+                "run_id": run_id,
+                "captured_at_utc": "2026-09-27T00:00:00Z",
+                "runner": {"id": "qualification/v010/workstation-runner", **source},
+                "machine_execution": {
+                    "scope": "machine",
+                    "environment_sha256": environment_binding["sha256"],
+                    "boot_id": boot_id,
+                    "controller": "maintainer-console",
+                    "mechanism": mechanism,
+                    "provenance": binding(provenance_path),
+                },
+                "observations": [
+                    {
+                        "name": observation,
+                        "result": "passed",
+                        "value": (
+                            provider_versions[observation.removesuffix("-version")]
+                            if observation.endswith("-version")
+                            else True
+                        ),
+                    }
+                    for observation in observations
+                ],
+            }
+            evidence.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            cases.append(
+                {
+                    "name": name,
+                    "result": "passed",
+                    "evidence": evidence.relative_to(root).as_posix(),
+                    "sha256": hashlib.sha256(evidence.read_bytes()).hexdigest(),
+                }
+            )
+
+        manifest = root / "qualification/v010/interactive-workstation-evidence.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest_payload = {
+            "schema_version": 1,
+            "milestone": "v0.10.0",
+            "profile_id": "arch-hyprland-v1",
+            "machine_class": "workstation",
+            "evidence_type": "maintainer-physical-workstation",
+            "evidence_tier": "maintainer_hardware",
+            "physical_hardware": physical_hardware,
+            "result": "passed",
+            "run_id": run_id,
+            "captured_at_utc": "2026-09-27T00:00:00Z",
+            "package_manifest_sha256": package_manifest_digest,
+            "source": source,
+            "machine_environment": environment_binding,
+            "hardware": hardware,
+            "session": {
+                "protocol": "wayland",
+                "compositor": "hyprland",
+                "compositor_version": package_versions["hyprland"],
+                "quickshell_version": package_versions["quickshell"],
+                "qt_version": package_versions["qt6-base"],
+                "kernel_version": package_versions["linux"],
+                "systemd_version": package_versions["systemd"],
+            },
+            "providers": provider_versions,
+            "cases": cases,
+        }
+        manifest.write_text(json.dumps(manifest_payload, indent=2) + "\n", encoding="utf-8")
+        digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        self._rewrite_contract(
+            root,
+            '[interactive_workstation]\nevidence_ready = false\nevidence_manifest = "qualification/v010/interactive-workstation-evidence.json"\nevidence_manifest_sha256 = ""',
+            '[interactive_workstation]\nevidence_ready = true\nevidence_manifest = "qualification/v010/interactive-workstation-evidence.json"\n'
+            f'evidence_manifest_sha256 = "{digest}"',
+        )
+        return manifest
+
+    def _release_matrix_mechanism(self, evidence_type: str, case_name: str) -> str:
+        q12 = {
+            "update-success": "machine-update",
+            "migration-v09-v010": "machine-migration",
+            "pre-migration-backup": "machine-backup",
+            "migration-failure-restore-retry": "externally-injected-migration-failure",
+            "update-interruption": "externally-interrupted-update",
+            "restart-reobservation": "machine-reboot",
+            "crash-before-dispatch": "external-process-termination",
+            "crash-after-effect-start": "external-process-termination",
+            "crash-around-durable-commit": "external-process-termination",
+            "indeterminate-external-outcome": "external-response-loss",
+            "deterministic-reconciliation": "external-state-drift",
+            "power-loss-recovery": "machine-power-cut",
+            "snapshot-rollback": "snapper-rollback",
+            "gui-unavailable-recovery": "shell-or-session-stop",
+            "offline-local-recovery": "network-isolation",
+            "corrupt-newer-state-fail-closed": "persistent-state-corruption",
+        }
+        q13 = {
+            "inbound-firewall-default-deny": "inbound-network-probe",
+            "ssh-disabled-default": "listener-and-unit-probe",
+            "remote-exposure-typed-authority": "unauthorized-remote-exposure-attempt",
+            "untrusted-package-source-denied": "untrusted-package-source-attempt",
+            "polkit-authorization": "cross-principal-polkit-probe",
+            "privilege-boundary": "privilege-boundary-probe",
+            "binding-substitution-rejection": "binding-substitution-attempt",
+            "independent-verification": "executor-self-report-tamper",
+            "authority-ceiling": "surface-authority-probe",
+            "secret-redaction": "secret-injection",
+            "adversarial-input": "malformed-input-injection",
+            "malicious-inputs": "malicious-input-corpus",
+            "recovery-boundary": "gui-and-model-unavailability",
+        }
+        mapping = q12 if evidence_type == "exact-source-q12-update-recovery" else q13
+        return mapping.get(case_name, f"legacy-{case_name}")
+
+    def _refresh_release_matrix_contract_digest(
+        self,
+        root: Path,
+        *,
+        section: str,
+        manifest: Path,
+    ) -> None:
+        digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        contract = root / "contracts/v010-workstation-qualification.toml"
+        text = contract.read_text(encoding="utf-8")
+        old = tomllib.loads(text)[section]["evidence_manifest_sha256"]
+        contract.write_text(text.replace(old, digest, 1), encoding="utf-8")
+
+    def _write_release_matrix_evidence(
+        self,
+        root: Path,
+        *,
+        section: str,
+        manifest_name: str,
+        evidence_type: str,
+        case_observations: dict[str, list[str]],
+        source_commit_sha: str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ) -> Path:
+        contract_path = root / "contracts/v010-workstation-qualification.toml"
+        contract_data = tomllib.loads(contract_path.read_text(encoding="utf-8"))
+        if contract_data["substrate"]["state"] != "frozen":
+            package_manifest = self._write_frozen_manifest(root)
+            self._freeze_contract(root, package_manifest)
+            contract_data = tomllib.loads(contract_path.read_text(encoding="utf-8"))
+        else:
+            package_manifest = root / contract_data["substrate"]["package_manifest"]
+
+        package_manifest_digest = hashlib.sha256(package_manifest.read_bytes()).hexdigest()
+        package_versions: dict[str, str] = {}
+        for line in package_manifest.read_text(encoding="utf-8").splitlines():
+            if not line or line.startswith("#"):
+                continue
+            _repository, name, version, _architecture = line.split("\t")
+            package_versions[name] = version
+
+        run_id = f"{section}-fixture-run"
+        evidence_dir = root / "qualification/v010/release-matrix" / section
+        machine_dir = evidence_dir / "machine"
+        provenance_dir = evidence_dir / "provenance"
+        machine_dir.mkdir(parents=True, exist_ok=True)
+        provenance_dir.mkdir(parents=True, exist_ok=True)
+
+        boot_id = "11111111-2222-3333-4444-555555555555"
+        package_inventory = machine_dir / "package-inventory.tsv"
+        package_inventory.write_text(
+            "".join(f"{name}\t{package_versions[name]}\n" for name in sorted(package_versions)),
+            encoding="utf-8",
+        )
+        os_release = machine_dir / "os-release.txt"
+        os_release.write_text("ID=arch\n", encoding="utf-8")
+        root_filesystem = machine_dir / "root-filesystem.txt"
+        root_filesystem.write_text("btrfs\n", encoding="utf-8")
+        virtualization = machine_dir / "virtualization.txt"
+        virtualization.write_text("qemu\n", encoding="utf-8")
+        boot_id_probe = machine_dir / "boot-id.txt"
+        boot_id_probe.write_text(boot_id + "\n", encoding="utf-8")
+
+        def binding(path: Path) -> dict[str, str]:
+            return {
+                "path": path.relative_to(root).as_posix(),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+
+        environment_path = machine_dir / "environment.json"
+        environment_payload = {
+            "schema_version": 1,
+            "artifact_type": "linura-v010-machine-environment",
+            "source_commit_sha": source_commit_sha,
+            "run_id": run_id,
+            "profile_id": "arch-hyprland-v1",
+            "profile_sha256": contract_data["profile_sha256"],
+            "machine_class": "workstation",
+            "package_manifest_sha256": package_manifest_digest,
+            "execution": {
+                "scope": "machine",
+                "kind": "virtual-machine",
+                "architecture": "x86_64",
+                "boot_id": boot_id,
+                "virtualization": "qemu",
+            },
+            "storage": {
+                "root_filesystem": "btrfs",
+                "snapshot_provider": "snapper",
+            },
+            "package_inventory": binding(package_inventory),
+            "probes": {
+                "os_release": binding(os_release),
+                "root_filesystem": binding(root_filesystem),
+                "virtualization": binding(virtualization),
+                "boot_id": binding(boot_id_probe),
+            },
+        }
+        environment_path.write_text(
+            json.dumps(environment_payload, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        environment_binding = {
+            "evidence": environment_path.relative_to(root).as_posix(),
+            "sha256": hashlib.sha256(environment_path.read_bytes()).hexdigest(),
+        }
+
         cases = []
         boot_transition_mechanisms = {"machine-reboot", "machine-power-cut"}
         recovered_boot_id = "66666666-7777-8888-9999-aaaaaaaaaaaa"
@@ -955,6 +1316,88 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("must be a structured JSON runner attestation", result.stderr)
+
+
+    def test_interactive_workstation_requires_digest_bound_physical_machine_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload.pop("machine_environment")
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "interactive workstation machine environment binding must be an object",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_rejects_virtualized_machine_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            environment_path = root / payload["machine_environment"]["path"]
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            environment["execution"]["kind"] = "virtual-machine"
+            environment["execution"]["virtualization"] = "qemu"
+            virtualization_probe = root / environment["probes"]["virtualization"]["path"]
+            virtualization_probe.write_text("qemu\n", encoding="utf-8")
+            environment["probes"]["virtualization"]["sha256"] = hashlib.sha256(
+                virtualization_probe.read_bytes()
+            ).hexdigest()
+            environment_path.write_text(json.dumps(environment, indent=2) + "\n", encoding="utf-8")
+            payload["machine_environment"]["sha256"] = hashlib.sha256(
+                environment_path.read_bytes()
+            ).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "interactive workstation machine environment execution.kind must be physical",
+                result.stderr,
+            )
+            self.assertIn(
+                "interactive workstation machine environment virtualization must be none",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_case_requires_external_execution_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "physical-session-start")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            attestation.pop("machine_execution")
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "interactive workstation case evidence physical-session-start missing machine_execution provenance",
+                result.stderr,
+            )
 
     def test_q12_q13_release_matrix_runner_attestations_are_valid(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

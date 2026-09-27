@@ -264,6 +264,9 @@ EXPECTED_INTERACTIVE_WORKSTATION = {
     "required_session": "wayland",
     "required_compositor": "hyprland",
     "require_physical_hardware": True,
+    "require_machine_environment_provenance": True,
+    "require_raw_machine_probes": True,
+    "require_case_execution_provenance": True,
     "required_provider_ids": [
         "networkmanager",
         "bluez",
@@ -281,6 +284,15 @@ EXPECTED_INTERACTIVE_WORKSTATION = {
         "restart-recovery",
     ],
 }
+EXPECTED_Q11_EXECUTION_MECHANISMS = {
+    "physical-session-start": "physical-session-observation",
+    "session-supervision": "systemd-session-observation",
+    "shell-render-and-input": "physical-input-observation",
+    "display-scale-and-hidpi": "physical-display-observation",
+    "provider-runtime-identities": "physical-provider-observation",
+    "restart-recovery": "physical-restart-observation",
+}
+
 EXPECTED_Q12_CASE_OBSERVATIONS = {
     "update-success": ["candidate-applied", "post-update-state-reobserved", "update-audit-bound"],
     "migration-v09-v010": ["v09-state-seeded", "v010-migration-applied", "persistent-state-reopened"],
@@ -900,12 +912,298 @@ def _validate_runner_case_attestation(
             )
 
 
+
+def _validate_q11_bound_artifact(
+    root: Path,
+    binding: object,
+    *,
+    label: str,
+    failures: list[str],
+) -> Path | None:
+    if not isinstance(binding, dict):
+        failures.append(f"{label} binding must be an object")
+        return None
+    path = _bounded_regular_path(
+        root,
+        binding.get("path"),
+        prefix="qualification/v010/interactive-workstation/",
+        label=label,
+        failures=failures,
+    )
+    digest = binding.get("sha256")
+    if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+        failures.append(f"{label} must carry a lowercase SHA-256 digest")
+        return None
+    if path is None:
+        return None
+    if _sha256(path) != digest:
+        failures.append(f"{label} digest mismatch")
+        return None
+    return path
+
+
+def _validate_q11_machine_environment(
+    root: Path,
+    manifest: dict[str, object],
+    *,
+    expected_profile_sha256: str | None,
+    expected_package_manifest_sha256: str | None,
+    expected_package_versions: dict[str, str] | None,
+    expected_architecture: str | None,
+    failures: list[str],
+) -> tuple[str | None, str | None]:
+    label = "interactive workstation machine environment"
+    binding = manifest.get("machine_environment")
+    environment_path = _validate_q11_bound_artifact(
+        root,
+        binding,
+        label=label,
+        failures=failures,
+    )
+    environment_sha256 = binding.get("sha256") if isinstance(binding, dict) else None
+    if environment_path is None or not isinstance(environment_sha256, str):
+        return None, None
+
+    environment = _load_json(environment_path, label, failures)
+    if not environment:
+        return environment_sha256, None
+    manifest_source = manifest.get("source")
+    source_sha = (
+        manifest_source.get("commit_sha")
+        if isinstance(manifest_source, dict)
+        else None
+    )
+    if environment.get("schema_version") != 1:
+        failures.append(f"{label} schema_version must be 1")
+    if environment.get("artifact_type") != "linura-v010-physical-workstation-environment":
+        failures.append(f"{label} artifact_type must identify physical workstation provenance")
+    if environment.get("source_commit_sha") != source_sha:
+        failures.append(f"{label} source must match the interactive workstation source")
+    if environment.get("run_id") != manifest.get("run_id"):
+        failures.append(f"{label} run_id must match the parent qualification run")
+    if environment.get("profile_id") != EXPECTED_PROFILE:
+        failures.append(f"{label} must bind {EXPECTED_PROFILE}")
+    if environment.get("machine_class") != EXPECTED_MACHINE_CLASS:
+        failures.append(f"{label} machine_class must be workstation")
+    if expected_profile_sha256 is None or environment.get("profile_sha256") != expected_profile_sha256:
+        failures.append(f"{label} must bind the reviewed workstation profile digest")
+    if (
+        expected_package_manifest_sha256 is None
+        or expected_package_versions is None
+        or expected_architecture is None
+    ):
+        failures.append(f"{label} requires the frozen qualification substrate")
+    elif environment.get("package_manifest_sha256") != expected_package_manifest_sha256:
+        failures.append(f"{label} package manifest digest must match the frozen substrate")
+
+    execution = environment.get("execution")
+    boot_id: str | None = None
+    virtualization: str | None = None
+    if not isinstance(execution, dict):
+        failures.append(f"{label} missing execution identity")
+    else:
+        if execution.get("scope") != "machine":
+            failures.append(f"{label} execution.scope must be machine")
+        if execution.get("kind") != "physical":
+            failures.append(f"{label} execution.kind must be physical")
+        if execution.get("architecture") != expected_architecture:
+            failures.append(f"{label} architecture must match the frozen substrate")
+        boot_value = execution.get("boot_id")
+        if not isinstance(boot_value, str) or BOOT_ID_RE.fullmatch(boot_value) is None:
+            failures.append(f"{label} boot_id must be a canonical UUID")
+        else:
+            boot_id = boot_value
+        virtualization_value = execution.get("virtualization")
+        if virtualization_value != "none":
+            failures.append(f"{label} virtualization must be none")
+        else:
+            virtualization = virtualization_value
+
+    package_inventory = _validate_q11_bound_artifact(
+        root,
+        environment.get("package_inventory"),
+        label=f"{label} installed package inventory",
+        failures=failures,
+    )
+    if package_inventory is not None and expected_package_versions is not None:
+        observed_packages = _load_release_machine_package_inventory(
+            package_inventory,
+            label=f"{label} installed package inventory",
+            failures=failures,
+        )
+        if observed_packages is not None and observed_packages != expected_package_versions:
+            failures.append(
+                f"{label} installed package inventory must exactly match the frozen package manifest"
+            )
+
+    probes = environment.get("probes")
+    if not isinstance(probes, dict) or set(probes) != MACHINE_PROBE_NAMES:
+        failures.append(f"{label} must retain exactly the required raw machine probes")
+        probes = {}
+    probe_paths: dict[str, Path] = {}
+    for probe_name in sorted(MACHINE_PROBE_NAMES):
+        probe_path = _validate_q11_bound_artifact(
+            root,
+            probes.get(probe_name),
+            label=f"{label} machine probe {probe_name}",
+            failures=failures,
+        )
+        if probe_path is not None:
+            probe_paths[probe_name] = probe_path
+
+    if "os_release" in probe_paths:
+        try:
+            os_release_lines = {
+                line.strip()
+                for line in probe_paths["os_release"].read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            }
+        except UnicodeError:
+            failures.append(f"{label} os-release probe must be valid UTF-8")
+        else:
+            if "ID=arch" not in os_release_lines and 'ID="arch"' not in os_release_lines:
+                failures.append(f"{label} os-release probe must independently identify Arch Linux")
+    if "root_filesystem" in probe_paths:
+        if probe_paths["root_filesystem"].read_text(encoding="utf-8").strip() != "btrfs":
+            failures.append(f"{label} root-filesystem probe must independently identify btrfs")
+    if "virtualization" in probe_paths:
+        observed_virtualization = probe_paths["virtualization"].read_text(encoding="utf-8").strip()
+        if observed_virtualization != "none":
+            failures.append(f"{label} virtualization probe must independently prove no virtualization")
+        if virtualization is not None and observed_virtualization != virtualization:
+            failures.append(f"{label} virtualization probe must match the machine execution identity")
+    if "boot_id" in probe_paths and boot_id is not None:
+        if probe_paths["boot_id"].read_text(encoding="utf-8").strip() != boot_id:
+            failures.append(f"{label} boot-id probe must match the machine execution identity")
+
+    hardware_probe_path = _validate_q11_bound_artifact(
+        root,
+        environment.get("hardware_probe"),
+        label=f"{label} physical hardware probe",
+        failures=failures,
+    )
+    if hardware_probe_path is not None:
+        hardware_probe = _load_json(
+            hardware_probe_path,
+            f"{label} physical hardware probe",
+            failures,
+        )
+        if hardware_probe:
+            if hardware_probe.get("schema_version") != 1:
+                failures.append(f"{label} physical hardware probe schema_version must be 1")
+            if hardware_probe.get("artifact_type") != "linura-v010-physical-hardware-probe":
+                failures.append(f"{label} physical hardware probe artifact_type drifted")
+            if hardware_probe.get("source_commit_sha") != source_sha:
+                failures.append(f"{label} physical hardware probe source mismatch")
+            if hardware_probe.get("run_id") != manifest.get("run_id"):
+                failures.append(f"{label} physical hardware probe run_id mismatch")
+            if hardware_probe.get("hardware") != manifest.get("hardware"):
+                failures.append(f"{label} physical hardware probe must match manifest hardware identities")
+
+    return environment_sha256, boot_id
+
+
+def _validate_q11_case_execution(
+    root: Path,
+    attestation: dict[str, object],
+    *,
+    label: str,
+    case_name: str,
+    manifest: dict[str, object],
+    environment_sha256: str | None,
+    environment_boot_id: str | None,
+    failures: list[str],
+) -> None:
+    execution = attestation.get("machine_execution")
+    if not isinstance(execution, dict):
+        failures.append(f"{label} missing machine_execution provenance")
+        return
+    if execution.get("scope") != "machine":
+        failures.append(f"{label} machine_execution.scope must be machine")
+    if environment_sha256 is None or execution.get("environment_sha256") != environment_sha256:
+        failures.append(f"{label} machine_execution must bind the physical machine environment digest")
+    if environment_boot_id is None or execution.get("boot_id") != environment_boot_id:
+        failures.append(f"{label} machine_execution must bind the physical machine boot identity")
+    controller = execution.get("controller")
+    if controller not in PHYSICAL_EXTERNAL_CONTROLLERS:
+        failures.append(f"{label} machine_execution controller must be an external physical-machine controller")
+    expected_mechanism = EXPECTED_Q11_EXECUTION_MECHANISMS[case_name]
+    if execution.get("mechanism") != expected_mechanism:
+        failures.append(f"{label} machine_execution mechanism must be {expected_mechanism}")
+
+    provenance_path = _validate_q11_bound_artifact(
+        root,
+        execution.get("provenance"),
+        label=f"{label} machine execution provenance",
+        failures=failures,
+    )
+    if provenance_path is None:
+        return
+    provenance = _load_json(
+        provenance_path,
+        f"{label} machine execution provenance",
+        failures,
+    )
+    if not provenance:
+        return
+    if provenance.get("schema_version") != 1:
+        failures.append(f"{label} machine execution provenance schema_version must be 1")
+    if provenance.get("artifact_type") != "linura-v010-physical-workstation-case-provenance":
+        failures.append(f"{label} machine execution provenance artifact_type drifted")
+    manifest_source = manifest.get("source")
+    source_sha = (
+        manifest_source.get("commit_sha")
+        if isinstance(manifest_source, dict)
+        else None
+    )
+    if provenance.get("source_commit_sha") != source_sha:
+        failures.append(f"{label} machine execution provenance source mismatch")
+    if provenance.get("run_id") != manifest.get("run_id") or provenance.get("case") != case_name:
+        failures.append(f"{label} machine execution provenance must bind the parent run and case")
+    if provenance.get("environment_sha256") != environment_sha256:
+        failures.append(f"{label} machine execution provenance environment binding mismatch")
+    if provenance.get("boot_id") != environment_boot_id:
+        failures.append(f"{label} machine execution provenance boot identity mismatch")
+    if provenance.get("scope") != "machine":
+        failures.append(f"{label} machine execution provenance scope must be machine")
+    if provenance.get("controller") != controller:
+        failures.append(f"{label} machine execution provenance controller mismatch")
+    if provenance.get("mechanism") != expected_mechanism:
+        failures.append(f"{label} machine execution provenance mechanism mismatch")
+    if provenance.get("external_controller") is not True:
+        failures.append(f"{label} machine execution provenance must prove external control")
+    if provenance.get("process_local_mock") is not False:
+        failures.append(f"{label} machine execution provenance process_local_mock must be false")
+
+    event_log_path = _validate_q11_bound_artifact(
+        root,
+        provenance.get("event_log"),
+        label=f"{label} machine execution event log",
+        failures=failures,
+    )
+    if event_log_path is not None:
+        try:
+            event_lines = set(event_log_path.read_text(encoding="utf-8").splitlines())
+        except UnicodeError:
+            failures.append(f"{label} machine execution event log must be valid UTF-8")
+        else:
+            required_lines = {
+                f"case={case_name}",
+                f"controller={controller}",
+                f"mechanism={expected_mechanism}",
+                f"boot_id={environment_boot_id}",
+            }
+            if not required_lines.issubset(event_lines):
+                failures.append(f"{label} machine execution event log does not bind the physical run")
+
+
 def _validate_interactive_workstation_evidence(
     root: Path,
     interactive: dict[str, object],
     failures: list[str],
     *,
     expected_source_sha: str | None,
+    expected_profile_sha256: str | None,
     expected_package_manifest_sha256: str | None,
     expected_provider_versions: dict[str, str] | None,
     expected_architecture: str | None,
@@ -1073,6 +1371,16 @@ def _validate_interactive_workstation_evidence(
                     f"interactive workstation provider {provider_id} must match frozen package version {expected_version}"
                 )
 
+    environment_sha256, environment_boot_id = _validate_q11_machine_environment(
+        root,
+        manifest,
+        expected_profile_sha256=expected_profile_sha256,
+        expected_package_manifest_sha256=expected_package_manifest_sha256,
+        expected_package_versions=expected_provider_versions,
+        expected_architecture=expected_architecture,
+        failures=failures,
+    )
+
     cases = manifest.get("cases")
     required_cases = EXPECTED_INTERACTIVE_WORKSTATION["required_cases"]
     if not isinstance(cases, list) or len(cases) != len(required_cases):
@@ -1126,6 +1434,22 @@ def _validate_interactive_workstation_evidence(
                 label=f"interactive workstation case evidence {name}",
                 failures=failures,
             )
+            attestation = _load_json(
+                evidence_path,
+                f"interactive workstation case evidence {name}",
+                failures,
+            )
+            if attestation:
+                _validate_q11_case_execution(
+                    root,
+                    attestation,
+                    label=f"interactive workstation case evidence {name}",
+                    case_name=name,
+                    manifest=manifest,
+                    environment_sha256=environment_sha256,
+                    environment_boot_id=environment_boot_id,
+                    failures=failures,
+                )
 
 
 def _load_release_machine_package_inventory(
@@ -2650,6 +2974,11 @@ def validate(
                 interactive,
                 failures,
                 expected_source_sha=expected_source_sha,
+                expected_profile_sha256=(
+                    contract.get("profile_sha256")
+                    if isinstance(contract.get("profile_sha256"), str)
+                    else None
+                ),
                 expected_package_manifest_sha256=frozen_package_manifest_digest,
                 expected_provider_versions=frozen_package_versions,
                 expected_architecture=frozen_substrate_architecture,

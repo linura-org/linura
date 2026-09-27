@@ -119,6 +119,9 @@ required_machine_class = "workstation"
 required_session = "wayland"
 required_compositor = "hyprland"
 require_physical_hardware = true
+require_machine_environment_provenance = true
+require_raw_machine_probes = true
+require_case_execution_provenance = true
 required_provider_ids = ["networkmanager", "bluez", "pipewire", "wireplumber", "udisks2", "polkit"]
 required_cases = ["physical-session-start", "session-supervision", "shell-render-and-input", "display-scale-and-hidpi", "provider-runtime-identities", "restart-recovery"]
 
