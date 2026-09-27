@@ -141,8 +141,35 @@ jobs:
           test "${#qualification_trees[@]}" -eq 1
           qualification_source_sha="${qualification_sources[0]}"
           qualification_tree_sha="${qualification_trees[0]}"
-          test "$(git rev-parse "$qualification_source_sha^{tree}")" = "$qualification_tree_sha"
-          git merge-base --is-ancestor "$qualification_source_sha" "$SOURCE_SHA"
+          actual_qualification_tree="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$qualification_source_sha" --jq .tree.sha)"
+          test "$actual_qualification_tree" = "$qualification_tree_sha"
+          mapfile -t preparation_lineage < <(git rev-list --parents -n 1 "$SOURCE_SHA")
+          read -r -a preparation_parts <<<"${preparation_lineage[0]}"
+          test "${#preparation_parts[@]}" -eq 2
+          semantic_source_sha="${preparation_parts[1]}"
+          semantic_tree_sha="$(git rev-parse "$semantic_source_sha^{tree}")"
+          test "$qualification_tree_sha" != "$semantic_tree_sha"
+          if [[ "$tag" = "v0.10.0" ]]; then
+            readiness_prs="$(gh api -H 'Accept: application/vnd.github+json' "repos/$GITHUB_REPOSITORY/commits/$semantic_source_sha/pulls")"
+            readiness_pr="$(jq -c --arg sha "$semantic_source_sha" --arg repo "$GITHUB_REPOSITORY" '
+              [.[] | select(
+                .merged_at != null and
+                .base.ref == "main" and
+                .merge_commit_sha == $sha and
+                .head.repo.full_name == $repo
+              )]
+              | if length == 1 then .[0] else empty end
+            ' <<<"$readiness_prs")"
+            test -n "$readiness_pr"
+            readiness_pr_number="$(jq -r .number <<<"$readiness_pr")"
+            readiness_head_sha="$(jq -r .head.sha <<<"$readiness_pr")"
+            python3 tools/verify_v010_slice_pr_evidence.py \
+              --repository "$GITHUB_REPOSITORY" \
+              --qualification-source-sha "$qualification_source_sha" \
+              --readiness-pr-number "$readiness_pr_number" \
+              --readiness-head-sha "$readiness_head_sha" \
+              --readiness-merge-sha "$semantic_source_sha"
+          fi
           {
             printf 'tree_sha=%s\n' "$tree_sha"
             printf 'qualification_source_sha=%s\n' "$qualification_source_sha"

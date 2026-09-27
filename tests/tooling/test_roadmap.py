@@ -122,19 +122,185 @@ class RoadmapContractTests(unittest.TestCase):
         checker = (ROOT / "tools/check_roadmap.py").read_text(encoding="utf-8")
         self.assertIn('os.environ.get("LINURA_EXPECTED_SOURCE_SHA")', checker)
         self.assertIn("expected_source_sha=expected_source_sha", checker)
+        self.assertIn("post_release_closed=v010_is_released", checker)
+
+        roadmap = tomllib.loads((ROOT / "contracts/roadmap.toml").read_text(encoding="utf-8"))
+        v010 = next(item for item in roadmap["milestone"] if item["version"] == "v0.10.0")
+        self.assertEqual(
+            v010["release_qualified_qualification_environments"],
+            ["qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"],
+        )
+        self.assertEqual(
+            v010["release_qualified_platform_profiles"],
+            [{"machine_class": "workstation", "profile": "arch-hyprland-v1"}],
+        )
 
         preparation = (ROOT / ".github/workflows/release-preparation.yml").read_text(encoding="utf-8")
-        self.assertIn('qualification_source_sha="${lineage_parts[1]}"', preparation)
+        self.assertIn('readiness_head_sha="$(jq -r .head.sha <<<"$selected_pr")"', preparation)
+        self.assertIn('qualification_source_sha="$(jq -r \'.parents[0].sha\' <<<"$readiness_commit")"', preparation)
+        self.assertIn('test "$readiness_tree_sha" = "$source_tree_sha"', preparation)
+        self.assertIn('test "$qualification_tree_sha" != "$readiness_tree_sha"', preparation)
+        self.assertNotIn('qualification_source_sha="${lineage_parts[1]}"', preparation)
+        first_gate = preparation.index('python3 tools/check_roadmap.py . --release-candidate "$tag"')
+        source_resolution = preparation.index('qualification_source_sha="$(jq -r \'.parents[0].sha\' <<<"$readiness_commit")"')
+        self.assertLess(source_resolution, first_gate)
+        self.assertIn("tools/verify_v010_slice_pr_evidence.py", preparation)
+        self.assertIn('--readiness-pr-number "$pr_number"', preparation)
+        self.assertIn('--readiness-head-sha "$readiness_head_sha"', preparation)
+        self.assertIn('--readiness-merge-sha "$SOURCE_SHA"', preparation)
+        self.assertIn('--readiness-pr-number "$READINESS_PR_NUMBER"', preparation)
+        self.assertIn('--readiness-head-sha "$READINESS_HEAD_SHA"', preparation)
         self.assertIn("Qualification-Source: $QUALIFICATION_SOURCE_SHA", preparation)
         self.assertIn("Qualification-Tree: $QUALIFICATION_TREE_SHA", preparation)
 
         authorization = (ROOT / ".github/workflows/release-authorization.yml").read_text(encoding="utf-8")
+        self.assertIn('test "$qualification_tree_sha" != "$semantic_tree_sha"', authorization)
+        self.assertIn("tools/verify_v010_slice_pr_evidence.py", authorization)
         self.assertIn("Qualification-Source: $QUALIFICATION_SOURCE_SHA", authorization)
         self.assertIn("Qualification-Tree: $QUALIFICATION_TREE_SHA", authorization)
+
+        qualification_workflow = (ROOT / ".github/workflows/v010-qualification.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Resolve qualification evidence source", qualification_workflow)
+        self.assertIn(
+            'release_contract.py validate-intent --source-sha "$SOURCE_SHA" --json',
+            qualification_workflow,
+        )
+        self.assertIn(
+            'release_contract.py validate-preparation',
+            qualification_workflow,
+        )
+        self.assertIn(
+            '--tag v0.10.0',
+            qualification_workflow,
+        )
+        self.assertIn(
+            'candidate="$(jq -r .qualification_source_sha <<<"$preparation")"',
+            qualification_workflow,
+        )
+        self.assertIn(
+            'test "$(git rev-parse "$candidate^{tree}")" = "$candidate_tree"',
+            qualification_workflow,
+        )
+        self.assertIn(
+            'mapfile -d \'\' -t changed < <(git diff --no-renames --name-only -z "$parent" "$SOURCE_SHA")',
+            qualification_workflow,
+        )
+        self.assertNotIn(
+            'git diff --name-only "$parent" "$SOURCE_SHA"',
+            qualification_workflow,
+        )
+        self.assertIn("release_intent_source_sha", qualification_workflow)
+        self.assertIn("qualification_source_sha", qualification_workflow)
+        self.assertIn("qualification_tree_sha", qualification_workflow)
+        self.assertIn(
+            'release_contract.py validate-intent --source-sha "$release_intent_source" --json',
+            qualification_workflow,
+        )
+        self.assertIn(
+            'test "$(git rev-parse "$persisted_source^{tree}")" = "$persisted_tree"',
+            qualification_workflow,
+        )
+        self.assertIn(
+            "contracts/v010-workstation-qualification.toml|contracts/v010-workstation-slices.toml",
+            qualification_workflow,
+        )
+        self.assertIn(
+            "printf 'LINURA_EXPECTED_SOURCE_SHA=%s\\n' \"$expected_source\"",
+            qualification_workflow,
+        )
+
+        runtime = (ROOT / ".github/workflows/v010-shell-runtime-qualification.yml").read_text(
+            encoding="utf-8"
+        )
+        release_build = (ROOT / ".github/workflows/reusable-release-build.yml").read_text(
+            encoding="utf-8"
+        )
+        for fragment in (
+            "RELEASE_TARGET: x86_64-unknown-linux-gnu",
+            "CARGO_INCREMENTAL=0",
+            "TZ=UTC",
+            "LANG=C.UTF-8",
+            "LC_ALL=C.UTF-8",
+            "RUSTFLAGS=--remap-path-prefix=%s=/workspace",
+        ):
+            self.assertIn(fragment, runtime)
+            self.assertIn(fragment, release_build)
+        self.assertIn(
+            'cargo build --workspace --release --locked --target "$RELEASE_TARGET"',
+            runtime,
+        )
+        self.assertIn(
+            'cargo build --workspace --release --locked --target "$RELEASE_TARGET"',
+            release_build,
+        )
+        self.assertIn(
+            'target/$RELEASE_TARGET/release/linurad',
+            runtime,
+        )
 
         proof = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(encoding="utf-8")
         self.assertIn("qualification_source_sha", proof)
         self.assertIn('LINURA_EXPECTED_SOURCE_SHA: ${{ needs.validate.outputs.qualification_source_sha }}', proof)
+        self.assertIn('source_sha: ${{ needs.validate.outputs.qualification_source_sha }}', proof)
+        self.assertIn('source_sha: ${{ github.sha }}', proof)
+        self.assertIn("v010-qualification-shell-runtime:", proof)
+        self.assertIn("v010-prepared-shell-runtime:", proof)
+        self.assertIn('ref: ${{ github.sha }}', proof)
+        self.assertIn('"$prepared_linurad_sha256"', proof)
+        self.assertIn('runtime/pre-seal/V010-SHELL-RUNTIME-EVIDENCE.json', proof)
+        self.assertIn('runtime/prepared-release/V010-SHELL-RUNTIME-EVIDENCE.json', proof)
+        self.assertIn('"LINURA_PREPARED_LINURAD_SHA256"', proof)
+        self.assertIn("LINURA_EXPECTED_LINURAD_SHA256", proof)
+        self.assertIn("LINURA_EXPECTED_SHELL_BRIDGE_SHA256", proof)
+        self.assertIn("LINURA_REQUIRE_BINARY_BINDING=1", proof)
+
+        workstation_checker = (
+            ROOT / "tools/check_v010_workstation_qualification.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("VISUAL_MAX_TOTAL_PNG_BYTES", workstation_checker)
+        self.assertIn("VISUAL_MAX_TOTAL_DECODE_PIXELS", workstation_checker)
+        self.assertIn("baseline_pixel_digests", workstation_checker)
+        self.assertIn("decode_byte_budget=png_byte_budget", workstation_checker)
+        self.assertIn("decode_pixel_budget=png_pixel_budget", workstation_checker)
+        self.assertIn('"migration-failure-restore-retry"', workstation_checker)
+        self.assertIn('"crash-before-dispatch"', workstation_checker)
+        self.assertIn('"corrupt-newer-state-fail-closed"', workstation_checker)
+        self.assertIn('"inbound-firewall-default-deny"', workstation_checker)
+        self.assertIn('"binding-substitution-rejection"', workstation_checker)
+        self.assertIn('"independent-verification"', workstation_checker)
+        self.assertIn('"session-supervision"', workstation_checker)
+        self.assertIn('"hyprland-session-target-active"', workstation_checker)
+        self.assertIn('"linura-shell-binds-to-session-target"', workstation_checker)
+        self.assertIn('"linura-shell-stopped-with-graphical-session"', workstation_checker)
+        self.assertIn('"authority-ceiling"', workstation_checker)
+
+        closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
+        self.assertIn("release_contract.py validate-intent", closure)
+        self.assertIn("--qualification-source-sha", closure)
+        self.assertIn("--qualification-tree-sha", closure)
+
+        verifier = (ROOT / "tools/verify_v010_slice_pr_evidence.py").read_text(encoding="utf-8")
+        self.assertIn('payload.get("state") != "closed"', verifier)
+        self.assertIn('base.get("ref") != "main"', verifier)
+        self.assertIn('f"compare/{merge_sha}...{qualification_source_sha}"', verifier)
+        self.assertIn('merge_base_sha != merge_sha', verifier)
+        self.assertIn("SLICE_PATH_PREFIXES", verifier)
+        self.assertIn("require_slice_scope(repository, number, slice_id)", verifier)
+        self.assertIn("if number == readiness_pr_number:", verifier)
+        self.assertIn("merge_tree_sha != readiness_tree_sha", verifier)
+        self.assertIn("verify_evidence_seal(", verifier)
+        self.assertIn("source_tree_sha,", verifier)
+        self.assertIn("changed_tree_paths(", verifier)
+        self.assertIn('f"git/trees/{tree_sha}?recursive=1"', verifier)
+        self.assertIn('payload.get("truncated") is not False', verifier)
+        self.assertIn("EVIDENCE_SEAL_PREFIXES", verifier)
+
+        closure_tool = (ROOT / "tools/post_release_close.py").read_text(encoding="utf-8")
+        self.assertIn("release_intent_source_sha", closure_tool)
+        self.assertIn("validate_release_intent(release_intent_source_sha, root)", checker)
+        self.assertIn("qualification_tree_sha does not match immutable release intent", checker)
 
     def test_v010_trusted_proof_seals_referenced_visual_baselines(self) -> None:
         proof = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(encoding="utf-8")
@@ -464,6 +630,22 @@ required_for_release = true
         text = text.replace('status = "planned"', 'status = "complete"')
         text = text.replace("evidence_prs = []", "evidence_prs = [999999]")
         contract.write_text(text, encoding="utf-8")
+
+    def test_v010_slice_evidence_rejects_duplicate_pr_lineage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8").replace(
+                "evidence_prs = [146]",
+                "evidence_prs = [144]",
+                1,
+            )
+            contract.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("S02: evidence PR #144 is already assigned to S01", result.stderr)
 
     def test_v010_slice_evidence_rejects_boolean_pr_numbers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

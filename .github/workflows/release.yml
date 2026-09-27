@@ -258,12 +258,26 @@ jobs:
           python3 tools/release_verify.py "$PROOF_DIR/release-payload" \
             --component-contract contracts/components.toml \
             --python-package bindings/python/pyproject.toml
+          if [[ "$RELEASE_TAG" = "v0.10.0" ]]; then
+            intent="$(python3 tools/release_contract.py validate-intent --source-sha "$SOURCE_SHA" --json)"
+            qualification_source_sha="$(jq -r .qualification_source_sha <<<"$intent")"
+            qualification_tree_sha="$(jq -r .qualification_tree_sha <<<"$intent")"
+            python3 tools/verify_v010_release_proof.py \
+              --proof-dir "$PROOF_DIR" \
+              --repository "$GITHUB_REPOSITORY" \
+              --source-sha "$SOURCE_SHA" \
+              --release-tag "$RELEASE_TAG" \
+              --release-version "$RELEASE_VERSION" \
+              --proof-run-id "$PROOF_RUN_ID" \
+              --qualification-source-sha "$qualification_source_sha" \
+              --qualification-tree-sha "$qualification_tree_sha"
+          fi
           while IFS= read -r -d '' file; do
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
           done < <(find "$PROOF_DIR/release-payload" -maxdepth 1 -type f -print0)
           while IFS= read -r -d '' file; do
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
-          done < <(find "$PROOF_DIR/qualification" -mindepth 2 -maxdepth 2 -type f -print0)
+          done < <(find "$PROOF_DIR/qualification" -mindepth 2 -type f -print0)
 
       - name: Preflight PyPI package version
         run: |
@@ -335,12 +349,26 @@ jobs:
           python3 tools/release_verify.py "$PROOF_DIR/release-payload" \
             --component-contract contracts/components.toml \
             --python-package bindings/python/pyproject.toml
+          if [[ "$RELEASE_TAG" = "v0.10.0" ]]; then
+            intent="$(python3 tools/release_contract.py validate-intent --source-sha "$SOURCE_SHA" --json)"
+            qualification_source_sha="$(jq -r .qualification_source_sha <<<"$intent")"
+            qualification_tree_sha="$(jq -r .qualification_tree_sha <<<"$intent")"
+            python3 tools/verify_v010_release_proof.py \
+              --proof-dir "$PROOF_DIR" \
+              --repository "$GITHUB_REPOSITORY" \
+              --source-sha "$SOURCE_SHA" \
+              --release-tag "$RELEASE_TAG" \
+              --release-version "$RELEASE_VERSION" \
+              --proof-run-id "$PROOF_RUN_ID" \
+              --qualification-source-sha "$qualification_source_sha" \
+              --qualification-tree-sha "$qualification_tree_sha"
+          fi
           while IFS= read -r -d '' file; do
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
           done < <(find "$PROOF_DIR/release-payload" -maxdepth 1 -type f -print0)
           while IFS= read -r -d '' file; do
             gh attestation verify "$file" --repo "$GITHUB_REPOSITORY"
-          done < <(find "$PROOF_DIR/qualification" -mindepth 2 -maxdepth 2 -type f -print0)
+          done < <(find "$PROOF_DIR/qualification" -mindepth 2 -type f -print0)
 
       - name: Create or verify immutable version tag
         run: |

@@ -102,6 +102,112 @@ jobs:
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
 
+      - name: Resolve qualification evidence source
+        run: |
+          set -euo pipefail
+          expected_source="$SOURCE_SHA"
+
+          # Immutable release-intent commits carry the authoritative qualification
+          # source explicitly. Prefer that binding when validating the release intent itself.
+          if intent="$(python3 tools/release_contract.py validate-intent --source-sha "$SOURCE_SHA" --json 2>/dev/null)"; then
+            candidate="$(jq -r .qualification_source_sha <<<"$intent")"
+            [[ "$candidate" =~ ^[0-9a-f]{40}$ ]]
+            expected_source="$candidate"
+          else
+            subject="$(git show -s --format=%s "$SOURCE_SHA")"
+            if [[ "$subject" == "release: prepare v0.10.0 "* ]]; then
+              # Mechanical release-preparation PRs intentionally change only
+              # Cargo.toml/Cargo.lock (or are zero-diff recovery handoffs). Their
+              # reviewed Q10-Q13 evidence remains bound to the pre-seal
+              # Qualification-Source trailer, so validate the complete constrained
+              # preparation shape before using that source identity.
+              preparation="$(python3 tools/release_contract.py validate-preparation \
+                --source-sha "$SOURCE_SHA" \
+                --tag v0.10.0 \
+                --json)"
+              candidate="$(jq -r .qualification_source_sha <<<"$preparation")"
+              candidate_tree="$(jq -r .qualification_tree_sha <<<"$preparation")"
+              [[ "$candidate" =~ ^[0-9a-f]{40}$ ]]
+              [[ "$candidate_tree" =~ ^[0-9a-f]{40}$ ]]
+              test "$(git rev-parse "$candidate^{tree}")" = "$candidate_tree"
+              expected_source="$candidate"
+            else
+              # After post-release closure, the roadmap persists the immutable
+              # release-intent and qualification identities. Re-prove those trailers
+              # instead of binding ready Q10-Q13 evidence to the closure commit.
+              persisted="$(python3 - <<'PY'
+          import json
+          import tomllib
+          from pathlib import Path
+
+          data = tomllib.loads(Path("contracts/roadmap.toml").read_text(encoding="utf-8"))
+          milestone = next(
+              (item for item in data.get("milestone", []) if item.get("version") == "v0.10.0"),
+              None,
+          )
+          if not isinstance(milestone, dict):
+              raise SystemExit("missing v0.10 roadmap milestone")
+          if milestone.get("status") != "released":
+              print("null")
+          else:
+              fields = {
+                  "release_intent_source_sha": milestone.get("release_intent_source_sha"),
+                  "qualification_source_sha": milestone.get("qualification_source_sha"),
+                  "qualification_tree_sha": milestone.get("qualification_tree_sha"),
+              }
+              if not all(isinstance(value, str) and value for value in fields.values()):
+                  raise SystemExit("released v0.10 roadmap lacks persisted qualification identity")
+              print(json.dumps(fields, sort_keys=True))
+          PY
+            )"
+            if [[ "$persisted" != "null" ]]; then
+              release_intent_source="$(jq -r .release_intent_source_sha <<<"$persisted")"
+              persisted_source="$(jq -r .qualification_source_sha <<<"$persisted")"
+              persisted_tree="$(jq -r .qualification_tree_sha <<<"$persisted")"
+              [[ "$release_intent_source" =~ ^[0-9a-f]{40}$ ]]
+              [[ "$persisted_source" =~ ^[0-9a-f]{40}$ ]]
+              [[ "$persisted_tree" =~ ^[0-9a-f]{40}$ ]]
+              persisted_intent="$(python3 tools/release_contract.py validate-intent --source-sha "$release_intent_source" --json)"
+              test "$(jq -r .qualification_source_sha <<<"$persisted_intent")" = "$persisted_source"
+              test "$(jq -r .qualification_tree_sha <<<"$persisted_intent")" = "$persisted_tree"
+              test "$(git rev-parse "$persisted_source^{tree}")" = "$persisted_tree"
+              expected_source="$persisted_source"
+            else
+              # A readiness evidence seal is exactly one commit above the qualified
+              # source and may change evidence-owned files only. Reproduce that
+              # shape locally so PR qualification validates committed Q10-Q13
+              # evidence against the pre-seal source it attests.
+              mapfile -t lineage < <(git rev-list --parents -n 1 "$SOURCE_SHA")
+              read -r -a parts <<<"${lineage[0]}"
+              if [[ "${#parts[@]}" -eq 2 ]]; then
+                parent="${parts[1]}"
+                # Disable rename detection so every changed tree path is classified independently.
+                # A product->evidence rename therefore appears as a disallowed product deletion plus
+                # an evidence addition rather than only the allowed destination path.
+                mapfile -d '' -t changed < <(git diff --no-renames --name-only -z "$parent" "$SOURCE_SHA")
+                evidence_seal=true
+                [[ "${#changed[@]}" -gt 0 ]] || evidence_seal=false
+                for path in "${changed[@]}"; do
+                  case "$path" in
+                    contracts/v010-workstation-qualification.toml|contracts/v010-workstation-slices.toml|docs/qualification/v0.10.0.md|docs/releases/v0.10.0.md|qualification/v010/*|visual/baselines/*)
+                      ;;
+                    *)
+                      evidence_seal=false
+                      break
+                      ;;
+                  esac
+                done
+                if [[ "$evidence_seal" = true ]]; then
+                  expected_source="$parent"
+                fi
+              fi
+            fi
+            fi
+          fi
+
+          [[ "$expected_source" =~ ^[0-9a-f]{40}$ ]]
+          printf 'LINURA_EXPECTED_SOURCE_SHA=%s\n' "$expected_source" >> "$GITHUB_ENV"
+
       - name: Load repository toolchain contract
         run: |
           set -euo pipefail

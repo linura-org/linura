@@ -1217,7 +1217,7 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self._copy_fixture(root)
             workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
             text = workflow.read_text(encoding="utf-8")
-            marker = "cargo build --locked --release -p linurad"
+            marker = 'cargo build --workspace --release --locked --target "$RELEASE_TARGET"'
             self.assertIn(marker, text)
             workflow.write_text(
                 text.replace(marker, 'echo "linurad build omitted"', 1),
@@ -1225,7 +1225,23 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             )
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("cargo build --locked --release -p linurad", result.stderr)
+            self.assertIn(marker, result.stderr)
+
+    def test_release_compatible_build_envelope_cannot_be_weakened(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "RUSTFLAGS=--remap-path-prefix=%s=/workspace"
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, "RUSTFLAGS=", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
 
     def test_runtime_must_assert_durable_audit_filesystem_and_schema_hardening(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

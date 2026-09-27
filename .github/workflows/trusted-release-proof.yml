@@ -47,7 +47,8 @@ jobs:
           qualification_tree_sha="$(jq -r .qualification_tree_sha <<<"$intent")"
           [[ "$qualification_source_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$qualification_tree_sha" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git rev-parse "$qualification_source_sha^{tree}")" = "$qualification_tree_sha"
+          actual_qualification_tree="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$qualification_source_sha" --jq .tree.sha)"
+          test "$actual_qualification_tree" = "$qualification_tree_sha"
           printf 'qualification_source_sha=%s\n' "$qualification_source_sha" >> "$GITHUB_OUTPUT"
           printf 'qualification_tree_sha=%s\n' "$qualification_tree_sha" >> "$GITHUB_OUTPUT"
           printf 'LINURA_EXPECTED_SOURCE_SHA=%s\n' "$qualification_source_sha" >> "$GITHUB_ENV"
@@ -173,6 +174,26 @@ jobs:
     with:
       source_sha: ${{ github.sha }}
 
+  v010-qualification-shell-runtime:
+    name: pre-seal v0.10 shell runtime binary proof
+    needs: validate
+    if: ${{ needs.validate.outputs.tag == 'v0.10.0' }}
+    uses: ./.github/workflows/v010-shell-runtime-qualification.yml
+    permissions:
+      contents: read
+    with:
+      source_sha: ${{ needs.validate.outputs.qualification_source_sha }}
+
+  v010-prepared-shell-runtime:
+    name: prepared-release v0.10 shell runtime binary proof
+    needs: validate
+    if: ${{ needs.validate.outputs.tag == 'v0.10.0' }}
+    uses: ./.github/workflows/v010-shell-runtime-qualification.yml
+    permissions:
+      contents: read
+    with:
+      source_sha: ${{ github.sha }}
+
   build:
     name: isolated build and reproducibility proof
     needs: [validate, observation-acceptance, plan-preview-acceptance, durability-qualification, enospc-qualification, executor-verifier-qualification, managed-lifecycle-qualification, library-qualification, agent-qualification, firstboot-qualification]
@@ -189,7 +210,8 @@ jobs:
 
   aggregate-proof:
     name: bind exact-source qualification into canonical proof
-    needs: [validate, agent-qualification, firstboot-qualification, build]
+    needs: [validate, agent-qualification, firstboot-qualification, v010-qualification-shell-runtime, v010-prepared-shell-runtime, build]
+    if: ${{ always() && needs.validate.result == 'success' && needs.agent-qualification.result == 'success' && needs.firstboot-qualification.result == 'success' && needs.build.result == 'success' && (needs.validate.outputs.tag != 'v0.10.0' || (needs.v010-qualification-shell-runtime.result == 'success' && needs.v010-prepared-shell-runtime.result == 'success')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -205,10 +227,12 @@ jobs:
       QUALIFICATION_ROOT: /tmp/linura-v08-qualification
       V09_QUALIFICATION_ROOT: /tmp/linura-v09-qualification
       V010_SOURCE_ROOT: ${{ github.workspace }}/v010-source
+      V010_QUALIFICATION_RUNTIME_ROOT: /tmp/linura-v010-qualification-shell-runtime
+      V010_PREPARED_RUNTIME_ROOT: /tmp/linura-v010-prepared-shell-runtime
       QUALIFICATION_SOURCE_SHA: ${{ needs.validate.outputs.qualification_source_sha }}
       QUALIFICATION_TREE_SHA: ${{ needs.validate.outputs.qualification_tree_sha }}
     steps:
-      - name: Checkout exact v0.10 qualification source
+      - name: Checkout reviewed v0.10 evidence-seal tree
         if: ${{ needs.validate.outputs.tag == 'v0.10.0' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -234,6 +258,20 @@ jobs:
         with:
           name: linura-v09-qualification-${{ github.sha }}
           path: /tmp/linura-v09-qualification
+
+      - name: Download pre-seal v0.10 shell runtime evidence
+        if: ${{ needs.validate.outputs.tag == 'v0.10.0' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-v010-shell-runtime-${{ needs.validate.outputs.qualification_source_sha }}
+          path: /tmp/linura-v010-qualification-shell-runtime
+
+      - name: Download prepared-release v0.10 shell runtime evidence
+        if: ${{ needs.validate.outputs.tag == 'v0.10.0' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-v010-shell-runtime-${{ github.sha }}
+          path: /tmp/linura-v010-prepared-shell-runtime
 
       - name: Verify and bind v0.8 qualification evidence
         shell: bash
@@ -375,14 +413,46 @@ jobs:
         run: |
           set -euo pipefail
           cd "$V010_SOURCE_ROOT"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          qualification_runtime="$V010_QUALIFICATION_RUNTIME_ROOT/V010-SHELL-RUNTIME-EVIDENCE.json"
+          prepared_runtime="$V010_PREPARED_RUNTIME_ROOT/V010-SHELL-RUNTIME-EVIDENCE.json"
+          test -f "$qualification_runtime"
+          test -f "$prepared_runtime"
+          test "$(jq -r .source_sha "$qualification_runtime")" = "$QUALIFICATION_SOURCE_SHA"
+          test "$(jq -r .source_sha "$prepared_runtime")" = "$SOURCE_SHA"
+          test "$(jq -r .result "$qualification_runtime")" = "passed"
+          test "$(jq -r .result "$prepared_runtime")" = "passed"
+
+          expected_linurad_sha256="$(jq -r .authority_runtime.linurad_sha256 "$qualification_runtime")"
+          expected_shell_bridge_sha256="$(jq -r .authority_runtime.shell_bridge_sha256 "$qualification_runtime")"
+          prepared_linurad_sha256="$(jq -r .authority_runtime.linurad_sha256 "$prepared_runtime")"
+          prepared_shell_bridge_sha256="$(jq -r .authority_runtime.shell_bridge_sha256 "$prepared_runtime")"
+          for digest in             "$expected_linurad_sha256"             "$expected_shell_bridge_sha256"             "$prepared_linurad_sha256"             "$prepared_shell_bridge_sha256"; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          done
+
+          # Q11 remains bound to the independently established pre-seal runtime.
+          # The version-prepared source is qualified separately and must exactly
+          # produce the shipped linurad payload. ShellBridge is not Cargo-versioned,
+          # so its digest must remain invariant across the mechanical version bump.
+          test "$prepared_shell_bridge_sha256" = "$expected_shell_bridge_sha256"
+          test "$(sha256sum "$PROOF_ROOT/release-payload/linurad" | awk '{print $1}')" = "$prepared_linurad_sha256"
+
+          export LINURA_EXPECTED_LINURAD_SHA256="$expected_linurad_sha256"
+          export LINURA_EXPECTED_SHELL_BRIDGE_SHA256="$expected_shell_bridge_sha256"
+          export LINURA_PREPARED_LINURAD_SHA256="$prepared_linurad_sha256"
+          export LINURA_PREPARED_SHELL_BRIDGE_SHA256="$prepared_shell_bridge_sha256"
+          export LINURA_REQUIRE_BINARY_BINDING=1
           python3 tools/check_roadmap.py . --release-candidate v0.10.0
           python3 tools/check_v010_workstation_qualification.py .
           destination="$PROOF_ROOT/qualification/v0.10"
           rm -rf "$destination"
-          mkdir -p "$destination/evidence" "$destination/visual/baselines"
+          mkdir -p             "$destination/evidence"             "$destination/visual/baselines"             "$destination/runtime/pre-seal"             "$destination/runtime/prepared-release"
           cp contracts/v010-workstation-qualification.toml "$destination/qualification-contract.toml"
           cp -a qualification/v010/. "$destination/evidence/"
           cp visual/baselines/manifest.json "$destination/visual/baselines/manifest.json"
+          cp -a "$V010_QUALIFICATION_RUNTIME_ROOT"/. "$destination/runtime/pre-seal"/
+          cp -a "$V010_PREPARED_RUNTIME_ROOT"/. "$destination/runtime/prepared-release"/
           python3 - <<'PY'
           import json
           import os
@@ -444,6 +514,13 @@ jobs:
               "qualification_source_sha": os.environ["QUALIFICATION_SOURCE_SHA"],
               "qualification_tree_sha": os.environ["QUALIFICATION_TREE_SHA"],
               "path": "qualification/v0.10/qualification-contract.toml",
+              "runtime_binding": {
+                  "qualification_source_evidence": "runtime/pre-seal/V010-SHELL-RUNTIME-EVIDENCE.json",
+                  "prepared_release_evidence": "runtime/prepared-release/V010-SHELL-RUNTIME-EVIDENCE.json",
+                  "qualification_linurad_sha256": os.environ["LINURA_EXPECTED_LINURAD_SHA256"],
+                  "prepared_linurad_sha256": os.environ["LINURA_PREPARED_LINURAD_SHA256"],
+                  "shell_bridge_sha256": os.environ["LINURA_EXPECTED_SHELL_BRIDGE_SHA256"],
+              },
               "files": files,
           }
           receipt_path.write_text(

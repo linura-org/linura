@@ -180,33 +180,14 @@ def validate_release_intent(source_sha: str, repository: Path = ROOT) -> dict[st
 
     qualification_source_sha = qualification_sources[0]
     qualification_tree_sha = qualification_trees[0]
-    try:
-        actual_qualification_tree = _git(
-            repository,
-            "rev-parse",
-            f"{qualification_source_sha}^{{tree}}",
-        )
-    except ContractError as error:
+    if qualification_source_sha == reviewed_source_sha:
         raise ContractError(
-            "release-intent Qualification-Source does not identify a repository commit"
-        ) from error
-    if actual_qualification_tree != qualification_tree_sha:
-        raise ContractError(
-            "release-intent Qualification-Tree does not match Qualification-Source: "
-            f"recorded={qualification_tree_sha} actual={actual_qualification_tree}"
+            "release-intent Qualification-Source must pre-exist the reviewed evidence seal"
         )
-    try:
-        _git(
-            repository,
-            "merge-base",
-            "--is-ancestor",
-            qualification_source_sha,
-            reviewed_source_sha,
-        )
-    except ContractError as error:
+    if qualification_tree_sha == reviewed_tree_sha:
         raise ContractError(
-            "release-intent Qualification-Source must be an ancestor of Reviewed-Source"
-        ) from error
+            "release-intent Qualification-Tree must pre-exist and differ from the reviewed evidence-seal tree"
+        )
 
     return {
         "source_sha": source_sha,
@@ -216,6 +197,96 @@ def validate_release_intent(source_sha: str, repository: Path = ROOT) -> dict[st
         "qualification_tree_sha": qualification_tree_sha,
     }
 
+
+
+def validate_release_preparation(
+    source_sha: str,
+    tag: str,
+    repository: Path = ROOT,
+) -> dict[str, object]:
+    """Validate a deterministic mechanical release-preparation commit.
+
+    This shape is deliberately narrower than a release-intent commit. It may
+    change only Cargo.toml and Cargo.lock (or be an idempotent zero-diff
+    handoff), and its commit metadata must bind the pre-existing qualification
+    source/tree. The binding is used by PR qualification to validate committed
+    Q10-Q13 evidence against the source it actually attests; it does not grant
+    release authority on its own.
+    """
+    parse_tag(tag)
+    if SHA_RE.fullmatch(source_sha) is None:
+        raise ContractError(
+            "release-preparation source SHA must be lowercase 40-character hexadecimal"
+        )
+
+    lineage = _git(repository, "rev-list", "--parents", "-n", "1", source_sha).split()
+    if len(lineage) != 2 or lineage[0] != source_sha:
+        raise ContractError(
+            "release-preparation commit must exist and have exactly one parent"
+        )
+    parent_sha = lineage[1]
+
+    subject = _git(repository, "show", "-s", "--format=%s", source_sha)
+    expected_prefix = f"release: prepare {tag} "
+    if not subject.startswith(expected_prefix) or not subject[len(expected_prefix):].strip():
+        raise ContractError(
+            f"release-preparation subject must start with {expected_prefix!r} and include a theme"
+        )
+
+    message = _git(repository, "show", "-s", "--format=%B", source_sha)
+    qualification_sources = QUALIFICATION_SOURCE_RE.findall(message)
+    qualification_trees = QUALIFICATION_TREE_RE.findall(message)
+    if len(qualification_sources) != 1 or len(qualification_trees) != 1:
+        raise ContractError(
+            "release-preparation commit must contain exactly one Qualification-Source and Qualification-Tree trailer"
+        )
+    qualification_source_sha = qualification_sources[0]
+    qualification_tree_sha = qualification_trees[0]
+    actual_qualification_tree = _git(
+        repository, "rev-parse", f"{qualification_source_sha}^{{tree}}"
+    )
+    if actual_qualification_tree != qualification_tree_sha:
+        raise ContractError(
+            "release-preparation Qualification-Tree does not match Qualification-Source: "
+            f"recorded={qualification_tree_sha} actual={actual_qualification_tree}"
+        )
+
+    parent_tree_sha = _git(repository, "rev-parse", f"{parent_sha}^{{tree}}")
+    source_tree_sha = _git(repository, "rev-parse", f"{source_sha}^{{tree}}")
+    if qualification_source_sha == parent_sha or qualification_tree_sha == parent_tree_sha:
+        raise ContractError(
+            "release-preparation qualification source/tree must pre-exist the reviewed evidence-seal parent"
+        )
+
+    changed_text = _git(
+        repository,
+        "diff",
+        "--no-renames",
+        "--name-only",
+        parent_sha,
+        source_sha,
+    )
+    changed_files = [line for line in changed_text.splitlines() if line]
+    if changed_files not in ([], ["Cargo.lock", "Cargo.toml"]):
+        raise ContractError(
+            "release-preparation commit must change zero files or exactly Cargo.lock and Cargo.toml"
+        )
+    if not changed_files and source_tree_sha != parent_tree_sha:
+        raise ContractError(
+            "zero-diff release-preparation commit must preserve the parent tree exactly"
+        )
+    if changed_files and source_tree_sha == parent_tree_sha:
+        raise ContractError(
+            "two-file release-preparation commit must produce a changed tree"
+        )
+
+    return {
+        "source_sha": source_sha,
+        "parent_sha": parent_sha,
+        "qualification_source_sha": qualification_source_sha,
+        "qualification_tree_sha": qualification_tree_sha,
+        "changed_files": changed_files,
+    }
 
 def validate_contract(notes: Path, tag: str, *, require_workspace_version: bool = False) -> dict[str, object]:
     version = parse_tag(tag)
@@ -371,6 +442,11 @@ def main() -> int:
     intent_parser.add_argument("--source-sha", required=True)
     intent_parser.add_argument("--repository", type=Path, default=ROOT)
     intent_parser.add_argument("--json", action="store_true")
+    preparation_parser = subparsers.add_parser("validate-preparation")
+    preparation_parser.add_argument("--source-sha", required=True)
+    preparation_parser.add_argument("--tag", required=True)
+    preparation_parser.add_argument("--repository", type=Path, default=ROOT)
+    preparation_parser.add_argument("--json", action="store_true")
     evidence_parser = subparsers.add_parser("evidence")
     evidence_parser.add_argument("--tag", required=True)
     evidence_parser.add_argument("--source-sha", required=True)
@@ -403,6 +479,23 @@ def main() -> int:
                     f"reviewed-tree={metadata['reviewed_tree_sha']} / "
                     f"qualification-source={metadata['qualification_source_sha']} / "
                     f"qualification-tree={metadata['qualification_tree_sha']}"
+                )
+        elif args.command == "validate-preparation":
+            metadata = validate_release_preparation(
+                args.source_sha,
+                args.tag,
+                args.repository,
+            )
+            if args.json:
+                print(json.dumps(metadata, sort_keys=True))
+            else:
+                print(
+                    "release preparation valid: "
+                    f"source={metadata['source_sha']} / "
+                    f"parent={metadata['parent_sha']} / "
+                    f"qualification-source={metadata['qualification_source_sha']} / "
+                    f"qualification-tree={metadata['qualification_tree_sha']} / "
+                    f"changed={','.join(metadata['changed_files']) or 'none'}"
                 )
         elif args.command == "evidence":
             write_evidence(args.notes, args.tag, args.source_sha, args.artifacts, args.output)

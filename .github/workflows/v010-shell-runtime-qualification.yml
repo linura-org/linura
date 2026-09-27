@@ -29,6 +29,7 @@ env:
   BASE_IMAGE_CHECKSUM_URL: https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2.SHA256
   ARCH_ARCHIVE_URL: https://archive.archlinux.org/repos/2026/09/16/$repo/os/$arch
   VM_ACCELERATION: tcg
+  RELEASE_TARGET: x86_64-unknown-linux-gnu
   QUALIFICATION_NIC_MAC: 52:54:00:12:34:56
   QUALIFICATION_GPU_PCI_BDF: "0000:00:02.0"
   QUALIFICATION_GPU_VENDOR_ID: "0x1af4"
@@ -163,10 +164,25 @@ jobs:
           printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
 
       - name: Install pinned Rust toolchain
-        run: rustup toolchain install "$RUST_VERSION" --profile minimal
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target "$RELEASE_TARGET"
 
       - name: Use pinned Rust toolchain
         run: rustup default "$RUST_VERSION"
+
+      - name: Establish release-compatible Rust build envelope
+        run: |
+          set -euo pipefail
+          source_date_epoch="$(git show -s --format=%ct "$SOURCE_SHA")"
+          {
+            printf 'SOURCE_DATE_EPOCH=%s\n' "$source_date_epoch"
+            printf 'CARGO_INCREMENTAL=0\n'
+            printf 'TZ=UTC\n'
+            printf 'LANG=C.UTF-8\n'
+            printf 'LC_ALL=C.UTF-8\n'
+            printf 'RUSTFLAGS=--remap-path-prefix=%s=/workspace\n' "$GITHUB_WORKSPACE"
+          } >> "$GITHUB_ENV"
 
       - name: Restore Cargo dependency cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -177,11 +193,11 @@ jobs:
             ~/.cargo/git/db
           key: linura-cargo-deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.RUST_VERSION }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'tools/codex/versions.env') }}
 
-      - name: Build exact-source Linura session authority
+      - name: Build exact-source Linura session authority with release envelope
         run: |
           set -euo pipefail
-          cargo build --locked --release -p linurad
-          linurad_binary="$GITHUB_WORKSPACE/target/release/linurad"
+          cargo build --workspace --release --locked --target "$RELEASE_TARGET"
+          linurad_binary="$GITHUB_WORKSPACE/target/$RELEASE_TARGET/release/linurad"
           test -x "$linurad_binary"
           linurad_sha256="$(sha256sum "$linurad_binary" | awk '{print $1}')"
           helper_sha256="$(sha256sum packaging/wireplumber/linura-session-audio.lua | awk '{print $1}')"
@@ -509,6 +525,9 @@ jobs:
 
           installed_linurad_sha="$(ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 'sha256sum /usr/bin/linurad | awk "{print \$1}"')"
           installed_helper_sha="$(ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 'sha256sum /usr/lib/linura/linura-session-audio.lua | awk "{print \$1}"')"
+          installed_shell_bridge_sha="$(ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 'sha256sum /usr/local/lib/qt6/qml/org/linura/ShellBridge/liblinura-shell-bridge.so | awk "{print \$1}"')"
+          [[ "$installed_shell_bridge_sha" =~ ^[0-9a-f]{64}$ ]]
+          printf 'SHELL_BRIDGE_SHA256=%s\n' "$installed_shell_bridge_sha" >> "$GITHUB_ENV"
           [[ "$installed_linurad_sha" == "$LINURAD_SHA256" ]] || {
             echo "installed linurad digest does not match exact-source build" >&2
             exit 1
@@ -521,7 +540,8 @@ jobs:
             printf 'source_sha=%s\n' "$SOURCE_SHA"
             printf 'linurad_sha256=%s\n' "$installed_linurad_sha"
             printf 'session_audio_helper_sha256=%s\n' "$installed_helper_sha"
-            ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1               "stat -c '%U:%G %a %h %n' /usr/bin/linurad /usr/lib/linura/linura-session-audio.lua"
+            printf 'shell_bridge_sha256=%s\n' "$installed_shell_bridge_sha"
+            ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1               "stat -c '%U:%G %a %h %n' /usr/bin/linurad /usr/lib/linura/linura-session-audio.lua /usr/local/lib/qt6/qml/org/linura/ShellBridge/liblinura-shell-bridge.so"
           } > "$ARTIFACT_DIR/runtime-install-integrity.txt"
 
       - name: Run real shell runtime qualification
@@ -737,6 +757,7 @@ jobs:
               },
               "authority_runtime": {
                   "linurad_sha256": os.environ["LINURAD_SHA256"],
+                  "shell_bridge_sha256": os.environ["SHELL_BRIDGE_SHA256"],
                   "session_audio_helper_sha256": os.environ["SESSION_AUDIO_HELPER_SHA256"],
                   "scope": "real-session-authority",
               },

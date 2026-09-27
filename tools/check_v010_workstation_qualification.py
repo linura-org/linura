@@ -105,6 +105,7 @@ EXPECTED_EXPERIENCE = {
     "noninteractive_surfaces_do_not_capture_input": True,
     "visual_baseline_manifest": "visual/baselines/manifest.json",
     "experience_evidence_manifest": "qualification/v010/experience-evidence.json",
+    "authority_evidence_manifest": "qualification/v010/experience/authority-evidence.json",
     "representative_visual_scales": [1.0, 2.0],
     "representative_visual_resolutions": ["1280x800", "1440x900"],
     "required_visual_surfaces": EXPECTED_REQUIRED_VISUAL_SURFACES,
@@ -154,8 +155,101 @@ EXPECTED_UPDATES = {
     "direct_upgrade_guard": True,
     "break_glass_override": "LINURA_ALLOW_DIRECT_PACMAN=1",
 }
+EXPECTED_Q11_SESSION_PACKAGE_VERSIONS = {
+    "compositor_version": "hyprland",
+    "quickshell_version": "quickshell",
+}
+
+EXPECTED_Q10_CASE_OBSERVATIONS = {
+    "manual-no-model-workflow": [
+        "model-providers-absent",
+        "manual-path-completed",
+        "configuration-path-completed",
+        "keyboard-path-completed",
+    ],
+    "cross-interface-operation-class-convergence": [
+        "cli-class-bound",
+        "control-center-class-bound",
+        "configuration-class-bound",
+        "palette-shortcut-class-bound",
+        "quick-settings-class-bound",
+        "agent-proposal-class-bound",
+        "classes-converged",
+    ],
+    "declarative-authority-smuggling-rejection": [
+        "unknown-field-rejected",
+        "shell-text-rejected",
+        "authority-token-rejected",
+        "policy-approval-material-rejected",
+        "no-effect-dispatched",
+    ],
+    "unregistered-palette-operation-rejection": [
+        "unregistered-operation-presented",
+        "operation-rejected",
+        "no-privileged-shell-dispatched",
+    ],
+    "operation-class-downgrade-rejection": [
+        "stronger-effect-presented-as-transient",
+        "trusted-registry-class-preserved",
+        "downgrade-rejected",
+    ],
+    "stale-quick-settings-external-change": [
+        "stale-observation-injected",
+        "concurrent-external-change-injected",
+        "mutation-disabled-or-revalidated",
+        "authoritative-state-reobserved",
+    ],
+    "forged-premature-success-rejection": [
+        "premature-success-injected",
+        "final-success-withheld",
+        "independent-verification-required",
+    ],
+    "malformed-malicious-interface-request": [
+        "malformed-or-malicious-request-injected",
+        "authority-not-widened",
+        "no-unauthorized-effect-dispatched",
+    ],
+    "input-accessibility-regression-rejection": [
+        "keyboard-or-pointer-regression-injected",
+        "semantic-or-focus-regression-injected",
+        "regression-detected",
+    ],
+    "visual-evidence-regression-rejection": [
+        "null-or-unreviewed-baseline-injected",
+        "coverage-or-interaction-gap-injected",
+        "unretained-failure-diff-injected",
+        "qualification-rejected",
+    ],
+    "offline-stale-error-reconnect": [
+        "provider-or-network-unavailable",
+        "stale-or-unknown-rendered",
+        "success-not-fabricated",
+        "reconnect-reobserved",
+    ],
+    "restart-during-managed-mutation": [
+        "managed-mutation-in-flight",
+        "surface-restart-injected",
+        "stale-approval-not-resurrected",
+        "effect-not-replayed",
+        "authoritative-lifecycle-reconstructed",
+    ],
+}
+EXPECTED_Q10_AUTHORITY_QUALIFICATION = {
+    "evidence_manifest": "qualification/v010/experience/authority-evidence.json",
+    "evidence_type": "exact-source-q10-experience-authority",
+    "required_cases": list(EXPECTED_Q10_CASE_OBSERVATIONS),
+}
+
 EXPECTED_Q11_CASE_OBSERVATIONS = {
     "physical-session-start": ["physical-hardware-present", "wayland-session-active", "hyprland-session-active"],
+    "session-supervision": [
+        "hyprland-session-target-active",
+        "graphical-session-target-active",
+        "linura-shell-active-through-session-target",
+        "linura-shell-binds-to-session-target",
+        "linura-shell-part-of-session-target",
+        "linura-shell-stopped-with-graphical-session",
+    ],
     "shell-render-and-input": ["shell-rendered", "keyboard-input", "pointer-input"],
     "display-scale-and-hidpi": ["display-enumerated", "scale-applied", "hidpi-render-captured"],
     "provider-runtime-identities": ["networkmanager-version", "bluez-version", "pipewire-version", "wireplumber-version", "udisks2-version", "polkit-version"],
@@ -180,46 +274,118 @@ EXPECTED_INTERACTIVE_WORKSTATION = {
     ],
     "required_cases": [
         "physical-session-start",
+        "session-supervision",
         "shell-render-and-input",
         "display-scale-and-hidpi",
         "provider-runtime-identities",
         "restart-recovery",
     ],
 }
+EXPECTED_Q12_CASE_OBSERVATIONS = {
+    "update-success": ["candidate-applied", "post-update-state-reobserved", "update-audit-bound"],
+    "migration-v09-v010": ["v09-state-seeded", "v010-migration-applied", "persistent-state-reopened"],
+    "pre-migration-backup": ["risky-migration-identified", "writer-safe-backup-created", "backup-integrity-verified"],
+    "migration-failure-restore-retry": ["migration-failure-injected", "pre-migration-backup-restored", "retry-converged"],
+    "update-interruption": ["candidate-update-started", "interruption-injected", "restart-detected-incomplete-update"],
+    "restart-reobservation": ["restart-completed", "authoritative-state-reobserved", "reobserved-state-bound"],
+    "crash-before-dispatch": ["pre-dispatch-crash-injected", "executor-not-dispatched", "recovery-converged"],
+    "crash-after-effect-start": ["effect-start-confirmed", "post-effect-start-crash-injected", "reconciliation-converged"],
+    "crash-around-durable-commit": ["commit-boundary-crash-injected", "durable-state-recovered", "commit-outcome-reconciled"],
+    "indeterminate-external-outcome": ["external-outcome-made-indeterminate", "self-report-not-trusted", "authoritative-outcome-resolved"],
+    "deterministic-reconciliation": ["drift-detected", "reconciliation-plan-deterministic", "verified-state-converged"],
+    "power-loss-recovery": ["power-loss-injected", "durable-state-recovered", "external-state-reconciled"],
+    "snapshot-rollback": ["btrfs-snapshot-identified", "snapper-rollback-applied", "rollback-state-verified"],
+    "gui-unavailable-recovery": ["gui-unavailable", "native-recovery-invoked", "local-repair-completed"],
+    "offline-local-recovery": ["model-unavailable", "network-unavailable", "local-material-recovery-completed"],
+    "corrupt-newer-state-fail-closed": ["corrupt-state-injected", "unsupported-newer-state-injected", "state-open-failed-closed"],
+}
 EXPECTED_UPDATE_RECOVERY_QUALIFICATION = {
     "evidence_manifest": "qualification/v010/update-recovery-evidence.json",
     "evidence_type": "exact-source-q12-update-recovery",
-    "required_cases": ["update-success", "migration-success", "update-interruption-recovery", "power-loss-recovery", "snapshot-rollback", "offline-repair"],
+    "required_cases": list(EXPECTED_Q12_CASE_OBSERVATIONS),
+}
+
+EXPECTED_Q13_CASE_OBSERVATIONS = {
+    "inbound-firewall-default-deny": ["firewall-policy-loaded", "unsolicited-inbound-probe-denied", "no-exposure-created"],
+    "ssh-disabled-default": ["ssh-unit-disabled", "ssh-listener-absent", "boot-state-verified"],
+    "remote-exposure-typed-authority": ["remote-exposure-requested", "typed-authority-required", "unauthorized-enable-denied"],
+    "untrusted-package-source-denied": ["untrusted-source-presented", "source-rejected", "no-package-effect-dispatched"],
+    "polkit-authorization": ["polkit-policy-loaded", "unauthorized-caller-denied", "authorized-caller-bound"],
+    "privilege-boundary": ["unprivileged-daemon-confirmed", "generic-root-shell-absent", "privileged-effect-denied-without-authority"],
+    "binding-substitution-rejection": ["actor-substitution-rejected", "plan-substitution-rejected", "evidence-substitution-rejected", "session-substitution-rejected"],
+    "independent-verification": ["executor-self-report-injected", "authoritative-reobservation-performed", "self-report-not-accepted-as-verification"],
+    "authority-ceiling": ["gui-proposal-only", "model-proposal-only", "deterministic-protocol-authority-preserved"],
+    "secret-redaction": ["secret-bearing-input-injected", "audit-redacted", "diagnostics-redacted"],
+    "adversarial-input": ["malformed-input-rejected", "authority-not-widened", "no-effect-dispatched"],
+    "malicious-inputs": ["malicious-client-rejected", "malicious-proposal-rejected", "malicious-profile-rejected", "malicious-import-rejected"],
+    "recovery-boundary": ["gui-unavailable", "model-unavailable", "native-recovery-remains-available"],
 }
 EXPECTED_SECURITY_QUALIFICATION = {
     "evidence_manifest": "qualification/v010/security-evidence.json",
     "evidence_type": "exact-source-q13-workstation-security",
-    "required_cases": ["privilege-boundary", "polkit-authorization", "untrusted-package-source-denied", "secret-redaction", "adversarial-input", "recovery-boundary"],
+    "required_profile": EXPECTED_PROFILE,
+    "required_machine_class": EXPECTED_MACHINE_CLASS,
+    "require_frozen_package_manifest": True,
+    "require_machine_execution_provenance": True,
+    "required_cases": list(EXPECTED_Q13_CASE_OBSERVATIONS),
 }
-EXPECTED_Q12_CASE_OBSERVATIONS = {
-    "update-success": ["candidate-applied", "post-update-state-reobserved", "update-audit-bound"],
-    "migration-success": ["pre-migration-backup-created", "migration-completed", "persistent-state-reopened"],
-    "update-interruption-recovery": ["interruption-injected", "restart-detected-incomplete-update", "recovery-converged"],
-    "power-loss-recovery": ["power-loss-injected", "durable-state-recovered", "external-state-reconciled"],
-    "snapshot-rollback": ["snapshot-identified", "rollback-applied", "rollback-state-verified"],
-    "offline-repair": ["network-unavailable", "gui-unavailable", "local-repair-completed"],
+EXPECTED_UPDATE_RECOVERY_QUALIFICATION.update({
+    "required_profile": EXPECTED_PROFILE,
+    "required_machine_class": EXPECTED_MACHINE_CLASS,
+    "require_frozen_package_manifest": True,
+    "require_machine_execution_provenance": True,
+    "require_external_fault_injection_provenance": True,
+    "require_boot_transition_provenance": True,
+})
+EXPECTED_Q12_EXECUTION_MECHANISMS = {
+    "update-success": "machine-update",
+    "migration-v09-v010": "machine-migration",
+    "pre-migration-backup": "machine-backup",
+    "migration-failure-restore-retry": "externally-injected-migration-failure",
+    "update-interruption": "externally-interrupted-update",
+    "restart-reobservation": "machine-reboot",
+    "crash-before-dispatch": "external-process-termination",
+    "crash-after-effect-start": "external-process-termination",
+    "crash-around-durable-commit": "external-process-termination",
+    "indeterminate-external-outcome": "external-response-loss",
+    "deterministic-reconciliation": "external-state-drift",
+    "power-loss-recovery": "machine-power-cut",
+    "snapshot-rollback": "snapper-rollback",
+    "gui-unavailable-recovery": "shell-or-session-stop",
+    "offline-local-recovery": "network-isolation",
+    "corrupt-newer-state-fail-closed": "persistent-state-corruption",
 }
-EXPECTED_Q13_CASE_OBSERVATIONS = {
-    "privilege-boundary": ["unprivileged-daemon-confirmed", "generic-root-shell-absent", "privileged-effect-denied-without-authority"],
-    "polkit-authorization": ["polkit-policy-loaded", "unauthorized-caller-denied", "authorized-caller-bound"],
-    "untrusted-package-source-denied": ["untrusted-source-presented", "source-rejected", "no-package-effect-dispatched"],
-    "secret-redaction": ["secret-bearing-input-injected", "audit-redacted", "diagnostics-redacted"],
-    "adversarial-input": ["malformed-input-rejected", "authority-not-widened", "no-effect-dispatched"],
-    "recovery-boundary": ["gui-unavailable", "model-unavailable", "native-recovery-remains-available"],
+BOOT_TRANSITION_MECHANISMS = {"machine-reboot", "machine-power-cut"}
+EXPECTED_Q13_EXECUTION_MECHANISMS = {
+    "inbound-firewall-default-deny": "inbound-network-probe",
+    "ssh-disabled-default": "listener-and-unit-probe",
+    "remote-exposure-typed-authority": "unauthorized-remote-exposure-attempt",
+    "untrusted-package-source-denied": "untrusted-package-source-attempt",
+    "polkit-authorization": "cross-principal-polkit-probe",
+    "privilege-boundary": "privilege-boundary-probe",
+    "binding-substitution-rejection": "binding-substitution-attempt",
+    "independent-verification": "executor-self-report-tamper",
+    "authority-ceiling": "surface-authority-probe",
+    "secret-redaction": "secret-injection",
+    "adversarial-input": "malformed-input-injection",
+    "malicious-inputs": "malicious-input-corpus",
+    "recovery-boundary": "gui-and-model-unavailability",
 }
+MACHINE_PROBE_NAMES = {"os_release", "root_filesystem", "virtualization", "boot_id"}
+VM_EXTERNAL_CONTROLLERS = {"qemu-host", "systemd-host", "network-harness", "storage-harness"}
+PHYSICAL_EXTERNAL_CONTROLLERS = {"maintainer-console", "systemd-host", "network-harness", "storage-harness"}
 OFFICIAL_REPOSITORIES = {"core", "extra", "multilib"}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+BOOT_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PACKAGE_NAME_RE = re.compile(r"^[a-z0-9@._+-]+$")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 PNG_MAX_BYTES = 64 * 1024 * 1024
 PNG_MAX_PIXELS = 32 * 1024 * 1024
+VISUAL_MAX_TOTAL_PNG_BYTES = 256 * 1024 * 1024
+VISUAL_MAX_TOTAL_DECODE_PIXELS = 64 * 1024 * 1024
+VISUAL_MAX_FAILURE_DIFFS = 32
 PNG_BYTES_PER_PIXEL = {0: 1, 2: 3, 4: 2, 6: 4}
 PNG_UNSUPPORTED_COLOR_CHUNKS = {b"cHRM", b"gAMA", b"iCCP", b"sRGB", b"cICP", b"mDCV", b"cLLI"}
 VISUAL_MAX_BASELINES = 128
@@ -558,6 +724,17 @@ def _decode_png_pixels(
     return width, height, bytes(rgba)
 
 
+def _png_declared_pixel_count(data: bytes) -> int | None:
+    if len(data) < 33 or not data.startswith(PNG_SIGNATURE):
+        return None
+    if struct.unpack_from(">I", data, 8)[0] != 13 or data[12:16] != b"IHDR":
+        return None
+    width, height = struct.unpack_from(">II", data, 16)
+    if width <= 0 or height <= 0:
+        return None
+    return width * height
+
+
 def _validate_png_artifact(
     path: Path | None,
     expected_digest: object,
@@ -566,6 +743,8 @@ def _validate_png_artifact(
     failures: list[str],
     expected_width: int | None = None,
     expected_height: int | None = None,
+    decode_byte_budget: list[int] | None = None,
+    decode_pixel_budget: list[int] | None = None,
 ) -> tuple[int, int, bytes] | None:
     if path is None:
         return None
@@ -575,6 +754,17 @@ def _validate_png_artifact(
     if not isinstance(expected_digest, str) or not SHA256_RE.fullmatch(expected_digest):
         failures.append(f"{label} must carry a lowercase SHA-256 digest")
         return None
+
+    artifact_size = path.stat().st_size
+    if decode_byte_budget is not None:
+        if artifact_size > decode_byte_budget[0]:
+            failures.append(
+                f"{label} exceeds the aggregate PNG byte-work budget "
+                f"{VISUAL_MAX_TOTAL_PNG_BYTES}"
+            )
+            return None
+        decode_byte_budget[0] -= artifact_size
+
     data = _read_bounded_bytes(
         path,
         PNG_MAX_BYTES,
@@ -586,6 +776,21 @@ def _validate_png_artifact(
     if hashlib.sha256(data).hexdigest() != expected_digest:
         failures.append(f"{label} digest mismatch")
         return None
+
+    declared_pixels = _png_declared_pixel_count(data)
+    if (
+        declared_pixels is not None
+        and declared_pixels <= PNG_MAX_PIXELS
+        and decode_pixel_budget is not None
+    ):
+        if declared_pixels > decode_pixel_budget[0]:
+            failures.append(
+                f"{label} exceeds the aggregate PNG decode-pixel budget "
+                f"{VISUAL_MAX_TOTAL_DECODE_PIXELS}"
+            )
+            return None
+        decode_pixel_budget[0] -= declared_pixels
+
     decoded = _decode_png_pixels(data, label=label, failures=failures)
     if decoded is None:
         return None
@@ -597,7 +802,6 @@ def _validate_png_artifact(
         failures.append(f"{label} PNG height does not match reviewed metadata")
         return None
     return decoded
-
 
 def _validate_digest_bound_json_artifact(
     root: Path,
@@ -635,7 +839,7 @@ def _validate_runner_case_attestation(
     case_name: str,
     manifest_run_id: object,
     source: dict[str, object],
-    expected_observations: list[str],
+    expected_observations: dict[str, object],
     label: str,
     failures: list[str],
 ) -> None:
@@ -681,12 +885,19 @@ def _validate_runner_case_attestation(
     if set(by_name) != set(expected_observations):
         failures.append(f"{label} observation set does not prove the required case")
         return
-    for name in expected_observations:
+    for name, expected_value in expected_observations.items():
         item = by_name[name]
         if item.get("result") != "passed":
             failures.append(f"{label} observation {name} must have result=passed")
-        if item.get("value") in {None, ""}:
-            failures.append(f"{label} observation {name} requires an observable value")
+        value = item.get("value")
+        if isinstance(expected_value, bool):
+            value_matches = type(value) is bool and value is expected_value
+        else:
+            value_matches = value == expected_value
+        if not value_matches:
+            failures.append(
+                f"{label} observation {name} must carry the typed success value {expected_value!r}"
+            )
 
 
 def _validate_interactive_workstation_evidence(
@@ -695,6 +906,12 @@ def _validate_interactive_workstation_evidence(
     failures: list[str],
     *,
     expected_source_sha: str | None,
+    expected_package_manifest_sha256: str | None,
+    expected_provider_versions: dict[str, str] | None,
+    expected_architecture: str | None,
+    expected_linurad_sha256: str | None,
+    expected_shell_bridge_sha256: str | None,
+    require_binary_binding: bool,
 ) -> None:
     manifest = _validate_digest_bound_json_artifact(
         root,
@@ -725,6 +942,14 @@ def _validate_interactive_workstation_evidence(
         failures.append("interactive workstation evidence requires a non-empty run_id")
     if not _nonempty_string(manifest.get("captured_at_utc")):
         failures.append("interactive workstation evidence requires captured_at_utc")
+    if expected_package_manifest_sha256 is None or expected_provider_versions is None:
+        failures.append(
+            "interactive workstation evidence requires the frozen qualification package manifest"
+        )
+    elif manifest.get("package_manifest_sha256") != expected_package_manifest_sha256:
+        failures.append(
+            "interactive workstation evidence package_manifest_sha256 must match the frozen qualification package manifest"
+        )
 
     source = manifest.get("source")
     source_valid = isinstance(source, dict)
@@ -739,10 +964,23 @@ def _validate_interactive_workstation_evidence(
             failures.append("interactive workstation evidence requires an expected release source SHA")
         elif commit_sha != expected_source_sha:
             failures.append("interactive workstation source.commit_sha does not match the expected release source")
-        for key in ("linurad_sha256", "shell_bridge_sha256"):
+        expected_binary_digests = {
+            "linurad_sha256": expected_linurad_sha256,
+            "shell_bridge_sha256": expected_shell_bridge_sha256,
+        }
+        for key, expected_digest in expected_binary_digests.items():
             value = source.get(key)
             if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
                 failures.append(f"interactive workstation source.{key} must be a lowercase SHA-256 digest")
+                continue
+            if expected_digest is not None and value != expected_digest:
+                failures.append(
+                    f"interactive workstation source.{key} does not match independently qualified runtime artifact"
+                )
+            elif require_binary_binding and expected_digest is None:
+                failures.append(
+                    f"interactive workstation source.{key} requires an independently qualified expected digest"
+                )
 
     hardware = manifest.get("hardware")
     if not isinstance(hardware, dict):
@@ -751,6 +989,15 @@ def _validate_interactive_workstation_evidence(
         cpu = hardware.get("cpu")
         if not isinstance(cpu, dict) or any(not _nonempty_string(cpu.get(key)) for key in ("architecture", "vendor", "model")):
             failures.append("interactive workstation CPU identity must include architecture, vendor and model")
+        else:
+            if expected_architecture is None:
+                failures.append(
+                    "interactive workstation CPU architecture requires a frozen qualification substrate"
+                )
+            elif cpu.get("architecture") != expected_architecture:
+                failures.append(
+                    "interactive workstation CPU architecture must match the frozen qualification substrate"
+                )
         gpu = hardware.get("gpu")
         if not isinstance(gpu, dict) or any(not _nonempty_string(gpu.get(key)) for key in ("vendor_id", "device_id", "driver", "driver_version")):
             failures.append("interactive workstation GPU identity must include vendor/device/driver/version")
@@ -780,18 +1027,51 @@ def _validate_interactive_workstation_evidence(
             failures.append("interactive workstation session.protocol must be wayland")
         if session.get("compositor") != "hyprland":
             failures.append("interactive workstation session.compositor must be hyprland")
-        for key in ("compositor_version", "quickshell_version", "qt_version", "kernel_version", "systemd_version"):
+        for key in (
+            "compositor_version",
+            "quickshell_version",
+            "qt_version",
+            "kernel_version",
+            "systemd_version",
+        ):
             if not _nonempty_string(session.get(key)):
                 failures.append(f"interactive workstation session.{key} must be non-empty")
+        for key, package_name in EXPECTED_Q11_SESSION_PACKAGE_VERSIONS.items():
+            value = session.get(key)
+            if not _nonempty_string(value):
+                continue
+            if expected_provider_versions is None:
+                failures.append(
+                    f"interactive workstation session.{key} requires a frozen package manifest"
+                )
+                continue
+            expected_version = expected_provider_versions.get(package_name)
+            if expected_version is None:
+                failures.append(
+                    f"frozen package manifest is missing session package {package_name}"
+                )
+            elif value != expected_version:
+                failures.append(
+                    f"interactive workstation session.{key} must match frozen {package_name} version {expected_version}"
+                )
 
     providers = manifest.get("providers")
     required_provider_ids = EXPECTED_INTERACTIVE_WORKSTATION["required_provider_ids"]
     if not isinstance(providers, dict) or set(providers) != set(required_provider_ids):
         failures.append("interactive workstation provider identities must match the required provider set")
+    elif expected_provider_versions is None:
+        failures.append("interactive workstation provider versions require a frozen package manifest")
     else:
         for provider_id in required_provider_ids:
-            if not _nonempty_string(providers.get(provider_id)):
-                failures.append(f"interactive workstation provider {provider_id} requires an exact runtime version")
+            expected_version = expected_provider_versions.get(provider_id)
+            if expected_version is None:
+                failures.append(
+                    f"frozen package manifest is missing required provider package {provider_id}"
+                )
+            elif providers.get(provider_id) != expected_version:
+                failures.append(
+                    f"interactive workstation provider {provider_id} must match frozen package version {expected_version}"
+                )
 
     cases = manifest.get("cases")
     required_cases = EXPECTED_INTERACTIVE_WORKSTATION["required_cases"]
@@ -811,11 +1091,6 @@ def _validate_interactive_workstation_evidence(
     if set(by_name) != set(required_cases):
         failures.append("interactive workstation Q11 case set drifted from the qualification contract")
         return
-    case_observations = (
-        EXPECTED_Q12_CASE_OBSERVATIONS
-        if expected["evidence_type"] == "exact-source-q12-update-recovery"
-        else EXPECTED_Q13_CASE_OBSERVATIONS
-    )
     for name in required_cases:
         case = by_name[name]
         if case.get("result") != "passed":
@@ -833,15 +1108,390 @@ def _validate_interactive_workstation_evidence(
         elif evidence_path is not None and _sha256(evidence_path) != digest:
             failures.append(f"interactive workstation case {name} evidence digest mismatch")
         elif evidence_path is not None and source_valid:
+            expected_values: dict[str, object] = {
+                observation_name: True
+                for observation_name in EXPECTED_Q11_CASE_OBSERVATIONS[name]
+            }
+            if expected_provider_versions is not None:
+                for provider_id, version in expected_provider_versions.items():
+                    observation_name = f"{provider_id}-version"
+                    if observation_name in expected_values:
+                        expected_values[observation_name] = version
             _validate_runner_case_attestation(
                 evidence_path,
                 case_name=name,
                 manifest_run_id=manifest.get("run_id"),
                 source=source,
-                expected_observations=EXPECTED_Q11_CASE_OBSERVATIONS[name],
+                expected_observations=expected_values,
                 label=f"interactive workstation case evidence {name}",
                 failures=failures,
             )
+
+
+def _load_release_machine_package_inventory(
+    path: Path,
+    *,
+    label: str,
+    failures: list[str],
+) -> dict[str, str] | None:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except UnicodeError:
+        failures.append(f"{label} must be valid UTF-8")
+        return None
+    packages: dict[str, str] = {}
+    for line_number, line in enumerate(lines, start=1):
+        if not line:
+            failures.append(f"{label} line {line_number} must not be empty")
+            continue
+        fields = line.split("\t")
+        if len(fields) != 2:
+            failures.append(f"{label} line {line_number} must contain name and exact version")
+            continue
+        name, version = fields
+        if not PACKAGE_NAME_RE.fullmatch(name) or not _valid_exact_version(version):
+            failures.append(f"{label} line {line_number} has an invalid package identity")
+            continue
+        if name in packages:
+            failures.append(f"{label} contains duplicate package {name}")
+            continue
+        packages[name] = version
+    if not packages:
+        failures.append(f"{label} must contain installed package identities")
+        return None
+    if list(packages) != sorted(packages):
+        failures.append(f"{label} must use canonical package-name order")
+    return packages
+
+
+def _validate_sha256_bound_release_artifact(
+    root: Path,
+    binding: object,
+    *,
+    label: str,
+    failures: list[str],
+) -> Path | None:
+    if not isinstance(binding, dict):
+        failures.append(f"{label} binding must be an object")
+        return None
+    path = _bounded_regular_path(
+        root,
+        binding.get("path"),
+        prefix="qualification/v010/release-matrix/",
+        label=label,
+        failures=failures,
+    )
+    digest = binding.get("sha256")
+    if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
+        failures.append(f"{label} must carry a lowercase SHA-256 digest")
+        return None
+    if path is None:
+        return None
+    if _sha256(path) != digest:
+        failures.append(f"{label} digest mismatch")
+        return None
+    return path
+
+
+def _validate_release_machine_environment(
+    root: Path,
+    manifest: dict[str, object],
+    *,
+    label: str,
+    source_sha: object,
+    run_id: object,
+    expected_profile_sha256: str | None,
+    expected_package_manifest_sha256: str | None,
+    expected_package_versions: dict[str, str] | None,
+    expected_architecture: str | None,
+    failures: list[str],
+) -> tuple[str | None, str | None, str | None]:
+    binding = manifest.get("machine_environment")
+    if not isinstance(binding, dict):
+        failures.append(f"{label} evidence requires machine_environment binding")
+        return None, None, None
+    evidence_path = _validate_sha256_bound_release_artifact(
+        root,
+        {"path": binding.get("evidence"), "sha256": binding.get("sha256")},
+        label=f"{label} machine environment",
+        failures=failures,
+    )
+    environment_sha256 = binding.get("sha256")
+    if evidence_path is None or not isinstance(environment_sha256, str):
+        return None, None, None
+    environment = _load_json(evidence_path, f"{label} machine environment", failures)
+    if not environment:
+        return environment_sha256, None, None
+
+    if environment.get("schema_version") != 1:
+        failures.append(f"{label} machine environment schema_version must be 1")
+    if environment.get("artifact_type") != "linura-v010-machine-environment":
+        failures.append(f"{label} machine environment artifact_type drifted")
+    if environment.get("source_commit_sha") != source_sha:
+        failures.append(f"{label} machine environment source must match the qualification source")
+    if environment.get("run_id") != run_id:
+        failures.append(f"{label} machine environment run_id must match the parent qualification run")
+    if environment.get("profile_id") != EXPECTED_PROFILE:
+        failures.append(f"{label} machine environment must bind {EXPECTED_PROFILE}")
+    if environment.get("machine_class") != EXPECTED_MACHINE_CLASS:
+        failures.append(f"{label} machine environment machine_class must be workstation")
+    if expected_profile_sha256 is None or environment.get("profile_sha256") != expected_profile_sha256:
+        failures.append(f"{label} machine environment must bind the reviewed workstation profile digest")
+    if (
+        expected_package_manifest_sha256 is None
+        or expected_package_versions is None
+        or expected_architecture is None
+    ):
+        failures.append(f"{label} machine environment requires a frozen qualification package manifest")
+    elif environment.get("package_manifest_sha256") != expected_package_manifest_sha256:
+        failures.append(f"{label} machine environment package manifest digest must match the frozen substrate")
+
+    execution = environment.get("execution")
+    boot_id: str | None = None
+    environment_kind: str | None = None
+    virtualization: str | None = None
+    if not isinstance(execution, dict):
+        failures.append(f"{label} machine environment missing execution identity")
+    else:
+        if execution.get("scope") != "machine":
+            failures.append(f"{label} machine environment execution.scope must be machine")
+        environment_kind = execution.get("kind") if isinstance(execution.get("kind"), str) else None
+        if environment_kind not in {"physical", "virtual-machine"}:
+            failures.append(f"{label} machine environment execution.kind must be physical or virtual-machine")
+        if execution.get("architecture") != expected_architecture:
+            failures.append(f"{label} machine environment architecture must match the frozen substrate")
+        boot_value = execution.get("boot_id")
+        if not isinstance(boot_value, str) or BOOT_ID_RE.fullmatch(boot_value) is None:
+            failures.append(f"{label} machine environment boot_id must be a canonical UUID")
+        else:
+            boot_id = boot_value
+        virtualization_value = execution.get("virtualization")
+        if not _nonempty_string(virtualization_value):
+            failures.append(f"{label} machine environment virtualization identity must be non-empty")
+        else:
+            virtualization = str(virtualization_value)
+            if environment_kind == "physical" and virtualization != "none":
+                failures.append(f"{label} physical machine environment must report virtualization=none")
+            if environment_kind == "virtual-machine" and virtualization == "none":
+                failures.append(f"{label} virtual-machine environment must identify its virtualization")
+
+    storage = environment.get("storage")
+    if not isinstance(storage, dict):
+        failures.append(f"{label} machine environment missing storage identity")
+    else:
+        if storage.get("root_filesystem") != "btrfs":
+            failures.append(f"{label} machine environment root filesystem must be btrfs")
+        if storage.get("snapshot_provider") != "snapper":
+            failures.append(f"{label} machine environment snapshot provider must be snapper")
+
+    package_inventory_path = _validate_sha256_bound_release_artifact(
+        root,
+        environment.get("package_inventory"),
+        label=f"{label} installed package inventory",
+        failures=failures,
+    )
+    if package_inventory_path is not None and expected_package_versions is not None:
+        observed_packages = _load_release_machine_package_inventory(
+            package_inventory_path,
+            label=f"{label} installed package inventory",
+            failures=failures,
+        )
+        if observed_packages is not None and observed_packages != expected_package_versions:
+            failures.append(
+                f"{label} installed package inventory must exactly match the frozen package manifest"
+            )
+
+    probes = environment.get("probes")
+    if not isinstance(probes, dict) or set(probes) != MACHINE_PROBE_NAMES:
+        failures.append(
+            f"{label} machine environment must retain exactly the required raw machine probes"
+        )
+        return environment_sha256, boot_id, environment_kind
+
+    probe_paths: dict[str, Path] = {}
+    for probe_name in sorted(MACHINE_PROBE_NAMES):
+        probe_path = _validate_sha256_bound_release_artifact(
+            root,
+            probes.get(probe_name),
+            label=f"{label} machine probe {probe_name}",
+            failures=failures,
+        )
+        if probe_path is not None:
+            probe_paths[probe_name] = probe_path
+
+    if "os_release" in probe_paths:
+        try:
+            os_release_lines = {
+                line.strip()
+                for line in probe_paths["os_release"].read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            }
+        except UnicodeError:
+            failures.append(f"{label} os-release probe must be valid UTF-8")
+        else:
+            if "ID=arch" not in os_release_lines and 'ID="arch"' not in os_release_lines:
+                failures.append(f"{label} os-release probe must independently identify Arch Linux")
+    if "root_filesystem" in probe_paths:
+        if probe_paths["root_filesystem"].read_text(encoding="utf-8").strip() != "btrfs":
+            failures.append(f"{label} root-filesystem probe must independently identify btrfs")
+    if "virtualization" in probe_paths and virtualization is not None:
+        if probe_paths["virtualization"].read_text(encoding="utf-8").strip() != virtualization:
+            failures.append(f"{label} virtualization probe must match the machine environment identity")
+    if "boot_id" in probe_paths and boot_id is not None:
+        if probe_paths["boot_id"].read_text(encoding="utf-8").strip() != boot_id:
+            failures.append(f"{label} boot-id probe must match the machine environment identity")
+
+    return environment_sha256, boot_id, environment_kind
+
+
+def _validate_machine_case_execution(
+    root: Path,
+    attestation: dict[str, object],
+    *,
+    label: str,
+    case_name: str,
+    source_sha: object,
+    run_id: object,
+    environment_sha256: str | None,
+    environment_boot_id: str | None,
+    environment_kind: str | None,
+    expected_mechanism: str,
+    failures: list[str],
+) -> None:
+    execution = attestation.get("machine_execution")
+    if not isinstance(execution, dict):
+        failures.append(f"{label} missing machine_execution provenance")
+        return
+    if execution.get("scope") != "machine":
+        failures.append(f"{label} machine_execution.scope must be machine")
+    if environment_sha256 is None or execution.get("environment_sha256") != environment_sha256:
+        failures.append(f"{label} machine_execution must bind the parent machine environment digest")
+
+    requires_boot_transition = expected_mechanism in BOOT_TRANSITION_MECHANISMS
+    pre_boot_id: str | None = None
+    post_boot_id: str | None = None
+    if requires_boot_transition:
+        pre_value = execution.get("pre_boot_id")
+        post_value = execution.get("post_boot_id")
+        if not isinstance(pre_value, str) or BOOT_ID_RE.fullmatch(pre_value) is None:
+            failures.append(f"{label} machine_execution pre_boot_id must be a canonical UUID")
+        else:
+            pre_boot_id = pre_value
+            if environment_boot_id is None or pre_boot_id != environment_boot_id:
+                failures.append(
+                    f"{label} machine_execution pre_boot_id must bind the parent machine boot identity"
+                )
+        if not isinstance(post_value, str) or BOOT_ID_RE.fullmatch(post_value) is None:
+            failures.append(f"{label} machine_execution post_boot_id must be a canonical UUID")
+        else:
+            post_boot_id = post_value
+            if pre_boot_id is not None and post_boot_id == pre_boot_id:
+                failures.append(
+                    f"{label} machine_execution pre_boot_id and post_boot_id must differ"
+                )
+        if "boot_id" in execution:
+            failures.append(
+                f"{label} rebooting machine_execution must use pre_boot_id/post_boot_id instead of boot_id"
+            )
+    elif environment_boot_id is None or execution.get("boot_id") != environment_boot_id:
+        failures.append(f"{label} machine_execution must bind the parent machine boot identity")
+
+    controller = execution.get("controller")
+    allowed_controllers = (
+        PHYSICAL_EXTERNAL_CONTROLLERS
+        if environment_kind == "physical"
+        else VM_EXTERNAL_CONTROLLERS
+    )
+    if controller not in allowed_controllers:
+        failures.append(f"{label} machine_execution controller must be externally controlled")
+    mechanism = execution.get("mechanism")
+    if mechanism != expected_mechanism:
+        failures.append(
+            f"{label} machine_execution mechanism must be {expected_mechanism}"
+        )
+
+    provenance_path = _validate_sha256_bound_release_artifact(
+        root,
+        execution.get("provenance"),
+        label=f"{label} machine execution provenance",
+        failures=failures,
+    )
+    if provenance_path is None:
+        return
+    provenance = _load_json(provenance_path, f"{label} machine execution provenance", failures)
+    if not provenance:
+        return
+    if provenance.get("schema_version") != 1:
+        failures.append(f"{label} machine execution provenance schema_version must be 1")
+    if provenance.get("artifact_type") != "linura-v010-machine-case-provenance":
+        failures.append(f"{label} machine execution provenance artifact_type drifted")
+    if provenance.get("source_commit_sha") != source_sha:
+        failures.append(f"{label} machine execution provenance source must match the qualification source")
+    if provenance.get("run_id") != run_id or provenance.get("case") != case_name:
+        failures.append(f"{label} machine execution provenance must bind the parent run and case")
+    if provenance.get("environment_sha256") != environment_sha256:
+        failures.append(f"{label} machine execution provenance environment binding mismatch")
+    if requires_boot_transition:
+        if provenance.get("pre_boot_id") != pre_boot_id:
+            failures.append(f"{label} machine execution provenance pre_boot_id mismatch")
+        if provenance.get("post_boot_id") != post_boot_id:
+            failures.append(f"{label} machine execution provenance post_boot_id mismatch")
+        if "boot_id" in provenance:
+            failures.append(
+                f"{label} rebooting machine execution provenance must use pre_boot_id/post_boot_id"
+            )
+        post_boot_probe_path = _validate_sha256_bound_release_artifact(
+            root,
+            provenance.get("post_boot_probe"),
+            label=f"{label} recovered boot probe",
+            failures=failures,
+        )
+        if post_boot_probe_path is not None and post_boot_id is not None:
+            try:
+                observed_post_boot_id = post_boot_probe_path.read_text(encoding="utf-8").strip()
+            except UnicodeError:
+                failures.append(f"{label} recovered boot probe must be valid UTF-8")
+            else:
+                if observed_post_boot_id != post_boot_id:
+                    failures.append(
+                        f"{label} recovered boot probe must match post_boot_id"
+                    )
+    elif provenance.get("boot_id") != environment_boot_id:
+        failures.append(f"{label} machine execution provenance boot identity mismatch")
+    if provenance.get("scope") != "machine":
+        failures.append(f"{label} machine execution provenance scope must be machine")
+    if provenance.get("controller") != controller:
+        failures.append(f"{label} machine execution provenance controller mismatch")
+    if provenance.get("mechanism") != expected_mechanism:
+        failures.append(f"{label} machine execution provenance mechanism mismatch")
+    if provenance.get("external_controller") is not True:
+        failures.append(f"{label} machine execution provenance must prove external control")
+    if provenance.get("process_local_mock") is not False:
+        failures.append(f"{label} machine execution provenance process_local_mock must be false")
+
+    event_log_path = _validate_sha256_bound_release_artifact(
+        root,
+        provenance.get("event_log"),
+        label=f"{label} machine execution event log",
+        failures=failures,
+    )
+    if event_log_path is not None:
+        if event_log_path.stat().st_size == 0:
+            failures.append(f"{label} machine execution event log must not be empty")
+        elif requires_boot_transition and pre_boot_id is not None and post_boot_id is not None:
+            try:
+                event_lines = set(event_log_path.read_text(encoding="utf-8").splitlines())
+            except UnicodeError:
+                failures.append(f"{label} machine execution event log must be valid UTF-8")
+            else:
+                required_boot_lines = {
+                    f"pre_boot_id={pre_boot_id}",
+                    f"post_boot_id={post_boot_id}",
+                }
+                if not required_boot_lines.issubset(event_lines):
+                    failures.append(
+                        f"{label} machine execution event log must record the boot transition"
+                    )
 
 
 def _validate_release_matrix_evidence(
@@ -852,6 +1502,10 @@ def _validate_release_matrix_evidence(
     label: str,
     expected_source_sha: str | None,
     failures: list[str],
+    expected_profile_sha256: str | None = None,
+    expected_package_manifest_sha256: str | None = None,
+    expected_package_versions: dict[str, str] | None = None,
+    expected_architecture: str | None = None,
 ) -> None:
     manifest = _validate_digest_bound_json_artifact(
         root,
@@ -868,6 +1522,10 @@ def _validate_release_matrix_evidence(
         failures.append(f"{label} evidence must bind milestone v0.10.0")
     if manifest.get("evidence_type") != expected["evidence_type"]:
         failures.append(f"{label} evidence_type drifted")
+    if manifest.get("profile_id") != EXPECTED_PROFILE:
+        failures.append(f"{label} evidence must bind {EXPECTED_PROFILE}")
+    if manifest.get("machine_class") != EXPECTED_MACHINE_CLASS:
+        failures.append(f"{label} evidence machine_class must be workstation")
     if manifest.get("result") != "passed":
         failures.append(f"{label} evidence result must be passed")
     manifest_run_id = manifest.get("run_id")
@@ -882,6 +1540,27 @@ def _validate_release_matrix_evidence(
         failures.append(f"{label} evidence requires an expected release source SHA")
     elif source_sha != expected_source_sha:
         failures.append(f"{label} source_commit_sha does not match the expected release source")
+
+    environment_sha256: str | None = None
+    environment_boot_id: str | None = None
+    environment_kind: str | None = None
+    if expected["evidence_type"] in {
+        "exact-source-q12-update-recovery",
+        "exact-source-q13-workstation-security",
+    }:
+        environment_sha256, environment_boot_id, environment_kind = _validate_release_machine_environment(
+            root,
+            manifest,
+            label=label,
+            source_sha=source_sha,
+            run_id=manifest_run_id,
+            expected_profile_sha256=expected_profile_sha256,
+            expected_package_manifest_sha256=expected_package_manifest_sha256,
+            expected_package_versions=expected_package_versions,
+            expected_architecture=expected_architecture,
+            failures=failures,
+        )
+
     cases = manifest.get("cases")
     required_cases = expected["required_cases"]
     if not isinstance(cases, list) or len(cases) != len(required_cases):
@@ -900,6 +1579,15 @@ def _validate_release_matrix_evidence(
     if set(by_name) != set(required_cases):
         failures.append(f"{label} case set drifted from the qualification contract")
         return
+    if expected["evidence_type"] == "exact-source-q10-experience-authority":
+        case_observations = EXPECTED_Q10_CASE_OBSERVATIONS
+        case_mechanisms = {}
+    elif expected["evidence_type"] == "exact-source-q12-update-recovery":
+        case_observations = EXPECTED_Q12_CASE_OBSERVATIONS
+        case_mechanisms = EXPECTED_Q12_EXECUTION_MECHANISMS
+    else:
+        case_observations = EXPECTED_Q13_CASE_OBSERVATIONS
+        case_mechanisms = EXPECTED_Q13_EXECUTION_MECHANISMS
     for name in required_cases:
         case = by_name[name]
         if case.get("result") != "passed":
@@ -947,6 +1635,22 @@ def _validate_release_matrix_evidence(
                 failures.append(f"{label} case {name} runner.version must be non-empty")
             if runner.get("commit_sha") != source_sha:
                 failures.append(f"{label} case {name} runner.commit_sha must match the parent source identity")
+
+        if name in case_mechanisms:
+            _validate_machine_case_execution(
+                root,
+                attestation,
+                label=f"{label} case {name}",
+                case_name=name,
+                source_sha=source_sha,
+                run_id=manifest_run_id,
+                environment_sha256=environment_sha256,
+                environment_boot_id=environment_boot_id,
+                environment_kind=environment_kind,
+                expected_mechanism=case_mechanisms[name],
+                failures=failures,
+            )
+
         observations = attestation.get("observations")
         if not isinstance(observations, list):
             failures.append(f"{label} case {name} observations must be an array")
@@ -969,9 +1673,10 @@ def _validate_release_matrix_evidence(
             observation = by_observation[observation_name]
             if observation.get("result") != "passed":
                 failures.append(f"{label} case {name} observation {observation_name} must pass")
-            if observation.get("value") in {None, ""}:
-                failures.append(f"{label} case {name} observation {observation_name} requires a value")
-
+            if observation.get("value") is not True:
+                failures.append(
+                    f"{label} case {name} observation {observation_name} must carry boolean true"
+                )
 
 def _matches_canonical_visual_diff(
     baseline: tuple[int, int, bytes],
@@ -1015,6 +1720,8 @@ def _validate_experience_evidence(
     root: Path,
     experience: dict[str, object],
     failures: list[str],
+    *,
+    expected_source_sha: str | None,
 ) -> None:
     baseline_path = _bounded_regular_path(
         root,
@@ -1046,11 +1753,14 @@ def _validate_experience_evidence(
         )
         return
 
+    png_byte_budget = [VISUAL_MAX_TOTAL_PNG_BYTES]
+    png_pixel_budget = [VISUAL_MAX_TOTAL_DECODE_PIXELS]
     baseline_ids: set[str] = set()
     baseline_metadata: dict[str, tuple[int, int, float, str]] = {}
-    # Keep only artifact locators/digests. Decoded RGBA buffers can be very large and must not
-    # accumulate across a manifest; decode a baseline only while its comparison is being checked.
+    # Keep digest-sized normalized pixel identities so ordinary comparisons never decode
+    # the reviewed baseline twice. Full RGBA is retained only for the current decode.
     baseline_artifacts: dict[str, tuple[Path, str]] = {}
+    baseline_pixel_digests: dict[str, str] = {}
     baseline_digests: dict[str, str] = {}
     observed_scales: set[float] = set()
     observed_resolutions: set[str] = set()
@@ -1101,6 +1811,8 @@ def _validate_experience_evidence(
             failures=failures,
             expected_width=width,
             expected_height=height,
+            decode_byte_budget=png_byte_budget,
+            decode_pixel_budget=png_pixel_budget,
         )
         if (
             baseline_image is not None
@@ -1108,6 +1820,9 @@ def _validate_experience_evidence(
             and isinstance(baseline_digest, str)
         ):
             baseline_artifacts[baseline_id] = (artifact_path, baseline_digest)
+            baseline_pixel_digests[baseline_id] = hashlib.sha256(
+                baseline_image[2]
+            ).hexdigest()
             baseline_digests[baseline_id] = baseline_digest
 
     required_visual_surfaces = experience.get("required_visual_surfaces")
@@ -1166,12 +1881,43 @@ def _validate_experience_evidence(
     evidence = _load_json(evidence_path, "v0.10 experience evidence manifest", failures)
     if evidence.get("schema_version") != 1:
         failures.append("v0.10 experience evidence manifest schema_version must be 1")
+    source_sha = evidence.get("source_commit_sha")
+    if not isinstance(source_sha, str) or not GIT_SHA_RE.fullmatch(source_sha):
+        failures.append("v0.10 experience evidence source_commit_sha must be a lowercase 40-hex Git SHA")
+    elif expected_source_sha is None:
+        failures.append("v0.10 experience evidence requires an expected release source SHA")
+    elif source_sha != expected_source_sha:
+        failures.append(
+            "v0.10 experience evidence source_commit_sha does not match the expected release source"
+        )
+    manifest_run_id = evidence.get("run_id")
+    if not _nonempty_string(manifest_run_id):
+        failures.append("v0.10 experience evidence requires run_id")
+    if not _nonempty_string(evidence.get("captured_at_utc")):
+        failures.append("v0.10 experience evidence requires captured_at_utc")
+
+    _validate_release_matrix_evidence(
+        root,
+        {
+            "evidence_manifest": experience.get("authority_evidence_manifest"),
+            "evidence_manifest_sha256": experience.get("authority_evidence_manifest_sha256"),
+        },
+        EXPECTED_Q10_AUTHORITY_QUALIFICATION,
+        label="Q10 experience authority/adversarial",
+        expected_source_sha=expected_source_sha,
+        failures=failures,
+    )
 
     comparisons = evidence.get("visual_comparisons")
     covered_baselines: set[str] = set()
     if not isinstance(comparisons, list) or not comparisons:
         failures.append("v0.10 experience evidence requires visual_comparisons")
     else:
+        if len(comparisons) > VISUAL_MAX_BASELINES:
+            failures.append(
+                f"v0.10 experience evidence exceeds bounded visual comparison count {VISUAL_MAX_BASELINES}"
+            )
+            comparisons = comparisons[:VISUAL_MAX_BASELINES]
         for index, item in enumerate(comparisons):
             if not isinstance(item, dict):
                 failures.append(f"visual comparison {index} must be an object")
@@ -1181,7 +1927,11 @@ def _validate_experience_evidence(
             if baseline_id not in baseline_ids or metadata is None:
                 failures.append(f"visual comparison {index} references unknown or invalid baseline")
                 continue
-            covered_baselines.add(str(baseline_id))
+            baseline_key = str(baseline_id)
+            if baseline_key in covered_baselines:
+                failures.append(f"visual comparison {index} duplicates baseline {baseline_key}")
+                continue
+            covered_baselines.add(baseline_key)
             if item.get("status") != "pass" or item.get("reviewed") is not True:
                 failures.append(f"visual comparison for {baseline_id} must be reviewed and passing")
             capture_path = _bounded_regular_path(
@@ -1198,24 +1948,14 @@ def _validate_experience_evidence(
                 failures=failures,
                 expected_width=metadata[0],
                 expected_height=metadata[1],
+                decode_byte_budget=png_byte_budget,
+                decode_pixel_budget=png_pixel_budget,
             )
-            baseline_artifact = baseline_artifacts.get(str(baseline_id))
-            baseline_image = (
-                _validate_png_artifact(
-                    baseline_artifact[0],
-                    baseline_artifact[1],
-                    label=f"visual baseline artifact {baseline_id}",
-                    failures=failures,
-                    expected_width=metadata[0],
-                    expected_height=metadata[1],
-                )
-                if baseline_artifact is not None
-                else None
-            )
+            baseline_pixel_digest = baseline_pixel_digests.get(str(baseline_id))
             if (
-                baseline_image is not None
+                baseline_pixel_digest is not None
                 and capture_image is not None
-                and capture_image != baseline_image
+                and hashlib.sha256(capture_image[2]).hexdigest() != baseline_pixel_digest
             ):
                 failures.append(
                     f"visual comparison for {baseline_id} does not match baseline pixels"
@@ -1230,6 +1970,11 @@ def _validate_experience_evidence(
     if not isinstance(failure_diffs, list) or not failure_diffs:
         failures.append("v0.10 experience evidence requires at least one retained reviewed failure diff")
     else:
+        if len(failure_diffs) > VISUAL_MAX_FAILURE_DIFFS:
+            failures.append(
+                f"v0.10 experience evidence exceeds bounded retained failure diff count {VISUAL_MAX_FAILURE_DIFFS}"
+            )
+            failure_diffs = failure_diffs[:VISUAL_MAX_FAILURE_DIFFS]
         for index, item in enumerate(failure_diffs):
             label = f"retained failure diff {index}"
             if not isinstance(item, dict) or item.get("reviewed") is not True:
@@ -1262,6 +2007,8 @@ def _validate_experience_evidence(
                 failures=failures,
                 expected_width=metadata[0],
                 expected_height=metadata[1],
+                decode_byte_budget=png_byte_budget,
+                decode_pixel_budget=png_pixel_budget,
             )
             baseline_artifact = baseline_artifacts.get(baseline_id)
             baseline_image = (
@@ -1272,6 +2019,8 @@ def _validate_experience_evidence(
                     failures=failures,
                     expected_width=metadata[0],
                     expected_height=metadata[1],
+                    decode_byte_budget=png_byte_budget,
+                    decode_pixel_budget=png_pixel_budget,
                 )
                 if baseline_artifact is not None
                 else None
@@ -1298,6 +2047,8 @@ def _validate_experience_evidence(
                 failures=failures,
                 expected_width=metadata[0],
                 expected_height=metadata[1],
+                decode_byte_budget=png_byte_budget,
+                decode_pixel_budget=png_pixel_budget,
             )
             if (
                 baseline_image is not None
@@ -1379,6 +2130,14 @@ def _validate_experience_evidence(
             failures.append(f"interaction/accessibility report {surface} surface binding mismatch")
         if report.get("result") != "pass":
             failures.append(f"interaction/accessibility report {surface} must record result=pass")
+        if report.get("source_commit_sha") != source_sha:
+            failures.append(
+                f"interaction/accessibility report {surface} source must match the experience evidence manifest"
+            )
+        if report.get("run_id") != manifest_run_id:
+            failures.append(
+                f"interaction/accessibility report {surface} run_id must match the parent experience run"
+            )
 
         runner = report.get("runner")
         if not isinstance(runner, dict):
@@ -1393,6 +2152,14 @@ def _validate_experience_evidence(
             if runner.get("platform") != EXPECTED_PROFILE:
                 failures.append(
                     f"interaction/accessibility report {surface} runner.platform must be {EXPECTED_PROFILE}"
+                )
+            if runner.get("run_id") != manifest_run_id:
+                failures.append(
+                    f"interaction/accessibility report {surface} runner.run_id must match the parent experience run"
+                )
+            if runner.get("commit_sha") != source_sha:
+                failures.append(
+                    f"interaction/accessibility report {surface} runner.commit_sha must match the qualified source"
                 )
 
         checks = report.get("checks")
@@ -1486,15 +2253,15 @@ def _validate_package_manifest(
     architecture: str,
     required_packages: set[str],
     failures: list[str],
-) -> None:
+) -> dict[str, str] | None:
     if not path.is_file() or path.is_symlink():
         failures.append(f"frozen package manifest missing or not a regular file: {path}")
-        return
+        return None
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except UnicodeError:
         failures.append("frozen package manifest must be valid UTF-8")
-        return
+        return None
 
     expected_headers = [
         f"# {EXPECTED_MANIFEST_FORMAT}",
@@ -1503,12 +2270,12 @@ def _validate_package_manifest(
     ]
     if lines[:3] != expected_headers:
         failures.append("frozen package manifest identity headers do not match the qualification substrate")
-        return
+        return None
 
     records = lines[3:]
     if not records:
         failures.append("frozen package manifest must contain versioned package records")
-        return
+        return None
     if any(not line for line in records):
         failures.append("frozen package manifest must not contain blank record lines")
 
@@ -1544,7 +2311,7 @@ def _validate_package_manifest(
 
     if not parsed:
         failures.append("frozen package manifest must contain parseable versioned package records")
-        return
+        return None
     if parsed != sorted(parsed, key=lambda item: (item[1], item[0], item[2], item[3])):
         failures.append("frozen package manifest records must use canonical package-name order")
     missing = sorted(required_packages - seen_names)
@@ -1552,9 +2319,17 @@ def _validate_package_manifest(
         failures.append(
             "frozen package manifest is missing required versioned packages: " + ", ".join(missing)
         )
+    return {name: version for _, name, version, _ in parsed}
 
-
-def validate(root: Path, *, expected_source_sha: str | None = None) -> list[str]:
+def validate(
+    root: Path,
+    *,
+    expected_source_sha: str | None = None,
+    expected_linurad_sha256: str | None = None,
+    expected_shell_bridge_sha256: str | None = None,
+    require_binary_binding: bool = False,
+    post_release_closed: bool = False,
+) -> list[str]:
     failures: list[str] = []
     contract = _load_toml(root / CONTRACT_PATH, "v0.10 qualification contract", failures)
     roadmap = _load_toml(root / "contracts/roadmap.toml", "roadmap contract", failures)
@@ -1596,6 +2371,7 @@ def validate(root: Path, *, expected_source_sha: str | None = None) -> list[str]
         static_experience = dict(experience)
         static_experience.pop("experience_evidence_ready", None)
         static_experience.pop("experience_evidence_manifest_sha256", None)
+        static_experience.pop("authority_evidence_manifest_sha256", None)
         static_experience.pop("visual_baseline_manifest_sha256", None)
         if static_experience != EXPECTED_EXPERIENCE:
             failures.append("v0.10 experience contract drifted from the required multi-interface workstation boundary")
@@ -1648,12 +2424,41 @@ def validate(root: Path, *, expected_source_sha: str | None = None) -> list[str]
         expected_digest = contract.get("profile_sha256")
         if not isinstance(expected_digest, str) or not SHA256_RE.fullmatch(expected_digest):
             failures.append("profile_sha256 must be a lowercase SHA-256 digest")
-        elif _sha256(profile_path) != expected_digest:
-            failures.append("arch-hyprland-v1 content does not match the qualification-bound profile_sha256")
+        else:
+            profile_bytes = profile_path.read_bytes()
+            if post_release_closed:
+                try:
+                    profile_text = profile_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    failures.append("arch-hyprland-v1 must remain UTF-8 after support promotion")
+                else:
+                    promoted_marker = 'status = "release-qualified"'
+                    if profile_text.count(promoted_marker) != 1:
+                        failures.append(
+                            "release-qualified arch-hyprland-v1 must contain one canonical promoted status field"
+                        )
+                    else:
+                        profile_bytes = profile_text.replace(
+                            promoted_marker,
+                            'status = "development"',
+                            1,
+                        ).encode("utf-8")
+            if hashlib.sha256(profile_bytes).hexdigest() != expected_digest:
+                failures.append(
+                    "arch-hyprland-v1 content does not match the qualification-bound profile_sha256"
+                )
         if profile.get("schema_version") != 1 or profile.get("id") != EXPECTED_PROFILE:
             failures.append("target PlatformProfile schema/id mismatch")
-        if profile.get("status") != "development":
-            failures.append("arch-hyprland-v1 must remain development before protected post-release closure")
+        expected_profile_status = "release-qualified" if post_release_closed else "development"
+        if profile.get("status") != expected_profile_status:
+            if post_release_closed:
+                failures.append(
+                    "arch-hyprland-v1 must be release-qualified after protected post-release closure"
+                )
+            else:
+                failures.append(
+                    "arch-hyprland-v1 must remain development before protected post-release closure"
+                )
         if profile.get("base") != EXPECTED_BASE:
             failures.append("arch-hyprland-v1 base identity drifted from the v0.10 qualification contract")
         if profile.get("providers") != EXPECTED_PROVIDERS:
@@ -1686,6 +2491,11 @@ def validate(root: Path, *, expected_source_sha: str | None = None) -> list[str]
         profiles = workstation.get("release_qualified_profiles") if isinstance(workstation, dict) else None
         if not isinstance(profiles, list):
             failures.append("workstation release_qualified_profiles must be an array")
+        elif post_release_closed:
+            if EXPECTED_PROFILE not in profiles:
+                failures.append(
+                    "arch-hyprland-v1 must be present in workstation release_qualified_profiles after protected post-release closure"
+                )
         elif EXPECTED_PROFILE in profiles:
             failures.append(
                 "arch-hyprland-v1 cannot be release-qualified before immutable v0.10 publication and protected post-release closure"
@@ -1697,6 +2507,9 @@ def validate(root: Path, *, expected_source_sha: str | None = None) -> list[str]
     elif not (root / qualification_document).is_file():
         failures.append("v0.10 qualification document is missing")
 
+    frozen_package_manifest_digest: str | None = None
+    frozen_package_versions: dict[str, str] | None = None
+    frozen_substrate_architecture: str | None = None
     substrate = contract.get("substrate")
     if not isinstance(substrate, dict):
         failures.append("v0.10 qualification contract missing substrate")
@@ -1727,6 +2540,8 @@ def validate(root: Path, *, expected_source_sha: str | None = None) -> list[str]
                 failures.append("mutable Arch archive aliases/latest are forbidden for v0.10 qualification")
         if architecture != "x86_64":
             failures.append("v0.10 Arch qualification architecture must remain x86_64")
+        if state == "frozen" and _nonempty_string(architecture):
+            frozen_substrate_architecture = architecture
 
         required_packages = _load_required_packages(root, substrate.get("required_packages_path"), failures)
         if substrate.get("package_manifest_format") != EXPECTED_MANIFEST_FORMAT:
@@ -1764,18 +2579,24 @@ def validate(root: Path, *, expected_source_sha: str | None = None) -> list[str]
             if isinstance(manifest_value, str) and manifest_value:
                 manifest_path = _manifest_path(root, manifest_value, failures)
                 if manifest_path is not None:
+                    manifest_digest_matches = False
                     if isinstance(manifest_digest, str) and SHA256_RE.fullmatch(manifest_digest):
                         if manifest_path.is_file() and not manifest_path.is_symlink():
                             if _sha256(manifest_path) != manifest_digest:
                                 failures.append("frozen package manifest digest mismatch")
+                            else:
+                                manifest_digest_matches = True
                     if isinstance(snapshot_date, str) and isinstance(architecture, str):
-                        _validate_package_manifest(
+                        parsed_versions = _validate_package_manifest(
                             manifest_path,
                             snapshot_date,
                             architecture,
                             required_packages,
                             failures,
                         )
+                        if manifest_digest_matches and parsed_versions is not None:
+                            frozen_package_manifest_digest = manifest_digest
+                            frozen_package_versions = parsed_versions
 
     if isinstance(experience, dict):
         experience_ready = experience.get("experience_evidence_ready")
@@ -1804,7 +2625,12 @@ def validate(root: Path, *, expected_source_sha: str | None = None) -> list[str]
                     "experience evidence cannot be ready until product slices S01-S28 are complete: "
                     + ", ".join(incomplete_product_slices)
                 )
-            _validate_experience_evidence(root, experience, failures)
+            _validate_experience_evidence(
+                root,
+                experience,
+                failures,
+                expected_source_sha=expected_source_sha,
+            )
 
     interactive = contract.get("interactive_workstation")
     if not isinstance(interactive, dict):
@@ -1824,6 +2650,12 @@ def validate(root: Path, *, expected_source_sha: str | None = None) -> list[str]
                 interactive,
                 failures,
                 expected_source_sha=expected_source_sha,
+                expected_package_manifest_sha256=frozen_package_manifest_digest,
+                expected_provider_versions=frozen_package_versions,
+                expected_architecture=frozen_substrate_architecture,
+                expected_linurad_sha256=expected_linurad_sha256,
+                expected_shell_bridge_sha256=expected_shell_bridge_sha256,
+                require_binary_binding=require_binary_binding,
             )
         elif interactive.get("evidence_manifest_sha256") not in {"", None}:
             failures.append(
@@ -1853,6 +2685,14 @@ def validate(root: Path, *, expected_source_sha: str | None = None) -> list[str]
                 expected,
                 label=label,
                 expected_source_sha=expected_source_sha,
+                expected_profile_sha256=(
+                    contract.get("profile_sha256")
+                    if isinstance(contract.get("profile_sha256"), str)
+                    else None
+                ),
+                expected_package_manifest_sha256=frozen_package_manifest_digest,
+                expected_package_versions=frozen_package_versions,
+                expected_architecture=frozen_substrate_architecture,
                 failures=failures,
             )
         elif section.get("evidence_manifest_sha256") not in {"", None}:
@@ -1868,11 +2708,39 @@ def validate(root: Path, *, expected_source_sha: str | None = None) -> list[str]
 
 def main(argv: list[str]) -> int:
     root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[1]
+    post_release_closed = False
+    roadmap_path = root / "contracts/roadmap.toml"
+    if roadmap_path.is_file():
+        try:
+            roadmap = tomllib.loads(roadmap_path.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError:
+            roadmap = {}
+        milestone = _v010_milestone(roadmap) if isinstance(roadmap, dict) else None
+        post_release_closed = bool(
+            isinstance(milestone, dict) and milestone.get("status") == "released"
+        )
     expected_source_sha = os.environ.get("LINURA_EXPECTED_SOURCE_SHA")
     if expected_source_sha is not None and not GIT_SHA_RE.fullmatch(expected_source_sha):
         print("ERROR: LINURA_EXPECTED_SOURCE_SHA must be a lowercase 40-hex Git SHA", file=sys.stderr)
         return 1
-    failures = validate(root, expected_source_sha=expected_source_sha)
+    expected_linurad_sha256 = os.environ.get("LINURA_EXPECTED_LINURAD_SHA256")
+    expected_shell_bridge_sha256 = os.environ.get("LINURA_EXPECTED_SHELL_BRIDGE_SHA256")
+    require_binary_binding = os.environ.get("LINURA_REQUIRE_BINARY_BINDING") == "1"
+    for name, value in (
+        ("LINURA_EXPECTED_LINURAD_SHA256", expected_linurad_sha256),
+        ("LINURA_EXPECTED_SHELL_BRIDGE_SHA256", expected_shell_bridge_sha256),
+    ):
+        if value is not None and not SHA256_RE.fullmatch(value):
+            print(f"ERROR: {name} must be a lowercase SHA-256 digest", file=sys.stderr)
+            return 1
+    failures = validate(
+        root,
+        expected_source_sha=expected_source_sha,
+        expected_linurad_sha256=expected_linurad_sha256,
+        expected_shell_bridge_sha256=expected_shell_bridge_sha256,
+        require_binary_binding=require_binary_binding,
+        post_release_closed=post_release_closed,
+    )
     if failures:
         for failure in failures:
             print(f"ERROR: {failure}", file=sys.stderr)

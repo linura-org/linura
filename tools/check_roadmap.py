@@ -12,6 +12,10 @@ import tomllib
 from check_v010_workstation_qualification import (
     validate as validate_v010_workstation_qualification,
 )
+from release_contract import (
+    ContractError as ReleaseContractError,
+    validate_release_intent,
+)
 
 VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 VALID_STATUS = {"released", "planned"}
@@ -224,6 +228,7 @@ def validate_v010_slice_contract(
     actual_ids: list[str] = []
     completed = 0
     seen_planned = False
+    seen_evidence_prs: dict[int, str] = {}
     for index, item in enumerate(slices):
         if not isinstance(item, dict):
             failures.append(f"v0.10 slice #{index + 1} must be a table")
@@ -252,6 +257,14 @@ def validate_v010_slice_contract(
         ):
             failures.append(f"{slice_id or index + 1}: evidence_prs must be positive PR numbers")
             evidence = []
+        for pr_number in evidence:
+            previous_slice = seen_evidence_prs.get(pr_number)
+            if previous_slice is not None:
+                failures.append(
+                    f"{slice_id or index + 1}: evidence PR #{pr_number} is already assigned to {previous_slice}"
+                )
+            else:
+                seen_evidence_prs[pr_number] = str(slice_id or index + 1)
         if status == "complete":
             if seen_planned:
                 failures.append("v0.10 completed slices must remain a contiguous prefix")
@@ -648,10 +661,21 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
             failures.append("v0.10 product-scope ADR 0033 is missing")
         if v010.get("slice_contract") != V010_SLICE_CONTRACT:
             failures.append("v0.10.0 slice_contract must bind the canonical 32-slice ledger")
-        require_v010_release = (
-            v010.get("status") == "released"
-            or release_candidate == "v0.10.0"
-        )
+        if v010.get("release_qualified_qualification_environments") != [
+            "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"
+        ]:
+            failures.append(
+                "v0.10.0 must preserve the inherited v0.9 release-qualified QualificationEnvironment metadata"
+            )
+        if v010.get("release_qualified_platform_profiles") != [
+            {"machine_class": "workstation", "profile": "arch-hyprland-v1"}
+        ]:
+            failures.append(
+                "v0.10.0 support promotion metadata must bind arch-hyprland-v1 to the workstation class"
+            )
+        v010_is_released = v010.get("status") == "released"
+        v010_is_release_candidate = release_candidate == "v0.10.0"
+        require_v010_release = v010_is_released or v010_is_release_candidate
         failures.extend(
             validate_v010_slice_contract(
                 root,
@@ -661,17 +685,65 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
         )
         if require_v010_release:
             failures.extend(validate_v010_release_readiness(root))
-            expected_source_sha = os.environ.get("LINURA_EXPECTED_SOURCE_SHA")
-            if expected_source_sha is None or GIT_SHA_RE.fullmatch(expected_source_sha) is None:
-                failures.append(
-                    "v0.10 release semantic qualification requires LINURA_EXPECTED_SOURCE_SHA as a lowercase 40-hex qualification source"
-                )
+            if v010_is_release_candidate:
+                expected_source_sha = os.environ.get("LINURA_EXPECTED_SOURCE_SHA")
+                if expected_source_sha is None or GIT_SHA_RE.fullmatch(expected_source_sha) is None:
+                    failures.append(
+                        "v0.10 release semantic qualification requires LINURA_EXPECTED_SOURCE_SHA as a lowercase 40-hex qualification source"
+                    )
+            else:
+                release_intent_source_sha = v010.get("release_intent_source_sha")
+                expected_source_sha = v010.get("qualification_source_sha")
+                qualification_tree_sha = v010.get("qualification_tree_sha")
+                if not isinstance(release_intent_source_sha, str) or GIT_SHA_RE.fullmatch(release_intent_source_sha) is None:
+                    failures.append(
+                        "released v0.10 requires a persisted lowercase 40-hex release_intent_source_sha"
+                    )
+                    release_intent_source_sha = None
+                if not isinstance(expected_source_sha, str) or GIT_SHA_RE.fullmatch(expected_source_sha) is None:
+                    failures.append(
+                        "released v0.10 requires a persisted lowercase 40-hex qualification_source_sha"
+                    )
+                    expected_source_sha = None
+                if not isinstance(qualification_tree_sha, str) or GIT_SHA_RE.fullmatch(qualification_tree_sha) is None:
+                    failures.append(
+                        "released v0.10 requires a persisted lowercase 40-hex qualification_tree_sha"
+                    )
+                    qualification_tree_sha = None
+                if (
+                    release_intent_source_sha is not None
+                    and expected_source_sha is not None
+                    and qualification_tree_sha is not None
+                ):
+                    try:
+                        intent = validate_release_intent(release_intent_source_sha, root)
+                    except ReleaseContractError as error:
+                        failures.append(
+                            f"released v0.10 persisted release intent is invalid: {error}"
+                        )
+                    else:
+                        if intent["qualification_source_sha"] != expected_source_sha:
+                            failures.append(
+                                "released v0.10 qualification_source_sha does not match immutable release intent"
+                            )
+                        if intent["qualification_tree_sha"] != qualification_tree_sha:
+                            failures.append(
+                                "released v0.10 qualification_tree_sha does not match immutable release intent"
+                            )
             failures.extend(
                 f"v0.10 semantic qualification: {failure}"
                 for failure in validate_v010_workstation_qualification(
                     root,
                     expected_source_sha=expected_source_sha,
+                    post_release_closed=v010_is_released,
                 )
+            )
+        elif any(
+            key in v010
+            for key in ("release_intent_source_sha", "qualification_source_sha", "qualification_tree_sha")
+        ):
+            failures.append(
+                "planned v0.10 must not persist release qualification source/tree before protected post-release closure"
             )
 
     v1 = by_version.get("v1.0.0")

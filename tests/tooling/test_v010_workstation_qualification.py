@@ -22,12 +22,27 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         root: Path,
         *,
         expected_source_sha: str | None = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        expected_linurad_sha256: str | None = None,
+        expected_shell_bridge_sha256: str | None = None,
+        require_binary_binding: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         if expected_source_sha is None:
             env.pop("LINURA_EXPECTED_SOURCE_SHA", None)
         else:
             env["LINURA_EXPECTED_SOURCE_SHA"] = expected_source_sha
+        for name, value in (
+            ("LINURA_EXPECTED_LINURAD_SHA256", expected_linurad_sha256),
+            ("LINURA_EXPECTED_SHELL_BRIDGE_SHA256", expected_shell_bridge_sha256),
+        ):
+            if value is None:
+                env.pop(name, None)
+            else:
+                env[name] = value
+        if require_binary_binding:
+            env["LINURA_REQUIRE_BINARY_BINDING"] = "1"
+        else:
+            env.pop("LINURA_REQUIRE_BINARY_BINDING", None)
         return subprocess.run(
             [sys.executable, str(ROOT / "tools/check_v010_workstation_qualification.py"), str(root)],
             capture_output=True,
@@ -83,7 +98,9 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         manifest = root / "qualification/v010/arch-packages.tsv"
         manifest.parent.mkdir(parents=True, exist_ok=True)
         records = []
-        for package in self._required_packages(root):
+        packages = set(self._required_packages(root))
+        packages.update({"qt6-base", "systemd"})
+        for package in sorted(packages):
             if package == omit:
                 continue
             records.append(f"core\t{package}\t1:1.0.0-1\tx86_64")
@@ -128,10 +145,25 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         gpu_driver: str = "amdgpu",
         source_commit_sha: str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     ) -> Path:
+        package_manifest = self._write_frozen_manifest(root)
+        self._freeze_contract(root, package_manifest)
+        package_manifest_digest = hashlib.sha256(package_manifest.read_bytes()).hexdigest()
+        provider_versions = {
+            provider_id: "1:1.0.0-1"
+            for provider_id in ("networkmanager", "bluez", "pipewire", "wireplumber", "udisks2", "polkit")
+        }
         evidence_dir = root / "qualification/v010/interactive-workstation"
         evidence_dir.mkdir(parents=True, exist_ok=True)
         case_observations = {
             "physical-session-start": ["physical-hardware-present", "wayland-session-active", "hyprland-session-active"],
+            "session-supervision": [
+                "hyprland-session-target-active",
+                "graphical-session-target-active",
+                "linura-shell-active-through-session-target",
+                "linura-shell-binds-to-session-target",
+                "linura-shell-part-of-session-target",
+                "linura-shell-stopped-with-graphical-session",
+            ],
             "shell-render-and-input": ["shell-rendered", "keyboard-input", "pointer-input"],
             "display-scale-and-hidpi": ["display-enumerated", "scale-applied", "hidpi-render-captured"],
             "provider-runtime-identities": ["networkmanager-version", "bluez-version", "pipewire-version", "wireplumber-version", "udisks2-version", "polkit-version"],
@@ -143,92 +175,76 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "shell_bridge_sha256": "c" * 64,
         }
         cases = []
+        boot_transition_mechanisms = {"machine-reboot", "machine-power-cut"}
+        recovered_boot_id = "66666666-7777-8888-9999-aaaaaaaaaaaa"
         for name, observations in case_observations.items():
-            evidence = evidence_dir / f"{name}.json"
-            payload = {
+            mechanism = self._release_matrix_mechanism(evidence_type, name)
+            requires_boot_transition = mechanism in boot_transition_mechanisms
+
+            event_log = provenance_dir / f"{name}.log"
+            event_lines = [
+                f"case={name}",
+                "controller=qemu-host",
+                f"mechanism={mechanism}",
+            ]
+            if requires_boot_transition:
+                event_lines.extend(
+                    [
+                        f"pre_boot_id={boot_id}",
+                        f"post_boot_id={recovered_boot_id}",
+                    ]
+                )
+            else:
+                event_lines.append(f"boot_id={boot_id}")
+            event_log.write_text("\n".join(event_lines) + "\n", encoding="utf-8")
+
+            provenance_path = provenance_dir / f"{name}.json"
+            provenance_payload = {
                 "schema_version": 1,
-                "attestation_type": "linura-v010-qualification-case",
+                "artifact_type": "linura-v010-machine-case-provenance",
+                "source_commit_sha": source_commit_sha,
+                "run_id": run_id,
                 "case": name,
-                "result": "passed",
-                "run_id": "q11-fixture-run",
-                "captured_at_utc": "2026-09-27T00:00:00Z",
-                "runner": {"id": "qualification/v010/workstation-runner", **source},
-                "observations": [
-                    {"name": observation, "result": "passed", "value": "fixture-observed"}
-                    for observation in observations
-                ],
+                "environment_sha256": environment_binding["sha256"],
+                "scope": "machine",
+                "controller": "qemu-host",
+                "mechanism": mechanism,
+                "external_controller": True,
+                "process_local_mock": False,
+                "event_log": binding(event_log),
             }
-            evidence.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-            cases.append({
-                "name": name,
-                "result": "passed",
-                "evidence": f"qualification/v010/interactive-workstation/{name}.json",
-                "sha256": hashlib.sha256(evidence.read_bytes()).hexdigest(),
-            })
+            machine_execution = {
+                "scope": "machine",
+                "environment_sha256": environment_binding["sha256"],
+                "controller": "qemu-host",
+                "mechanism": mechanism,
+            }
+            if requires_boot_transition:
+                post_boot_probe = provenance_dir / f"{name}-post-boot-id.txt"
+                post_boot_probe.write_text(recovered_boot_id + "\n", encoding="utf-8")
+                provenance_payload.update(
+                    {
+                        "pre_boot_id": boot_id,
+                        "post_boot_id": recovered_boot_id,
+                        "post_boot_probe": binding(post_boot_probe),
+                    }
+                )
+                machine_execution.update(
+                    {
+                        "pre_boot_id": boot_id,
+                        "post_boot_id": recovered_boot_id,
+                    }
+                )
+            else:
+                provenance_payload["boot_id"] = boot_id
+                machine_execution["boot_id"] = boot_id
 
-        manifest = root / "qualification/v010/interactive-workstation-evidence.json"
-        manifest.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "schema_version": 1,
-            "milestone": "v0.10.0",
-            "profile_id": "arch-hyprland-v1",
-            "machine_class": "workstation",
-            "evidence_type": "maintainer-physical-workstation",
-            "evidence_tier": "maintainer_hardware",
-            "physical_hardware": physical_hardware,
-            "result": "passed",
-            "run_id": "q11-fixture-run",
-            "captured_at_utc": "2026-09-27T00:00:00Z",
-            "source": source,
-            "hardware": {
-                "cpu": {"architecture": "x86_64", "vendor": "AuthenticAMD", "model": "fixture-cpu"},
-                "gpu": {"vendor_id": "1002", "device_id": "fixture-gpu", "driver": gpu_driver, "driver_version": "fixture-driver-1"},
-                "displays": [{"connector": "DP-1", "width": 2560, "height": 1440, "refresh_millihz": 60000, "scale": 1.0}],
-            },
-            "session": {
-                "protocol": "wayland",
-                "compositor": "hyprland",
-                "compositor_version": "fixture-hyprland",
-                "quickshell_version": "fixture-quickshell",
-                "qt_version": "fixture-qt",
-                "kernel_version": "fixture-kernel",
-                "systemd_version": "fixture-systemd",
-            },
-            "providers": {
-                "networkmanager": "fixture-networkmanager",
-                "bluez": "fixture-bluez",
-                "pipewire": "fixture-pipewire",
-                "wireplumber": "fixture-wireplumber",
-                "udisks2": "fixture-udisks2",
-                "polkit": "fixture-polkit",
-            },
-            "cases": cases,
-        }
-        manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
-        self._rewrite_contract(
-            root,
-            '[interactive_workstation]\nevidence_ready = false\nevidence_manifest = "qualification/v010/interactive-workstation-evidence.json"\nevidence_manifest_sha256 = ""',
-            '[interactive_workstation]\nevidence_ready = true\nevidence_manifest = "qualification/v010/interactive-workstation-evidence.json"\n'
-            f'evidence_manifest_sha256 = "{digest}"',
-        )
-        return manifest
+            provenance_path.write_text(
+                json.dumps(provenance_payload, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            machine_execution["provenance"] = binding(provenance_path)
 
-    def _write_release_matrix_evidence(
-        self,
-        root: Path,
-        *,
-        section: str,
-        manifest_name: str,
-        evidence_type: str,
-        case_observations: dict[str, list[str]],
-        source_commit_sha: str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    ) -> Path:
-        run_id = f"{section}-fixture-run"
-        evidence_dir = root / "qualification/v010/release-matrix" / section
-        evidence_dir.mkdir(parents=True, exist_ok=True)
-        cases = []
-        for name, observations in case_observations.items():
             evidence = evidence_dir / f"{name}.json"
             payload = {
                 "schema_version": 1,
@@ -243,8 +259,9 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                     "version": "1.0",
                     "commit_sha": source_commit_sha,
                 },
+                "machine_execution": machine_execution,
                 "observations": [
-                    {"name": observation, "result": "passed", "value": "fixture-observed"}
+                    {"name": observation, "result": "passed", "value": True}
                     for observation in observations
                 ],
             }
@@ -264,17 +281,19 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "schema_version": 1,
             "milestone": "v0.10.0",
             "evidence_type": evidence_type,
+            "profile_id": "arch-hyprland-v1",
+            "machine_class": "workstation",
             "result": "passed",
             "source_commit_sha": source_commit_sha,
             "run_id": run_id,
             "captured_at_utc": "2026-09-27T00:00:00Z",
+            "machine_environment": environment_binding,
             "cases": cases,
         }
         manifest.write_text(json.dumps(manifest_payload, indent=2) + "\n", encoding="utf-8")
         digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
 
-        contract = root / "contracts/v010-workstation-qualification.toml"
-        text = contract.read_text(encoding="utf-8")
+        text = contract_path.read_text(encoding="utf-8")
         data = tomllib.loads(text)
         old_digest = data[section]["evidence_manifest_sha256"]
         text = text.replace(
@@ -292,8 +311,124 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             )
             self.assertIn(marker, text)
             text = text.replace(marker, replacement, 1)
-        contract.write_text(text, encoding="utf-8")
+        contract_path.write_text(text, encoding="utf-8")
         return manifest
+
+    def _q10_case_observations(self) -> dict[str, list[str]]:
+        return {
+            "manual-no-model-workflow": ["model-providers-absent", "manual-path-completed", "configuration-path-completed", "keyboard-path-completed"],
+            "cross-interface-operation-class-convergence": ["cli-class-bound", "control-center-class-bound", "configuration-class-bound", "palette-shortcut-class-bound", "quick-settings-class-bound", "agent-proposal-class-bound", "classes-converged"],
+            "declarative-authority-smuggling-rejection": ["unknown-field-rejected", "shell-text-rejected", "authority-token-rejected", "policy-approval-material-rejected", "no-effect-dispatched"],
+            "unregistered-palette-operation-rejection": ["unregistered-operation-presented", "operation-rejected", "no-privileged-shell-dispatched"],
+            "operation-class-downgrade-rejection": ["stronger-effect-presented-as-transient", "trusted-registry-class-preserved", "downgrade-rejected"],
+            "stale-quick-settings-external-change": ["stale-observation-injected", "concurrent-external-change-injected", "mutation-disabled-or-revalidated", "authoritative-state-reobserved"],
+            "forged-premature-success-rejection": ["premature-success-injected", "final-success-withheld", "independent-verification-required"],
+            "malformed-malicious-interface-request": ["malformed-or-malicious-request-injected", "authority-not-widened", "no-unauthorized-effect-dispatched"],
+            "input-accessibility-regression-rejection": ["keyboard-or-pointer-regression-injected", "semantic-or-focus-regression-injected", "regression-detected"],
+            "visual-evidence-regression-rejection": ["null-or-unreviewed-baseline-injected", "coverage-or-interaction-gap-injected", "unretained-failure-diff-injected", "qualification-rejected"],
+            "offline-stale-error-reconnect": ["provider-or-network-unavailable", "stale-or-unknown-rendered", "success-not-fabricated", "reconnect-reobserved"],
+            "restart-during-managed-mutation": ["managed-mutation-in-flight", "surface-restart-injected", "stale-approval-not-resurrected", "effect-not-replayed", "authoritative-lifecycle-reconstructed"],
+        }
+
+    def _write_q10_authority_evidence(
+        self,
+        root: Path,
+        *,
+        source_commit_sha: str,
+    ) -> Path:
+        run_id = "q10-fixture-run"
+        evidence_dir = root / "qualification/v010/experience/authority"
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        cases = []
+        for name, observations in self._q10_case_observations().items():
+            evidence = evidence_dir / f"{name}.json"
+            payload = {
+                "schema_version": 1,
+                "attestation_type": "linura-v010-release-qualification-case",
+                "case": name,
+                "result": "passed",
+                "source_commit_sha": source_commit_sha,
+                "run_id": run_id,
+                "captured_at_utc": "2026-09-27T00:00:00Z",
+                "runner": {
+                    "id": "qualification/v010/release-matrix-runner",
+                    "version": "1.0",
+                    "commit_sha": source_commit_sha,
+                },
+                "observations": [
+                    {"name": observation, "result": "passed", "value": True}
+                    for observation in observations
+                ],
+            }
+            evidence.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            cases.append(
+                {
+                    "name": name,
+                    "result": "passed",
+                    "evidence": evidence.relative_to(root).as_posix(),
+                    "sha256": hashlib.sha256(evidence.read_bytes()).hexdigest(),
+                }
+            )
+
+        manifest = root / "qualification/v010/experience/authority-evidence.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "milestone": "v0.10.0",
+                    "evidence_type": "exact-source-q10-experience-authority",
+                    "profile_id": "arch-hyprland-v1",
+                    "machine_class": "workstation",
+                    "result": "passed",
+                    "source_commit_sha": source_commit_sha,
+                    "run_id": run_id,
+                    "captured_at_utc": "2026-09-27T00:00:00Z",
+                    "cases": cases,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self._refresh_q10_authority_evidence_digest(root)
+        return manifest
+
+    def _q12_case_observations(self) -> dict[str, list[str]]:
+        return {
+            "update-success": ["candidate-applied", "post-update-state-reobserved", "update-audit-bound"],
+            "migration-v09-v010": ["v09-state-seeded", "v010-migration-applied", "persistent-state-reopened"],
+            "pre-migration-backup": ["risky-migration-identified", "writer-safe-backup-created", "backup-integrity-verified"],
+            "migration-failure-restore-retry": ["migration-failure-injected", "pre-migration-backup-restored", "retry-converged"],
+            "update-interruption": ["candidate-update-started", "interruption-injected", "restart-detected-incomplete-update"],
+            "restart-reobservation": ["restart-completed", "authoritative-state-reobserved", "reobserved-state-bound"],
+            "crash-before-dispatch": ["pre-dispatch-crash-injected", "executor-not-dispatched", "recovery-converged"],
+            "crash-after-effect-start": ["effect-start-confirmed", "post-effect-start-crash-injected", "reconciliation-converged"],
+            "crash-around-durable-commit": ["commit-boundary-crash-injected", "durable-state-recovered", "commit-outcome-reconciled"],
+            "indeterminate-external-outcome": ["external-outcome-made-indeterminate", "self-report-not-trusted", "authoritative-outcome-resolved"],
+            "deterministic-reconciliation": ["drift-detected", "reconciliation-plan-deterministic", "verified-state-converged"],
+            "power-loss-recovery": ["power-loss-injected", "durable-state-recovered", "external-state-reconciled"],
+            "snapshot-rollback": ["btrfs-snapshot-identified", "snapper-rollback-applied", "rollback-state-verified"],
+            "gui-unavailable-recovery": ["gui-unavailable", "native-recovery-invoked", "local-repair-completed"],
+            "offline-local-recovery": ["model-unavailable", "network-unavailable", "local-material-recovery-completed"],
+            "corrupt-newer-state-fail-closed": ["corrupt-state-injected", "unsupported-newer-state-injected", "state-open-failed-closed"],
+        }
+
+    def _q13_case_observations(self) -> dict[str, list[str]]:
+        return {
+            "inbound-firewall-default-deny": ["firewall-policy-loaded", "unsolicited-inbound-probe-denied", "no-exposure-created"],
+            "ssh-disabled-default": ["ssh-unit-disabled", "ssh-listener-absent", "boot-state-verified"],
+            "remote-exposure-typed-authority": ["remote-exposure-requested", "typed-authority-required", "unauthorized-enable-denied"],
+            "untrusted-package-source-denied": ["untrusted-source-presented", "source-rejected", "no-package-effect-dispatched"],
+            "polkit-authorization": ["polkit-policy-loaded", "unauthorized-caller-denied", "authorized-caller-bound"],
+            "privilege-boundary": ["unprivileged-daemon-confirmed", "generic-root-shell-absent", "privileged-effect-denied-without-authority"],
+            "binding-substitution-rejection": ["actor-substitution-rejected", "plan-substitution-rejected", "evidence-substitution-rejected", "session-substitution-rejected"],
+            "independent-verification": ["executor-self-report-injected", "authoritative-reobservation-performed", "self-report-not-accepted-as-verification"],
+            "authority-ceiling": ["gui-proposal-only", "model-proposal-only", "deterministic-protocol-authority-preserved"],
+            "secret-redaction": ["secret-bearing-input-injected", "audit-redacted", "diagnostics-redacted"],
+            "adversarial-input": ["malformed-input-rejected", "authority-not-widened", "no-effect-dispatched"],
+            "malicious-inputs": ["malicious-client-rejected", "malicious-proposal-rejected", "malicious-profile-rejected", "malicious-import-rejected"],
+            "recovery-boundary": ["gui-unavailable", "model-unavailable", "native-recovery-remains-available"],
+        }
 
     def _png_bytes(
         self,
@@ -340,6 +475,23 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         old_digest = data["experience"]["experience_evidence_manifest_sha256"]
         contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
 
+    def _refresh_q10_authority_evidence_digest(self, root: Path) -> None:
+        evidence = root / "qualification/v010/experience/authority-evidence.json"
+        digest = hashlib.sha256(evidence.read_bytes()).hexdigest()
+        contract = root / "contracts/v010-workstation-qualification.toml"
+        text = contract.read_text(encoding="utf-8")
+        data = tomllib.loads(text)
+        old_digest = data["experience"]["authority_evidence_manifest_sha256"]
+        if old_digest:
+            text = text.replace(old_digest, digest, 1)
+        else:
+            text = text.replace(
+                'authority_evidence_manifest_sha256 = ""',
+                f'authority_evidence_manifest_sha256 = "{digest}"',
+                1,
+            )
+        contract.write_text(text, encoding="utf-8")
+
     def _refresh_visual_baseline_manifest_digest(self, root: Path) -> None:
         manifest = root / "visual/baselines/manifest.json"
         digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
@@ -380,8 +532,14 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         text = text.replace('next_slice = "S15"', 'next_slice = "S29"', 1)
         path.write_text(text, encoding="utf-8")
 
-    def _write_complete_experience_evidence(self, root: Path) -> None:
+    def _write_complete_experience_evidence(
+        self,
+        root: Path,
+        *,
+        source_commit_sha: str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ) -> None:
         self._complete_product_slices_for_q10(root)
+        run_id = "q10-fixture-run"
         baseline_manifest = root / "visual/baselines/manifest.json"
         required_visual_surfaces = ["linura-firstboot","linura-installer","linura-control-center","command-palette","quick-settings","desktop-shell-integration","shell-panel-tray-status","launcher-workspace","notifications-osd","lock-session-controls","network-connectivity","bluetooth","audio-media","display-power","desktop-utilities","applications-packages","updates-snapshots-recovery","personalization"]
         baseline_records = [
@@ -479,11 +637,14 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 "artifact_type": "linura-v010-interaction-accessibility",
                 "surface": surface,
                 "result": "pass",
+                "source_commit_sha": source_commit_sha,
+                "run_id": run_id,
                 "runner": {
                     "name": "fixture-runner",
                     "version": "1.0",
-                    "run_id": f"fixture-{surface}",
+                    "run_id": run_id,
                     "platform": "arch-hyprland-v1",
+                    "commit_sha": source_commit_sha,
                 },
                 "checks": {
                     "keyboard": "pass",
@@ -504,8 +665,16 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 }
             )
 
+        self._write_q10_authority_evidence(
+            root,
+            source_commit_sha=source_commit_sha,
+        )
+
         evidence = {
             "schema_version": 1,
+            "source_commit_sha": source_commit_sha,
+            "run_id": run_id,
+            "captured_at_utc": "2026-09-27T00:00:00Z",
             "visual_comparisons": comparisons,
             "retained_failure_diffs": [
                 {
@@ -608,6 +777,163 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 result.stderr,
             )
 
+    def test_interactive_workstation_rejects_package_manifest_digest_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload["package_manifest_sha256"] = "d" * 64
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "package_manifest_sha256 must match the frozen qualification package manifest",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_rejects_provider_version_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload["providers"]["networkmanager"] = "9.9.9"
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("provider networkmanager must match frozen package version", result.stderr)
+
+    def test_interactive_workstation_rejects_session_version_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload["session"]["compositor_version"] = "9.9.9"
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("session.compositor_version must match frozen hyprland version", result.stderr)
+
+    def test_interactive_workstation_rejects_cpu_architecture_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload["hardware"]["cpu"]["architecture"] = "aarch64"
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "interactive workstation CPU architecture must match the frozen qualification substrate",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_release_binding_rejects_binary_digest_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_interactive_workstation_evidence(root)
+            result = self._run(
+                root,
+                expected_linurad_sha256="d" * 64,
+                expected_shell_bridge_sha256="c" * 64,
+                require_binary_binding=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "source.linurad_sha256 does not match independently qualified runtime artifact",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_requires_session_supervision_case(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload["cases"] = [
+                case for case in payload["cases"] if case["name"] != "session-supervision"
+            ]
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "interactive workstation evidence must contain exactly the required Q11 cases",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_rejects_false_success_observation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "physical-session-start")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            attestation["observations"][0]["value"] = False
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must carry the typed success value True", result.stderr)
+
+    def test_interactive_workstation_rejects_numeric_boolean_success_observation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "physical-session-start")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            attestation["observations"][0]["value"] = 1
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must carry the typed success value True", result.stderr)
+
     def test_interactive_workstation_case_requires_structured_runner_attestation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -639,6 +965,211 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 section="update_recovery_qualification",
                 manifest_name="update-recovery-evidence.json",
                 evidence_type="exact-source-q12-update-recovery",
+                case_observations=self._q12_case_observations(),
+            )
+            self._write_release_matrix_evidence(
+                root,
+                section="security_qualification",
+                manifest_name="security-evidence.json",
+                evidence_type="exact-source-q13-workstation-security",
+                case_observations=self._q13_case_observations(),
+            )
+            result = self._run(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_q12_release_matrix_rejects_unqualified_machine_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_release_matrix_evidence(
+                root,
+                section="update_recovery_qualification",
+                manifest_name="update-recovery-evidence.json",
+                evidence_type="exact-source-q12-update-recovery",
+                case_observations=self._q12_case_observations(),
+            )
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            environment_path = root / payload["machine_environment"]["evidence"]
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            environment["profile_id"] = "unrelated-host"
+            environment_path.write_text(json.dumps(environment, indent=2) + "\n", encoding="utf-8")
+            payload["machine_environment"]["sha256"] = hashlib.sha256(environment_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            self._refresh_release_matrix_contract_digest(
+                root,
+                section="update_recovery_qualification",
+                manifest=manifest,
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("machine environment must bind arch-hyprland-v1", result.stderr)
+
+    def test_q12_release_matrix_rejects_frozen_package_inventory_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_release_matrix_evidence(
+                root,
+                section="update_recovery_qualification",
+                manifest_name="update-recovery-evidence.json",
+                evidence_type="exact-source-q12-update-recovery",
+                case_observations=self._q12_case_observations(),
+            )
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            environment_path = root / payload["machine_environment"]["evidence"]
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            inventory_path = root / environment["package_inventory"]["path"]
+            inventory = inventory_path.read_text(encoding="utf-8")
+            self.assertIn("hyprland\t1:1.0.0-1", inventory)
+            inventory_path.write_text(
+                inventory.replace("hyprland\t1:1.0.0-1", "hyprland\t9.9.9", 1),
+                encoding="utf-8",
+            )
+            environment["package_inventory"]["sha256"] = hashlib.sha256(inventory_path.read_bytes()).hexdigest()
+            environment_path.write_text(json.dumps(environment, indent=2) + "\n", encoding="utf-8")
+            payload["machine_environment"]["sha256"] = hashlib.sha256(environment_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            self._refresh_release_matrix_contract_digest(
+                root,
+                section="update_recovery_qualification",
+                manifest=manifest,
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("installed package inventory must exactly match the frozen package manifest", result.stderr)
+
+    def test_q12_release_matrix_rejects_process_local_fault_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_release_matrix_evidence(
+                root,
+                section="update_recovery_qualification",
+                manifest_name="update-recovery-evidence.json",
+                evidence_type="exact-source-q12-update-recovery",
+                case_observations=self._q12_case_observations(),
+            )
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "power-loss-recovery")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            provenance_path = root / attestation["machine_execution"]["provenance"]["path"]
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            provenance["external_controller"] = False
+            provenance["process_local_mock"] = True
+            provenance_path.write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+            attestation["machine_execution"]["provenance"]["sha256"] = hashlib.sha256(provenance_path.read_bytes()).hexdigest()
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            self._refresh_release_matrix_contract_digest(
+                root,
+                section="update_recovery_qualification",
+                manifest=manifest,
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("machine execution provenance must prove external control", result.stderr)
+            self.assertIn("process_local_mock must be false", result.stderr)
+
+    def test_q12_restart_reobservation_requires_distinct_boot_transition(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_release_matrix_evidence(
+                root,
+                section="update_recovery_qualification",
+                manifest_name="update-recovery-evidence.json",
+                evidence_type="exact-source-q12-update-recovery",
+                case_observations=self._q12_case_observations(),
+            )
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "restart-reobservation")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            attestation["machine_execution"]["post_boot_id"] = attestation["machine_execution"]["pre_boot_id"]
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            self._refresh_release_matrix_contract_digest(
+                root,
+                section="update_recovery_qualification",
+                manifest=manifest,
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("pre_boot_id and post_boot_id must differ", result.stderr)
+
+    def test_q12_power_loss_recovery_requires_matching_recovered_boot_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_release_matrix_evidence(
+                root,
+                section="update_recovery_qualification",
+                manifest_name="update-recovery-evidence.json",
+                evidence_type="exact-source-q12-update-recovery",
+                case_observations=self._q12_case_observations(),
+            )
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "power-loss-recovery")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            provenance_path = root / attestation["machine_execution"]["provenance"]["path"]
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            post_boot_probe = root / provenance["post_boot_probe"]["path"]
+            post_boot_probe.write_text(provenance["pre_boot_id"] + "\n", encoding="utf-8")
+            provenance["post_boot_probe"]["sha256"] = hashlib.sha256(post_boot_probe.read_bytes()).hexdigest()
+            provenance_path.write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+            attestation["machine_execution"]["provenance"]["sha256"] = hashlib.sha256(provenance_path.read_bytes()).hexdigest()
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            self._refresh_release_matrix_contract_digest(
+                root,
+                section="update_recovery_qualification",
+                manifest=manifest,
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("recovered boot probe must match post_boot_id", result.stderr)
+
+    def test_q13_release_matrix_rejects_process_scoped_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_release_matrix_evidence(
+                root,
+                section="security_qualification",
+                manifest_name="security-evidence.json",
+                evidence_type="exact-source-q13-workstation-security",
+                case_observations=self._q13_case_observations(),
+            )
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            environment_path = root / payload["machine_environment"]["evidence"]
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            environment["execution"]["scope"] = "process"
+            environment_path.write_text(json.dumps(environment, indent=2) + "\n", encoding="utf-8")
+            payload["machine_environment"]["sha256"] = hashlib.sha256(environment_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            self._refresh_release_matrix_contract_digest(
+                root,
+                section="security_qualification",
+                manifest=manifest,
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("machine environment execution.scope must be machine", result.stderr)
+
+    def test_q12_legacy_partial_matrix_cannot_satisfy_release_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_release_matrix_evidence(
+                root,
+                section="update_recovery_qualification",
+                manifest_name="update-recovery-evidence.json",
+                evidence_type="exact-source-q12-update-recovery",
                 case_observations={
                     "update-success": ["candidate-applied", "post-update-state-reobserved", "update-audit-bound"],
                     "migration-success": ["pre-migration-backup-created", "migration-completed", "persistent-state-reopened"],
@@ -648,6 +1179,14 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                     "offline-repair": ["network-unavailable", "gui-unavailable", "local-repair-completed"],
                 },
             )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must contain exactly the required cases", result.stderr)
+
+    def test_q13_legacy_partial_matrix_cannot_satisfy_release_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
             self._write_release_matrix_evidence(
                 root,
                 section="security_qualification",
@@ -663,7 +1202,36 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 },
             )
             result = self._run(root)
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must contain exactly the required cases", result.stderr)
+
+    def test_q12_release_matrix_rejects_false_success_observation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_release_matrix_evidence(
+                root,
+                section="update_recovery_qualification",
+                manifest_name="update-recovery-evidence.json",
+                evidence_type="exact-source-q12-update-recovery",
+                case_observations=self._q12_case_observations(),
+            )
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "power-loss-recovery")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            attestation["observations"][0]["value"] = False
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old = tomllib.loads(text)["update_recovery_qualification"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must carry boolean true", result.stderr)
 
     def test_q12_release_matrix_rejects_missing_runner_provenance(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -674,14 +1242,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 section="update_recovery_qualification",
                 manifest_name="update-recovery-evidence.json",
                 evidence_type="exact-source-q12-update-recovery",
-                case_observations={
-                    "update-success": ["candidate-applied", "post-update-state-reobserved", "update-audit-bound"],
-                    "migration-success": ["pre-migration-backup-created", "migration-completed", "persistent-state-reopened"],
-                    "update-interruption-recovery": ["interruption-injected", "restart-detected-incomplete-update", "recovery-converged"],
-                    "power-loss-recovery": ["power-loss-injected", "durable-state-recovered", "external-state-reconciled"],
-                    "snapshot-rollback": ["snapshot-identified", "rollback-applied", "rollback-state-verified"],
-                    "offline-repair": ["network-unavailable", "gui-unavailable", "local-repair-completed"],
-                },
+                case_observations=self._q12_case_observations(),
             )
             payload = json.loads(manifest.read_text(encoding="utf-8"))
             case = payload["cases"][0]
@@ -709,14 +1270,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 section="security_qualification",
                 manifest_name="security-evidence.json",
                 evidence_type="exact-source-q13-workstation-security",
-                case_observations={
-                    "privilege-boundary": ["unprivileged-daemon-confirmed", "generic-root-shell-absent", "privileged-effect-denied-without-authority"],
-                    "polkit-authorization": ["polkit-policy-loaded", "unauthorized-caller-denied", "authorized-caller-bound"],
-                    "untrusted-package-source-denied": ["untrusted-source-presented", "source-rejected", "no-package-effect-dispatched"],
-                    "secret-redaction": ["secret-bearing-input-injected", "audit-redacted", "diagnostics-redacted"],
-                    "adversarial-input": ["malformed-input-rejected", "authority-not-widened", "no-effect-dispatched"],
-                    "recovery-boundary": ["gui-unavailable", "model-unavailable", "native-recovery-remains-available"],
-                },
+                case_observations=self._q13_case_observations(),
             )
             payload = json.loads(manifest.read_text(encoding="utf-8"))
             case = next(item for item in payload["cases"] if item["name"] == "adversarial-input")
@@ -766,6 +1320,64 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("cannot be release-qualified", result.stderr)
+
+    def test_protected_post_release_closure_accepts_status_only_profile_promotion(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+
+            roadmap = root / "contracts/roadmap.toml"
+            roadmap_text = roadmap.read_text(encoding="utf-8")
+            milestone_marker = 'version = "v0.10.0"\ntitle = "complete Experimental Linura workstation"\nstatus = "planned"'
+            self.assertIn(milestone_marker, roadmap_text)
+            roadmap.write_text(
+                roadmap_text.replace(
+                    milestone_marker,
+                    'version = "v0.10.0"\ntitle = "complete Experimental Linura workstation"\nstatus = "released"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            profile = root / "profiles/arch-hyprland-v1.toml"
+            qualified_digest = hashlib.sha256(profile.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            contract_text = contract.read_text(encoding="utf-8")
+            current_digest = tomllib.loads(contract_text)["profile_sha256"]
+            self.assertEqual(current_digest, qualified_digest)
+            profile.write_text(
+                profile.read_text(encoding="utf-8").replace(
+                    'status = "development"',
+                    'status = "release-qualified"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            matrix = root / "hardware/support-matrix.json"
+            payload = json.loads(matrix.read_text(encoding="utf-8"))
+            payload["machine_classes"]["workstation"]["release_qualified_profiles"] = [
+                "arch-hyprland-v1"
+            ]
+            matrix.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+            result = self._run(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            profile.write_text(
+                profile.read_text(encoding="utf-8").replace(
+                    'network = "networkmanager"',
+                    'network = "systemd-networkd"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "content does not match the qualification-bound profile_sha256",
+                result.stderr,
+            )
 
     def test_profile_provider_identity_cannot_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -982,6 +1594,90 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self._write_complete_experience_evidence(root)
             result = self._run(root)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_q10_authority_evidence_requires_exact_case_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            manifest = root / "qualification/v010/experience/authority-evidence.json"
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload["cases"] = [
+                case
+                for case in payload["cases"]
+                if case["name"] != "restart-during-managed-mutation"
+            ]
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            self._refresh_q10_authority_evidence_digest(root)
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "Q10 experience authority/adversarial evidence must contain exactly the required cases",
+                result.stderr,
+            )
+
+    def test_q10_authority_evidence_rejects_false_observation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            manifest = root / "qualification/v010/experience/authority-evidence.json"
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(
+                item
+                for item in payload["cases"]
+                if item["name"] == "operation-class-downgrade-rejection"
+            )
+            evidence_path = root / case["evidence"]
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            evidence["observations"][0]["value"] = False
+            evidence_path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            self._refresh_q10_authority_evidence_digest(root)
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "Q10 experience authority/adversarial case operation-class-downgrade-rejection observation stronger-effect-presented-as-transient must carry boolean true",
+                result.stderr,
+            )
+
+    def test_experience_evidence_must_match_expected_release_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            result = self._run(
+                root,
+                expected_source_sha="dddddddddddddddddddddddddddddddddddddddd",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "v0.10 experience evidence source_commit_sha does not match the expected release source",
+                result.stderr,
+            )
+
+    def test_interaction_report_must_bind_parent_experience_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            evidence_path = root / "qualification/v010/experience-evidence.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            record = evidence["interaction_accessibility"][0]
+            report_path = root / record["report"]
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["source_commit_sha"] = "d" * 40
+            report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+            record["report_sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+            evidence_path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+            self._refresh_experience_evidence_digest(root)
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "source must match the experience evidence manifest",
+                result.stderr,
+            )
 
     def test_experience_evidence_manifest_digest_is_verified(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

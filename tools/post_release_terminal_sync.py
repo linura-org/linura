@@ -175,6 +175,96 @@ def update_docs_index(text: str, root: Path, tag: str) -> str:
     return text[: prior.start("body")] + prior_body + text[prior.end("body") :]
 
 
+def _release_qualified_profile_requests(
+    contract: dict[str, object],
+    milestone: dict[str, object],
+) -> list[tuple[str, str]]:
+    requested = milestone.get("release_qualified_platform_profiles", [])
+    if not isinstance(requested, list):
+        raise TerminalSyncError("release_qualified_platform_profiles must be an array")
+    if not requested:
+        return []
+
+    machine_classes = contract.get("target_machine_classes")
+    if not isinstance(machine_classes, list) or not all(
+        isinstance(value, str) and value for value in machine_classes
+    ):
+        raise TerminalSyncError("roadmap target_machine_classes must be a non-empty string array")
+    allowed_classes = set(machine_classes)
+
+    result: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in requested:
+        if not isinstance(item, dict):
+            raise TerminalSyncError(
+                "release_qualified_platform_profiles entries must be inline tables"
+            )
+        if set(item) != {"machine_class", "profile"}:
+            raise TerminalSyncError(
+                "release_qualified_platform_profiles entries must contain exactly machine_class and profile"
+            )
+        machine_class = item.get("machine_class")
+        profile = item.get("profile")
+        if not isinstance(machine_class, str) or machine_class not in allowed_classes:
+            raise TerminalSyncError(
+                f"invalid release-qualified PlatformProfile machine class: {machine_class!r}"
+            )
+        if (
+            not isinstance(profile, str)
+            or not profile
+            or profile.startswith("qualification/")
+            or "/" in profile
+            or "\\" in profile
+            or profile in {".", ".."}
+        ):
+            raise TerminalSyncError(
+                f"invalid release-qualified PlatformProfile ID: {profile!r}"
+            )
+        key = (machine_class, profile)
+        if key in seen:
+            raise TerminalSyncError(
+                f"duplicate release-qualified PlatformProfile metadata: {machine_class}/{profile}"
+            )
+        seen.add(key)
+        result.append(key)
+    return result
+
+
+def _promote_platform_profile(
+    root: Path,
+    profile_id: str,
+    changed: list[str],
+) -> None:
+    path = root / "profiles" / f"{profile_id}.toml"
+    text = read(path)
+    try:
+        profile = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise TerminalSyncError(f"invalid PlatformProfile {profile_id}: {error}") from error
+    if profile.get("id") != profile_id:
+        raise TerminalSyncError(
+            f"PlatformProfile identity mismatch for {profile_id}: {profile.get('id')!r}"
+        )
+    status = profile.get("status")
+    if status == "release-qualified":
+        return
+    if status != "development":
+        raise TerminalSyncError(
+            f"PlatformProfile {profile_id} must be development before support promotion, found {status!r}"
+        )
+    marker = 'status = "development"'
+    if text.count(marker) != 1:
+        raise TerminalSyncError(
+            f"PlatformProfile {profile_id} must contain one canonical development status field"
+        )
+    write_if_changed(
+        path,
+        text.replace(marker, 'status = "release-qualified"', 1),
+        changed,
+        root,
+    )
+
+
 def sync_release_qualified_environments(
     root: Path,
     contract: dict[str, object],
@@ -193,9 +283,14 @@ def sync_release_qualified_environments(
         )
     if len(requested) != len(set(requested)):
         raise TerminalSyncError("release-qualified QualificationEnvironment IDs contain duplicates")
-    if milestone.get("platform_support") == "reference-experimental" and not requested:
+    requested_profiles = _release_qualified_profile_requests(contract, milestone)
+    if (
+        milestone.get("platform_support") == "reference-experimental"
+        and not requested
+        and not requested_profiles
+    ):
         raise TerminalSyncError(
-            "reference-experimental release requires explicit release-qualified QualificationEnvironment metadata"
+            "reference-experimental release requires explicit release-qualified support metadata"
         )
 
     matrix_path = root / matrix_path_value
@@ -212,6 +307,26 @@ def sync_release_qualified_environments(
     if not isinstance(existing, list) or not all(isinstance(value, str) for value in existing):
         raise TerminalSyncError("hardware support matrix release_qualified must be an array")
     environments["release_qualified"] = sorted(set(existing).union(requested))
+
+    classes = matrix.get("machine_classes")
+    if not isinstance(classes, dict):
+        raise TerminalSyncError("hardware support matrix machine_classes must be an object")
+    for machine_class, profile_id in requested_profiles:
+        entry = classes.get(machine_class)
+        if not isinstance(entry, dict):
+            raise TerminalSyncError(
+                f"hardware support matrix machine class is missing: {machine_class}"
+            )
+        profiles = entry.get("release_qualified_profiles")
+        if not isinstance(profiles, list) or not all(
+            isinstance(value, str) and value for value in profiles
+        ):
+            raise TerminalSyncError(
+                f"hardware support matrix {machine_class}.release_qualified_profiles must be an array"
+            )
+        entry["release_qualified_profiles"] = sorted(set(profiles).union({profile_id}))
+        _promote_platform_profile(root, profile_id, changed)
+
     matrix["note"] = (
         "Release-qualified QualificationEnvironment and PlatformProfile entries are the explicit "
         "machine-readable support boundary for the current release; domain evidence tiers remain separate."

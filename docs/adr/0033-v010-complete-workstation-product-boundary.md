@@ -17,6 +17,8 @@ Product completeness and support maturity are therefore separate decisions.
 
 v0.10 is rebaselined as Linura's **complete Experimental workstation** milestone on the exact `arch-hyprland-v1` PlatformProfile.
 
+`arch-hyprland-v1` is a product qualification target, not an architectural dependency of Linura's core model. This decision does not retroactively widen v0.9.0: that frozen release remains qualified only for its Ubuntu 24.04/QEMU-TCG/headless QualificationEnvironment and has no release-qualified PlatformProfile.
+
 Within that narrow platform boundary, the release contract must cover the ordinary workstation experience rather than deferring basic product surfaces until after v1:
 
 - first-party shell panel/status/tray and workstation entry points;

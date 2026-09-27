@@ -49,6 +49,8 @@ visual_baseline_manifest = "visual/baselines/manifest.json"
 visual_baseline_manifest_sha256 = ""
 experience_evidence_manifest = "qualification/v010/experience-evidence.json"
 experience_evidence_manifest_sha256 = ""
+authority_evidence_manifest = "qualification/v010/experience/authority-evidence.json"
+authority_evidence_manifest_sha256 = ""
 representative_visual_scales = [1.0, 2.0]
 representative_visual_resolutions = ["1280x800", "1440x900"]
 required_visual_surfaces = ["linura-firstboot", "linura-installer", "linura-control-center", "command-palette", "quick-settings", "desktop-shell-integration", "shell-panel-tray-status", "launcher-workspace", "notifications-osd", "lock-session-controls", "network-connectivity", "bluetooth", "audio-media", "display-power", "desktop-utilities", "applications-packages", "updates-snapshots-recovery", "personalization"]
@@ -118,21 +120,31 @@ required_session = "wayland"
 required_compositor = "hyprland"
 require_physical_hardware = true
 required_provider_ids = ["networkmanager", "bluez", "pipewire", "wireplumber", "udisks2", "polkit"]
-required_cases = ["physical-session-start", "shell-render-and-input", "display-scale-and-hidpi", "provider-runtime-identities", "restart-recovery"]
+required_cases = ["physical-session-start", "session-supervision", "shell-render-and-input", "display-scale-and-hidpi", "provider-runtime-identities", "restart-recovery"]
 
 [update_recovery_qualification]
 evidence_ready = false
 evidence_manifest = "qualification/v010/update-recovery-evidence.json"
 evidence_manifest_sha256 = ""
 evidence_type = "exact-source-q12-update-recovery"
-required_cases = ["update-success", "migration-success", "update-interruption-recovery", "power-loss-recovery", "snapshot-rollback", "offline-repair"]
+required_profile = "arch-hyprland-v1"
+required_machine_class = "workstation"
+require_frozen_package_manifest = true
+require_machine_execution_provenance = true
+require_external_fault_injection_provenance = true
+require_boot_transition_provenance = true
+required_cases = ["update-success", "migration-v09-v010", "pre-migration-backup", "migration-failure-restore-retry", "update-interruption", "restart-reobservation", "crash-before-dispatch", "crash-after-effect-start", "crash-around-durable-commit", "indeterminate-external-outcome", "deterministic-reconciliation", "power-loss-recovery", "snapshot-rollback", "gui-unavailable-recovery", "offline-local-recovery", "corrupt-newer-state-fail-closed"]
 
 [security_qualification]
 evidence_ready = false
 evidence_manifest = "qualification/v010/security-evidence.json"
 evidence_manifest_sha256 = ""
 evidence_type = "exact-source-q13-workstation-security"
-required_cases = ["privilege-boundary", "polkit-authorization", "untrusted-package-source-denied", "secret-redaction", "adversarial-input", "recovery-boundary"]
+required_profile = "arch-hyprland-v1"
+required_machine_class = "workstation"
+require_frozen_package_manifest = true
+require_machine_execution_provenance = true
+required_cases = ["inbound-firewall-default-deny", "ssh-disabled-default", "remote-exposure-typed-authority", "untrusted-package-source-denied", "polkit-authorization", "privilege-boundary", "binding-substitution-rejection", "independent-verification", "authority-ceiling", "secret-redaction", "adversarial-input", "malicious-inputs", "recovery-boundary"]
 
 [security]
 disk_encryption = "required_for_supported_install"
