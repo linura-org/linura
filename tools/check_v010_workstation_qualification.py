@@ -72,6 +72,27 @@ EXPECTED_REQUIRED_VISUAL_SURFACES = [
     "personalization",
 ]
 EXPECTED_ALLOWED_VISUAL_SURFACES = set(EXPECTED_REQUIRED_VISUAL_SURFACES) | {"approval-dialog"}
+EXPECTED_Q10_SURFACE_WORKFLOW_OBSERVATIONS = {
+    "linura-firstboot": ["owner-enrollment-workflow-completed", "qualified-profile-state-rendered", "manual-no-ai-completion-verified"],
+    "linura-installer": ["supported-profile-install-plan-rendered", "destructive-step-review-completed", "installer-handoff-to-firstboot-verified"],
+    "linura-control-center": ["authoritative-state-reobserved", "registered-typed-effect-dispatched", "post-effect-verification-rendered"],
+    "command-palette": ["registered-target-resolved", "typed-operation-dispatched", "raw-privileged-shell-rejected"],
+    "quick-settings": ["fresh-authoritative-state-rendered", "registered-typed-effect-dispatched", "stale-or-unavailable-mutation-disabled"],
+    "desktop-shell-integration": ["verified-lifecycle-state-rendered", "shell-authority-escalation-absent", "session-restart-state-reconstructed"],
+    "shell-panel-tray-status": ["authoritative-status-rendered", "entrypoint-navigation-completed", "status-surface-authority-escalation-absent"],
+    "launcher-workspace": ["application-launch-completed", "workspace-navigation-completed", "ephemeral-navigation-not-recorded-as-durable-mutation"],
+    "notifications-osd": ["verified-commit-precedes-success-notification", "failure-lifecycle-notification-rendered", "secret-bearing-material-redacted"],
+    "lock-session-controls": ["authenticated-actor-bound", "registered-session-action-dispatched", "authority-unavailable-fails-closed"],
+    "network-connectivity": ["fresh-networkmanager-state-observed", "registered-network-effect-dispatched", "post-effect-network-state-reobserved"],
+    "bluetooth": ["fresh-bluez-state-observed", "registered-bluetooth-effect-dispatched", "post-effect-bluetooth-state-reobserved"],
+    "audio-media": ["fresh-pipewire-wireplumber-state-observed", "registered-audio-effect-dispatched", "post-effect-audio-state-reobserved"],
+    "display-power": ["fresh-display-power-state-observed", "supported-display-power-effect-dispatched", "unsupported-or-stale-state-rendered"],
+    "desktop-utilities": ["screenshot-or-recording-workflow-completed", "clipboard-history-workflow-completed", "privileged-shell-shortcut-absent"],
+    "applications-packages": ["typed-package-discovery-completed", "registered-package-install-remove-effect-dispatched", "arbitrary-package-or-shell-text-rejected"],
+    "updates-snapshots-recovery": ["coordinated-update-workflow-completed", "snapshot-or-rollback-workflow-completed", "durable-recovery-state-reobserved"],
+    "personalization": ["typed-preference-change-completed", "preference-persistence-reobserved", "authority-bearing-payload-rejected"],
+}
+
 
 EXPECTED_EXPERIENCE = {
     "interaction_model": "one-model-many-interfaces",
@@ -114,6 +135,8 @@ EXPECTED_EXPERIENCE = {
     "require_representative_resolution_scale_captures": True,
     "require_retained_visual_failure_diffs": True,
     "require_visual_interaction_evidence": True,
+    "require_rendered_visual_content": True,
+    "require_surface_workflow_observations": True,
     "require_screen_reader_semantics": True,
     "require_reduced_motion": True,
     "require_display_scaling": True,
@@ -841,7 +864,7 @@ def _validate_png_artifact(
     return decoded
 
 
-def _validate_structured_physical_visual_content(
+def _validate_structured_rendered_visual_content(
     decoded: tuple[int, int, bytes] | None,
     *,
     label: str,
@@ -1654,7 +1677,7 @@ def _validate_interactive_workstation_evidence(
                             expected_width=expected_visual_width,
                             expected_height=expected_visual_height,
                         )
-                        _validate_structured_physical_visual_content(
+                        _validate_structured_rendered_visual_content(
                             decoded_visual,
                             label="interactive workstation physical accessibility visual artifact",
                             failures=failures,
@@ -2359,6 +2382,11 @@ def _validate_experience_evidence(
             decode_byte_budget=png_byte_budget,
             decode_pixel_budget=png_pixel_budget,
         )
+        _validate_structured_rendered_visual_content(
+            baseline_image,
+            label=f"visual baseline artifact {baseline_id}",
+            failures=failures,
+        )
         if (
             baseline_image is not None
             and artifact_path is not None
@@ -2495,6 +2523,11 @@ def _validate_experience_evidence(
                 expected_height=metadata[1],
                 decode_byte_budget=png_byte_budget,
                 decode_pixel_budget=png_pixel_budget,
+            )
+            _validate_structured_rendered_visual_content(
+                capture_image,
+                label=f"visual capture for {baseline_id}",
+                failures=failures,
             )
             baseline_pixel_digest = baseline_pixel_digests.get(str(baseline_id))
             if (
@@ -2716,6 +2749,27 @@ def _validate_experience_evidence(
                 failures.append(
                     f"interaction/accessibility report {surface} checks.{key} must be pass"
                 )
+
+        expected_workflow_observations = EXPECTED_Q10_SURFACE_WORKFLOW_OBSERVATIONS.get(surface)
+        workflow_observations = report.get("workflow_observations")
+        if expected_workflow_observations is None:
+            failures.append(
+                f"interaction/accessibility report {surface} has no qualified workflow contract"
+            )
+        elif not isinstance(workflow_observations, dict):
+            failures.append(
+                f"interaction/accessibility report {surface} missing workflow_observations"
+            )
+        elif set(workflow_observations) != set(expected_workflow_observations):
+            failures.append(
+                f"interaction/accessibility report {surface} must contain exactly the required workflow observations"
+            )
+        else:
+            for observation in expected_workflow_observations:
+                if workflow_observations.get(observation) != "pass":
+                    failures.append(
+                        f"interaction/accessibility report {surface} workflow_observations.{observation} must be pass"
+                    )
 
 
 def _v010_milestone(roadmap: dict[str, object]) -> dict[str, object] | None:

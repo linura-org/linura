@@ -979,13 +979,18 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         qualification_dir = root / "qualification/v010"
         qualification_dir.mkdir(parents=True, exist_ok=True)
         comparisons = []
+        render_pattern = (0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240)
         for baseline_id, surface, width, height, scale in baseline_records:
             baseline_rel = f"visual/baselines/{baseline_id}.png"
             baseline_path = root / baseline_rel
-            baseline_path.write_bytes(self._png_bytes(width, height))
+            baseline_path.write_bytes(
+                self._png_bytes(width, height, pattern_values=render_pattern)
+            )
             capture_rel = f"qualification/v010/{baseline_id}-capture.png"
             capture_path = root / capture_rel
-            capture_path.write_bytes(self._png_bytes(width, height))
+            capture_path.write_bytes(
+                self._png_bytes(width, height, pattern_values=render_pattern)
+            )
             baselines.append(
                 {
                     "id": baseline_id,
@@ -1034,7 +1039,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self._png_bytes(
                 int(failed_baseline["width"]),
                 int(failed_baseline["height"]),
-                pixel_value=255,
+                pattern_values=tuple(255 - value for value in render_pattern),
             )
         )
         diff_digest = hashlib.sha256(diff_path.read_bytes()).hexdigest()
@@ -1047,6 +1052,26 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         )
 
         required_surfaces = ["linura-firstboot","linura-installer","linura-control-center","command-palette","quick-settings","desktop-shell-integration","shell-panel-tray-status","launcher-workspace","notifications-osd","lock-session-controls","network-connectivity","bluetooth","audio-media","display-power","desktop-utilities","applications-packages","updates-snapshots-recovery","personalization"]
+        workflow_observations_by_surface = {
+            "linura-firstboot": ["owner-enrollment-workflow-completed", "qualified-profile-state-rendered", "manual-no-ai-completion-verified"],
+            "linura-installer": ["supported-profile-install-plan-rendered", "destructive-step-review-completed", "installer-handoff-to-firstboot-verified"],
+            "linura-control-center": ["authoritative-state-reobserved", "registered-typed-effect-dispatched", "post-effect-verification-rendered"],
+            "command-palette": ["registered-target-resolved", "typed-operation-dispatched", "raw-privileged-shell-rejected"],
+            "quick-settings": ["fresh-authoritative-state-rendered", "registered-typed-effect-dispatched", "stale-or-unavailable-mutation-disabled"],
+            "desktop-shell-integration": ["verified-lifecycle-state-rendered", "shell-authority-escalation-absent", "session-restart-state-reconstructed"],
+            "shell-panel-tray-status": ["authoritative-status-rendered", "entrypoint-navigation-completed", "status-surface-authority-escalation-absent"],
+            "launcher-workspace": ["application-launch-completed", "workspace-navigation-completed", "ephemeral-navigation-not-recorded-as-durable-mutation"],
+            "notifications-osd": ["verified-commit-precedes-success-notification", "failure-lifecycle-notification-rendered", "secret-bearing-material-redacted"],
+            "lock-session-controls": ["authenticated-actor-bound", "registered-session-action-dispatched", "authority-unavailable-fails-closed"],
+            "network-connectivity": ["fresh-networkmanager-state-observed", "registered-network-effect-dispatched", "post-effect-network-state-reobserved"],
+            "bluetooth": ["fresh-bluez-state-observed", "registered-bluetooth-effect-dispatched", "post-effect-bluetooth-state-reobserved"],
+            "audio-media": ["fresh-pipewire-wireplumber-state-observed", "registered-audio-effect-dispatched", "post-effect-audio-state-reobserved"],
+            "display-power": ["fresh-display-power-state-observed", "supported-display-power-effect-dispatched", "unsupported-or-stale-state-rendered"],
+            "desktop-utilities": ["screenshot-or-recording-workflow-completed", "clipboard-history-workflow-completed", "privileged-shell-shortcut-absent"],
+            "applications-packages": ["typed-package-discovery-completed", "registered-package-install-remove-effect-dispatched", "arbitrary-package-or-shell-text-rejected"],
+            "updates-snapshots-recovery": ["coordinated-update-workflow-completed", "snapshot-or-rollback-workflow-completed", "durable-recovery-state-reobserved"],
+            "personalization": ["typed-preference-change-completed", "preference-persistence-reobserved", "authority-bearing-payload-rejected"],
+        }
         interaction_records = []
         for surface in required_surfaces:
             report_rel = f"qualification/v010/{surface}-interaction-accessibility.json"
@@ -1073,6 +1098,10 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                     "display_scaling": "pass",
                     "offline_error": "pass",
                     "reconnect": "pass",
+                },
+                "workflow_observations": {
+                    observation: "pass"
+                    for observation in workflow_observations_by_surface[surface]
                 },
             }
             report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -2309,6 +2338,55 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self._write_complete_experience_evidence(root)
             result = self._run(root)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+
+    def test_q10_rejects_blank_reviewed_visual_baseline_and_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            baseline_manifest_path = root / "visual/baselines/manifest.json"
+            baseline_manifest = json.loads(baseline_manifest_path.read_text(encoding="utf-8"))
+            baseline = next(item for item in baseline_manifest["baselines"] if item["id"] == "firstboot-1280x800-2x")
+            baseline_path = root / baseline["baseline"]
+            baseline_path.write_bytes(self._png_bytes(int(baseline["width"]), int(baseline["height"]), pixel_value=0))
+            baseline["sha256"] = hashlib.sha256(baseline_path.read_bytes()).hexdigest()
+            baseline_manifest_path.write_text(json.dumps(baseline_manifest, indent=2) + "\n", encoding="utf-8")
+            self._refresh_visual_baseline_manifest_digest(root)
+
+            evidence_path = root / "qualification/v010/experience-evidence.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            comparison = next(item for item in evidence["visual_comparisons"] if item["baseline_id"] == baseline["id"])
+            capture_path = root / comparison["capture"]
+            capture_path.write_bytes(self._png_bytes(int(baseline["width"]), int(baseline["height"]), pixel_value=0))
+            comparison["capture_sha256"] = hashlib.sha256(capture_path.read_bytes()).hexdigest()
+            evidence_path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+            self._refresh_experience_evidence_digest(root)
+
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("visual baseline artifact firstboot-1280x800-2x must contain representative non-uniform rendered content", result.stderr)
+            self.assertIn("visual capture for firstboot-1280x800-2x must contain representative non-uniform rendered content", result.stderr)
+
+    def test_q10_requires_surface_specific_functional_workflow_observations(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            evidence_path = root / "qualification/v010/experience-evidence.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            record = next(item for item in evidence["interaction_accessibility"] if item["surface"] == "network-connectivity")
+            report_path = root / record["report"]
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["workflow_observations"].pop("post-effect-network-state-reobserved")
+            report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+            record["report_sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+            evidence_path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+            self._refresh_experience_evidence_digest(root)
+
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interaction/accessibility report network-connectivity must contain exactly the required workflow observations", result.stderr)
 
     def test_q10_authority_evidence_requires_exact_case_matrix(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
