@@ -367,7 +367,12 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 visual_artifact = evidence_dir / "accessibility-and-visual.png"
                 display = hardware["displays"][0]
                 visual_artifact.write_bytes(
-                    self._png_bytes(display["width"], display["height"], pixel_value=96)
+                    self._png_bytes(
+                        display["width"],
+                        display["height"],
+                        pixel_value=96,
+                        pattern_values=(16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 255),
+                    )
                 )
                 payload["visual_artifact"] = {
                     **binding(visual_artifact),
@@ -586,6 +591,10 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 f"case={name}",
                 "controller=qemu-host",
                 f"mechanism={mechanism}",
+                f"environment_sha256={environment_binding['sha256']}",
+                f"source_commit_sha={source_commit_sha}",
+                f"run_id={run_id}",
+                "scope=machine",
             ]
             if requires_boot_transition:
                 event_lines.extend(
@@ -839,6 +848,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         transparent_gray: int | None = None,
         extra_raw_bytes: int = 0,
         ancillary_chunks: tuple[tuple[bytes, bytes], ...] = (),
+        pattern_values: tuple[int, ...] | None = None,
     ) -> bytes:
         def chunk(kind: bytes, payload: bytes) -> bytes:
             return (
@@ -855,9 +865,18 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self.assertGreaterEqual(transparent_gray, 0)
             self.assertLessEqual(transparent_gray, 255)
         self.assertGreaterEqual(extra_raw_bytes, 0)
-        rows = b"".join(
-            b"\x00" + bytes([pixel_value]) * width for _ in range(height)
-        ) + (b"\x00" * extra_raw_bytes)
+        if pattern_values is None:
+            row = bytes([pixel_value]) * width
+        else:
+            self.assertGreaterEqual(len(pattern_values), 2)
+            for value in pattern_values:
+                self.assertGreaterEqual(value, 0)
+                self.assertLessEqual(value, 255)
+            row = bytes(
+                pattern_values[min((x * len(pattern_values)) // width, len(pattern_values) - 1)]
+                for x in range(width)
+            )
+        rows = b"".join(b"\x00" + row for _ in range(height)) + (b"\x00" * extra_raw_bytes)
         result = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
         if transparent_gray is not None:
             result += chunk(b"tRNS", struct.pack(">H", transparent_gray))
@@ -1415,6 +1434,33 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 result.stderr,
             )
 
+    def test_interactive_workstation_rejects_blank_accessibility_visual_capture(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "accessibility-and-visual")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            visual_path = root / attestation["visual_artifact"]["path"]
+            visual_path.write_bytes(self._png_bytes(320, 180, pixel_value=96))
+            attestation["visual_artifact"]["sha256"] = hashlib.sha256(visual_path.read_bytes()).hexdigest()
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "must contain representative non-uniform rendered content",
+                result.stderr,
+            )
+
     def test_interactive_workstation_rejects_accessibility_visual_scale_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1703,6 +1749,43 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("machine execution provenance must prove external control", result.stderr)
             self.assertIn("process_local_mock must be false", result.stderr)
+
+    def test_q12_release_matrix_rejects_unbound_nonempty_execution_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_release_matrix_evidence(
+                root,
+                section="update_recovery_qualification",
+                manifest_name="update-recovery-evidence.json",
+                evidence_type="exact-source-q12-update-recovery",
+                case_observations=self._q12_case_observations(),
+            )
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "crash-before-dispatch")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            provenance_path = root / attestation["machine_execution"]["provenance"]["path"]
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            event_log = root / provenance["event_log"]["path"]
+            event_log.write_text("x\n", encoding="utf-8")
+            provenance["event_log"]["sha256"] = hashlib.sha256(event_log.read_bytes()).hexdigest()
+            provenance_path.write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+            attestation["machine_execution"]["provenance"]["sha256"] = hashlib.sha256(provenance_path.read_bytes()).hexdigest()
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            self._refresh_release_matrix_contract_digest(
+                root,
+                section="update_recovery_qualification",
+                manifest=manifest,
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "machine execution event log must bind the case, controller, mechanism, environment, source, run, scope, and boot identity",
+                result.stderr,
+            )
 
     def test_q12_restart_reobservation_requires_distinct_boot_transition(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

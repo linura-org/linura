@@ -840,6 +840,67 @@ def _validate_png_artifact(
         return None
     return decoded
 
+
+def _validate_structured_physical_visual_content(
+    decoded: tuple[int, int, bytes] | None,
+    *,
+    label: str,
+    failures: list[str],
+) -> None:
+    if decoded is None:
+        return
+    width, height, pixels = decoded
+    pixel_count = width * height
+    if pixel_count <= 0:
+        failures.append(f"{label} must contain rendered visual content")
+        return
+
+    rgba = memoryview(pixels)
+    distinct_visible: set[int] = set()
+    previous_row = [-1] * width
+    transition_count = 0
+    visible_count = 0
+    min_luma = 255
+    max_luma = 0
+
+    for y in range(height):
+        left_key = -1
+        for x in range(width):
+            offset = (y * width + x) * 4
+            red = rgba[offset]
+            green = rgba[offset + 1]
+            blue = rgba[offset + 2]
+            alpha = rgba[offset + 3]
+            if alpha == 0:
+                key = -1
+            else:
+                visible_count += 1
+                key = (red << 24) | (green << 16) | (blue << 8) | alpha
+                if len(distinct_visible) < 32:
+                    distinct_visible.add(key)
+                luma = (red * 299 + green * 587 + blue * 114) // 1000
+                min_luma = min(min_luma, luma)
+                max_luma = max(max_luma, luma)
+            if x > 0 and key != left_key:
+                transition_count += 1
+            if y > 0 and key != previous_row[x]:
+                transition_count += 1
+            previous_row[x] = key
+            left_key = key
+
+    minimum_transitions = max(128, pixel_count // 500)
+    if (
+        visible_count == 0
+        or len(distinct_visible) < 16
+        or max_luma - min_luma < 24
+        or transition_count < minimum_transitions
+    ):
+        failures.append(
+            f"{label} must contain representative non-uniform rendered content; "
+            "blank, near-uniform, or minimally perturbed captures are not qualification evidence"
+        )
+
+
 def _validate_digest_bound_json_artifact(
     root: Path,
     path_value: object,
@@ -1585,13 +1646,18 @@ def _validate_interactive_workstation_evidence(
                                             "interactive workstation physical accessibility visual artifact capture.scale must match the identified physical display"
                                         )
 
-                        _validate_png_artifact(
+                        decoded_visual = _validate_png_artifact(
                             visual_path,
                             visual_binding.get("sha256"),
                             label="interactive workstation physical accessibility visual artifact",
                             failures=failures,
                             expected_width=expected_visual_width,
                             expected_height=expected_visual_height,
+                        )
+                        _validate_structured_physical_visual_content(
+                            decoded_visual,
+                            label="interactive workstation physical accessibility visual artifact",
+                            failures=failures,
                         )
 
 
@@ -1943,22 +2009,34 @@ def _validate_machine_case_execution(
         failures=failures,
     )
     if event_log_path is not None:
-        if event_log_path.stat().st_size == 0:
-            failures.append(f"{label} machine execution event log must not be empty")
-        elif requires_boot_transition and pre_boot_id is not None and post_boot_id is not None:
-            try:
-                event_lines = set(event_log_path.read_text(encoding="utf-8").splitlines())
-            except UnicodeError:
-                failures.append(f"{label} machine execution event log must be valid UTF-8")
-            else:
-                required_boot_lines = {
-                    f"pre_boot_id={pre_boot_id}",
-                    f"post_boot_id={post_boot_id}",
-                }
-                if not required_boot_lines.issubset(event_lines):
-                    failures.append(
-                        f"{label} machine execution event log must record the boot transition"
-                    )
+        try:
+            event_lines = set(event_log_path.read_text(encoding="utf-8").splitlines())
+        except UnicodeError:
+            failures.append(f"{label} machine execution event log must be valid UTF-8")
+        else:
+            required_event_lines = {
+                f"case={case_name}",
+                f"controller={controller}",
+                f"mechanism={expected_mechanism}",
+                f"environment_sha256={environment_sha256}",
+                f"source_commit_sha={source_sha}",
+                f"run_id={run_id}",
+                "scope=machine",
+            }
+            if requires_boot_transition and pre_boot_id is not None and post_boot_id is not None:
+                required_event_lines.update(
+                    {
+                        f"pre_boot_id={pre_boot_id}",
+                        f"post_boot_id={post_boot_id}",
+                    }
+                )
+            elif environment_boot_id is not None:
+                required_event_lines.add(f"boot_id={environment_boot_id}")
+            if not required_event_lines.issubset(event_lines):
+                failures.append(
+                    f"{label} machine execution event log must bind the case, controller, "
+                    "mechanism, environment, source, run, scope, and boot identity"
+                )
 
 
 def _validate_release_matrix_evidence(
