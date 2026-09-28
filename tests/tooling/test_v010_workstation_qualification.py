@@ -974,8 +974,13 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         for surface in required_visual_surfaces:
             if surface in existing_surfaces:
                 continue
+            # Per-surface presence/interaction coverage does not need to pay the
+            # full-resolution decode cost. The three representative records above
+            # retain the qualified 1280x800/1440x900 and 1x/2x coverage; all other
+            # surfaces use a compact structured image that still exercises PNG,
+            # rendered-content, digest, pixel-equivalence, and surface binding.
             baseline_records.append(
-                (f"{surface}-1280x800-1x", surface, 1280, 800, 1.0)
+                (f"{surface}-32x24-1x", surface, 32, 24, 1.0)
             )
         baselines = []
         visual_dir = root / "visual/baselines"
@@ -1026,7 +1031,11 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             f'visual_baseline_manifest_sha256 = "{baseline_digest}"',
         )
 
-        failed_baseline = baselines[0]
+        # Keep retained-failure mechanics on a compact surface. Resolution
+        # handling is already exercised by the representative full-size records.
+        failed_baseline = next(
+            item for item in baselines if item["surface"] == "linura-installer"
+        )
         failed_capture_rel = "qualification/v010/visual-failure-capture.png"
         failed_capture_path = root / failed_capture_rel
         failed_capture_path.write_bytes(
@@ -2773,7 +2782,15 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             evidence_path = root / "qualification/v010/experience-evidence.json"
             evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
             failure = evidence["retained_failure_diffs"][0]
-            baseline_path = root / "visual/baselines/firstboot-1280x800-1x.png"
+            baseline_manifest = json.loads(
+                (root / "visual/baselines/manifest.json").read_text(encoding="utf-8")
+            )
+            baseline = next(
+                item
+                for item in baseline_manifest["baselines"]
+                if item["id"] == failure["baseline_id"]
+            )
+            baseline_path = root / baseline["baseline"]
             failed_capture_path = root / failure["failed_capture"]
             failed_capture_path.write_bytes(baseline_path.read_bytes())
             failure["failed_capture_sha256"] = hashlib.sha256(
@@ -2802,7 +2819,15 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             evidence_path = root / "qualification/v010/experience-evidence.json"
             evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
             failure = evidence["retained_failure_diffs"][0]
-            baseline_path = root / "visual/baselines/firstboot-1280x800-1x.png"
+            baseline_manifest = json.loads(
+                (root / "visual/baselines/manifest.json").read_text(encoding="utf-8")
+            )
+            baseline = next(
+                item
+                for item in baseline_manifest["baselines"]
+                if item["id"] == failure["baseline_id"]
+            )
+            baseline_path = root / baseline["baseline"]
             diff_path = root / failure["diff"]
             diff_path.write_bytes(baseline_path.read_bytes())
             failure["diff_sha256"] = hashlib.sha256(diff_path.read_bytes()).hexdigest()
