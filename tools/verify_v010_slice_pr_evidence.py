@@ -69,9 +69,19 @@ EVIDENCE_SEAL_EXACT_PATHS = {
     "contracts/v010-workstation-slices.toml",
     "docs/qualification/v0.10.0.md",
     "docs/releases/v0.10.0.md",
+    "qualification/v010/experience-evidence.json",
+    "qualification/v010/interactive-workstation-evidence.json",
+    "qualification/v010/security-evidence.json",
+    "qualification/v010/update-recovery-evidence.json",
 }
+# Readiness may seal retained evidence, never qualification executables. Keep this
+# allowlist explicit so a new harness subtree cannot become trusted merely by
+# being placed under qualification/v010/.
 EVIDENCE_SEAL_PREFIXES = (
-    "qualification/v010/",
+    "qualification/v010/experience/",
+    "qualification/v010/interactive-workstation/",
+    "qualification/v010/security/",
+    "qualification/v010/update-recovery/",
     "visual/baselines/",
 )
 

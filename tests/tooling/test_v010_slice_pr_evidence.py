@@ -40,7 +40,7 @@ class V010SlicePREvidenceTests(unittest.TestCase):
             with self.subTest(slice_id=slice_id, path=path):
                 self.assertTrue(verifier.path_matches_slice(slice_id, path))
 
-    def test_evidence_seal_paths_are_strictly_non_executable(self) -> None:
+    def test_evidence_seal_paths_allow_only_retained_artifact_surfaces(self) -> None:
         self.assertTrue(
             verifier.evidence_seal_path_allowed(
                 "contracts/v010-workstation-qualification.toml"
@@ -48,9 +48,27 @@ class V010SlicePREvidenceTests(unittest.TestCase):
         )
         self.assertTrue(
             verifier.evidence_seal_path_allowed(
+                "qualification/v010/experience-evidence.json"
+            )
+        )
+        self.assertTrue(
+            verifier.evidence_seal_path_allowed(
                 "qualification/v010/interactive-workstation/physical-session-start.json"
             )
         )
+        self.assertTrue(
+            verifier.evidence_seal_path_allowed(
+                "qualification/v010/security/polkit-attestation.json"
+            )
+        )
+        for executable_harness in (
+            "qualification/v010/shell-runtime/run-shell-runtime.sh",
+            "qualification/v010/shell-runtime/prepare-substrate.sh",
+            "qualification/v010/shell-runtime/verify-substrate.py",
+            "qualification/v010/future-harness/run.py",
+        ):
+            with self.subTest(path=executable_harness):
+                self.assertFalse(verifier.evidence_seal_path_allowed(executable_harness))
         self.assertFalse(verifier.evidence_seal_path_allowed("apps/linurad/src/main.rs"))
         self.assertFalse(verifier.evidence_seal_path_allowed("Cargo.lock"))
 
