@@ -84,6 +84,8 @@ EVIDENCE_SEAL_PREFIXES = (
     "qualification/v010/update-recovery/",
     "visual/baselines/",
 )
+EVIDENCE_SEAL_RELEASE_MATRIX_PREFIX = "qualification/v010/release-matrix/"
+EVIDENCE_SEAL_RELEASE_MATRIX_SUFFIXES = (".json", ".log", ".tsv", ".txt")
 
 
 class EvidenceError(RuntimeError):
@@ -254,8 +256,12 @@ def require_slice_scope(repository: str, number: int, slice_id: str) -> None:
 
 
 def evidence_seal_path_allowed(path: str) -> bool:
-    return path in EVIDENCE_SEAL_EXACT_PATHS or any(
-        path.startswith(prefix) for prefix in EVIDENCE_SEAL_PREFIXES
+    if path in EVIDENCE_SEAL_EXACT_PATHS:
+        return True
+    if any(path.startswith(prefix) for prefix in EVIDENCE_SEAL_PREFIXES):
+        return True
+    return path.startswith(EVIDENCE_SEAL_RELEASE_MATRIX_PREFIX) and path.endswith(
+        EVIDENCE_SEAL_RELEASE_MATRIX_SUFFIXES
     )
 
 

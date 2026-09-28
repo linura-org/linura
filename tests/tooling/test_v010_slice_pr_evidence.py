@@ -61,11 +61,22 @@ class V010SlicePREvidenceTests(unittest.TestCase):
                 "qualification/v010/security/polkit-attestation.json"
             )
         )
+        for release_matrix_artifact in (
+            "qualification/v010/release-matrix/update_recovery_qualification/machine/environment.json",
+            "qualification/v010/release-matrix/update_recovery_qualification/provenance/crash-before-dispatch.log",
+            "qualification/v010/release-matrix/security_qualification/machine/package-inventory.tsv",
+            "qualification/v010/release-matrix/security_qualification/machine/os-release.txt",
+        ):
+            with self.subTest(path=release_matrix_artifact):
+                self.assertTrue(verifier.evidence_seal_path_allowed(release_matrix_artifact))
         for executable_harness in (
             "qualification/v010/shell-runtime/run-shell-runtime.sh",
             "qualification/v010/shell-runtime/prepare-substrate.sh",
             "qualification/v010/shell-runtime/verify-substrate.py",
             "qualification/v010/future-harness/run.py",
+            "qualification/v010/release-matrix/run.py",
+            "qualification/v010/release-matrix/run.sh",
+            "qualification/v010/release-matrix/helper.rs",
         ):
             with self.subTest(path=executable_harness):
                 self.assertFalse(verifier.evidence_seal_path_allowed(executable_harness))

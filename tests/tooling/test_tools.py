@@ -198,10 +198,17 @@ class ToolingTests(unittest.TestCase):
             "qualification/v010/interactive-workstation/*",
             "qualification/v010/security/*",
             "qualification/v010/update-recovery/*",
+            "qualification/v010/release-matrix/*.json",
+            "qualification/v010/release-matrix/*.log",
+            "qualification/v010/release-matrix/*.tsv",
+            "qualification/v010/release-matrix/*.txt",
         ):
             with self.subTest(path=retained_path):
                 self.assertIn(retained_path, classifier)
         self.assertNotIn("qualification/v010/shell-runtime/*", classifier)
+        self.assertNotIn("qualification/v010/release-matrix/*.py", classifier)
+        self.assertNotIn("qualification/v010/release-matrix/*.sh", classifier)
+        self.assertNotIn("qualification/v010/release-matrix/*.rs", classifier)
 
     def test_v09_regression_lane_cannot_skip_exact_source_contract_tests(self) -> None:
         workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(encoding="utf-8")
