@@ -497,6 +497,13 @@ def close_release(args: argparse.Namespace) -> list[str]:
         raise ClosureError(f"invalid release tag: {args.tag!r}")
     if not SHA_RE.fullmatch(args.source_sha):
         raise ClosureError("source_sha must be a lowercase 40-character SHA")
+    if args.tag == "v0.10.0":
+        qualification_source_sha = getattr(args, "qualification_source_sha", None)
+        qualification_tree_sha = getattr(args, "qualification_tree_sha", None)
+        if not isinstance(qualification_source_sha, str) or not SHA_RE.fullmatch(qualification_source_sha):
+            raise ClosureError("v0.10 closure requires qualification_source_sha as a lowercase 40-character SHA")
+        if not isinstance(qualification_tree_sha, str) or not SHA_RE.fullmatch(qualification_tree_sha):
+            raise ClosureError("v0.10 closure requires qualification_tree_sha as a lowercase 40-character SHA")
     for field in ("proof_run_id", "promotion_run_id", "release_run_id", "release_id", "verification_run_id", "crates_io_run_id"):
         if getattr(args, field) <= 0:
             raise ClosureError(f"{field} must be positive")
@@ -552,6 +559,16 @@ def close_release(args: argparse.Namespace) -> list[str]:
     )
     start, end, block = milestone_block(updated_contract, args.tag)
     updated_block = replace_once(block, 'status = "planned"', 'status = "released"', f"{args.tag} status")
+    if args.tag == "v0.10.0":
+        updated_block = replace_once(
+            updated_block,
+            'status = "released"\n',
+            'status = "released"\n'
+            f'release_intent_source_sha = "{args.source_sha}"\n'
+            f'qualification_source_sha = "{args.qualification_source_sha}"\n'
+            f'qualification_tree_sha = "{args.qualification_tree_sha}"\n',
+            "v0.10 persisted qualification identity",
+        )
     updated_contract = updated_contract[:start] + updated_block + updated_contract[end:]
     write_if_changed(contract_path, updated_contract, changed, root)
 
@@ -673,6 +690,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--root", type=Path, default=Path("."))
     parser.add_argument("--tag", required=True)
     parser.add_argument("--source-sha", required=True)
+    parser.add_argument("--qualification-source-sha")
+    parser.add_argument("--qualification-tree-sha")
     parser.add_argument("--proof-run-id", type=int, required=True)
     parser.add_argument("--promotion-run-id", type=int, required=True)
     parser.add_argument("--release-run-id", type=int, required=True)

@@ -6,7 +6,7 @@ Linura intends to be beautiful, but visual quality must be qualified through rep
 
 ## v0.10 evidence contract
 
-The v0.10 workstation contract requires reviewed non-null baselines for the required surfaces, representative resolution/scale coverage, passing captures for every reviewed baseline, at least one retained reviewed failed comparison/diff, and digest-verified interaction/accessibility reports.
+The v0.10 workstation contract requires reviewed non-null baselines for the required surfaces, representative resolution/scale coverage, passing captures for every reviewed baseline, at least one retained reviewed failed comparison/diff, and digest-verified interaction/accessibility reports. A structurally valid PNG is not sufficient: reviewed baselines and passing captures must contain representative non-uniform rendered content, and each surface report must include its exact domain-specific workflow observations in addition to generic input/accessibility checks.
 
 Required visual/accessibility surfaces currently include:
 

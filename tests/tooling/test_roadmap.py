@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -14,9 +15,17 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class RoadmapContractTests(unittest.TestCase):
-    def _run_checker(self, root: Path) -> subprocess.CompletedProcess[str]:
+    def _run_checker(
+        self,
+        root: Path,
+        *,
+        release_candidate: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        command = [sys.executable, str(ROOT / "tools/check_roadmap.py"), str(root)]
+        if release_candidate is not None:
+            command.extend(["--release-candidate", release_candidate])
         return subprocess.run(
-            [sys.executable, str(ROOT / "tools/check_roadmap.py"), str(root)],
+            command,
             capture_output=True,
             text=True,
             check=False,
@@ -34,6 +43,9 @@ class RoadmapContractTests(unittest.TestCase):
         contract = tomllib.loads((ROOT / "contracts/roadmap.toml").read_text(encoding="utf-8"))
         paths = {
             "contracts/roadmap.toml",
+            "contracts/v010-workstation-slices.toml",
+            "contracts/v010-workstation-qualification.toml",
+            "docs/adr/0033-v010-complete-workstation-product-boundary.md",
             "crates/linura-intent/src/model.rs",
             "crates/linura-sdk/src/lib.rs",
             "docs/roadmap.md",
@@ -94,6 +106,207 @@ class RoadmapContractTests(unittest.TestCase):
             machine_class["release_qualified_profiles"] = []
         payload["qualification_environments"]["release_qualified"] = []
         matrix.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+    def test_release_preparation_uses_explicit_roadmap_release_candidate_gate(self) -> None:
+        workflow = (ROOT / ".github/workflows/release-preparation.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            'python3 tools/check_roadmap.py . --release-candidate "$tag"',
+            workflow,
+        )
+        self.assertIn(
+            'python3 tools/check_roadmap.py . --release-candidate "$RELEASE_TAG"',
+            workflow,
+        )
+
+    def test_v010_release_gate_forwards_explicit_qualification_source(self) -> None:
+        checker = (ROOT / "tools/check_roadmap.py").read_text(encoding="utf-8")
+        self.assertIn('os.environ.get("LINURA_EXPECTED_SOURCE_SHA")', checker)
+        self.assertIn("expected_source_sha=expected_source_sha", checker)
+        self.assertIn("post_release_closed=v010_is_released", checker)
+
+        roadmap = tomllib.loads((ROOT / "contracts/roadmap.toml").read_text(encoding="utf-8"))
+        v010 = next(item for item in roadmap["milestone"] if item["version"] == "v0.10.0")
+        self.assertEqual(
+            v010["release_qualified_qualification_environments"],
+            ["qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"],
+        )
+        self.assertEqual(
+            v010["release_qualified_platform_profiles"],
+            [{"machine_class": "workstation", "profile": "arch-hyprland-v1"}],
+        )
+
+        preparation = (ROOT / ".github/workflows/release-preparation.yml").read_text(encoding="utf-8")
+        self.assertIn('readiness_head_sha="$(jq -r .head.sha <<<"$selected_pr")"', preparation)
+        self.assertIn('qualification_source_sha="$(jq -r \'.parents[0].sha\' <<<"$readiness_commit")"', preparation)
+        self.assertIn('test "$readiness_tree_sha" = "$source_tree_sha"', preparation)
+        self.assertIn('test "$qualification_tree_sha" != "$readiness_tree_sha"', preparation)
+        self.assertNotIn('qualification_source_sha="${lineage_parts[1]}"', preparation)
+        first_gate = preparation.index('python3 tools/check_roadmap.py . --release-candidate "$tag"')
+        source_resolution = preparation.index('qualification_source_sha="$(jq -r \'.parents[0].sha\' <<<"$readiness_commit")"')
+        self.assertLess(source_resolution, first_gate)
+        self.assertIn("tools/verify_v010_slice_pr_evidence.py", preparation)
+        self.assertIn('--readiness-pr-number "$pr_number"', preparation)
+        self.assertIn('--readiness-head-sha "$readiness_head_sha"', preparation)
+        self.assertIn('--readiness-merge-sha "$SOURCE_SHA"', preparation)
+        self.assertIn('--readiness-pr-number "$READINESS_PR_NUMBER"', preparation)
+        self.assertIn('--readiness-head-sha "$READINESS_HEAD_SHA"', preparation)
+        self.assertIn("Qualification-Source: $QUALIFICATION_SOURCE_SHA", preparation)
+        self.assertIn("Qualification-Tree: $QUALIFICATION_TREE_SHA", preparation)
+
+        authorization = (ROOT / ".github/workflows/release-authorization.yml").read_text(encoding="utf-8")
+        self.assertIn('test "$qualification_tree_sha" != "$semantic_tree_sha"', authorization)
+        self.assertIn("tools/verify_v010_slice_pr_evidence.py", authorization)
+        self.assertIn("Qualification-Source: $QUALIFICATION_SOURCE_SHA", authorization)
+        self.assertIn("Qualification-Tree: $QUALIFICATION_TREE_SHA", authorization)
+
+        qualification_workflow = (ROOT / ".github/workflows/v010-qualification.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Resolve qualification evidence source", qualification_workflow)
+        self.assertIn(
+            'release_contract.py validate-intent --source-sha "$SOURCE_SHA" --json',
+            qualification_workflow,
+        )
+        self.assertIn(
+            'release_contract.py validate-preparation',
+            qualification_workflow,
+        )
+        self.assertIn(
+            '--tag v0.10.0',
+            qualification_workflow,
+        )
+        self.assertIn(
+            'candidate="$(jq -r .qualification_source_sha <<<"$preparation")"',
+            qualification_workflow,
+        )
+        self.assertIn(
+            'test "$(git rev-parse "$candidate^{tree}")" = "$candidate_tree"',
+            qualification_workflow,
+        )
+        self.assertIn(
+            'mapfile -d \'\' -t changed < <(git diff --no-renames --name-only -z "$parent" "$SOURCE_SHA")',
+            qualification_workflow,
+        )
+        self.assertNotIn(
+            'git diff --name-only "$parent" "$SOURCE_SHA"',
+            qualification_workflow,
+        )
+        self.assertIn("release_intent_source_sha", qualification_workflow)
+        self.assertIn("qualification_source_sha", qualification_workflow)
+        self.assertIn("qualification_tree_sha", qualification_workflow)
+        self.assertIn(
+            'release_contract.py validate-intent --source-sha "$release_intent_source" --json',
+            qualification_workflow,
+        )
+        self.assertIn(
+            'test "$(git rev-parse "$persisted_source^{tree}")" = "$persisted_tree"',
+            qualification_workflow,
+        )
+        self.assertIn(
+            "contracts/v010-workstation-qualification.toml|contracts/v010-workstation-slices.toml",
+            qualification_workflow,
+        )
+        self.assertIn(
+            "printf 'LINURA_EXPECTED_SOURCE_SHA=%s\\n' \"$expected_source\"",
+            qualification_workflow,
+        )
+
+        runtime = (ROOT / ".github/workflows/v010-shell-runtime-qualification.yml").read_text(
+            encoding="utf-8"
+        )
+        release_build = (ROOT / ".github/workflows/reusable-release-build.yml").read_text(
+            encoding="utf-8"
+        )
+        for fragment in (
+            "RELEASE_TARGET: x86_64-unknown-linux-gnu",
+            "CARGO_INCREMENTAL=0",
+            "TZ=UTC",
+            "LANG=C.UTF-8",
+            "LC_ALL=C.UTF-8",
+            "RUSTFLAGS=--remap-path-prefix=%s=/workspace",
+        ):
+            self.assertIn(fragment, runtime)
+            self.assertIn(fragment, release_build)
+        self.assertIn(
+            'cargo build --workspace --release --locked --target "$RELEASE_TARGET"',
+            runtime,
+        )
+        self.assertIn(
+            'cargo build --workspace --release --locked --target "$RELEASE_TARGET"',
+            release_build,
+        )
+        self.assertIn(
+            'target/$RELEASE_TARGET/release/linurad',
+            runtime,
+        )
+
+        proof = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(encoding="utf-8")
+        self.assertIn("qualification_source_sha", proof)
+        self.assertIn('LINURA_EXPECTED_SOURCE_SHA: ${{ needs.validate.outputs.qualification_source_sha }}', proof)
+        self.assertIn('source_sha: ${{ needs.validate.outputs.qualification_source_sha }}', proof)
+        self.assertIn('source_sha: ${{ github.sha }}', proof)
+        self.assertIn("v010-qualification-shell-runtime:", proof)
+        self.assertIn("v010-prepared-shell-runtime:", proof)
+        self.assertIn('ref: ${{ github.sha }}', proof)
+        self.assertIn('"$prepared_linurad_sha256"', proof)
+        self.assertIn('runtime/pre-seal/V010-SHELL-RUNTIME-EVIDENCE.json', proof)
+        self.assertIn('runtime/prepared-release/V010-SHELL-RUNTIME-EVIDENCE.json', proof)
+        self.assertIn('"LINURA_PREPARED_LINURAD_SHA256"', proof)
+        self.assertIn("LINURA_EXPECTED_LINURAD_SHA256", proof)
+        self.assertIn("LINURA_EXPECTED_SHELL_BRIDGE_SHA256", proof)
+        self.assertIn("LINURA_REQUIRE_BINARY_BINDING=1", proof)
+
+        workstation_checker = (
+            ROOT / "tools/check_v010_workstation_qualification.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("VISUAL_MAX_TOTAL_PNG_BYTES", workstation_checker)
+        self.assertIn("VISUAL_MAX_TOTAL_DECODE_PIXELS", workstation_checker)
+        self.assertIn("baseline_pixel_digests", workstation_checker)
+        self.assertIn("decode_byte_budget=png_byte_budget", workstation_checker)
+        self.assertIn("decode_pixel_budget=png_pixel_budget", workstation_checker)
+        self.assertIn('"migration-failure-restore-retry"', workstation_checker)
+        self.assertIn('"crash-before-dispatch"', workstation_checker)
+        self.assertIn('"corrupt-newer-state-fail-closed"', workstation_checker)
+        self.assertIn('"inbound-firewall-default-deny"', workstation_checker)
+        self.assertIn('"binding-substitution-rejection"', workstation_checker)
+        self.assertIn('"independent-verification"', workstation_checker)
+        self.assertIn('"session-supervision"', workstation_checker)
+        self.assertIn('"hyprland-session-target-active"', workstation_checker)
+        self.assertIn('"linura-shell-binds-to-session-target"', workstation_checker)
+        self.assertIn('"linura-shell-stopped-with-graphical-session"', workstation_checker)
+        self.assertIn('"authority-ceiling"', workstation_checker)
+
+        closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
+        self.assertIn("release_contract.py validate-intent", closure)
+        self.assertIn("--qualification-source-sha", closure)
+        self.assertIn("--qualification-tree-sha", closure)
+
+        verifier = (ROOT / "tools/verify_v010_slice_pr_evidence.py").read_text(encoding="utf-8")
+        self.assertIn('payload.get("state") != "closed"', verifier)
+        self.assertIn('base.get("ref") != "main"', verifier)
+        self.assertIn('f"compare/{merge_sha}...{qualification_source_sha}"', verifier)
+        self.assertIn('merge_base_sha != merge_sha', verifier)
+        self.assertIn("SLICE_PATH_PREFIXES", verifier)
+        self.assertIn("require_slice_scope(repository, number, slice_id)", verifier)
+        self.assertIn("if number == readiness_pr_number:", verifier)
+        self.assertIn("merge_tree_sha != readiness_tree_sha", verifier)
+        self.assertIn("verify_evidence_seal(", verifier)
+        self.assertIn("source_tree_sha,", verifier)
+        self.assertIn("changed_tree_paths(", verifier)
+        self.assertIn('f"git/trees/{tree_sha}?recursive=1"', verifier)
+        self.assertIn('payload.get("truncated") is not False', verifier)
+        self.assertIn("EVIDENCE_SEAL_PREFIXES", verifier)
+
+        closure_tool = (ROOT / "tools/post_release_close.py").read_text(encoding="utf-8")
+        self.assertIn("release_intent_source_sha", closure_tool)
+        self.assertIn("validate_release_intent(release_intent_source_sha, root)", checker)
+        self.assertIn("qualification_tree_sha does not match immutable release intent", checker)
+
+    def test_v010_trusted_proof_seals_referenced_visual_baselines(self) -> None:
+        proof = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(encoding="utf-8")
+        self.assertIn('value = item.get("baseline")', proof)
+        self.assertIn('shutil.copyfile(source, target)', proof)
+        self.assertIn('subject-path: "/tmp/linura-final-proof/qualification/v0.10/**"', proof)
 
     def test_repository_roadmap_contract_is_valid(self) -> None:
         result = self._run_checker(ROOT)
@@ -259,6 +472,415 @@ class RoadmapContractTests(unittest.TestCase):
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("development plan missing roadmap alignment marker", result.stderr)
+
+    def test_v010_slice_ledger_cannot_silently_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8").replace(
+                "completed_slice_count = 14",
+                "completed_slice_count = 15",
+                1,
+            )
+            contract.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("completed_slice_count does not match", result.stderr)
+
+    def test_v010_planned_slice_ledger_can_advance_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8")
+            text = text.replace("completed_slice_count = 14", "completed_slice_count = 15", 1)
+            text = text.replace('next_slice = "S15"', 'next_slice = "S16"', 1)
+            old_slice = """[[slice]]
+id = "S15"
+title = "lifecycle notifications and OSD"
+status = "planned"
+depends_on = ["S14"]
+evidence_prs = []
+required_for_release = true
+"""
+            new_slice = """[[slice]]
+id = "S15"
+title = "lifecycle notifications and OSD"
+status = "complete"
+depends_on = ["S14"]
+evidence_prs = [999999]
+required_for_release = true
+"""
+            self.assertIn(old_slice, text)
+            contract.write_text(text.replace(old_slice, new_slice, 1), encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_v010_release_candidate_rejects_incomplete_slices(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+
+            result = self._run_checker(root, release_candidate="v0.10.0")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "v0.10 release candidate requires all release-required slices complete",
+                result.stderr,
+            )
+            self.assertIn(
+                "v0.10 release candidate must have all 32 workstation slices complete",
+                result.stderr,
+            )
+
+    def test_v010_slice_scope_cannot_silently_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8").replace(
+                'title = "lifecycle notifications and OSD"',
+                'title = "unrelated trivial feature"',
+                1,
+            )
+            contract.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("S15: slice title/scope drifted", result.stderr)
+
+    def test_v010_release_requires_all_release_slices_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/roadmap.toml"
+            text = contract.read_text(encoding="utf-8")
+            text = text.replace(
+                'current_release = "v0.9.0"',
+                'current_release = "v0.10.0"',
+                1,
+            ).replace(
+                'next_release = "v0.10.0"',
+                'next_release = "v1.0.0"',
+                1,
+            )
+            text = self._mutate_milestone_field(
+                text,
+                "v0.10.0",
+                'status = "planned"',
+                'status = "released"',
+            )
+            text = self._mutate_milestone_field(
+                text,
+                "v0.10.0",
+                'qualification = "docs/qualification/v0.10.0.md"',
+                'qualification = "docs/qualification/v0.10.0.md"\nrelease_contract = "docs/releases/v0.10.0.md"',
+            )
+            contract.write_text(text, encoding="utf-8")
+
+            release_contract = root / "docs/releases/v0.10.0.md"
+            release_contract.parent.mkdir(parents=True, exist_ok=True)
+            release_contract.write_text("# v0.10.0 release fixture\n", encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "released v0.10 requires all release-required slices complete",
+                result.stderr,
+            )
+            self.assertIn("released v0.10 must not retain a next_slice", result.stderr)
+
+
+    def _promote_v010_fixture_to_released(self, root: Path) -> None:
+        contract = root / "contracts/roadmap.toml"
+        text = contract.read_text(encoding="utf-8")
+        text = text.replace(
+            'current_release = "v0.9.0"',
+            'current_release = "v0.10.0"',
+            1,
+        ).replace(
+            'next_release = "v0.10.0"',
+            'next_release = "v1.0.0"',
+            1,
+        )
+        text = self._mutate_milestone_field(
+            text,
+            "v0.10.0",
+            'status = "planned"',
+            'status = "released"',
+        )
+        text = self._mutate_milestone_field(
+            text,
+            "v0.10.0",
+            'qualification = "docs/qualification/v0.10.0.md"',
+            'qualification = "docs/qualification/v0.10.0.md"\nrelease_contract = "docs/releases/v0.10.0.md"',
+        )
+        contract.write_text(text, encoding="utf-8")
+        release_contract = root / "docs/releases/v0.10.0.md"
+        release_contract.parent.mkdir(parents=True, exist_ok=True)
+        release_contract.write_text("# v0.10.0 release fixture\n", encoding="utf-8")
+
+    def _complete_v010_slice_fixture(self, root: Path) -> None:
+        contract = root / "contracts/v010-workstation-slices.toml"
+        text = contract.read_text(encoding="utf-8")
+        text = text.replace("completed_slice_count = 14", "completed_slice_count = 32", 1)
+        text = text.replace('next_slice = "S15"', 'next_slice = ""', 1)
+        text = text.replace('status = "planned"', 'status = "complete"')
+        text = text.replace("evidence_prs = []", "evidence_prs = [999999]")
+        contract.write_text(text, encoding="utf-8")
+
+    def test_v010_slice_evidence_rejects_duplicate_pr_lineage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8").replace(
+                "evidence_prs = [146]",
+                "evidence_prs = [144]",
+                1,
+            )
+            contract.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("S02: evidence PR #144 is already assigned to S01", result.stderr)
+
+    def test_v010_slice_evidence_rejects_boolean_pr_numbers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8").replace(
+                "evidence_prs = [144, 145]",
+                "evidence_prs = [true]",
+                1,
+            )
+            contract.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("S01: evidence_prs must be positive PR numbers", result.stderr)
+
+
+    def test_v010_planned_release_candidate_requires_qualification_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._complete_v010_slice_fixture(root)
+
+            result = self._run_checker(root, release_candidate="v0.10.0")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("released v0.10 requires frozen immutable Arch substrate", result.stderr)
+            self.assertIn(
+                "released v0.10 requires substrate.release_qualification_ready=true",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 requires experience.experience_evidence_ready=true",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 requires interactive_workstation.evidence_ready=true",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 requires update_recovery_qualification.evidence_ready=true",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 requires security_qualification.evidence_ready=true",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 requires update_recovery_qualification.evidence_ready=true",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 requires security_qualification.evidence_ready=true",
+                result.stderr,
+            )
+
+
+    def test_v010_release_hashes_do_not_replace_semantic_qualification(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._complete_v010_slice_fixture(root)
+
+            package_manifest = root / "qualification/v010/arch-packages.tsv"
+            visual_manifest = root / "visual/baselines/manifest.json"
+            experience_manifest = root / "qualification/v010/experience-evidence.json"
+            interactive_manifest = root / "qualification/v010/interactive-workstation-evidence.json"
+            package_manifest.parent.mkdir(parents=True, exist_ok=True)
+            visual_manifest.parent.mkdir(parents=True, exist_ok=True)
+            experience_manifest.parent.mkdir(parents=True, exist_ok=True)
+            interactive_manifest.parent.mkdir(parents=True, exist_ok=True)
+            package_manifest.write_text("not a package manifest\n", encoding="utf-8")
+            visual_manifest.write_text("not json\n", encoding="utf-8")
+            experience_manifest.write_text("not json\n", encoding="utf-8")
+            interactive_manifest.write_text("not json\n", encoding="utf-8")
+
+            qualification = root / "contracts/v010-workstation-qualification.toml"
+            text = qualification.read_text(encoding="utf-8")
+            text = text.replace(
+                'state = "source-pinned-package-set-pending"',
+                'state = "frozen"',
+                1,
+            ).replace(
+                'package_manifest = ""',
+                'package_manifest = "qualification/v010/arch-packages.tsv"',
+                1,
+            ).replace(
+                'package_manifest_sha256 = ""',
+                f'package_manifest_sha256 = "{hashlib.sha256(package_manifest.read_bytes()).hexdigest()}"',
+                1,
+            ).replace(
+                "release_qualification_ready = false",
+                "release_qualification_ready = true",
+                1,
+            ).replace(
+                "experience_evidence_ready = false",
+                "experience_evidence_ready = true",
+                1,
+            ).replace(
+                '[interactive_workstation]\nevidence_ready = false\nevidence_manifest = "qualification/v010/interactive-workstation-evidence.json"\nevidence_manifest_sha256 = ""',
+                '[interactive_workstation]\nevidence_ready = true\nevidence_manifest = "qualification/v010/interactive-workstation-evidence.json"\n'
+                f'evidence_manifest_sha256 = "{hashlib.sha256(interactive_manifest.read_bytes()).hexdigest()}"',
+                1,
+            ).replace(
+                'visual_baseline_manifest_sha256 = ""',
+                f'visual_baseline_manifest_sha256 = "{hashlib.sha256(visual_manifest.read_bytes()).hexdigest()}"',
+                1,
+            ).replace(
+                'experience_evidence_manifest_sha256 = ""',
+                f'experience_evidence_manifest_sha256 = "{hashlib.sha256(experience_manifest.read_bytes()).hexdigest()}"',
+                1,
+            )
+            qualification.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root, release_candidate="v0.10.0")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "v0.10 semantic qualification: frozen package manifest identity headers do not match",
+                result.stderr,
+            )
+            self.assertIn(
+                "v0.10 semantic qualification: invalid v0.10 visual baseline manifest:",
+                result.stderr,
+            )
+            self.assertIn(
+                "v0.10 semantic qualification: invalid interactive workstation evidence manifest:",
+                result.stderr,
+            )
+
+
+    def test_v010_release_requires_qualification_readiness_after_slices_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._promote_v010_fixture_to_released(root)
+            self._complete_v010_slice_fixture(root)
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("released v0.10 requires frozen immutable Arch substrate", result.stderr)
+            self.assertIn(
+                "released v0.10 requires substrate.release_qualification_ready=true",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 requires experience.experience_evidence_ready=true",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 requires interactive_workstation.evidence_ready=true",
+                result.stderr,
+            )
+
+
+    def test_v010_release_requires_digest_bound_qualification_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._promote_v010_fixture_to_released(root)
+            self._complete_v010_slice_fixture(root)
+
+            qualification = root / "contracts/v010-workstation-qualification.toml"
+            text = qualification.read_text(encoding="utf-8")
+            text = text.replace(
+                'state = "source-pinned-package-set-pending"',
+                'state = "frozen"',
+                1,
+            ).replace(
+                'package_manifest = ""',
+                'package_manifest = "qualification/v010/arch-packages.tsv"',
+                1,
+            ).replace(
+                'package_manifest_sha256 = ""',
+                'package_manifest_sha256 = "' + ("0" * 64) + '"',
+                1,
+            ).replace(
+                "release_qualification_ready = false",
+                "release_qualification_ready = true",
+                1,
+            ).replace(
+                "experience_evidence_ready = false",
+                "experience_evidence_ready = true",
+                1,
+            ).replace(
+                '[interactive_workstation]\nevidence_ready = false\nevidence_manifest = "qualification/v010/interactive-workstation-evidence.json"\nevidence_manifest_sha256 = ""',
+                '[interactive_workstation]\nevidence_ready = true\nevidence_manifest = "qualification/v010/interactive-workstation-evidence.json"\n'
+                'evidence_manifest_sha256 = "' + ("0" * 64) + '"',
+                1,
+            ).replace(
+                '[update_recovery_qualification]\nevidence_ready = false\nevidence_manifest = "qualification/v010/update-recovery-evidence.json"\nevidence_manifest_sha256 = ""',
+                '[update_recovery_qualification]\nevidence_ready = true\nevidence_manifest = "qualification/v010/update-recovery-evidence.json"\n'
+                'evidence_manifest_sha256 = "' + ("0" * 64) + '"',
+                1,
+            ).replace(
+                '[security_qualification]\nevidence_ready = false\nevidence_manifest = "qualification/v010/security-evidence.json"\nevidence_manifest_sha256 = ""',
+                '[security_qualification]\nevidence_ready = true\nevidence_manifest = "qualification/v010/security-evidence.json"\n'
+                'evidence_manifest_sha256 = "' + ("0" * 64) + '"',
+                1,
+            ).replace(
+                'visual_baseline_manifest_sha256 = ""',
+                'visual_baseline_manifest_sha256 = "' + ("0" * 64) + '"',
+                1,
+            ).replace(
+                'experience_evidence_manifest_sha256 = ""',
+                'experience_evidence_manifest_sha256 = "' + ("0" * 64) + '"',
+                1,
+            )
+            qualification.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "released v0.10 qualification artifact missing or unsafe: qualification/v010/arch-packages.tsv",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 qualification artifact missing or unsafe: visual/baselines/manifest.json",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 qualification artifact missing or unsafe: qualification/v010/experience-evidence.json",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 qualification artifact missing or unsafe: qualification/v010/interactive-workstation-evidence.json",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 qualification artifact missing or unsafe: qualification/v010/update-recovery-evidence.json",
+                result.stderr,
+            )
+            self.assertIn(
+                "released v0.10 qualification artifact missing or unsafe: qualification/v010/security-evidence.json",
+                result.stderr,
+            )
 
     def test_v010_remains_explicitly_experimental(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -352,6 +352,9 @@ def validate(root: Path) -> list[str]:
         'runs-on: ubuntu-24.04',
         'timeout-minutes: 90',
         'python3 tools/check_v010_shell_runtime_qualification.py',
+        'installed_shell_bridge_sha=',
+        "SHELL_BRIDGE_SHA256",
+        '"shell_bridge_sha256": os.environ["SHELL_BRIDGE_SHA256"]',
         "source tools/codex/versions.env",
         'rustup toolchain install "$RUST_VERSION" --profile minimal',
         "growpart:",
@@ -392,7 +395,16 @@ def validate(root: Path) -> list[str]:
         "fail-on-cache-miss: true",
         "Restore Cargo dependency cache",
         "linura-cargo-deps-v1-",
-        "cargo build --locked --release -p linurad",
+        "RELEASE_TARGET: x86_64-unknown-linux-gnu",
+        "Establish release-compatible Rust build envelope",
+        "SOURCE_DATE_EPOCH=%s",
+        "CARGO_INCREMENTAL=0",
+        "TZ=UTC",
+        "LANG=C.UTF-8",
+        "LC_ALL=C.UTF-8",
+        "RUSTFLAGS=--remap-path-prefix=%s=/workspace",
+        'cargo build --workspace --release --locked --target "$RELEASE_TARGET"',
+        'target/$RELEASE_TARGET/release/linurad',
         'LINURAD_SHA256=%s',
         'SESSION_AUDIO_HELPER_SHA256=%s',
         "bash qualification/v010/shell-runtime/start-vm.sh",
@@ -854,6 +866,10 @@ def validate(root: Path) -> list[str]:
             failures.append(
                 "runtime protocol must not split Quick Settings readiness and draft binding across separate IPC calls"
             )
+        if "quick_settings_ready_for_drift()" in run_text:
+            failures.append(
+                "precondition-drift qualification must retry atomic draft binding instead of splitting readiness from beginDraft"
+            )
         if audit_index < 0 or open_index < 0 or audit_index > open_index:
             failures.append(
                 "runtime protocol must capture the transient-audit baseline before opening Quick Settings"
@@ -987,8 +1003,10 @@ def validate(root: Path) -> list[str]:
             'quick-settings-session1-failure.txt',
             "'-- transient audit --'",
             'SELECT rowid,request_id,resource,disposition,failure_code,pre_effect_evidence_id,post_effect_evidence_id FROM transient_effect_audit ORDER BY rowid DESC LIMIT 3;',
-            "quick_settings_ready_for_drift() {",
-            'wait_until "fresh Quick Settings state before precondition-drift draft" quick_settings_ready_for_drift',
+            "quick_settings_bind_drift_draft() {",
+            'wait_until "bound fresh Quick Settings precondition-drift draft" quick_settings_bind_drift_draft',
+            '[[ "$(checked_quick_settings_call linura.quick-settings-qualification canCommitDraft 2>/dev/null)" == "true" ]]',
+            'Quick Settings precondition-drift draft did not bind authoritative volume 63',
             'pass_case "quick-settings-precondition-drift-rejection"',
             'pass_case "quick-settings-service-loss-fail-closed"',
             'quick_settings_recovered() {',

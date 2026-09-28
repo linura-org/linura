@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -166,11 +167,81 @@ none
                 },
                 changed,
             )
-            updated = __import__("json").loads(matrix.read_text(encoding="utf-8"))
+            updated = json.loads(matrix.read_text(encoding="utf-8"))
             self.assertEqual(
                 updated["qualification_environments"]["release_qualified"],
                 ["qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"],
             )
+            self.assertIn("hardware/support-matrix.json", changed)
+
+    def test_v010_reference_release_promotes_declared_workstation_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            matrix = root / "hardware/support-matrix.json"
+            matrix.parent.mkdir(parents=True, exist_ok=True)
+            matrix.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "qualification_environments": {
+                            "release_qualified": [
+                                "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"
+                            ]
+                        },
+                        "machine_classes": {
+                            "workstation": {"release_qualified_profiles": []},
+                            "server": {"release_qualified_profiles": []},
+                            "edge": {"release_qualified_profiles": []},
+                        },
+                        "domains": {},
+                        "note": "development",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            profile = root / "profiles/arch-hyprland-v1.toml"
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_text(
+                'schema_version = 1\nid = "arch-hyprland-v1"\nstatus = "development"\n',
+                encoding="utf-8",
+            )
+            changed: list[str] = []
+            contract = {
+                "hardware_support_matrix": "hardware/support-matrix.json",
+                "target_machine_classes": ["workstation", "server", "edge"],
+            }
+            milestone = {
+                "platform_support": "reference-experimental",
+                "release_qualified_qualification_environments": [
+                    "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"
+                ],
+                "release_qualified_platform_profiles": [
+                    {"machine_class": "workstation", "profile": "arch-hyprland-v1"}
+                ],
+            }
+
+            sync_tool.sync_release_qualified_environments(
+                root,
+                contract,
+                milestone,
+                changed,
+            )
+            # Re-running protected closure must be deterministic/idempotent.
+            sync_tool.sync_release_qualified_environments(
+                root,
+                contract,
+                milestone,
+                changed,
+            )
+
+            updated = json.loads(matrix.read_text(encoding="utf-8"))
+            self.assertEqual(
+                updated["machine_classes"]["workstation"]["release_qualified_profiles"],
+                ["arch-hyprland-v1"],
+            )
+            self.assertIn('status = "release-qualified"', profile.read_text(encoding="utf-8"))
+            self.assertIn("profiles/arch-hyprland-v1.toml", changed)
             self.assertIn("hardware/support-matrix.json", changed)
 
     def test_release_workflows_require_release_app_native_gates_and_deterministic_closure(self) -> None:

@@ -33,7 +33,7 @@ The current component set is an integrated v0.10 foundation, **not yet a stable 
 
 ## Current maturity and v0.10 scope
 
-`design/tokens.json` establishes the initial semantic token vocabulary. v0.10 turns that foundation into a qualified cross-surface contract for First Boot, Control Center, command palette, quick settings, bounded desktop integration, notifications/OSD and the other required workstation interaction surfaces.
+`design/tokens.json` establishes the initial semantic token vocabulary. v0.10 turns that foundation into a qualified cross-surface contract for First Boot, installer, Control Center, command palette, quick settings, the complete first-party workstation shell, notifications/OSD and the other required workstation interaction surfaces.
 
 Shared tokens alone are **not** visual qualification. The v0.10 contract requires reviewed non-null baselines and representative captures for the required visual surfaces, representative resolutions/scales, executed comparisons, retained reviewed failure diffs, and digest-verified interaction/accessibility runner evidence.
 

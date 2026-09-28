@@ -1082,21 +1082,40 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("quick-settings-session1-volume-effect", result.stderr)
 
-    def test_precondition_drift_must_refresh_before_binding_second_draft(self) -> None:
+    def test_precondition_drift_must_atomically_bind_second_draft(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
             script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
             text = script.read_text(encoding="utf-8")
             marker = (
-                'wait_until "fresh Quick Settings state before precondition-drift draft" '
-                "quick_settings_ready_for_drift\n"
+                'wait_until "bound fresh Quick Settings precondition-drift draft" '
+                "quick_settings_bind_drift_draft\n"
             )
             self.assertIn(marker, text)
             script.write_text(text.replace(marker, "", 1), encoding="utf-8")
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("fresh Quick Settings state before precondition-drift draft", result.stderr)
+            self.assertIn("bound fresh Quick Settings precondition-drift draft", result.stderr)
+
+    def test_precondition_drift_must_not_split_readiness_from_draft_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = "quick_settings_bind_drift_draft() {"
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, "quick_settings_ready_for_drift() {", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "precondition-drift qualification must retry atomic draft binding",
+                result.stderr,
+            )
 
     def test_quick_settings_runtime_fixture_must_import_quickshell_io(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1198,7 +1217,7 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self._copy_fixture(root)
             workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
             text = workflow.read_text(encoding="utf-8")
-            marker = "cargo build --locked --release -p linurad"
+            marker = 'cargo build --workspace --release --locked --target "$RELEASE_TARGET"'
             self.assertIn(marker, text)
             workflow.write_text(
                 text.replace(marker, 'echo "linurad build omitted"', 1),
@@ -1206,7 +1225,23 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             )
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("cargo build --locked --release -p linurad", result.stderr)
+            self.assertIn(marker, result.stderr)
+
+    def test_release_compatible_build_envelope_cannot_be_weakened(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "RUSTFLAGS=--remap-path-prefix=%s=/workspace"
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, "RUSTFLAGS=", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
 
     def test_runtime_must_assert_durable_audit_filesystem_and_schema_hardening(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -65,24 +65,99 @@ def initialized_repository(directory: Path) -> Path:
     return repository
 
 
-def create_release_intent(repository: Path, *, change_tree: bool = False, wrong_tree: bool = False) -> tuple[str, str, str]:
+def create_release_intent(
+    repository: Path,
+    *,
+    change_tree: bool = False,
+    wrong_tree: bool = False,
+    wrong_qualification_tree: bool = False,
+) -> tuple[str, str, str, str, str]:
+    qualification_source = git(repository, "rev-parse", "HEAD")
+    qualification_tree = git(repository, "rev-parse", "HEAD^{tree}")
+    evidence = repository / "qualification-evidence.json"
+    evidence.write_text('{"result":"passed"}\n', encoding="utf-8")
+    subprocess.run(["git", "add", "qualification-evidence.json"], cwd=repository, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "test: seal release qualification evidence"],
+        cwd=repository,
+        check=True,
+    )
     reviewed_source = git(repository, "rev-parse", "HEAD")
     reviewed_tree = git(repository, "rev-parse", "HEAD^{tree}")
     if change_tree:
         (repository / "candidate.txt").write_text("changed after review\n", encoding="utf-8")
         subprocess.run(["git", "add", "candidate.txt"], cwd=repository, check=True)
     recorded_tree = "0" * 40 if wrong_tree else reviewed_tree
+    recorded_qualification_tree = reviewed_tree if wrong_qualification_tree else qualification_tree
     message = (
         "release: v0.0.0 — test release\n\n"
         "Authorize the exact reviewed tree.\n\n"
         f"Reviewed-Source: {reviewed_source}\n"
-        f"Reviewed-Tree: {recorded_tree}"
+        f"Reviewed-Tree: {recorded_tree}\n"
+        f"Qualification-Source: {qualification_source}\n"
+        f"Qualification-Tree: {recorded_qualification_tree}"
     )
     command = ["git", "commit", "-q", "-m", message]
     if not change_tree:
         command.insert(2, "--allow-empty")
     subprocess.run(command, cwd=repository, check=True)
-    return git(repository, "rev-parse", "HEAD"), reviewed_source, reviewed_tree
+    return (
+        git(repository, "rev-parse", "HEAD"),
+        reviewed_source,
+        reviewed_tree,
+        qualification_source,
+        qualification_tree,
+    )
+
+
+def create_release_preparation(
+    repository: Path,
+    *,
+    changed_files: tuple[str, ...] = ("Cargo.lock", "Cargo.toml"),
+    wrong_qualification_tree: bool = False,
+    duplicate_source_trailer: bool = False,
+) -> tuple[str, str, str, str]:
+    qualification_source = git(repository, "rev-parse", "HEAD")
+    qualification_tree = git(repository, "rev-parse", "HEAD^{tree}")
+
+    evidence = repository / "qualification-evidence.json"
+    evidence.write_text('{"result":"passed"}\n', encoding="utf-8")
+    subprocess.run(["git", "add", "qualification-evidence.json"], cwd=repository, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "test: seal release qualification evidence"],
+        cwd=repository,
+        check=True,
+    )
+    parent = git(repository, "rev-parse", "HEAD")
+
+    for name in changed_files:
+        path = repository / name
+        path.write_text(f"{name} prepared\n", encoding="utf-8")
+        subprocess.run(["git", "add", name], cwd=repository, check=True)
+
+    recorded_tree = "0" * 40 if wrong_qualification_tree else qualification_tree
+    duplicate = (
+        f"\nQualification-Source: {qualification_source}"
+        if duplicate_source_trailer
+        else ""
+    )
+    message = (
+        "release: prepare v0.10.0 complete-workstation\n\n"
+        "Deterministic release preparation.\n\n"
+        f"Qualification-Source: {qualification_source}\n"
+        f"Qualification-Tree: {recorded_tree}"
+        f"{duplicate}"
+    )
+    command = ["git", "commit", "-q", "-m", message]
+    if not changed_files:
+        command.insert(2, "--allow-empty")
+    subprocess.run(command, cwd=repository, check=True)
+    return (
+        git(repository, "rev-parse", "HEAD"),
+        parent,
+        qualification_source,
+        qualification_tree,
+    )
 
 
 class ReleaseContractTests(unittest.TestCase):
@@ -130,25 +205,109 @@ class ReleaseContractTests(unittest.TestCase):
     def test_release_intent_requires_tree_identical_single_parent_and_exact_trailers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repository = initialized_repository(Path(temp_dir))
-            source, reviewed_source, reviewed_tree = create_release_intent(repository)
+            source, reviewed_source, reviewed_tree, qualification_source, qualification_tree = create_release_intent(repository)
             metadata = release_contract.validate_release_intent(source, repository)
             self.assertEqual(metadata["source_sha"], source)
             self.assertEqual(metadata["reviewed_source_sha"], reviewed_source)
             self.assertEqual(metadata["reviewed_tree_sha"], reviewed_tree)
+            self.assertEqual(metadata["qualification_source_sha"], qualification_source)
+            self.assertEqual(metadata["qualification_tree_sha"], qualification_tree)
 
     def test_release_intent_rejects_tree_changed_after_review(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repository = initialized_repository(Path(temp_dir))
-            source, _, _ = create_release_intent(repository, change_tree=True)
+            source, _, _, _, _ = create_release_intent(repository, change_tree=True)
             with self.assertRaises(release_contract.ContractError):
                 release_contract.validate_release_intent(source, repository)
 
     def test_release_intent_rejects_forged_reviewed_tree_trailer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repository = initialized_repository(Path(temp_dir))
-            source, _, _ = create_release_intent(repository, wrong_tree=True)
+            source, _, _, _, _ = create_release_intent(repository, wrong_tree=True)
             with self.assertRaises(release_contract.ContractError):
                 release_contract.validate_release_intent(source, repository)
+
+    def test_release_intent_rejects_non_independent_qualification_tree_trailer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = initialized_repository(Path(temp_dir))
+            source, _, _, _, _ = create_release_intent(
+                repository,
+                wrong_qualification_tree=True,
+            )
+            with self.assertRaises(release_contract.ContractError):
+                release_contract.validate_release_intent(source, repository)
+
+    def test_release_preparation_accepts_exact_mechanical_two_file_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = initialized_repository(Path(temp_dir))
+            source, parent, qualification_source, qualification_tree = (
+                create_release_preparation(repository)
+            )
+            metadata = release_contract.validate_release_preparation(
+                source,
+                "v0.10.0",
+                repository,
+            )
+            self.assertEqual(metadata["parent_sha"], parent)
+            self.assertEqual(metadata["qualification_source_sha"], qualification_source)
+            self.assertEqual(metadata["qualification_tree_sha"], qualification_tree)
+            self.assertEqual(metadata["changed_files"], ["Cargo.lock", "Cargo.toml"])
+
+    def test_release_preparation_accepts_idempotent_zero_diff_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = initialized_repository(Path(temp_dir))
+            source, _, qualification_source, _ = create_release_preparation(
+                repository,
+                changed_files=(),
+            )
+            metadata = release_contract.validate_release_preparation(
+                source,
+                "v0.10.0",
+                repository,
+            )
+            self.assertEqual(metadata["qualification_source_sha"], qualification_source)
+            self.assertEqual(metadata["changed_files"], [])
+
+    def test_release_preparation_rejects_non_mechanical_changed_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = initialized_repository(Path(temp_dir))
+            source, _, _, _ = create_release_preparation(
+                repository,
+                changed_files=("Cargo.lock", "Cargo.toml", "product.txt"),
+            )
+            with self.assertRaises(release_contract.ContractError):
+                release_contract.validate_release_preparation(
+                    source,
+                    "v0.10.0",
+                    repository,
+                )
+
+    def test_release_preparation_rejects_forged_or_duplicate_qualification_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = initialized_repository(Path(temp_dir))
+            source, _, _, _ = create_release_preparation(
+                repository,
+                wrong_qualification_tree=True,
+            )
+            with self.assertRaises(release_contract.ContractError):
+                release_contract.validate_release_preparation(
+                    source,
+                    "v0.10.0",
+                    repository,
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = initialized_repository(Path(temp_dir))
+            source, _, _, _ = create_release_preparation(
+                repository,
+                duplicate_source_trailer=True,
+            )
+            with self.assertRaises(release_contract.ContractError):
+                release_contract.validate_release_preparation(
+                    source,
+                    "v0.10.0",
+                    repository,
+                )
 
     def test_evidence_detects_artifact_tampering(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

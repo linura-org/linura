@@ -179,6 +179,37 @@ class ToolingTests(unittest.TestCase):
             workflow,
         )
 
+    def test_v010_readiness_seal_excludes_executable_qualification_harnesses(self) -> None:
+        workflow = (ROOT / ".github/workflows/v010-qualification.yml").read_text(encoding="utf-8")
+        match = re.search(
+            r'for path in "\$\{changed\[@\]\}"; do\s+case "\$path" in(?P<classifier>.*?)\n\s+\*\)',
+            workflow,
+            flags=re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        classifier = match.group("classifier") if match is not None else ""
+        self.assertNotIn("|qualification/v010/*|", classifier)
+        for retained_path in (
+            "qualification/v010/experience-evidence.json",
+            "qualification/v010/interactive-workstation-evidence.json",
+            "qualification/v010/security-evidence.json",
+            "qualification/v010/update-recovery-evidence.json",
+            "qualification/v010/experience/*",
+            "qualification/v010/interactive-workstation/*",
+            "qualification/v010/security/*",
+            "qualification/v010/update-recovery/*",
+            "qualification/v010/release-matrix/*.json",
+            "qualification/v010/release-matrix/*.log",
+            "qualification/v010/release-matrix/*.tsv",
+            "qualification/v010/release-matrix/*.txt",
+        ):
+            with self.subTest(path=retained_path):
+                self.assertIn(retained_path, classifier)
+        self.assertNotIn("qualification/v010/shell-runtime/*", classifier)
+        self.assertNotIn("qualification/v010/release-matrix/*.py", classifier)
+        self.assertNotIn("qualification/v010/release-matrix/*.sh", classifier)
+        self.assertNotIn("qualification/v010/release-matrix/*.rs", classifier)
+
     def test_v09_regression_lane_cannot_skip_exact_source_contract_tests(self) -> None:
         workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(encoding="utf-8")
         self.assertIn("cargo fmt --all -- --check", workflow)
@@ -254,7 +285,23 @@ class ToolingTests(unittest.TestCase):
             workflow,
         )
         self.assertIn("aggregate-proof:", workflow)
-        self.assertIn("needs: [validate, agent-qualification, firstboot-qualification, build]", workflow)
+        self.assertIn("v010-qualification-shell-runtime:", workflow)
+        self.assertIn("v010-prepared-shell-runtime:", workflow)
+        self.assertIn(
+            "needs: [validate, agent-qualification, firstboot-qualification, v010-qualification-shell-runtime, v010-prepared-shell-runtime, build]",
+            workflow,
+        )
+        self.assertIn("source_sha: ${{ needs.validate.outputs.qualification_source_sha }}", workflow)
+        self.assertIn("source_sha: ${{ github.sha }}", workflow)
+        self.assertIn('test "$(jq -r .source_sha "$qualification_runtime")" = "$QUALIFICATION_SOURCE_SHA"', workflow)
+        self.assertIn('test "$(jq -r .source_sha "$prepared_runtime")" = "$SOURCE_SHA"', workflow)
+        self.assertIn('test "$(sha256sum "$PROOF_ROOT/release-payload/linurad" | awk \'{print $1}\')" = "$prepared_linurad_sha256"', workflow)
+        self.assertIn('"$destination/runtime/pre-seal"', workflow)
+        self.assertIn('"$destination/runtime/prepared-release"', workflow)
+        self.assertIn('cp -a "$V010_QUALIFICATION_RUNTIME_ROOT"/. "$destination/runtime/pre-seal"/', workflow)
+        self.assertIn('cp -a "$V010_PREPARED_RUNTIME_ROOT"/. "$destination/runtime/prepared-release"/', workflow)
+        self.assertIn('"qualification_source_evidence": "runtime/pre-seal/V010-SHELL-RUNTIME-EVIDENCE.json"', workflow)
+        self.assertIn('"prepared_release_evidence": "runtime/prepared-release/V010-SHELL-RUNTIME-EVIDENCE.json"', workflow)
         self.assertIn("linura-v08-agent-${{ github.sha }}", workflow)
         self.assertIn("linura-v09-qualification-${{ github.sha }}", workflow)
         self.assertIn("receipt['schema_version'] = 2", workflow)
@@ -334,7 +381,7 @@ class ToolingTests(unittest.TestCase):
         self.assertNotIn("bootstrap-pypi", release)
         self.assertNotIn("operation:", release)
 
-    def test_release_promotion_verifies_v09_qualification_bound_proof(self) -> None:
+    def test_release_promotion_verifies_qualification_bound_proof_recursively(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn('receipt.get("schema_version") != 2', workflow)
         self.assertIn('def verify_qualification(version, expected_path, expected_environment=None):', workflow)
@@ -343,10 +390,32 @@ class ToolingTests(unittest.TestCase):
         self.assertIn('"qualification/v0.9/qualification.json",', workflow)
         self.assertIn('expected_environment="qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"', workflow)
         self.assertIn('actual_files != expected_files', workflow)
+        self.assertEqual(workflow.count("python3 tools/verify_v010_release_proof.py"), 2)
         self.assertEqual(
-            workflow.count('find "$PROOF_DIR/qualification" -mindepth 2 -maxdepth 2 -type f -print0'),
+            workflow.count('release_contract.py validate-intent --source-sha "$SOURCE_SHA" --json'),
             2,
         )
+        validate_job = workflow.split("\n  validate:", 1)[1].split("\n  publish:", 1)[0]
+        publish_job = workflow.split("\n  publish:", 1)[1].split("\n  pypi-preflight:", 1)[0]
+        self.assertEqual(validate_job.count("python3 tools/verify_v010_release_proof.py"), 1)
+        self.assertEqual(publish_job.count("python3 tools/verify_v010_release_proof.py"), 1)
+        self.assertEqual(
+            workflow.count('find "$PROOF_DIR/qualification" -mindepth 2 -type f -print0'),
+            2,
+        )
+        self.assertNotIn(
+            'find "$PROOF_DIR/qualification" -mindepth 2 -maxdepth 2 -type f -print0',
+            workflow,
+        )
+
+        verifier = (ROOT / "tools/verify_v010_release_proof.py").read_text(encoding="utf-8")
+        self.assertIn('qualification_root.rglob("*")', verifier)
+        self.assertIn('declaration.get("runtime_binding")', verifier)
+        self.assertIn("PRE_SEAL_RUNTIME_PATH", verifier)
+        self.assertIn("PREPARED_RUNTIME_PATH", verifier)
+        self.assertIn("sha256(payload_linurad) != prepared_linurad", verifier)
+        self.assertIn('declaration.get("qualification_source_sha") != qualification_source_sha', verifier)
+        self.assertIn('declaration.get("qualification_tree_sha") != qualification_tree_sha', verifier)
 
     def test_v07_library_qualification_is_exact_source_and_machine_readable(self) -> None:
         workflow = (ROOT / ".github/workflows/v07-library-qualification.yml").read_text(

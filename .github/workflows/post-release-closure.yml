@@ -69,6 +69,17 @@ jobs:
 
           source_sha="$(git rev-list -n1 "$tag")"
           [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
+          qualification_source_sha=""
+          qualification_tree_sha=""
+          if [[ "$tag" = "v0.10.0" ]]; then
+            intent="$(python3 tools/release_contract.py validate-intent --source-sha "$source_sha" --json)"
+            qualification_source_sha="$(jq -r .qualification_source_sha <<<"$intent")"
+            qualification_tree_sha="$(jq -r .qualification_tree_sha <<<"$intent")"
+            [[ "$qualification_source_sha" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$qualification_tree_sha" =~ ^[0-9a-f]{40}$ ]]
+            actual_qualification_tree="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$qualification_source_sha" --jq .tree.sha)"
+            test "$actual_qualification_tree" = "$qualification_tree_sha"
+          fi
 
           verification="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$verification_run_id")"
           test "$(jq -r .path <<<"$verification")" = ".github/workflows/release-verification.yml"
@@ -152,6 +163,8 @@ jobs:
           {
             printf 'tag=%s\n' "$tag"
             printf 'source_sha=%s\n' "$source_sha"
+            printf 'qualification_source_sha=%s\n' "$qualification_source_sha"
+            printf 'qualification_tree_sha=%s\n' "$qualification_tree_sha"
             printf 'verification_run_id=%s\n' "$verification_run_id"
             printf 'crates_io_run_id=%s\n' "$crates_io_run_id"
             printf 'crate_version=%s\n' "$crate_version"
@@ -199,6 +212,8 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           SOURCE_SHA: ${{ steps.release.outputs.source_sha }}
+          QUALIFICATION_SOURCE_SHA: ${{ steps.release.outputs.qualification_source_sha }}
+          QUALIFICATION_TREE_SHA: ${{ steps.release.outputs.qualification_tree_sha }}
           PROOF_RUN_ID: ${{ steps.release.outputs.proof_run_id }}
           PROMOTION_RUN_ID: ${{ steps.release.outputs.promotion_run_id }}
           RELEASE_RUN_ID: ${{ steps.release.outputs.release_run_id }}
@@ -225,7 +240,14 @@ jobs:
             --crate-package-sha256 "$CRATE_PACKAGE_SHA256"
             --published-at "$PUBLISHED_AT"
           )
-          python3 tools/post_release_close.py "${common[@]}"
+          close_args=("${common[@]}")
+          if [[ "$RELEASE_TAG" = "v0.10.0" ]]; then
+            close_args+=(
+              --qualification-source-sha "$QUALIFICATION_SOURCE_SHA"
+              --qualification-tree-sha "$QUALIFICATION_TREE_SHA"
+            )
+          fi
+          python3 tools/post_release_close.py "${close_args[@]}"
           python3 tools/post_release_terminal_sync.py "${common[@]}"
           python3 tools/check_roadmap.py .
           python3 tools/check_machine_classes.py .
