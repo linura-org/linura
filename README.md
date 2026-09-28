@@ -6,6 +6,33 @@
 
 Status: `v0.9.0` released — Experimental First Boot and supported reference environment. The immutable release is independently verified. `executor_state = "integrated-narrow"`, `managed_mutation_support = "narrow-experimental"`, `complete_lifecycle = true` and `platform_support = "reference-experimental"` remain the authoritative v0.9.0 boundary. The release remains Experimental; the next roadmap milestone is `v0.10.0`.
 
+
+## Project navigation
+
+| | |
+|---|---|
+| Website | https://linura.org |
+| Repository | https://github.com/linura-org/linura |
+| Architecture | [`docs/architecture.md`](docs/architecture.md) |
+| Roadmap | [`docs/roadmap.md`](docs/roadmap.md) |
+| Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Community | https://github.com/linura-org/linura/discussions |
+| Issues | https://github.com/linura-org/linura/issues |
+| Security | https://github.com/linura-org/linura/security/policy |
+| Releases | https://github.com/linura-org/linura/releases |
+
+## Try Linura
+
+Linura is still experimental. Use release-qualified artifacts and disposable/reference environments for evaluation; do not treat the current pre-1.0 release as a production support guarantee.
+
+For repository development, install the pinned Rust toolchain and run:
+
+```bash
+cargo xtask check
+```
+
+The canonical development, VM, image, visual, qualification, and release paths are repository-owned. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for a first contribution or [`docs/development-infrastructure.md`](docs/development-infrastructure.md) for system-level development.
+
 ## The product idea
 
 A fresh Linura installation should be able to begin with a minimal, recoverable base and ask:
@@ -223,6 +250,43 @@ python3 scripts/check_repository.py
 ```
 
 The bootstrap deliberately keeps Rust crates dependency-light while public contracts are still stabilizing.
+
+
+## Contributing
+
+Linura has two contributor lanes so rigor does not become unnecessary friction.
+
+A documentation fix, focused test improvement, or routine internal change can start with the short path in [`CONTRIBUTING.md`](CONTRIBUTING.md). Changes to authority, security, public contracts, persistence, recovery, supported platform behavior, or release control use the deeper architecture/security path and the RFC/ADR process where required.
+
+The public contributor label taxonomy is documented in [`docs/community/labels.md`](docs/community/labels.md).
+
+## Community
+
+Use **GitHub Discussions** for Q&A, architecture exploration, ideas, show-and-tell, and general community conversation:
+
+https://github.com/linura-org/linura/discussions
+
+Use **GitHub Issues** for actionable tracked work:
+
+https://github.com/linura-org/linura/issues
+
+Cross-cutting proposals follow [`docs/rfcs/README.md`](docs/rfcs/README.md). Community conversation does not create technical authority; project decisions follow [`GOVERNANCE.md`](GOVERNANCE.md).
+
+## Security
+
+Do not disclose suspected vulnerabilities in public Issues, Discussions, pull requests, or chat.
+
+Follow the private reporting instructions in [`SECURITY.md`](SECURITY.md):
+
+https://github.com/linura-org/linura/security/policy
+
+Linura treats authority, privilege, verification, recovery, and release integrity as product boundaries, not post-release hardening tasks.
+
+## Support Linura
+
+Funding may support development, infrastructure, hardware qualification, security work, documentation, and community operations, but sponsorship never purchases architecture, security, merge, release, or governance authority.
+
+See [`docs/community/sponsorship.md`](docs/community/sponsorship.md). Native funding destinations remain intentionally inactive until a verified receiving account or funding page is selected and reviewed.
 
 ## License
 

@@ -1,0 +1,48 @@
+version = 1
+
+[channels]
+website = "https://linura.org"
+repository = "https://github.com/linura-org/linura"
+discussions = "https://github.com/linura-org/linura/discussions"
+issues = "https://github.com/linura-org/linura/issues"
+security_policy = "https://github.com/linura-org/linura/security/policy"
+private_vulnerability_reporting = "https://github.com/linura-org/linura/security/advisories/new"
+releases = "https://github.com/linura-org/linura/releases"
+security_email = "security@linura.org"
+conduct_email = "conduct@linura.org"
+
+[governance]
+model = "maintainer-led-pre-1.0"
+current_maintainers = ["@Ehsan-Azari"]
+inbound_license = "Apache-2.0"
+
+[funding]
+active = false
+
+[repository_settings]
+discussions = true
+wiki = false
+private_vulnerability_reporting = true
+organization_community_profile = true
+
+[discussion_categories]
+required = [
+  "Announcements",
+  "Q&A",
+  "Architecture & RFCs",
+  "Ideas",
+  "Show and tell",
+  "General",
+]
+
+[labels]
+required = [
+  "good first issue",
+  "help wanted",
+  "rfc",
+  "compatibility",
+  "area:rust",
+  "area:linux",
+  "area:docs",
+  "area:security",
+]

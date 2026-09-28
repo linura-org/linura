@@ -2,6 +2,10 @@ name: Feature request
 description: Propose a capability, provider, or product behavior
 title: "feat: "
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include secrets or private identifiers. If this may be a security vulnerability, stop and follow SECURITY.md instead of filing publicly.
   - type: textarea
     id: problem
     attributes:

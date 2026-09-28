@@ -29,9 +29,26 @@ No production-supported version exists yet. Security fixes apply to the active d
 
 ## Reporting a vulnerability
 
-Do not open a public issue for suspected vulnerabilities. Use GitHub private vulnerability reporting when hosted, or the security contact published by the project owner.
+Do not open a public issue, Discussion, pull request, or chat thread for a suspected vulnerability.
 
-Include the affected version/commit, component/trust boundary, reproduction/PoC, impact, required attacker access and suggested mitigation if known.
+Preferred private channel:
+
+1. Open the repository's **Security** tab.
+2. Choose **Report a vulnerability** to use GitHub private vulnerability reporting.
+
+Alternative private channel:
+
+- email **security@linura.org**.
+
+Include the affected version/commit, component or trust boundary, reproduction/PoC, impact, required attacker access, relevant logs/evidence with secrets removed, and suggested mitigation if known.
+
+### Response and disclosure
+
+Linura is currently maintained as a pre-1.0 open-source project, so response targets are best-effort rather than a contractual SLA. The project should acknowledge a credible report promptly, establish whether it crosses a supported security boundary, and coordinate disclosure only after affected users have a reasonable remediation path.
+
+Reporters should avoid public disclosure of exploit details while coordinated remediation is active. Linura will not require a reporter to keep a vulnerability private indefinitely when the project is unresponsive; if coordination breaks down, the reporter should give reasonable notice before disclosure.
+
+Security reports are shared only with people needed to triage and remediate the issue. Confidentiality cannot be guaranteed against legal obligations or an immediate safety requirement, but unnecessary disclosure is prohibited.
 
 ## Security-review triggers
 

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and community discussion
+    url: https://github.com/linura-org/linura/discussions
+    about: Ask usage/contributor questions or start exploratory discussion.
+  - name: Architecture and RFC discussion
+    url: https://github.com/linura-org/linura/discussions
+    about: Discuss cross-cutting design before or alongside a tracked RFC.
+  - name: Security vulnerability
+    url: https://github.com/linura-org/linura/security/policy
+    about: Do not disclose vulnerabilities publicly; use the private reporting instructions.

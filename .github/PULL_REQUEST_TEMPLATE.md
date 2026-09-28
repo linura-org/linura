@@ -25,6 +25,7 @@ Explain if checked:
 Release contracts use the final PR URL as human provenance after the PR number exists. PR/commit references do not replace acceptance evidence.
 
 ## Checklist
+- [ ] I have the right to submit this contribution under the project's Apache-2.0 inbound contribution policy
 - [ ] Tests cover negative/failure paths
 - [ ] Docs/ADR/RFC updated as needed
 - [ ] No secrets/logging regressions

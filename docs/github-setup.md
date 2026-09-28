@@ -14,6 +14,22 @@ Apply these settings before accepting implementation PRs.
 - Prefer squash merge for normal feature PRs; preserve an explicit release/history policy if later changed by ADR.
 - Delete merged feature branches automatically unless a documented workflow requires otherwise.
 
+## Community and public contribution surface
+
+Repository-side contributor/community policy is defined in [`community/repository-settings.md`](community/repository-settings.md) and enforced for file-level drift by `tools/check_community.py`.
+
+Before broad community promotion, verify the GitHub administration state matches that runbook:
+
+- Discussions enabled with the documented categories;
+- Wiki disabled;
+- private vulnerability reporting enabled;
+- documented security and conduct role addresses monitored;
+- contributor labels created with the documented meanings;
+- organization `.github` profile repository created when administration access is available;
+- funding activated only when a verified receiving destination exists.
+
+These settings complement rather than replace the main branch ruleset and release-control model below.
+
 ## Main branch ruleset
 
 Target the default branch (`main`) and require:

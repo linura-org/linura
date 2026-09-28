@@ -1,6 +1,7 @@
 # RFC XXXX: Title
 
 Status: Draft
+Related Discussion: <!-- link when applicable -->
 
 ## Summary
 
@@ -25,3 +26,11 @@ Status: Draft
 ## Test plan
 
 ## Rollout/rollback
+
+## Decision
+
+<!-- Maintainers record Accepted/Rejected rationale here or in the linked PR before changing status. -->
+
+## Implementation
+
+<!-- Link implementation PRs and evidence. Mark Implemented only when the accepted design has landed. -->

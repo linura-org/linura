@@ -1,0 +1,10 @@
+# Funding destinations are intentionally inactive until a verified receiving
+# account or funding page is selected and the sponsorship policy is updated in
+# the same reviewed change.
+#
+# See docs/community/sponsorship.md.
+#
+# Example supported keys when activation is appropriate:
+# github:
+# open_collective:
+# custom:
