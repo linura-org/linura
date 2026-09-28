@@ -195,6 +195,14 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 "visual-artifact-retained",
             ],
             "provider-runtime-identities": ["networkmanager-version", "bluez-version", "pipewire-version", "wireplumber-version", "udisks2-version", "polkit-version"],
+            "session-audio-transient-effect": [
+                "numeric-pipewire-output-bound",
+                "typed-session-volume-operation-dispatched",
+                "exact-node-post-effect-reobserved",
+                "executor-failure-fails-closed",
+                "timeout-fails-closed",
+                "restart-reobservation-verified",
+            ],
             "restart-recovery": ["shell-restart", "authority-restart", "state-reobserved"],
         }
         source = {
@@ -299,12 +307,13 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "display-scale-and-hidpi": "physical-display-observation",
             "accessibility-and-visual": "physical-accessibility-visual-observation",
             "provider-runtime-identities": "physical-provider-observation",
+            "session-audio-transient-effect": "physical-session-audio-effect",
             "restart-recovery": "physical-restart-observation",
         }
         for name, observations in case_observations.items():
             mechanism = mechanisms[name]
             event_log = provenance_dir / f"{name}.log"
-            event_log.write_text(
+            event_text = (
                 f"case={name}\n"
                 "controller=maintainer-console\n"
                 f"mechanism={mechanism}\n"
@@ -312,9 +321,23 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 f"source_commit_sha={source_commit_sha}\n"
                 f"run_id={run_id}\n"
                 "scope=machine\n"
-                f"boot_id={boot_id}\n",
-                encoding="utf-8",
+                f"boot_id={boot_id}\n"
             )
+            if name == "session-audio-transient-effect":
+                event_text += (
+                    "operation_id=operation:audio.output.set-session-volume\n"
+                    "transport=org.linura.Session1\n"
+                    "resource=audio:session:output:87\n"
+                    "node_id=87\n"
+                    "object_serial=9001\n"
+                    "node_name=alsa_output.linura_fixture\n"
+                    "desired_key=volume_percent\n"
+                    "requested_volume_percent=65\n"
+                    "scenario.executor-failure=failed-closed\n"
+                    "scenario.timeout=failed-closed\n"
+                    "scenario.restart-recovery=reobserved\n"
+                )
+            event_log.write_text(event_text, encoding="utf-8")
             provenance_path = provenance_dir / f"{name}.json"
             provenance_payload = {
                 "schema_version": 1,
@@ -367,6 +390,100 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                     for observation in observations
                 ],
             }
+            if name == "session-audio-transient-effect":
+                audio_common = {
+                    "source_commit_sha": source_commit_sha,
+                    "run_id": run_id,
+                    "environment_sha256": environment_binding["sha256"],
+                    "boot_id": boot_id,
+                    "provider": "pipewire",
+                    "observation_capability": "audio.session.observe",
+                    "resource": "audio:session:output:87",
+                    "node_id": 87,
+                    "object_serial": "9001",
+                    "node_name": "alsa_output.linura_fixture",
+                }
+                pre_path = evidence_dir / "session-audio-pre-effect.json"
+                pre_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "artifact_type": "linura-v010-physical-session-audio-observation",
+                            **audio_common,
+                            "phase": "pre-effect",
+                            "volume_percent": 40,
+                            "observed_monotonic_ns": 100,
+                        },
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                post_path = evidence_dir / "session-audio-post-effect.json"
+                post_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "artifact_type": "linura-v010-physical-session-audio-observation",
+                            **audio_common,
+                            "phase": "post-effect",
+                            "volume_percent": 65,
+                            "observed_monotonic_ns": 200,
+                        },
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                scenario_bindings = {}
+                for scenario, fault, result_value in (
+                    ("executor-failure", "helper-exit-nonzero", "failed-closed"),
+                    ("timeout", "bounded-executor-timeout", "failed-closed"),
+                    ("restart-recovery", "linurad-restart", "reobserved"),
+                ):
+                    scenario_path = evidence_dir / f"session-audio-{scenario}.json"
+                    scenario_payload = {
+                        "schema_version": 1,
+                        "artifact_type": "linura-v010-physical-session-audio-scenario",
+                        **audio_common,
+                        "scenario": scenario,
+                        "fault_injection": fault,
+                        "result": result_value,
+                        "operation_id": "operation:audio.output.set-session-volume",
+                        "transport": "org.linura.Session1",
+                        "authoritative_state_reobserved": True,
+                    }
+                    if scenario in {"executor-failure", "timeout"}:
+                        scenario_payload["success_fabricated"] = False
+                    else:
+                        scenario_payload.update(
+                            {
+                                "service_restarted": "linurad",
+                                "post_restart_resource": "audio:session:output:87",
+                                "post_restart_object_serial": "9001",
+                                "post_restart_volume_percent": 65,
+                            }
+                        )
+                    scenario_path.write_text(
+                        json.dumps(scenario_payload, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+                    scenario_bindings[scenario] = binding(scenario_path)
+                payload["session_audio"] = {
+                    "operation_id": "operation:audio.output.set-session-volume",
+                    "transport": "org.linura.Session1",
+                    "provider": "pipewire",
+                    "observation_capability": "audio.session.observe",
+                    "resource": "audio:session:output:87",
+                    "node_id": 87,
+                    "object_serial": "9001",
+                    "node_name": "alsa_output.linura_fixture",
+                    "desired_key": "volume_percent",
+                    "requested_volume_percent": 65,
+                    "pre_effect_observation": binding(pre_path),
+                    "post_effect_observation": binding(post_path),
+                    "scenario_evidence": scenario_bindings,
+                }
             if name == "accessibility-and-visual":
                 visual_artifact = evidence_dir / "accessibility-and-visual.png"
                 display = hardware["displays"][0]
@@ -1734,6 +1851,69 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             )
             self.assertIn(
                 "interactive workstation machine environment virtualization must be none",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_session_audio_requires_fault_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(
+                item for item in payload["cases"]
+                if item["name"] == "session-audio-transient-effect"
+            )
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            attestation["session_audio"]["scenario_evidence"].pop("timeout")
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "must retain exactly executor-failure, timeout and restart-recovery scenario evidence",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_session_audio_post_effect_binds_exact_node(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(
+                item for item in payload["cases"]
+                if item["name"] == "session-audio-transient-effect"
+            )
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            post_binding = attestation["session_audio"]["post_effect_observation"]
+            post_path = root / post_binding["path"]
+            post = json.loads(post_path.read_text(encoding="utf-8"))
+            post["node_id"] = 88
+            post_path.write_text(json.dumps(post, indent=2) + "\n", encoding="utf-8")
+            post_binding["sha256"] = hashlib.sha256(post_path.read_bytes()).hexdigest()
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "physical session-audio evidence post-effect observation node_id mismatch",
                 result.stderr,
             )
 

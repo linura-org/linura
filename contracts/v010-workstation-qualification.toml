@@ -129,7 +129,7 @@ require_interrupted_install_recovery = true
 require_physical_accessibility_visual_evidence = true
 require_retained_physical_visual_artifact = true
 required_provider_ids = ["networkmanager", "bluez", "pipewire", "wireplumber", "udisks2", "polkit"]
-required_cases = ["bounded-installer-lane", "physical-session-start", "session-supervision", "shell-render-and-input", "display-scale-and-hidpi", "accessibility-and-visual", "provider-runtime-identities", "restart-recovery"]
+required_cases = ["bounded-installer-lane", "physical-session-start", "session-supervision", "shell-render-and-input", "display-scale-and-hidpi", "accessibility-and-visual", "provider-runtime-identities", "session-audio-transient-effect", "restart-recovery"]
 
 [update_recovery_qualification]
 evidence_ready = false

@@ -311,6 +311,14 @@ EXPECTED_Q11_CASE_OBSERVATIONS = {
         "visual-artifact-retained",
     ],
     "provider-runtime-identities": ["networkmanager-version", "bluez-version", "pipewire-version", "wireplumber-version", "udisks2-version", "polkit-version"],
+    "session-audio-transient-effect": [
+        "numeric-pipewire-output-bound",
+        "typed-session-volume-operation-dispatched",
+        "exact-node-post-effect-reobserved",
+        "executor-failure-fails-closed",
+        "timeout-fails-closed",
+        "restart-reobservation-verified",
+    ],
     "restart-recovery": ["shell-restart", "authority-restart", "state-reobserved"],
 }
 EXPECTED_INTERACTIVE_WORKSTATION = {
@@ -345,6 +353,7 @@ EXPECTED_INTERACTIVE_WORKSTATION = {
         "display-scale-and-hidpi",
         "accessibility-and-visual",
         "provider-runtime-identities",
+        "session-audio-transient-effect",
         "restart-recovery",
     ],
 }
@@ -356,7 +365,18 @@ EXPECTED_Q11_EXECUTION_MECHANISMS = {
     "display-scale-and-hidpi": "physical-display-observation",
     "accessibility-and-visual": "physical-accessibility-visual-observation",
     "provider-runtime-identities": "physical-provider-observation",
+    "session-audio-transient-effect": "physical-session-audio-effect",
     "restart-recovery": "physical-restart-observation",
+}
+EXPECTED_Q11_AUDIO_OPERATION_ID = "operation:audio.output.set-session-volume"
+EXPECTED_Q11_AUDIO_TRANSPORT = "org.linura.Session1"
+EXPECTED_Q11_AUDIO_PROVIDER = "pipewire"
+EXPECTED_Q11_AUDIO_CAPABILITY = "audio.session.observe"
+EXPECTED_Q11_AUDIO_DESIRED_KEY = "volume_percent"
+EXPECTED_Q11_AUDIO_SCENARIOS = {
+    "executor-failure": ("helper-exit-nonzero", "failed-closed"),
+    "timeout": ("bounded-executor-timeout", "failed-closed"),
+    "restart-recovery": ("linurad-restart", "reobserved"),
 }
 
 EXPECTED_Q12_CASE_OBSERVATIONS = {
@@ -1331,6 +1351,223 @@ def _validate_q11_case_execution(
                 )
 
 
+def _validate_q11_session_audio_case(
+    root: Path,
+    attestation: dict[str, object],
+    *,
+    manifest: dict[str, object],
+    environment_sha256: str | None,
+    environment_boot_id: str | None,
+    failures: list[str],
+) -> None:
+    label = "interactive workstation physical session-audio evidence"
+    audio = attestation.get("session_audio")
+    if not isinstance(audio, dict):
+        failures.append(f"{label} missing session_audio proof")
+        return
+
+    if audio.get("operation_id") != EXPECTED_Q11_AUDIO_OPERATION_ID:
+        failures.append(f"{label} operation_id must bind the registered session-volume operation")
+    if audio.get("transport") != EXPECTED_Q11_AUDIO_TRANSPORT:
+        failures.append(f"{label} transport must be org.linura.Session1")
+    if audio.get("provider") != EXPECTED_Q11_AUDIO_PROVIDER:
+        failures.append(f"{label} provider must be pipewire")
+    if audio.get("observation_capability") != EXPECTED_Q11_AUDIO_CAPABILITY:
+        failures.append(f"{label} observation_capability must be audio.session.observe")
+    if audio.get("desired_key") != EXPECTED_Q11_AUDIO_DESIRED_KEY:
+        failures.append(f"{label} desired_key must be volume_percent")
+
+    node_id = audio.get("node_id")
+    if type(node_id) is not int or node_id <= 0:
+        failures.append(f"{label} node_id must be a positive numeric PipeWire node ID")
+        node_id = None
+    resource = audio.get("resource")
+    if node_id is not None and resource != f"audio:session:output:{node_id}":
+        failures.append(f"{label} resource must bind the exact numeric PipeWire node")
+    object_serial = audio.get("object_serial")
+    if (
+        not isinstance(object_serial, str)
+        or not object_serial.isdigit()
+        or int(object_serial) <= 0
+    ):
+        failures.append(f"{label} object_serial must be a positive PipeWire object serial")
+        object_serial = None
+    node_name = audio.get("node_name")
+    if not _nonempty_string(node_name):
+        failures.append(f"{label} node_name must be non-empty")
+        node_name = None
+    requested_volume = audio.get("requested_volume_percent")
+    if type(requested_volume) is not int or not 0 <= requested_volume <= 100:
+        failures.append(f"{label} requested_volume_percent must be an integer in 0..100")
+        requested_volume = None
+
+    manifest_source = manifest.get("source")
+    source_sha = (
+        manifest_source.get("commit_sha")
+        if isinstance(manifest_source, dict)
+        else None
+    )
+    run_id = manifest.get("run_id")
+
+    def load_observation(binding: object, phase: str) -> dict[str, object] | None:
+        path = _validate_q11_bound_artifact(
+            root,
+            binding,
+            label=f"{label} {phase} observation",
+            failures=failures,
+        )
+        if path is None:
+            return None
+        observation = _load_json(path, f"{label} {phase} observation", failures)
+        if not observation:
+            return None
+        if observation.get("schema_version") != 1:
+            failures.append(f"{label} {phase} observation schema_version must be 1")
+        if observation.get("artifact_type") != "linura-v010-physical-session-audio-observation":
+            failures.append(f"{label} {phase} observation artifact_type drifted")
+        expected = {
+            "source_commit_sha": source_sha,
+            "run_id": run_id,
+            "environment_sha256": environment_sha256,
+            "boot_id": environment_boot_id,
+            "phase": phase,
+            "provider": EXPECTED_Q11_AUDIO_PROVIDER,
+            "observation_capability": EXPECTED_Q11_AUDIO_CAPABILITY,
+            "resource": resource,
+            "node_id": node_id,
+            "object_serial": object_serial,
+            "node_name": node_name,
+        }
+        for key, expected_value in expected.items():
+            if observation.get(key) != expected_value:
+                failures.append(f"{label} {phase} observation {key} mismatch")
+        volume = observation.get("volume_percent")
+        if type(volume) is not int or not 0 <= volume <= 100:
+            failures.append(f"{label} {phase} observation volume_percent must be an integer in 0..100")
+        observed_ns = observation.get("observed_monotonic_ns")
+        if type(observed_ns) is not int or observed_ns <= 0:
+            failures.append(f"{label} {phase} observation observed_monotonic_ns must be positive")
+        return observation
+
+    before = load_observation(audio.get("pre_effect_observation"), "pre-effect")
+    after = load_observation(audio.get("post_effect_observation"), "post-effect")
+    if before and after and requested_volume is not None:
+        if before.get("volume_percent") == requested_volume:
+            failures.append(f"{label} pre-effect volume must differ from the requested volume")
+        if after.get("volume_percent") != requested_volume:
+            failures.append(f"{label} post-effect observation must verify the requested volume")
+        before_ns = before.get("observed_monotonic_ns")
+        after_ns = after.get("observed_monotonic_ns")
+        if (
+            type(before_ns) is int
+            and type(after_ns) is int
+            and after_ns <= before_ns
+        ):
+            failures.append(f"{label} post-effect observation must be newer than pre-effect evidence")
+
+    scenarios = audio.get("scenario_evidence")
+    if not isinstance(scenarios, dict) or set(scenarios) != set(EXPECTED_Q11_AUDIO_SCENARIOS):
+        failures.append(
+            f"{label} must retain exactly executor-failure, timeout and restart-recovery scenario evidence"
+        )
+    else:
+        for scenario, (fault_injection, expected_result) in EXPECTED_Q11_AUDIO_SCENARIOS.items():
+            path = _validate_q11_bound_artifact(
+                root,
+                scenarios.get(scenario),
+                label=f"{label} {scenario} scenario",
+                failures=failures,
+            )
+            if path is None:
+                continue
+            evidence = _load_json(path, f"{label} {scenario} scenario", failures)
+            if not evidence:
+                continue
+            if evidence.get("schema_version") != 1:
+                failures.append(f"{label} {scenario} scenario schema_version must be 1")
+            if evidence.get("artifact_type") != "linura-v010-physical-session-audio-scenario":
+                failures.append(f"{label} {scenario} scenario artifact_type drifted")
+            expected = {
+                "source_commit_sha": source_sha,
+                "run_id": run_id,
+                "environment_sha256": environment_sha256,
+                "boot_id": environment_boot_id,
+                "scenario": scenario,
+                "fault_injection": fault_injection,
+                "result": expected_result,
+                "operation_id": EXPECTED_Q11_AUDIO_OPERATION_ID,
+                "transport": EXPECTED_Q11_AUDIO_TRANSPORT,
+                "provider": EXPECTED_Q11_AUDIO_PROVIDER,
+                "observation_capability": EXPECTED_Q11_AUDIO_CAPABILITY,
+                "resource": resource,
+                "node_id": node_id,
+                "object_serial": object_serial,
+                "node_name": node_name,
+            }
+            for key, expected_value in expected.items():
+                if evidence.get(key) != expected_value:
+                    failures.append(f"{label} {scenario} scenario {key} mismatch")
+            if evidence.get("authoritative_state_reobserved") is not True:
+                failures.append(f"{label} {scenario} scenario must reobserve authoritative state")
+            if scenario in {"executor-failure", "timeout"}:
+                if evidence.get("success_fabricated") is not False:
+                    failures.append(f"{label} {scenario} scenario must not fabricate success")
+            else:
+                if evidence.get("service_restarted") != "linurad":
+                    failures.append(f"{label} restart-recovery scenario must restart linurad")
+                if evidence.get("post_restart_resource") != resource:
+                    failures.append(f"{label} restart-recovery scenario must reobserve the exact resource")
+                if evidence.get("post_restart_object_serial") != object_serial:
+                    failures.append(f"{label} restart-recovery scenario must reobserve the exact object serial")
+                if evidence.get("post_restart_volume_percent") != requested_volume:
+                    failures.append(f"{label} restart-recovery scenario must reobserve the requested volume")
+
+    machine_execution = attestation.get("machine_execution")
+    provenance_binding = (
+        machine_execution.get("provenance")
+        if isinstance(machine_execution, dict)
+        else None
+    )
+    provenance_path = _validate_q11_bound_artifact(
+        root,
+        provenance_binding,
+        label=f"{label} execution provenance",
+        failures=failures,
+    )
+    if provenance_path is not None:
+        provenance = _load_json(provenance_path, f"{label} execution provenance", failures)
+        event_binding = provenance.get("event_log") if provenance else None
+        event_path = _validate_q11_bound_artifact(
+            root,
+            event_binding,
+            label=f"{label} raw event log",
+            failures=failures,
+        )
+        if event_path is not None:
+            try:
+                event_lines = set(event_path.read_text(encoding="utf-8").splitlines())
+            except UnicodeError:
+                failures.append(f"{label} raw event log must be valid UTF-8")
+            else:
+                required_lines = {
+                    f"operation_id={EXPECTED_Q11_AUDIO_OPERATION_ID}",
+                    f"transport={EXPECTED_Q11_AUDIO_TRANSPORT}",
+                    f"resource={resource}",
+                    f"node_id={node_id}",
+                    f"object_serial={object_serial}",
+                    f"node_name={node_name}",
+                    f"desired_key={EXPECTED_Q11_AUDIO_DESIRED_KEY}",
+                    f"requested_volume_percent={requested_volume}",
+                    "scenario.executor-failure=failed-closed",
+                    "scenario.timeout=failed-closed",
+                    "scenario.restart-recovery=reobserved",
+                }
+                if not required_lines.issubset(event_lines):
+                    failures.append(
+                        f"{label} raw event log must bind the exact operation, node, desired value and fault matrix"
+                    )
+
+
 def _validate_interactive_workstation_evidence(
     root: Path,
     interactive: dict[str, object],
@@ -1592,6 +1829,15 @@ def _validate_interactive_workstation_evidence(
                     environment_boot_id=environment_boot_id,
                     failures=failures,
                 )
+                if name == "session-audio-transient-effect":
+                    _validate_q11_session_audio_case(
+                        root,
+                        attestation,
+                        manifest=manifest,
+                        environment_sha256=environment_sha256,
+                        environment_boot_id=environment_boot_id,
+                        failures=failures,
+                    )
                 if name == "accessibility-and-visual":
                     visual_binding = attestation.get("visual_artifact")
                     visual_path = _validate_q11_bound_artifact(
