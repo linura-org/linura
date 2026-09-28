@@ -75,14 +75,14 @@ class V010SlicePREvidenceTests(unittest.TestCase):
     def test_evidence_seal_rename_checks_source_and_destination(self) -> None:
         paths = verifier.evidence_seal_record_paths(
             {
-                "filename": "qualification/v010/moved-evidence.json",
+                "filename": "qualification/v010/interactive-workstation/moved-evidence.json",
                 "previous_filename": "apps/linurad/src/main.rs",
                 "status": "renamed",
             }
         )
         self.assertEqual(
             paths,
-            ("qualification/v010/moved-evidence.json", "apps/linurad/src/main.rs"),
+            ("qualification/v010/interactive-workstation/moved-evidence.json", "apps/linurad/src/main.rs"),
         )
         self.assertTrue(verifier.evidence_seal_path_allowed(paths[0]))
         self.assertFalse(verifier.evidence_seal_path_allowed(paths[1]))
