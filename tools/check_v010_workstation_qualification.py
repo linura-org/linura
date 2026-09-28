@@ -1785,6 +1785,7 @@ def _validate_release_machine_environment(
     expected_package_manifest_sha256: str | None,
     expected_package_versions: dict[str, str] | None,
     expected_architecture: str | None,
+    expected_runtime_digests: dict[str, str] | None,
     failures: list[str],
 ) -> tuple[str | None, str | None, str | None]:
     binding = manifest.get("machine_environment")
@@ -1826,6 +1827,14 @@ def _validate_release_machine_environment(
         failures.append(f"{label} machine environment requires a frozen qualification package manifest")
     elif environment.get("package_manifest_sha256") != expected_package_manifest_sha256:
         failures.append(f"{label} machine environment package manifest digest must match the frozen substrate")
+
+    runtime = environment.get("runtime")
+    if expected_runtime_digests is None:
+        failures.append(f"{label} machine environment requires qualified Linura runtime digests")
+    elif not isinstance(runtime, dict):
+        failures.append(f"{label} machine environment missing runtime digest binding")
+    elif runtime != expected_runtime_digests:
+        failures.append(f"{label} machine environment runtime digests must match the qualification manifest")
 
     execution = environment.get("execution")
     boot_id: str | None = None
@@ -2099,6 +2108,9 @@ def _validate_release_matrix_evidence(
     expected_package_manifest_sha256: str | None = None,
     expected_package_versions: dict[str, str] | None = None,
     expected_architecture: str | None = None,
+    expected_linurad_sha256: str | None = None,
+    expected_shell_bridge_sha256: str | None = None,
+    require_binary_binding: bool = False,
 ) -> None:
     manifest = _validate_digest_bound_json_artifact(
         root,
@@ -2137,10 +2149,37 @@ def _validate_release_matrix_evidence(
     environment_sha256: str | None = None
     environment_boot_id: str | None = None
     environment_kind: str | None = None
+    runtime_digests: dict[str, str] | None = None
     if expected["evidence_type"] in {
         "exact-source-q12-update-recovery",
         "exact-source-q13-workstation-security",
     }:
+        runtime = manifest.get("runtime")
+        if not isinstance(runtime, dict):
+            failures.append(f"{label} evidence requires qualified Linura runtime digests")
+        else:
+            if runtime.get("source_commit_sha") != source_sha:
+                failures.append(f"{label} runtime source must match the qualification source")
+            runtime_digests = {}
+            for key, expected_digest in (
+                ("linurad_sha256", expected_linurad_sha256),
+                ("shell_bridge_sha256", expected_shell_bridge_sha256),
+            ):
+                value = runtime.get(key)
+                if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
+                    failures.append(f"{label} runtime.{key} must be a lowercase SHA-256 digest")
+                    runtime_digests = None
+                    continue
+                if expected_digest is not None and value != expected_digest:
+                    failures.append(
+                        f"{label} runtime.{key} does not match independently qualified runtime artifact"
+                    )
+                elif require_binary_binding and expected_digest is None:
+                    failures.append(
+                        f"{label} runtime.{key} requires an independently qualified expected digest"
+                    )
+                if runtime_digests is not None:
+                    runtime_digests[key] = value
         environment_sha256, environment_boot_id, environment_kind = _validate_release_machine_environment(
             root,
             manifest,
@@ -2151,6 +2190,7 @@ def _validate_release_matrix_evidence(
             expected_package_manifest_sha256=expected_package_manifest_sha256,
             expected_package_versions=expected_package_versions,
             expected_architecture=expected_architecture,
+            expected_runtime_digests=runtime_digests,
             failures=failures,
         )
 
@@ -2228,6 +2268,12 @@ def _validate_release_matrix_evidence(
                 failures.append(f"{label} case {name} runner.version must be non-empty")
             if runner.get("commit_sha") != source_sha:
                 failures.append(f"{label} case {name} runner.commit_sha must match the parent source identity")
+            if name in case_mechanisms and runtime_digests is not None:
+                for key, digest in runtime_digests.items():
+                    if runner.get(key) != digest:
+                        failures.append(
+                            f"{label} case {name} runner.{key} must match the qualified runtime digest"
+                        )
 
         if name in case_mechanisms:
             _validate_machine_case_execution(
@@ -2554,6 +2600,40 @@ def _validate_experience_evidence(
                 label=f"visual capture for {baseline_id}",
                 failures=failures,
             )
+            capture_attestation = _validate_digest_bound_json_artifact(
+                root,
+                item.get("capture_attestation"),
+                item.get("capture_attestation_sha256"),
+                label=f"visual capture attestation for {baseline_id}",
+                failures=failures,
+            )
+            if capture_attestation is not None:
+                if capture_attestation.get("schema_version") != 1:
+                    failures.append(f"visual capture attestation for {baseline_id} schema_version must be 1")
+                if capture_attestation.get("artifact_type") != "linura-v010-visual-capture-attestation":
+                    failures.append(f"visual capture attestation for {baseline_id} artifact_type drifted")
+                if capture_attestation.get("source_commit_sha") != source_sha:
+                    failures.append(f"visual capture attestation for {baseline_id} source must match the experience run")
+                if capture_attestation.get("run_id") != manifest_run_id:
+                    failures.append(f"visual capture attestation for {baseline_id} run_id must match the experience run")
+                if capture_attestation.get("platform") != EXPECTED_PROFILE:
+                    failures.append(f"visual capture attestation for {baseline_id} platform must be {EXPECTED_PROFILE}")
+                if capture_attestation.get("baseline_id") != baseline_id:
+                    failures.append(f"visual capture attestation for {baseline_id} baseline binding mismatch")
+                if capture_attestation.get("capture_sha256") != item.get("capture_sha256"):
+                    failures.append(f"visual capture attestation for {baseline_id} capture digest mismatch")
+                capture_runner = capture_attestation.get("runner")
+                if not isinstance(capture_runner, dict):
+                    failures.append(f"visual capture attestation for {baseline_id} missing runner provenance")
+                else:
+                    if capture_runner.get("id") != "qualification/v010/visual-capture-runner":
+                        failures.append(f"visual capture attestation for {baseline_id} runner.id drifted")
+                    if not _nonempty_string(capture_runner.get("version")):
+                        failures.append(f"visual capture attestation for {baseline_id} runner.version must be non-empty")
+                    if capture_runner.get("source_commit_sha") != source_sha:
+                        failures.append(f"visual capture attestation for {baseline_id} runner source mismatch")
+                    if capture_runner.get("run_id") != manifest_run_id:
+                        failures.append(f"visual capture attestation for {baseline_id} runner run_id mismatch")
             baseline_pixel_digest = baseline_pixel_digests.get(str(baseline_id))
             if (
                 baseline_pixel_digest is not None
@@ -3330,6 +3410,9 @@ def validate(
                 expected_package_manifest_sha256=frozen_package_manifest_digest,
                 expected_package_versions=frozen_package_versions,
                 expected_architecture=frozen_substrate_architecture,
+                expected_linurad_sha256=expected_linurad_sha256,
+                expected_shell_bridge_sha256=expected_shell_bridge_sha256,
+                require_binary_binding=require_binary_binding,
                 failures=failures,
             )
         elif section.get("evidence_manifest_sha256") not in {"", None}:

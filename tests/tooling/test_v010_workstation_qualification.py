@@ -517,6 +517,11 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             _repository, name, version, _architecture = line.split("\t")
             package_versions[name] = version
 
+        runtime_digests = {
+            "linurad_sha256": "b" * 64,
+            "shell_bridge_sha256": "c" * 64,
+        }
+
         run_id = f"{section}-fixture-run"
         evidence_dir = root / "qualification/v010/release-matrix" / section
         machine_dir = evidence_dir / "machine"
@@ -555,6 +560,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "profile_sha256": contract_data["profile_sha256"],
             "machine_class": "workstation",
             "package_manifest_sha256": package_manifest_digest,
+            "runtime": runtime_digests,
             "execution": {
                 "scope": "machine",
                 "kind": "virtual-machine",
@@ -671,6 +677,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                     "id": "qualification/v010/release-matrix-runner",
                     "version": "1.0",
                     "commit_sha": source_commit_sha,
+                    **runtime_digests,
                 },
                 "machine_execution": machine_execution,
                 "observations": [
@@ -700,6 +707,10 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "source_commit_sha": source_commit_sha,
             "run_id": run_id,
             "captured_at_utc": "2026-09-27T00:00:00Z",
+            "runtime": {
+                "source_commit_sha": source_commit_sha,
+                **runtime_digests,
+            },
             "machine_environment": environment_binding,
             "cases": cases,
         }
@@ -1011,11 +1022,43 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                     "sha256": hashlib.sha256(baseline_path.read_bytes()).hexdigest(),
                 }
             )
+            capture_sha256 = hashlib.sha256(capture_path.read_bytes()).hexdigest()
+            capture_attestation_rel = (
+                f"qualification/v010/visual-capture-attestations/{baseline_id}.json"
+            )
+            capture_attestation_path = root / capture_attestation_rel
+            capture_attestation_path.parent.mkdir(parents=True, exist_ok=True)
+            capture_attestation_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "artifact_type": "linura-v010-visual-capture-attestation",
+                        "source_commit_sha": source_commit_sha,
+                        "run_id": run_id,
+                        "platform": "arch-hyprland-v1",
+                        "baseline_id": baseline_id,
+                        "capture_sha256": capture_sha256,
+                        "runner": {
+                            "id": "qualification/v010/visual-capture-runner",
+                            "version": "1.0",
+                            "source_commit_sha": source_commit_sha,
+                            "run_id": run_id,
+                        },
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             comparisons.append(
                 {
                     "baseline_id": baseline_id,
                     "capture": capture_rel,
-                    "capture_sha256": hashlib.sha256(capture_path.read_bytes()).hexdigest(),
+                    "capture_sha256": capture_sha256,
+                    "capture_attestation": capture_attestation_rel,
+                    "capture_attestation_sha256": hashlib.sha256(
+                        capture_attestation_path.read_bytes()
+                    ).hexdigest(),
                     "status": "pass",
                     "reviewed": True,
                 }
@@ -1877,6 +1920,38 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self.assertIn("machine execution provenance must prove external control", result.stderr)
             self.assertIn("process_local_mock must be false", result.stderr)
 
+    def test_q12_release_matrix_rejects_substituted_runtime_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_release_matrix_evidence(
+                root,
+                section="update_recovery_qualification",
+                manifest_name="update-recovery-evidence.json",
+                evidence_type="exact-source-q12-update-recovery",
+                case_observations=self._q12_case_observations(),
+            )
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload["runtime"]["linurad_sha256"] = "d" * 64
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            self._refresh_release_matrix_contract_digest(
+                root,
+                section="update_recovery_qualification",
+                manifest=manifest,
+            )
+
+            result = self._run(
+                root,
+                expected_linurad_sha256="b" * 64,
+                expected_shell_bridge_sha256="c" * 64,
+                require_binary_binding=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "Q12 update/recovery runtime.linurad_sha256 does not match independently qualified runtime artifact",
+                result.stderr,
+            )
+
     def test_q12_release_matrix_rejects_unbound_nonempty_execution_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -2465,6 +2540,33 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("visual baseline artifact firstboot-1280x800-2x must contain representative non-uniform rendered content", result.stderr)
             self.assertIn("visual capture for firstboot-1280x800-2x must contain representative non-uniform rendered content", result.stderr)
+
+    def test_q10_visual_capture_attestation_must_bind_exact_source_and_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            evidence_path = root / "qualification/v010/experience-evidence.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            comparison = evidence["visual_comparisons"][0]
+            attestation_path = root / comparison["capture_attestation"]
+            attestation = json.loads(attestation_path.read_text(encoding="utf-8"))
+            attestation["run_id"] = "stale-q10-run"
+            attestation["runner"]["run_id"] = "stale-q10-run"
+            attestation_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            comparison["capture_attestation_sha256"] = hashlib.sha256(
+                attestation_path.read_bytes()
+            ).hexdigest()
+            evidence_path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+            self._refresh_experience_evidence_digest(root)
+
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "visual capture attestation for",
+                result.stderr,
+            )
+            self.assertIn("run_id must match the experience run", result.stderr)
 
     def test_q10_requires_surface_specific_functional_workflow_observations(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
