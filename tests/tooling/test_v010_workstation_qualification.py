@@ -1097,6 +1097,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 "checks": {
                     "keyboard": "pass",
                     "pointer": "pass",
+                    "focus_navigation": "pass",
                     "screen_reader": "pass",
                     "reduced_motion": "pass",
                     "display_scaling": "pass",
@@ -2475,6 +2476,32 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("interaction/accessibility report network-connectivity must contain exactly the required workflow observations", result.stderr)
+
+    def test_q10_requires_focus_navigation_for_every_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            evidence_path = root / "qualification/v010/experience-evidence.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            record = next(
+                item for item in evidence["interaction_accessibility"]
+                if item["surface"] == "personalization"
+            )
+            report_path = root / record["report"]
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["checks"].pop("focus_navigation")
+            report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+            record["report_sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+            evidence_path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+            self._refresh_experience_evidence_digest(root)
+
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "interaction/accessibility report personalization checks.focus_navigation must be pass",
+                result.stderr,
+            )
 
     def test_q10_overlay_input_regions_must_pass_through_and_remain_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -2705,6 +2705,7 @@ def _validate_experience_evidence(
     required_checks = (
         "keyboard",
         "pointer",
+        "focus_navigation",
         "screen_reader",
         "reduced_motion",
         "display_scaling",
