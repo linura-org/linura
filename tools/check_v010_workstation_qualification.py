@@ -1305,6 +1305,7 @@ def _validate_interactive_workstation_evidence(
                     f"interactive workstation source.{key} requires an independently qualified expected digest"
                 )
 
+    display_by_connector: dict[str, dict[str, object]] = {}
     hardware = manifest.get("hardware")
     if not isinstance(hardware, dict):
         failures.append("interactive workstation evidence missing hardware identities")
@@ -1332,8 +1333,15 @@ def _validate_interactive_workstation_evidence(
                 if not isinstance(display, dict):
                     failures.append(f"interactive workstation display {index} must be an object")
                     continue
-                if not _nonempty_string(display.get("connector")):
+                connector = display.get("connector")
+                if not _nonempty_string(connector):
                     failures.append(f"interactive workstation display {index} requires connector identity")
+                elif connector in display_by_connector:
+                    failures.append(
+                        f"interactive workstation display {index} duplicates connector {connector}"
+                    )
+                else:
+                    display_by_connector[connector] = display
                 for key in ("width", "height", "refresh_millihz"):
                     value = display.get(key)
                     if type(value) is not int or value <= 0:
@@ -1507,11 +1515,83 @@ def _validate_interactive_workstation_evidence(
                             failures.append(
                                 "interactive workstation physical accessibility visual artifact must bind the case execution provenance"
                             )
+                        capture = visual_binding.get("capture")
+                        expected_visual_width: int | None = None
+                        expected_visual_height: int | None = None
+                        if not isinstance(capture, dict):
+                            failures.append(
+                                "interactive workstation physical accessibility visual artifact capture metadata must be an object"
+                            )
+                        else:
+                            if capture.get("kind") != "full-output":
+                                failures.append(
+                                    "interactive workstation physical accessibility visual artifact capture.kind must be full-output"
+                                )
+                            if capture.get("coordinate_space") != "physical-pixels":
+                                failures.append(
+                                    "interactive workstation physical accessibility visual artifact capture.coordinate_space must be physical-pixels"
+                                )
+                            connector = capture.get("connector")
+                            if not _nonempty_string(connector):
+                                failures.append(
+                                    "interactive workstation physical accessibility visual artifact capture.connector must identify a physical display"
+                                )
+                            else:
+                                display = display_by_connector.get(connector)
+                                if display is None:
+                                    failures.append(
+                                        "interactive workstation physical accessibility visual artifact capture.connector must match an identified physical display"
+                                    )
+                                else:
+                                    display_width = display.get("width")
+                                    display_height = display.get("height")
+                                    display_scale = display.get("scale")
+                                    if type(display_width) is int and display_width > 0:
+                                        expected_visual_width = display_width
+                                    if type(display_height) is int and display_height > 0:
+                                        expected_visual_height = display_height
+
+                                    capture_width = capture.get("pixel_width")
+                                    if type(capture_width) is not int or capture_width <= 0:
+                                        failures.append(
+                                            "interactive workstation physical accessibility visual artifact capture.pixel_width must be a positive integer"
+                                        )
+                                    elif capture_width != display_width:
+                                        failures.append(
+                                            "interactive workstation physical accessibility visual artifact capture.pixel_width must match the identified physical display"
+                                        )
+
+                                    capture_height = capture.get("pixel_height")
+                                    if type(capture_height) is not int or capture_height <= 0:
+                                        failures.append(
+                                            "interactive workstation physical accessibility visual artifact capture.pixel_height must be a positive integer"
+                                        )
+                                    elif capture_height != display_height:
+                                        failures.append(
+                                            "interactive workstation physical accessibility visual artifact capture.pixel_height must match the identified physical display"
+                                        )
+
+                                    capture_scale = capture.get("scale")
+                                    if (
+                                        not isinstance(capture_scale, (int, float))
+                                        or isinstance(capture_scale, bool)
+                                        or capture_scale <= 0
+                                    ):
+                                        failures.append(
+                                            "interactive workstation physical accessibility visual artifact capture.scale must be positive"
+                                        )
+                                    elif capture_scale != display_scale:
+                                        failures.append(
+                                            "interactive workstation physical accessibility visual artifact capture.scale must match the identified physical display"
+                                        )
+
                         _validate_png_artifact(
                             visual_path,
                             visual_binding.get("sha256"),
                             label="interactive workstation physical accessibility visual artifact",
                             failures=failures,
+                            expected_width=expected_visual_width,
+                            expected_height=expected_visual_height,
                         )
 
 

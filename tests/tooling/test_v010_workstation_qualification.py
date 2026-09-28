@@ -213,8 +213,8 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "displays": [
                 {
                     "connector": "DP-1",
-                    "width": 2560,
-                    "height": 1440,
+                    "width": 320,
+                    "height": 180,
                     "refresh_millihz": 60000,
                     "scale": 1.0,
                 }
@@ -365,11 +365,22 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             }
             if name == "accessibility-and-visual":
                 visual_artifact = evidence_dir / "accessibility-and-visual.png"
-                visual_artifact.write_bytes(self._png_bytes(8, 8, pixel_value=96))
+                display = hardware["displays"][0]
+                visual_artifact.write_bytes(
+                    self._png_bytes(display["width"], display["height"], pixel_value=96)
+                )
                 payload["visual_artifact"] = {
                     **binding(visual_artifact),
                     "environment_sha256": environment_binding["sha256"],
                     "execution_provenance_sha256": provenance_binding["sha256"],
+                    "capture": {
+                        "kind": "full-output",
+                        "coordinate_space": "physical-pixels",
+                        "connector": display["connector"],
+                        "pixel_width": display["width"],
+                        "pixel_height": display["height"],
+                        "scale": display["scale"],
+                    },
                 }
             evidence.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
             cases.append(
@@ -1348,6 +1359,84 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
                 "physical accessibility visual artifact must bind the physical machine environment",
+                result.stderr,
+            )
+
+
+    def test_interactive_workstation_rejects_accessibility_visual_display_substitution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "accessibility-and-visual")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            attestation["visual_artifact"]["capture"]["connector"] = "HDMI-A-99"
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "physical accessibility visual artifact capture.connector must match an identified physical display",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_rejects_accessibility_visual_png_dimension_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "accessibility-and-visual")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            visual_path = root / attestation["visual_artifact"]["path"]
+            visual_path.write_bytes(self._png_bytes(160, 90, pixel_value=96))
+            attestation["visual_artifact"]["sha256"] = hashlib.sha256(visual_path.read_bytes()).hexdigest()
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "physical accessibility visual artifact PNG width does not match reviewed metadata",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_rejects_accessibility_visual_scale_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "accessibility-and-visual")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            attestation["visual_artifact"]["capture"]["scale"] = 2.0
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "physical accessibility visual artifact capture.scale must match the identified physical display",
                 result.stderr,
             )
 
