@@ -166,6 +166,17 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         run_id = "q11-fixture-run"
         boot_id = "11111111-2222-3333-4444-555555555555"
         case_observations = {
+            "bounded-installer-lane": [
+                "installer-started-from-supported-media",
+                "arch-hyprland-v1-constructed-or-adopted",
+                "disk-encryption-baseline-verified",
+                "firewall-default-deny-verified",
+                "ssh-disabled-default-verified",
+                "owner-enrollment-completed",
+                "install-interruption-injected",
+                "interrupted-install-recovered",
+                "post-install-first-boot-completed",
+            ],
             "physical-session-start": ["physical-hardware-present", "wayland-session-active", "hyprland-session-active"],
             "session-supervision": [
                 "hyprland-session-target-active",
@@ -177,6 +188,12 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             ],
             "shell-render-and-input": ["shell-rendered", "keyboard-input", "pointer-input"],
             "display-scale-and-hidpi": ["display-enumerated", "scale-applied", "hidpi-render-captured"],
+            "accessibility-and-visual": [
+                "screen-reader-semantics-verified",
+                "focus-navigation-verified",
+                "reduced-motion-verified",
+                "visual-artifact-retained",
+            ],
             "provider-runtime-identities": ["networkmanager-version", "bluez-version", "pipewire-version", "wireplumber-version", "udisks2-version", "polkit-version"],
             "restart-recovery": ["shell-restart", "authority-restart", "state-reobserved"],
         }
@@ -275,10 +292,12 @@ class V010WorkstationQualificationTests(unittest.TestCase):
 
         cases = []
         mechanisms = {
+            "bounded-installer-lane": "physical-installer-execution",
             "physical-session-start": "physical-session-observation",
             "session-supervision": "systemd-session-observation",
             "shell-render-and-input": "physical-input-observation",
             "display-scale-and-hidpi": "physical-display-observation",
+            "accessibility-and-visual": "physical-accessibility-visual-observation",
             "provider-runtime-identities": "physical-provider-observation",
             "restart-recovery": "physical-restart-observation",
         }
@@ -312,6 +331,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 json.dumps(provenance_payload, indent=2) + "\n",
                 encoding="utf-8",
             )
+            provenance_binding = binding(provenance_path)
 
             evidence = evidence_dir / f"{name}.json"
             payload = {
@@ -328,7 +348,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                     "boot_id": boot_id,
                     "controller": "maintainer-console",
                     "mechanism": mechanism,
-                    "provenance": binding(provenance_path),
+                    "provenance": provenance_binding,
                 },
                 "observations": [
                     {
@@ -343,6 +363,14 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                     for observation in observations
                 ],
             }
+            if name == "accessibility-and-visual":
+                visual_artifact = evidence_dir / "accessibility-and-visual.png"
+                visual_artifact.write_bytes(self._png_bytes(8, 8, pixel_value=96))
+                payload["visual_artifact"] = {
+                    **binding(visual_artifact),
+                    "environment_sha256": environment_binding["sha256"],
+                    "execution_provenance_sha256": provenance_binding["sha256"],
+                }
             evidence.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
             cases.append(
                 {
@@ -1248,6 +1276,78 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
                 "interactive workstation evidence must contain exactly the required Q11 cases",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_requires_executed_bounded_installer_lane(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "bounded-installer-lane")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            attestation["machine_execution"]["mechanism"] = "process-local-installer"
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("machine_execution mechanism must be physical-installer-execution", result.stderr)
+
+    def test_interactive_workstation_requires_physical_accessibility_visual_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "accessibility-and-visual")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            attestation.pop("visual_artifact")
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "interactive workstation physical accessibility visual artifact binding must be an object",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_rejects_accessibility_visual_environment_substitution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "accessibility-and-visual")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            attestation["visual_artifact"]["environment_sha256"] = "d" * 64
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "physical accessibility visual artifact must bind the physical machine environment",
                 result.stderr,
             )
 

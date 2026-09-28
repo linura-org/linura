@@ -241,6 +241,17 @@ EXPECTED_Q10_AUTHORITY_QUALIFICATION = {
 }
 
 EXPECTED_Q11_CASE_OBSERVATIONS = {
+    "bounded-installer-lane": [
+        "installer-started-from-supported-media",
+        "arch-hyprland-v1-constructed-or-adopted",
+        "disk-encryption-baseline-verified",
+        "firewall-default-deny-verified",
+        "ssh-disabled-default-verified",
+        "owner-enrollment-completed",
+        "install-interruption-injected",
+        "interrupted-install-recovered",
+        "post-install-first-boot-completed",
+    ],
     "physical-session-start": ["physical-hardware-present", "wayland-session-active", "hyprland-session-active"],
     "session-supervision": [
         "hyprland-session-target-active",
@@ -252,6 +263,12 @@ EXPECTED_Q11_CASE_OBSERVATIONS = {
     ],
     "shell-render-and-input": ["shell-rendered", "keyboard-input", "pointer-input"],
     "display-scale-and-hidpi": ["display-enumerated", "scale-applied", "hidpi-render-captured"],
+    "accessibility-and-visual": [
+        "screen-reader-semantics-verified",
+        "focus-navigation-verified",
+        "reduced-motion-verified",
+        "visual-artifact-retained",
+    ],
     "provider-runtime-identities": ["networkmanager-version", "bluez-version", "pipewire-version", "wireplumber-version", "udisks2-version", "polkit-version"],
     "restart-recovery": ["shell-restart", "authority-restart", "state-reobserved"],
 }
@@ -267,6 +284,10 @@ EXPECTED_INTERACTIVE_WORKSTATION = {
     "require_machine_environment_provenance": True,
     "require_raw_machine_probes": True,
     "require_case_execution_provenance": True,
+    "require_bounded_installer_execution": True,
+    "require_interrupted_install_recovery": True,
+    "require_physical_accessibility_visual_evidence": True,
+    "require_retained_physical_visual_artifact": True,
     "required_provider_ids": [
         "networkmanager",
         "bluez",
@@ -276,19 +297,23 @@ EXPECTED_INTERACTIVE_WORKSTATION = {
         "polkit",
     ],
     "required_cases": [
+        "bounded-installer-lane",
         "physical-session-start",
         "session-supervision",
         "shell-render-and-input",
         "display-scale-and-hidpi",
+        "accessibility-and-visual",
         "provider-runtime-identities",
         "restart-recovery",
     ],
 }
 EXPECTED_Q11_EXECUTION_MECHANISMS = {
+    "bounded-installer-lane": "physical-installer-execution",
     "physical-session-start": "physical-session-observation",
     "session-supervision": "systemd-session-observation",
     "shell-render-and-input": "physical-input-observation",
     "display-scale-and-hidpi": "physical-display-observation",
+    "accessibility-and-visual": "physical-accessibility-visual-observation",
     "provider-runtime-identities": "physical-provider-observation",
     "restart-recovery": "physical-restart-observation",
 }
@@ -1450,6 +1475,44 @@ def _validate_interactive_workstation_evidence(
                     environment_boot_id=environment_boot_id,
                     failures=failures,
                 )
+                if name == "accessibility-and-visual":
+                    visual_binding = attestation.get("visual_artifact")
+                    visual_path = _validate_q11_bound_artifact(
+                        root,
+                        visual_binding,
+                        label="interactive workstation physical accessibility visual artifact",
+                        failures=failures,
+                    )
+                    if isinstance(visual_binding, dict):
+                        if visual_binding.get("environment_sha256") != environment_sha256:
+                            failures.append(
+                                "interactive workstation physical accessibility visual artifact must bind the physical machine environment"
+                            )
+                        machine_execution = attestation.get("machine_execution")
+                        provenance_binding = (
+                            machine_execution.get("provenance")
+                            if isinstance(machine_execution, dict)
+                            else None
+                        )
+                        provenance_sha256 = (
+                            provenance_binding.get("sha256")
+                            if isinstance(provenance_binding, dict)
+                            else None
+                        )
+                        if (
+                            not isinstance(provenance_sha256, str)
+                            or not SHA256_RE.fullmatch(provenance_sha256)
+                            or visual_binding.get("execution_provenance_sha256") != provenance_sha256
+                        ):
+                            failures.append(
+                                "interactive workstation physical accessibility visual artifact must bind the case execution provenance"
+                            )
+                        _validate_png_artifact(
+                            visual_path,
+                            visual_binding.get("sha256"),
+                            label="interactive workstation physical accessibility visual artifact",
+                            failures=failures,
+                        )
 
 
 def _load_release_machine_package_inventory(

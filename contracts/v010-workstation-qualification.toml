@@ -122,8 +122,12 @@ require_physical_hardware = true
 require_machine_environment_provenance = true
 require_raw_machine_probes = true
 require_case_execution_provenance = true
+require_bounded_installer_execution = true
+require_interrupted_install_recovery = true
+require_physical_accessibility_visual_evidence = true
+require_retained_physical_visual_artifact = true
 required_provider_ids = ["networkmanager", "bluez", "pipewire", "wireplumber", "udisks2", "polkit"]
-required_cases = ["physical-session-start", "session-supervision", "shell-render-and-input", "display-scale-and-hidpi", "provider-runtime-identities", "restart-recovery"]
+required_cases = ["bounded-installer-lane", "physical-session-start", "session-supervision", "shell-render-and-input", "display-scale-and-hidpi", "accessibility-and-visual", "provider-runtime-identities", "restart-recovery"]
 
 [update_recovery_qualification]
 evidence_ready = false
