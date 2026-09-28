@@ -181,7 +181,14 @@ class ToolingTests(unittest.TestCase):
 
     def test_v010_readiness_seal_excludes_executable_qualification_harnesses(self) -> None:
         workflow = (ROOT / ".github/workflows/v010-qualification.yml").read_text(encoding="utf-8")
-        self.assertNotIn("|qualification/v010/*|", workflow)
+        match = re.search(
+            r'for path in "\$\{changed\[@\]\}"; do\s+case "\$path" in(?P<classifier>.*?)\n\s+\*\)',
+            workflow,
+            flags=re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        classifier = match.group("classifier") if match is not None else ""
+        self.assertNotIn("|qualification/v010/*|", classifier)
         for retained_path in (
             "qualification/v010/experience-evidence.json",
             "qualification/v010/interactive-workstation-evidence.json",
@@ -193,8 +200,8 @@ class ToolingTests(unittest.TestCase):
             "qualification/v010/update-recovery/*",
         ):
             with self.subTest(path=retained_path):
-                self.assertIn(retained_path, workflow)
-        self.assertNotIn("qualification/v010/shell-runtime/*", workflow)
+                self.assertIn(retained_path, classifier)
+        self.assertNotIn("qualification/v010/shell-runtime/*", classifier)
 
     def test_v09_regression_lane_cannot_skip_exact_source_contract_tests(self) -> None:
         workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(encoding="utf-8")

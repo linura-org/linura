@@ -1108,6 +1108,18 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                     for observation in workflow_observations_by_surface[surface]
                 },
             }
+            if surface in {
+                "command-palette",
+                "quick-settings",
+                "desktop-shell-integration",
+                "shell-panel-tray-status",
+                "launcher-workspace",
+                "notifications-osd",
+            }:
+                report["input_region"] = {
+                    "noninteractive_regions": "pass-through",
+                    "interactive_regions": "bounded-to-visible-controls",
+                }
             report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
             interaction_records.append(
                 {
@@ -1282,6 +1294,36 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("session.compositor_version must match frozen hyprland version", result.stderr)
+
+    def test_interactive_workstation_rejects_qt_kernel_and_systemd_version_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            for key in ("qt_version", "kernel_version", "systemd_version"):
+                payload["session"][key] = "9.9.9"
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "session.qt_version must match frozen qt6-base version",
+                result.stderr,
+            )
+            self.assertIn(
+                "session.kernel_version must match frozen linux version",
+                result.stderr,
+            )
+            self.assertIn(
+                "session.systemd_version must match frozen systemd version",
+                result.stderr,
+            )
 
     def test_interactive_workstation_rejects_cpu_architecture_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2433,6 +2475,42 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("interaction/accessibility report network-connectivity must contain exactly the required workflow observations", result.stderr)
+
+    def test_q10_overlay_input_regions_must_pass_through_and_remain_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_complete_experience_evidence(root)
+            evidence_path = root / "qualification/v010/experience-evidence.json"
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+
+            for surface, key, value in (
+                ("notifications-osd", "noninteractive_regions", "captures-full-screen"),
+                ("command-palette", "interactive_regions", "full-screen"),
+            ):
+                record = next(
+                    item for item in evidence["interaction_accessibility"]
+                    if item["surface"] == surface
+                )
+                report_path = root / record["report"]
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+                report["input_region"][key] = value
+                report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+                record["report_sha256"] = hashlib.sha256(report_path.read_bytes()).hexdigest()
+
+            evidence_path.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+            self._refresh_experience_evidence_digest(root)
+
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "interaction/accessibility report notifications-osd must bind pass-through noninteractive regions and bounded interactive controls",
+                result.stderr,
+            )
+            self.assertIn(
+                "interaction/accessibility report command-palette must bind pass-through noninteractive regions and bounded interactive controls",
+                result.stderr,
+            )
 
     def test_q10_authority_evidence_requires_exact_case_matrix(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

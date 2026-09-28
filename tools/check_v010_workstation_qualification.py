@@ -93,6 +93,21 @@ EXPECTED_Q10_SURFACE_WORKFLOW_OBSERVATIONS = {
     "personalization": ["typed-preference-change-completed", "preference-persistence-reobserved", "authority-bearing-payload-rejected"],
 }
 
+EXPECTED_Q10_OVERLAY_INPUT_REGION_SURFACES = frozenset(
+    {
+        "command-palette",
+        "quick-settings",
+        "desktop-shell-integration",
+        "shell-panel-tray-status",
+        "launcher-workspace",
+        "notifications-osd",
+    }
+)
+EXPECTED_Q10_OVERLAY_INPUT_REGION = {
+    "noninteractive_regions": "pass-through",
+    "interactive_regions": "bounded-to-visible-controls",
+}
+
 
 EXPECTED_EXPERIENCE = {
     "interaction_model": "one-model-many-interfaces",
@@ -181,6 +196,9 @@ EXPECTED_UPDATES = {
 EXPECTED_Q11_SESSION_PACKAGE_VERSIONS = {
     "compositor_version": "hyprland",
     "quickshell_version": "quickshell",
+    "qt_version": "qt6-base",
+    "kernel_version": "linux",
+    "systemd_version": "systemd",
 }
 
 EXPECTED_Q10_CASE_OBSERVATIONS = {
@@ -2755,6 +2773,13 @@ def _validate_experience_evidence(
             if checks.get(key) != "pass":
                 failures.append(
                     f"interaction/accessibility report {surface} checks.{key} must be pass"
+                )
+
+        if surface in EXPECTED_Q10_OVERLAY_INPUT_REGION_SURFACES:
+            if report.get("input_region") != EXPECTED_Q10_OVERLAY_INPUT_REGION:
+                failures.append(
+                    f"interaction/accessibility report {surface} must bind pass-through "
+                    "noninteractive regions and bounded interactive controls"
                 )
 
         expected_workflow_observations = EXPECTED_Q10_SURFACE_WORKFLOW_OBSERVATIONS.get(surface)
