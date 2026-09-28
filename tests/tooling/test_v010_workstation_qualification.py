@@ -308,6 +308,10 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 f"case={name}\n"
                 "controller=maintainer-console\n"
                 f"mechanism={mechanism}\n"
+                f"environment_sha256={environment_binding['sha256']}\n"
+                f"source_commit_sha={source_commit_sha}\n"
+                f"run_id={run_id}\n"
+                "scope=machine\n"
                 f"boot_id={boot_id}\n",
                 encoding="utf-8",
             )
@@ -1660,6 +1664,48 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
                 "interactive workstation case evidence physical-session-start missing machine_execution provenance",
+                result.stderr,
+            )
+
+    def test_interactive_workstation_rejects_stale_execution_log_run_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = self._write_interactive_workstation_evidence(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            case = next(item for item in payload["cases"] if item["name"] == "physical-session-start")
+            evidence_path = root / case["evidence"]
+            attestation = json.loads(evidence_path.read_text(encoding="utf-8"))
+            provenance_path = root / attestation["machine_execution"]["provenance"]["path"]
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            event_log = root / provenance["event_log"]["path"]
+            event_text = event_log.read_text(encoding="utf-8")
+            event_log.write_text(
+                event_text.replace(
+                    f"run_id={payload['run_id']}\n",
+                    "run_id=stale-physical-run\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            provenance["event_log"]["sha256"] = hashlib.sha256(event_log.read_bytes()).hexdigest()
+            provenance_path.write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+            attestation["machine_execution"]["provenance"]["sha256"] = hashlib.sha256(
+                provenance_path.read_bytes()
+            ).hexdigest()
+            evidence_path.write_text(json.dumps(attestation, indent=2) + "\n", encoding="utf-8")
+            case["sha256"] = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            text = contract.read_text(encoding="utf-8")
+            old_digest = tomllib.loads(text)["interactive_workstation"]["evidence_manifest_sha256"]
+            contract.write_text(text.replace(old_digest, digest, 1), encoding="utf-8")
+
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "machine execution event log must bind the case, controller, mechanism, environment, source, run, scope, and boot identity",
                 result.stderr,
             )
 

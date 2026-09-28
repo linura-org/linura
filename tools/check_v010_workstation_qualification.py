@@ -1300,10 +1300,17 @@ def _validate_q11_case_execution(
                 f"case={case_name}",
                 f"controller={controller}",
                 f"mechanism={expected_mechanism}",
+                f"environment_sha256={environment_sha256}",
+                f"source_commit_sha={source_sha}",
+                f"run_id={manifest.get('run_id')}",
+                "scope=machine",
                 f"boot_id={environment_boot_id}",
             }
             if not required_lines.issubset(event_lines):
-                failures.append(f"{label} machine execution event log does not bind the physical run")
+                failures.append(
+                    f"{label} machine execution event log must bind the case, controller, "
+                    "mechanism, environment, source, run, scope, and boot identity"
+                )
 
 
 def _validate_interactive_workstation_evidence(

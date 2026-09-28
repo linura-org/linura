@@ -189,7 +189,7 @@ jobs:
                 [[ "${#changed[@]}" -gt 0 ]] || evidence_seal=false
                 for path in "${changed[@]}"; do
                   case "$path" in
-                    contracts/v010-workstation-qualification.toml|contracts/v010-workstation-slices.toml|docs/qualification/v0.10.0.md|docs/releases/v0.10.0.md|qualification/v010/*|visual/baselines/*)
+                    contracts/v010-workstation-qualification.toml|contracts/v010-workstation-slices.toml|docs/qualification/v0.10.0.md|docs/releases/v0.10.0.md|qualification/v010/experience-evidence.json|qualification/v010/interactive-workstation-evidence.json|qualification/v010/security-evidence.json|qualification/v010/update-recovery-evidence.json|qualification/v010/experience/*|qualification/v010/interactive-workstation/*|qualification/v010/security/*|qualification/v010/update-recovery/*|visual/baselines/*)
                       ;;
                     *)
                       evidence_seal=false

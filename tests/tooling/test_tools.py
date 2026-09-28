@@ -179,6 +179,23 @@ class ToolingTests(unittest.TestCase):
             workflow,
         )
 
+    def test_v010_readiness_seal_excludes_executable_qualification_harnesses(self) -> None:
+        workflow = (ROOT / ".github/workflows/v010-qualification.yml").read_text(encoding="utf-8")
+        self.assertNotIn("|qualification/v010/*|", workflow)
+        for retained_path in (
+            "qualification/v010/experience-evidence.json",
+            "qualification/v010/interactive-workstation-evidence.json",
+            "qualification/v010/security-evidence.json",
+            "qualification/v010/update-recovery-evidence.json",
+            "qualification/v010/experience/*",
+            "qualification/v010/interactive-workstation/*",
+            "qualification/v010/security/*",
+            "qualification/v010/update-recovery/*",
+        ):
+            with self.subTest(path=retained_path):
+                self.assertIn(retained_path, workflow)
+        self.assertNotIn("qualification/v010/shell-runtime/*", workflow)
+
     def test_v09_regression_lane_cannot_skip_exact_source_contract_tests(self) -> None:
         workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(encoding="utf-8")
         self.assertIn("cargo fmt --all -- --check", workflow)
