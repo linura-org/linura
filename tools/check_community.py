@@ -182,7 +182,11 @@ def _top_level_yaml_entries(text: str) -> list[tuple[str, str, list[str]]]:
     ]
     root_indent = min(active_indents, default=0)
     normalized = [
-        raw[root_indent:] if len(raw) >= root_indent else raw
+        raw
+        if not raw.strip() or raw.lstrip().startswith("#")
+        else raw[root_indent:]
+        if len(raw) >= root_indent
+        else raw
         for raw in lines
     ]
 
