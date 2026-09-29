@@ -83,6 +83,62 @@ class CommunityContractTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("effective YAML setting", result.stderr)
 
+    def test_rejects_malformed_or_unrecognized_issue_routing_yaml(self) -> None:
+        for extra, expected in (
+            ("this is invalid yaml\n", "is malformed"),
+            ("unexpected_setting: true\n", "unsupported top-level key"),
+        ):
+            with self.subTest(extra=extra):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self.copy_fixture(root)
+                    config = root / ".github/ISSUE_TEMPLATE/config.yml"
+                    config.write_text(
+                        config.read_text(encoding="utf-8") + "\n" + extra,
+                        encoding="utf-8",
+                    )
+
+                    result = self.run_checker(root)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(expected, result.stderr)
+
+    def test_active_funding_requires_explicit_canonical_active_status(self) -> None:
+        for replacement in (
+            "Status: pending a verified funding destination.",
+            "",
+        ):
+            with self.subTest(replacement=replacement):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self.copy_fixture(root)
+                    contract = root / "contracts/community.toml"
+                    contract.write_text(
+                        contract.read_text(encoding="utf-8").replace(
+                            "active = false", "active = true", 1
+                        ),
+                        encoding="utf-8",
+                    )
+                    sponsorship = root / "docs/community/sponsorship.md"
+                    sponsorship.write_text(
+                        sponsorship.read_text(encoding="utf-8").replace(
+                            "Status: inactive pending a verified funding destination.",
+                            replacement,
+                            1,
+                        ),
+                        encoding="utf-8",
+                    )
+                    (root / ".github/FUNDING.yml").write_text(
+                        'custom: ["https://github.com/sponsors/linura-org"]\n',
+                        encoding="utf-8",
+                    )
+
+                    result = self.run_checker(root)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(
+                        "requires exactly the canonical active sponsorship status",
+                        result.stderr,
+                    )
+
     def test_rejects_empty_or_unsupported_active_funding_destination(self) -> None:
         for funding_text, expected in (
             ("github:\n", "requires a nonempty destination"),

@@ -108,6 +108,8 @@ _PLACEHOLDER_FUNDING_VALUES = frozenset({
     "changeme",
 })
 _PLACEHOLDER_HOSTS = frozenset({"example.com", "example.org", "example.net"})
+INACTIVE_SPONSORSHIP_STATUS = "Status: inactive pending a verified funding destination."
+ACTIVE_SPONSORSHIP_STATUS = "Status: active with a verified funding destination."
 
 
 def _strip_yaml_comment(value: str) -> str:
@@ -206,6 +208,127 @@ def _top_level_yaml_entries(text: str) -> list[tuple[str, str, list[str]]]:
         entries.append((key, scalar, children))
         index = cursor
     return entries
+
+
+def _validate_issue_config_yaml(text: str) -> list[str]:
+    failures: list[str] = []
+    seen_top_level: set[str] = set()
+    contact_links: list[dict[str, str]] = []
+    current_link: dict[str, str] | None = None
+    section: str | None = None
+
+    for line_number, raw in enumerate(text.splitlines(), start=1):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        if "\t" in raw[: len(raw) - len(raw.lstrip())]:
+            failures.append(
+                f"issue routing YAML line {line_number} must use spaces for indentation"
+            )
+            continue
+
+        indent = len(raw) - len(raw.lstrip(" "))
+        active = _strip_yaml_comment(raw).strip()
+        if not active:
+            continue
+
+        if indent == 0:
+            match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", active)
+            if match is None:
+                failures.append(
+                    f"issue routing YAML line {line_number} is malformed: {active!r}"
+                )
+                section = None
+                current_link = None
+                continue
+            key, scalar = match.group(1), match.group(2).strip()
+            if key not in {"blank_issues_enabled", "contact_links"}:
+                failures.append(
+                    f"issue routing YAML line {line_number} has unsupported top-level key: {key}"
+                )
+            if key in seen_top_level:
+                failures.append(
+                    f"issue routing YAML contains duplicate top-level key: {key}"
+                )
+            seen_top_level.add(key)
+            current_link = None
+
+            if key == "blank_issues_enabled":
+                section = None
+                if scalar.lower() not in {"true", "false"}:
+                    failures.append(
+                        "issue routing blank_issues_enabled must be an explicit YAML boolean"
+                    )
+            elif key == "contact_links":
+                section = "contact_links"
+                if scalar:
+                    failures.append(
+                        "issue routing contact_links must be a block sequence"
+                    )
+            continue
+
+        if indent == 2 and section == "contact_links":
+            match = re.fullmatch(r"-\s+name\s*:\s*(.+)", active)
+            if match is None:
+                failures.append(
+                    f"issue routing YAML line {line_number} must start a contact link with '- name:'"
+                )
+                current_link = None
+                continue
+            name = _unquote_yaml_scalar(match.group(1))
+            if not name:
+                failures.append(
+                    f"issue routing YAML line {line_number} has an empty contact link name"
+                )
+                current_link = None
+                continue
+            current_link = {"name": name}
+            contact_links.append(current_link)
+            continue
+
+        if indent == 4 and section == "contact_links" and current_link is not None:
+            match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", active)
+            if match is None:
+                failures.append(
+                    f"issue routing YAML line {line_number} is malformed: {active!r}"
+                )
+                continue
+            key, scalar = match.group(1), _unquote_yaml_scalar(match.group(2))
+            if key not in {"url", "about"}:
+                failures.append(
+                    f"issue routing YAML line {line_number} has unsupported contact-link key: {key}"
+                )
+                continue
+            if key in current_link:
+                failures.append(
+                    f"issue routing YAML contact link contains duplicate key: {key}"
+                )
+                continue
+            if not scalar:
+                failures.append(
+                    f"issue routing YAML contact link {key} must be nonempty"
+                )
+                continue
+            current_link[key] = scalar
+            continue
+
+        failures.append(
+            f"issue routing YAML line {line_number} has invalid structure or indentation"
+        )
+
+    if "blank_issues_enabled" not in seen_top_level:
+        failures.append("issue routing YAML is missing blank_issues_enabled")
+    if "contact_links" not in seen_top_level:
+        failures.append("issue routing YAML is missing contact_links")
+    if not contact_links:
+        failures.append("issue routing YAML requires at least one contact link")
+    for index, link in enumerate(contact_links, start=1):
+        missing = {"name", "url", "about"} - set(link)
+        if missing:
+            failures.append(
+                f"issue routing YAML contact link {index} is missing: {', '.join(sorted(missing))}"
+            )
+
+    return failures
 
 
 def _funding_destinations(scalar: str, children: list[str]) -> list[str]:
@@ -310,6 +433,7 @@ def validate(root: Path) -> list[str]:
         failures.append("CONTRIBUTING.md must state the inbound Apache-2.0 policy")
 
     issue_config = read_text(root, ".github/ISSUE_TEMPLATE/config.yml")
+    failures.extend(_validate_issue_config_yaml(issue_config))
     issue_entries = [
         (key, scalar)
         for key, scalar, _children in _top_level_yaml_entries(issue_config)
@@ -350,11 +474,18 @@ def validate(root: Path) -> list[str]:
     funding_text = read_text(root, ".github/FUNDING.yml")
     funding_entries = _top_level_yaml_entries(funding_text)
     sponsorship = read_text(root, "docs/community/sponsorship.md")
+    sponsorship_statuses = [
+        line.strip()
+        for line in sponsorship.splitlines()
+        if line.strip().startswith("Status:")
+    ]
     if funding_active is False:
         if funding_entries:
             failures.append("FUNDING.yml activates a destination while community contract funding.active=false")
-        if "Status: inactive" not in sponsorship:
-            failures.append("inactive funding contract requires explicit inactive sponsorship status")
+        if sponsorship_statuses != [INACTIVE_SPONSORSHIP_STATUS]:
+            failures.append(
+                "inactive funding contract requires exactly the canonical inactive sponsorship status"
+            )
     elif funding_active is True:
         if not funding_entries:
             failures.append("funding.active=true requires an active FUNDING.yml destination")
@@ -379,8 +510,10 @@ def validate(root: Path) -> list[str]:
             valid_destinations += len(destinations)
         if valid_destinations == 0:
             failures.append("funding.active=true requires at least one supported usable FUNDING.yml destination")
-        if "Status: inactive" in sponsorship:
-            failures.append("active funding contract cannot retain inactive sponsorship status")
+        if sponsorship_statuses != [ACTIVE_SPONSORSHIP_STATUS]:
+            failures.append(
+                "active funding contract requires exactly the canonical active sponsorship status"
+            )
     else:
         failures.append("community contract funding.active must be boolean")
 
