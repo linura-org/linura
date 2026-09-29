@@ -36,7 +36,7 @@ Last reviewed: **2026-09-29**
 | crates.io | `linura` | ✅ Claimed | — | Canonical `linura` crate has been published under Linura control; the bootstrap publish token was revoked after publication | Maintain ownership/recovery controls and use the reviewed release path for future publications |
 | PyPI | `linura` | ✅ Claimed | — | The canonical `linura` project has been published under Linura control; organization governance remains separate from project-name ownership | Maintain ownership/recovery controls and trusted publishing for future releases |
 | Flathub / AppStream | `org.linura.Linura` | 🟦 Defined | 🟠 High | Canonical desktop/AppStream identity is on `main`; this is not a Flathub publication claim | Submit only when the graphical client is genuinely installable and release-qualified |
-| Homebrew | `linura-org/homebrew-tap` | ⬜ Pending | 🟠 Soon | No tap recorded | Create when a supported Homebrew install path exists |
+| Homebrew | `linura-org/homebrew-tap` | 🟦 Defined | — | Canonical public tap repository exists at `https://github.com/linura-org/homebrew-tap`; no formula is published yet | Maintain the tap; add `Formula/linura.rb` only when a release-qualified immutable artifact and checksum exist |
 | Arch / AUR | `linura` | 🟨 Blocked | 🟠 High | New AUR account registration is currently unavailable | Keep a real Arch package ready; publish when account creation is available |
 | Linux / Freedesktop namespace | `org.linura.*`, `linura-*` | ✅ Established | — | `contracts/namespaces.toml`, ADR 0011, active repository surfaces | Maintain through `cargo xtask check` |
 | OCI / GHCR | `ghcr.io/linura-org/*` | 🟦 Defined | 🟠 Soon | GitHub organization provides the canonical owner root; no generic image publication implied | Define image names only when real container artifacts are ready |
@@ -69,8 +69,8 @@ Do not commit secrets, recovery codes, private account identifiers, support tran
 The current ordering is:
 
 1. finish the Docker Hub organization conversion/support path without publishing a placeholder image;
-2. preserve npm, Snap, crates.io, and PyPI ownership/recovery controls without publishing placeholder artifacts;
+2. preserve npm, Snap, crates.io, PyPI, and the canonical Homebrew tap ownership/recovery controls without publishing placeholder artifacts;
 3. preserve the defined desktop/AppStream identity without overstating Flathub publication, and submit only when the graphical client is release-qualified;
 4. keep the AUR package ready while registration remains blocked;
-5. add Homebrew/OCI distribution only when the corresponding installable artifact is real;
+5. add the real Homebrew formula and OCI distribution only when the corresponding installable artifacts are real;
 6. activate package/download/documentation subdomains only when they have an operational service behind them.
