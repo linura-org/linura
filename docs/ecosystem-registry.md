@@ -31,7 +31,7 @@ Last reviewed: **2026-09-29**
 | GitHub | `linura-org` | ✅ Claimed | — | `https://github.com/linura-org` | Maintain organization ownership and recovery controls |
 | Domains | `linura.org`, `linura.dev` | ✅ Claimed | — | Project-controlled domains | Keep `linura.org` canonical; maintain `.dev` redirect/defensive ownership |
 | npm | `@linura` | ✅ Claimed | — | The `@linura` organization/scope is secured under Linura control; no placeholder package is required | Maintain organization ownership/recovery controls; publish only real packages when needed |
-| Docker Hub | `linura` organization | 🟪 In progress | 🔴 Now | The `linura` Docker user namespace is secured under Linura control; Docker Support has offered conversion to an organization, but the organization conversion is not yet recorded as complete | Complete the support-assisted conversion to the `linura` organization and verify the intended owner account; do not publish a placeholder image |
+| Docker Hub | `linura` namespace | ✅ Claimed | — | The `linura` Docker ID/user namespace is secured under Linura control; Docker Support has confirmed an organization-conversion path if needed later | Maintain ownership/recovery controls; defer organization conversion until Linura needs organization-level CI/team governance or real container publication |
 | Snap Store | `linura` | ✅ Claimed | — | Snapcraft reports the publisher already owns `linura`; uploads and metadata updates are allowed, while public release remains gated by Canonical's manual registration review | Maintain publisher ownership/recovery controls; wait for registration review and publish only a real release-qualified snap |
 | crates.io | `linura` | ✅ Claimed | — | Canonical `linura` crate has been published under Linura control; the bootstrap publish token was revoked after publication | Maintain ownership/recovery controls and use the reviewed release path for future publications |
 | PyPI | `linura` | ✅ Claimed | — | The canonical `linura` project has been published under Linura control; organization governance remains separate from project-name ownership | Maintain ownership/recovery controls and trusted publishing for future releases |
@@ -68,9 +68,9 @@ Do not commit secrets, recovery codes, private account identifiers, support tran
 
 The current ordering is:
 
-1. finish the Docker Hub organization conversion/support path without publishing a placeholder image;
-2. preserve npm, Snap, crates.io, PyPI, and the canonical Homebrew tap ownership/recovery controls without publishing placeholder artifacts;
-3. preserve the defined desktop/AppStream identity without overstating Flathub publication, and submit only when the graphical client is release-qualified;
-4. keep the AUR package ready while registration remains blocked;
-5. add the real Homebrew formula and OCI distribution only when the corresponding installable artifacts are real;
+1. preserve npm, Docker Hub, Snap, crates.io, PyPI, and the canonical Homebrew tap ownership/recovery controls without publishing placeholder artifacts;
+2. preserve the defined desktop/AppStream identity without overstating Flathub publication, and submit only when the graphical client is release-qualified;
+3. keep the AUR package ready while registration remains blocked;
+4. add the real Homebrew formula and OCI/container distribution only when the corresponding installable artifacts are real;
+5. convert the Docker namespace to an organization only when organization-level CI/team governance or real container publication makes that structure useful;
 6. activate package/download/documentation subdomains only when they have an operational service behind them.
