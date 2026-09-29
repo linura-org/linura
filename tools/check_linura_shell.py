@@ -35,6 +35,8 @@ REQUIRED = (
     "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml",
     "apps/linura-shell/plugins/command-palette/manifest.json",
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
+    "apps/linura-shell/plugins/notifications-osd/manifest.json",
+    "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml",
     "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml",
     "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml",
     "apps/linura-shell/bridge/CMakeLists.txt",
@@ -137,6 +139,8 @@ REQUIRED_BRIDGE = (
     "(!canApply() && !canCommitDraft())",
     'QStringLiteral("Audio controls are inactive.")',
     "observe(ObservePurpose::PostApply)",
+    "void lifecycleFeedback(",
+    "void publishLifecycleFeedback(",
 )
 
 REQUIRED_CI = (
@@ -174,6 +178,8 @@ REQUIRED_IMAGE = (
     'ROOT / "apps/linura-shell/plugins/quick-settings/manifest.json"',
     'ROOT / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"',
     'ROOT / "apps/linura-shell/plugins/command-palette/manifest.json"',
+    'ROOT / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"',
+    'ROOT / "apps/linura-shell/plugins/notifications-osd/manifest.json"',
     'ROOT / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"',
     'ROOT / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"',
     'ROOT / "apps/linura-shell/org.linura.ControlCenter.desktop"',
@@ -272,6 +278,9 @@ def validate(root: Path) -> list[str]:
     palette_qml = (
         root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
     ).read_text(encoding="utf-8")
+    lifecycle_feedback_qml = (
+        root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+    ).read_text(encoding="utf-8")
     workspace_controller_qml = (
         root / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"
     ).read_text(encoding="utf-8")
@@ -306,6 +315,8 @@ def validate(root: Path) -> list[str]:
         + "\n"
         + palette_qml
         + "\n"
+        + lifecycle_feedback_qml
+        + "\n"
         + workspace_controller_qml
         + "\n"
         + application_controller_qml
@@ -319,6 +330,7 @@ def validate(root: Path) -> list[str]:
         "import org.linura.ShellBridge 1.0",
         'import "plugins/quick-settings"',
         'import "plugins/command-palette"',
+        'import "plugins/notifications-osd" as Feedback',
         'import "integrations/hyprland"',
         'import "integrations/xdg"',
         "ShellRoot {",
@@ -337,6 +349,11 @@ def validate(root: Path) -> list[str]:
         "onLaunchCompleted: (status, requestGeneration) =>",
         "commandPalette.completeApplicationRequest(status, requestGeneration)",
         "active: shell.controlCenterOpen || shell.quickSettingsOpen",
+        "onLifecycleFeedback: (presentationGeneration, operationKey, phase, outcome,",
+        "observedValuePercent, observedValueValid, finalOutcome) =>",
+        "lifecycleFeedback.present(",
+        "Feedback.LifecycleFeedback {",
+        "id: lifecycleFeedback",
         "CommandPalette {",
         "onQuickSettingsRequested: shell.showQuickSettings()",
         "workspaceCatalog: workspaceNavigation.workspaceEntries",
@@ -377,6 +394,61 @@ def validate(root: Path) -> list[str]:
                 failures.append(
                     f"Linura Shell IPC must delegate navigation method to ShellRoot: {delegation}"
                 )
+
+    transition_start = lifecycle_feedback_qml.find(
+        "function transitionIsValid(currentPhase, nextPhase, nextOutcome) {"
+    )
+    transition_end = lifecycle_feedback_qml.find(
+        "\n    function boundedValueIsValid(",
+        transition_start,
+    )
+    expected_transition_lines = (
+        "function transitionIsValid(currentPhase, nextPhase, nextOutcome) {",
+        'if (currentPhase === "preparing") {',
+        'if (nextPhase === "executing")',
+        'return nextOutcome === "none"',
+        'if (nextPhase === "blocked")',
+        'return nextOutcome === "cancelled" || nextOutcome === "precondition-changed"',
+        'if (nextPhase === "failed")',
+        'return nextOutcome === "precondition-unavailable"',
+        '|| nextOutcome === "authority-unavailable"',
+        "return false",
+        "}",
+        'if (currentPhase === "executing") {',
+        'if (nextPhase === "verifying")',
+        'return nextOutcome === "none"',
+        'if (nextPhase === "failed")',
+        'return nextOutcome === "authority-unavailable"',
+        '|| nextOutcome === "rejected"',
+        '|| nextOutcome === "receipt-invalid"',
+        "return false",
+        "}",
+        'if (currentPhase === "verifying") {',
+        'if (nextPhase === "verified")',
+        'return nextOutcome === "changed" || nextOutcome === "no-change"',
+        'if (nextPhase === "blocked")',
+        'return nextOutcome === "target-changed"',
+        'if (nextPhase === "failed")',
+        'return nextOutcome === "verification-mismatch"',
+        '|| nextOutcome === "verification-unavailable"',
+        "return false",
+        "}",
+        "return false",
+        "}",
+    )
+    if transition_start < 0 or transition_end < 0:
+        failures.append("Lifecycle feedback transition state-machine contract is missing")
+    else:
+        transition_block = lifecycle_feedback_qml[transition_start:transition_end]
+        transition_lines = tuple(
+            line.strip()
+            for line in transition_block.splitlines()
+            if line.strip()
+        )
+        if transition_lines != expected_transition_lines:
+            failures.append(
+                "Lifecycle feedback transition state-machine contract drifted"
+            )
 
     for fragment in (
         "PanelWindow {",
@@ -445,6 +517,94 @@ def validate(root: Path) -> list[str]:
                 f"trusted shell QML contains forbidden authority/process/provider surface: {fragment}"
             )
 
+    for fragment in (
+        "PanelWindow {",
+        'WlrLayershell.namespace: "linura-lifecycle-feedback"',
+        "WlrLayershell.keyboardFocus: WlrKeyboardFocus.None",
+        "mask: Region {}",
+        "anchors { bottom: true; right: true }",
+        "margins { bottom: theme.spacingLg; right: theme.spacingLg }",
+        "function present(",
+        "function eventIsValid(",
+        "function transitionIsValid(currentPhase, nextPhase, nextOutcome)",
+        "function boundedValueIsValid(",
+        "function accessibilityName(",
+        'property int presentationGeneration: 0',
+        'property string operationKey: ""',
+        'property string phase: ""',
+        'property string outcome: "none"',
+        "property int observedValuePercent: -1",
+        "property bool observedValueValid: false",
+        "property bool finalOutcome: false",
+        'nextOperationKey !== "audio-output-volume"',
+        'nextOutcome === "changed" || nextOutcome === "no-change"',
+        'nextOutcome === "precondition-changed" || nextOutcome === "target-changed"',
+        'return (nextOutcome === "precondition-changed" || nextOutcome === "target-changed")\n                && nextFinalOutcome',
+        'nextOutcome === "verification-mismatch"',
+        'if (nextOutcome === "verification-mismatch")\n                return nextFinalOutcome',
+        "generation > 2147483647",
+        "const expectedNextGeneration =",
+        'generation !== 1 || nextPhase !== "preparing"',
+        "!finalOutcome",
+        "generation !== expectedNextGeneration",
+        'nextPhase !== "preparing"',
+        "!transitionIsValid(phase, nextPhase, nextOutcome)",
+        'if (currentPhase === "preparing")',
+        'return nextOutcome === "cancelled" || nextOutcome === "precondition-changed"',
+        'return nextOutcome === "precondition-unavailable"',
+        '|| nextOutcome === "authority-unavailable"',
+        'if (currentPhase === "executing")',
+        'return nextOutcome === "authority-unavailable"',
+        '|| nextOutcome === "rejected"',
+        '|| nextOutcome === "receipt-invalid"',
+        'if (currentPhase === "verifying")',
+        'return nextOutcome === "changed" || nextOutcome === "no-change"',
+        'return nextOutcome === "target-changed"',
+        'return nextOutcome === "verification-mismatch"',
+        '|| nextOutcome === "verification-unavailable"',
+        "LinuraSurface {",
+        "LinuraStatus {",
+        "LinuraText {",
+        "Accessible.name: root.accessibilityName()",
+        "Accessible.description: root.detail",
+        "Accessible.role: Accessible.AlertMessage",
+        "Accessible.focusable: false",
+        "Accessible.ignored: true",
+        "Timer {",
+    ):
+        if fragment not in lifecycle_feedback_qml:
+            failures.append(f"Lifecycle feedback shell contract missing: {fragment}")
+    if "anchors { top: true; right: true }" in lifecycle_feedback_qml:
+        failures.append(
+            "Lifecycle feedback must not compete with top-right Control Center or Quick Settings geometry"
+        )
+
+    if "Accessible.role: Accessible.StaticText" in lifecycle_feedback_qml:
+        failures.append(
+            "Lifecycle feedback must expose a live alert accessibility role, not static text"
+        )
+    if lifecycle_feedback_qml.count("Accessible.ignored: true") < 4:
+        failures.append(
+            "Lifecycle feedback visual children must be accessibility-ignored behind the single alert node"
+        )
+
+    for fragment in (
+        "import Quickshell.Io",
+        "Process {",
+        "org.linura.Control1",
+        "org.linura.Session1",
+        "requestId",
+        "planId",
+        "evidenceId",
+        "nextTitle",
+        "nextDetail",
+        "nextTone",
+    ):
+        if fragment in lifecycle_feedback_qml:
+            failures.append(
+                f"Lifecycle feedback presentation contains forbidden authority/identifier surface: {fragment}"
+            )
+
     broker_exempt_qml = application_controller_qml
     ordinary_qml = (
         shell_qml
@@ -454,6 +614,8 @@ def validate(root: Path) -> list[str]:
         + quick_settings_qml
         + "\n"
         + palette_qml
+        + "\n"
+        + lifecycle_feedback_qml
         + "\n"
         + workspace_controller_qml
         + "\n"
@@ -853,6 +1015,35 @@ def validate(root: Path) -> list[str]:
     if "capabilities" in quick_settings_manifest:
         failures.append("Quick Settings manifest must not become a capability grant")
 
+    lifecycle_manifest = json.loads(
+        (
+            root / "apps/linura-shell/plugins/notifications-osd/manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    expected_lifecycle_manifest = {
+        "schema_version": 1,
+        "id": "linura.notifications-osd",
+        "name": "Linura Lifecycle Feedback",
+        "kind": "overlay",
+        "entry_point": "LifecycleFeedback.qml",
+        "trust": "first-party",
+        "authority": "none",
+        "interaction_scope": "lifecycle-feedback-presentation",
+        "event_source": "typed-shell-feedback-envelope",
+        "payload_policy": "fixed-operation-phase-outcome-plus-authoritative-bounded-value",
+        "supported_feedback_operations": [
+            "audio-output-volume",
+        ],
+        "correlation": "ephemeral-local-generation",
+        "protocol_requirements": [],
+    }
+    if lifecycle_manifest != expected_lifecycle_manifest:
+        failures.append(
+            "Lifecycle feedback manifest must remain exact, first-party, presentation-only and authority-free"
+        )
+    if "capabilities" in lifecycle_manifest:
+        failures.append("Lifecycle feedback manifest must not become a capability grant")
+
     palette_manifest = json.loads(
         (
             root / "apps/linura-shell/plugins/command-palette/manifest.json"
@@ -929,6 +1120,70 @@ def validate(root: Path) -> list[str]:
         failures.append("Linura Shell bridge must reset canceled audio observations to inactive")
     if bridge.count("pending_->dispatched = true;") != 1:
         failures.append("Linura Shell bridge must distinguish pre-dispatch from dispatched effects")
+    verified_feedback_calls = list(
+        re.finditer(
+            r"publishLifecycleFeedback\(\s*[^,]+,\s*FeedbackPhase::Verified,",
+            bridge_source,
+        )
+    )
+    verified_feedback = (
+        verified_feedback_calls[0].start()
+        if len(verified_feedback_calls) == 1
+        else -1
+    )
+    post_identity = bridge_source.find("sameIdentity(pending.displayed, snapshot)")
+    post_value = bridge_source.find("snapshot.volumePercent != pending.requestedVolume")
+    if verified_feedback < 0 or not (
+        post_identity >= 0
+        and post_value >= 0
+        and verified_feedback > post_value > post_identity
+    ):
+        failures.append(
+            "Linura Shell verified lifecycle feedback must occur only after independent post-effect identity and value verification"
+        )
+    if len(verified_feedback_calls) != 1:
+        failures.append(
+            "Linura Shell must emit exactly one verified final lifecycle presentation path"
+        )
+    signal_block = re.search(
+        r"void lifecycleFeedback\(.*?\);",
+        bridge_header,
+        re.DOTALL,
+    )
+    if signal_block is None:
+        failures.append("Linura Shell bridge lifecycle feedback signal is missing")
+    elif any(
+        token in signal_block.group(0)
+        for token in ("requestId", "planId", "evidenceId", "tone", "title", "detail")
+    ):
+        failures.append(
+            "Linura Shell lifecycle feedback signal must not expose authority/evidence identifiers or free-form presentation copy"
+        )
+    for fragment in (
+        'constexpr auto kAudioFeedbackOperation = "audio-output-volume";',
+        "enum class FeedbackPhase",
+        "enum class FeedbackOutcome",
+        "qint32 presentationGeneration = 0;",
+        "qint32 presentationGeneration_ = 0;",
+        "FeedbackOutcome::PreconditionChanged",
+        "FeedbackOutcome::TargetChanged",
+        "FeedbackOutcome::VerificationMismatch",
+        "FeedbackOutcome::VerificationUnavailable",
+        "FeedbackOutcome::ReceiptInvalid",
+        "presentationVolumePercent(int volumePercent)",
+        "presentationVolumePercent(snapshot.volumePercent)",
+    ):
+        if fragment not in bridge:
+            failures.append(f"Linura Shell typed lifecycle feedback contract missing: {fragment}")
+
+    if "std::min(snapshot.volumePercent, 100)" in bridge_source:
+        failures.append(
+            "Linura Shell lifecycle feedback must never clip authoritative amplified volume into the presentation range"
+        )
+    if bridge_source.count("presentationVolumePercent(snapshot.volumePercent)") != 3:
+        failures.append(
+            "Linura Shell lifecycle feedback must omit rather than clip out-of-envelope authoritative volume"
+        )
 
     cmake = (root / "apps/linura-shell/bridge/CMakeLists.txt").read_text(
         encoding="utf-8"
@@ -1129,6 +1384,9 @@ def validate(root: Path) -> list[str]:
         "linura:commandPalette",
         "toggleQuickSettings",
         "Quick Settings",
+        "Lifecycle notifications and OSD are presentation-only consumers",
+        "does **not** introduce or claim a generic Control lifecycle event stream",
+        "final verified success is accepted only after the producer's independent post-effect observation",
         "active only while Control Center or Quick Settings is open",
         "toggleCommandPalette",
         "HYPRLAND_NO_SD_TARGET",

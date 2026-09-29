@@ -61,8 +61,40 @@ signals:
     void availabilityChanged();
     void receiptChanged();
     void activeChanged();
+    void lifecycleFeedback(
+        qint32 presentationGeneration,
+        const QString &operationKey,
+        const QString &phase,
+        const QString &outcome,
+        int observedValuePercent,
+        bool observedValueValid,
+        bool finalOutcome);
 
 private:
+    enum class FeedbackPhase {
+        Preparing,
+        Executing,
+        Verifying,
+        Verified,
+        Blocked,
+        Failed,
+    };
+
+    enum class FeedbackOutcome {
+        None,
+        Changed,
+        NoChange,
+        Cancelled,
+        PreconditionChanged,
+        TargetChanged,
+        VerificationMismatch,
+        VerificationUnavailable,
+        PreconditionUnavailable,
+        AuthorityUnavailable,
+        Rejected,
+        ReceiptInvalid,
+    };
+
     struct SinkSnapshot {
         quint32 nodeId = 0;
         quint64 objectSerial = 0;
@@ -89,6 +121,7 @@ private:
         SinkSnapshot displayed;
         int requestedVolume = 0;
         QString requestId;
+        qint32 presentationGeneration = 0;
         bool dispatched = false;
     };
 
@@ -105,6 +138,15 @@ private:
         const SinkSnapshot &left,
         const SinkSnapshot &right);
     void setState(const QString &state, const QString &message);
+    [[nodiscard]] static QString feedbackPhaseName(FeedbackPhase phase);
+    [[nodiscard]] static QString feedbackOutcomeName(FeedbackOutcome outcome);
+    [[nodiscard]] static std::optional<int> presentationVolumePercent(int volumePercent);
+    void publishLifecycleFeedback(
+        qint32 presentationGeneration,
+        FeedbackPhase phase,
+        FeedbackOutcome outcome,
+        std::optional<int> observedValuePercent,
+        bool finalOutcome);
     void applySnapshot(const SinkSnapshot &snapshot, bool armExpiry);
     void armFreshnessExpiry(const SinkSnapshot &snapshot);
     void scheduleActiveRetry();
@@ -137,6 +179,7 @@ private:
     QString lastReceiptStatus_;
     QString lastEvidenceId_;
     quint64 observationGeneration_ = 0;
+    qint32 presentationGeneration_ = 0;
     int retryDelayMs_ = 0;
     bool active_ = false;
 };

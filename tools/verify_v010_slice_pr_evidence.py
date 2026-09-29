@@ -30,7 +30,7 @@ SLICE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
     "S12": ("apps/linura-shell/integrations/hyprland/", "apps/linura-shell/integrations/xdg/"),
     "S13": ("apps/linura-shell/plugins/quick-settings/", "apps/linura-shell/org.linura.QuickSettings.desktop"),
     "S14": ("contracts/v010-shell-runtime-qualification.toml", "contracts/v010-shell-runtime-substrate.toml", "qualification/v010/shell-runtime/", ".github/workflows/v010-shell-runtime-qualification.yml"),
-    "S15": ("apps/linura-shell/plugins/notifications/", "apps/linura-shell/plugins/osd/", "apps/linura-shell/integrations/lifecycle/"),
+    "S15": ("apps/linura-shell/plugins/notifications-osd/",),
     "S16": ("apps/linura-shell/panel/", "apps/linura-shell/tray/", "apps/linura-shell/status/"),
     "S17": ("apps/linura-shell/plugins/session/", "apps/linura-shell/integrations/logind/", "apps/linura-shell/plugins/power/"),
     "S18": ("apps/linura-shell/plugins/network/", "crates/linura-provider-networkmanager/"),

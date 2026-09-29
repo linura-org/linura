@@ -185,6 +185,206 @@ class LinuraShellContractTests(unittest.TestCase):
                 any("must not own shared audio-controller activation" in item for item in failures)
             )
 
+    def test_lifecycle_feedback_cannot_gain_process_or_provider_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            surface = root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            surface.write_text(
+                surface.read_text(encoding="utf-8")
+                + '\nimport Quickshell.Io\nProcess { command: ["wpctl"] }\n',
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Lifecycle feedback presentation contains forbidden" in item
+                    or "trusted shell QML contains forbidden" in item
+                    for item in failures
+                )
+            )
+
+    def test_lifecycle_feedback_must_be_click_through(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            surface = root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            text = surface.read_text(encoding="utf-8")
+            self.assertIn("mask: Region {}", text)
+            surface.write_text(text.replace("    mask: Region {}\n", "", 1), encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Lifecycle feedback shell contract missing: mask: Region {}" in item
+                    for item in failures
+                )
+            )
+
+    def test_lifecycle_feedback_must_expose_single_alert_accessibility_node(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            surface = root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            text = surface.read_text(encoding="utf-8")
+            marker = "Accessible.role: Accessible.AlertMessage"
+            self.assertIn(marker, text)
+            surface.write_text(
+                text.replace(marker, "Accessible.role: Accessible.StaticText", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "live alert accessibility role" in item
+                    or "Lifecycle feedback shell contract missing: Accessible.role: Accessible.AlertMessage"
+                    in item
+                    for item in failures
+                )
+            )
+
+    def test_lifecycle_feedback_must_preserve_exact_phase_outcome_ordering(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            surface = root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            text = surface.read_text(encoding="utf-8")
+            marker = 'return nextOutcome === "target-changed"'
+            self.assertIn(marker, text)
+            surface.write_text(
+                text.replace(
+                    marker,
+                    'return nextOutcome === "target-changed" || nextOutcome === "precondition-changed"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertIn(
+                "Lifecycle feedback transition state-machine contract drifted",
+                failures,
+            )
+
+    def test_lifecycle_feedback_new_generation_requires_finished_predecessor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            surface = root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            text = surface.read_text(encoding="utf-8")
+            marker = "!finalOutcome"
+            self.assertIn(marker, text)
+            surface.write_text(
+                text.replace(marker, "false", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Lifecycle feedback shell contract missing: !finalOutcome" in item
+                    for item in failures
+                )
+            )
+
+    def test_lifecycle_feedback_must_stay_clear_of_top_right_settings_panels(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            surface = root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            text = surface.read_text(encoding="utf-8")
+            self.assertIn("anchors { bottom: true; right: true }", text)
+            surface.write_text(
+                text.replace(
+                    "anchors { bottom: true; right: true }",
+                    "anchors { top: true; right: true }",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("must not compete with top-right" in item for item in failures)
+            )
+
+    def test_lifecycle_feedback_manifest_cannot_gain_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest = root / "apps/linura-shell/plugins/notifications-osd/manifest.json"
+            text = manifest.read_text(encoding="utf-8").replace(
+                '"authority": "none",',
+                '"authority": "none",\n  "capabilities": ["system.audio.control"],',
+                1,
+            )
+            manifest.write_text(text, encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("Lifecycle feedback manifest" in item for item in failures)
+            )
+
+    def test_verified_lifecycle_feedback_must_follow_post_effect_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            source = root / "apps/linura-shell/bridge/audio_session_controller.cpp"
+            text = source.read_text(encoding="utf-8")
+            marker = "observe(ObservePurpose::PostApply);"
+            injected = (
+                'publishLifecycleFeedback(\n'
+                '                1,\n'
+                '                FeedbackPhase::Verified,\n'
+                '                FeedbackOutcome::Changed,\n'
+                '                50,\n'
+                '                true);\n'
+            )
+            source.write_text(
+                text.replace(marker, injected + "            " + marker, 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "exactly one verified final lifecycle presentation path" in item
+                    for item in failures
+                )
+            )
+
+    def test_lifecycle_feedback_must_not_clip_amplified_authoritative_volume(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            source = root / "apps/linura-shell/bridge/audio_session_controller.cpp"
+            text = source.read_text(encoding="utf-8")
+            marker = "presentationVolumePercent(snapshot.volumePercent)"
+            self.assertEqual(text.count(marker), 3)
+            source.write_text(
+                text.replace(marker, "std::min(snapshot.volumePercent, 100)", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("must never clip authoritative amplified volume" in item for item in failures)
+            )
+
+    def test_lifecycle_feedback_signal_cannot_expose_free_form_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            header = root / "apps/linura-shell/bridge/audio_session_controller.h"
+            text = header.read_text(encoding="utf-8")
+            marker = "        const QString &outcome,\n"
+            self.assertIn(marker, text)
+            header.write_text(
+                text.replace(marker, marker + "        const QString &title,\n", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "must not expose authority/evidence identifiers or free-form presentation copy"
+                    in item
+                    for item in failures
+                )
+            )
+
     def test_missing_control_service_must_be_unavailable_not_stale(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

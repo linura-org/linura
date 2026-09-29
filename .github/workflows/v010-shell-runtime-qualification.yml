@@ -623,6 +623,8 @@ jobs:
           quick_settings_drift = artifacts / "quick-settings-precondition-drift.txt"
           quick_settings_service_loss = artifacts / "quick-settings-service-loss.txt"
           quick_settings_recovery = artifacts / "quick-settings-restart-recovery.txt"
+          lifecycle_feedback_success = artifacts / "lifecycle-feedback-success.txt"
+          lifecycle_feedback_drift = artifacts / "lifecycle-feedback-precondition-drift.txt"
           required_files = (
               cases_path,
               transcript_path,
@@ -652,6 +654,8 @@ jobs:
               quick_settings_drift,
               quick_settings_service_loss,
               quick_settings_recovery,
+              lifecycle_feedback_success,
+              lifecycle_feedback_drift,
           )
           for path in required_files:
               if not path.is_file() or path.is_symlink():

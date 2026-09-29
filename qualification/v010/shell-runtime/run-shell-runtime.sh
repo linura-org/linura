@@ -686,6 +686,7 @@ fi
 } > "$evidence_root/quick-settings-observation.txt"
 pass_case "quick-settings-authoritative-observation"
 
+checked_quick_settings_call linura.quick-settings-qualification resetFeedbackTrace >/dev/null
 [[ "$(checked_quick_settings_call linura.quick-settings-qualification commitVolume 63)" == "requested" ]] || fail "Quick Settings did not dispatch the bounded volume request"
 quick_settings_verified_63() {
     [[ "$(checked_quick_settings_call linura.quick-settings-qualification state 2>/dev/null)" == "ready" ]] && [[ "$(checked_quick_settings_call linura.quick-settings-qualification volumePercent 2>/dev/null)" == "63" ]] && [[ "$(checked_quick_settings_call linura.quick-settings-qualification receiptStatus 2>/dev/null)" == "verified" ]]
@@ -732,6 +733,49 @@ wait_until "independent PipeWire volume 63" audio_sink_matches_volume 63
     audio_snapshot
 } > "$evidence_root/quick-settings-session1-effect.txt"
 pass_case "quick-settings-session1-volume-effect"
+
+lifecycle_success_trace="$(checked_quick_settings_call linura.quick-settings-qualification feedbackTrace)"
+python3 - "$lifecycle_success_trace" <<'PY'
+import sys
+entries = [entry.split(":") for entry in sys.argv[1].split("|") if entry]
+if len(entries) != 4 or any(len(entry) != 6 for entry in entries):
+    raise SystemExit("typed lifecycle success trace shape drifted")
+generations = {entry[0] for entry in entries}
+if len(generations) != 1 or not next(iter(generations)).isdigit() or int(next(iter(generations))) <= 0:
+    raise SystemExit("typed lifecycle success correlation drifted")
+expected = [
+    ["audio-output-volume", "preparing", "none", "none", "progress"],
+    ["audio-output-volume", "executing", "none", "none", "progress"],
+    ["audio-output-volume", "verifying", "none", "none", "progress"],
+    ["audio-output-volume", "verified", "changed", "observed", "final"],
+]
+actual = [entry[1:] for entry in entries]
+if actual != expected:
+    raise SystemExit(f"typed lifecycle success ordering/outcome drifted: {actual!r}")
+PY
+lifecycle_success_generation="$(checked_quick_settings_call linura.quick-settings-qualification feedbackGeneration)"
+[[ "$lifecycle_success_generation" =~ ^[1-9][0-9]*$ ]] || fail "verified lifecycle feedback generation is invalid"
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification feedbackOperation)" == "audio-output-volume" ]] || fail "verified lifecycle feedback operation drifted"
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification feedbackPhase)" == "verified" ]] || fail "final lifecycle feedback phase is not verified"
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification feedbackOutcome)" == "changed" ]] || fail "verified lifecycle feedback outcome is not changed"
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification feedbackTone)" == "success" ]] || fail "verified lifecycle feedback is not success-toned"
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification feedbackFinal)" == "true" ]] || fail "verified lifecycle feedback is not marked final"
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification feedbackValueValid)" == "true" ]] || fail "verified lifecycle OSD value is not marked authoritative"
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification feedbackValue)" == "63" ]] || fail "verified lifecycle OSD value does not match authoritative volume"
+{
+    printf 'trace=%s\n' "$lifecycle_success_trace"
+    printf 'generation=%s\n' "$lifecycle_success_generation"
+    printf 'operation=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackOperation)"
+    printf 'phase=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackPhase)"
+    printf 'outcome=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackOutcome)"
+    printf 'tone=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackTone)"
+    printf 'title=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackTitle)"
+    printf 'detail=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackDetail)"
+    printf 'value=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackValue)"
+    printf 'value_valid=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackValueValid)"
+    printf 'final=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackFinal)"
+} > "$evidence_root/lifecycle-feedback-success.txt"
+pass_case "lifecycle-feedback-verified-success"
 
 [[ -f "$audio_audit" && ! -L "$audio_audit" ]] || fail "durable transient audit database is missing or untrusted"
 audit_mode="$(stat -c '%a' "$audio_audit")"
@@ -796,6 +840,7 @@ wait_until "bound fresh Quick Settings precondition-drift draft" quick_settings_
 set_fixture_volume 72
 wait_until "external concurrent volume 72" audio_sink_matches_volume 72
 audit_count_before_drift="$(sqlite3 "$audio_audit" 'SELECT count(*) FROM transient_effect_audit;')"
+checked_quick_settings_call linura.quick-settings-qualification resetFeedbackTrace >/dev/null
 [[ "$(checked_quick_settings_call linura.quick-settings-qualification commitVolume 55)" == "requested" ]] || fail "Quick Settings did not enter pre-dispatch revalidation"
 quick_settings_drift_rejected() {
     [[ "$(checked_quick_settings_call linura.quick-settings-qualification state 2>/dev/null)" == "ready" ]] && [[ "$(checked_quick_settings_call linura.quick-settings-qualification volumePercent 2>/dev/null)" == "72" ]]
@@ -811,6 +856,49 @@ audit_count_after_drift="$(sqlite3 "$audio_audit" 'SELECT count(*) FROM transien
     audio_snapshot
 } > "$evidence_root/quick-settings-precondition-drift.txt"
 pass_case "quick-settings-precondition-drift-rejection"
+
+lifecycle_drift_trace="$(checked_quick_settings_call linura.quick-settings-qualification feedbackTrace)"
+python3 - "$lifecycle_drift_trace" <<'PY'
+import sys
+entries = [entry.split(":") for entry in sys.argv[1].split("|") if entry]
+if len(entries) != 2 or any(len(entry) != 6 for entry in entries):
+    raise SystemExit("typed lifecycle drift trace shape drifted")
+generations = {entry[0] for entry in entries}
+if len(generations) != 1 or not next(iter(generations)).isdigit() or int(next(iter(generations))) <= 0:
+    raise SystemExit("typed lifecycle drift correlation drifted")
+expected = [
+    ["audio-output-volume", "preparing", "none", "none", "progress"],
+    ["audio-output-volume", "blocked", "precondition-changed", "observed", "final"],
+]
+actual = [entry[1:] for entry in entries]
+if actual != expected:
+    raise SystemExit(f"typed lifecycle drift ordering/outcome drifted: {actual!r}")
+if any(entry[2] == "verified" for entry in entries):
+    raise SystemExit("precondition drift incorrectly presented verified success")
+PY
+lifecycle_drift_generation="$(checked_quick_settings_call linura.quick-settings-qualification feedbackGeneration)"
+[[ "$lifecycle_drift_generation" =~ ^[1-9][0-9]*$ ]] || fail "drift lifecycle feedback generation is invalid"
+(( lifecycle_drift_generation > lifecycle_success_generation )) || fail "lifecycle feedback generation did not advance for a new request"
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification feedbackOperation)" == "audio-output-volume" ]] || fail "drift lifecycle feedback operation drifted"
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification feedbackPhase)" == "blocked" ]] || fail "precondition drift final feedback is not blocked"
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification feedbackOutcome)" == "precondition-changed" ]] || fail "precondition drift outcome drifted"
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification feedbackValueValid)" == "true" ]] || fail "precondition drift observed value is not marked authoritative"
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification feedbackValue)" == "72" ]] || fail "precondition drift observed value does not match authoritative state"
+[[ "$(checked_quick_settings_call linura.quick-settings-qualification feedbackFinal)" == "true" ]] || fail "precondition drift feedback is not marked final"
+{
+    printf 'trace=%s\n' "$lifecycle_drift_trace"
+    printf 'generation=%s\n' "$lifecycle_drift_generation"
+    printf 'operation=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackOperation)"
+    printf 'phase=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackPhase)"
+    printf 'outcome=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackOutcome)"
+    printf 'tone=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackTone)"
+    printf 'title=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackTitle)"
+    printf 'detail=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackDetail)"
+    printf 'value=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackValue)"
+    printf 'value_valid=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackValueValid)"
+    printf 'final=%s\n' "$(checked_quick_settings_call linura.quick-settings-qualification feedbackFinal)"
+} > "$evidence_root/lifecycle-feedback-precondition-drift.txt"
+pass_case "lifecycle-feedback-precondition-drift-no-success"
 
 systemctl --user stop linurad.service
 control_bus_gone() {
@@ -870,7 +958,7 @@ pass_case "quick-settings-restart-recovery"
 pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite \
     | LC_ALL=C sort > "$evidence_root/package-versions.txt"
 
-expected_cases=17
+expected_cases=19
 actual_cases="$(wc -l < "$evidence_root/cases.tsv")"
 [[ "$actual_cases" -eq "$expected_cases" ]]     || fail "expected $expected_cases runtime cases, recorded $actual_cases"
 

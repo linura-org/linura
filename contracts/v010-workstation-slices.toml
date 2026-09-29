@@ -2,8 +2,8 @@ schema_version = 1
 milestone = "v0.10.0"
 target = "complete-experimental-workstation"
 slice_count = 32
-completed_slice_count = 14
-next_slice = "S15"
+completed_slice_count = 15
+next_slice = "S16"
 completion_policy = "contiguous-prefix-with-merged-pr-evidence"
 scope_change_policy = "explicit-roadmap-rebaseline"
 
@@ -122,9 +122,9 @@ required_for_release = true
 [[slice]]
 id = "S15"
 title = "lifecycle notifications and OSD"
-status = "planned"
+status = "complete"
 depends_on = ["S14"]
-evidence_prs = []
+evidence_prs = [179]
 required_for_release = true
 
 [[slice]]

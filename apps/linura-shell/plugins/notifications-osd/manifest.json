@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "linura.notifications-osd",
+  "name": "Linura Lifecycle Feedback",
+  "kind": "overlay",
+  "entry_point": "LifecycleFeedback.qml",
+  "trust": "first-party",
+  "authority": "none",
+  "interaction_scope": "lifecycle-feedback-presentation",
+  "event_source": "typed-shell-feedback-envelope",
+  "payload_policy": "fixed-operation-phase-outcome-plus-authoritative-bounded-value",
+  "supported_feedback_operations": [
+    "audio-output-volume"
+  ],
+  "correlation": "ephemeral-local-generation",
+  "protocol_requirements": []
+}

@@ -24,6 +24,7 @@ constexpr auto kPipeWireProvider = "pipewire";
 constexpr auto kAudioCapability = "audio.session.observe";
 constexpr auto kDefaultOutputResource = "audio:session:default-output";
 constexpr auto kAudioOperation = "operation:audio.output.set-session-volume";
+constexpr auto kAudioFeedbackOperation = "audio-output-volume";
 constexpr auto kReason = "Linura Shell Control Center audio quick setting";
 constexpr qint64 kFutureSkewMs = 1'000;
 constexpr quint64 kMaximumObservationValidityMs = 10'000;
@@ -160,6 +161,46 @@ bool AudioSessionController::samePrecondition(
         && left.muted == right.muted;
 }
 
+QString AudioSessionController::feedbackPhaseName(FeedbackPhase phase)
+{
+    switch (phase) {
+    case FeedbackPhase::Preparing: return QStringLiteral("preparing");
+    case FeedbackPhase::Executing: return QStringLiteral("executing");
+    case FeedbackPhase::Verifying: return QStringLiteral("verifying");
+    case FeedbackPhase::Verified: return QStringLiteral("verified");
+    case FeedbackPhase::Blocked: return QStringLiteral("blocked");
+    case FeedbackPhase::Failed: return QStringLiteral("failed");
+    }
+    return QStringLiteral("failed");
+}
+
+QString AudioSessionController::feedbackOutcomeName(FeedbackOutcome outcome)
+{
+    switch (outcome) {
+    case FeedbackOutcome::None: return QStringLiteral("none");
+    case FeedbackOutcome::Changed: return QStringLiteral("changed");
+    case FeedbackOutcome::NoChange: return QStringLiteral("no-change");
+    case FeedbackOutcome::Cancelled: return QStringLiteral("cancelled");
+    case FeedbackOutcome::PreconditionChanged: return QStringLiteral("precondition-changed");
+    case FeedbackOutcome::TargetChanged: return QStringLiteral("target-changed");
+    case FeedbackOutcome::VerificationMismatch: return QStringLiteral("verification-mismatch");
+    case FeedbackOutcome::VerificationUnavailable: return QStringLiteral("verification-unavailable");
+    case FeedbackOutcome::PreconditionUnavailable: return QStringLiteral("precondition-unavailable");
+    case FeedbackOutcome::AuthorityUnavailable: return QStringLiteral("authority-unavailable");
+    case FeedbackOutcome::Rejected: return QStringLiteral("rejected");
+    case FeedbackOutcome::ReceiptInvalid: return QStringLiteral("receipt-invalid");
+    }
+    return QStringLiteral("rejected");
+}
+
+std::optional<int> AudioSessionController::presentationVolumePercent(int volumePercent)
+{
+    if (volumePercent < 0 || volumePercent > 100) {
+        return std::nullopt;
+    }
+    return volumePercent;
+}
+
 AudioSessionController::AudioSessionController(QObject *parent)
     : QObject(parent),
       sessionBus_(QDBusConnection::sessionBus())
@@ -278,7 +319,14 @@ void AudioSessionController::setActive(bool active)
         resetRetryBackoff();
         draftBase_.reset();
         if (pending_.has_value() && !pending_->dispatched) {
+            const qint32 presentationGeneration = pending_->presentationGeneration;
             pending_.reset();
+            publishLifecycleFeedback(
+                presentationGeneration,
+                FeedbackPhase::Blocked,
+                FeedbackOutcome::Cancelled,
+                std::nullopt,
+                true);
         }
         if (!pending_.has_value()) {
             ++observationGeneration_;
@@ -351,12 +399,23 @@ void AudioSessionController::setVolume(int requestedVolume)
     draftBase_.reset();
     emit availabilityChanged();
     freshnessTimer_.stop();
+    presentationGeneration_ =
+        presentationGeneration_ == std::numeric_limits<qint32>::max()
+        ? 1
+        : presentationGeneration_ + 1;
     pending_ = PendingEffect {
         .displayed = displayed,
         .requestedVolume = requestedVolume,
         .requestId = QStringLiteral("request:linura-shell:audio:")
             + QUuid::createUuid().toString(QUuid::WithoutBraces),
+        .presentationGeneration = presentationGeneration_,
     };
+    publishLifecycleFeedback(
+        pending_->presentationGeneration,
+        FeedbackPhase::Preparing,
+        FeedbackOutcome::None,
+        std::nullopt,
+        false);
     setState(
         QStringLiteral("applying"),
         QStringLiteral("Revalidating the current audio state before dispatch…"));
@@ -371,6 +430,30 @@ void AudioSessionController::setState(
     statusText_ = message;
     emit stateChanged();
     emit availabilityChanged();
+}
+
+void AudioSessionController::publishLifecycleFeedback(
+    qint32 presentationGeneration,
+    FeedbackPhase phase,
+    FeedbackOutcome outcome,
+    std::optional<int> observedValuePercent,
+    bool finalOutcome)
+{
+    if (presentationGeneration == 0) {
+        return;
+    }
+    const bool observedValueValid = observedValuePercent.has_value();
+    const int boundedObservedValue = observedValueValid
+        ? std::clamp(*observedValuePercent, 0, 100)
+        : -1;
+    emit lifecycleFeedback(
+        presentationGeneration,
+        QString::fromLatin1(kAudioFeedbackOperation),
+        feedbackPhaseName(phase),
+        feedbackOutcomeName(outcome),
+        boundedObservedValue,
+        observedValueValid,
+        finalOutcome);
 }
 
 void AudioSessionController::applySnapshot(
@@ -646,7 +729,14 @@ void AudioSessionController::handleObservation(
         }
         if (!samePrecondition(pending_->displayed, snapshot)) {
             applySnapshot(snapshot, true);
+            const qint32 presentationGeneration = pending_->presentationGeneration;
             pending_.reset();
+            publishLifecycleFeedback(
+                presentationGeneration,
+                FeedbackPhase::Blocked,
+                FeedbackOutcome::PreconditionChanged,
+                presentationVolumePercent(snapshot.volumePercent),
+                true);
             setState(
                 snapshot.volumePercent <= 100
                     ? QStringLiteral("ready")
@@ -671,6 +761,12 @@ void AudioSessionController::handleObservation(
             pending_.reset();
             applySnapshot(snapshot, true);
             if (!sameIdentity(pending.displayed, snapshot)) {
+                publishLifecycleFeedback(
+                    pending.presentationGeneration,
+                    FeedbackPhase::Blocked,
+                    FeedbackOutcome::TargetChanged,
+                    presentationVolumePercent(snapshot.volumePercent),
+                    true);
                 setState(
                     snapshot.volumePercent <= 100
                         ? QStringLiteral("ready")
@@ -680,12 +776,26 @@ void AudioSessionController::handleObservation(
                 return;
             }
             if (snapshot.volumePercent != pending.requestedVolume) {
+                publishLifecycleFeedback(
+                    pending.presentationGeneration,
+                    FeedbackPhase::Failed,
+                    FeedbackOutcome::VerificationMismatch,
+                    presentationVolumePercent(snapshot.volumePercent),
+                    true);
                 setState(
                     QStringLiteral("error"),
                     QStringLiteral(
                         "Independent post-effect observation did not match the requested volume."));
                 return;
             }
+            publishLifecycleFeedback(
+                pending.presentationGeneration,
+                FeedbackPhase::Verified,
+                lastReceiptStatus_ == QStringLiteral("no-change")
+                    ? FeedbackOutcome::NoChange
+                    : FeedbackOutcome::Changed,
+                snapshot.volumePercent,
+                true);
             setState(
                 QStringLiteral("ready"),
                 lastReceiptStatus_ == QStringLiteral("no-change")
@@ -708,7 +818,15 @@ void AudioSessionController::handleObservationFailure(
     const bool unavailable = serviceUnavailable || !sessionBus_.isConnected();
 
     if (purpose == ObservePurpose::PostApply) {
+        const qint32 presentationGeneration =
+            pending_.has_value() ? pending_->presentationGeneration : 0;
         pending_.reset();
+        publishLifecycleFeedback(
+            presentationGeneration,
+            FeedbackPhase::Failed,
+            FeedbackOutcome::VerificationUnavailable,
+            std::nullopt,
+            true);
         setState(
             unavailable
                 ? QStringLiteral("unavailable")
@@ -721,7 +839,15 @@ void AudioSessionController::handleObservationFailure(
         return;
     }
     if (purpose == ObservePurpose::PreApply) {
+        const qint32 presentationGeneration =
+            pending_.has_value() ? pending_->presentationGeneration : 0;
         pending_.reset();
+        publishLifecycleFeedback(
+            presentationGeneration,
+            FeedbackPhase::Failed,
+            FeedbackOutcome::PreconditionUnavailable,
+            std::nullopt,
+            true);
     }
     setState(
         unavailable
@@ -747,7 +873,14 @@ void AudioSessionController::dispatchEffect()
         sessionBus_);
     session.setTimeout(kEffectTimeoutMs);
     if (!session.isValid()) {
+        const qint32 presentationGeneration = pending_->presentationGeneration;
         pending_.reset();
+        publishLifecycleFeedback(
+            presentationGeneration,
+            FeedbackPhase::Failed,
+            FeedbackOutcome::AuthorityUnavailable,
+            std::nullopt,
+            true);
         setState(
             QStringLiteral("unavailable"),
             QStringLiteral("Linura Session1 is unavailable; no effect was dispatched."));
@@ -757,6 +890,12 @@ void AudioSessionController::dispatchEffect()
 
     pending_->dispatched = true;
     const PendingEffect pending = *pending_;
+    publishLifecycleFeedback(
+        pending.presentationGeneration,
+        FeedbackPhase::Executing,
+        FeedbackOutcome::None,
+        std::nullopt,
+        false);
     setState(
         QStringLiteral("applying"),
         QStringLiteral("Dispatching the exact-node Session1 transient effect…"));
@@ -772,12 +911,23 @@ void AudioSessionController::dispatchEffect()
         watcher,
         &QDBusPendingCallWatcher::finished,
         this,
-        [this, requestId = pending.requestId](QDBusPendingCallWatcher *finished) {
+        [this,
+         requestId = pending.requestId,
+         presentationGeneration = pending.presentationGeneration](
+            QDBusPendingCallWatcher *finished) {
             const QDBusMessage reply = finished->reply();
             finished->deleteLater();
             if (reply.type() == QDBusMessage::ErrorMessage) {
                 pending_.reset();
                 const bool unavailable = isServiceUnavailableError(reply.errorName());
+                publishLifecycleFeedback(
+                    presentationGeneration,
+                    FeedbackPhase::Failed,
+                    unavailable
+                        ? FeedbackOutcome::AuthorityUnavailable
+                        : FeedbackOutcome::Rejected,
+                    std::nullopt,
+                    true);
                 setState(
                     unavailable
                         ? QStringLiteral("unavailable")
@@ -794,6 +944,12 @@ void AudioSessionController::dispatchEffect()
             const auto receipt = parseReceipt(reply, requestId, &error);
             if (!receipt.has_value()) {
                 pending_.reset();
+                publishLifecycleFeedback(
+                    presentationGeneration,
+                    FeedbackPhase::Failed,
+                    FeedbackOutcome::ReceiptInvalid,
+                    std::nullopt,
+                    true);
                 setState(QStringLiteral("error"), error);
                 return;
             }
@@ -803,6 +959,12 @@ void AudioSessionController::dispatchEffect()
                 ? receipt->preEffectEvidenceId
                 : receipt->postEffectEvidenceId;
             emit receiptChanged();
+            publishLifecycleFeedback(
+                presentationGeneration,
+                FeedbackPhase::Verifying,
+                FeedbackOutcome::None,
+                std::nullopt,
+                false);
             setState(
                 QStringLiteral("applying"),
                 QStringLiteral(
