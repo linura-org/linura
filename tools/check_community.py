@@ -179,7 +179,7 @@ def _split_inline_yaml_list(value: str) -> list[str]:
         current.append(char)
     if current or inner.strip():
         items.append(_unquote_yaml_scalar("".join(current)))
-    return [item for item in items if item]
+    return items
 
 
 def _top_level_yaml_entries(text: str) -> list[tuple[str, str, list[str]]]:
@@ -517,7 +517,11 @@ def _validate_issue_form_yaml(text: str, rel: str) -> list[str]:
 
     return failures
 
-def _validate_issue_config_yaml(text: str) -> list[str]:
+def _validate_issue_config_yaml(
+    text: str,
+    *,
+    required_urls: dict[str, str] | None = None,
+) -> list[str]:
     failures: list[str] = _yaml_scalar_syntax_failures(
         text, label="issue routing YAML"
     )
@@ -638,6 +642,18 @@ def _validate_issue_config_yaml(text: str) -> list[str]:
             failures.append(
                 f"issue routing YAML contact link {index} is missing: {', '.join(sorted(missing))}"
             )
+
+    if required_urls:
+        parsed_urls = {
+            link["url"]
+            for link in contact_links
+            if isinstance(link.get("url"), str)
+        }
+        for key, expected in required_urls.items():
+            if expected not in parsed_urls:
+                failures.append(
+                    f"issue routing parsed contact links missing canonical {key} URL: {expected}"
+                )
 
     return failures
 
@@ -784,7 +800,17 @@ def validate(root: Path) -> list[str]:
         failures.append("CONTRIBUTING.md must state the inbound Apache-2.0 policy")
 
     issue_config = read_text(root, ".github/ISSUE_TEMPLATE/config.yml")
-    failures.extend(_validate_issue_config_yaml(issue_config))
+    canonical_issue_urls = {
+        key: value
+        for key in ("discussions", "security_policy")
+        if isinstance((value := channels.get(key)), str) and value
+    }
+    failures.extend(
+        _validate_issue_config_yaml(
+            issue_config,
+            required_urls=canonical_issue_urls,
+        )
+    )
     for issue_form in (
         ".github/ISSUE_TEMPLATE/bug.yml",
         ".github/ISSUE_TEMPLATE/feature.yml",
@@ -799,10 +825,6 @@ def validate(root: Path) -> list[str]:
     ]
     if len(issue_entries) != 1 or issue_entries[0][1].strip().lower() != "false":
         failures.append("issue routing must keep blank issues disabled as the effective YAML setting")
-    for key in ("discussions", "security_policy"):
-        value = channels.get(key)
-        if isinstance(value, str) and value not in issue_config:
-            failures.append(f"issue routing missing canonical {key} link")
 
     required_categories = contract.get("discussion_categories", {}).get("required", [])
     for category in required_categories:

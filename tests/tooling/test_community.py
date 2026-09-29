@@ -329,5 +329,59 @@ class CommunityContractTests(unittest.TestCase):
                     self.assertIn(expected, result.stderr)
 
 
+    def test_rejects_canonical_contact_url_hidden_outside_parsed_url_field(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            config = root / ".github/ISSUE_TEMPLATE/config.yml"
+            text = config.read_text(encoding="utf-8")
+            canonical = "https://github.com/linura-org/linura/security/policy"
+            config.write_text(
+                text.replace(
+                    f"url: {canonical}",
+                    "url: https://example.invalid/report",
+                    1,
+                )
+                + f"\n# canonical security route: {canonical}\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "parsed contact links missing canonical security_policy URL",
+                result.stderr,
+            )
+
+    def test_rejects_empty_items_in_inline_funding_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            contract = root / "contracts/community.toml"
+            contract.write_text(
+                contract.read_text(encoding="utf-8").replace(
+                    "active = false", "active = true", 1
+                ),
+                encoding="utf-8",
+            )
+            sponsorship = root / "docs/community/sponsorship.md"
+            sponsorship.write_text(
+                sponsorship.read_text(encoding="utf-8").replace(
+                    "Status: inactive pending a verified funding destination.",
+                    "Status: active with a verified funding destination.",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            (root / ".github/FUNDING.yml").write_text(
+                "github: [valid-user,,]\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("contains an invalid destination", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
