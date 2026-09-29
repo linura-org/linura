@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED = [
-    "README.md", "SECURITY.md", "AGENTS.md", "CONTRIBUTING.md", "Cargo.toml", "rust-toolchain.toml",
+    "README.md", "SECURITY.md", "SUPPORT.md", "GOVERNANCE.md", "CODE_OF_CONDUCT.md", "CITATION.cff", "AGENTS.md", "CONTRIBUTING.md", "Cargo.toml", "rust-toolchain.toml",
     "docs/product-vision.md", "docs/vision-coverage.md", "docs/architecture.md", "docs/naming.md", "docs/sdk.md", "docs/intent-model.md",
     "docs/system-graph.md", "docs/capability-composition.md", "docs/semantic-provenance.md", "docs/reusable-setups.md",
     "docs/agent-architecture.md", "docs/provider-model.md", "docs/state-model.md", "docs/terminology.md",
@@ -23,6 +23,11 @@ REQUIRED = [
     "docs/visual-testing.md", "docs/application-supervision.md", "docs/lifecycle-workflows.md",
     "docs/release-engineering.md", "docs/api-versioning.md", "docs/omarchy-development-lessons.md",
     "docs/roadmap.md", "docs/system-domains.md", "docs/operation-semantics.md", "docs/adr/README.md", "docs/adr/0017-bounded-probes-context-query.md", "docs/adr/0032-classify-operations-before-authority.md", "docs/adr/0033-v010-complete-workstation-product-boundary.md",
+    "docs/community/labels.md", "docs/community/repository-settings.md", "docs/community/sponsorship.md",
+    "docs/rfcs/README.md", ".github/FUNDING.yml",
+    ".github/ISSUE_TEMPLATE/config.yml", ".github/ISSUE_TEMPLATE/bug.yml", ".github/ISSUE_TEMPLATE/feature.yml",
+    ".github/ISSUE_TEMPLATE/compatibility.yml", ".github/ISSUE_TEMPLATE/rfc.yml",
+    "contracts/community.toml", "tools/check_community.py", "tests/tooling/test_community.py",
     "tools/check_adrs.py", "tests/tooling/test_adrs.py",
     "contracts/stability.toml", "tools/check_contract_stability.py", "tests/tooling/test_contract_stability.py",
     "contracts/roadmap.toml", "contracts/v010-workstation-slices.toml", "tools/check_roadmap.py", "tests/tooling/test_roadmap.py",
@@ -77,7 +82,7 @@ REQUIRED = [
 FORBIDDEN_SNIPPETS = ["sudo bash -c", "chmod 777"]
 LEGACY_BRANDS = ["sys" + "plane", "luna" + "rchy"]
 LEGACY_COMPONENTS = ["linura-runtime", "linura_runtime", "apps/control-center", "apps/agent-ui", "apps/shell"]
-TEXT_SUFFIXES = {".md", ".rs", ".toml", ".py", ".yml", ".yaml", ".xml", ".json", ".service", ".policy", ".hook", ".sh", ".conf", ".lua", ".cpp", ".h", ".hpp", ".qml", ".cmake", ".desktop"}
+TEXT_SUFFIXES = {".md", ".cff", ".rs", ".toml", ".py", ".yml", ".yaml", ".xml", ".json", ".service", ".policy", ".hook", ".sh", ".conf", ".lua", ".cpp", ".h", ".hpp", ".qml", ".cmake", ".desktop"}
 GENERATED_DIRS = {
     ".cache",
     ".direnv",
@@ -273,6 +278,16 @@ def main() -> int:
     if adr_result.returncode != 0:
         details = adr_result.stderr.strip() or adr_result.stdout.strip()
         failures.append(f"ADR governance validation failed: {details}")
+
+    community_result = subprocess.run(
+        [sys.executable, str(ROOT / "tools/check_community.py"), str(ROOT)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if community_result.returncode != 0:
+        details = community_result.stderr.strip() or community_result.stdout.strip()
+        failures.append(f"community contract validation failed: {details}")
 
     contract_result = subprocess.run(
         [sys.executable, str(ROOT / "tools/check_contract_stability.py"), "--root", str(ROOT)],

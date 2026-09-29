@@ -2,6 +2,10 @@ name: Bug report
 description: Report a reproducible defect
 title: "bug: "
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include secrets or private identifiers. If this may be a security vulnerability, stop and follow SECURITY.md instead of filing publicly.
   - type: textarea
     id: summary
     attributes:

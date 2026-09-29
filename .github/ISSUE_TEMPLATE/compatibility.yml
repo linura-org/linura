@@ -1,0 +1,54 @@
+name: Compatibility report
+description: Report a platform, provider, or environment compatibility problem
+title: "compat: "
+labels:
+  - compatibility
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, private keys, tokens, serial numbers, MAC addresses, private account identifiers, or unrelated user data.
+        If this may be a security vulnerability, stop and use the private reporting instructions in SECURITY.md.
+  - type: input
+    id: linura
+    attributes:
+      label: Linura version or commit
+      placeholder: v0.9.0 or full commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: system
+    attributes:
+      label: System
+      description: Distro/version, kernel, systemd, compositor/session, and selected PlatformProfile if applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: providers
+    attributes:
+      label: Relevant providers
+      description: Versions for NetworkManager, BlueZ, PipeWire/WirePlumber, UDisks2, or other affected subsystem authorities.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Include whether the behavior reproduces in a disposable/reference environment.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence
+      description: Capability snapshot, logs, or other bounded evidence with private identifiers removed.
