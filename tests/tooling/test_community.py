@@ -260,5 +260,74 @@ class CommunityContractTests(unittest.TestCase):
                     self.assertIn("unterminated inline YAML sequence", result.stderr)
 
 
+    def test_rejects_unquoted_mapping_delimiter_in_issue_form_scalar(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            form = root / ".github/ISSUE_TEMPLATE/bug.yml"
+            form.write_text(
+                form.read_text(encoding="utf-8").replace(
+                    "label: Summary",
+                    "label: Summary: details",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unquoted YAML mapping delimiter", result.stderr)
+
+    def test_rejects_provider_invalid_funding_identifiers_and_cardinality(self) -> None:
+        cases = (
+            ("github: not/a/github-user\n", "contains an invalid destination"),
+            (
+                "github: [one, two, three, four, five]\n",
+                "supports between one and four destinations",
+            ),
+            (
+                "patreon: [first, second]\n",
+                "requires exactly one destination",
+            ),
+            (
+                "tidelift: unknown/package\n",
+                "contains an invalid destination",
+            ),
+            (
+                "thanks_dev: github-user\n",
+                "contains an invalid destination",
+            ),
+        )
+        for funding_text, expected in cases:
+            with self.subTest(funding_text=funding_text):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self.copy_fixture(root)
+                    contract = root / "contracts/community.toml"
+                    contract.write_text(
+                        contract.read_text(encoding="utf-8").replace(
+                            "active = false", "active = true", 1
+                        ),
+                        encoding="utf-8",
+                    )
+                    sponsorship = root / "docs/community/sponsorship.md"
+                    sponsorship.write_text(
+                        sponsorship.read_text(encoding="utf-8").replace(
+                            "Status: inactive pending a verified funding destination.",
+                            "Status: active with a verified funding destination.",
+                            1,
+                        ),
+                        encoding="utf-8",
+                    )
+                    (root / ".github/FUNDING.yml").write_text(
+                        funding_text,
+                        encoding="utf-8",
+                    )
+
+                    result = self.run_checker(root)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(expected, result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

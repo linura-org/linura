@@ -111,6 +111,16 @@ _PLACEHOLDER_HOSTS = frozenset({"example.com", "example.org", "example.net"})
 INACTIVE_SPONSORSHIP_STATUS = "Status: inactive pending a verified funding destination."
 ACTIVE_SPONSORSHIP_STATUS = "Status: active with a verified funding destination."
 
+_TIDELIFT_PLATFORMS = frozenset({
+    "npm",
+    "pypi",
+    "rubygems",
+    "maven",
+    "packagist",
+    "nuget",
+})
+_SINGLE_DESTINATION_FUNDING_KEYS = SUPPORTED_FUNDING_KEYS - {"github", "custom"}
+
 
 def _strip_yaml_comment(value: str) -> str:
     quote: str | None = None
@@ -231,6 +241,7 @@ def _top_level_yaml_entries(text: str) -> list[tuple[str, str, list[str]]]:
 
 def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
     failures: list[str] = []
+    block_scalar_indent: int | None = None
 
     for line_number, raw in enumerate(text.splitlines(), start=1):
         if not raw.strip() or raw.lstrip().startswith("#"):
@@ -240,13 +251,21 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
             failures.append(f"{label} line {line_number} must use spaces for indentation")
             continue
 
+        indent = len(raw) - len(raw.lstrip(" "))
+        if block_scalar_indent is not None and indent > block_scalar_indent:
+            continue
+        block_scalar_indent = None
+
         active = _strip_yaml_comment(raw).strip()
         if not active:
             continue
         candidate = active[2:].strip() if active.startswith("- ") else active
         if ":" in candidate:
             candidate = candidate.split(":", 1)[1].strip()
-        if not candidate or candidate in {"|", ">"}:
+        if not candidate:
+            continue
+        if candidate in {"|", ">"}:
+            block_scalar_indent = indent
             continue
 
         if candidate.startswith("[") and not candidate.endswith("]"):
@@ -256,6 +275,10 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
             continue
 
         if candidate[0] not in {"'", '"'}:
+            if re.search(r":(?:\s|$)", candidate):
+                failures.append(
+                    f"{label} line {line_number} contains an unquoted YAML mapping delimiter"
+                )
             continue
 
         quote = candidate[0]
@@ -291,7 +314,6 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
             )
 
     return failures
-
 
 def _validate_issue_form_yaml(text: str, rel: str) -> list[str]:
     failures = _yaml_scalar_syntax_failures(text, label=f"issue form {rel}")
@@ -631,23 +653,63 @@ def _funding_destinations(scalar: str, children: list[str]) -> list[str]:
     return [_unquote_yaml_scalar(value)]
 
 
+def _github_login_is_valid(value: str) -> bool:
+    return (
+        len(value) <= 39
+        and re.fullmatch(
+            r"[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9]))*",
+            value,
+        )
+        is not None
+    )
+
+
 def _valid_funding_destination(key: str, destination: str) -> bool:
     value = destination.strip()
     if not value or value.lower() in _PLACEHOLDER_FUNDING_VALUES:
         return False
+
     if key == "custom":
         parsed = urlparse(value)
         return (
             parsed.scheme in {"http", "https"}
             and bool(parsed.netloc)
             and parsed.hostname not in _PLACEHOLDER_HOSTS
+            and not parsed.username
+            and not parsed.password
         )
+
+    if key == "github":
+        return _github_login_is_valid(value)
+
+    if key == "tidelift":
+        platform, separator, package = value.partition("/")
+        return (
+            separator == "/"
+            and platform in _TIDELIFT_PLATFORMS
+            and bool(package)
+            and not package.startswith("/")
+            and not package.endswith("/")
+            and not any(char.isspace() for char in package)
+            and not package.startswith(("http://", "https://"))
+        )
+
+    if key == "thanks_dev":
+        prefix = "u/gh/"
+        return value.startswith(prefix) and _github_login_is_valid(value[len(prefix) :])
+
     return (
-        not any(char.isspace() for char in value)
-        and value not in {"-", "_"}
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", value) is not None
         and not value.startswith(("http://", "https://"))
     )
 
+
+def _funding_cardinality_is_valid(key: str, destinations: list[str]) -> bool:
+    if key in {"github", "custom"}:
+        return 1 <= len(destinations) <= 4
+    if key in _SINGLE_DESTINATION_FUNDING_KEYS:
+        return len(destinations) == 1
+    return False
 
 def read_text(root: Path, rel: str) -> str:
     path = root / rel
@@ -799,6 +861,16 @@ def validate(root: Path) -> list[str]:
             destinations = _funding_destinations(scalar, children)
             if not destinations:
                 failures.append(f"FUNDING.yml funding key {key} requires a nonempty destination")
+                continue
+            if not _funding_cardinality_is_valid(key, destinations):
+                if key in {"github", "custom"}:
+                    failures.append(
+                        f"FUNDING.yml funding key {key} supports between one and four destinations"
+                    )
+                else:
+                    failures.append(
+                        f"FUNDING.yml funding key {key} requires exactly one destination"
+                    )
                 continue
             invalid = [value for value in destinations if not _valid_funding_destination(key, value)]
             if invalid:
