@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import sys
 import tomllib
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -82,6 +84,158 @@ REQUIRED_MARKERS = {
 
 STALE_HOSTING_LANGUAGE = ("once hosted", "when hosted")
 
+SUPPORTED_FUNDING_KEYS = frozenset({
+    "github",
+    "patreon",
+    "open_collective",
+    "ko_fi",
+    "tidelift",
+    "community_bridge",
+    "liberapay",
+    "issuehunt",
+    "lfx_crowdfunding",
+    "polar",
+    "buy_me_a_coffee",
+    "thanks_dev",
+    "custom",
+})
+_PLACEHOLDER_FUNDING_VALUES = frozenset({
+    "placeholder",
+    "example",
+    "tbd",
+    "todo",
+    "replace-me",
+    "changeme",
+})
+_PLACEHOLDER_HOSTS = frozenset({"example.com", "example.org", "example.net"})
+
+
+def _strip_yaml_comment(value: str) -> str:
+    quote: str | None = None
+    escaped = False
+    for index, char in enumerate(value):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\" and quote == '"':
+            escaped = True
+            continue
+        if char in {"'", '"'}:
+            if quote == char:
+                quote = None
+            elif quote is None:
+                quote = char
+            continue
+        if char == "#" and quote is None:
+            return value[:index].rstrip()
+    return value.rstrip()
+
+
+def _unquote_yaml_scalar(value: str) -> str:
+    stripped = value.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {"'", '"'}:
+        return stripped[1:-1].strip()
+    return stripped
+
+
+def _split_inline_yaml_list(value: str) -> list[str]:
+    inner = value.strip()[1:-1]
+    items: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for char in inner:
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+        if char == "\\" and quote == '"':
+            current.append(char)
+            escaped = True
+            continue
+        if char in {"'", '"'}:
+            current.append(char)
+            if quote == char:
+                quote = None
+            elif quote is None:
+                quote = char
+            continue
+        if char == "," and quote is None:
+            items.append(_unquote_yaml_scalar("".join(current)))
+            current = []
+            continue
+        current.append(char)
+    if current or inner.strip():
+        items.append(_unquote_yaml_scalar("".join(current)))
+    return [item for item in items if item]
+
+
+def _top_level_yaml_entries(text: str) -> list[tuple[str, str, list[str]]]:
+    entries: list[tuple[str, str, list[str]]] = []
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        raw = lines[index]
+        stripped = raw.strip()
+        if not stripped or raw[:1].isspace() or stripped.startswith("#"):
+            index += 1
+            continue
+        active = _strip_yaml_comment(raw).strip()
+        match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", active)
+        if match is None:
+            entries.append(("", active, []))
+            index += 1
+            continue
+        key, scalar = match.group(1), match.group(2).strip()
+        children: list[str] = []
+        cursor = index + 1
+        while cursor < len(lines):
+            child_raw = lines[cursor]
+            child_stripped = child_raw.strip()
+            if not child_stripped or child_stripped.startswith("#"):
+                cursor += 1
+                continue
+            if not child_raw[:1].isspace():
+                break
+            child_active = _strip_yaml_comment(child_stripped).strip()
+            if child_active.startswith("- "):
+                item = _unquote_yaml_scalar(child_active[2:])
+                if item:
+                    children.append(item)
+            cursor += 1
+        entries.append((key, scalar, children))
+        index = cursor
+    return entries
+
+
+def _funding_destinations(scalar: str, children: list[str]) -> list[str]:
+    if children:
+        return children
+    value = _strip_yaml_comment(scalar).strip()
+    if not value or value in {"[]", "null", "~"}:
+        return []
+    if value.startswith("[") and value.endswith("]"):
+        return _split_inline_yaml_list(value)
+    return [_unquote_yaml_scalar(value)]
+
+
+def _valid_funding_destination(key: str, destination: str) -> bool:
+    value = destination.strip()
+    if not value or value.lower() in _PLACEHOLDER_FUNDING_VALUES:
+        return False
+    if key == "custom":
+        parsed = urlparse(value)
+        return (
+            parsed.scheme in {"http", "https"}
+            and bool(parsed.netloc)
+            and parsed.hostname not in _PLACEHOLDER_HOSTS
+        )
+    return (
+        not any(char.isspace() for char in value)
+        and value not in {"-", "_"}
+        and not value.startswith(("http://", "https://"))
+    )
+
 
 def read_text(root: Path, rel: str) -> str:
     path = root / rel
@@ -156,8 +310,13 @@ def validate(root: Path) -> list[str]:
         failures.append("CONTRIBUTING.md must state the inbound Apache-2.0 policy")
 
     issue_config = read_text(root, ".github/ISSUE_TEMPLATE/config.yml")
-    if "blank_issues_enabled: false" not in issue_config:
-        failures.append("issue routing must keep blank issues disabled")
+    issue_entries = [
+        (key, scalar)
+        for key, scalar, _children in _top_level_yaml_entries(issue_config)
+        if key == "blank_issues_enabled"
+    ]
+    if len(issue_entries) != 1 or issue_entries[0][1].strip().lower() != "false":
+        failures.append("issue routing must keep blank issues disabled as the effective YAML setting")
     for key in ("discussions", "security_policy"):
         value = channels.get(key)
         if isinstance(value, str) and value not in issue_config:
@@ -189,19 +348,37 @@ def validate(root: Path) -> list[str]:
     funding = contract.get("funding", {})
     funding_active = funding.get("active")
     funding_text = read_text(root, ".github/FUNDING.yml")
-    active_funding_lines = [
-        line for line in funding_text.splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
+    funding_entries = _top_level_yaml_entries(funding_text)
     sponsorship = read_text(root, "docs/community/sponsorship.md")
     if funding_active is False:
-        if active_funding_lines:
+        if funding_entries:
             failures.append("FUNDING.yml activates a destination while community contract funding.active=false")
         if "Status: inactive" not in sponsorship:
             failures.append("inactive funding contract requires explicit inactive sponsorship status")
     elif funding_active is True:
-        if not active_funding_lines:
+        if not funding_entries:
             failures.append("funding.active=true requires an active FUNDING.yml destination")
+        valid_destinations = 0
+        seen_funding_keys: set[str] = set()
+        for key, scalar, children in funding_entries:
+            if not key or key not in SUPPORTED_FUNDING_KEYS:
+                failures.append(f"FUNDING.yml contains unsupported funding key: {key or scalar!r}")
+                continue
+            if key in seen_funding_keys:
+                failures.append(f"FUNDING.yml contains duplicate funding key: {key}")
+                continue
+            seen_funding_keys.add(key)
+            destinations = _funding_destinations(scalar, children)
+            if not destinations:
+                failures.append(f"FUNDING.yml funding key {key} requires a nonempty destination")
+                continue
+            invalid = [value for value in destinations if not _valid_funding_destination(key, value)]
+            if invalid:
+                failures.append(f"FUNDING.yml funding key {key} contains an invalid destination")
+                continue
+            valid_destinations += len(destinations)
+        if valid_destinations == 0:
+            failures.append("funding.active=true requires at least one supported usable FUNDING.yml destination")
         if "Status: inactive" in sponsorship:
             failures.append("active funding contract cannot retain inactive sponsorship status")
     else:
