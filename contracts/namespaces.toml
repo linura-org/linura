@@ -1,0 +1,172 @@
+schema_version = 1
+
+[authority]
+domain = "linura.org"
+reverse_dns = "org.linura"
+
+[local]
+bare_name = "linura"
+component_prefix = "linura-"
+daemon = "linurad"
+control_cli = "linuractl"
+
+[filesystem]
+config = "/etc/linura"
+lib = "/usr/lib/linura"
+share = "/usr/share/linura"
+xdg_subdir = "linura"
+
+[[identifier]]
+id = "org.linura.Control1"
+kind = "dbus-service"
+status = "active"
+primary_interface = "org.linura.Control1"
+
+[[identifier]]
+id = "org.linura.Authority1"
+kind = "dbus-service"
+status = "active"
+primary_interface = "org.linura.Authority1"
+
+[[identifier]]
+id = "org.linura.Executor.Systemd1"
+kind = "dbus-service"
+status = "active"
+primary_interface = "org.linura.Executor.Systemd1"
+
+[[identifier]]
+id = "org.linura.Control1"
+kind = "dbus-interface"
+status = "active"
+object_path = "/org/linura/Control1"
+
+[[identifier]]
+id = "org.linura.Session1"
+kind = "dbus-interface"
+status = "active"
+object_path = "/org/linura/Session1"
+
+[[identifier]]
+id = "org.linura.Authority1"
+kind = "dbus-interface"
+status = "active"
+object_path = "/org/linura/Authority1"
+
+[[identifier]]
+id = "org.linura.Executor.Systemd1"
+kind = "dbus-interface"
+status = "active"
+object_path = "/org/linura/Executor/Systemd1"
+
+[[identifier]]
+id = "org.linura.ControlCenter"
+kind = "desktop-id"
+status = "active"
+
+[[identifier]]
+id = "org.linura.CommandPalette"
+kind = "desktop-id"
+status = "active"
+
+[[identifier]]
+id = "org.linura.ShellBridge"
+kind = "qml-uri"
+status = "active"
+
+[[identifier]]
+id = "org.linura.UI"
+kind = "qml-uri"
+status = "active"
+
+[[identifier]]
+id = "org.linura.authority.manage-systemd-active-state"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.executor.systemd.qualify-restart"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.executor.systemd.set-active-state"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "linura-authorityd.service"
+kind = "systemd-unit"
+status = "active"
+
+[[identifier]]
+id = "linura-executor-systemd.service"
+kind = "systemd-unit"
+status = "active"
+
+[[identifier]]
+id = "linura-shell.service"
+kind = "systemd-unit"
+status = "active"
+
+[[identifier]]
+id = "linurad.service"
+kind = "systemd-unit"
+status = "active"
+
+[[identifier]]
+id = "org.linura.Linura"
+kind = "application-id"
+status = "active"
+
+[[identifier]]
+id = "org.linura.Linura"
+kind = "desktop-id"
+status = "active"
+
+[[dbus_registration]]
+source = "crates/linura-dbus/src/lib.rs"
+path_token = "OBJECT_PATH"
+object_token = "service"
+interface = "org.linura.Control1"
+
+[[dbus_registration]]
+source = "crates/linura-dbus/src/lib.rs"
+path_token = "OBJECT_PATH"
+object_token = "control"
+interface = "org.linura.Control1"
+
+[[dbus_registration]]
+source = "crates/linura-dbus/src/lib.rs"
+path_token = "SESSION_OBJECT_PATH"
+object_token = "session"
+interface = "org.linura.Session1"
+
+[[dbus_registration]]
+source = "crates/linura-dbus/src/authority.rs"
+path_token = "AUTHORITY_OBJECT_PATH"
+object_token = "service"
+interface = "org.linura.Authority1"
+
+[[dbus_registration]]
+source = "executors/linura-executor-systemd/src/lib.rs"
+path_token = "OBJECT_PATH"
+object_token = "SystemdExecutorService"
+interface = "org.linura.Executor.Systemd1"
+
+[[polkit_binding]]
+source = "crates/linura-dbus/src/authority.rs"
+usage = "action-arg"
+token = "MANAGE_SYSTEMD_ACTIVE_STATE_ACTION"
+action = "org.linura.authority.manage-systemd-active-state"
+
+[[polkit_binding]]
+source = "executors/linura-executor-systemd/src/lib.rs"
+usage = "authorize-caller"
+token = "QUALIFICATION_ACTION_ID"
+action = "org.linura.executor.systemd.qualify-restart"
+
+[[polkit_binding]]
+source = "executors/linura-executor-systemd/src/lib.rs"
+usage = "authorize-caller"
+token = "MANAGED_ACTION_ID"
+action = "org.linura.executor.systemd.set-active-state"

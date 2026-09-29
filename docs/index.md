@@ -5,6 +5,7 @@
 - [Vision coverage](vision-coverage.md)
 - [Architecture](architecture.md)
 - [Naming and product architecture](naming.md)
+- [Ecosystem identity and reservation registry](ecosystem-registry.md)
 - [Linura SDK](sdk.md)
 - [Development plan](development-plan.md)
 - [Roadmap](roadmap.md)
