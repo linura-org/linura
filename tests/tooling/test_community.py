@@ -543,7 +543,7 @@ class CommunityContractTests(unittest.TestCase):
             form.write_text(
                 form.read_text(encoding="utf-8").replace(
                     "label: Summary",
-                    'label: ["Bad\\\\q"]',
+                    r'label: ["Bad\q"]',
                     1,
                 ),
                 encoding="utf-8",
