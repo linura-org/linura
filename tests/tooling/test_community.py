@@ -383,5 +383,75 @@ class CommunityContractTests(unittest.TestCase):
             self.assertIn("contains an invalid destination", result.stderr)
 
 
+    def test_rejects_invalid_double_quoted_yaml_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            form = root / ".github/ISSUE_TEMPLATE/bug.yml"
+            form.write_text(
+                form.read_text(encoding="utf-8").replace(
+                    "label: Summary",
+                    'label: "Bad\\q"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("invalid double-quoted YAML escape", result.stderr)
+
+    def test_rejects_malformed_funding_block_child(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            contract = root / "contracts/community.toml"
+            contract.write_text(
+                contract.read_text(encoding="utf-8").replace(
+                    "active = false", "active = true", 1
+                ),
+                encoding="utf-8",
+            )
+            sponsorship = root / "docs/community/sponsorship.md"
+            sponsorship.write_text(
+                sponsorship.read_text(encoding="utf-8").replace(
+                    "Status: inactive pending a verified funding destination.",
+                    "Status: active with a verified funding destination.",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            (root / ".github/FUNDING.yml").write_text(
+                "github:\n  - valid-user\n  garbage\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("malformed funding list child", result.stderr)
+
+    def test_rejects_commented_cff_license_masking_effective_license(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            citation = root / "CITATION.cff"
+            citation.write_text(
+                citation.read_text(encoding="utf-8").replace(
+                    'license: "Apache-2.0"',
+                    'license: "GPL-3.0"',
+                    1,
+                )
+                + '\n# license: "Apache-2.0"\n',
+                encoding="utf-8",
+            )
+
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "CITATION.cff effective license must be 'Apache-2.0'",
+                result.stderr,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

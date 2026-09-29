@@ -242,6 +242,8 @@ def _top_level_yaml_entries(text: str) -> list[tuple[str, str, list[str]]]:
 def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
     failures: list[str] = []
     block_scalar_indent: int | None = None
+    simple_double_escapes = frozenset('0abtnvfre "/\\N_LP')
+    hex_escape_widths = {"x": 2, "u": 4, "U": 8}
 
     for line_number, raw in enumerate(text.splitlines(), start=1):
         if not raw.strip() or raw.lstrip().startswith("#"):
@@ -282,19 +284,38 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
             continue
 
         quote = candidate[0]
-        escaped = False
         closed_at: int | None = None
+        invalid_escape = False
         index = 1
         while index < len(candidate):
             char = candidate[index]
-            if quote == '"' and escaped:
-                escaped = False
-                index += 1
-                continue
             if quote == '"' and char == "\\":
-                escaped = True
-                index += 1
-                continue
+                if index + 1 >= len(candidate):
+                    failures.append(
+                        f"{label} line {line_number} has an invalid double-quoted YAML escape"
+                    )
+                    invalid_escape = True
+                    break
+                escape = candidate[index + 1]
+                if escape in simple_double_escapes:
+                    index += 2
+                    continue
+                width = hex_escape_widths.get(escape)
+                if width is not None:
+                    digits = candidate[index + 2 : index + 2 + width]
+                    if len(digits) != width or re.fullmatch(r"[0-9A-Fa-f]+", digits) is None:
+                        failures.append(
+                            f"{label} line {line_number} has an invalid double-quoted YAML escape"
+                        )
+                        invalid_escape = True
+                        break
+                    index += 2 + width
+                    continue
+                failures.append(
+                    f"{label} line {line_number} has an invalid double-quoted YAML escape"
+                )
+                invalid_escape = True
+                break
             if char == quote:
                 if quote == "'" and index + 1 < len(candidate) and candidate[index + 1] == "'":
                     index += 2
@@ -303,6 +324,8 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
                 break
             index += 1
 
+        if invalid_escape:
+            continue
         if closed_at is None:
             failures.append(
                 f"{label} line {line_number} has an unterminated quoted YAML scalar"
@@ -314,6 +337,85 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
             )
 
     return failures
+
+
+def _funding_yaml_structure_failures(text: str) -> list[str]:
+    failures: list[str] = []
+    lines = text.splitlines()
+    active_indents = [
+        len(raw) - len(raw.lstrip(" "))
+        for raw in lines
+        if raw.strip() and not raw.lstrip().startswith("#")
+    ]
+    root_indent = min(active_indents, default=0)
+    current_key: str | None = None
+    current_has_scalar = False
+    child_indent: int | None = None
+
+    for line_number, original in enumerate(lines, start=1):
+        if not original.strip() or original.lstrip().startswith("#"):
+            continue
+        raw = original[root_indent:] if len(original) >= root_indent else original
+        indent = len(raw) - len(raw.lstrip(" "))
+        active = _strip_yaml_comment(raw).strip()
+        if not active:
+            continue
+
+        if indent == 0:
+            match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", active)
+            if match is None:
+                failures.append(
+                    f"FUNDING.yml line {line_number} is malformed"
+                )
+                current_key = None
+                child_indent = None
+                continue
+            current_key = match.group(1)
+            current_has_scalar = bool(match.group(2).strip())
+            child_indent = None
+            continue
+
+        if current_key is None or current_has_scalar:
+            failures.append(
+                f"FUNDING.yml line {line_number} has an unexpected indented child"
+            )
+            continue
+        if child_indent is None:
+            child_indent = indent
+        elif indent != child_indent:
+            failures.append(
+                f"FUNDING.yml line {line_number} has inconsistent child indentation"
+            )
+            continue
+        match = re.fullmatch(r"-\s+(.+)", active)
+        if match is None or not _unquote_yaml_scalar(match.group(1)).strip():
+            failures.append(
+                f"FUNDING.yml line {line_number} has a malformed funding list child"
+            )
+
+    return failures
+
+
+def _effective_top_level_scalars(
+    text: str, *, label: str, required: set[str]
+) -> tuple[dict[str, str], list[str]]:
+    failures = _yaml_scalar_syntax_failures(text, label=label)
+    values: dict[str, str] = {}
+    for key, scalar, _children in _top_level_yaml_entries(text):
+        if not key:
+            failures.append(f"{label} contains malformed top-level YAML")
+            continue
+        if key not in required:
+            continue
+        if key in values:
+            failures.append(f"{label} contains duplicate top-level key: {key}")
+            continue
+        value = _unquote_yaml_scalar(_strip_yaml_comment(scalar).strip())
+        if not value:
+            failures.append(f"{label} top-level field {key} must be nonempty")
+            continue
+        values[key] = value
+    return values, failures
 
 def _validate_issue_form_yaml(text: str, rel: str) -> list[str]:
     failures = _yaml_scalar_syntax_failures(text, label=f"issue form {rel}")
@@ -853,6 +955,7 @@ def validate(root: Path) -> list[str]:
     funding_active = funding.get("active")
     funding_text = read_text(root, ".github/FUNDING.yml")
     failures.extend(_yaml_scalar_syntax_failures(funding_text, label="FUNDING.yml"))
+    failures.extend(_funding_yaml_structure_failures(funding_text))
     funding_entries = _top_level_yaml_entries(funding_text)
     sponsorship = read_text(root, "docs/community/sponsorship.md")
     sponsorship_statuses = [
@@ -914,9 +1017,24 @@ def validate(root: Path) -> list[str]:
         failures.append("GOVERNANCE.md must define sponsorship/conflict boundaries")
 
     citation = read_text(root, "CITATION.cff")
-    for marker in ("cff-version: 1.2.0", 'title: "Linura"', 'license: "Apache-2.0"', "repository-code:"):
-        if marker not in citation:
-            failures.append(f"CITATION.cff missing required marker: {marker!r}")
+    citation_expected = {
+        "cff-version": "1.2.0",
+        "title": "Linura",
+        "license": "Apache-2.0",
+        "repository-code": "https://github.com/linura-org/linura",
+    }
+    citation_values, citation_failures = _effective_top_level_scalars(
+        citation,
+        label="CITATION.cff",
+        required=set(citation_expected),
+    )
+    failures.extend(citation_failures)
+    for key, expected in citation_expected.items():
+        actual = citation_values.get(key)
+        if actual != expected:
+            failures.append(
+                f"CITATION.cff effective {key} must be {expected!r}; got {actual!r}"
+            )
 
     return failures
 
