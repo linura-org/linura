@@ -5,6 +5,7 @@ import org.linura.ShellBridge 1.0
 import "plugins/control-center"
 import "plugins/quick-settings"
 import "plugins/command-palette"
+import "plugins/notifications-osd" as Feedback
 import "integrations/hyprland"
 import "integrations/xdg"
 
@@ -69,6 +70,21 @@ ShellRoot {
     AudioSessionController {
         id: audioController
         active: shell.controlCenterOpen || shell.quickSettingsOpen
+        onLifecycleFeedback: (presentationGeneration, operationKey, phase, outcome,
+                              observedValuePercent, observedValueValid, finalOutcome) =>
+            lifecycleFeedback.present(
+                presentationGeneration,
+                operationKey,
+                phase,
+                outcome,
+                observedValuePercent,
+                observedValueValid,
+                finalOutcome
+            )
+    }
+
+    Feedback.LifecycleFeedback {
+        id: lifecycleFeedback
     }
 
     WorkspaceNavigationController {

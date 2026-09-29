@@ -479,8 +479,8 @@ class RoadmapContractTests(unittest.TestCase):
             self._copy_fixture(root)
             contract = root / "contracts/v010-workstation-slices.toml"
             text = contract.read_text(encoding="utf-8").replace(
-                "completed_slice_count = 14",
                 "completed_slice_count = 15",
+                "completed_slice_count = 16",
                 1,
             )
             contract.write_text(text, encoding="utf-8")
@@ -495,21 +495,21 @@ class RoadmapContractTests(unittest.TestCase):
             self._copy_fixture(root)
             contract = root / "contracts/v010-workstation-slices.toml"
             text = contract.read_text(encoding="utf-8")
-            text = text.replace("completed_slice_count = 14", "completed_slice_count = 15", 1)
-            text = text.replace('next_slice = "S15"', 'next_slice = "S16"', 1)
+            text = text.replace("completed_slice_count = 15", "completed_slice_count = 16", 1)
+            text = text.replace('next_slice = "S16"', 'next_slice = "S17"', 1)
             old_slice = """[[slice]]
-id = "S15"
-title = "lifecycle notifications and OSD"
+id = "S16"
+title = "first-party panel, tray, status and workstation entry points"
 status = "planned"
-depends_on = ["S14"]
+depends_on = ["S15"]
 evidence_prs = []
 required_for_release = true
 """
             new_slice = """[[slice]]
-id = "S15"
-title = "lifecycle notifications and OSD"
+id = "S16"
+title = "first-party panel, tray, status and workstation entry points"
 status = "complete"
-depends_on = ["S14"]
+depends_on = ["S15"]
 evidence_prs = [999999]
 required_for_release = true
 """
@@ -625,8 +625,8 @@ required_for_release = true
     def _complete_v010_slice_fixture(self, root: Path) -> None:
         contract = root / "contracts/v010-workstation-slices.toml"
         text = contract.read_text(encoding="utf-8")
-        text = text.replace("completed_slice_count = 14", "completed_slice_count = 32", 1)
-        text = text.replace('next_slice = "S15"', 'next_slice = ""', 1)
+        text = text.replace("completed_slice_count = 15", "completed_slice_count = 32", 1)
+        text = text.replace('next_slice = "S16"', 'next_slice = ""', 1)
         text = text.replace('status = "planned"', 'status = "complete"')
         text = text.replace("evidence_prs = []", "evidence_prs = [999999]")
         contract.write_text(text, encoding="utf-8")

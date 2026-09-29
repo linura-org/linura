@@ -1652,5 +1652,20 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertIn("quick_settings_recovered", result.stderr)
 
 
+    def test_lifecycle_feedback_runtime_cases_cannot_be_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-shell-runtime-qualification.toml"
+            text = contract.read_text(encoding="utf-8").replace(
+                '  "lifecycle-feedback-verified-success",\n',
+                "",
+                1,
+            )
+            contract.write_text(text, encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("required_cases drifted", result.stderr)
+
 if __name__ == "__main__":
     unittest.main()

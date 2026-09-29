@@ -32,6 +32,7 @@ class V010SlicePREvidenceTests(unittest.TestCase):
             "S08": "apps/linurad/src/session_audio.rs",
             "S12": "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml",
             "S14": "qualification/v010/shell-runtime/run-shell-runtime.sh",
+            "S15": "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml",
             "S29": "qualification/v010/experience-evidence.json",
             "S31": "qualification/v010/update-recovery/case.json",
             "S32": ".github/workflows/post-release-closure.yml",
@@ -39,6 +40,21 @@ class V010SlicePREvidenceTests(unittest.TestCase):
         for slice_id, path in cases.items():
             with self.subTest(slice_id=slice_id, path=path):
                 self.assertTrue(verifier.path_matches_slice(slice_id, path))
+
+    def test_s15_scope_rejects_legacy_split_notification_paths(self) -> None:
+        self.assertTrue(
+            verifier.path_matches_slice(
+                "S15",
+                "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml",
+            )
+        )
+        for stale_path in (
+            "apps/linura-shell/plugins/notifications/Notification.qml",
+            "apps/linura-shell/plugins/osd/Volume.qml",
+            "apps/linura-shell/integrations/lifecycle/Feedback.qml",
+        ):
+            with self.subTest(path=stale_path):
+                self.assertFalse(verifier.path_matches_slice("S15", stale_path))
 
     def test_evidence_seal_paths_allow_only_retained_artifact_surfaces(self) -> None:
         self.assertTrue(

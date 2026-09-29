@@ -29,6 +29,7 @@ EXPECTED_COMPONENTS = [
     "session1",
     "sqlite-transient-audit",
     "quick-settings",
+    "notifications-osd",
 ]
 
 EXPECTED_RUNTIME_PACKAGES = [
@@ -70,6 +71,8 @@ EXPECTED_CASES = [
     "quick-settings-precondition-drift-rejection",
     "quick-settings-service-loss-fail-closed",
     "quick-settings-restart-recovery",
+    "lifecycle-feedback-verified-success",
+    "lifecycle-feedback-precondition-drift-no-success",
 ]
 
 RUNTIME_FILES = (
@@ -80,6 +83,8 @@ RUNTIME_FILES = (
     "apps/linura-shell/bridge/audio_session_controller.h",
     "apps/linura-shell/bridge/audio_session_controller.cpp",
     "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml",
+    "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml",
+    "apps/linura-shell/plugins/notifications-osd/manifest.json",
     "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml",
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
     "apps/linura-shell/ui/CMakeLists.txt",
@@ -327,6 +332,7 @@ def validate(root: Path) -> list[str]:
             "audio_fixture_evidence_required",
             "transient_audit_evidence_required",
             "quick_settings_authority_path_required",
+            "lifecycle_feedback_evidence_required",
         ):
             if evidence.get(key) is not True:
                 failures.append(f"shell runtime evidence.{key} must remain true")
@@ -443,6 +449,8 @@ def validate(root: Path) -> list[str]:
         "quick-settings-precondition-drift.txt",
         "quick-settings-service-loss.txt",
         "quick-settings-restart-recovery.txt",
+        "lifecycle-feedback-success.txt",
+        "lifecycle-feedback-precondition-drift.txt",
         '"prepared_substrate": {',
         "PREPARED_IMAGE_SHA256",
         '"qt_quick_backend": rendering_backend',

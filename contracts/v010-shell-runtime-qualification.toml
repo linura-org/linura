@@ -35,6 +35,7 @@ required_components = [
   "session1",
   "sqlite-transient-audit",
   "quick-settings",
+  "notifications-osd",
 ]
 
 required_cases = [
@@ -55,6 +56,8 @@ required_cases = [
   "quick-settings-precondition-drift-rejection",
   "quick-settings-service-loss-fail-closed",
   "quick-settings-restart-recovery",
+  "lifecycle-feedback-verified-success",
+  "lifecycle-feedback-precondition-drift-no-success",
 ]
 
 [evidence]
@@ -76,4 +79,5 @@ authority_runtime_integrity_required = true
 audio_fixture_evidence_required = true
 transient_audit_evidence_required = true
 quick_settings_authority_path_required = true
+lifecycle_feedback_evidence_required = true
 release_support_promotion = false
