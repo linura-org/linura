@@ -471,5 +471,24 @@ class CommunityContractTests(unittest.TestCase):
             )
 
 
+    def test_rejects_forbidden_plain_scalar_prefix_in_issue_form(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            form = root / ".github/ISSUE_TEMPLATE/bug.yml"
+            form.write_text(
+                form.read_text(encoding="utf-8").replace(
+                    "label: Summary",
+                    "label: ]bad",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("forbidden YAML plain-scalar indicator", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -282,6 +282,14 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
             continue
 
         if candidate[0] not in {"'", '"'}:
+            forbidden_plain_prefixes = frozenset(",[]{}#&*!|>%@") | {chr(96)}
+            if candidate[0] in forbidden_plain_prefixes or (
+                candidate[0] in "-?:" and (len(candidate) == 1 or candidate[1].isspace())
+            ):
+                failures.append(
+                    f"{label} line {line_number} starts with a forbidden YAML plain-scalar indicator"
+                )
+                continue
             if re.search(r":(?:\s|$)", candidate):
                 failures.append(
                     f"{label} line {line_number} contains an unquoted YAML mapping delimiter"
