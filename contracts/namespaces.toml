@@ -69,6 +69,11 @@ kind = "desktop-id"
 status = "active"
 
 [[identifier]]
+id = "org.linura.QuickSettings"
+kind = "desktop-id"
+status = "active"
+
+[[identifier]]
 id = "org.linura.ShellBridge"
 kind = "qml-uri"
 status = "active"

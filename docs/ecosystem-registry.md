@@ -24,7 +24,7 @@ A name being **defined** or **prepared** here does not mean it is externally cla
 
 ## Current registry
 
-Last reviewed: **2026-09-25**
+Last reviewed: **2026-09-29**
 
 | Area | Canonical identity | Status | Priority | Evidence / blocker | Next action |
 | --- | --- | --- | --- | --- | --- |
@@ -33,7 +33,7 @@ Last reviewed: **2026-09-25**
 | npm | `@linura` | ⬜ Pending | 🔴 Now | No completed registry claim recorded here | Claim the scope through a legitimate package/account flow |
 | Docker Hub | `linura` organization | 🟪 In progress | 🔴 Now | Desired identity is not yet recorded as secured | Resolve availability/support path, then record proof |
 | Snap Store | `linura` | ⬜ Pending | 🔴 Now | No completed store registration recorded here | Create/verify publisher identity and register the real snap name |
-| crates.io | `linura` | 🟪 In progress | 🔴 High | Canonical crate and trusted-publishing workflow are on `main`; external publication/ownership is not yet recorded here | Verify the trusted publisher and record the first registry ownership/publication evidence |
+| crates.io | `linura` | ✅ Claimed | — | Canonical `linura` crate has been published under Linura control; the bootstrap publish token was revoked after publication | Maintain ownership/recovery controls and use the reviewed release path for future publications |
 | PyPI | `linura` | 🟪 In progress | 🟠 High | Canonical Python package and trusted-publishing configuration are on `main`; external publication/ownership remains to be evidenced | Verify the external PyPI project/publisher state before marking Claimed |
 | Flathub / AppStream | `org.linura.Linura` | 🟦 Defined | 🟠 High | Canonical desktop/AppStream identity is on `main`; this is not a Flathub publication claim | Submit only when the graphical client is genuinely installable and release-qualified |
 | Homebrew | `linura-org/homebrew-tap` | ⬜ Pending | 🟠 Soon | No tap recorded | Create when a supported Homebrew install path exists |
@@ -68,7 +68,7 @@ Do not commit secrets, recovery codes, private account identifiers, support tran
 
 The current ordering is:
 
-1. verify the crates.io publisher/publication state and finish the already-open PyPI and desktop-identity work;
+1. finish the open PyPI publisher/organization work and preserve the defined desktop identity without overstating Flathub publication;
 2. secure npm, Docker Hub, and Snap identities where provider rules allow;
 3. keep the AUR package ready while registration remains blocked;
 4. add Homebrew/OCI distribution only when the corresponding installable artifact is real;

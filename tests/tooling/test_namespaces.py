@@ -33,6 +33,7 @@ class NamespaceContractTests(unittest.TestCase):
             "executors/linura-executor-systemd/src/lib.rs",
             "apps/linura-shell/org.linura.ControlCenter.desktop",
             "apps/linura-shell/org.linura.CommandPalette.desktop",
+            "apps/linura-shell/org.linura.QuickSettings.desktop",
             "apps/linura-control-center/data/org.linura.Linura.desktop",
             "apps/linura-control-center/data/org.linura.Linura.metainfo.xml",
             "apps/linura-shell/bridge/CMakeLists.txt",
@@ -824,6 +825,66 @@ class NamespaceContractTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
                 "does not define action org.linura.authority.manage-systemd-active-state",
+                result.stderr,
+            )
+
+
+
+    def test_systemd_dropin_cannot_override_bound_bus_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            dropin = (
+                root
+                / "packaging/systemd/system/linura-authorityd.service.d/override.conf"
+            )
+            dropin.parent.mkdir(parents=True, exist_ok=True)
+            dropin.write_text(
+                "[Service]\nBusName=\nType=simple\n",
+                encoding="utf-8",
+            )
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "must not override Type or BusName",
+                result.stderr,
+            )
+
+    def test_system_bus_service_cannot_have_duplicate_policy_ownership(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            duplicate = root / "packaging/dbus-1/system.d/org.linura.Authority1-extra.conf"
+            duplicate.write_text(
+                '<busconfig><policy user="root">'
+                '<allow own="org.linura.Authority1"/>'
+                "</policy></busconfig>\n",
+                encoding="utf-8",
+            )
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "must be owned only by packaging/dbus-1/system.d/org.linura.Authority1.conf",
+                result.stderr,
+            )
+
+    def test_polkit_action_cannot_have_duplicate_policy_definition(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            duplicate = root / "packaging/polkit-1/actions/org.linura.duplicate.policy"
+            duplicate.write_text(
+                '<policyconfig>'
+                '<action id="org.linura.authority.manage-systemd-active-state">'
+                "<description>duplicate</description>"
+                "</action>"
+                "</policyconfig>\n",
+                encoding="utf-8",
+            )
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "must be defined only by packaging/polkit-1/actions/org.linura.authority.policy",
                 result.stderr,
             )
 

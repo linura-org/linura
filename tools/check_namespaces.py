@@ -882,6 +882,27 @@ def check(root: Path) -> list[str]:
                             f"D-Bus policy {policy} does not grant ownership of {service}"
                         )
 
+                ownership_files: set[str] = set()
+                for policy_dir_name in (
+                    "packaging/dbus-1/system.d",
+                    "packaging/dbus-1/session.d",
+                ):
+                    policy_dir = root / policy_dir_name
+                    if not policy_dir.is_dir():
+                        continue
+                    for candidate in sorted(policy_dir.glob("*.conf")):
+                        try:
+                            candidate_owned = _xml_attribute_values(candidate, ("own",))
+                        except (OSError, ET.ParseError):
+                            continue
+                        if service in candidate_owned:
+                            ownership_files.add(candidate.relative_to(root).as_posix())
+                if ownership_files != {policy}:
+                    failures.append(
+                        f"D-Bus service {service} must be owned only by {policy}; "
+                        f"found {sorted(ownership_files)!r}"
+                    )
+
         if not isinstance(systemd_unit, str) or not re.fullmatch(
             r"packaging/systemd/system/[A-Za-z0-9_.@-]+\.service", systemd_unit
         ):
@@ -911,6 +932,16 @@ def check(root: Path) -> list[str]:
                     failures.append(
                         f"systemd unit {systemd_unit} must declare exactly Type=dbus"
                     )
+
+                dropin_dir = unit_path.parent / f"{unit_name}.d"
+                if dropin_dir.is_dir():
+                    for dropin in sorted(dropin_dir.glob("*.conf")):
+                        dropin_text = dropin.read_text(encoding="utf-8")
+                        if re.search(r"(?m)^\s*(?:BusName|Type)\s*=", dropin_text):
+                            failures.append(
+                                f"systemd drop-in {dropin.relative_to(root)} must not override "
+                                f"Type or BusName for namespace-bound service {service}"
+                            )
 
     for source, token in sorted(runtime_dbus_name_calls):
         if (source, token) not in declared_dbus_name_bindings:
@@ -1026,6 +1057,22 @@ def check(root: Path) -> list[str]:
                         failures.append(
                             f"Polkit policy {policy} does not define action {action}"
                         )
+
+                definition_files: set[str] = set()
+                policy_dir = root / "packaging/polkit-1/actions"
+                if policy_dir.is_dir():
+                    for candidate in sorted(policy_dir.glob("*.policy")):
+                        try:
+                            candidate_actions = set(_xml_values(candidate, "action", "id"))
+                        except (OSError, ET.ParseError):
+                            continue
+                        if action in candidate_actions:
+                            definition_files.add(candidate.relative_to(root).as_posix())
+                if definition_files != {policy}:
+                    failures.append(
+                        f"Polkit action {action} must be defined only by {policy}; "
+                        f"found {sorted(definition_files)!r}"
+                    )
         if key not in runtime_polkit_calls:
             failures.append(
                 f"missing Polkit runtime binding {source}:{usage}:{token}"
