@@ -279,20 +279,52 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
 
             inner = candidate[1:-1]
             quote: str | None = None
-            escaped = False
-            for char in inner:
-                if escaped:
-                    escaped = False
-                    continue
-                if char == "\\" and quote == '"':
-                    escaped = True
-                    continue
-                if char in {"'", '"'}:
-                    if quote == char:
-                        quote = None
-                    elif quote is None:
+            invalid_escape = False
+            index = 0
+            while index < len(inner):
+                char = inner[index]
+                if quote is None:
+                    if char in {"'", '"'}:
                         quote = char
-            if escaped or quote is not None:
+                    index += 1
+                    continue
+
+                if quote == "'":
+                    if char == "'":
+                        if index + 1 < len(inner) and inner[index + 1] == "'":
+                            index += 2
+                            continue
+                        quote = None
+                    index += 1
+                    continue
+
+                if char == "\\":
+                    if index + 1 >= len(inner):
+                        failures.append(
+                            f"{label} line {line_number} has an invalid double-quoted YAML escape"
+                        )
+                        invalid_escape = True
+                        break
+                    escape = inner[index + 1]
+                    if escape in simple_double_escapes:
+                        index += 2
+                        continue
+                    width = hex_escape_widths.get(escape)
+                    if width is not None:
+                        digits = inner[index + 2 : index + 2 + width]
+                        if len(digits) == width and re.fullmatch(r"[0-9A-Fa-f]+", digits):
+                            index += 2 + width
+                            continue
+                    failures.append(
+                        f"{label} line {line_number} has an invalid double-quoted YAML escape"
+                    )
+                    invalid_escape = True
+                    break
+                if char == '"':
+                    quote = None
+                index += 1
+
+            if not invalid_escape and quote is not None:
                 failures.append(
                     f"{label} line {line_number} has an unterminated quoted scalar in an inline YAML sequence"
                 )
@@ -452,6 +484,113 @@ def _effective_top_level_scalars(
             continue
         values[key] = value
     return values, failures
+
+
+def _validate_citation_cff_yaml(text: str) -> list[str]:
+    failures = _yaml_scalar_syntax_failures(text, label="CITATION.cff")
+    active_lines = [
+        (line_number, raw)
+        for line_number, raw in enumerate(text.splitlines(), start=1)
+        if raw.strip() and not raw.lstrip().startswith("#")
+    ]
+    if not active_lines:
+        return failures + ["CITATION.cff is empty"]
+
+    root_keys: set[str] = set()
+    authors: list[set[str]] = []
+    current_author: set[str] | None = None
+    section: str | None = None
+
+    for line_number, raw in active_lines:
+        if "\t" in raw[: len(raw) - len(raw.lstrip())]:
+            failures.append(
+                f"CITATION.cff line {line_number} must use spaces for indentation"
+            )
+            continue
+
+        indent = len(raw) - len(raw.lstrip(" "))
+        active = _strip_yaml_comment(raw).strip()
+        if not active:
+            continue
+
+        if indent == 0:
+            match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", active)
+            if match is None:
+                failures.append(
+                    f"CITATION.cff line {line_number} is malformed YAML"
+                )
+                section = None
+                current_author = None
+                continue
+            key, scalar = match.group(1), match.group(2).strip()
+            if key in root_keys:
+                failures.append(f"CITATION.cff contains duplicate top-level key: {key}")
+            root_keys.add(key)
+            current_author = None
+            if key == "authors":
+                if scalar:
+                    failures.append("CITATION.cff authors must be a block sequence")
+                    section = None
+                else:
+                    section = "authors"
+            else:
+                section = None
+                if not scalar:
+                    failures.append(
+                        f"CITATION.cff top-level field {key} must be nonempty"
+                    )
+            continue
+
+        if section != "authors":
+            failures.append(
+                f"CITATION.cff line {line_number} has unexpected nested content"
+            )
+            continue
+
+        if indent == 2:
+            match = re.fullmatch(r"-\s+([A-Za-z0-9_-]+)\s*:\s*(.+)", active)
+            if match is None:
+                failures.append(
+                    f"CITATION.cff line {line_number} must start an author mapping with '- key:'"
+                )
+                current_author = None
+                continue
+            key = match.group(1)
+            current_author = {key}
+            authors.append(current_author)
+            continue
+
+        if indent == 4 and current_author is not None:
+            match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.+)", active)
+            if match is None:
+                failures.append(
+                    f"CITATION.cff line {line_number} is a malformed author entry"
+                )
+                continue
+            key = match.group(1)
+            if key in current_author:
+                failures.append(
+                    f"CITATION.cff author contains duplicate field: {key}"
+                )
+            current_author.add(key)
+            continue
+
+        failures.append(
+            f"CITATION.cff line {line_number} has invalid structure or indentation"
+        )
+
+    if "authors" not in root_keys:
+        failures.append("CITATION.cff is missing authors")
+    if not authors:
+        failures.append("CITATION.cff requires at least one author")
+    for index, author in enumerate(authors, start=1):
+        missing = {"family-names", "given-names"} - author
+        if missing:
+            failures.append(
+                f"CITATION.cff author {index} is missing: {', '.join(sorted(missing))}"
+            )
+
+    return failures
 
 def _validate_issue_form_yaml(text: str, rel: str) -> list[str]:
     failures = _yaml_scalar_syntax_failures(text, label=f"issue form {rel}")
@@ -1053,6 +1192,7 @@ def validate(root: Path) -> list[str]:
         failures.append("GOVERNANCE.md must define sponsorship/conflict boundaries")
 
     citation = read_text(root, "CITATION.cff")
+    failures.extend(_validate_citation_cff_yaml(citation))
     citation_expected = {
         "cff-version": "1.2.0",
         "title": "Linura",

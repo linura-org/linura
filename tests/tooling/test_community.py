@@ -535,5 +535,43 @@ class CommunityContractTests(unittest.TestCase):
             self.assertIn("forbidden YAML plain-scalar indicator", result.stderr)
 
 
+    def test_rejects_invalid_double_quoted_escape_inside_inline_yaml_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            form = root / ".github/ISSUE_TEMPLATE/bug.yml"
+            form.write_text(
+                form.read_text(encoding="utf-8").replace(
+                    "label: Summary",
+                    'label: ["Bad\\\\q"]',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("invalid double-quoted YAML escape", result.stderr)
+
+    def test_rejects_malformed_nested_citation_author_yaml(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            citation = root / "CITATION.cff"
+            citation.write_text(
+                citation.read_text(encoding="utf-8").replace(
+                    '    given-names: "Ehsan"',
+                    "    garbage",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("malformed author entry", result.stderr)
+
+
+
 if __name__ == "__main__":
     unittest.main()
