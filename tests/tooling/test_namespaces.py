@@ -729,5 +729,105 @@ class NamespaceContractTests(unittest.TestCase):
             )
 
 
+    def test_active_dbus_service_requires_runtime_name_acquisition(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            runtime = root / "crates/linura-dbus/src/authority.rs"
+            runtime.write_text(
+                runtime.read_text(encoding="utf-8").replace(
+                    ".name(AUTHORITY_SERVICE_NAME)?",
+                    "",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "missing D-Bus runtime name acquisition crates/linura-dbus/src/authority.rs: .name(AUTHORITY_SERVICE_NAME)",
+                result.stderr,
+            )
+
+    def test_system_bus_service_requires_packaged_policy_ownership(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            policy = root / "packaging/dbus-1/system.d/org.linura.Authority1.conf"
+            policy.write_text(
+                policy.read_text(encoding="utf-8").replace(
+                    '    <allow own="org.linura.Authority1"/>\n',
+                    "",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "does not grant ownership of org.linura.Authority1",
+                result.stderr,
+            )
+
+    def test_system_bus_service_requires_exact_systemd_dbus_contract(self) -> None:
+        mutations = (
+            ("BusName=org.linura.Authority1", "BusName=org.linura.Executor.Systemd1", "must declare exactly BusName=org.linura.Authority1"),
+            ("Type=dbus", "Type=simple", "must declare exactly Type=dbus"),
+        )
+        for old, new, expected in mutations:
+            with self.subTest(old=old, new=new):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    root = Path(temp_dir)
+                    self._copy_fixture(root)
+                    unit = root / "packaging/systemd/system/linura-authorityd.service"
+                    unit.write_text(
+                        unit.read_text(encoding="utf-8").replace(old, new, 1),
+                        encoding="utf-8",
+                    )
+                    result = self._run_checker(root)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(expected, result.stderr)
+
+    def test_runtime_name_acquisition_requires_exact_contract_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            runtime = root / "crates/linura-dbus/src/name_binding_fixture.rs"
+            runtime.write_text(
+                'pub const EXTRA_SERVICE_NAME: &str = "org.linura.Control1";\n'
+                'fn acquire(builder: zbus::connection::Builder) {\n'
+                '    let _ = builder.name(EXTRA_SERVICE_NAME);\n'
+                '}\n',
+                encoding="utf-8",
+            )
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "undeclared D-Bus runtime name binding crates/linura-dbus/src/name_binding_fixture.rs: .name(EXTRA_SERVICE_NAME)",
+                result.stderr,
+            )
+
+    def test_runtime_polkit_action_requires_installed_policy_definition(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            policy = root / "packaging/polkit-1/actions/org.linura.authority.policy"
+            policy.write_text(
+                policy.read_text(encoding="utf-8").replace(
+                    'id="org.linura.authority.manage-systemd-active-state"',
+                    'id="org.linura.authority.removed"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "does not define action org.linura.authority.manage-systemd-active-state",
+                result.stderr,
+            )
+
+
+
 if __name__ == "__main__":
     unittest.main()

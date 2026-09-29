@@ -123,6 +123,28 @@ id = "org.linura.Linura"
 kind = "desktop-id"
 status = "active"
 
+[[dbus_name_binding]]
+source = "crates/linura-dbus/src/lib.rs"
+token = "SERVICE_NAME"
+service = "org.linura.Control1"
+bus = "session"
+
+[[dbus_name_binding]]
+source = "crates/linura-dbus/src/authority.rs"
+token = "AUTHORITY_SERVICE_NAME"
+service = "org.linura.Authority1"
+bus = "system"
+policy = "packaging/dbus-1/system.d/org.linura.Authority1.conf"
+systemd_unit = "packaging/systemd/system/linura-authorityd.service"
+
+[[dbus_name_binding]]
+source = "executors/linura-executor-systemd/src/lib.rs"
+token = "SERVICE_NAME"
+service = "org.linura.Executor.Systemd1"
+bus = "system"
+policy = "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf"
+systemd_unit = "packaging/systemd/system/linura-executor-systemd.service"
+
 [[dbus_registration]]
 source = "crates/linura-dbus/src/lib.rs"
 path_token = "OBJECT_PATH"
@@ -158,15 +180,18 @@ source = "crates/linura-dbus/src/authority.rs"
 usage = "action-arg"
 token = "MANAGE_SYSTEMD_ACTIVE_STATE_ACTION"
 action = "org.linura.authority.manage-systemd-active-state"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
 
 [[polkit_binding]]
 source = "executors/linura-executor-systemd/src/lib.rs"
 usage = "authorize-caller"
 token = "QUALIFICATION_ACTION_ID"
 action = "org.linura.executor.systemd.qualify-restart"
+policy = "packaging/polkit-1/actions/org.linura.executor.systemd.policy"
 
 [[polkit_binding]]
 source = "executors/linura-executor-systemd/src/lib.rs"
 usage = "authorize-caller"
 token = "MANAGED_ACTION_ID"
 action = "org.linura.executor.systemd.set-active-state"
+policy = "packaging/polkit-1/actions/org.linura.executor.systemd.policy"

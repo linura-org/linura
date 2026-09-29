@@ -55,6 +55,9 @@ CMAKE_URI_PATTERN = re.compile(r"(?:^|\s)URI\s+([A-Za-z0-9_.]+)(?=\s|$)")
 SYSTEMD_BUS_NAME_PATTERN = re.compile(
     r"(?m)^\s*BusName\s*=\s*([A-Za-z0-9_.-]+)\s*(?:#.*)?$"
 )
+SYSTEMD_TYPE_PATTERN = re.compile(
+    r"(?m)^\s*Type\s*=\s*([A-Za-z0-9_-]+)\s*(?:#.*)?$"
+)
 DBUS_ACTIVATION_NAME_PATTERN = re.compile(
     r"(?m)^\s*Name\s*=\s*([A-Za-z0-9_.-]+)\s*(?:#.*)?$"
 )
@@ -465,11 +468,13 @@ def _runtime_binding_surfaces(
     root: Path,
 ) -> tuple[
     set[tuple[str, str, str]],
+    set[tuple[str, str]],
     set[tuple[str, str, str]],
     dict[tuple[str, str], str],
     dict[str, set[str]],
 ]:
     dbus_registrations: set[tuple[str, str, str]] = set()
+    dbus_name_calls: set[tuple[str, str]] = set()
     polkit_calls: set[tuple[str, str, str]] = set()
     constants: dict[tuple[str, str], str] = {}
     global_constants: dict[str, set[str]] = {}
@@ -484,13 +489,21 @@ def _runtime_binding_surfaces(
 
         for path_token, object_token in RUST_SERVE_AT_BINDING_PATTERN.findall(text):
             dbus_registrations.add((relative, path_token, object_token))
+        for token in RUST_BUS_NAME_PATTERN.findall(text):
+            dbus_name_calls.add((relative, token))
 
         for token in RUST_AUTHORIZE_CALL_PATTERN.findall(text):
             polkit_calls.add((relative, "authorize-caller", token))
         for token in RUST_ACTION_ARG_PATTERN.findall(text):
             polkit_calls.add((relative, "action-arg", token))
 
-    return dbus_registrations, polkit_calls, constants, global_constants
+    return (
+        dbus_registrations,
+        dbus_name_calls,
+        polkit_calls,
+        constants,
+        global_constants,
+    )
 
 
 def _resolve_runtime_binding_constant(
@@ -499,6 +512,8 @@ def _resolve_runtime_binding_constant(
     constants: dict[tuple[str, str], str],
     global_constants: dict[str, set[str]],
 ) -> str | None:
+    if len(token) >= 2 and token.startswith('"') and token.endswith('"'):
+        return token[1:-1]
     local_value = constants.get((source, token))
     if local_value is not None:
         return local_value
@@ -766,20 +781,148 @@ def check(root: Path) -> list[str]:
             )
 
     dbus_registration_items = contract.get("dbus_registration", [])
+    dbus_name_binding_items = contract.get("dbus_name_binding", [])
     polkit_binding_items = contract.get("polkit_binding", [])
     if not isinstance(dbus_registration_items, list):
         failures.append("namespace contract dbus_registration must be an array of tables")
         dbus_registration_items = []
+    if not isinstance(dbus_name_binding_items, list):
+        failures.append("namespace contract dbus_name_binding must be an array of tables")
+        dbus_name_binding_items = []
     if not isinstance(polkit_binding_items, list):
         failures.append("namespace contract polkit_binding must be an array of tables")
         polkit_binding_items = []
 
     (
         runtime_dbus_registrations,
+        runtime_dbus_name_calls,
         runtime_polkit_calls,
         rust_constants,
         global_rust_constants,
     ) = _runtime_binding_surfaces(root)
+
+    declared_dbus_name_bindings: set[tuple[str, str]] = set()
+    bound_active_services: set[str] = set()
+    for index, item in enumerate(dbus_name_binding_items, 1):
+        if not isinstance(item, dict):
+            failures.append(f"dbus_name_binding #{index} must be a table")
+            continue
+        source = item.get("source")
+        token = item.get("token")
+        service = item.get("service")
+        bus = item.get("bus")
+        if not all(isinstance(value, str) and value for value in (source, token, service, bus)):
+            failures.append(f"dbus_name_binding #{index} has invalid fields")
+            continue
+        if bus not in {"session", "system"}:
+            failures.append(f"dbus_name_binding #{index} has unsupported bus {bus!r}")
+            continue
+
+        key = (source, token)
+        if key in declared_dbus_name_bindings:
+            failures.append(f"duplicate dbus_name_binding: {source}:{token}")
+        declared_dbus_name_bindings.add(key)
+
+        if declared.get(("dbus-service", service)) != "active":
+            failures.append(
+                f"dbus_name_binding {source}:{token} must reference an active D-Bus service: {service}"
+            )
+        else:
+            bound_active_services.add(service)
+
+        if key not in runtime_dbus_name_calls:
+            failures.append(
+                f"missing D-Bus runtime name acquisition {source}: .name({token})"
+            )
+        resolved_service = _resolve_runtime_binding_constant(
+            source,
+            token,
+            rust_constants,
+            global_rust_constants,
+        )
+        if resolved_service is None:
+            failures.append(
+                f"cannot resolve D-Bus runtime name token {token} in {source}"
+            )
+        elif resolved_service != service:
+            failures.append(
+                f"D-Bus runtime name binding mismatch for {source}:{token}: "
+                f"resolved {resolved_service}, expected {service}"
+            )
+
+        policy = item.get("policy")
+        systemd_unit = item.get("systemd_unit")
+        if bus == "session":
+            if policy is not None or systemd_unit is not None:
+                failures.append(
+                    f"session dbus_name_binding {source}:{token} must not declare system packaging"
+                )
+            continue
+
+        if not isinstance(policy, str) or not re.fullmatch(
+            r"packaging/dbus-1/system\.d/[A-Za-z0-9_.-]+\.conf", policy
+        ):
+            failures.append(
+                f"system dbus_name_binding {source}:{token} must declare a system-bus policy path"
+            )
+        else:
+            policy_path = root / policy
+            if not policy_path.is_file() or policy_path.is_symlink():
+                failures.append(
+                    f"system dbus_name_binding {source}:{token} policy is missing or unsafe: {policy}"
+                )
+            else:
+                try:
+                    owned = _xml_attribute_values(policy_path, ("own",))
+                except (OSError, ET.ParseError) as error:
+                    failures.append(f"cannot inspect D-Bus policy {policy}: {error}")
+                else:
+                    if service not in owned:
+                        failures.append(
+                            f"D-Bus policy {policy} does not grant ownership of {service}"
+                        )
+
+        if not isinstance(systemd_unit, str) or not re.fullmatch(
+            r"packaging/systemd/system/[A-Za-z0-9_.@-]+\.service", systemd_unit
+        ):
+            failures.append(
+                f"system dbus_name_binding {source}:{token} must declare a systemd service path"
+            )
+        else:
+            unit_path = root / systemd_unit
+            if not unit_path.is_file() or unit_path.is_symlink():
+                failures.append(
+                    f"system dbus_name_binding {source}:{token} unit is missing or unsafe: {systemd_unit}"
+                )
+            else:
+                unit_name = unit_path.name
+                if declared.get(("systemd-unit", unit_name)) != "active":
+                    failures.append(
+                        f"D-Bus system service {service} must bind an active declared unit: {unit_name}"
+                    )
+                unit_text = unit_path.read_text(encoding="utf-8")
+                bus_names = SYSTEMD_BUS_NAME_PATTERN.findall(unit_text)
+                if bus_names != [service]:
+                    failures.append(
+                        f"systemd unit {systemd_unit} must declare exactly BusName={service}"
+                    )
+                service_types = SYSTEMD_TYPE_PATTERN.findall(unit_text)
+                if service_types != ["dbus"]:
+                    failures.append(
+                        f"systemd unit {systemd_unit} must declare exactly Type=dbus"
+                    )
+
+    for source, token in sorted(runtime_dbus_name_calls):
+        if (source, token) not in declared_dbus_name_bindings:
+            failures.append(
+                f"undeclared D-Bus runtime name binding {source}: .name({token})"
+            )
+
+    for (kind, identifier), status in sorted(declared.items()):
+        if kind == "dbus-service" and status == "active" and identifier not in bound_active_services:
+            failures.append(
+                f"active D-Bus service lacks an exact runtime name binding: {identifier}"
+            )
 
     declared_runtime_dbus: set[tuple[str, str, str]] = set()
     for index, item in enumerate(dbus_registration_items, 1):
@@ -831,6 +974,7 @@ def check(root: Path) -> list[str]:
             )
 
     declared_polkit_bindings: set[tuple[str, str, str]] = set()
+    bound_active_polkit_actions: set[str] = set()
     for index, item in enumerate(polkit_binding_items, 1):
         if not isinstance(item, dict):
             failures.append(f"polkit_binding #{index} must be a table")
@@ -839,7 +983,11 @@ def check(root: Path) -> list[str]:
         usage = item.get("usage")
         token = item.get("token")
         action = item.get("action")
-        if not all(isinstance(value, str) and value for value in (source, usage, token, action)):
+        policy = item.get("policy")
+        if not all(
+            isinstance(value, str) and value
+            for value in (source, usage, token, action, policy)
+        ):
             failures.append(f"polkit_binding #{index} has invalid fields")
             continue
         if usage not in {"authorize-caller", "action-arg"}:
@@ -849,10 +997,35 @@ def check(root: Path) -> list[str]:
         if key in declared_polkit_bindings:
             failures.append(f"duplicate polkit_binding: {source}:{usage}:{token}")
         declared_polkit_bindings.add(key)
-        if ("polkit-action", action) not in declared:
+        if declared.get(("polkit-action", action)) != "active":
             failures.append(
-                f"polkit_binding {source}:{usage}:{token} references undeclared action {action}"
+                f"polkit_binding {source}:{usage}:{token} must reference an active action {action}"
             )
+        else:
+            bound_active_polkit_actions.add(action)
+
+        if not re.fullmatch(
+            r"packaging/polkit-1/actions/[A-Za-z0-9_.-]+\.policy", policy
+        ):
+            failures.append(
+                f"polkit_binding {source}:{usage}:{token} has invalid policy path {policy!r}"
+            )
+        else:
+            policy_path = root / policy
+            if not policy_path.is_file() or policy_path.is_symlink():
+                failures.append(
+                    f"polkit_binding {source}:{usage}:{token} policy is missing or unsafe: {policy}"
+                )
+            else:
+                try:
+                    installed_actions = set(_xml_values(policy_path, "action", "id"))
+                except (OSError, ET.ParseError) as error:
+                    failures.append(f"cannot inspect Polkit policy {policy}: {error}")
+                else:
+                    if action not in installed_actions:
+                        failures.append(
+                            f"Polkit policy {policy} does not define action {action}"
+                        )
         if key not in runtime_polkit_calls:
             failures.append(
                 f"missing Polkit runtime binding {source}:{usage}:{token}"
@@ -875,6 +1048,16 @@ def check(root: Path) -> list[str]:
         if (source, usage, token) not in declared_polkit_bindings:
             failures.append(
                 f"undeclared Polkit runtime binding {source}:{usage}:{token}"
+            )
+
+    for (kind, identifier), status in sorted(declared.items()):
+        if (
+            kind == "polkit-action"
+            and status == "active"
+            and identifier not in bound_active_polkit_actions
+        ):
+            failures.append(
+                f"active Polkit action lacks an exact runtime/policy binding: {identifier}"
             )
 
     discovered, runtime_paths, runtime_service_interfaces, discovery_failures = _discover(root)
