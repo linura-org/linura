@@ -61,7 +61,9 @@ If a role address is not operational, do not publish it as a reporting route.
 
 `.github/FUNDING.yml` is the canonical native GitHub Sponsor-button configuration.
 
-While [`sponsorship.md`](sponsorship.md) says `Status: inactive`, `FUNDING.yml` must contain no active funding destination. Activate both in one reviewed change only after the destination can actually receive funding and its ownership is verified.
+The institutional sponsorship program may be publicly described at <https://linura.org/sponsors> while native payment destinations remain inactive. A public sponsorship page is not, by itself, proof that a payment rail or legal recipient is ready.
+
+While [`sponsorship.md`](sponsorship.md) says `Status: inactive`, `FUNDING.yml` must contain no active funding destination. Activate the sponsorship status, the machine-readable funding contract, and `FUNDING.yml` together in one reviewed change only after the destination can actually receive funding and its ownership is verified.
 
 ## Organization community profile
 

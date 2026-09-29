@@ -294,9 +294,11 @@ Linura treats authority, privilege, verification, recovery, and release integrit
 
 ## Support Linura
 
+Linura is preparing an institutional sponsorship program for organizations building Linux, AI infrastructure, cloud platforms, hardware, security systems, runtimes, and developer infrastructure.
+
 Funding may support development, infrastructure, hardware qualification, security work, documentation, and community operations, but sponsorship never purchases architecture, security, merge, release, or governance authority.
 
-See [`docs/community/sponsorship.md`](docs/community/sponsorship.md). Native funding destinations remain intentionally inactive until a verified receiving account or funding page is selected and reviewed.
+See the [sponsorship charter](docs/community/sponsorship.md) and the public program at <https://linura.org/sponsors>. Native funding destinations remain intentionally inactive until a verified legal or fiscal recipient and receiving account are selected and reviewed.
 
 ## License
 

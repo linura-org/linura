@@ -1,6 +1,12 @@
 # Funding destinations are intentionally inactive until a verified receiving
-# account or funding page is selected and the sponsorship policy is updated in
-# the same reviewed change.
+# account or funding page can actually receive funds and the sponsorship status
+# is updated in the same reviewed change.
+#
+# The institutional sponsorship program is described at:
+# https://linura.org/sponsors
+#
+# That public program page is not itself an active FUNDING.yml destination while
+# the repository sponsorship status remains inactive.
 #
 # See docs/community/sponsorship.md.
 #
