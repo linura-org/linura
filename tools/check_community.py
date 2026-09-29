@@ -175,11 +175,26 @@ def _split_inline_yaml_list(value: str) -> list[str]:
 def _top_level_yaml_entries(text: str) -> list[tuple[str, str, list[str]]]:
     entries: list[tuple[str, str, list[str]]] = []
     lines = text.splitlines()
+    active_indents = [
+        len(raw) - len(raw.lstrip(" "))
+        for raw in lines
+        if raw.strip() and not raw.lstrip().startswith("#")
+    ]
+    root_indent = min(active_indents, default=0)
+    normalized = [
+        raw[root_indent:] if len(raw) >= root_indent else raw
+        for raw in lines
+    ]
+
     index = 0
-    while index < len(lines):
-        raw = lines[index]
+    while index < len(normalized):
+        raw = normalized[index]
         stripped = raw.strip()
-        if not stripped or raw[:1].isspace() or stripped.startswith("#"):
+        if not stripped or stripped.startswith("#"):
+            index += 1
+            continue
+        if raw[:1].isspace():
+            entries.append(("", stripped, []))
             index += 1
             continue
         active = _strip_yaml_comment(raw).strip()
@@ -191,8 +206,8 @@ def _top_level_yaml_entries(text: str) -> list[tuple[str, str, list[str]]]:
         key, scalar = match.group(1), match.group(2).strip()
         children: list[str] = []
         cursor = index + 1
-        while cursor < len(lines):
-            child_raw = lines[cursor]
+        while cursor < len(normalized):
+            child_raw = normalized[cursor]
             child_stripped = child_raw.strip()
             if not child_stripped or child_stripped.startswith("#"):
                 cursor += 1
@@ -210,8 +225,278 @@ def _top_level_yaml_entries(text: str) -> list[tuple[str, str, list[str]]]:
     return entries
 
 
-def _validate_issue_config_yaml(text: str) -> list[str]:
+def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
     failures: list[str] = []
+
+    for line_number, raw in enumerate(text.splitlines(), start=1):
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        prefix = raw[: len(raw) - len(raw.lstrip())]
+        if "\t" in prefix:
+            failures.append(f"{label} line {line_number} must use spaces for indentation")
+            continue
+
+        active = _strip_yaml_comment(raw).strip()
+        if not active:
+            continue
+        candidate = active[2:].strip() if active.startswith("- ") else active
+        if ":" in candidate:
+            candidate = candidate.split(":", 1)[1].strip()
+        if not candidate or candidate in {"|", ">"}:
+            continue
+
+        if candidate.startswith("[") and not candidate.endswith("]"):
+            failures.append(
+                f"{label} line {line_number} has an unterminated inline YAML sequence"
+            )
+            continue
+
+        if candidate[0] not in {"'", '"'}:
+            continue
+
+        quote = candidate[0]
+        escaped = False
+        closed_at: int | None = None
+        index = 1
+        while index < len(candidate):
+            char = candidate[index]
+            if quote == '"' and escaped:
+                escaped = False
+                index += 1
+                continue
+            if quote == '"' and char == "\\":
+                escaped = True
+                index += 1
+                continue
+            if char == quote:
+                if quote == "'" and index + 1 < len(candidate) and candidate[index + 1] == "'":
+                    index += 2
+                    continue
+                closed_at = index
+                break
+            index += 1
+
+        if closed_at is None:
+            failures.append(
+                f"{label} line {line_number} has an unterminated quoted YAML scalar"
+            )
+            continue
+        if candidate[closed_at + 1 :].strip():
+            failures.append(
+                f"{label} line {line_number} has trailing content after a quoted YAML scalar"
+            )
+
+    return failures
+
+
+def _validate_issue_form_yaml(text: str, rel: str) -> list[str]:
+    failures = _yaml_scalar_syntax_failures(text, label=f"issue form {rel}")
+    if failures:
+        return failures
+
+    active_lines = [
+        raw
+        for raw in text.splitlines()
+        if raw.strip() and not raw.lstrip().startswith("#")
+    ]
+    if not active_lines:
+        return [f"issue form {rel} is empty"]
+
+    root_indent = min(len(raw) - len(raw.lstrip(" ")) for raw in active_lines)
+    lines = [
+        (line_number, raw[root_indent:])
+        for line_number, raw in enumerate(text.splitlines(), start=1)
+        if raw.strip() and not raw.lstrip().startswith("#")
+    ]
+
+    allowed_root = {"name", "description", "title", "labels", "assignees", "body"}
+    allowed_types = {"markdown", "input", "textarea", "dropdown", "checkboxes"}
+    seen_root: set[str] = set()
+    body_items: list[dict[str, object]] = []
+    current: dict[str, object] | None = None
+    section: str | None = None
+    nested: str | None = None
+    block_scalar_indent: int | None = None
+
+    for line_number, raw in lines:
+        indent = len(raw) - len(raw.lstrip(" "))
+        active = _strip_yaml_comment(raw).strip()
+        if not active:
+            continue
+
+        if block_scalar_indent is not None and indent > block_scalar_indent:
+            continue
+        block_scalar_indent = None
+
+        if indent == 0:
+            match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", active)
+            if match is None:
+                failures.append(f"issue form {rel} line {line_number} is malformed YAML")
+                section = None
+                current = None
+                continue
+            key, scalar = match.group(1), match.group(2).strip()
+            if key not in allowed_root:
+                failures.append(f"issue form {rel} has unsupported top-level key: {key}")
+            if key in seen_root:
+                failures.append(f"issue form {rel} contains duplicate top-level key: {key}")
+            seen_root.add(key)
+            current = None
+            nested = None
+            if key in {"body", "labels", "assignees"}:
+                section = key
+                if scalar and scalar != "[]":
+                    failures.append(
+                        f"issue form {rel} top-level {key} must use a block sequence"
+                    )
+            else:
+                section = None
+                if not scalar:
+                    failures.append(f"issue form {rel} requires nonempty {key}")
+                elif key in {"name", "description", "title"}:
+                    _unquote_yaml_scalar(scalar)
+            continue
+
+        if section in {"labels", "assignees"}:
+            if indent != 2 or not active.startswith("- "):
+                failures.append(
+                    f"issue form {rel} line {line_number} has invalid {section} structure"
+                )
+            elif not _unquote_yaml_scalar(active[2:]).strip():
+                failures.append(
+                    f"issue form {rel} line {line_number} has empty {section} entry"
+                )
+            continue
+
+        if section != "body":
+            failures.append(
+                f"issue form {rel} line {line_number} has unexpected indentation"
+            )
+            continue
+
+        if indent == 2:
+            match = re.fullmatch(r"-\s+type\s*:\s*(.+)", active)
+            if match is None:
+                failures.append(
+                    f"issue form {rel} line {line_number} must start a body item with '- type:'"
+                )
+                current = None
+                nested = None
+                continue
+            item_type = _unquote_yaml_scalar(match.group(1))
+            if item_type not in allowed_types:
+                failures.append(
+                    f"issue form {rel} line {line_number} has unsupported body type: {item_type!r}"
+                )
+            current = {"type": item_type, "id": None, "attributes": set(), "required": None}
+            body_items.append(current)
+            nested = None
+            continue
+
+        if current is None:
+            failures.append(
+                f"issue form {rel} line {line_number} appears outside a body item"
+            )
+            continue
+
+        if indent == 4:
+            match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", active)
+            if match is None:
+                failures.append(f"issue form {rel} line {line_number} is malformed YAML")
+                continue
+            key, scalar = match.group(1), match.group(2).strip()
+            if key == "id":
+                if not scalar:
+                    failures.append(f"issue form {rel} body item id must be nonempty")
+                else:
+                    current["id"] = _unquote_yaml_scalar(scalar)
+                nested = None
+            elif key in {"attributes", "validations"}:
+                if scalar:
+                    failures.append(
+                        f"issue form {rel} body item {key} must be a mapping"
+                    )
+                nested = key
+            else:
+                failures.append(
+                    f"issue form {rel} line {line_number} has unsupported body key: {key}"
+                )
+                nested = None
+            continue
+
+        if indent == 6 and nested in {"attributes", "validations"}:
+            match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", active)
+            if match is None:
+                failures.append(f"issue form {rel} line {line_number} is malformed YAML")
+                continue
+            key, scalar = match.group(1), match.group(2).strip()
+            if nested == "attributes":
+                attributes = current["attributes"]
+                assert isinstance(attributes, set)
+                attributes.add(key)
+                if scalar in {"|", ">"}:
+                    block_scalar_indent = indent
+                elif not scalar:
+                    failures.append(
+                        f"issue form {rel} body attribute {key} must be nonempty"
+                    )
+                else:
+                    _unquote_yaml_scalar(scalar)
+            else:
+                if key != "required":
+                    failures.append(
+                        f"issue form {rel} has unsupported validation key: {key}"
+                    )
+                elif scalar.lower() not in {"true", "false"}:
+                    failures.append(
+                        f"issue form {rel} validations.required must be boolean"
+                    )
+                else:
+                    current["required"] = scalar.lower() == "true"
+            continue
+
+        failures.append(
+            f"issue form {rel} line {line_number} has invalid structure or indentation"
+        )
+
+    for key in ("name", "description", "body"):
+        if key not in seen_root:
+            failures.append(f"issue form {rel} is missing required top-level key: {key}")
+    if not body_items:
+        failures.append(f"issue form {rel} requires at least one body item")
+
+    seen_ids: set[str] = set()
+    for index, item in enumerate(body_items, start=1):
+        item_type = item["type"]
+        attributes = item["attributes"]
+        assert isinstance(attributes, set)
+        if item_type == "markdown":
+            if "value" not in attributes:
+                failures.append(
+                    f"issue form {rel} markdown item {index} requires attributes.value"
+                )
+            continue
+
+        item_id = item["id"]
+        if not isinstance(item_id, str) or re.fullmatch(r"[A-Za-z0-9_-]+", item_id) is None:
+            failures.append(f"issue form {rel} body item {index} requires a stable id")
+        elif item_id in seen_ids:
+            failures.append(f"issue form {rel} contains duplicate body id: {item_id}")
+        else:
+            seen_ids.add(item_id)
+        if "label" not in attributes:
+            failures.append(
+                f"issue form {rel} body item {index} requires attributes.label"
+            )
+
+    return failures
+
+def _validate_issue_config_yaml(text: str) -> list[str]:
+    failures: list[str] = _yaml_scalar_syntax_failures(
+        text, label="issue routing YAML"
+    )
+    if failures:
+        return failures
     seen_top_level: set[str] = set()
     contact_links: list[dict[str, str]] = []
     current_link: dict[str, str] | None = None
@@ -434,6 +719,13 @@ def validate(root: Path) -> list[str]:
 
     issue_config = read_text(root, ".github/ISSUE_TEMPLATE/config.yml")
     failures.extend(_validate_issue_config_yaml(issue_config))
+    for issue_form in (
+        ".github/ISSUE_TEMPLATE/bug.yml",
+        ".github/ISSUE_TEMPLATE/feature.yml",
+        ".github/ISSUE_TEMPLATE/compatibility.yml",
+        ".github/ISSUE_TEMPLATE/rfc.yml",
+    ):
+        failures.extend(_validate_issue_form_yaml(read_text(root, issue_form), issue_form))
     issue_entries = [
         (key, scalar)
         for key, scalar, _children in _top_level_yaml_entries(issue_config)
@@ -472,6 +764,7 @@ def validate(root: Path) -> list[str]:
     funding = contract.get("funding", {})
     funding_active = funding.get("active")
     funding_text = read_text(root, ".github/FUNDING.yml")
+    failures.extend(_yaml_scalar_syntax_failures(funding_text, label="FUNDING.yml"))
     funding_entries = _top_level_yaml_entries(funding_text)
     sponsorship = read_text(root, "docs/community/sponsorship.md")
     sponsorship_statuses = [

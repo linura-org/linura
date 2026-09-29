@@ -213,5 +213,52 @@ class CommunityContractTests(unittest.TestCase):
             self.assertIn("funding.active=false", result.stderr)
 
 
+    def test_rejects_indented_funding_activation_when_contract_inactive(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            funding = root / ".github/FUNDING.yml"
+            funding.write_text("  github: real-sponsor\n", encoding="utf-8")
+
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("funding.active=false", result.stderr)
+
+    def test_rejects_unterminated_quoted_issue_routing_scalar(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            config = root / ".github/ISSUE_TEMPLATE/config.yml"
+            config.write_text(
+                config.read_text(encoding="utf-8").replace(
+                    "url: https://github.com/linura-org/linura/discussions",
+                    'url: "https://github.com/linura-org/linura/discussions',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unterminated quoted YAML scalar", result.stderr)
+
+    def test_rejects_malformed_required_issue_forms(self) -> None:
+        for rel in (
+            ".github/ISSUE_TEMPLATE/bug.yml",
+            ".github/ISSUE_TEMPLATE/feature.yml",
+            ".github/ISSUE_TEMPLATE/compatibility.yml",
+            ".github/ISSUE_TEMPLATE/rfc.yml",
+        ):
+            with self.subTest(rel=rel):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self.copy_fixture(root)
+                    (root / rel).write_text("not_yaml: [\n", encoding="utf-8")
+
+                    result = self.run_checker(root)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("unterminated inline YAML sequence", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
