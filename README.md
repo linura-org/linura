@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/brand/linura-lockup-on-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./docs/assets/brand/linura-lockup-on-light.svg">
+    <img alt="Linura" src="./docs/assets/brand/linura-lockup-on-light.svg" width="380">
+  </picture>
+</p>
+
 # Linura — The intelligent system layer for Linux.
 
 > **Tell your computer what you want it to become.**
