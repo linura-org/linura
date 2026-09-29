@@ -201,6 +201,51 @@ class CommunityContractTests(unittest.TestCase):
             result = self.run_checker(root)
             self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
+    def test_accepts_closed_inline_funding_sequence_before_plain_scalar_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            contract = root / "contracts/community.toml"
+            contract.write_text(
+                contract.read_text(encoding="utf-8").replace(
+                    "active = false", "active = true", 1
+                ),
+                encoding="utf-8",
+            )
+            sponsorship = root / "docs/community/sponsorship.md"
+            sponsorship.write_text(
+                sponsorship.read_text(encoding="utf-8").replace(
+                    "Status: inactive pending a verified funding destination.",
+                    "Status: active with a verified funding destination.",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            (root / ".github/FUNDING.yml").write_text(
+                'custom: ["https://github.com/sponsors/linura-org"]\n',
+                encoding="utf-8",
+            )
+
+            result = self.run_checker(root)
+            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
+    def test_rejects_unbalanced_quote_inside_closed_inline_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            funding = root / ".github/FUNDING.yml"
+            funding.write_text(
+                'custom: ["https://github.com/sponsors/linura-org]\n',
+                encoding="utf-8",
+            )
+
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "unterminated quoted scalar in an inline YAML sequence",
+                result.stderr,
+            )
+
     def test_rejects_unreviewed_funding_activation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

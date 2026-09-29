@@ -270,11 +270,34 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
             block_scalar_indent = indent
             continue
 
-        if candidate.startswith("[") and not candidate.endswith("]"):
-            failures.append(
-                f"{label} line {line_number} has an unterminated inline YAML sequence"
-            )
+        if candidate.startswith("["):
+            if not candidate.endswith("]"):
+                failures.append(
+                    f"{label} line {line_number} has an unterminated inline YAML sequence"
+                )
+                continue
+
+            inner = candidate[1:-1]
+            quote: str | None = None
+            escaped = False
+            for char in inner:
+                if escaped:
+                    escaped = False
+                    continue
+                if char == "\\" and quote == '"':
+                    escaped = True
+                    continue
+                if char in {"'", '"'}:
+                    if quote == char:
+                        quote = None
+                    elif quote is None:
+                        quote = char
+            if escaped or quote is not None:
+                failures.append(
+                    f"{label} line {line_number} has an unterminated quoted scalar in an inline YAML sequence"
+                )
             continue
+
         if candidate.startswith("{") and not candidate.endswith("}"):
             failures.append(
                 f"{label} line {line_number} has an unterminated inline YAML mapping"
