@@ -10,6 +10,15 @@
 - [Development plan](development-plan.md)
 - [Roadmap](roadmap.md)
 
+## Landscape and boundaries
+
+These documents are **non-normative**. They explain how Linura relates to neighboring systems without making those projects dependencies of Linura's architecture.
+
+- [Landscape and architectural boundaries](concepts/landscape.md)
+- [Agent runtimes and execution sandboxes](concepts/landscape/agent-runtimes.md)
+- [Configuration management and declarative systems](concepts/landscape/configuration-management.md)
+- [Linux desktops and Omarchy](concepts/landscape/linux-desktops.md)
+
 ## Intent-native model
 - [Intent model](intent-model.md)
 - [System graph](system-graph.md)

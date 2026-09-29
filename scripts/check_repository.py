@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = [
     "README.md", "SECURITY.md", "SUPPORT.md", "GOVERNANCE.md", "CODE_OF_CONDUCT.md", "CITATION.cff", "AGENTS.md", "CONTRIBUTING.md", "Cargo.toml", "rust-toolchain.toml",
     "docs/product-vision.md", "docs/vision-coverage.md", "docs/architecture.md", "docs/naming.md", "docs/ecosystem-registry.md", "docs/sdk.md", "docs/intent-model.md",
+    "docs/concepts/landscape.md", "docs/concepts/landscape/agent-runtimes.md", "docs/concepts/landscape/configuration-management.md", "docs/concepts/landscape/linux-desktops.md",
     "docs/system-graph.md", "docs/capability-composition.md", "docs/semantic-provenance.md", "docs/reusable-setups.md",
     "docs/agent-architecture.md", "docs/provider-model.md", "docs/state-model.md", "docs/terminology.md",
     "docs/first-boot.md", "docs/machine-profiles.md", "docs/workflow-model.md",

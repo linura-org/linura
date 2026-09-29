@@ -17,11 +17,13 @@ Status: `v0.9.0` released — Experimental First Boot and supported reference en
 
 ## Project navigation
 
-| | |
-|---|---|
+| Resource | Link |
+| --- | --- |
 | Website | https://linura.org |
 | Repository | https://github.com/linura-org/linura |
+| Documentation | [`docs/index.md`](docs/index.md) |
 | Architecture | [`docs/architecture.md`](docs/architecture.md) |
+| Landscape | [`docs/concepts/landscape.md`](docs/concepts/landscape.md) |
 | Roadmap | [`docs/roadmap.md`](docs/roadmap.md) |
 | Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Community | https://github.com/linura-org/linura/discussions |
@@ -313,4 +315,4 @@ cargo xtask image-plan
 
 The grand development foundation includes checkpointed bootstrap, migrations, coordinated updates, config ownership/drift, sanitized hardware evidence, disposable QEMU/KVM acceptance, visual-regression contracts, exact-SHA release candidate proof, build/publish separation, and independent release-asset verification.
 
-See [Development infrastructure](docs/development-infrastructure.md) and [Development lessons adopted from Omarchy](docs/omarchy-development-lessons.md). crates.io publication is governed by [crates.io publishing](docs/crates-io-publishing.md). Linura adopts [Omarchy](https://github.com/basecamp/omarchy)'s strong distro-development discipline while deliberately rejecting unsandboxed plugins, shell strings as the authority API, arbitrary privileged hooks, and model-to-root execution.
+See [Development infrastructure](docs/development-infrastructure.md), [Development lessons adopted from Omarchy](docs/omarchy-development-lessons.md), and the non-normative [Landscape and architectural boundaries](docs/concepts/landscape.md). crates.io publication is governed by [crates.io publishing](docs/crates-io-publishing.md). Linura adopts [Omarchy](https://github.com/basecamp/omarchy)'s strong distro-development discipline while deliberately rejecting unsandboxed plugins, shell strings as the authority API, arbitrary privileged hooks, and model-to-root execution.

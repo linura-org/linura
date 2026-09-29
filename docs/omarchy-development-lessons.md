@@ -2,6 +2,8 @@
 
 Linura is not an Omarchy fork and does not copy Omarchy's shell-command architecture. It does intentionally adopt several mature distro-development disciplines while implementing them through Linura's typed, intent-driven authority model.
 
+For the broader non-normative product and architectural comparison, see [Linux desktops and Omarchy](concepts/landscape/linux-desktops.md). This document remains specifically about development and distro-engineering lessons.
+
 | Lesson | Linura implementation | Status |
 |---|---|---|
 | Task-specific contributor/agent guides | `agents/skills/*` | implemented foundation |
