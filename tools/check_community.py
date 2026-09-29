@@ -275,6 +275,11 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
                 f"{label} line {line_number} has an unterminated inline YAML sequence"
             )
             continue
+        if candidate.startswith("{") and not candidate.endswith("}"):
+            failures.append(
+                f"{label} line {line_number} has an unterminated inline YAML mapping"
+            )
+            continue
 
         if candidate[0] not in {"'", '"'}:
             if re.search(r":(?:\s|$)", candidate):

@@ -260,6 +260,24 @@ class CommunityContractTests(unittest.TestCase):
                     self.assertIn("unterminated inline YAML sequence", result.stderr)
 
 
+    def test_rejects_unterminated_flow_mapping_in_issue_form_scalar(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.copy_fixture(root)
+            form = root / ".github/ISSUE_TEMPLATE/bug.yml"
+            form.write_text(
+                form.read_text(encoding="utf-8").replace(
+                    "label: Summary",
+                    "label: {bad",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            result = self.run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unterminated inline YAML mapping", result.stderr)
+
     def test_rejects_unquoted_mapping_delimiter_in_issue_form_scalar(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
