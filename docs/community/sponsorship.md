@@ -17,6 +17,22 @@ The public sponsorship identity is **Linura**.
 
 A human maintainer or a legal entity may appear as the contractual signatory when required, but that does not change the public identity or technical authority of the open-source project.
 
+## Planned corporate stewardship
+
+Linura plans to establish a dedicated Delaware corporation, expected to be named **Linura, Inc.**, as the long-term counterparty for institutional sponsorship, investment, employment, and commercial relationships.
+
+That corporation is **planned, not yet formed**. Until incorporation, name availability, tax/accounting setup, banking, and authorized signatory status are verified:
+
+- public materials must not describe Linura, Inc. as an existing company;
+- no one may sign a contract in the name of Linura, Inc.;
+- no payment destination may imply that the planned corporation can already receive or account for funds;
+- Linura remains the public open-source project and governance identity.
+
+After formation, corporate stewardship does not replace the technical governance defined in [GOVERNANCE.md](../../GOVERNANCE.md). The company may become the legal/economic operator while project architecture, security, merge, release, and maintainer authority continue to follow published project governance.
+
+The canonical project domain remains **linura.org**. Use of a `.org` domain does not represent Linura or its future corporate steward as a tax-exempt nonprofit.
+
+
 ## Funding model
 
 Linura's intended funding model has four distinct lanes:
@@ -27,6 +43,15 @@ Linura's intended funding model has four distinct lanes:
 - **Commercial relationships** — future support, qualification, integration, certification, or managed-service work governed separately from sponsorship and project governance.
 
 Sponsorship, partnership, investment, commercial contracts, and governance are separate relationships. One does not imply another. Partnership boundaries are defined in [`partnerships.md`](partnerships.md).
+
+### Sponsorship is not charitable-donation status
+
+If the future corporate recipient is a for-profit corporation, Linura may still receive institutional sponsorship, public sponsorship/support, eligible grants, and in-kind contributions through that entity.
+
+Public language must not imply that payments to a for-profit recipient are tax-deductible charitable donations. Prefer **sponsor**, **support**, **fund**, or **program funding** unless a separate qualifying charitable recipient or fiscal host is actually receiving a donation.
+
+Some grants or contribution programs may be restricted to nonprofit/tax-exempt recipients. Those require their own eligibility review.
+
 
 ## What funding may support
 
@@ -119,10 +144,16 @@ Commercial work may fund project development, but it does not silently change op
 
 Before Linura accepts material sponsorship, the receiving party or fiscal host must be clearly identified and capable of handling the applicable agreement, invoicing, tax, accounting, and payment requirements.
 
-The long-term intent is to use a dedicated legal entity for institutional sponsorship, investment, employment, and commercial relationships. A fiscal host may be used as a temporary bridge for open-source sponsorship if needed, but it must not silently become the owner of Linura governance or technical authority.
+The long-term intent is a dedicated Delaware corporation, expected to be **Linura, Inc.**, for institutional sponsorship, investment, employment, and commercial relationships. This is a planning decision, not a claim that the corporation already exists. A fiscal host may be used as a temporary bridge for open-source sponsorship if needed, but it must not silently become the owner of Linura governance or technical authority.
 
 The repository contains `.github/FUNDING.yml` as the canonical GitHub funding configuration. It remains inactive until a real funding endpoint is verified and this status is changed in the same reviewed change.
 
 The public sponsorship program may be described at <https://linura.org/sponsors> before a payment destination is active. That page must not imply that Linura can accept funds through a channel that has not been verified.
 
 Do not point the Sponsor button at a placeholder URL, an unverified account, or a general project homepage that cannot actually receive funding.
+
+## Public/private operating boundary
+
+Public project documentation contains policy, sponsor classes, funded-program purposes, governance boundaries, reporting expectations, and disclosed sponsor/program evidence.
+
+Internal sponsorship ask ranges, target-company pipelines, warm-introduction paths, contact/negotiation notes, legal advice, private contracts, banking/tax/accounting records, credentials, and non-public infrastructure details belong in private company/operations systems unless deliberately disclosed.

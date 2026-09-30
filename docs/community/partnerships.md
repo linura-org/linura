@@ -14,6 +14,15 @@ The same organization may hold more than one relationship with Linura, but each 
 
 Equity or financing conversations belong at `investors@linura.org`. Sponsorship belongs at `sponsors@linura.org`.
 
+## Planned contracting party
+
+Linura plans to establish a Delaware corporation, expected to be named **Linura, Inc.**, as the long-term contracting party for strategic partnerships and commercial relationships.
+
+The corporation is not yet formed. Partnership discussions and technical scoping may proceed now, but public materials and counterparties must not be told that Linura, Inc. already exists or can execute agreements until incorporation and authorized-signatory status are complete.
+
+Project governance remains distinct from the future corporate counterparty.
+
+
 ## Partnership categories
 
 Linura uses relationship categories rather than prestige tiers.

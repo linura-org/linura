@@ -123,6 +123,8 @@ decision_authority = Linura
 
 The receiving entity, exact amount, invoice details, tax records, credentials, confidential contract terms, and other sensitive financial information belong in private accounting/contract systems rather than the public repository.
 
+Internal prospect lists, sponsorship ask ranges, warm-introduction paths, negotiation notes, and sponsor-specific commercial strategy are also private operating data. They are not part of the public funded-program record unless Linura deliberately discloses a specific item.
+
 ## Acceptance boundary
 
 Funded work is never accepted merely because it was paid for.
