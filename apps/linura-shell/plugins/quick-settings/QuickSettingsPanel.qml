@@ -7,7 +7,17 @@ import org.linura.UI 1.0
 PanelWindow {
     id: root
 
+    property var targetScreen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+    screen: root.targetScreen
+
     required property var controller
+    property int topInset: 0
+    readonly property int availableOverlayHeight: root.targetScreen
+        ? Math.max(theme.controlMd, root.targetScreen.height - root.topInset - theme.spacingLg * 2)
+        : 520
+    readonly property int availableOverlayWidth: root.targetScreen
+        ? Math.max(theme.controlMd, root.targetScreen.width - theme.spacingLg * 2)
+        : 360
     property bool opened: false
     property int draftVolume: controller.volumePercent
     property bool draftDirty: false
@@ -16,8 +26,8 @@ PanelWindow {
     signal controlCenterRequested()
 
     visible: opened
-    implicitWidth: 360
-    implicitHeight: quickColumn.implicitHeight + theme.spacingXl * 2
+    implicitWidth: Math.min(360, root.availableOverlayWidth)
+    implicitHeight: Math.min(quickColumn.implicitHeight + theme.spacingXl * 2, root.availableOverlayHeight)
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
 
@@ -27,7 +37,7 @@ PanelWindow {
     }
 
     margins {
-        top: theme.spacingLg
+        top: root.topInset + theme.spacingLg
         right: theme.spacingLg
     }
 
@@ -100,13 +110,22 @@ PanelWindow {
         level: "background"
         cornerRadius: theme.radiusXl
 
-        ColumnLayout {
-            id: quickColumn
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.margins: theme.spacingXl
-            spacing: theme.spacingLg
+        Flickable {
+            id: quickViewport
+            anchors.fill: parent
+            clip: true
+            contentWidth: width
+            contentHeight: quickColumn.implicitHeight + theme.spacingXl * 2
+            boundsBehavior: Flickable.StopAtBounds
+            flickableDirection: Flickable.VerticalFlick
+            interactive: contentHeight > height
+
+            ColumnLayout {
+                id: quickColumn
+                x: theme.spacingXl
+                y: theme.spacingXl
+                width: Math.max(0, quickViewport.width - theme.spacingXl * 2)
+                spacing: theme.spacingLg
 
             RowLayout {
                 Layout.fillWidth: true
@@ -287,6 +306,7 @@ PanelWindow {
                 wrapMode: Text.WordWrap
                 Accessible.name: text
             }
+        }
         }
     }
 }

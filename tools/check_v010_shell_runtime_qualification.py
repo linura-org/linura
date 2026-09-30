@@ -30,6 +30,7 @@ EXPECTED_COMPONENTS = [
     "sqlite-transient-audit",
     "quick-settings",
     "notifications-osd",
+    "workstation-panel",
 ]
 
 EXPECTED_RUNTIME_PACKAGES = [
@@ -73,12 +74,18 @@ EXPECTED_CASES = [
     "quick-settings-restart-recovery",
     "lifecycle-feedback-verified-success",
     "lifecycle-feedback-precondition-drift-no-success",
+    "workstation-panel-entrypoints",
 ]
 
 RUNTIME_FILES = (
     "apps/linura-shell/qualification-controller.qml",
     "apps/linura-shell/qualification-palette.qml",
     "apps/linura-shell/qualification-quick-settings.qml",
+    "apps/linura-shell/qualification-panel.qml",
+    "apps/linura-shell/panel/WorkstationPanel.qml",
+    "apps/linura-shell/tray/SystemTrayView.qml",
+    "apps/linura-shell/status/WorkstationStatus.qml",
+    "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml",
     "apps/linura-shell/bridge/CMakeLists.txt",
     "apps/linura-shell/bridge/audio_session_controller.h",
     "apps/linura-shell/bridge/audio_session_controller.cpp",
@@ -98,6 +105,7 @@ RUNTIME_FILES = (
     "qualification/v010/shell-runtime/fixtures/linura-shell-qualification.service",
     "qualification/v010/shell-runtime/fixtures/linura-palette-qualification.service",
     "qualification/v010/shell-runtime/fixtures/linura-quick-settings-qualification.service",
+    "qualification/v010/shell-runtime/fixtures/linura-panel-qualification.service",
     "packaging/systemd/user/linurad.service",
     "packaging/wireplumber/linura-session-audio.lua",
     "packaging/arch/archiso/packages.linura",
@@ -333,6 +341,7 @@ def validate(root: Path) -> list[str]:
             "transient_audit_evidence_required",
             "quick_settings_authority_path_required",
             "lifecycle_feedback_evidence_required",
+            "workstation_panel_evidence_required",
         ):
             if evidence.get(key) is not True:
                 failures.append(f"shell runtime evidence.{key} must remain true")
@@ -451,6 +460,15 @@ def validate(root: Path) -> list[str]:
         "quick-settings-restart-recovery.txt",
         "lifecycle-feedback-success.txt",
         "lifecycle-feedback-precondition-drift.txt",
+        "workstation-panel.txt",
+        "workstation-panel-monitors.json",
+        "workstation_panel_values = {}",
+        '"keyboard_entry_focused",',
+        '"tray_keyboard_focus_restored",',
+        "workstation panel/tray/status evidence is not positive",
+        "workstation status clock evidence did not advance",
+        "workstation tray bounded-overflow evidence is invalid",
+        "workstation tray action evidence did not record both primary activations",
         '"prepared_substrate": {',
         "PREPARED_IMAGE_SHA256",
         '"qt_quick_backend": rendering_backend',
@@ -658,6 +676,8 @@ def validate(root: Path) -> list[str]:
             "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-palette.qml",
         "linura-quick-settings-qualification.service":
             "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-quick-settings.qml",
+        "linura-panel-qualification.service":
+            "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-panel.qml",
     }
     for service_name, expected_exec_start in qualification_services.items():
         service = (
@@ -668,10 +688,15 @@ def validate(root: Path) -> list[str]:
             failures.append(
                 f"{service_name} must launch the raw qualification entrypoint from the Linura Shell root"
             )
-        if "Environment=QT_QUICK_BACKEND=software" not in service_lines:
-            failures.append(
-                f"{service_name} must pin QT_QUICK_BACKEND=software for the QEMU/TCG development gate"
-            )
+        for environment_line in (
+            "Environment=QS_DISABLE_FILE_WATCHER=1",
+            "Environment=QML2_IMPORT_PATH=/usr/local/lib/qt6/qml",
+            "Environment=QT_QUICK_BACKEND=software",
+        ):
+            if environment_line not in service_lines:
+                failures.append(
+                    f"{service_name} must pin the qualification runtime environment: {environment_line}"
+                )
         for runtime_line in (
             "RuntimeDirectory=quickshell",
             "RuntimeDirectoryMode=0700",
@@ -738,6 +763,35 @@ def validate(root: Path) -> list[str]:
         if forbidden in quick_settings:
             failures.append(
                 f"Quick Settings runtime fixture must not bypass the production bridge: {forbidden}"
+            )
+
+    panel_fixture = (root / "apps/linura-shell/qualification-panel.qml").read_text(
+        encoding="utf-8"
+    )
+    for fragment in (
+        "//@ pragma ShellId linura-panel-qualification",
+        "Panel.WorkstationPanel {",
+        'target: "linura.panel-qualification"',
+        "workstationPanel.focusPanel(0)",
+        "workstationPanel.panelKeyboardEntryFocused(0)",
+        "workstationPanel.activateCommandPaletteControl(0)",
+        "workstationPanel.activateQuickSettingsControl(0)",
+        "workstationPanel.activateControlCenterControl(0)",
+        "workstationPanel.activateWorkspaceControl(0, workspaceId)",
+    ):
+        if fragment not in panel_fixture:
+            failures.append(
+                f"workstation panel runtime fixture must activate real production controls: {fragment}"
+            )
+    for forbidden in (
+        "workstationPanel.commandPaletteRequested(",
+        "workstationPanel.quickSettingsRequested(",
+        "workstationPanel.controlCenterRequested(",
+        "workstationPanel.workspaceRequested(",
+    ):
+        if forbidden in panel_fixture:
+            failures.append(
+                f"workstation panel runtime fixture must not emit product output signals directly: {forbidden}"
             )
 
     run_script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
@@ -943,6 +997,71 @@ def validate(root: Path) -> list[str]:
             'fail "$service_name did not retain the qualification-only Qt Quick software backend"',
             "checked_palette_call()",
             'fail "palette IPC call failed with status $status: $*"',
+            "panel_window_ready() {",
+            '[[ "$(checked_panel_call linura.panel-qualification panelWindowCount 2>/dev/null)" == "$panel_screen_count" ]]',
+            'panel_window_count="$(checked_panel_call linura.panel-qualification panelWindowCount)"',
+            'panel_window_width="$(checked_panel_call linura.panel-qualification panelWindowWidth 0)"',
+            'panel_window_height="$(checked_panel_call linura.panel-qualification panelWindowHeight 0)"',
+            'panel_screen_width="$(checked_panel_call linura.panel-qualification panelScreenWidth 0)"',
+            'panel_exclusive_zone="$(checked_panel_call linura.panel-qualification panelExclusiveZone 0)"',
+            'panel_screen_matches="$(checked_panel_call linura.panel-qualification panelScreenMatches 0)"',
+            'panel_exclusion_normal="$(checked_panel_call linura.panel-qualification panelExclusionNormal 0)"',
+            'panel_anchors_valid="$(checked_panel_call linura.panel-qualification panelAnchorsValid 0)"',
+            "panelScreenMatches 0",
+            "panelWindowWidth 0",
+            "panelWindowHeight 0",
+            "panelScreenWidth 0",
+            "panelExclusiveZone 0",
+            "panelExclusionNormal 0",
+            "panelAnchorsValid 0",
+            "focusPanelControl",
+            "panelKeyboardEntryFocused",
+            "panelKeyboardNavigationActive",
+            "statusTimeText",
+            "statusDateText",
+            "statusTimestampMs",
+            "statusTimeRendered",
+            "trayItemCount",
+            "trayOverflowCount",
+            "activateTrayInlineControl",
+            "openTrayOverflowControl",
+            "cancelTrayOverflowControl",
+            "trayOverflowVisible",
+            "trayOverflowButtonFocused",
+            "activateTrayOverflowControl",
+            "trayPrimaryCount",
+            "activateCommandPaletteControl",
+            "activateQuickSettingsControl",
+            "activateControlCenterControl",
+            "activateWorkspaceControl",
+            'panel_keyboard_focus_entered="$(checked_panel_call linura.panel-qualification focusPanelControl)"',
+            '[[ "$panel_keyboard_focus_entered" == "true" ]]',
+            "panel_keyboard_focus_ready() {",
+            '[[ "$(checked_panel_call linura.panel-qualification panelKeyboardEntryFocused 2>/dev/null)" == "true" ]]',
+            'wait_until "workstation panel keyboard-only focus entry" panel_keyboard_focus_ready',
+            'panel_keyboard_entry_focused="$(checked_panel_call linura.panel-qualification panelKeyboardEntryFocused)"',
+            '[[ "$panel_keyboard_entry_focused" == "true" ]]',
+            'printf \'keyboard_entry_focused=%s\\n\' "$panel_keyboard_entry_focused"',
+            'panel_status_time="$(checked_panel_call linura.panel-qualification statusTimeText)"',
+            'panel_status_timestamp_before="$(checked_panel_call linura.panel-qualification statusTimestampMs)"',
+            'wait_until "workstation status clock advancement" panel_status_advanced',
+            'panel_tray_inline_activated="$(checked_panel_call linura.panel-qualification activateTrayInlineControl 0)"',
+            'panel_tray_overflow_opened="$(checked_panel_call linura.panel-qualification openTrayOverflowControl)"',
+            'panel_tray_cancelled="$(checked_panel_call linura.panel-qualification cancelTrayOverflowControl)"',
+            'wait_until "workstation tray overflow keyboard-session restoration" panel_tray_keyboard_focus_restored',
+            'panel_tray_overflow_activated="$(checked_panel_call linura.panel-qualification activateTrayOverflowControl 4)"',
+            'printf \'status_timestamp_after=%s\\n\' "$panel_status_timestamp_after"',
+            'printf \'tray_primary_requests=%s\\n\' "$panel_tray_primary_requests"',
+            'panel_command_palette_activated="$(checked_panel_call linura.panel-qualification activateCommandPaletteControl)"',
+            'panel_quick_settings_activated="$(checked_panel_call linura.panel-qualification activateQuickSettingsControl)"',
+            'panel_control_center_activated="$(checked_panel_call linura.panel-qualification activateControlCenterControl)"',
+            'panel_workspace_control_activated="$(checked_panel_call linura.panel-qualification activateWorkspaceControl "$first_workspace_id")"',
+            'wait_until "instantiated workstation panel geometry and exclusion" panel_window_ready',
+            'panel_hyprland_monitors="$evidence_root/workstation-panel-monitors.json"',
+            'hyprctl monitors -j > "$panel_hyprland_monitors"',
+            "Hyprland monitor JSON serializes reserved as [left, top, right, bottom]",
+            "ok = values == [0, 56, 0, 0]",
+            '[[ "$panel_compositor_reserve" == "true" ]]',
             "checked_quick_settings_call()",
             'fail "Quick Settings IPC call failed with status $status: $*"',
             'quick_settings_bind_draft() {',

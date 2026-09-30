@@ -8,7 +8,17 @@ import org.linura.UI 1.0
 PanelWindow {
     id: root
 
+    property var targetScreen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+    screen: root.targetScreen
+
     required property var controller
+    property int topInset: 0
+    readonly property int availableOverlayHeight: root.targetScreen
+        ? Math.max(theme.controlMd, root.targetScreen.height - root.topInset - theme.spacingLg * 2)
+        : 520
+    readonly property int availableOverlayWidth: root.targetScreen
+        ? Math.max(theme.controlMd, root.targetScreen.width - theme.spacingLg * 2)
+        : 420
     property bool opened: false
     property int draftVolume: controller.volumePercent
     property bool draftDirty: false
@@ -16,8 +26,8 @@ PanelWindow {
     signal closeRequested()
 
     visible: opened
-    implicitWidth: 420
-    implicitHeight: 520
+    implicitWidth: Math.min(420, root.availableOverlayWidth)
+    implicitHeight: Math.min(520, root.availableOverlayHeight)
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
 
@@ -27,7 +37,7 @@ PanelWindow {
     }
 
     margins {
-        top: theme.spacingLg
+        top: root.topInset + theme.spacingLg
         right: theme.spacingLg
     }
 
@@ -97,10 +107,22 @@ PanelWindow {
         level: "background"
         cornerRadius: theme.radiusXl
 
-        ColumnLayout {
+        Flickable {
+            id: controlViewport
             anchors.fill: parent
-            anchors.margins: theme.spacingXl
-            spacing: theme.spacingLg
+            clip: true
+            contentWidth: width
+            contentHeight: controlColumn.implicitHeight + theme.spacingXl * 2
+            boundsBehavior: Flickable.StopAtBounds
+            flickableDirection: Flickable.VerticalFlick
+            interactive: contentHeight > height
+
+            ColumnLayout {
+                id: controlColumn
+                x: theme.spacingXl
+                y: theme.spacingXl
+                width: Math.max(0, controlViewport.width - theme.spacingXl * 2)
+                spacing: theme.spacingLg
 
             RowLayout {
                 Layout.fillWidth: true
@@ -312,6 +334,7 @@ PanelWindow {
             Item {
                 Layout.fillHeight: true
             }
+        }
         }
     }
 }

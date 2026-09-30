@@ -33,6 +33,7 @@ class V010SlicePREvidenceTests(unittest.TestCase):
             "S12": "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml",
             "S14": "qualification/v010/shell-runtime/run-shell-runtime.sh",
             "S15": "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml",
+            "S16": "apps/linura-shell/panel/WorkstationPanel.qml",
             "S29": "qualification/v010/experience-evidence.json",
             "S31": "qualification/v010/update-recovery/case.json",
             "S32": ".github/workflows/post-release-closure.yml",

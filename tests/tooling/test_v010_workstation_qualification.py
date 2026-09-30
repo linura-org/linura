@@ -1074,13 +1074,13 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         parts = text.split("[[slice]]")
         rewritten = [parts[0]]
         for block in parts[1:]:
-            if any(f'id = "S{index:02d}"' in block for index in range(16, 29)):
+            if any(f'id = "S{index:02d}"' in block for index in range(17, 29)):
                 block = block.replace('status = "planned"', 'status = "complete"', 1)
                 block = block.replace("evidence_prs = []", "evidence_prs = [999]", 1)
             rewritten.append("[[slice]]" + block)
         text = "".join(rewritten)
-        text = text.replace("completed_slice_count = 15", "completed_slice_count = 28", 1)
-        text = text.replace('next_slice = "S16"', 'next_slice = "S29"', 1)
+        text = text.replace("completed_slice_count = 16", "completed_slice_count = 28", 1)
+        text = text.replace('next_slice = "S17"', 'next_slice = "S29"', 1)
         path.write_text(text, encoding="utf-8")
 
     def _write_complete_experience_evidence(

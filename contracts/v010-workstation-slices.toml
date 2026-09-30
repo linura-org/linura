@@ -2,8 +2,8 @@ schema_version = 1
 milestone = "v0.10.0"
 target = "complete-experimental-workstation"
 slice_count = 32
-completed_slice_count = 15
-next_slice = "S16"
+completed_slice_count = 16
+next_slice = "S17"
 completion_policy = "contiguous-prefix-with-merged-pr-evidence"
 scope_change_policy = "explicit-roadmap-rebaseline"
 
@@ -130,9 +130,9 @@ required_for_release = true
 [[slice]]
 id = "S16"
 title = "first-party panel, tray, status and workstation entry points"
-status = "planned"
+status = "complete"
 depends_on = ["S15"]
-evidence_prs = []
+evidence_prs = [187]
 required_for_release = true
 
 [[slice]]

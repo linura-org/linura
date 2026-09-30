@@ -7,6 +7,9 @@ import org.linura.UI 1.0
 PanelWindow {
     id: root
 
+    property var targetScreen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+    screen: root.targetScreen
+
     property int presentationGeneration: 0
     property string operationKey: ""
     property string phase: ""

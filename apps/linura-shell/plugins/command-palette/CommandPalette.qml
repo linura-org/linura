@@ -7,6 +7,13 @@ import org.linura.UI 1.0
 PanelWindow {
     id: root
 
+    property var targetScreen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+    screen: root.targetScreen
+
+    property int topInset: 0
+    readonly property int availableOverlayHeight: root.targetScreen
+        ? Math.max(theme.controlMd, root.targetScreen.height - root.topInset - theme.spacingLg * 2)
+        : 560
     property bool opened: false
     property int selectedIndex: 0
     property int sessionGeneration: 0
@@ -41,7 +48,7 @@ PanelWindow {
     signal applicationRequested(string applicationId, int sessionGeneration)
 
     visible: opened
-    implicitHeight: Math.min(560, paletteSurface.implicitHeight + theme.spacing2xl * 3)
+    implicitHeight: Math.min(560, root.availableOverlayHeight)
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
 
@@ -49,6 +56,10 @@ PanelWindow {
         top: true
         left: true
         right: true
+    }
+
+    margins {
+        top: root.topInset + theme.spacingLg
     }
 
     WlrLayershell.namespace: "linura-command-palette"
@@ -305,8 +316,9 @@ PanelWindow {
 
     LinuraSurface {
         id: paletteSurface
-        width: Math.min(760, root.width - theme.spacing2xl * 2)
-        implicitHeight: paletteColumn.implicitHeight + theme.spacingXl * 2
+        width: Math.max(0, Math.min(760, root.width - theme.spacing2xl * 2))
+        height: Math.max(0, root.height - theme.spacing2xl * 2)
+        clip: true
         anchors.top: parent.top
         anchors.topMargin: theme.spacing2xl
         anchors.horizontalCenter: parent.horizontalCenter
@@ -315,9 +327,7 @@ PanelWindow {
 
         ColumnLayout {
             id: paletteColumn
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
+            anchors.fill: parent
             anchors.margins: theme.spacingXl
             spacing: theme.spacingLg
 
@@ -386,6 +396,9 @@ PanelWindow {
             ListView {
                 id: resultList
                 Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumHeight: 0
+                Layout.maximumHeight: 280
                 Layout.preferredHeight: Math.min(contentHeight, 280)
                 visible: root.results.length > 0
                 clip: true

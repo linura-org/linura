@@ -7,6 +7,7 @@ shell_root="$source_root/apps/linura-shell"
 controller_config="$shell_root/qualification-controller.qml"
 palette_config="$shell_root/qualification-palette.qml"
 quick_settings_config="$shell_root/qualification-quick-settings.qml"
+panel_config="$shell_root/qualification-panel.qml"
 applications_dir="$HOME/.local/share/applications"
 audio_helper=/usr/lib/linura/linura-session-audio.lua
 audio_audit="$HOME/.local/state/linura/transient-effects.sqlite3"
@@ -39,6 +40,7 @@ wait_until() {
 
 cleanup() {
     set +e
+    systemctl --user stop linura-panel-qualification.service >/dev/null 2>&1
     systemctl --user stop linura-quick-settings-qualification.service >/dev/null 2>&1
     systemctl --user stop linura-palette-qualification.service >/dev/null 2>&1
     systemctl --user stop linura-shell-qualification.service >/dev/null 2>&1
@@ -462,7 +464,7 @@ wait_until "org.linura.Control1 session-bus ownership" control_bus_ready
 qt_quick_rendering_file="$evidence_root/qt-quick-rendering.env"
 {
     printf 'backend=%s\n' "$QT_QUICK_BACKEND"
-    for service_name in linura-shell-qualification.service linura-palette-qualification.service linura-quick-settings-qualification.service; do
+    for service_name in linura-shell-qualification.service linura-palette-qualification.service linura-quick-settings-qualification.service linura-panel-qualification.service; do
         service_environment="$(systemctl --user show "$service_name" -p Environment --value)"
         if ! grep -Eq '(^| )QT_QUICK_BACKEND=software( |$)' <<<"$service_environment"; then
             fail "$service_name did not retain the qualification-only Qt Quick software backend"
@@ -611,6 +613,210 @@ systemctl --user is-active --quiet "$fork_unit"     || fail "forking application
     systemctl --user show "$fork_unit" -p Slice -p ExitType -p ControlGroup -p ActiveState
 } > "$evidence_root/forking-application-systemd.txt"
 pass_case "forking-application-cgroup-lifetime"
+
+systemctl --user start linura-panel-qualification.service
+wait_for_ipc_target "workstation panel IPC" linura-panel-qualification.service "$panel_config" linura.panel-qualification
+
+panel_qs() {
+    QS_CONFIG_PATH="$panel_config" qs ipc "$@"
+}
+
+checked_panel_call() {
+    local output
+    local status
+    set +e
+    output="$(panel_qs call "$@" 2>&1)"
+    status=$?
+    set -e
+    if [[ "$status" -ne 0 ]]; then
+        printf '%s\n' "$output" >&2
+        journalctl --user -u linura-panel-qualification.service --no-pager >&2 || true
+        fail "workstation panel IPC call failed with status $status: $*"
+    fi
+    printf '%s\n' "$output"
+}
+
+panel_screen_count="$(checked_panel_call linura.panel-qualification screenCount)"
+[[ "$panel_screen_count" == "1" ]] || fail "workstation panel did not observe exactly one qualification screen: $panel_screen_count"
+[[ "$(checked_panel_call linura.panel-qualification panelHeight)" == "56" ]] || fail "workstation panel height contract drifted"
+
+panel_window_ready() {
+    [[ "$(checked_panel_call linura.panel-qualification panelWindowCount 2>/dev/null)" == "$panel_screen_count" ]] &&
+    [[ "$(checked_panel_call linura.panel-qualification panelScreenMatches 0 2>/dev/null)" == "true" ]] &&
+    [[ "$(checked_panel_call linura.panel-qualification panelWindowHeight 0 2>/dev/null)" == "56" ]] &&
+    [[ "$(checked_panel_call linura.panel-qualification panelWindowWidth 0 2>/dev/null)" == "$(checked_panel_call linura.panel-qualification panelScreenWidth 0 2>/dev/null)" ]] &&
+    [[ "$(checked_panel_call linura.panel-qualification panelExclusiveZone 0 2>/dev/null)" == "56" ]] &&
+    [[ "$(checked_panel_call linura.panel-qualification panelExclusionNormal 0 2>/dev/null)" == "true" ]] &&
+    [[ "$(checked_panel_call linura.panel-qualification panelAnchorsValid 0 2>/dev/null)" == "true" ]]
+}
+wait_until "instantiated workstation panel geometry and exclusion" panel_window_ready
+
+panel_window_count="$(checked_panel_call linura.panel-qualification panelWindowCount)"
+panel_window_width="$(checked_panel_call linura.panel-qualification panelWindowWidth 0)"
+panel_window_height="$(checked_panel_call linura.panel-qualification panelWindowHeight 0)"
+panel_screen_width="$(checked_panel_call linura.panel-qualification panelScreenWidth 0)"
+panel_exclusive_zone="$(checked_panel_call linura.panel-qualification panelExclusiveZone 0)"
+panel_screen_matches="$(checked_panel_call linura.panel-qualification panelScreenMatches 0)"
+panel_exclusion_normal="$(checked_panel_call linura.panel-qualification panelExclusionNormal 0)"
+panel_anchors_valid="$(checked_panel_call linura.panel-qualification panelAnchorsValid 0)"
+
+[[ "$panel_window_count" == "1" ]] || fail "workstation panel delegate was not instantiated exactly once: $panel_window_count"
+[[ "$panel_screen_matches" == "true" ]] || fail "workstation panel delegate is not bound to the qualification screen"
+[[ "$panel_window_width" == "$panel_screen_width" && "$panel_window_width" =~ ^[1-9][0-9]*$ ]] || fail "workstation panel geometry does not span the bound screen"
+[[ "$panel_window_height" == "56" ]] || fail "workstation panel actual height drifted: $panel_window_height"
+[[ "$panel_exclusive_zone" == "56" && "$panel_exclusion_normal" == "true" && "$panel_anchors_valid" == "true" ]] || fail "workstation panel effective QML exclusion state drifted"
+
+panel_hyprland_monitors="$evidence_root/workstation-panel-monitors.json"
+hyprctl monitors -j > "$panel_hyprland_monitors"
+panel_compositor_reserve="$(
+    python3 - "$panel_hyprland_monitors" <<'PY'
+import json
+import sys
+
+monitors = json.load(open(sys.argv[1], encoding="utf-8"))
+if len(monitors) != 1:
+    raise SystemExit(2)
+reserved = monitors[0].get("reserved")
+ok = False
+if isinstance(reserved, dict):
+    ok = (
+        int(reserved.get("top", -1)) == 56
+        and int(reserved.get("right", -1)) == 0
+        and int(reserved.get("bottom", -1)) == 0
+        and int(reserved.get("left", -1)) == 0
+    )
+elif isinstance(reserved, list) and len(reserved) == 4:
+    # Hyprland monitor JSON serializes reserved as [left, top, right, bottom].
+    values = [int(value) for value in reserved]
+    ok = values == [0, 56, 0, 0]
+print("true" if ok else "false")
+PY
+)"
+[[ "$panel_compositor_reserve" == "true" ]] || fail "Hyprland did not expose the workstation panel's effective 56px top reservation"
+
+panel_workspace_count="$(checked_panel_call linura.panel-qualification workspaceCount)"
+[[ "$panel_workspace_count" =~ ^[1-9][0-9]*$ ]] || fail "workstation panel has no live workspace descriptors"
+[[ "$(checked_panel_call linura.panel-qualification focusedWorkspaceCount)" == "1" ]] || fail "workstation panel did not expose exactly one focused workspace"
+
+panel_keyboard_focus_entered="$(checked_panel_call linura.panel-qualification focusPanelControl)"
+[[ "$panel_keyboard_focus_entered" == "true" ]] || fail "workstation panel keyboard entry could not request focus for its first real control"
+panel_keyboard_focus_ready() {
+    [[ "$(checked_panel_call linura.panel-qualification panelKeyboardEntryFocused 2>/dev/null)" == "true" ]]
+}
+wait_until "workstation panel keyboard-only focus entry" panel_keyboard_focus_ready
+panel_keyboard_entry_focused="$(checked_panel_call linura.panel-qualification panelKeyboardEntryFocused)"
+[[ "$panel_keyboard_entry_focused" == "true" ]] || fail "workstation panel keyboard focus was not retained after readiness proof"
+
+panel_command_palette_activated="$(checked_panel_call linura.panel-qualification activateCommandPaletteControl)"
+panel_quick_settings_activated="$(checked_panel_call linura.panel-qualification activateQuickSettingsControl)"
+panel_control_center_activated="$(checked_panel_call linura.panel-qualification activateControlCenterControl)"
+[[ "$panel_command_palette_activated" == "true" ]] || fail "command-palette panel control could not be activated through its instantiated button"
+[[ "$panel_quick_settings_activated" == "true" ]] || fail "Quick Settings panel control could not be activated through its instantiated button"
+[[ "$panel_control_center_activated" == "true" ]] || fail "Control Center panel control could not be activated through its instantiated button"
+[[ "$(checked_panel_call linura.panel-qualification commandPaletteCount)" == "1" ]] || fail "command-palette panel control did not emit exactly once"
+[[ "$(checked_panel_call linura.panel-qualification quickSettingsCount)" == "1" ]] || fail "Quick Settings panel control did not emit exactly once"
+[[ "$(checked_panel_call linura.panel-qualification controlCenterCount)" == "1" ]] || fail "Control Center panel control did not emit exactly once"
+
+first_workspace_id="$(checked_panel_call linura.panel-qualification firstWorkspaceId)"
+[[ "$first_workspace_id" =~ ^-?[0-9]+$ && "$first_workspace_id" != "0" ]] || fail "workstation panel returned invalid workspace identity"
+panel_workspace_control_activated="$(checked_panel_call linura.panel-qualification activateWorkspaceControl "$first_workspace_id")"
+[[ "$panel_workspace_control_activated" == "true" ]] || fail "workspace panel control could not be activated through its instantiated button"
+[[ "$(checked_panel_call linura.panel-qualification workspaceCountRequested)" == "1" ]] || fail "workspace panel control did not emit exactly once"
+[[ "$(checked_panel_call linura.panel-qualification lastWorkspaceActivated)" == "true" ]] || fail "workspace panel control did not re-resolve and activate its exact live target"
+
+
+panel_status_time="$(checked_panel_call linura.panel-qualification statusTimeText)"
+panel_status_date="$(checked_panel_call linura.panel-qualification statusDateText)"
+panel_status_rendered="$(checked_panel_call linura.panel-qualification statusTimeRendered)"
+panel_status_timestamp_before="$(checked_panel_call linura.panel-qualification statusTimestampMs)"
+[[ -n "$panel_status_time" && -n "$panel_status_date" ]] || fail "workstation status did not render non-empty time/date text"
+[[ "$panel_status_rendered" == "true" ]] || fail "workstation status time label was not rendered in the instantiated panel"
+[[ "$panel_status_timestamp_before" =~ ^[0-9]+$ ]] || fail "workstation status returned an invalid initial timestamp"
+
+panel_status_advanced() {
+    local current
+    current="$(checked_panel_call linura.panel-qualification statusTimestampMs 2>/dev/null)"
+    [[ "$current" =~ ^[0-9]+$ ]] && (( current > panel_status_timestamp_before ))
+}
+wait_until "workstation status clock advancement" panel_status_advanced
+panel_status_timestamp_after="$(checked_panel_call linura.panel-qualification statusTimestampMs)"
+[[ "$panel_status_timestamp_after" =~ ^[0-9]+$ ]] || fail "workstation status returned an invalid advanced timestamp"
+(( panel_status_timestamp_after > panel_status_timestamp_before )) || fail "workstation status clock did not advance"
+
+panel_tray_item_count="$(checked_panel_call linura.panel-qualification trayItemCount)"
+panel_tray_overflow_count="$(checked_panel_call linura.panel-qualification trayOverflowCount)"
+[[ "$panel_tray_item_count" == "5" ]] || fail "workstation tray qualification model did not expose five deterministic items"
+[[ "$panel_tray_overflow_count" =~ ^[1-9][0-9]*$ ]] || fail "workstation tray did not bound excess items into overflow"
+
+panel_tray_inline_activated="$(checked_panel_call linura.panel-qualification activateTrayInlineControl 0)"
+[[ "$panel_tray_inline_activated" == "true" ]] || fail "workstation tray inline item could not invoke its primary action"
+[[ "$(checked_panel_call linura.panel-qualification trayPrimaryCount)" == "1" ]] || fail "workstation tray inline primary action was not observed exactly once"
+
+panel_tray_focus_reentered="$(checked_panel_call linura.panel-qualification focusPanelControl)"
+[[ "$panel_tray_focus_reentered" == "true" ]] || fail "workstation panel could not re-enter keyboard mode before tray overflow qualification"
+panel_tray_overflow_opened="$(checked_panel_call linura.panel-qualification openTrayOverflowControl)"
+[[ "$panel_tray_overflow_opened" == "true" ]] || fail "workstation tray overflow control did not open its popup"
+[[ "$(checked_panel_call linura.panel-qualification trayOverflowVisible)" == "true" ]] || fail "workstation tray overflow popup was not visible after activation"
+
+panel_tray_cancelled="$(checked_panel_call linura.panel-qualification cancelTrayOverflowControl)"
+[[ "$panel_tray_cancelled" == "true" ]] || fail "workstation tray overflow could not be cancelled through its component path"
+panel_tray_keyboard_focus_restored() {
+    [[ "$(checked_panel_call linura.panel-qualification panelKeyboardNavigationActive 2>/dev/null)" == "true" ]] &&
+    [[ "$(checked_panel_call linura.panel-qualification trayOverflowButtonFocused 2>/dev/null)" == "true" ]]
+}
+wait_until "workstation tray overflow keyboard-session restoration" panel_tray_keyboard_focus_restored
+panel_tray_keyboard_focus_restored_value="true"
+
+panel_tray_overflow_reopened="$(checked_panel_call linura.panel-qualification openTrayOverflowControl)"
+[[ "$panel_tray_overflow_reopened" == "true" ]] || fail "workstation tray overflow could not reopen after keyboard cancellation"
+panel_tray_overflow_activated="$(checked_panel_call linura.panel-qualification activateTrayOverflowControl 4)"
+[[ "$panel_tray_overflow_activated" == "true" ]] || fail "workstation tray overflow item could not invoke its primary action"
+[[ "$(checked_panel_call linura.panel-qualification trayPrimaryCount)" == "2" ]] || fail "workstation tray primary action count did not include inline and overflow activation"
+panel_tray_overflow_closed="$(checked_panel_call linura.panel-qualification trayOverflowVisible)"
+[[ "$panel_tray_overflow_closed" == "false" ]] || fail "workstation tray overflow did not dismiss after primary activation"
+panel_tray_primary_requests="$(checked_panel_call linura.panel-qualification trayPrimaryCount)"
+
+{
+    printf 'screen_count=%s\n' "$panel_screen_count"
+    printf 'panel_window_count=%s\n' "$panel_window_count"
+    printf 'panel_width=%s\n' "$panel_window_width"
+    printf 'screen_width=%s\n' "$panel_screen_width"
+    printf 'panel_height=%s\n' "$panel_window_height"
+    printf 'screen_matches=%s\n' "$panel_screen_matches"
+    printf 'exclusive_zone=%s\n' "$panel_exclusive_zone"
+    printf 'exclusion_normal=%s\n' "$panel_exclusion_normal"
+    printf 'anchors_valid=%s\n' "$panel_anchors_valid"
+    printf 'compositor_reserve=%s\n' "$panel_compositor_reserve"
+    printf 'workspace_count=%s\n' "$panel_workspace_count"
+    printf 'focused_workspace_count=%s\n' "$(checked_panel_call linura.panel-qualification focusedWorkspaceCount)"
+    printf 'keyboard_focus_entered=%s\n' "$panel_keyboard_focus_entered"
+    printf 'keyboard_entry_focused=%s\n' "$panel_keyboard_entry_focused"
+    printf 'command_palette_control_activated=%s\n' "$panel_command_palette_activated"
+    printf 'quick_settings_control_activated=%s\n' "$panel_quick_settings_activated"
+    printf 'control_center_control_activated=%s\n' "$panel_control_center_activated"
+    printf 'workspace_control_activated=%s\n' "$panel_workspace_control_activated"
+    printf 'command_palette_requests=%s\n' "$(checked_panel_call linura.panel-qualification commandPaletteCount)"
+    printf 'quick_settings_requests=%s\n' "$(checked_panel_call linura.panel-qualification quickSettingsCount)"
+    printf 'control_center_requests=%s\n' "$(checked_panel_call linura.panel-qualification controlCenterCount)"
+    printf 'workspace_requests=%s\n' "$(checked_panel_call linura.panel-qualification workspaceCountRequested)"
+    printf 'workspace_activation=%s\n' "$(checked_panel_call linura.panel-qualification lastWorkspaceActivated)"
+    printf 'status_time=%s\n' "$panel_status_time"
+    printf 'status_date=%s\n' "$panel_status_date"
+    printf 'status_rendered=%s\n' "$panel_status_rendered"
+    printf 'status_timestamp_before=%s\n' "$panel_status_timestamp_before"
+    printf 'status_timestamp_after=%s\n' "$panel_status_timestamp_after"
+    printf 'tray_item_count=%s\n' "$panel_tray_item_count"
+    printf 'tray_overflow_count=%s\n' "$panel_tray_overflow_count"
+    printf 'tray_inline_activated=%s\n' "$panel_tray_inline_activated"
+    printf 'tray_overflow_opened=%s\n' "$panel_tray_overflow_opened"
+    printf 'tray_cancelled=%s\n' "$panel_tray_cancelled"
+    printf 'tray_keyboard_focus_restored=%s\n' "$panel_tray_keyboard_focus_restored_value"
+    printf 'tray_overflow_reopened=%s\n' "$panel_tray_overflow_reopened"
+    printf 'tray_overflow_activated=%s\n' "$panel_tray_overflow_activated"
+    printf 'tray_overflow_closed=%s\n' "$panel_tray_overflow_closed"
+    printf 'tray_primary_requests=%s\n' "$panel_tray_primary_requests"
+} > "$evidence_root/workstation-panel.txt"
+pass_case "workstation-panel-entrypoints"
 
 systemctl --user start linura-palette-qualification.service
 wait_for_ipc_target     "palette IPC"     linura-palette-qualification.service     "$palette_config"     linura.palette-qualification
@@ -958,7 +1164,7 @@ pass_case "quick-settings-restart-recovery"
 pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite \
     | LC_ALL=C sort > "$evidence_root/package-versions.txt"
 
-expected_cases=19
+expected_cases=20
 actual_cases="$(wc -l < "$evidence_root/cases.tsv")"
 [[ "$actual_cases" -eq "$expected_cases" ]]     || fail "expected $expected_cases runtime cases, recorded $actual_cases"
 

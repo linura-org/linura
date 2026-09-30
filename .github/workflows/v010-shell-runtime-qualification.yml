@@ -563,7 +563,7 @@ jobs:
 
           copy_status=0
           scp "${ssh_common[@]}" -P 2223 -r             linura@127.0.0.1:/tmp/linura-shell-runtime/evidence/.             "$ARTIFACT_DIR/" || copy_status=$?
-          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'journalctl --user -u linura-shell-qualification.service -u linura-palette-qualification.service -u linura-quick-settings-qualification.service -u linurad.service -u pipewire.service -u wireplumber.service -u linura-hyprland-qualification.service --no-pager'             > "$ARTIFACT_DIR/user-journal.log" || true
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'journalctl --user -u linura-shell-qualification.service -u linura-palette-qualification.service -u linura-quick-settings-qualification.service -u linura-panel-qualification.service -u linurad.service -u pipewire.service -u wireplumber.service -u linura-hyprland-qualification.service --no-pager'             > "$ARTIFACT_DIR/user-journal.log" || true
           ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'sudo -n journalctl -u seatd.service --no-pager'             > "$ARTIFACT_DIR/seatd-journal.log" || true
 
           if [[ "$runtime_status" -ne 0 ]]; then
@@ -625,6 +625,8 @@ jobs:
           quick_settings_recovery = artifacts / "quick-settings-restart-recovery.txt"
           lifecycle_feedback_success = artifacts / "lifecycle-feedback-success.txt"
           lifecycle_feedback_drift = artifacts / "lifecycle-feedback-precondition-drift.txt"
+          workstation_panel = artifacts / "workstation-panel.txt"
+          workstation_panel_monitors = artifacts / "workstation-panel-monitors.json"
           required_files = (
               cases_path,
               transcript_path,
@@ -656,10 +658,55 @@ jobs:
               quick_settings_recovery,
               lifecycle_feedback_success,
               lifecycle_feedback_drift,
+              workstation_panel,
+              workstation_panel_monitors,
           )
           for path in required_files:
               if not path.is_file() or path.is_symlink():
                   raise SystemExit(f"runtime evidence missing or untrusted: {path.name}")
+
+          workstation_panel_values = {}
+          for line in workstation_panel.read_text(encoding="utf-8").splitlines():
+              if "=" not in line:
+                  raise SystemExit(f"invalid workstation panel evidence record: {line!r}")
+              key, value = line.split("=", 1)
+              if not key or key in workstation_panel_values:
+                  raise SystemExit(f"invalid or duplicate workstation panel evidence key: {key!r}")
+              workstation_panel_values[key] = value
+          for key in (
+              "keyboard_focus_entered",
+              "keyboard_entry_focused",
+              "status_rendered",
+              "tray_inline_activated",
+              "tray_overflow_opened",
+              "tray_cancelled",
+              "tray_keyboard_focus_restored",
+              "tray_overflow_reopened",
+              "tray_overflow_activated",
+          ):
+              if workstation_panel_values.get(key) != "true":
+                  raise SystemExit(
+                      f"workstation panel/tray/status evidence is not positive: {key}"
+                  )
+          if workstation_panel_values.get("tray_overflow_closed") != "false":
+              raise SystemExit("workstation tray overflow did not remain closed after activation")
+          for key in ("status_time", "status_date"):
+              if not workstation_panel_values.get(key):
+                  raise SystemExit(f"workstation status evidence is empty: {key}")
+          try:
+              status_before = int(workstation_panel_values["status_timestamp_before"])
+              status_after = int(workstation_panel_values["status_timestamp_after"])
+              tray_item_count = int(workstation_panel_values["tray_item_count"])
+              tray_overflow_count = int(workstation_panel_values["tray_overflow_count"])
+              tray_primary_requests = int(workstation_panel_values["tray_primary_requests"])
+          except (KeyError, ValueError) as error:
+              raise SystemExit(f"invalid workstation tray/status evidence: {error}") from error
+          if status_after <= status_before:
+              raise SystemExit("workstation status clock evidence did not advance")
+          if tray_item_count != 5 or tray_overflow_count < 1:
+              raise SystemExit("workstation tray bounded-overflow evidence is invalid")
+          if tray_primary_requests != 2:
+              raise SystemExit("workstation tray action evidence did not record both primary activations")
 
           observed = {}
           for line in cases_path.read_text(encoding="utf-8").splitlines():
