@@ -138,6 +138,26 @@ v0.10 inherits the earlier deterministic/authority qualification chain but adds 
 
 Passing the inherited Ubuntu VM lanes is therefore necessary continuity evidence, not sufficient v0.10 workstation support evidence.
 
+## v0.10 workstation acceptance levels
+
+The workstation uses one exact-source acceptance family with three deliberately different evidence levels. They share contracts and recording semantics, but they do not make interchangeable support claims.
+
+- **Level A — automated VM:** mandatory development qualification. The existing v0.10 Arch/Hyprland/Quickshell guest remains QEMU/TCG and host-headless, while a recorder inside the guest Wayland session captures the actual automated interaction run. The video is digest-bound evidence from the same execution; assertions, authoritative state checks and interaction/accessibility reports remain the correctness oracle.
+- **Level B — interactive VM:** opt-in developer acceptance over the same pinned substrate contract, same exact-source provisioning path, same virtio GPU identity and same Linura binaries. The VM may expose a local GTK display or loopback-only VNC. Recording is optional and uses the same guest recorder as Level A.
+- **Level C — maintained hardware:** physical-machine evidence for Q11. Capture runs inside an already established Hyprland Wayland session, records source/hardware/display identity and may create a video with the same recording contract. Virtualized execution is explicitly not Level C evidence.
+
+The machine-readable contract is `contracts/v010-workstation-acceptance.toml`. Inspect prerequisites and mode semantics with:
+
+```bash
+python3 tools/workstation_acceptance.py plan --mode automated --display none
+python3 tools/workstation_acceptance.py doctor --mode interactive --display gtk
+python3 tools/workstation_acceptance.py plan --mode hardware --display none --record
+```
+
+For Level B, prepare/verify the pinned Arch substrate using the existing v0.10 substrate tooling, ensure the repository-pinned Rust toolchain/target is installed, then launch the disposable interactive guest with `qualification/v010/workstation-acceptance/launch-interactive.sh`. The launcher rejects dirty tracked source, self-builds `linurad` from the exact checked-out SHA using the pinned toolchain, locked workspace and the same release-envelope variables as CI, re-verifies the prepared image, provisions the exact source into the guest, verifies the installed daemon digest against that local exact-source build, and then enters the live workstation session. `--display gtk` opens a local QEMU window; `--display vnc --vnc-display N` exposes QEMU only on loopback at VNC display N.
+
+Level C capture uses `qualification/v010/workstation-acceptance/capture-hardware-session.sh` on a maintained physical fixture. A recording or hardware-capture file alone never promotes support; Q11's maintained fixture identity and release qualification still govern that claim.
+
 ### v0.10 shell runtime development gate
 
 The v0.10 shell path also has an exact-source disposable **Arch** runtime gate in `.github/workflows/v010-shell-runtime-qualification.yml`. It boots a version-addressed official Arch cloud image under QEMU/TCG with an opt-in virtio GPU, installs the runtime from the dated Arch Linux Archive substrate, starts headless Hyprland and real Quickshell, and executes repository-owned qualification fixtures around the production application-launch and command-palette QML components.

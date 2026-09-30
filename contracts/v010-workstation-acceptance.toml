@@ -1,0 +1,55 @@
+schema_version = 1
+id = "qualification/v010-workstation-acceptance"
+milestone = "v0.10.0"
+target_profile = "arch-hyprland-v1"
+runtime_contract = "contracts/v010-shell-runtime-qualification.toml"
+substrate_contract = "contracts/v010-shell-runtime-substrate.toml"
+vm_launcher = "qualification/v010/shell-runtime/start-vm.sh"
+interactive_launcher = "qualification/v010/workstation-acceptance/launch-interactive.sh"
+live_session = "qualification/v010/workstation-acceptance/run-live-session.sh"
+guest_recorder = "qualification/v010/workstation-acceptance/record-session.sh"
+hardware_capture = "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+recording_verifier = "tools/workstation_acceptance.py"
+release_support_promotion = false
+
+[level_a]
+id = "automated-vm"
+required = true
+vm_mode = "automated"
+display_backend = "none"
+recording = "required"
+source_scope = "exact-pr-head"
+evidence_scope = "development-runtime"
+
+[level_b]
+id = "interactive-vm"
+required = false
+vm_mode = "interactive"
+display_backends = ["gtk", "vnc"]
+recording = "optional"
+same_runtime_contract = true
+same_substrate_contract = true
+same_exact_source_provisioning = true
+evidence_scope = "developer-interactive"
+
+[level_c]
+id = "maintained-hardware"
+required_for_release_gate = "Q11"
+recording = "optional"
+same_recording_contract = true
+virtualization_allowed = false
+evidence_scope = "maintained-physical-interactive"
+
+[recording]
+container = "matroska"
+extension = ".mkv"
+codec = "ffv1"
+minimum_bytes = 1024
+maximum_bytes = 536870912
+minimum_duration_seconds = 0.25
+maximum_duration_seconds = 600.0
+maximum_width = 16384
+maximum_height = 16384
+video_stream_count = 1
+audio_streams_allowed = false
+metadata_schema_version = 1

@@ -25,6 +25,7 @@ env:
   SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
   RUNTIME_CONTRACT: contracts/v010-shell-runtime-qualification.toml
   SUBSTRATE_CONTRACT: contracts/v010-shell-runtime-substrate.toml
+  ACCEPTANCE_CONTRACT: contracts/v010-workstation-acceptance.toml
   BASE_IMAGE_URL: https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2
   BASE_IMAGE_CHECKSUM_URL: https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2.SHA256
   ARCH_ARCHIVE_URL: https://archive.archlinux.org/repos/2026/09/16/$repo/os/$arch
@@ -213,7 +214,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends             cloud-image-utils             openssh-client             qemu-system-x86             qemu-utils
+          sudo apt-get install -y --no-install-recommends             cloud-image-utils             ffmpeg             openssh-client             qemu-system-x86             qemu-utils
 
       - name: Restore prepared runtime substrate
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -322,7 +323,7 @@ jobs:
       - name: Start disposable Arch graphical guest
         run: |
           set -euo pipefail
-          bash qualification/v010/shell-runtime/start-vm.sh             --image "$VM_IMAGE"             --seed "$SEED_IMAGE"             --memory 6144             --cpus 4             --nic-mac "$QUALIFICATION_NIC_MAC"             --ssh-port 2223             >"$VM_LOG" 2>&1 &
+          bash qualification/v010/shell-runtime/start-vm.sh             --mode automated             --display none             --image "$VM_IMAGE"             --seed "$SEED_IMAGE"             --memory 6144             --cpus 4             --nic-mac "$QUALIFICATION_NIC_MAC"             --ssh-port 2223             >"$VM_LOG" 2>&1 &
           printf 'VM_PID=%s\n' "$!" >> "$GITHUB_ENV"
 
       - name: Wait for Arch guest and verify prepared runtime substrate
@@ -555,7 +556,7 @@ jobs:
             -o ConnectTimeout=5
           )
           set +e
-          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'bash /opt/linura-source/qualification/v010/shell-runtime/run-shell-runtime.sh /opt/linura-source /tmp/linura-shell-runtime/evidence'             | tee "$ARTIFACT_DIR/shell-runtime-transcript.log"
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             "bash /opt/linura-source/qualification/v010/shell-runtime/run-shell-runtime.sh /opt/linura-source /tmp/linura-shell-runtime/evidence '$SOURCE_SHA'"             | tee "$ARTIFACT_DIR/shell-runtime-transcript.log"
           pipeline_status=("${PIPESTATUS[@]}")
           set -e
           runtime_status="${pipeline_status[0]}"
@@ -576,6 +577,16 @@ jobs:
             exit "$copy_status"
           fi
 
+      - name: Verify automated workstation recording
+        run: |
+          set -euo pipefail
+          python3 tools/workstation_acceptance.py             verify-recording "$ARTIFACT_DIR/workstation-runtime.mkv"             --metadata "$ARTIFACT_DIR/workstation-runtime.metadata.json"             --source-sha "$SOURCE_SHA"
+          read -r expected_recording_sha expected_recording_name < "$ARTIFACT_DIR/workstation-runtime.sha256"
+          actual_recording_sha="$(sha256sum "$ARTIFACT_DIR/workstation-runtime.mkv" | awk '{print $1}')"
+          [[ "$expected_recording_sha" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$expected_recording_name" == "workstation-runtime.mkv" ]]
+          [[ "$actual_recording_sha" == "$expected_recording_sha" ]]
+
       - name: Bind exact-source runtime evidence
         run: |
           set -euo pipefail
@@ -590,6 +601,7 @@ jobs:
           artifacts = pathlib.Path(os.environ["ARTIFACT_DIR"])
           contract_path = root / os.environ["RUNTIME_CONTRACT"]
           substrate_contract_path = root / os.environ["SUBSTRATE_CONTRACT"]
+          acceptance_contract_path = root / os.environ["ACCEPTANCE_CONTRACT"]
           contract = tomllib.loads(contract_path.read_text(encoding="utf-8"))
 
           def digest(path: pathlib.Path) -> str:
@@ -627,6 +639,9 @@ jobs:
           lifecycle_feedback_drift = artifacts / "lifecycle-feedback-precondition-drift.txt"
           workstation_panel = artifacts / "workstation-panel.txt"
           workstation_panel_monitors = artifacts / "workstation-panel-monitors.json"
+          workstation_recording = artifacts / "workstation-runtime.mkv"
+          workstation_recording_metadata = artifacts / "workstation-runtime.metadata.json"
+          workstation_recording_sha256 = artifacts / "workstation-runtime.sha256"
           required_files = (
               cases_path,
               transcript_path,
@@ -660,6 +675,9 @@ jobs:
               lifecycle_feedback_drift,
               workstation_panel,
               workstation_panel_monitors,
+              workstation_recording,
+              workstation_recording_metadata,
+              workstation_recording_sha256,
           )
           for path in required_files:
               if not path.is_file() or path.is_symlink():
@@ -707,6 +725,17 @@ jobs:
               raise SystemExit("workstation tray bounded-overflow evidence is invalid")
           if tray_primary_requests != 2:
               raise SystemExit("workstation tray action evidence did not record both primary activations")
+
+          recording_metadata = json.loads(
+              workstation_recording_metadata.read_text(encoding="utf-8")
+          )
+          if recording_metadata.get("source_sha") != os.environ["SOURCE_SHA"]:
+              raise SystemExit("workstation recording metadata source SHA mismatch")
+          if recording_metadata.get("sha256") != digest(workstation_recording):
+              raise SystemExit("workstation recording metadata digest mismatch")
+          digest_line = workstation_recording_sha256.read_text(encoding="utf-8").strip().split()
+          if digest_line != [digest(workstation_recording), workstation_recording.name]:
+              raise SystemExit("workstation recording digest file mismatch")
 
           observed = {}
           for line in cases_path.read_text(encoding="utf-8").splitlines():
@@ -762,6 +791,8 @@ jobs:
               "wireplumber",
               "networkmanager",
               "sqlite",
+              "ffmpeg",
+              "wf-recorder",
           }
           if set(package_versions) != required_packages:
               raise SystemExit(
@@ -784,6 +815,10 @@ jobs:
                   "path": substrate_contract_path.relative_to(root).as_posix(),
                   "sha256": digest(substrate_contract_path),
               },
+              "workstation_acceptance_contract": {
+                  "path": acceptance_contract_path.relative_to(root).as_posix(),
+                  "sha256": digest(acceptance_contract_path),
+              },
               "base_image": {
                   "url": os.environ["BASE_IMAGE_URL"],
                   "sha256": os.environ["BASE_IMAGE_SHA256"],
@@ -805,6 +840,13 @@ jobs:
               "rendering": {
                   "qt_quick_backend": rendering_backend,
                   "scope": "headless-development-runtime",
+              },
+              "workstation_recording": {
+                  "path": workstation_recording.name,
+                  "sha256": digest(workstation_recording),
+                  "metadata_sha256": digest(workstation_recording_metadata),
+                  "digest_file_sha256": digest(workstation_recording_sha256),
+                  "scope": "captured-automated-wayland-session",
               },
               "authority_runtime": {
                   "linurad_sha256": os.environ["LINURAD_SHA256"],
@@ -861,3 +903,4 @@ jobs:
           path: ${{ runner.temp }}/linura-v010-shell-artifacts/
           if-no-files-found: warn
           retention-days: 30
+          compression-level: 0

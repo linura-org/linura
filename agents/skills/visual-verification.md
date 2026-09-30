@@ -7,3 +7,5 @@
 - Pair visual comparison with interaction/accessibility tests; pixel equality alone is insufficient.
 - Interaction/accessibility readiness requires retained digest-verified runner reports for every qualified surface, including runner identity and explicit per-check results. Hand-authored manifest booleans are not execution evidence.
 - Evidence readers must remain bounded before and during decoding; a small compressed artifact must not be able to force unbounded memory expansion.
+
+- Workstation video is supporting evidence, not a pixel/accessibility oracle. Capture Level A/B/C sessions inside the Wayland session, verify bounded container/codec/dimensions/duration and SHA-256 metadata, and never infer physical-hardware support from VM video.

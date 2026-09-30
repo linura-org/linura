@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_PATHS = (
     "contracts/v010-shell-runtime-qualification.toml",
     "contracts/v010-shell-runtime-substrate.toml",
+    "contracts/v010-workstation-acceptance.toml",
     "contracts/v010-workstation-qualification.toml",
     ".github/workflows/v010-shell-runtime-qualification.yml",
     ".github/workflows/v010-qualification.yml",
@@ -59,6 +60,11 @@ FIXTURE_PATHS = (
     "qualification/v010/shell-runtime/provision-shell-runtime.sh",
     "qualification/v010/shell-runtime/run-shell-runtime.sh",
     "qualification/v010/shell-runtime/start-vm.sh",
+    "qualification/v010/workstation-acceptance/record-session.sh",
+    "qualification/v010/workstation-acceptance/run-live-session.sh",
+    "qualification/v010/workstation-acceptance/launch-interactive.sh",
+    "qualification/v010/workstation-acceptance/capture-hardware-session.sh",
+    "tools/workstation_acceptance.py",
     "qualification/v010/shell-runtime/prepare-substrate.sh",
     "qualification/v010/shell-runtime/verify-substrate.py",
     "qualification/v010/shell-runtime/fixtures/linger-app",
@@ -1929,6 +1935,156 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("required_cases drifted", result.stderr)
+
+
+    def test_substrate_must_include_workstation_recording_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            substrate = root / "contracts/v010-shell-runtime-substrate.toml"
+            text = substrate.read_text(encoding="utf-8")
+            marker = '  "wf-recorder",\n'
+            self.assertIn(marker, text)
+            substrate.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("runtime_packages drifted", result.stderr)
+
+    def test_vm_launcher_must_retain_interactive_display_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "qualification/v010/shell-runtime/start-vm.sh"
+            text = launcher.read_text(encoding="utf-8")
+            marker = "interactive:vnc)"
+            self.assertIn(marker, text)
+            launcher.write_text(
+                text.replace(marker, "interactive:removed)", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interactive:vnc)", result.stderr)
+
+    def test_automated_runtime_must_finalize_visual_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = '"$workstation_recorder" stop "$workstation_recording"'
+            self.assertGreaterEqual(text.count(marker), 2)
+            script.write_text(
+                text.replace(marker, 'echo "recording not finalized"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("workstation_recorder", result.stderr)
+
+    def test_workflow_must_host_verify_automated_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "Verify automated workstation recording"
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, "Skip automated workstation recording", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_evidence_package_set_must_include_recorder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            evidence_start = text.index("required_packages = {")
+            marker = '              "wf-recorder",\n'
+            marker_index = text.index(marker, evidence_start)
+            workflow.write_text(
+                text[:marker_index] + text[marker_index + len(marker):],
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("evidence package set must include wf-recorder", result.stderr)
+
+    def test_acceptance_contract_cannot_allow_virtual_level_c(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-acceptance.toml"
+            text = contract.read_text(encoding="utf-8")
+            marker = "virtualization_allowed = false"
+            self.assertIn(marker, text)
+            contract.write_text(
+                text.replace(marker, "virtualization_allowed = true", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("level_c.virtualization_allowed", result.stderr)
+
+
+
+    def test_interactive_launcher_must_self_build_exact_source_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+            text = launcher.read_text(encoding="utf-8")
+            marker = 'cargo +"$RUST_VERSION" build --workspace --release --locked --target "$release_target"'
+            self.assertIn(marker, text)
+            launcher.write_text(
+                text.replace(marker, 'echo "exact-source build omitted"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interactive workstation launcher missing exact-source invariant", result.stderr)
+
+    def test_interactive_launcher_rejects_caller_supplied_authority_binary_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+            text = launcher.read_text(encoding="utf-8")
+            marker = '        --source-root) source_root="$2"; shift 2 ;;\n'
+            self.assertIn(marker, text)
+            launcher.write_text(
+                text.replace(
+                    marker,
+                    '        --linurad) linurad_binary="$2"; shift 2 ;;\n' + marker,
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must not accept a caller-supplied authority binary", result.stderr)
+
+    def test_automated_recorder_requires_success_and_cleanup_finalization(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = '"$workstation_recorder" stop "$workstation_recording"'
+            self.assertGreaterEqual(text.count(marker), 2)
+            script.write_text(
+                text.replace(marker, 'echo "cleanup finalization omitted"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("finalize on both success and cleanup paths", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

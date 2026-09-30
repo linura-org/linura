@@ -8,9 +8,12 @@ import sys
 import tomllib
 from urllib.parse import urlparse
 
+from workstation_acceptance import validate_contract as validate_acceptance_contract
+
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = "contracts/v010-shell-runtime-qualification.toml"
 SUBSTRATE_CONTRACT = "contracts/v010-shell-runtime-substrate.toml"
+ACCEPTANCE_CONTRACT = "contracts/v010-workstation-acceptance.toml"
 WORKFLOW = ".github/workflows/v010-shell-runtime-qualification.yml"
 PARENT_WORKFLOW = ".github/workflows/v010-qualification.yml"
 
@@ -31,6 +34,7 @@ EXPECTED_COMPONENTS = [
     "quick-settings",
     "notifications-osd",
     "workstation-panel",
+    "wayland-session-recorder",
 ]
 
 EXPECTED_RUNTIME_PACKAGES = [
@@ -52,6 +56,8 @@ EXPECTED_RUNTIME_PACKAGES = [
     "wireplumber",
     "networkmanager",
     "sqlite",
+    "ffmpeg",
+    "wf-recorder",
 ]
 
 EXPECTED_CASES = [
@@ -75,6 +81,7 @@ EXPECTED_CASES = [
     "lifecycle-feedback-verified-success",
     "lifecycle-feedback-precondition-drift-no-success",
     "workstation-panel-entrypoints",
+    "workstation-visual-recording",
 ]
 
 RUNTIME_FILES = (
@@ -98,6 +105,12 @@ RUNTIME_FILES = (
     "qualification/v010/shell-runtime/provision-shell-runtime.sh",
     "qualification/v010/shell-runtime/run-shell-runtime.sh",
     "qualification/v010/shell-runtime/start-vm.sh",
+    "qualification/v010/workstation-acceptance/record-session.sh",
+    "qualification/v010/workstation-acceptance/run-live-session.sh",
+    "qualification/v010/workstation-acceptance/launch-interactive.sh",
+    "qualification/v010/workstation-acceptance/capture-hardware-session.sh",
+    "tools/workstation_acceptance.py",
+    "contracts/v010-workstation-acceptance.toml",
     "qualification/v010/shell-runtime/prepare-substrate.sh",
     "qualification/v010/shell-runtime/verify-substrate.py",
     "qualification/v010/shell-runtime/fixtures/linger-app",
@@ -223,13 +236,22 @@ def validate(root: Path) -> list[str]:
         "v0.10 shell runtime substrate contract",
         failures,
     )
-    if not contract or not workstation or not cache_substrate:
+    acceptance = _load_toml(
+        root / ACCEPTANCE_CONTRACT,
+        "v0.10 workstation acceptance contract",
+        failures,
+    )
+    if not contract or not workstation or not cache_substrate or not acceptance:
         return failures
+    for failure in validate_acceptance_contract(acceptance):
+        failures.append(f"workstation acceptance contract: {failure}")
 
     if workstation.get("shell_runtime_qualification_contract") != CONTRACT:
         failures.append("v0.10 workstation qualification must bind the shell runtime qualification contract")
     if contract.get("substrate_contract") != SUBSTRATE_CONTRACT:
         failures.append("shell runtime qualification must bind the cacheable substrate contract")
+    if contract.get("workstation_acceptance_contract") != ACCEPTANCE_CONTRACT:
+        failures.append("shell runtime qualification must bind the A/B/C workstation acceptance contract")
 
     expected_scalars = {
         "schema_version": 1,
@@ -258,7 +280,7 @@ def validate(root: Path) -> list[str]:
         "id": "qualification/v010-shell-runtime-substrate",
         "state": "development-prerequisite",
         "claim": "non-evidence-cacheable-substrate",
-        "cache_namespace": "linura-v010-shell-substrate-v2",
+        "cache_namespace": "linura-v010-shell-substrate-v3",
         "builder": "qualification/v010/shell-runtime/prepare-substrate.sh",
         "verifier": "qualification/v010/shell-runtime/verify-substrate.py",
         "base_image_url": contract.get("base_image_url"),
@@ -342,6 +364,7 @@ def validate(root: Path) -> list[str]:
             "quick_settings_authority_path_required",
             "lifecycle_feedback_evidence_required",
             "workstation_panel_evidence_required",
+            "workstation_video_evidence_required",
         ):
             if evidence.get(key) is not True:
                 failures.append(f"shell runtime evidence.{key} must remain true")
@@ -423,6 +446,8 @@ def validate(root: Path) -> list[str]:
         'LINURAD_SHA256=%s',
         'SESSION_AUDIO_HELPER_SHA256=%s',
         "bash qualification/v010/shell-runtime/start-vm.sh",
+        "--mode automated",
+        "--display none",
         "cloud-localds",
         "QUALIFICATION_NIC_MAC: 52:54:00:12:34:56",
         'QUALIFICATION_GPU_PCI_BDF: "0000:00:02.0"',
@@ -463,6 +488,20 @@ def validate(root: Path) -> list[str]:
         "workstation-panel.txt",
         "workstation-panel-monitors.json",
         "workstation_panel_values = {}",
+        "Verify automated workstation recording",
+        "tools/workstation_acceptance.py",
+        "workstation-runtime.mkv",
+        "workstation-runtime.metadata.json",
+        "workstation-runtime.sha256",
+        "expected_recording_sha",
+        "expected_recording_name",
+        "recording metadata source SHA mismatch",
+        "recording metadata digest mismatch",
+        "recording digest file mismatch",
+        '"workstation_acceptance_contract": {',
+        "compression-level: 0",
+        '"workstation_recording": {',
+        '"scope": "captured-automated-wayland-session"',
         '"keyboard_entry_focused",',
         '"tray_keyboard_focus_restored",',
         "workstation panel/tray/status evidence is not positive",
@@ -492,8 +531,11 @@ def validate(root: Path) -> list[str]:
         failures.append("shell runtime workflow missing exact runtime package evidence set")
     else:
         package_set = workflow.split(package_set_marker, 1)[1].split("}", 1)[0]
-        if '"pipewire-audio"' not in package_set:
-            failures.append("shell runtime evidence package set must include pipewire-audio")
+        for required_package in ("pipewire-audio", "ffmpeg", "wf-recorder"):
+            if f'"{required_package}"' not in package_set:
+                failures.append(
+                    f"shell runtime evidence package set must include {required_package}"
+                )
 
     def workflow_step_block(text: str, step_name: str) -> str:
         marker = f"- name: {step_name}"
@@ -604,6 +646,10 @@ def validate(root: Path) -> list[str]:
         '".github/workflows/v010-shell-runtime-qualification.yml"',
         '"contracts/v010-shell-runtime-qualification.toml"',
         '"contracts/v010-shell-runtime-substrate.toml"',
+        '"contracts/v010-workstation-acceptance.toml"',
+        '"tools/workstation_acceptance.py"',
+        '"tests/tooling/test_workstation_acceptance.py"',
+        '"qualification/v010/workstation-acceptance/**"',
         '"apps/linura-shell/**"',
         '"apps/linurad/**"',
         '"packaging/systemd/user/linurad.service"',
@@ -624,6 +670,7 @@ def validate(root: Path) -> list[str]:
         "shell-runtime:",
         "uses: ./.github/workflows/v010-shell-runtime-qualification.yml",
         "source_sha: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}",
+        "tests.tooling.test_workstation_acceptance",
     )
     for fragment in parent_fragments:
         if fragment not in parent:
@@ -797,6 +844,11 @@ def validate(root: Path) -> list[str]:
     run_script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
     provision_script = root / "qualification/v010/shell-runtime/provision-shell-runtime.sh"
     vm_launcher = root / "qualification/v010/shell-runtime/start-vm.sh"
+    recorder_script = root / "qualification/v010/workstation-acceptance/record-session.sh"
+    live_session_script = root / "qualification/v010/workstation-acceptance/run-live-session.sh"
+    interactive_launcher = root / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+    hardware_capture_script = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+    acceptance_tool = root / "tools/workstation_acceptance.py"
     prepare_substrate_script = root / "qualification/v010/shell-runtime/prepare-substrate.sh"
     verify_substrate_script = root / "qualification/v010/shell-runtime/verify-substrate.py"
 
@@ -826,7 +878,16 @@ def validate(root: Path) -> list[str]:
                     f"shell runtime provisioning missing QML module dependency-closure proof: {fragment}"
                 )
 
-    for script in (run_script, provision_script, vm_launcher, prepare_substrate_script):
+    for script in (
+        run_script,
+        provision_script,
+        vm_launcher,
+        recorder_script,
+        live_session_script,
+        interactive_launcher,
+        hardware_capture_script,
+        prepare_substrate_script,
+    ):
         completed = subprocess.run(
             ["bash", "-n", str(script)],
             check=False,
@@ -843,10 +904,19 @@ def validate(root: Path) -> list[str]:
         except SyntaxError as error:
             failures.append(f"invalid prepared-substrate verifier: {error}")
 
+    if acceptance_tool.is_file():
+        acceptance_source = acceptance_tool.read_text(encoding="utf-8")
+        try:
+            compile(acceptance_source, str(acceptance_tool), "exec")
+        except SyntaxError as error:
+            failures.append(f"invalid workstation acceptance helper: {error}")
+
     if prepare_substrate_script.is_file():
         prepare_text = prepare_substrate_script.read_text(encoding="utf-8")
         for fragment in (
             "--persistent",
+            "--mode automated",
+            "--display none",
             "pacman -Syu",
             "timeout --signal=TERM --kill-after=10s 720",
             "--disable-download-timeout",
@@ -883,12 +953,30 @@ def validate(root: Path) -> list[str]:
 
     if vm_launcher.is_file():
         launcher_text = vm_launcher.read_text(encoding="utf-8")
-        for fragment in ("--persistent", "snapshot_args=(-snapshot)", "snapshot_args=()", '"${snapshot_args[@]}"'):
+        for fragment in (
+            "--persistent",
+            "snapshot_args=(-snapshot)",
+            "snapshot_args=()",
+            '"${snapshot_args[@]}"',
+            'mode="automated"',
+            'display_backend="none"',
+            "interactive:gtk)",
+            "interactive:vnc)",
+            "automated:none)",
+            'display_args=(-display none)',
+            'display_args=(-display gtk,gl=off,show-cursor=on)',
+            '-vnc "127.0.0.1:$vnc_display"',
+            '"${display_args[@]}"',
+        ):
             if fragment not in launcher_text:
                 failures.append(f"shell runtime VM launcher missing bounded persistence contract: {fragment}")
 
     if run_script.is_file():
         run_text = run_script.read_text(encoding="utf-8")
+        if run_text.count('"$workstation_recorder" stop "$workstation_recording"') < 2:
+            failures.append(
+                "shell runtime recorder must finalize on both success and cleanup paths"
+            )
         for case_id in EXPECTED_CASES:
             if f'pass_case "{case_id}"' not in run_text:
                 failures.append(f"runtime protocol does not positively record required case: {case_id}")
@@ -954,6 +1042,14 @@ def validate(root: Path) -> list[str]:
             'controller_config="$shell_root/qualification-controller.qml"',
             'palette_config="$shell_root/qualification-palette.qml"',
             'quick_settings_config="$shell_root/qualification-quick-settings.qml"',
+            'source_sha="${3:-}"',
+            'workstation_recorder="$source_root/qualification/v010/workstation-acceptance/record-session.sh"',
+            'workstation_recording="$evidence_root/workstation-runtime.mkv"',
+            'command -v wf-recorder >/dev/null || fail "wf-recorder is missing"',
+            'command -v ffprobe >/dev/null || fail "ffprobe is missing"',
+            '"$workstation_recorder" start "$workstation_recording"',
+            '"$workstation_recorder" stop "$workstation_recording"',
+            'pass_case "workstation-visual-recording"',
             "wait_for_ipc_target()",
             'fail "$service_name exited before publishing $target"',
             "ExitType --value",
@@ -1140,7 +1236,7 @@ def validate(root: Path) -> list[str]:
             'wait_until "Quick Settings recovery after linurad restart" quick_settings_recovered',
             'pass_case "quick-settings-restart-recovery"',
             "seat-drm-preflight.txt",
-            'pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite',
+            'pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite ffmpeg wf-recorder',
             'package-versions.txt',
         ):
             if fragment not in run_text:
@@ -1191,10 +1287,69 @@ wait_until "WirePlumber mixer state for qualification sink" wireplumber_fixture_
             "hostfwd=tcp:127.0.0.1:$ssh_port-:22",
             "--nic-mac)",
             "mac=$nic_mac",
+            "--mode)",
+            "--display)",
+            "--vnc-display)",
+            "interactive:gtk)",
+            "interactive:vnc)",
         ):
             if fragment not in launcher_text:
                 failures.append(
                     f"shell runtime VM launcher missing bounded graphical VM contract: {fragment}"
+                )
+
+    if recorder_script.is_file():
+        recorder_text = recorder_script.read_text(encoding="utf-8")
+        for fragment in (
+            "/usr/bin/wf-recorder",
+            "-c ffv1",
+            "systemd-run --user",
+            "--signal=INT",
+            "verify-recording",
+            "LINURA_SOURCE_SHA",
+            "/tmp/linura-shell-runtime/evidence/*.mkv",
+        ):
+            if fragment not in recorder_text:
+                failures.append(
+                    f"workstation recorder missing bounded recording contract: {fragment}"
+                )
+
+    if interactive_launcher.is_file():
+        interactive_text = interactive_launcher.read_text(encoding="utf-8")
+        for fragment in (
+            "verify-substrate.py",
+            "git -C \"$source_root\" diff --quiet",
+            "--mode interactive",
+            '--display "$display_backend"',
+            "provision-shell-runtime.sh",
+            "run-live-session.sh",
+            'source "$source_root/tools/codex/versions.env"',
+            'cargo +"$RUST_VERSION" build --workspace --release --locked --target "$release_target"',
+            'RUSTFLAGS="--remap-path-prefix=$source_root=/workspace"',
+            "installed linurad differs from the exact-source local build",
+            "LINURA_SOURCE_SHA=$source_sha",
+        ):
+            if fragment not in interactive_text:
+                failures.append(
+                    f"interactive workstation launcher missing exact-source invariant: {fragment}"
+                )
+        if "--linurad)" in interactive_text:
+            failures.append(
+                "interactive workstation launcher must not accept a caller-supplied authority binary"
+            )
+
+    if hardware_capture_script.is_file():
+        hardware_text = hardware_capture_script.read_text(encoding="utf-8")
+        for fragment in (
+            "Level C evidence requires a clean exact-source checkout",
+            "Level C evidence root must not be a symlink",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            "hardware-session.txt",
+            "record-session.sh",
+        ):
+            if fragment not in hardware_text:
+                failures.append(
+                    f"hardware workstation capture missing maintained-hardware invariant: {fragment}"
                 )
 
     if "tools/vm.py" in workflow:

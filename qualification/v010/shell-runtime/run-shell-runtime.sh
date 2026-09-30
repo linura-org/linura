@@ -3,7 +3,15 @@ set -euo pipefail
 
 source_root="${1:-/opt/linura-source}"
 evidence_root="${2:-/tmp/linura-shell-runtime/evidence}"
+source_sha="${3:-}"
+[[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "exact lowercase 40-hex source SHA is required" >&2
+    exit 2
+}
 shell_root="$source_root/apps/linura-shell"
+workstation_recorder="$source_root/qualification/v010/workstation-acceptance/record-session.sh"
+workstation_recording="$evidence_root/workstation-runtime.mkv"
+recording_started=0
 controller_config="$shell_root/qualification-controller.qml"
 palette_config="$shell_root/qualification-palette.qml"
 quick_settings_config="$shell_root/qualification-quick-settings.qml"
@@ -69,6 +77,9 @@ command -v pw-dump >/dev/null || fail "pw-dump is missing"
 command -v wpctl >/dev/null || fail "wpctl is missing"
 command -v wpexec >/dev/null || fail "wpexec is missing"
 command -v sqlite3 >/dev/null || fail "sqlite3 is missing"
+command -v wf-recorder >/dev/null || fail "wf-recorder is missing"
+command -v ffprobe >/dev/null || fail "ffprobe is missing"
+[[ -x "$workstation_recorder" && ! -L "$workstation_recorder" ]] || fail "workstation recorder is missing or untrusted"
 [[ -x /usr/bin/linurad && ! -L /usr/bin/linurad ]] || fail "exact-source linurad runtime is missing or untrusted"
 [[ -f "$audio_helper" && ! -L "$audio_helper" ]] || fail "session-audio helper is missing or untrusted"
 audio_helper_uid="$(stat -c '%u' "$audio_helper")"
@@ -250,6 +261,9 @@ rm -f "$hyprland_ipc_last_error"
     printf 'hyprland_instance_signature=%s\n' "$HYPRLAND_INSTANCE_SIGNATURE"
 } > "$evidence_root/hyprland-session.env"
 pass_case "headless-hyprland-runtime"
+
+LINURA_SOURCE_ROOT="$source_root" LINURA_SOURCE_SHA="$source_sha"     "$workstation_recorder" start "$workstation_recording"
+recording_started=1
 
 systemctl --user daemon-reload
 
@@ -1145,6 +1159,13 @@ wait_until "Quick Settings recovery after linurad restart" quick_settings_recove
 } > "$evidence_root/quick-settings-restart-recovery.txt"
 pass_case "quick-settings-restart-recovery"
 
+LINURA_SOURCE_ROOT="$source_root" LINURA_SOURCE_SHA="$source_sha"     "$workstation_recorder" stop "$workstation_recording"
+recording_started=0
+[[ -f "$workstation_recording" && ! -L "$workstation_recording" ]]     || fail "automated workstation recording is missing or unsafe"
+[[ -f "${workstation_recording%.mkv}.metadata.json" && ! -L "${workstation_recording%.mkv}.metadata.json" ]]     || fail "automated workstation recording metadata is missing or unsafe"
+[[ -f "${workstation_recording%.mkv}.sha256" && ! -L "${workstation_recording%.mkv}.sha256" ]]     || fail "automated workstation recording digest is missing or unsafe"
+pass_case "workstation-visual-recording"
+
 {
     uname -a
     printf '\n-- systemd --\n'
@@ -1161,10 +1182,10 @@ pass_case "quick-settings-restart-recovery"
     quickshell --version
 } > "$evidence_root/runtime-versions.txt"
 
-pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite \
+pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite ffmpeg wf-recorder \
     | LC_ALL=C sort > "$evidence_root/package-versions.txt"
 
-expected_cases=20
+expected_cases=21
 actual_cases="$(wc -l < "$evidence_root/cases.tsv")"
 [[ "$actual_cases" -eq "$expected_cases" ]]     || fail "expected $expected_cases runtime cases, recorded $actual_cases"
 
