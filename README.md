@@ -300,6 +300,14 @@ Funding may support development, infrastructure, hardware qualification, securit
 
 See the [sponsorship charter](docs/community/sponsorship.md) and the public program at <https://linura.org/sponsors>. Linura plans a dedicated Delaware corporate steward, expected to be named **Linura, Inc.**, but that entity is not yet formed. Native funding destinations therefore remain intentionally inactive until the legal recipient, receiving account, tax/accounting path, and destination ownership are verified.
 
+## Partner with Linura
+
+Linura welcomes strategic technical relationships that deepen interoperability, hardware and platform qualification, compute capacity, security review, research, distribution, and real-world design evidence.
+
+Partnership categories include **Technology**, **Hardware**, **Cloud & Compute**, **Qualification**, **Distribution & OEM**, **Research & Security**, and **Design** partnerships. A partner is not automatically a sponsor, investor, customer, maintainer, or governance participant, and partnership does not grant architecture, roadmap, merge, release, security-policy, or maintainer authority.
+
+For partnership discussions, contact **partners@linura.org**. See the [partnership policy](docs/community/partnerships.md) and the public program at <https://linura.org/partners>. Sponsorship remains a separate relationship handled through **sponsors@linura.org**, while equity and financing conversations belong at **investors@linura.org**.
+
 ## License
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
