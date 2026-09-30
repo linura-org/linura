@@ -298,7 +298,7 @@ Linura is preparing an institutional sponsorship program for organizations build
 
 Funding may support development, infrastructure, hardware qualification, security work, documentation, and community operations, but sponsorship never purchases architecture, security, merge, release, or governance authority.
 
-See the [sponsorship charter](docs/community/sponsorship.md) and the public program at <https://linura.org/sponsors>. Native funding destinations remain intentionally inactive until a verified legal or fiscal recipient and receiving account are selected and reviewed.
+See the [sponsorship charter](docs/community/sponsorship.md) and the public program at <https://linura.org/sponsors>. Linura plans a dedicated Delaware corporate steward, expected to be named **Linura, Inc.**, but that entity is not yet formed. Native funding destinations therefore remain intentionally inactive until the legal recipient, receiving account, tax/accounting path, and destination ownership are verified.
 
 ## License
 
