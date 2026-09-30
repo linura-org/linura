@@ -65,6 +65,17 @@ The institutional sponsorship program may be publicly described at <https://linu
 
 While [`sponsorship.md`](sponsorship.md) says `Status: inactive`, `FUNDING.yml` must contain no active funding destination. Activate the sponsorship status, the machine-readable funding contract, and `FUNDING.yml` together in one reviewed change only after the destination can actually receive funding and its ownership is verified.
 
+For the planned corporate path, activation additionally requires:
+
+- the legal entity to actually exist;
+- the authorized signatory/corporate authority to be established;
+- EIN/tax/accounting requirements needed for the selected payment channel to be complete;
+- a verified bank, fiscal-host, or payout account;
+- the GitHub Sponsors organization profile or other selected funding endpoint to be approved and controlled by Linura;
+- public language to avoid representing ordinary corporate sponsorship as a tax-deductible charitable donation.
+
+A monthly funding goal is not, by itself, sufficient reason to bypass these activation requirements.
+
 ## Organization community profile
 
 Create the public repository `linura-org/.github` when organization-profile administration is available.

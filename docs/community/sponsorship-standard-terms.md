@@ -4,6 +4,8 @@ This document is a public policy baseline for future Linura sponsorship agreemen
 
 A real sponsorship agreement must identify the legal parties, governing law, tax treatment, payment route, signatories, and any required compliance terms.
 
+Linura's planned long-term recipient is a Delaware corporation expected to be named **Linura, Inc.** That entity is not yet formed, so this document must not be read as an agreement offered by an existing Linura corporation.
+
 ## 1. Parties and purpose
 
 The agreement should identify:
@@ -26,6 +28,8 @@ The agreement should state:
 - applicable taxes, fees, and transaction costs;
 - refund or non-refundable status where lawful;
 - treatment of unused program funds at the end of the term.
+
+The agreement and invoice should use the economically accurate classification for the transaction. A sponsorship paid to a for-profit corporate recipient must not be represented as a tax-deductible charitable donation unless a separate qualifying charitable recipient is actually involved.
 
 ## 3. Scope and funded outcomes
 
@@ -138,7 +142,7 @@ Termination should also define what happens to recognition, unused funds, outsta
 
 These clauses must be negotiated and reviewed by qualified counsel for the actual parties and jurisdiction.
 
-Linura's public policy does not pre-select governing law, dispute forum, liability caps, indemnities, or tax characterization before the receiving entity exists.
+Linura's public policy does not pre-select governing law, dispute forum, liability caps, indemnities, or tax characterization before the receiving entity exists. Formation of a Delaware corporation may make Delaware law commercially relevant, but the actual agreement must still be reviewed and negotiated by counsel for the real parties.
 
 ## 14. Signatures
 

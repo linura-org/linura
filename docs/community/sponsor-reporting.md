@@ -32,6 +32,11 @@ The public registry should not expose:
 - embargoed vulnerability information;
 - private conduct reports.
 
+- internal sponsor targets, contact notes, warm-introduction paths, ask ranges, and negotiation strategy;
+- privileged legal advice and draft counsel communications.
+
+Public sponsorship reporting is project transparency, not the corporation's CRM, tax ledger, board record, or complete set of commercial books.
+
 ## In-kind support
 
 Material in-kind support should describe what was provided and why it matters.
@@ -95,6 +100,8 @@ At least once per year while material sponsorship is active, Linura should publi
 - the current receiving entity or fiscal-host model at a high level.
 
 The annual summary is project transparency, not audited financial statements unless Linura explicitly says otherwise.
+
+After a corporate steward exists, public project reporting should identify that steward accurately at a high level without implying nonprofit or charitable tax status.
 
 ## Sponsor registry template
 
