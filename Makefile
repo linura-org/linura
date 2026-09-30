@@ -21,6 +21,12 @@ assets:
 acceptance-list:
 	python3 tools/acceptance.py list
 
+slice-status:
+	python3 tools/v010_slice_graph.py status
+
+slice-ready:
+	python3 tools/v010_slice_graph.py ready
+
 vm-doctor:
 	python3 tools/vm.py doctor
 

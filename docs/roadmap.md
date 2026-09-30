@@ -14,6 +14,7 @@ The machine-readable companion contract is `contracts/roadmap.toml`. Repository 
 6. **Local authority remains standalone.** Remote control, hosted Library sync, model providers and enterprise services remain optional integrations rather than prerequisites for local operation or recovery.
 7. **Version numbers describe proven capability/support slices.** Pre-1.0 minor releases may introduce externally testable Experimental capability slices; patch releases repair an already-published minor line; v1.0 is reserved for the first Stable supported end-user contract.
 8. **Machine classes are support targets, not domains.** Workstation, server and edge share Linura's authority model but require separately qualified machine/platform profiles; fleet is an optional overlay across those classes, not a fourth local machine class.
+9. **Roadmap order is not forced implementation serialization.** The v0.10 slice ledger is an explicit acyclic dependency graph. Dependency-ready slices may be developed in parallel, while merges remain dependency-ordered and every release-required node must still complete with evidence.
 
 ## Canonical managed-mutation architecture
 
@@ -261,7 +262,7 @@ Declarative configuration is data, not executable authority. Keyboard shortcuts 
 
 ADR 0031 remains authoritative for interface/authority convergence. ADR 0033 refines the product boundary: v0.10 now requires a **complete first-party workstation shell experience** rather than deferring panel, lock/session or other ordinary workstation surfaces until after v1. Hyprland remains the qualified compositor and upstream components may remain implementation dependencies, but an ordinary user-facing workflow required by the release contract cannot be omitted merely because an upstream component could supply it.
 
-Implementation progress is machine-locked by `contracts/v010-workstation-slices.toml`: 32 required slices, a contiguous completed prefix, merged-PR evidence for completed slices and an explicit next slice. Code presence outside that ledger cannot silently broaden or shrink the milestone.
+Implementation progress is machine-locked by `contracts/v010-workstation-slices.toml`: 32 required slices, dependency-closed completion, merged-PR evidence for completed slices, and an explicit dependency-ready frontier for parallel development. Integration remains dependency-ordered, and code presence outside that ledger cannot silently broaden or shrink the milestone.
 
 v0.10.0 is deliberately **Experimental**. Complete product scope at v0.10 does not imply Stable support.
 

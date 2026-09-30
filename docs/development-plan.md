@@ -159,6 +159,8 @@ Required v0.10 product scope includes:
 
 The authoritative implementation ledger is `contracts/v010-workstation-slices.toml`. It records the 32 required vertical slices, their completion state and merged-PR evidence so implementation progress cannot silently redefine milestone scope.
 
+The slice IDs remain stable roadmap/evidence identifiers, not a serialization mechanism. The ledger is an explicit acyclic dependency graph: any planned slice whose declared dependencies are complete belongs to the development-ready frontier and may be implemented in parallel with the other ready slices. Integration remains dependency-ordered, every completed node requires merged-PR evidence, and final qualification/release closure still depends on the entire required graph. `python3 tools/v010_slice_graph.py status` is the canonical scheduler view; its recommended batch is bounded by the ledger's `max_parallel_active` value to keep review and rebase pressure controlled.
+
 ## Phase 11 — Stable support qualification (target v1.0.0)
 
 `v1.0.0` is reserved by Linura's versioning policy for the first Stable supported end-user contract. Phase 11 stabilizes the complete workstation delivered by v0.10; it is not where ordinary workstation surfaces are first added.

@@ -1,10 +1,13 @@
-schema_version = 1
+schema_version = 2
 milestone = "v0.10.0"
 target = "complete-experimental-workstation"
 slice_count = 32
 completed_slice_count = 16
-next_slice = "S17"
-completion_policy = "contiguous-prefix-with-merged-pr-evidence"
+completion_policy = "dependency-closed-with-merged-pr-evidence"
+dependency_policy = "explicit-acyclic-dag"
+scheduling_policy = "parallel-ready-frontier"
+integration_policy = "dependency-ordered-merge"
+max_parallel_active = 4
 scope_change_policy = "explicit-roadmap-rebaseline"
 
 [[slice]]
@@ -147,7 +150,7 @@ required_for_release = true
 id = "S18"
 title = "NetworkManager connectivity experience"
 status = "planned"
-depends_on = ["S17"]
+depends_on = ["S16"]
 evidence_prs = []
 required_for_release = true
 
@@ -155,7 +158,7 @@ required_for_release = true
 id = "S19"
 title = "BlueZ Bluetooth experience"
 status = "planned"
-depends_on = ["S18"]
+depends_on = ["S16"]
 evidence_prs = []
 required_for_release = true
 
@@ -163,7 +166,7 @@ required_for_release = true
 id = "S20"
 title = "complete audio and media experience"
 status = "planned"
-depends_on = ["S19"]
+depends_on = ["S16"]
 evidence_prs = []
 required_for_release = true
 
@@ -171,7 +174,7 @@ required_for_release = true
 id = "S21"
 title = "display, brightness, power and removable-storage experience"
 status = "planned"
-depends_on = ["S20"]
+depends_on = ["S17"]
 evidence_prs = []
 required_for_release = true
 
@@ -187,7 +190,7 @@ required_for_release = true
 id = "S23"
 title = "applications, packages and default-app management"
 status = "planned"
-depends_on = ["S22"]
+depends_on = ["S17"]
 evidence_prs = []
 required_for_release = true
 
@@ -195,7 +198,7 @@ required_for_release = true
 id = "S24"
 title = "updates, snapshots, rollback and recovery experience"
 status = "planned"
-depends_on = ["S23"]
+depends_on = ["S17"]
 evidence_prs = []
 required_for_release = true
 
@@ -203,7 +206,7 @@ required_for_release = true
 id = "S25"
 title = "themes, wallpaper, fonts, icons and personalization"
 status = "planned"
-depends_on = ["S24"]
+depends_on = ["S21"]
 evidence_prs = []
 required_for_release = true
 
@@ -211,7 +214,7 @@ required_for_release = true
 id = "S26"
 title = "Library, Setups and MachineProfiles workstation workflows"
 status = "planned"
-depends_on = ["S25"]
+depends_on = ["S16"]
 evidence_prs = []
 required_for_release = true
 
@@ -227,7 +230,7 @@ required_for_release = true
 id = "S28"
 title = "bounded installer and First Boot workstation path"
 status = "planned"
-depends_on = ["S27"]
+depends_on = ["S18", "S21", "S24", "S27"]
 evidence_prs = []
 required_for_release = true
 
@@ -235,7 +238,7 @@ required_for_release = true
 id = "S29"
 title = "Q10 complete experience, visual, accessibility and input qualification"
 status = "planned"
-depends_on = ["S28"]
+depends_on = ["S17", "S18", "S19", "S20", "S21", "S22", "S23", "S24", "S25", "S26", "S27", "S28"]
 evidence_prs = []
 required_for_release = true
 

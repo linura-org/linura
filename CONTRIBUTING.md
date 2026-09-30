@@ -26,6 +26,7 @@ Useful discovery commands:
 
 ```bash
 cargo xtask acceptance-list
+python3 tools/v010_slice_graph.py status
 python3 tools/vm.py doctor
 python3 tools/image.py doctor
 python3 tools/visual.py list

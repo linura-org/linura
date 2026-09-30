@@ -496,7 +496,6 @@ class RoadmapContractTests(unittest.TestCase):
             contract = root / "contracts/v010-workstation-slices.toml"
             text = contract.read_text(encoding="utf-8")
             text = text.replace("completed_slice_count = 16", "completed_slice_count = 17", 1)
-            text = text.replace('next_slice = "S17"', 'next_slice = "S18"', 1)
             old_slice = """[[slice]]
 id = "S17"
 title = "lock screen and session/power controls"
@@ -590,7 +589,27 @@ required_for_release = true
                 "released v0.10 requires all release-required slices complete",
                 result.stderr,
             )
-            self.assertIn("released v0.10 must not retain a next_slice", result.stderr)
+            self.assertIn(
+                "released v0.10 must have all 32 workstation slices complete",
+                result.stderr,
+            )
+
+
+    def test_v010_slice_ledger_rejects_obsolete_linear_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8").replace(
+                "completed_slice_count = 16",
+                'completed_slice_count = 16\nnext_slice = "S17"',
+                1,
+            )
+            contract.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("obsolete linear next_slice cursor", result.stderr)
 
 
     def _promote_v010_fixture_to_released(self, root: Path) -> None:
@@ -626,7 +645,6 @@ required_for_release = true
         contract = root / "contracts/v010-workstation-slices.toml"
         text = contract.read_text(encoding="utf-8")
         text = text.replace("completed_slice_count = 16", "completed_slice_count = 32", 1)
-        text = text.replace('next_slice = "S17"', 'next_slice = ""', 1)
         text = text.replace('status = "planned"', 'status = "complete"')
         text = text.replace("evidence_prs = []", "evidence_prs = [999999]")
         contract.write_text(text, encoding="utf-8")
