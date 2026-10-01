@@ -1,0 +1,147 @@
+name: Publish approved qualification evidence to private R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact qualified commit on main (40 lowercase hex characters)
+        required: true
+        type: string
+      run_id:
+        description: Successful source qualification workflow run ID
+        required: true
+        type: string
+      attempt:
+        description: Exact successful run attempt
+        required: true
+        default: "1"
+        type: string
+      category:
+        description: Private archive category
+        required: true
+        type: choice
+        options: [baselines, regressions]
+      reason:
+        description: Why this evidence was selected for retention (12–256 characters)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: private-r2-evidence-publication
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+    steps:
+      - id: source
+        name: Validate immutable source and run identifiers
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RUN_ID: ${{ inputs.run_id }}
+          ATTEMPT: ${{ inputs.attempt }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" = refs/heads/main ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+      - name: Require completed successful main-branch qualification attempt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          ATTEMPT: ${{ inputs.attempt }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/attempts/$ATTEMPT" > "$RUNNER_TEMP/source-run.json"
+          python3 - "$RUNNER_TEMP/source-run.json" "$SOURCE_SHA" "$RUN_ID" "$ATTEMPT" <<'PY'
+          import json, sys
+          run=json.load(open(sys.argv[1],encoding='utf-8'))
+          assert run['id']==int(sys.argv[3]) and run['run_attempt']==int(sys.argv[4])
+          assert run['head_sha']==sys.argv[2] and run['head_branch']=='main'
+          assert run['event']=='workflow_dispatch' and run['status']=='completed' and run['conclusion']=='success'
+          assert run['repository']['full_name']=='linura-org/linura'
+          assert run['path'] in ('.github/workflows/v010-shell-runtime-qualification.yml','.github/workflows/v010-qualification.yml')
+          PY
+
+  archive:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    environment: qualification-archive
+    timeout-minutes: 40
+    steps:
+      - name: Checkout trusted publisher from main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Assert trusted publisher code
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Download selected Level A artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-v010-shell-runtime-${{ needs.preflight.outputs.source_sha }}
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/selected-evidence
+      - name: Fetch independent GitHub provenance and human approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          ATTEMPT: ${{ inputs.attempt }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/attempts/$ATTEMPT" > "$RUNNER_TEMP/source-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/approvals" > "$RUNNER_TEMP/publication-approvals.json"
+      - name: Verify publication inputs before exposing R2 credentials
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RUN_ID: ${{ inputs.run_id }}
+          ATTEMPT: ${{ inputs.attempt }}
+          CATEGORY: ${{ inputs.category }}
+          APPROVAL_REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          admitted_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python3 tools/evidence_publication.py verify \
+            --directory "$RUNNER_TEMP/selected-evidence" \
+            --run-json "$RUNNER_TEMP/source-run.json" \
+            --approval-json "$RUNNER_TEMP/publication-approvals.json" \
+            --source-sha "$SOURCE_SHA" --run-id "$RUN_ID" --attempt "$ATTEMPT" \
+            --category "$CATEGORY" --actor "$GITHUB_ACTOR" --reason "$APPROVAL_REASON" \
+            --approved-at "$admitted_at"
+          printf 'LINURA_ADMITTED_AT=%s\n' "$admitted_at" >> "$GITHUB_ENV"
+      - name: Publish immutable evidence and verify R2 readback
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RUN_ID: ${{ inputs.run_id }}
+          ATTEMPT: ${{ inputs.attempt }}
+          CATEGORY: ${{ inputs.category }}
+          APPROVAL_REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          aws --version
+          python3 tools/evidence_publication.py publish \
+            --directory "$RUNNER_TEMP/selected-evidence" \
+            --run-json "$RUNNER_TEMP/source-run.json" \
+            --approval-json "$RUNNER_TEMP/publication-approvals.json" \
+            --source-sha "$SOURCE_SHA" --run-id "$RUN_ID" --attempt "$ATTEMPT" \
+            --category "$CATEGORY" --actor "$GITHUB_ACTOR" --reason "$APPROVAL_REASON" \
+            --approved-at "$LINURA_ADMITTED_AT"
