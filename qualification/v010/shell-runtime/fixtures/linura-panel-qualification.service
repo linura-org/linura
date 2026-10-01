@@ -1,0 +1,21 @@
+[Unit]
+Description=Linura workstation panel runtime qualification
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-panel.qml
+Restart=no
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+RuntimeDirectory=quickshell
+RuntimeDirectoryMode=0700
+ReadWritePaths=%t/quickshell
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+Environment=QS_DISABLE_FILE_WATCHER=1
+Environment=QML2_IMPORT_PATH=/usr/local/lib/qt6/qml
+Environment=QT_QUICK_BACKEND=software

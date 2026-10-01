@@ -35,6 +35,7 @@ install -d -o "$user_name" -g "$user_name" -m 0755 "$user_home/.config/systemd/u
 install -o "$user_name" -g "$user_name" -m 0644     "$source_root/qualification/v010/shell-runtime/fixtures/linura-shell-qualification.service"     "$user_home/.config/systemd/user/linura-shell-qualification.service"
 install -o "$user_name" -g "$user_name" -m 0644     "$source_root/qualification/v010/shell-runtime/fixtures/linura-palette-qualification.service"     "$user_home/.config/systemd/user/linura-palette-qualification.service"
 install -o "$user_name" -g "$user_name" -m 0644     "$source_root/qualification/v010/shell-runtime/fixtures/linura-quick-settings-qualification.service"     "$user_home/.config/systemd/user/linura-quick-settings-qualification.service"
+install -o "$user_name" -g "$user_name" -m 0644     "$source_root/qualification/v010/shell-runtime/fixtures/linura-panel-qualification.service"     "$user_home/.config/systemd/user/linura-panel-qualification.service"
 install -o "$user_name" -g "$user_name" -m 0644     "$source_root/packaging/systemd/user/linurad.service"     "$user_home/.config/systemd/user/linurad.service"
 
 install -o root -g root -m 0755 "$linurad_binary" /usr/bin/linurad

@@ -6,6 +6,7 @@ import "plugins/control-center"
 import "plugins/quick-settings"
 import "plugins/command-palette"
 import "plugins/notifications-osd" as Feedback
+import "panel" as Panel
 import "integrations/hyprland"
 import "integrations/xdg"
 
@@ -15,6 +16,51 @@ ShellRoot {
     property bool controlCenterOpen: false
     property bool quickSettingsOpen: false
     property bool commandPaletteOpen: false
+    property var overlayScreen: null
+    property int lifecycleFeedbackGeneration: 0
+    property var lifecycleFeedbackScreen: null
+
+    function defaultOverlayScreen() {
+        const focusedMonitor = Hyprland.focusedMonitor
+        if (focusedMonitor) {
+            for (let i = 0; i < Quickshell.screens.length; i++) {
+                const screen = Quickshell.screens[i]
+                if (Hyprland.monitorFor(screen) === focusedMonitor)
+                    return screen
+            }
+        }
+        return Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+    }
+
+    function selectOverlayScreen(screen) {
+        shell.overlayScreen = screen ? screen : shell.defaultOverlayScreen()
+    }
+
+    function presentLifecycleFeedback(presentationGeneration, operationKey, phase, outcome,
+                                      observedValuePercent, observedValueValid, finalOutcome) {
+        if (phase === "preparing") {
+            shell.lifecycleFeedbackGeneration = presentationGeneration
+            shell.lifecycleFeedbackScreen =
+                shell.overlayScreen ? shell.overlayScreen : shell.defaultOverlayScreen()
+        } else if (presentationGeneration !== shell.lifecycleFeedbackGeneration) {
+            return
+        }
+
+        lifecycleFeedback.present(
+            presentationGeneration,
+            operationKey,
+            phase,
+            outcome,
+            observedValuePercent,
+            observedValueValid,
+            finalOutcome
+        )
+    }
+
+    function showControlCenterOnScreen(screen) {
+        shell.selectOverlayScreen(screen)
+        shell.showControlCenter()
+    }
 
     function showControlCenter() {
         shell.quickSettingsOpen = false
@@ -30,7 +76,12 @@ ShellRoot {
         if (shell.controlCenterOpen)
             shell.hideControlCenter()
         else
-            shell.showControlCenter()
+            shell.showControlCenterOnScreen(shell.defaultOverlayScreen())
+    }
+
+    function showQuickSettingsOnScreen(screen) {
+        shell.selectOverlayScreen(screen)
+        shell.showQuickSettings()
     }
 
     function showQuickSettings() {
@@ -47,7 +98,12 @@ ShellRoot {
         if (shell.quickSettingsOpen)
             shell.hideQuickSettings()
         else
-            shell.showQuickSettings()
+            shell.showQuickSettingsOnScreen(shell.defaultOverlayScreen())
+    }
+
+    function showCommandPaletteOnScreen(screen) {
+        shell.selectOverlayScreen(screen)
+        shell.showCommandPalette()
     }
 
     function showCommandPalette() {
@@ -64,7 +120,7 @@ ShellRoot {
         if (shell.commandPaletteOpen)
             shell.hideCommandPalette()
         else
-            shell.showCommandPalette()
+            shell.showCommandPaletteOnScreen(shell.defaultOverlayScreen())
     }
 
     AudioSessionController {
@@ -72,7 +128,7 @@ ShellRoot {
         active: shell.controlCenterOpen || shell.quickSettingsOpen
         onLifecycleFeedback: (presentationGeneration, operationKey, phase, outcome,
                               observedValuePercent, observedValueValid, finalOutcome) =>
-            lifecycleFeedback.present(
+            shell.presentLifecycleFeedback(
                 presentationGeneration,
                 operationKey,
                 phase,
@@ -85,6 +141,18 @@ ShellRoot {
 
     Feedback.LifecycleFeedback {
         id: lifecycleFeedback
+        targetScreen: shell.lifecycleFeedbackScreen
+            ? shell.lifecycleFeedbackScreen
+            : shell.defaultOverlayScreen()
+    }
+
+    Panel.WorkstationPanel {
+        id: workstationPanel
+        workspaceModel: workspaceNavigation.workspaceEntries
+        onCommandPaletteRequested: screen => shell.showCommandPaletteOnScreen(screen)
+        onQuickSettingsRequested: screen => shell.showQuickSettingsOnScreen(screen)
+        onControlCenterRequested: screen => shell.showControlCenterOnScreen(screen)
+        onWorkspaceRequested: workspaceId => workspaceNavigation.activateWorkspace(workspaceId)
     }
 
     WorkspaceNavigationController {
@@ -101,7 +169,7 @@ ShellRoot {
         target: "linura.shell"
 
         function showControlCenter() {
-            shell.showControlCenter()
+            shell.showControlCenterOnScreen(shell.defaultOverlayScreen())
         }
 
         function hideControlCenter() {
@@ -113,7 +181,7 @@ ShellRoot {
         }
 
         function showQuickSettings() {
-            shell.showQuickSettings()
+            shell.showQuickSettingsOnScreen(shell.defaultOverlayScreen())
         }
 
         function hideQuickSettings() {
@@ -125,7 +193,7 @@ ShellRoot {
         }
 
         function showCommandPalette() {
-            shell.showCommandPalette()
+            shell.showCommandPaletteOnScreen(shell.defaultOverlayScreen())
         }
 
         function hideCommandPalette() {
@@ -135,6 +203,13 @@ ShellRoot {
         function toggleCommandPalette() {
             shell.toggleCommandPalette()
         }
+    }
+
+    GlobalShortcut {
+        appid: "linura"
+        name: "workstationPanel"
+        description: "Focus Linura workstation panel"
+        onPressed: workstationPanel.focusPanelOnScreen(shell.defaultOverlayScreen())
     }
 
     GlobalShortcut {
@@ -152,26 +227,32 @@ ShellRoot {
     }
 
     ControlCenterPanel {
+        targetScreen: shell.overlayScreen ? shell.overlayScreen : shell.defaultOverlayScreen()
+        topInset: workstationPanel.panelHeight
         opened: shell.controlCenterOpen
         controller: audioController
         onCloseRequested: shell.hideControlCenter()
     }
 
     QuickSettingsPanel {
+        targetScreen: shell.overlayScreen ? shell.overlayScreen : shell.defaultOverlayScreen()
+        topInset: workstationPanel.panelHeight
         opened: shell.quickSettingsOpen
         controller: audioController
         onCloseRequested: shell.hideQuickSettings()
-        onControlCenterRequested: shell.showControlCenter()
+        onControlCenterRequested: shell.showControlCenterOnScreen(shell.overlayScreen)
     }
 
     CommandPalette {
         id: commandPalette
+        targetScreen: shell.overlayScreen ? shell.overlayScreen : shell.defaultOverlayScreen()
+        topInset: workstationPanel.panelHeight
         opened: shell.commandPaletteOpen
         workspaceCatalog: workspaceNavigation.workspaceEntries
         applicationCatalog: applicationLauncher.applicationEntries
         onCloseRequested: shell.hideCommandPalette()
-        onControlCenterRequested: shell.showControlCenter()
-        onQuickSettingsRequested: shell.showQuickSettings()
+        onControlCenterRequested: shell.showControlCenterOnScreen(shell.overlayScreen)
+        onQuickSettingsRequested: shell.showQuickSettingsOnScreen(shell.overlayScreen)
         onWorkspaceRequested: workspaceId => {
             const activated = workspaceNavigation.activateWorkspace(workspaceId)
             commandPalette.completeWorkspaceRequest(activated)

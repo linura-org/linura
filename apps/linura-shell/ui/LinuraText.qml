@@ -7,6 +7,7 @@ Label {
     property bool muted: false
     property bool emphasized: role === "display" || role === "title"
     LinuraTheme { id: theme }
+    textFormat: Text.PlainText
     color: muted ? theme.muted : theme.foreground
     font.pixelSize: role === "display" ? theme.typeDisplay
         : role === "title" ? theme.typeTitle

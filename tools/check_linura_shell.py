@@ -37,6 +37,9 @@ REQUIRED = (
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
     "apps/linura-shell/plugins/notifications-osd/manifest.json",
     "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml",
+    "apps/linura-shell/panel/WorkstationPanel.qml",
+    "apps/linura-shell/tray/SystemTrayView.qml",
+    "apps/linura-shell/status/WorkstationStatus.qml",
     "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml",
     "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml",
     "apps/linura-shell/bridge/CMakeLists.txt",
@@ -54,6 +57,7 @@ REQUIRED = (
     "docs/architecture.md",
     "docs/qualification/v0.10.0.md",
     "packaging/arch/archiso/packages.linura",
+    "packaging/arch/archiso/airootfs/etc/skel/.config/hypr/hyprland.lua",
     "packaging/systemd/user/linura-shell.service",
     "tools/image.py",
 )
@@ -180,6 +184,9 @@ REQUIRED_IMAGE = (
     'ROOT / "apps/linura-shell/plugins/command-palette/manifest.json"',
     'ROOT / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"',
     'ROOT / "apps/linura-shell/plugins/notifications-osd/manifest.json"',
+    'ROOT / "apps/linura-shell/panel/WorkstationPanel.qml"',
+    'ROOT / "apps/linura-shell/tray/SystemTrayView.qml"',
+    'ROOT / "apps/linura-shell/status/WorkstationStatus.qml"',
     'ROOT / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"',
     'ROOT / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"',
     'ROOT / "apps/linura-shell/org.linura.ControlCenter.desktop"',
@@ -193,6 +200,7 @@ REQUIRED_IMAGE = (
     'UI_SDK_SOURCE = ROOT / "apps/linura-shell/ui"',
     'UI_SDK_BUILD = ROOT / ".artifacts/linura-ui-build"',
     "build_ui_sdk(STAGED)",
+    'shutil.copytree(OVERLAY / "airootfs", STAGED / "airootfs", dirs_exist_ok=True)',
     'SHELL_BRIDGE_QT_MODULES = ("Qt6Core", "Qt6DBus", "Qt6Qml")',
     'UI_SDK_QT_MODULES = ("Qt6Core", "Qt6Qml", "Qt6Quick", "Qt6QuickControls2")',
     "DOCTOR_QT_MODULES = tuple(dict.fromkeys(SHELL_BRIDGE_QT_MODULES + UI_SDK_QT_MODULES))",
@@ -281,6 +289,18 @@ def validate(root: Path) -> list[str]:
     lifecycle_feedback_qml = (
         root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
     ).read_text(encoding="utf-8")
+    workstation_panel_qml = (
+        root / "apps/linura-shell/panel/WorkstationPanel.qml"
+    ).read_text(encoding="utf-8")
+    system_tray_qml = (
+        root / "apps/linura-shell/tray/SystemTrayView.qml"
+    ).read_text(encoding="utf-8")
+    workstation_status_qml = (
+        root / "apps/linura-shell/status/WorkstationStatus.qml"
+    ).read_text(encoding="utf-8")
+    linura_text_qml = (
+        root / "apps/linura-shell/ui/LinuraText.qml"
+    ).read_text(encoding="utf-8")
     workspace_controller_qml = (
         root / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"
     ).read_text(encoding="utf-8")
@@ -317,6 +337,12 @@ def validate(root: Path) -> list[str]:
         + "\n"
         + lifecycle_feedback_qml
         + "\n"
+        + workstation_panel_qml
+        + "\n"
+        + system_tray_qml
+        + "\n"
+        + workstation_status_qml
+        + "\n"
         + workspace_controller_qml
         + "\n"
         + application_controller_qml
@@ -331,6 +357,7 @@ def validate(root: Path) -> list[str]:
         'import "plugins/quick-settings"',
         'import "plugins/command-palette"',
         'import "plugins/notifications-osd" as Feedback',
+        'import "panel" as Panel',
         'import "integrations/hyprland"',
         'import "integrations/xdg"',
         "ShellRoot {",
@@ -340,6 +367,9 @@ def validate(root: Path) -> list[str]:
         "function toggleCommandPalette()",
         "GlobalShortcut {",
         'appid: "linura"',
+        'name: "workstationPanel"',
+        'description: "Focus Linura workstation panel"',
+        "onPressed: workstationPanel.focusPanelOnScreen(shell.defaultOverlayScreen())",
         'name: "quickSettings"',
         'name: "commandPalette"',
         "ControlCenterPanel {",
@@ -354,8 +384,36 @@ def validate(root: Path) -> list[str]:
         "lifecycleFeedback.present(",
         "Feedback.LifecycleFeedback {",
         "id: lifecycleFeedback",
+        "Panel.WorkstationPanel {",
+        "id: workstationPanel",
+        "workspaceModel: workspaceNavigation.workspaceEntries",
+        "property var overlayScreen: null",
+        "property int lifecycleFeedbackGeneration: 0",
+        "property var lifecycleFeedbackScreen: null",
+        "function defaultOverlayScreen()",
+        "function presentLifecycleFeedback(",
+        'if (phase === "preparing")',
+        "shell.lifecycleFeedbackGeneration = presentationGeneration",
+        "shell.lifecycleFeedbackScreen =",
+        "shell.overlayScreen ? shell.overlayScreen : shell.defaultOverlayScreen()",
+        "const focusedMonitor = Hyprland.focusedMonitor",
+        "Hyprland.monitorFor(screen) === focusedMonitor",
+        "shell.showControlCenterOnScreen(shell.defaultOverlayScreen())",
+        "shell.showQuickSettingsOnScreen(shell.defaultOverlayScreen())",
+        "shell.showCommandPaletteOnScreen(shell.defaultOverlayScreen())",
+        "presentationGeneration !== shell.lifecycleFeedbackGeneration",
+        "shell.presentLifecycleFeedback(",
+        "function selectOverlayScreen(screen)",
+        "function showControlCenterOnScreen(screen)",
+        "function showQuickSettingsOnScreen(screen)",
+        "function showCommandPaletteOnScreen(screen)",
+        "onCommandPaletteRequested: screen => shell.showCommandPaletteOnScreen(screen)",
+        "onQuickSettingsRequested: screen => shell.showQuickSettingsOnScreen(screen)",
+        "onControlCenterRequested: screen => shell.showControlCenterOnScreen(screen)",
+        "onWorkspaceRequested: workspaceId => workspaceNavigation.activateWorkspace(workspaceId)",
+        "topInset: workstationPanel.panelHeight",
         "CommandPalette {",
-        "onQuickSettingsRequested: shell.showQuickSettings()",
+        "onQuickSettingsRequested: shell.showQuickSettingsOnScreen(shell.overlayScreen)",
         "workspaceCatalog: workspaceNavigation.workspaceEntries",
         "applicationCatalog: applicationLauncher.applicationEntries",
         "onWorkspaceRequested: workspaceId =>",
@@ -369,27 +427,548 @@ def validate(root: Path) -> list[str]:
         if fragment not in shell_qml:
             failures.append(f"Linura Shell root contract missing: {fragment}")
 
+    for fragment in (
+        "Variants {",
+        "model: Quickshell.screens",
+        "screen: modelData",
+        "property var trayItemModelOverride: null",
+        "property int statusClockPrecision: SystemClock.Minutes",
+        "readonly property int panelHeight: 56",
+        "readonly property int screenCount: Quickshell.screens.length",
+        "readonly property int instantiatedPanelCount: panels.instances.length",
+        "function panelInstance(index)",
+        "function panelScreenMatches(index)",
+        "function panelWidth(index)",
+        "function panelHeightActual(index)",
+        "function panelScreenWidth(index)",
+        "function panelExclusiveZone(index)",
+        "function panelExclusionNormal(index)",
+        "function panelAnchorsValid(index)",
+        "function activateCommandPaletteControl(index)",
+        "function activateQuickSettingsControl(index)",
+        "function activateControlCenterControl(index)",
+        "function activateWorkspaceControl(index, workspaceId)",
+        "function focusPanelInstance(target)",
+        "function focusPanel(index)",
+        "function focusPanelOnScreen(screen)",
+        "instance && instance !== target",
+        "instance.releaseKeyboardEntry()",
+        "return target.focusKeyboardEntry()",
+        "function panelKeyboardEntryFocused(index)",
+        "function panelKeyboardNavigationActive(index)",
+        "function statusTimeText()",
+        "function statusDateText()",
+        "function statusTimestampMs()",
+        "function statusTimeRendered(index)",
+        "function trayItemCount(index)",
+        "function trayOverflowCount(index)",
+        "function activateTrayInlineControl(index, itemIndex)",
+        "function openTrayOverflowControl(index)",
+        "function cancelTrayOverflowControl(index)",
+        "function trayOverflowVisible(index)",
+        "function trayOverflowButtonFocused(index)",
+        "function activateTrayOverflowControl(index, itemIndex)",
+        "property bool keyboardNavigationActive: false",
+        "property bool keyboardReleasePending: false",
+        "function restoreKeyboardEntry(control, reason)",
+        "function focusKeyboardEntry()",
+        "function releaseKeyboardEntry()",
+        "function keyboardEntryFocused()",
+        "panel.keyboardNavigationActive = true",
+        "target.forceActiveFocus(reason)",
+        "return restoreKeyboardEntry(",
+        "Qt.ShortcutFocusReason",
+        "WlrKeyboardFocus.Exclusive",
+        "WlrKeyboardFocus.None",
+        "WlrKeyboardFocus.OnDemand",
+        "id: keyboardReleaseTimer",
+        "onTriggered: panel.keyboardReleasePending = false",
+        "enabled: panel.keyboardNavigationActive",
+        "onActivated: panel.releaseKeyboardEntry()",
+        "function controlIsUsable(control)",
+        "function activateControl(control)",
+        "control.click()",
+        "id: commandPaletteButton",
+        "id: workspaceRepeater",
+        "id: quickSettingsButton",
+        "id: controlCenterButton",
+        "id: panels",
+        "exclusiveZone: root.panelHeight",
+        'WlrLayershell.namespace: "linura-workstation-panel"',
+        "WlrLayershell.layer: WlrLayer.Top",
+        "WlrLayershell.keyboardFocus: panel.keyboardReleasePending",
+        "? WlrKeyboardFocus.None",
+        ": panel.keyboardNavigationActive",
+        "? WlrKeyboardFocus.Exclusive",
+        ": WlrKeyboardFocus.OnDemand",
+        "signal commandPaletteRequested(var screen)",
+        "signal quickSettingsRequested(var screen)",
+        "signal controlCenterRequested(var screen)",
+        "signal workspaceRequested(int workspaceId)",
+        "Tray.SystemTrayView {",
+        "Status.WorkstationStatus {",
+        "readonly property int workspaceInlineLimit:",
+        "readonly property int trayInlineLimit:",
+        "readonly property int workspaceOverflowCount:",
+        "function focusedWorkspaceIndex()",
+        "function workspaceIsInline(index)",
+        "focusedIndex >= limit",
+        "id: workspaceOverflowButton",
+        'qsTr("Show %1 more workspaces")',
+        "PopupWindow {",
+        "id: workspaceOverflowWindow",
+        "anchor.item: workspaceOverflowButton",
+        "anchor.adjustment: PopupAdjustment.All",
+        "surfaceFormat.opaque: false",
+        "grabFocus: true",
+        "id: workspaceOverflowRepeater",
+        "function dismissWorkspaceOverflow()",
+        "function keyboardRestoreTarget(control)",
+        "const target = keyboardRestoreTarget(control)",
+        'sequence: "Escape"',
+        "context: Qt.WindowShortcut",
+        "onActivated: panel.dismissWorkspaceOverflow()",
+        "id: workspaceOverflowFlickable",
+        "function ensureVisible(item)",
+        "workspaceOverflowFlickable.ensureVisible(workspaceOverflowEntry)",
+        "panel.restoreKeyboardEntry(",
+        "workspaceOverflowButton,",
+        "Qt.TabFocusReason",
+        "visible: panel.workspaceIsInline(index)",
+        "visible: !panel.workspaceIsInline(index)",
+        "id: systemTray",
+        "inlineItemLimit: panel.trayInlineLimit",
+        "itemModelOverride: root.trayItemModelOverride",
+        "onInteractionStarted: panel.releaseKeyboardEntry()",
+        "onKeyboardReturnRequested: control =>",
+        "panel.restoreKeyboardEntry(control, Qt.TabFocusReason)",
+        "id: centerZone",
+        "Layout.fillWidth: true",
+        "model: root.workspaceModel",
+        "root.workspaceRequested(modelData.id)",
+        "root.commandPaletteRequested(panel.screen)",
+        "root.quickSettingsRequested(panel.screen)",
+        "root.controlCenterRequested(panel.screen)",
+    ):
+        if fragment not in workstation_panel_qml:
+            failures.append(f"Workstation panel contract missing: {fragment}")
+
+    if workstation_panel_qml.count("model: root.workspaceModel") != 2:
+        failures.append(
+            "Workstation panel must project one bounded inline workspace model and one overflow model"
+        )
+    if workstation_panel_qml.count("PopupWindow {") != 1:
+        failures.append(
+            "Workstation workspace overflow must use one screen-adjusted PopupWindow"
+        )
+    if workstation_panel_qml.count('sequence: "Escape"') != 2:
+        failures.append(
+            "Workstation panel must provide Escape for keyboard entry and workspace overflow"
+        )
+    if workstation_panel_qml.count("workspaceOverflowFlickable.ensureVisible(workspaceOverflowEntry)") != 1:
+        failures.append(
+            "Workstation workspace overflow must scroll the focused action into view"
+        )
+    workspace_keyboard_restore = (
+        "panel.restoreKeyboardEntry(\n"
+        "                        workspaceOverflowButton,\n"
+        "                        Qt.TabFocusReason\n"
+        "                    )"
+    )
+    if workstation_panel_qml.count(workspace_keyboard_restore) != 1:
+        failures.append(
+            "Workstation workspace overflow cancellation must restore compositor keyboard mode and focus through the opener-or-fallback path"
+        )
+    if "if (workspaceOverflowButton.visible)" in workstation_panel_qml:
+        failures.append(
+            "Workstation workspace overflow restoration must remain unconditional when its opener disappears"
+        )
+
+    workspace_model_closure = (
+        "onWorkspaceOverflowCountChanged: {\n"
+        "                if (workspaceOverflowCount === 0 && workspaceOverflowWindow.visible)\n"
+        "                    panel.dismissWorkspaceOverflow()\n"
+        "            }"
+    )
+    if workspace_model_closure not in workstation_panel_qml:
+        failures.append(
+            "Workstation workspace overflow model-driven closure must restore the keyboard session"
+        )
+
+    keyboard_restore_fallback = (
+        "function keyboardRestoreTarget(control) {\n"
+        "                if (controlIsUsable(control))\n"
+        "                    return control\n"
+        "                if (controlIsUsable(commandPaletteButton))\n"
+        "                    return commandPaletteButton\n"
+        "                return null\n"
+        "            }"
+    )
+    if keyboard_restore_fallback not in workstation_panel_qml:
+        failures.append(
+            "Workstation panel keyboard restoration must fall back to a stable visible control when an opener disappears"
+        )
+
+    if "Layout.preferredWidth: Math.max(leftGroup.implicitWidth, rightGroup.implicitWidth)" in workstation_panel_qml:
+        failures.append(
+            "Workstation panel side groups must not mirror unbounded implicit widths"
+        )
+
+    keyboard_handoff_fragments = (
+        (
+            "command palette",
+            "panel.releaseKeyboardEntry()\n"
+            "                            root.commandPaletteRequested(panel.screen)",
+        ),
+        (
+            "workspace activation",
+            "panel.releaseKeyboardEntry()\n"
+            "                                root.workspaceRequested(modelData.id)",
+        ),
+        (
+            "workspace overflow",
+            "panel.releaseKeyboardEntry()\n"
+            "                            panel.openWorkspaceOverflow()",
+        ),
+        (
+            "tray interaction",
+            "onInteractionStarted: panel.releaseKeyboardEntry()",
+        ),
+        (
+            "Quick Settings",
+            "panel.releaseKeyboardEntry()\n"
+            "                            root.quickSettingsRequested(panel.screen)",
+        ),
+        (
+            "Control Center",
+            "panel.releaseKeyboardEntry()\n"
+            "                            root.controlCenterRequested(panel.screen)",
+        ),
+    )
+    for handoff_name, fragment in keyboard_handoff_fragments:
+        if fragment not in workstation_panel_qml:
+            failures.append(
+                "Workstation panel actions must release keyboard-entry ownership before handoff"
+                f": {handoff_name}"
+            )
+
+    for fragment in (
+        "import Quickshell",
+        "import Quickshell.Services.SystemTray",
+        "signal interactionStarted()",
+        "signal keyboardReturnRequested(var control)",
+        "property int inlineItemLimit: 4",
+        "property var itemModelOverride: null",
+        "readonly property var itemModel:",
+        "itemModelOverride === null ? SystemTray.items : itemModelOverride",
+        "itemModelOverride === null ? SystemTray.items.values.length : itemModelOverride.length",
+        "readonly property int effectiveInlineItemLimit: Math.max(1, inlineItemLimit)",
+        "readonly property int overflowCount: Math.max(0, itemCount - effectiveInlineItemLimit)",
+        "visible: itemCount > 0",
+        "visible: index < root.effectiveInlineItemLimit",
+        "visible: index >= root.effectiveInlineItemLimit",
+        "id: overflowButton",
+        'qsTr("Show %1 more tray items")',
+        "PopupWindow {",
+        "id: overflowWindow",
+        "anchor.item: overflowButton",
+        "anchor.adjustment: PopupAdjustment.All",
+        "surfaceFormat.opaque: false",
+        "grabFocus: true",
+        "id: overflowRepeater",
+        "function dismissOverflow(returnKeyboardFocus)",
+        "function activateInlineControl(index)",
+        "function openOverflowControl()",
+        "function cancelOverflowControl()",
+        "function overflowIsVisible()",
+        "function overflowButtonFocused()",
+        "function activateOverflowControl(index)",
+        'sequence: "Escape"',
+        "context: Qt.WindowShortcut",
+        "onActivated: root.dismissOverflow(true)",
+        "id: overflowFlickable",
+        "function ensureVisible(item)",
+        "overflowFlickable.ensureVisible(overflowEntry)",
+        "root.keyboardReturnRequested(overflowButton)",
+        "id: inlineRepeater",
+        "model: root.itemModel",
+        "function boundedText(",
+        "id: entryToolTip",
+        "contentItem: Label {",
+        "text: entryToolTip.text",
+        "textFormat: Text.PlainText",
+        "clean.length <= 128",
+        "item.activate()",
+        "item.secondaryActivate()",
+        "function secondaryAction()",
+        'qsTr("Shift+Enter activates the secondary tray action.")',
+        "(event.modifiers & Qt.ShiftModifier) !== 0",
+        "entry.secondaryAction()",
+        "!hostWindow.contentItem",
+        "hostWindow.contentItem.mapFromItem(anchorItem, 0, anchorItem.height)",
+        "item.display(",
+        "hostWindow,",
+        "root.openMenu(entry.modelData, entry, root.panelWindow)",
+        "root.openMenu(modelData, overflowEntry, overflowWindow)",
+        "item.onlyMenu",
+        "item.hasMenu",
+        "Accessible.role: Accessible.Button",
+        "Accessible.focusable: visible",
+        "Accessible.onPressAction: entry.primaryAction()",
+        "Keys.onReturnPressed: event =>",
+        "Keys.onEnterPressed: event =>",
+        "Keys.onSpacePressed: event =>",
+        "Keys.onPressed: event =>",
+        "event.key === Qt.Key_Menu",
+        "event.key === Qt.Key_F10",
+        "Qt.ShiftModifier",
+    ):
+        if fragment not in system_tray_qml:
+            failures.append(f"System tray contract missing: {fragment}")
+
+    native_menu_host_lifetime = (
+        "root.openMenu(modelData, overflowEntry, overflowWindow)\n"
+        "                                overflowWindow.visible = false"
+    )
+    if native_menu_host_lifetime in system_tray_qml:
+        failures.append(
+            "System tray overflow must keep its mapped host alive while a native menu is open"
+        )
+    for fragment in (
+        "if (item.onlyMenu) {\n"
+        "            root.openMenu(item, anchorItem, hostWindow)\n"
+        "            return false",
+        "const shouldDismiss = root.primaryAction(",
+        "if (shouldDismiss)\n"
+        "                                root.dismissOverflow()",
+    ):
+        if fragment not in system_tray_qml:
+            failures.append(
+                f"System tray overflow menu-lifetime contract missing: {fragment}"
+            )
+
+    if system_tray_qml.count("model: root.itemModel") != 2:
+        failures.append(
+            "System tray must project one bounded inline model and one overflow model from the production-default item source"
+        )
+    if system_tray_qml.count("visible: index < root.effectiveInlineItemLimit") != 1:
+        failures.append(
+            "System tray inline presentation must remain bounded by inlineItemLimit"
+        )
+    if system_tray_qml.count("visible: index >= root.effectiveInlineItemLimit") != 1:
+        failures.append(
+            "System tray overflow must retain every item excluded from the inline budget"
+        )
+    if system_tray_qml.count("PopupWindow {") != 1:
+        failures.append(
+            "System tray overflow must use one screen-adjusted PopupWindow"
+        )
+    if system_tray_qml.count('sequence: "Escape"') != 1:
+        failures.append(
+            "System tray overflow must provide exactly one Escape cancellation path"
+        )
+    if system_tray_qml.count("overflowFlickable.ensureVisible(overflowEntry)") != 1:
+        failures.append(
+            "System tray overflow must scroll the focused action into view"
+        )
+    if system_tray_qml.count("root.keyboardReturnRequested(overflowButton)") != 1:
+        failures.append(
+            "System tray overflow cancellation must request compositor keyboard-mode restoration for its opener"
+        )
+
+    tray_model_closure = (
+        "onOverflowCountChanged: {\n"
+        "        if (overflowCount === 0 && overflowWindow.visible)\n"
+        "            root.dismissOverflow(true)\n"
+        "    }"
+    )
+    if tray_model_closure not in system_tray_qml:
+        failures.append(
+            "System tray model-driven overflow closure must restore the panel keyboard session"
+        )
+
+    if "LinuraPopover {" in system_tray_qml:
+        failures.append(
+            "System tray overflow must not use an item popup constrained by panel geometry"
+        )
+
+    if system_tray_qml.count("event.key === Qt.Key_Menu") != 2:
+        failures.append(
+            "System tray inline and overflow native menus must both remain keyboard-accessible"
+        )
+    if system_tray_qml.count("event.key === Qt.Key_F10") != 2:
+        failures.append(
+            "System tray inline and overflow native menus must both preserve Shift+F10 access"
+        )
+
+    secondary_keyboard_paths = (
+        (
+            "Keys.onReturnPressed: event => {\n"
+            "                if ((event.modifiers & Qt.ShiftModifier) !== 0)\n"
+            "                    entry.secondaryAction()"
+        ),
+        (
+            "Keys.onEnterPressed: event => {\n"
+            "                if ((event.modifiers & Qt.ShiftModifier) !== 0)\n"
+            "                    entry.secondaryAction()"
+        ),
+    )
+    for fragment in secondary_keyboard_paths:
+        if fragment not in system_tray_qml:
+            failures.append(
+                "System tray secondary action must be keyboard-accessible from both Return and keypad Enter"
+            )
+
+    for fragment in (
+        "property int clockPrecision: SystemClock.Minutes",
+        "SystemClock {",
+        "precision: root.clockPrecision",
+        'Qt.formatDateTime(clock.date, "HH:mm")',
+        'Qt.formatDateTime(clock.date, "ddd, MMM d")',
+        "readonly property real timestampMs: clock.date.getTime()",
+    ):
+        if fragment not in workstation_status_qml:
+            failures.append(f"Workstation status contract missing: {fragment}")
+
+    if "textFormat: Text.PlainText" not in linura_text_qml:
+        failures.append(
+            "LinuraText must render protocol and first-party strings as plain text by default"
+        )
+    if system_tray_qml.count("textFormat: Text.PlainText") != 1:
+        failures.append(
+            "System tray tooltip metadata must render through an explicit plain-text boundary"
+        )
+
+    for surface_name, surface_text in (
+        ("workstation panel", workstation_panel_qml),
+        ("system tray", system_tray_qml),
+        ("workstation status", workstation_status_qml),
+    ):
+        for forbidden in (
+            "import Quickshell.Io",
+            "Process {",
+            "org.linura.Control1",
+            "org.linura.Session1",
+            "Hyprland.dispatch(",
+            "HyprlandIpc.dispatch(",
+            "linuractl",
+            "wpctl",
+            "pactl",
+            "systemctl",
+            "sudo",
+            "pkexec",
+        ):
+            if forbidden in surface_text:
+                failures.append(
+                    f"{surface_name} contains forbidden process/authority surface: {forbidden}"
+                )
+
+    for overlay_name, overlay_text, viewport_id, minimum_focus_hooks in (
+        ("Control Center", panel_qml, "controlViewport", 4),
+        ("Quick Settings", quick_settings_qml, "quickViewport", 5),
+    ):
+        for fragment in (
+            "function ensureVisible(item)",
+            f"item.mapToItem({viewport_id}.contentItem, 0, 0)",
+            f"{viewport_id}.contentY",
+            "onActiveFocusChanged: root.ensureVisible(",
+        ):
+            if fragment not in overlay_text:
+                failures.append(
+                    f"{overlay_name} must keep keyboard focus visible in bounded-height scrolling"
+                )
+        if overlay_text.count("onActiveFocusChanged: root.ensureVisible(") < minimum_focus_hooks:
+            failures.append(
+                f"{overlay_name} must scroll every keyboard-focusable bounded control into view"
+            )
+
+    for fragment in (
+        "readonly property bool compactHeight: root.height < 440",
+        "readonly property int compactInset:",
+        "Layout.minimumHeight: theme.controlLg * 2",
+        "visible: !root.compactHeight",
+    ):
+        if fragment not in palette_qml:
+            failures.append(
+                f"Command Palette compact-height result budget drifted: {fragment}"
+            )
+    if palette_qml.count("visible: !root.compactHeight") < 2:
+        failures.append(
+            "Command Palette compact height must shed nonessential subtitle/footer copy before collapsing results"
+        )
+
+    for overlay_name, overlay_text in (
+        ("Control Center", panel_qml),
+        ("Quick Settings", quick_settings_qml),
+        ("Command Palette", palette_qml),
+    ):
+        if "property var targetScreen:" not in overlay_text:
+            failures.append(f"{overlay_name} must expose an explicit target screen")
+        if "screen: root.targetScreen" not in overlay_text:
+            failures.append(f"{overlay_name} must bind its PanelWindow to the requested screen")
+        if "property int topInset: 0" not in overlay_text:
+            failures.append(f"{overlay_name} must expose the workstation-panel top inset")
+        if "top: root.topInset + theme.spacingLg" not in overlay_text:
+            failures.append(f"{overlay_name} must render below the workstation panel")
+
+    overlay_screen_binding = (
+        "targetScreen: shell.overlayScreen ? shell.overlayScreen : shell.defaultOverlayScreen()"
+    )
+    if shell_qml.count(overlay_screen_binding) != 3:
+        failures.append(
+            "Linura Shell must bind Control Center, Quick Settings and Command Palette to one selected overlay screen"
+        )
+    lifecycle_feedback_screen_binding = (
+        "targetScreen: shell.lifecycleFeedbackScreen\n"
+        "            ? shell.lifecycleFeedbackScreen\n"
+        "            : shell.defaultOverlayScreen()"
+    )
+    if lifecycle_feedback_screen_binding not in shell_qml:
+        failures.append(
+            "Lifecycle feedback must remain pinned to its initiating screen"
+        )
+    if shell_qml.count(
+        "onControlCenterRequested: shell.showControlCenterOnScreen(shell.overlayScreen)"
+    ) != 2:
+        failures.append(
+            "Linura Shell overlay-to-Control-Center navigation must preserve the selected screen"
+        )
+    if shell_qml.count(
+        "onQuickSettingsRequested: shell.showQuickSettingsOnScreen(shell.overlayScreen)"
+    ) != 1:
+        failures.append(
+            "Linura Shell overlay-to-Quick-Settings navigation must preserve the selected screen"
+        )
+    for fragment in (
+        "property var targetScreen:",
+        "screen: root.targetScreen",
+    ):
+        if fragment not in lifecycle_feedback_qml:
+            failures.append(
+                f"Lifecycle feedback must follow the selected overlay screen: {fragment}"
+            )
+
     ipc_index = shell_qml.find("IpcHandler {")
     if ipc_index < 0:
         failures.append("Linura Shell root contract missing: IpcHandler {")
     else:
-        for method in (
-            "showControlCenter",
-            "hideControlCenter",
-            "toggleControlCenter",
-            "showQuickSettings",
-            "hideQuickSettings",
-            "toggleQuickSettings",
-            "showCommandPalette",
-            "hideCommandPalette",
-            "toggleCommandPalette",
-        ):
+        ipc_delegations = {
+            "showControlCenter": "shell.showControlCenterOnScreen(shell.defaultOverlayScreen())",
+            "hideControlCenter": "shell.hideControlCenter()",
+            "toggleControlCenter": "shell.toggleControlCenter()",
+            "showQuickSettings": "shell.showQuickSettingsOnScreen(shell.defaultOverlayScreen())",
+            "hideQuickSettings": "shell.hideQuickSettings()",
+            "toggleQuickSettings": "shell.toggleQuickSettings()",
+            "showCommandPalette": "shell.showCommandPaletteOnScreen(shell.defaultOverlayScreen())",
+            "hideCommandPalette": "shell.hideCommandPalette()",
+            "toggleCommandPalette": "shell.toggleCommandPalette()",
+        }
+        for method, delegation in ipc_delegations.items():
             declaration = f"function {method}()"
             if shell_qml.find(declaration, 0, ipc_index) < 0:
                 failures.append(
                     f"Linura Shell root must own navigation method before IPC delegation: {declaration}"
                 )
-            delegation = f"shell.{method}()"
             if shell_qml.find(delegation, ipc_index) < 0:
                 failures.append(
                     f"Linura Shell IPC must delegate navigation method to ShellRoot: {delegation}"
@@ -452,6 +1031,11 @@ def validate(root: Path) -> list[str]:
 
     for fragment in (
         "PanelWindow {",
+        "readonly property int availableOverlayHeight:",
+        "root.targetScreen.height - root.topInset - theme.spacingLg * 2",
+        "implicitHeight: Math.min(520, root.availableOverlayHeight)",
+        "Flickable {",
+        "contentHeight: controlColumn.implicitHeight + theme.spacingXl * 2",
         "WlrLayershell.keyboardFocus:",
         "controller.beginVolumeDraft()",
         "controller.cancelVolumeDraft()",
@@ -477,6 +1061,11 @@ def validate(root: Path) -> list[str]:
 
     for fragment in (
         "PanelWindow {",
+        "readonly property int availableOverlayHeight:",
+        "root.targetScreen.height - root.topInset - theme.spacingLg * 2",
+        "implicitHeight: Math.min(quickColumn.implicitHeight + theme.spacingXl * 2, root.availableOverlayHeight)",
+        "Flickable {",
+        "contentHeight: quickColumn.implicitHeight + theme.spacingXl * 2",
         'WlrLayershell.namespace: "linura-quick-settings"',
         "required property var controller",
         "controller.beginVolumeDraft()",
@@ -636,6 +1225,17 @@ def validate(root: Path) -> list[str]:
     for fragment in (
         "PanelWindow {",
         "import org.linura.UI 1.0",
+        "readonly property int availableOverlayHeight:",
+        "root.targetScreen.height - root.topInset - theme.spacingLg * 2",
+        "implicitHeight: Math.min(560, root.availableOverlayHeight)",
+        "readonly property bool compactHeight: root.height < 440",
+        "readonly property int compactInset: root.compactHeight ? theme.spacingMd : theme.spacing2xl",
+        "height: Math.max(0, root.height - compactInset * 2)",
+        "anchors.margins: root.compactHeight ? theme.spacingMd : theme.spacingXl",
+        "spacing: root.compactHeight ? theme.spacingSm : theme.spacingLg",
+        "Layout.fillHeight: true",
+        "Layout.minimumHeight: theme.controlLg * 2",
+        "Layout.maximumHeight: 280",
         "property var workspaceCatalog:",
         "property var applicationCatalog:",
         "property int sessionGeneration: 0",
@@ -1305,6 +1905,25 @@ def validate(root: Path) -> list[str]:
     if "quickshell" not in packages:
         failures.append("Arch workstation package contract must include quickshell")
 
+    hyprland_profile = (
+        root / "packaging/arch/archiso/airootfs/etc/skel/.config/hypr/hyprland.lua"
+    ).read_text(encoding="utf-8")
+    for fragment in (
+        'require("/usr/share/hypr/hyprland")',
+        'hl.bind("SUPER + CTRL + P", hl.dsp.global("linura:workstationPanel"))',
+        'hl.bind("SUPER + CTRL + S", hl.dsp.global("linura:quickSettings"))',
+        'hl.bind("SUPER + SPACE", hl.dsp.global("linura:commandPalette"))',
+    ):
+        if hyprland_profile.count(fragment) != 1:
+            failures.append(
+                f"Arch workstation Hyprland profile shortcut contract missing or duplicated: {fragment}"
+            )
+    for forbidden in ("hl.dsp.exec_cmd(", "os.execute(", "io.popen(", "loadfile(", "dofile("):
+        if forbidden in hyprland_profile:
+            failures.append(
+                f"Arch workstation Hyprland shortcut profile must not introduce process/code execution: {forbidden}"
+            )
+
     service = (
         root / "packaging/systemd/user/linura-shell.service"
     ).read_text(encoding="utf-8")
@@ -1382,6 +2001,9 @@ def validate(root: Path) -> list[str]:
         "org.linura.UI 1.0",
         "navigation-only command palette",
         "linura:commandPalette",
+        "Super+Ctrl+P",
+        "Super+Ctrl+S",
+        "Super+Space",
         "toggleQuickSettings",
         "Quick Settings",
         "Lifecycle notifications and OSD are presentation-only consumers",

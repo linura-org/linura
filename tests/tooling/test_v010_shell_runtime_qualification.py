@@ -19,6 +19,7 @@ FIXTURE_PATHS = (
     "packaging/systemd/user/linurad.service",
     "packaging/wireplumber/linura-session-audio.lua",
     "packaging/arch/archiso/packages.linura",
+    "packaging/arch/archiso/airootfs/etc/skel/.config/hypr/hyprland.lua",
     "apps/linurad/Cargo.toml",
     "crates/linura-agent-runtime/Cargo.toml",
     "crates/linura-capability-sdk/Cargo.toml",
@@ -42,10 +43,17 @@ FIXTURE_PATHS = (
     "apps/linura-shell/qualification-controller.qml",
     "apps/linura-shell/qualification-palette.qml",
     "apps/linura-shell/qualification-quick-settings.qml",
+    "apps/linura-shell/qualification-panel.qml",
+    "apps/linura-shell/panel/WorkstationPanel.qml",
+    "apps/linura-shell/tray/SystemTrayView.qml",
+    "apps/linura-shell/status/WorkstationStatus.qml",
+    "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml",
     "apps/linura-shell/bridge/CMakeLists.txt",
     "apps/linura-shell/bridge/audio_session_controller.h",
     "apps/linura-shell/bridge/audio_session_controller.cpp",
     "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml",
+    "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml",
+    "apps/linura-shell/plugins/notifications-osd/manifest.json",
     "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml",
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
     "apps/linura-shell/ui/CMakeLists.txt",
@@ -59,6 +67,7 @@ FIXTURE_PATHS = (
     "qualification/v010/shell-runtime/fixtures/linura-shell-qualification.service",
     "qualification/v010/shell-runtime/fixtures/linura-palette-qualification.service",
     "qualification/v010/shell-runtime/fixtures/linura-quick-settings-qualification.service",
+    "qualification/v010/shell-runtime/fixtures/linura-panel-qualification.service",
     "qualification/v010/shell-runtime/fixtures/org.linura.QualificationVisible.desktop",
     "qualification/v010/shell-runtime/fixtures/org.linura.QualificationHidden.desktop",
     "qualification/v010/shell-runtime/fixtures/org.linura.QualificationTerminal.desktop",
@@ -90,6 +99,29 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
     def test_runtime_qualification_contract_is_valid(self) -> None:
         result = self._run(ROOT)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_runtime_teardown_uses_supported_exact_inactive_state_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            run_script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = run_script.read_text(encoding="utf-8")
+            marker = 'systemctl --user show --property=ActiveState --value "$unit"'
+            self.assertIn(marker, text)
+            run_script.write_text(
+                text.replace(
+                    marker,
+                    'systemctl --user is-inactive --quiet "$unit"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "supported exact inactive-state probe",
+                result.stderr,
+            )
 
     def test_substrate_cache_policy_cannot_cache_qualification_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1019,6 +1051,26 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("QT_QUICK_BACKEND=software", result.stderr)
 
+    def test_panel_qualification_service_must_pin_runtime_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            service = (
+                root
+                / "qualification/v010/shell-runtime/fixtures/linura-panel-qualification.service"
+            )
+            text = service.read_text(encoding="utf-8")
+            marker = "Environment=QML2_IMPORT_PATH=/usr/local/lib/qt6/qml"
+            self.assertIn(marker, text)
+            service.write_text(
+                text.replace(marker, "Environment=QML2_IMPORT_PATH=/tmp/untrusted", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must pin the qualification runtime environment", result.stderr)
+            self.assertIn(marker, result.stderr)
+
     def test_production_shell_service_cannot_pin_qualification_renderer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1065,6 +1117,269 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("palette IPC call failed", result.stderr)
 
+
+    def test_panel_qualification_must_activate_real_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            fixture = root / "apps/linura-shell/qualification-panel.qml"
+            text = fixture.read_text(encoding="utf-8")
+            marker = "workstationPanel.activateQuickSettingsControl(0)"
+            self.assertIn(marker, text)
+            fixture.write_text(
+                text.replace(
+                    marker,
+                    "workstationPanel.quickSettingsRequested(Quickshell.screens[0])",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "workstation panel runtime fixture must activate real production controls",
+                result.stderr,
+            )
+            self.assertIn(
+                "workstation panel runtime fixture must not emit product output signals directly",
+                result.stderr,
+            )
+
+    def test_panel_qualification_must_request_real_keyboard_focus(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            fixture = root / "apps/linura-shell/qualification-panel.qml"
+            text = fixture.read_text(encoding="utf-8")
+            marker = "onPressed: workstationPanel.focusPanel(0)"
+            self.assertIn(marker, text)
+            fixture.write_text(
+                text.replace(marker, "onPressed: {}", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "workstation panel runtime fixture must activate real production controls",
+                result.stderr,
+            )
+
+    def test_runtime_must_prove_keyboard_entry_focus(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = "hyprctl dispatch global linura:workstationPanel >/dev/null"
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, ":", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_runtime_must_snapshot_keyboard_focus_before_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = (
+                'panel_keyboard_entry_focused="$(checked_panel_call '
+                'linura.panel-qualification panelKeyboardEntryFocused)"'
+            )
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, 'panel_keyboard_entry_focused="true"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_runtime_evidence_binder_must_validate_keyboard_focus_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = '"keyboard_entry_focused",'
+            self.assertEqual(text.count(marker), 1)
+            workflow.write_text(
+                text.replace(marker, '"keyboard_entry_focus_omitted",', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_runtime_must_invoke_instantiated_panel_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = (
+                'panel_quick_settings_activated="$(checked_panel_call '
+                'linura.panel-qualification activateQuickSettingsControl)"'
+            )
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(
+                    marker,
+                    'panel_quick_settings_activated="true"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_runtime_must_measure_instantiated_panel_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = (
+                'panel_window_count="$(checked_panel_call '
+                'linura.panel-qualification panelWindowCount)"'
+            )
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(
+                    marker,
+                    'panel_window_count="$(checked_panel_call '
+                    'linura.panel-qualification screenCount)"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_runtime_compositor_reservation_must_preserve_edge_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = "ok = values == [0, 56, 0, 0]"
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(
+                    marker,
+                    "ok = sorted(values) == [0, 0, 0, 56]",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_runtime_must_retain_compositor_panel_reservation_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'panel_hyprland_monitors="$evidence_root/workstation-panel-monitors.json"'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(
+                    marker,
+                    'panel_hyprland_monitors="$evidence_root/discarded-panel-monitors.json"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("workstation-panel-monitors.json", result.stderr)
+
+    def test_workstation_status_runtime_evidence_cannot_disappear(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'wait_until "workstation status clock advancement" panel_status_advanced'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, 'echo "status advancement omitted"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_workstation_tray_runtime_interactions_cannot_disappear(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'panel_tray_overflow_activated="$(checked_panel_call linura.panel-qualification activateTrayOverflowControl 4)"'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, 'panel_tray_overflow_activated="true"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_workstation_tray_runtime_menu_interaction_cannot_disappear(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'panel_tray_inline_menu_activated="$(checked_panel_call linura.panel-qualification activateTrayInlineControl 1)"'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, 'panel_tray_inline_menu_activated="true"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_workstation_tray_runtime_fixture_contains_menu_only_item(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            fixture = root / "apps/linura-shell/qualification-panel.qml"
+            text = fixture.read_text(encoding="utf-8")
+            for marker in ("property bool hasMenu: true", "property bool onlyMenu: true"):
+                self.assertIn(marker, text)
+                changed = text.replace(marker, marker.replace("true", "false"), 1)
+                fixture.write_text(changed, encoding="utf-8")
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(marker, result.stderr)
+                fixture.write_text(text, encoding="utf-8")
+
+    def test_workstation_tray_status_manifest_validation_cannot_disappear(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "workstation tray action evidence did not record both primary activations"
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, "workstation tray action validation omitted", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
 
     def test_quick_settings_runtime_case_cannot_disappear(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1666,6 +1981,37 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("required_cases drifted", result.stderr)
+
+
+    def test_ui_qualification_fixtures_must_be_isolated_before_next_surface(self) -> None:
+        transitions = (
+            (
+                'pass_case "workstation-panel-entrypoints"',
+                "systemctl --user stop linura-panel-qualification.service",
+            ),
+            (
+                'pass_case "palette-session-generation-isolation"',
+                "systemctl --user stop linura-palette-qualification.service",
+            ),
+        )
+        for passed_case, stop in transitions:
+            with self.subTest(stop=stop), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+                text = script.read_text(encoding="utf-8")
+                transition = passed_case + "\n\n" + stop + "\n"
+                self.assertIn(transition, text)
+                script.write_text(
+                    text.replace(transition, passed_case + "\n", 1),
+                    encoding="utf-8",
+                )
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "must stop completed UI qualification fixtures before starting the next surface",
+                    result.stderr,
+                )
 
 if __name__ == "__main__":
     unittest.main()
