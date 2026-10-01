@@ -36,6 +36,7 @@ required_components = [
   "sqlite-transient-audit",
   "quick-settings",
   "notifications-osd",
+  "workstation-panel",
 ]
 
 required_cases = [
@@ -58,6 +59,7 @@ required_cases = [
   "quick-settings-restart-recovery",
   "lifecycle-feedback-verified-success",
   "lifecycle-feedback-precondition-drift-no-success",
+  "workstation-panel-entrypoints",
 ]
 
 [evidence]
@@ -80,4 +82,6 @@ audio_fixture_evidence_required = true
 transient_audit_evidence_required = true
 quick_settings_authority_path_required = true
 lifecycle_feedback_evidence_required = true
+workstation_panel_evidence_required = true
+workstation_shortcut_binding_evidence_required = true
 release_support_promotion = false

@@ -58,6 +58,12 @@ RUNTIME_ASSETS = {
         "usr/share/linura/shell/plugins/notifications-osd/LifecycleFeedback.qml",
     ROOT / "apps/linura-shell/plugins/notifications-osd/manifest.json":
         "usr/share/linura/shell/plugins/notifications-osd/manifest.json",
+    ROOT / "apps/linura-shell/panel/WorkstationPanel.qml":
+        "usr/share/linura/shell/panel/WorkstationPanel.qml",
+    ROOT / "apps/linura-shell/tray/SystemTrayView.qml":
+        "usr/share/linura/shell/tray/SystemTrayView.qml",
+    ROOT / "apps/linura-shell/status/WorkstationStatus.qml":
+        "usr/share/linura/shell/status/WorkstationStatus.qml",
     ROOT / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml":
         "usr/share/linura/shell/integrations/hyprland/WorkspaceNavigationController.qml",
     ROOT / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml":

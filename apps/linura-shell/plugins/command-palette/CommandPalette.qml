@@ -7,7 +7,15 @@ import org.linura.UI 1.0
 PanelWindow {
     id: root
 
+    property var targetScreen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+    screen: root.targetScreen
+
+    property int topInset: 0
+    readonly property int availableOverlayHeight: root.targetScreen
+        ? Math.max(theme.controlMd, root.targetScreen.height - root.topInset - theme.spacingLg * 2)
+        : 560
     property bool opened: false
+    readonly property bool compactHeight: root.height < 440
     property int selectedIndex: 0
     property int sessionGeneration: 0
     property var results: []
@@ -41,7 +49,7 @@ PanelWindow {
     signal applicationRequested(string applicationId, int sessionGeneration)
 
     visible: opened
-    implicitHeight: Math.min(560, paletteSurface.implicitHeight + theme.spacing2xl * 3)
+    implicitHeight: Math.min(560, root.availableOverlayHeight)
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
 
@@ -49,6 +57,10 @@ PanelWindow {
         top: true
         left: true
         right: true
+    }
+
+    margins {
+        top: root.topInset + theme.spacingLg
     }
 
     WlrLayershell.namespace: "linura-command-palette"
@@ -305,21 +317,21 @@ PanelWindow {
 
     LinuraSurface {
         id: paletteSurface
-        width: Math.min(760, root.width - theme.spacing2xl * 2)
-        implicitHeight: paletteColumn.implicitHeight + theme.spacingXl * 2
+        width: Math.max(0, Math.min(760, root.width - theme.spacing2xl * 2))
+        readonly property int compactInset: root.compactHeight ? theme.spacingMd : theme.spacing2xl
+        height: Math.max(0, root.height - compactInset * 2)
+        clip: true
         anchors.top: parent.top
-        anchors.topMargin: theme.spacing2xl
+        anchors.topMargin: compactInset
         anchors.horizontalCenter: parent.horizontalCenter
         level: "background"
         cornerRadius: theme.radiusXl
 
         ColumnLayout {
             id: paletteColumn
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.margins: theme.spacingXl
-            spacing: theme.spacingLg
+            anchors.fill: parent
+            anchors.margins: root.compactHeight ? theme.spacingMd : theme.spacingXl
+            spacing: root.compactHeight ? theme.spacingSm : theme.spacingLg
 
             RowLayout {
                 Layout.fillWidth: true
@@ -336,6 +348,7 @@ PanelWindow {
 
                     LinuraText {
                         Layout.fillWidth: true
+                        visible: !root.compactHeight
                         text: qsTr("Find Linura controls, applications and Hyprland workspaces")
                         muted: true
                         elide: Text.ElideRight
@@ -386,6 +399,9 @@ PanelWindow {
             ListView {
                 id: resultList
                 Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumHeight: theme.controlLg * 2
+                Layout.maximumHeight: 280
                 Layout.preferredHeight: Math.min(contentHeight, 280)
                 visible: root.results.length > 0
                 clip: true
@@ -429,6 +445,7 @@ PanelWindow {
 
             LinuraText {
                 Layout.fillWidth: true
+                visible: !root.compactHeight
                 text: qsTr("Workspace switching and trusted desktop-entry application launch are bounded experience actions. Managed effects remain typed Control operations; the palette never accepts shell, Exec, or compositor command strings.")
                 role: "caption"
                 muted: true

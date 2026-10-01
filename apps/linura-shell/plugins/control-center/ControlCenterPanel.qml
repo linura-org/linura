@@ -8,7 +8,17 @@ import org.linura.UI 1.0
 PanelWindow {
     id: root
 
+    property var targetScreen: Quickshell.screens.length > 0 ? Quickshell.screens[0] : null
+    screen: root.targetScreen
+
     required property var controller
+    property int topInset: 0
+    readonly property int availableOverlayHeight: root.targetScreen
+        ? Math.max(theme.controlMd, root.targetScreen.height - root.topInset - theme.spacingLg * 2)
+        : 520
+    readonly property int availableOverlayWidth: root.targetScreen
+        ? Math.max(theme.controlMd, root.targetScreen.width - theme.spacingLg * 2)
+        : 420
     property bool opened: false
     property int draftVolume: controller.volumePercent
     property bool draftDirty: false
@@ -16,8 +26,8 @@ PanelWindow {
     signal closeRequested()
 
     visible: opened
-    implicitWidth: 420
-    implicitHeight: 520
+    implicitWidth: Math.min(420, root.availableOverlayWidth)
+    implicitHeight: Math.min(520, root.availableOverlayHeight)
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
 
@@ -27,7 +37,7 @@ PanelWindow {
     }
 
     margins {
-        top: theme.spacingLg
+        top: root.topInset + theme.spacingLg
         right: theme.spacingLg
     }
 
@@ -55,6 +65,25 @@ PanelWindow {
         root.draftDirty = false
         root.controller.cancelVolumeDraft()
         root.closeRequested()
+    }
+
+    function ensureVisible(item) {
+        if (!opened || !item || !item.activeFocus)
+            return
+
+        Qt.callLater(function() {
+            if (!root.opened || !item.activeFocus)
+                return
+            const point = item.mapToItem(controlViewport.contentItem, 0, 0)
+            const margin = theme.spacingMd
+            const top = Math.max(0, point.y - margin)
+            const bottom = point.y + item.height + margin
+            const maximum = Math.max(0, controlViewport.contentHeight - controlViewport.height)
+            if (top < controlViewport.contentY)
+                controlViewport.contentY = Math.max(0, Math.min(maximum, top))
+            else if (bottom > controlViewport.contentY + controlViewport.height)
+                controlViewport.contentY = Math.max(0, Math.min(maximum, bottom - controlViewport.height))
+        })
     }
 
     onOpenedChanged: {
@@ -97,10 +126,22 @@ PanelWindow {
         level: "background"
         cornerRadius: theme.radiusXl
 
-        ColumnLayout {
+        Flickable {
+            id: controlViewport
             anchors.fill: parent
-            anchors.margins: theme.spacingXl
-            spacing: theme.spacingLg
+            clip: true
+            contentWidth: width
+            contentHeight: controlColumn.implicitHeight + theme.spacingXl * 2
+            boundsBehavior: Flickable.StopAtBounds
+            flickableDirection: Flickable.VerticalFlick
+            interactive: contentHeight > height
+
+            ColumnLayout {
+                id: controlColumn
+                x: theme.spacingXl
+                y: theme.spacingXl
+                width: Math.max(0, controlViewport.width - theme.spacingXl * 2)
+                spacing: theme.spacingLg
 
             RowLayout {
                 Layout.fillWidth: true
@@ -129,6 +170,7 @@ PanelWindow {
                     text: qsTr("Close")
                     onClicked: root.closePanel()
                     Accessible.name: qsTr("Close Control Center")
+                    onActiveFocusChanged: root.ensureVisible(closeButton)
                 }
             }
 
@@ -184,6 +226,7 @@ PanelWindow {
 
                         Accessible.name: qsTr("Output volume")
                         Accessible.description: qsTr("Changes are applied only after authoritative state is revalidated.")
+                        onActiveFocusChanged: root.ensureVisible(volumeSlider)
 
                         onPressedChanged: {
                             if (pressed) {
@@ -219,6 +262,7 @@ PanelWindow {
                         Layout.fillWidth: true
 
                         LinuraButton {
+                            id: resetButton
                             text: qsTr("Reset")
                             enabled: !controller.busy
                             onClicked: {
@@ -227,6 +271,7 @@ PanelWindow {
                                 controller.cancelVolumeDraft()
                             }
                             Accessible.name: qsTr("Reset selected volume")
+                            onActiveFocusChanged: root.ensureVisible(resetButton)
                         }
 
                         Item {
@@ -234,6 +279,7 @@ PanelWindow {
                         }
 
                         LinuraButton {
+                            id: applyButton
                             text: qsTr("Apply volume")
                             enabled: controller.canApply
                                 && !controller.busy
@@ -245,6 +291,7 @@ PanelWindow {
                                 controller.setVolume(root.draftVolume)
                             }
                             Accessible.name: qsTr("Apply selected output volume")
+                            onActiveFocusChanged: root.ensureVisible(applyButton)
                         }
                     }
                 }
@@ -312,6 +359,7 @@ PanelWindow {
             Item {
                 Layout.fillHeight: true
             }
+        }
         }
     }
 }
