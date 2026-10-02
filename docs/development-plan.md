@@ -157,7 +157,9 @@ Required v0.10 product scope includes:
 
 “Complete workstation” is intentionally narrow in platform breadth. It does not imply generic Linux, every GPU/display/storage layout, arbitrary package sources, broad containers/virtualization, fleet authority or Stable support. Every supported external effect still requires trusted operation classification and the appropriate Control-owned authority path.
 
-The authoritative implementation ledger is `contracts/v010-workstation-slices.toml`. It records the 32 required vertical slices, their completion state and merged-PR evidence so implementation progress cannot silently redefine milestone scope.
+The authoritative implementation ledger is `contracts/v010-workstation-slices.toml`. It records the 32 required vertical slices as an explicit dependency DAG, together with completion state and merged-PR evidence, so implementation progress cannot silently redefine milestone scope.
+
+Slice IDs remain stable scope/evidence units, not a mandatory coding queue. Any planned slice whose declared dependencies are complete is a valid development frontier and may be implemented in parallel with other ready slices. Integration remains dependency-ordered: a slice cannot be marked complete while any declared dependency is incomplete, and release closure still requires every release-required slice. `python3 tools/v010_slice_graph.py ready` reports the current frontier; `waves` reports deterministic future topological waves. Dependency edits are roadmap changes and must update the machine-readable contract and anti-drift checks rather than being removed merely to create concurrency.
 
 ## Phase 11 — Stable support qualification (target v1.0.0)
 

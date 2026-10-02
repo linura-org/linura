@@ -261,7 +261,7 @@ Declarative configuration is data, not executable authority. Keyboard shortcuts 
 
 ADR 0031 remains authoritative for interface/authority convergence. ADR 0033 refines the product boundary: v0.10 now requires a **complete first-party workstation shell experience** rather than deferring panel, lock/session or other ordinary workstation surfaces until after v1. Hyprland remains the qualified compositor and upstream components may remain implementation dependencies, but an ordinary user-facing workflow required by the release contract cannot be omitted merely because an upstream component could supply it.
 
-Implementation progress is machine-locked by `contracts/v010-workstation-slices.toml`: 32 required slices, a contiguous completed prefix, merged-PR evidence for completed slices and an explicit next slice. Code presence outside that ledger cannot silently broaden or shrink the milestone.
+Implementation progress is machine-locked by `contracts/v010-workstation-slices.toml`: 32 required slices form an explicit acyclic dependency graph, completed slices require merged-PR evidence and a dependency-closed completion set, and every currently unblocked slice is a valid parallel-development frontier. Numeric slice order remains a stable scope/reference order rather than a mandatory coding queue. Integration is dependency-ordered, and code presence outside the ledger cannot silently broaden or shrink the milestone.
 
 v0.10.0 is deliberately **Experimental**. Complete product scope at v0.10 does not imply Stable support.
 
@@ -415,7 +415,7 @@ A future VM lifecycle must use the same canonical eleven stages: request/intent 
 
 ## Dependency gates
 
-These gates are architectural, not merely scheduling preferences:
+These gates are architectural, not merely scheduling preferences. Within v0.10, the slice DAG is authoritative for implementation ordering: parallel work is allowed only across graph-ready slices, completion must remain dependency-closed, and removing an edge to manufacture concurrency is an explicit roadmap rebaseline rather than an implementation shortcut:
 
 - no supported managed external mutation may appear before v0.6 proves the complete eleven-stage lifecycle;
 - v0.4 may establish durable prepare/recovery state but still has no external effect authority;

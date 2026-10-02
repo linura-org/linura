@@ -31,7 +31,7 @@ REQUIRED = [
     "contracts/community.toml", "tools/check_community.py", "tests/tooling/test_community.py",
     "tools/check_adrs.py", "tests/tooling/test_adrs.py",
     "contracts/stability.toml", "tools/check_contract_stability.py", "tests/tooling/test_contract_stability.py",
-    "contracts/roadmap.toml", "contracts/v010-workstation-slices.toml", "tools/check_roadmap.py", "tests/tooling/test_roadmap.py",
+    "contracts/roadmap.toml", "contracts/v010-workstation-slices.toml", "tools/check_roadmap.py", "tools/v010_slice_graph.py", "tests/tooling/test_roadmap.py",
     "contracts/layering.toml", "tools/check_layering.py", "tests/tooling/test_layering.py",
     "contracts/operation-semantics.toml", "tools/check_operation_semantics.py", "tests/tooling/test_operation_semantics.py",
     "contracts/components.toml", "tools/check_component_maturity.py", "tests/tooling/test_component_maturity.py",

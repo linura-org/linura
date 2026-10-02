@@ -39,6 +39,24 @@ class RoadmapContractTests(unittest.TestCase):
             check=False,
         )
 
+    def _run_slice_graph(
+        self,
+        root: Path,
+        *args: str,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "tools/v010_slice_graph.py"),
+                "--root",
+                str(root),
+                *args,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
     def _copy_fixture(self, destination: Path) -> None:
         contract = tomllib.loads((ROOT / "contracts/roadmap.toml").read_text(encoding="utf-8"))
         paths = {
@@ -489,35 +507,223 @@ class RoadmapContractTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("completed_slice_count does not match", result.stderr)
 
-    def test_v010_planned_slice_ledger_can_advance_atomically(self) -> None:
+    def test_v010_dependency_graph_allows_out_of_numeric_order_completion(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
             contract = root / "contracts/v010-workstation-slices.toml"
             text = contract.read_text(encoding="utf-8")
             text = text.replace("completed_slice_count = 16", "completed_slice_count = 17", 1)
-            text = text.replace('next_slice = "S17"', 'next_slice = "S18"', 1)
             old_slice = """[[slice]]
-id = "S17"
-title = "lock screen and session/power controls"
+id = "S18"
+title = "NetworkManager connectivity experience"
 status = "planned"
 depends_on = ["S16"]
 evidence_prs = []
 required_for_release = true
 """
             new_slice = """[[slice]]
-id = "S17"
-title = "lock screen and session/power controls"
+id = "S18"
+title = "NetworkManager connectivity experience"
 status = "complete"
 depends_on = ["S16"]
-evidence_prs = [999999]
+evidence_prs = [999998]
+required_for_release = true
+"""
+            self.assertIn(old_slice, text)
+            contract.write_text(text.replace(old_slice, new_slice, 1), encoding="utf-8")
+
+            ready = self._run_slice_graph(root, "ready", "--json")
+            self.assertEqual(ready.returncode, 0, ready.stderr)
+            ready_ids = [item["id"] for item in json.loads(ready.stdout)]
+            self.assertNotIn("S18", ready_ids)
+            self.assertIn("S17", ready_ids)
+
+            checker = self._run_checker(root)
+            self.assertNotEqual(checker.returncode, 0)
+            self.assertIn("completed slice identities drifted", checker.stderr)
+
+    def test_v010_completed_identity_floor_cannot_be_swapped_at_same_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8")
+            s16_old = '''id = "S16"
+title = "first-party panel, tray, status and workstation entry points"
+status = "complete"
+depends_on = ["S15"]
+evidence_prs = [187]'''
+            s16_new = '''id = "S16"
+title = "first-party panel, tray, status and workstation entry points"
+status = "planned"
+depends_on = ["S15"]
+evidence_prs = []'''
+            s18_old = '''id = "S18"
+title = "NetworkManager connectivity experience"
+status = "planned"
+depends_on = ["S16"]
+evidence_prs = []'''
+            s18_new = '''id = "S18"
+title = "NetworkManager connectivity experience"
+status = "complete"
+depends_on = ["S16"]
+evidence_prs = [999996]'''
+            self.assertIn(s16_old, text)
+            self.assertIn(s18_old, text)
+            text = text.replace(s16_old, s16_new, 1).replace(s18_old, s18_new, 1)
+            contract.write_text(text, encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("completed slice identities drifted", result.stderr)
+
+    def test_v010_completed_slice_must_have_completed_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8")
+            text = text.replace("completed_slice_count = 16", "completed_slice_count = 17", 1)
+            old_slice = """[[slice]]
+id = "S21"
+title = "display, brightness, power and removable-storage experience"
+status = "planned"
+depends_on = ["S17"]
+evidence_prs = []
+required_for_release = true
+"""
+            new_slice = """[[slice]]
+id = "S21"
+title = "display, brightness, power and removable-storage experience"
+status = "complete"
+depends_on = ["S17"]
+evidence_prs = [999997]
 required_for_release = true
 """
             self.assertIn(old_slice, text)
             contract.write_text(text.replace(old_slice, new_slice, 1), encoding="utf-8")
 
             result = self._run_checker(root)
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "S21: completed slice has incomplete dependencies: S17",
+                result.stderr,
+            )
+
+    def test_v010_slice_dependency_cycle_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8")
+            marker = """id = "S17"
+title = "lock screen and session/power controls"
+status = "planned"
+depends_on = ["S16"]"""
+            replacement = """id = "S17"
+title = "lock screen and session/power controls"
+status = "planned"
+depends_on = ["S21"]"""
+            self.assertIn(marker, text)
+            contract.write_text(text.replace(marker, replacement, 1), encoding="utf-8")
+
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("slice dependency graph contains cycle", result.stderr)
+
+    def test_v010_malformed_slice_status_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8")
+            self.assertIn('status = "planned"', text)
+            contract.write_text(
+                text.replace('status = "planned"', 'status = ["planned"]', 1),
+                encoding="utf-8",
+            )
+            for command in (("ready",), ("waves",), ("explain", "S17")):
+                result = self._run_slice_graph(root, *command)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("status must be complete or planned", result.stderr)
+            checker = self._run_checker(root)
+            self.assertNotEqual(checker.returncode, 0)
+            self.assertIn("status must be complete or planned", checker.stderr)
+
+    def test_v010_slice_ready_frontier_and_execution_waves_are_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+
+            ready = self._run_slice_graph(root, "ready", "--json")
+            self.assertEqual(ready.returncode, 0, ready.stderr)
+            ready_ids = [item["id"] for item in json.loads(ready.stdout)]
+            self.assertEqual(
+                ready_ids,
+                ["S17", "S18", "S19", "S20", "S22", "S23", "S25", "S26"],
+            )
+
+            waves = self._run_slice_graph(root, "waves", "--json")
+            self.assertEqual(waves.returncode, 0, waves.stderr)
+            wave_ids = [
+                [item["id"] for item in wave]
+                for wave in json.loads(waves.stdout)
+            ]
+            self.assertEqual(
+                wave_ids,
+                [
+                    ["S17", "S18", "S19", "S20", "S22", "S23", "S25", "S26"],
+                    ["S21", "S24"],
+                    ["S27"],
+                    ["S28"],
+                    ["S29"],
+                    ["S30"],
+                    ["S31"],
+                    ["S32"],
+                ],
+            )
+
+    def test_v010_linear_next_slice_field_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8").replace(
+                'completed_slice_count = 16\n',
+                'completed_slice_count = 16\nnext_slice = "S17"\n',
+                1,
+            )
+            contract.write_text(text, encoding="utf-8")
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must not encode a linear next_slice", result.stderr)
+
+    def test_v010_qualification_watches_slice_graph_scheduler(self) -> None:
+        workflow = (
+            ROOT / ".github/workflows/v010-qualification.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn('- "tools/v010_slice_graph.py"', workflow)
+
+    def test_v010_declared_dependency_graph_cannot_be_silently_weakened(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-slices.toml"
+            text = contract.read_text(encoding="utf-8")
+            marker = """id = "S24"
+title = "updates, snapshots, rollback and recovery experience"
+status = "planned"
+depends_on = ["S23"]"""
+            replacement = """id = "S24"
+title = "updates, snapshots, rollback and recovery experience"
+status = "planned"
+depends_on = ["S16"]"""
+            self.assertIn(marker, text)
+            contract.write_text(text.replace(marker, replacement, 1), encoding="utf-8")
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("S24: slice dependency graph drifted", result.stderr)
 
     def test_v010_release_candidate_rejects_incomplete_slices(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -590,7 +796,6 @@ required_for_release = true
                 "released v0.10 requires all release-required slices complete",
                 result.stderr,
             )
-            self.assertIn("released v0.10 must not retain a next_slice", result.stderr)
 
 
     def _promote_v010_fixture_to_released(self, root: Path) -> None:
@@ -626,9 +831,22 @@ required_for_release = true
         contract = root / "contracts/v010-workstation-slices.toml"
         text = contract.read_text(encoding="utf-8")
         text = text.replace("completed_slice_count = 16", "completed_slice_count = 32", 1)
-        text = text.replace('next_slice = "S17"', 'next_slice = ""', 1)
-        text = text.replace('status = "planned"', 'status = "complete"')
-        text = text.replace("evidence_prs = []", "evidence_prs = [999999]")
+        for index in range(17, 33):
+            slice_id = f"S{index:02d}"
+            pattern = re.compile(
+                rf'(?ms)^\[\[slice\]\]\nid = "{slice_id}"\n.*?(?=^\[\[slice\]\]|\Z)'
+            )
+            match = pattern.search(text)
+            self.assertIsNotNone(match, f"missing {slice_id}")
+            assert match is not None
+            block = match.group(0)
+            block = block.replace('status = "planned"', 'status = "complete"', 1)
+            block = block.replace(
+                "evidence_prs = []",
+                f"evidence_prs = [{990000 + index}]",
+                1,
+            )
+            text = text[: match.start()] + block + text[match.end() :]
         contract.write_text(text, encoding="utf-8")
 
     def test_v010_slice_evidence_rejects_duplicate_pr_lineage(self) -> None:
