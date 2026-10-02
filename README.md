@@ -321,6 +321,8 @@ cargo xtask check
 cargo xtask acceptance-list
 cargo xtask vm-plan
 cargo xtask image-plan
+cargo xtask slices-ready
+cargo xtask slices-waves
 ```
 
 The grand development foundation includes checkpointed bootstrap, migrations, coordinated updates, config ownership/drift, sanitized hardware evidence, disposable QEMU/KVM acceptance, visual-regression contracts, exact-SHA release candidate proof, build/publish separation, and independent release-asset verification.

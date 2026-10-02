@@ -1080,7 +1080,6 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             rewritten.append("[[slice]]" + block)
         text = "".join(rewritten)
         text = text.replace("completed_slice_count = 16", "completed_slice_count = 28", 1)
-        text = text.replace('next_slice = "S17"', 'next_slice = "S29"', 1)
         path.write_text(text, encoding="utf-8")
 
     def _write_complete_experience_evidence(
@@ -2674,7 +2673,6 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 rewritten.append("[[slice]]" + block)
             text = "".join(rewritten)
             text = text.replace("completed_slice_count = 28", "completed_slice_count = 27", 1)
-            text = text.replace('next_slice = "S29"', 'next_slice = "S28"', 1)
             slices.write_text(text, encoding="utf-8")
 
             result = self._run(root)

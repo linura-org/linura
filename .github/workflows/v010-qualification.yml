@@ -70,6 +70,7 @@ on:
       - "tools/check_machine_classes.py"
       - "tools/check_operation_semantics.py"
       - "tools/check_roadmap.py"
+      - "tools/v010_slice_graph.py"
       - "tools/check_v010_workstation_qualification.py"
       - "tests/tooling/test_roadmap.py"
       - "tests/tooling/test_operation_semantics.py"

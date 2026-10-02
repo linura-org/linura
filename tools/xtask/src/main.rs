@@ -97,6 +97,8 @@ fn print_help() {
     println!("  acceptance-list    list disposable-machine acceptance scenarios");
     println!("  vm-plan            print QEMU command for a qcow2 image");
     println!("  image-plan         print Arch image build stages");
+    println!("  slices-ready       list v0.10 slices whose dependencies are complete");
+    println!("  slices-waves       print deterministic v0.10 dependency waves");
 }
 
 fn main() -> ExitCode {
@@ -107,6 +109,8 @@ fn main() -> ExitCode {
         "acceptance-list" => run("python3", &["tools/acceptance.py", "list"]),
         "vm-plan" => run("python3", &["tools/vm.py", "plan"]),
         "image-plan" => run("python3", &["tools/image.py", "plan"]),
+        "slices-ready" => run("python3", &["tools/v010_slice_graph.py", "ready"]),
+        "slices-waves" => run("python3", &["tools/v010_slice_graph.py", "waves"]),
         "help" | "--help" | "-h" => {
             print_help();
             Ok(())

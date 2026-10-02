@@ -1,10 +1,11 @@
-schema_version = 1
+schema_version = 2
 milestone = "v0.10.0"
 target = "complete-experimental-workstation"
 slice_count = 32
 completed_slice_count = 16
-next_slice = "S17"
-completion_policy = "contiguous-prefix-with-merged-pr-evidence"
+completion_policy = "dependency-closed-with-merged-pr-evidence"
+scheduling_policy = "dependency-dag"
+integration_policy = "dependency-ordered"
 scope_change_policy = "explicit-roadmap-rebaseline"
 
 [[slice]]
@@ -147,7 +148,7 @@ required_for_release = true
 id = "S18"
 title = "NetworkManager connectivity experience"
 status = "planned"
-depends_on = ["S17"]
+depends_on = ["S16"]
 evidence_prs = []
 required_for_release = true
 
@@ -155,7 +156,7 @@ required_for_release = true
 id = "S19"
 title = "BlueZ Bluetooth experience"
 status = "planned"
-depends_on = ["S18"]
+depends_on = ["S16"]
 evidence_prs = []
 required_for_release = true
 
@@ -163,7 +164,7 @@ required_for_release = true
 id = "S20"
 title = "complete audio and media experience"
 status = "planned"
-depends_on = ["S19"]
+depends_on = ["S16"]
 evidence_prs = []
 required_for_release = true
 
@@ -171,7 +172,7 @@ required_for_release = true
 id = "S21"
 title = "display, brightness, power and removable-storage experience"
 status = "planned"
-depends_on = ["S20"]
+depends_on = ["S17"]
 evidence_prs = []
 required_for_release = true
 
@@ -179,7 +180,7 @@ required_for_release = true
 id = "S22"
 title = "desktop utilities, screenshot/recording and clipboard history"
 status = "planned"
-depends_on = ["S21"]
+depends_on = ["S16"]
 evidence_prs = []
 required_for_release = true
 
@@ -187,7 +188,7 @@ required_for_release = true
 id = "S23"
 title = "applications, packages and default-app management"
 status = "planned"
-depends_on = ["S22"]
+depends_on = ["S16"]
 evidence_prs = []
 required_for_release = true
 
@@ -203,7 +204,7 @@ required_for_release = true
 id = "S25"
 title = "themes, wallpaper, fonts, icons and personalization"
 status = "planned"
-depends_on = ["S24"]
+depends_on = ["S16"]
 evidence_prs = []
 required_for_release = true
 
@@ -211,7 +212,7 @@ required_for_release = true
 id = "S26"
 title = "Library, Setups and MachineProfiles workstation workflows"
 status = "planned"
-depends_on = ["S25"]
+depends_on = ["S16"]
 evidence_prs = []
 required_for_release = true
 
@@ -219,7 +220,7 @@ required_for_release = true
 id = "S27"
 title = "declarative configuration, manual/no-AI and agent convergence"
 status = "planned"
-depends_on = ["S26"]
+depends_on = ["S17", "S18", "S19", "S20", "S21", "S22", "S23", "S24", "S25", "S26"]
 evidence_prs = []
 required_for_release = true
 

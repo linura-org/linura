@@ -16,6 +16,7 @@ from release_contract import (
     ContractError as ReleaseContractError,
     validate_release_intent,
 )
+from v010_slice_graph import validate_graph as validate_v010_slice_graph
 
 VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 VALID_STATUS = {"released", "planned"}
@@ -33,7 +34,11 @@ V010_QUALIFICATION_CONTRACT = "contracts/v010-workstation-qualification.toml"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 V010_SLICE_COUNT = 32
-V010_MIN_COMPLETED_SLICE_COUNT = 14
+V010_MIN_COMPLETED_SLICE_COUNT = 16
+V010_EXPECTED_COMPLETED_SLICE_IDS = (
+    "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08",
+    "S09", "S10", "S11", "S12", "S13", "S14", "S15", "S16",
+)
 V010_SLICE_TITLES = (
     "v0.10 workstation contract and qualification foundation",
     "typed arch-hyprland-v1 PlatformProfile compatibility",
@@ -67,6 +72,40 @@ V010_SLICE_TITLES = (
     "Q11 maintained real Arch/Hyprland hardware qualification",
     "Q12/Q13 recovery, power-loss and workstation security qualification",
     "Q14/Q15 inherited qualification, support promotion and release closure",
+)
+V010_SLICE_DEPENDENCIES = (
+    (),
+    ("S01",),
+    ("S02",),
+    ("S03",),
+    ("S04",),
+    ("S05",),
+    ("S06",),
+    ("S07",),
+    ("S08",),
+    ("S09",),
+    ("S10",),
+    ("S11",),
+    ("S12",),
+    ("S13",),
+    ("S14",),
+    ("S15",),
+    ("S16",),
+    ("S16",),
+    ("S16",),
+    ("S16",),
+    ("S17",),
+    ("S16",),
+    ("S16",),
+    ("S23",),
+    ("S16",),
+    ("S16",),
+    ("S17", "S18", "S19", "S20", "S21", "S22", "S23", "S24", "S25", "S26"),
+    ("S27",),
+    ("S28",),
+    ("S29",),
+    ("S30",),
+    ("S31",),
 )
 
 
@@ -207,14 +246,20 @@ def validate_v010_slice_contract(
     except Exception as error:
         return [f"invalid {V010_SLICE_CONTRACT}: {error}"]
 
-    if contract.get("schema_version") != 1:
-        failures.append("v0.10 slice contract schema_version must remain 1")
+    if contract.get("schema_version") != 2:
+        failures.append("v0.10 slice contract schema_version must remain 2")
     if contract.get("milestone") != "v0.10.0":
         failures.append("v0.10 slice contract milestone must remain v0.10.0")
     if contract.get("target") != "complete-experimental-workstation":
         failures.append("v0.10 slice contract target must remain complete-experimental-workstation")
-    if contract.get("completion_policy") != "contiguous-prefix-with-merged-pr-evidence":
+    if contract.get("completion_policy") != "dependency-closed-with-merged-pr-evidence":
         failures.append("v0.10 slice completion policy drifted")
+    if contract.get("scheduling_policy") != "dependency-dag":
+        failures.append("v0.10 slice scheduling policy must remain dependency-dag")
+    if contract.get("integration_policy") != "dependency-ordered":
+        failures.append("v0.10 slice integration policy must remain dependency-ordered")
+    if "next_slice" in contract:
+        failures.append("v0.10 slice DAG must not encode a linear next_slice")
     if contract.get("scope_change_policy") != "explicit-roadmap-rebaseline":
         failures.append("v0.10 slice scope changes must require explicit roadmap rebaseline")
 
@@ -224,15 +269,20 @@ def validate_v010_slice_contract(
     if len(slices) != V010_SLICE_COUNT or contract.get("slice_count") != V010_SLICE_COUNT:
         failures.append(f"v0.10 slice contract must remain exactly {V010_SLICE_COUNT} slices")
 
+    graph_failures = validate_v010_slice_graph(contract)
+    failures.extend(f"v0.10 slice graph: {failure}" for failure in graph_failures)
+
     expected_ids = [f"S{index:02d}" for index in range(1, V010_SLICE_COUNT + 1)]
     actual_ids: list[str] = []
     completed = 0
-    seen_planned = False
+    completed_ids: list[str] = []
     seen_evidence_prs: dict[int, str] = {}
+
     for index, item in enumerate(slices):
         if not isinstance(item, dict):
             failures.append(f"v0.10 slice #{index + 1} must be a table")
             continue
+
         slice_id = item.get("id")
         actual_ids.append(slice_id if isinstance(slice_id, str) else "")
         title = item.get("title")
@@ -240,18 +290,27 @@ def validate_v010_slice_contract(
         dependencies = item.get("depends_on")
         evidence = item.get("evidence_prs")
         expected_title = V010_SLICE_TITLES[index] if index < len(V010_SLICE_TITLES) else None
+        expected_dependencies = (
+            list(V010_SLICE_DEPENDENCIES[index])
+            if index < len(V010_SLICE_DEPENDENCIES)
+            else None
+        )
+
         if title != expected_title:
             failures.append(
                 f"{slice_id or index + 1}: slice title/scope drifted; "
                 f"expected {expected_title!r}, found {title!r}"
             )
-        if status not in {"complete", "planned"}:
+        if not isinstance(status, str) or status not in {"complete", "planned"}:
             failures.append(f"{slice_id or index + 1}: slice status must be complete or planned")
         if item.get("required_for_release") is not True:
             failures.append(f"{slice_id or index + 1}: every v0.10 slice must remain required_for_release")
-        expected_dep = [] if index == 0 else [expected_ids[index - 1]]
-        if dependencies != expected_dep:
-            failures.append(f"{slice_id or index + 1}: slice dependency must preserve sequential ledger order")
+        if dependencies != expected_dependencies:
+            failures.append(
+                f"{slice_id or index + 1}: slice dependency graph drifted; "
+                f"expected {expected_dependencies!r}, found {dependencies!r}"
+            )
+
         if not isinstance(evidence, list) or not all(
             type(value) is int and value > 0 for value in evidence
         ):
@@ -265,21 +324,29 @@ def validate_v010_slice_contract(
                 )
             else:
                 seen_evidence_prs[pr_number] = str(slice_id or index + 1)
+
         if status == "complete":
-            if seen_planned:
-                failures.append("v0.10 completed slices must remain a contiguous prefix")
             completed += 1
+            if isinstance(slice_id, str):
+                completed_ids.append(slice_id)
             if not evidence:
                 failures.append(f"{slice_id or index + 1}: completed slice requires merged-PR evidence")
-        elif status == "planned":
-            seen_planned = True
-            if evidence:
-                failures.append(f"{slice_id or index + 1}: planned slice must not carry completion evidence")
+        elif status == "planned" and evidence:
+            failures.append(f"{slice_id or index + 1}: planned slice must not carry completion evidence")
 
     if actual_ids != expected_ids:
         failures.append("v0.10 slice IDs/order drifted from S01..S32")
     if contract.get("completed_slice_count") != completed:
         failures.append("v0.10 completed_slice_count does not match slice statuses")
+    if tuple(completed_ids) != V010_EXPECTED_COMPLETED_SLICE_IDS:
+        failures.append(
+            "v0.10 completed slice identities drifted; intentional completion progress "
+            "must advance V010_EXPECTED_COMPLETED_SLICE_IDS"
+        )
+    if completed < V010_MIN_COMPLETED_SLICE_COUNT:
+        failures.append(
+            f"v0.10 completed slice set cannot regress below {V010_MIN_COMPLETED_SLICE_COUNT}"
+        )
 
     if milestone_status == "released" or require_release_complete:
         release_label = (
@@ -305,20 +372,7 @@ def validate_v010_slice_contract(
             failures.append(
                 f"{release_label} must have all {V010_SLICE_COUNT} workstation slices complete"
             )
-        if contract.get("next_slice") not in {None, ""}:
-            failures.append(f"{release_label} must not retain a next_slice")
-    else:
-        if completed < V010_MIN_COMPLETED_SLICE_COUNT:
-            failures.append(
-                f"v0.10 completed slice prefix cannot regress below {V010_MIN_COMPLETED_SLICE_COUNT}"
-            )
-        if completed < len(slices):
-            next_item = slices[completed]
-            next_id = next_item.get("id") if isinstance(next_item, dict) else None
-            if next_id != contract.get("next_slice"):
-                failures.append("v0.10 next_slice must identify the first planned slice")
-        elif contract.get("next_slice") not in {None, ""}:
-            failures.append("v0.10 next_slice must be empty after all slices complete")
+
     return failures
 
 
