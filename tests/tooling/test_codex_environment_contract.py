@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -152,6 +153,23 @@ class CodexEnvironmentContractTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 42, completed.stderr)
         self.assertIsNone(basename)
         self.assertFalse(bootstrap_dir_exists)
+
+    def test_bindings_recreation_drops_contaminated_cache(self) -> None:
+        setup = (ROOT / "scripts/setup_codex_environment.sh").read_text(encoding="utf-8")
+        self.assertIn('python3 -m venv --clear "$python_root"', setup)
+        self.assertIn('[[ -L "$TOOL_ROOT" || -L "$python_root" ]]', setup)
+        self.assertIn("--no-cache-dir --require-hashes --only-binary=:all: --no-deps", setup)
+        self.assertIn('.linura-bindings-lock-sha256', setup)
+        with tempfile.TemporaryDirectory() as temp:
+            environment = Path(temp) / "python"
+            subprocess.run([sys.executable, "-m", "venv", str(environment)],
+                           check=True, capture_output=True, text=True)
+            stale = environment / "lib/python-stale-contamination"
+            stale.parent.mkdir(exist_ok=True)
+            stale.write_text("undeclared package survives\n", encoding="utf-8")
+            subprocess.run([sys.executable, "-m", "venv", "--clear", str(environment)],
+                           check=True, capture_output=True, text=True)
+            self.assertFalse(stale.exists())
 
     def test_fresh_host_does_not_require_preinstalled_rustup(self) -> None:
         setup = (ROOT / "scripts/setup_codex_environment.sh").read_text(encoding="utf-8")

@@ -73,6 +73,15 @@ Implement that by converting human/model input into typed intent and determinist
 9. Update ADR/RFC and threat model for contract or trust-boundary changes.
 10. Run the repository quality gate.
 
+## Codex repository workflow
+
+- Read `docs/codex-development.md` for setup/maintenance, readiness profiles and commands across the repository.
+- Use `python3 tools/codex/doctor.py --all` to inventory environment gaps; its report is not test evidence.
+- Use `bash scripts/run_codex.sh cargo xtask check` when setup's PATH exports are absent from task shells.
+- Scoped `AGENTS.md` files route specialized work to existing guides. When starting at the root, read the scoped file for every directory you modify; automatic discovery may only cover the current working-directory ancestors.
+- Implement → internal architecture/code/adversarial review → fix findings → compact to one clean commit → full gates → Codex review → fix genuinely new findings → merge only when green. Required validation that is blocked keeps the PR draft; do not request final review on incomplete evidence.
+- Work only on the assigned PR/scope. Do not create duplicate PRs, weaken checks, invent qualification evidence, add production credentials or bypass repository protections.
+
 ## Task-specific guides
 
 Before changing a specialized subsystem, read the corresponding guide under `agents/skills/`:
