@@ -20,6 +20,10 @@ on:
       - "contracts/v010-shell-runtime-qualification.toml"
       - "contracts/v010-shell-runtime-substrate.toml"
       - "apps/linura-shell/**"
+      # Presentation-only contributor guidance is not shell implementation.
+      # GitHub evaluates exclusions in order; later functional paths still match.
+      - "!apps/linura-shell/AGENTS.md"
+      - "!apps/linura-shell/README.md"
       - "apps/linurad/**"
       - "packaging/systemd/user/linura-shell.service"
       - "packaging/systemd/user/linurad.service"

@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+readonly REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+# shellcheck source=scripts/lib/codex_source_state.sh
+source scripts/lib/codex_source_state.sh
+INITIAL_SOURCE_STATE="$(codex_source_state)"
+readonly INITIAL_SOURCE_STATE
+trap codex_source_state_exit_guard EXIT
+
+case "${1:-}" in
+  "") [[ $# -eq 0 ]] || exit 2 ;;
+  --full) [[ $# -eq 1 ]] || exit 2 ;;
+  *) echo 'usage: bash scripts/preflight_codex_environment.sh [--full]' >&2; exit 2 ;;
+esac
+export RUSTUP_AUTO_INSTALL=0
+
 readonly VERSION_CONTRACT="tools/codex/versions.env"
 if [[ ! -f "$VERSION_CONTRACT" ]]; then
   echo "missing Codex toolchain contract: $VERSION_CONTRACT" >&2
@@ -68,7 +83,7 @@ require_supported_glibc() {
   printf '%s\n' "$version_text"
 }
 
-for command_name in bash cargo-audit cc getconf git python3 rustup uname; do
+for command_name in bash cargo-audit cc getconf git python3 rustup sha256sum uname; do
   require_command "$command_name"
 done
 
@@ -137,6 +152,10 @@ if ! reports_exact_version "$ACTIONLINT_VERSION" "$actionlint_bin" -version; the
   exit 1
 fi
 
+# Presence of the language toolchain does not prove its quality components exist.
+rustup run "$RUST_TOOLCHAIN" cargo fmt --version >/dev/null
+rustup run "$RUST_TOOLCHAIN" cargo clippy --version >/dev/null
+
 # Prove the exact dependency graph is locally available without network mutation.
 "$cargo_bin" metadata --locked --offline --format-version 1 >/dev/null
 
@@ -144,16 +163,11 @@ fi
 "$actionlint_bin" -color
 
 # Environment verification must not change tracked source.
-git diff --exit-code -- .
-git diff --cached --exit-code -- .
+codex_verify_source_state "$INITIAL_SOURCE_STATE"
 
 if [[ "${1:-}" == "--full" ]]; then
   CARGO_NET_OFFLINE=true "$cargo_bin" xtask check
-  git diff --exit-code -- .
-  git diff --cached --exit-code -- .
-elif [[ $# -gt 0 ]]; then
-  echo "usage: bash scripts/preflight_codex_environment.sh [--full]" >&2
-  exit 2
+  codex_verify_source_state "$INITIAL_SOURCE_STATE"
 fi
 
 printf 'Linura Codex environment preflight passed.\n'

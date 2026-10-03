@@ -1,0 +1,101 @@
+name: Codex environment
+
+on:
+  pull_request:
+    paths:
+      - "AGENTS.md"
+      - "**/AGENTS.md"
+      - "CONTRIBUTING.md"
+      - "docs/codex-development.md"
+      - "docs/development-infrastructure.md"
+      - "scripts/*codex*.sh"
+      - "scripts/lib/*.sh"
+      - "tools/codex/**"
+      - "tests/tooling/test_codex*.py"
+      - "tools/check_validation_gates.py"
+      - "tests/tooling/test_validation_gates.py"
+      - "bindings/python/build-requirements.lock"
+      - "rust-toolchain.toml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - ".github/workflows/codex-environment.yml"
+  push:
+    branches: [main]
+    paths:
+      - "AGENTS.md"
+      - "**/AGENTS.md"
+      - "CONTRIBUTING.md"
+      - "docs/codex-development.md"
+      - "docs/development-infrastructure.md"
+      - "scripts/*codex*.sh"
+      - "scripts/lib/*.sh"
+      - "tools/codex/**"
+      - "tests/tooling/test_codex*.py"
+      - "tools/check_validation_gates.py"
+      - "tests/tooling/test_validation_gates.py"
+      - "bindings/python/build-requirements.lock"
+      - "rust-toolchain.toml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - ".github/workflows/codex-environment.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-environment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare isolated environment
+        run: |
+          set -euo pipefail
+          task_home="$RUNNER_TEMP/linura-codex-home"
+          mkdir -p "$task_home"
+          {
+            printf 'HOME=%s\n' "$task_home"
+            printf 'CARGO_HOME=%s/.cargo\n' "$task_home"
+            printf 'RUSTUP_HOME=%s/.rustup\n' "$task_home"
+          } >> "$GITHUB_ENV"
+      - name: Bootstrap from host primitives
+        run: PATH=/usr/bin:/bin bash scripts/setup_codex_environment.sh --bindings
+      - name: Inject stale bindings distribution before maintenance
+        run: |
+          set -euo pipefail
+          "$HOME/.local/linura-tools/python/bin/python3" - <<'PY'
+          import pathlib
+          import sysconfig
+
+          site = pathlib.Path(sysconfig.get_paths()["purelib"])
+          stale = site / "linura-contaminant-0.0.1.dist-info"
+          stale.mkdir()
+          (stale / "METADATA").write_text(
+              "Metadata-Version: 2.1\nName: linura-contaminant\nVersion: 0.0.1\n"
+          )
+          PY
+          if python3 tools/codex/doctor.py --profile bindings --json > "$RUNNER_TEMP/contaminated-bindings.json"; then
+            echo "doctor accepted an undeclared cached distribution" >&2
+            exit 1
+          fi
+      - name: Resume cached environment at selected checkout
+        run: PATH=/usr/bin:/bin bash scripts/maintain_codex_environment.sh --bindings
+      - name: Verify maintenance removed contaminated distributions
+        run: |
+          set -euo pipefail
+          python3 tools/codex/doctor.py --profile bindings --json > "$RUNNER_TEMP/clean-bindings.json"
+          "$HOME/.local/linura-tools/python/bin/python3" - <<'PY'
+          import importlib.metadata as metadata
+          assert all(dist.metadata["Name"] != "linura-contaminant" for dist in metadata.distributions())
+          PY
+      - name: Verify from a separate task process
+        run: |
+          set -euo pipefail
+          PATH=/usr/bin:/bin bash scripts/preflight_codex_environment.sh --full
+          PATH=/usr/bin:/bin bash scripts/run_codex.sh cargo --version
+          "$HOME/.local/linura-tools/python/bin/python3" -m pip wheel \
+            --disable-pip-version-check --no-index --no-deps --no-build-isolation \
+            --wheel-dir "$RUNNER_TEMP/linura-python-wheel" ./bindings/python
+          PYTHONPATH=bindings/python/src python3 -m unittest discover \
+            -s bindings/python/tests -p 'test_*.py'

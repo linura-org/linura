@@ -62,6 +62,8 @@ on:
       - "tools/check_machine_classes.py"
       - "tools/check_operation_semantics.py"
       - "tools/image.py"
+      - "tools/check_validation_gates.py"
+      - "tests/tooling/test_validation_gates.py"
       - "tools/codex/versions.env"
       - "rust-toolchain.toml"
       - "Cargo.toml"

@@ -22,6 +22,8 @@ Then:
 
 You do **not** need to read every architecture document before fixing a typo, improving a test, or making a routine internal change. If the change expands in scope, follow the deeper contribution path below.
 
+Codex contributors should also follow [Codex development](docs/codex-development.md) for environment preparation, capability diagnostics and task commands.
+
 Useful discovery commands:
 
 ```bash

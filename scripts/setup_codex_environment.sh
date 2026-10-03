@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+readonly REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+# shellcheck source=scripts/lib/codex_source_state.sh
+source scripts/lib/codex_source_state.sh
+INITIAL_SOURCE_STATE="$(codex_source_state)"
+readonly INITIAL_SOURCE_STATE
+trap codex_source_state_exit_guard EXIT
+
+BUILD_BINDINGS=false
+case "${1:-}" in
+  "") [[ $# -eq 0 ]] || exit 2 ;;
+  --bindings) [[ $# -eq 1 ]] || exit 2; BUILD_BINDINGS=true ;;
+  *) echo 'usage: bash scripts/setup_codex_environment.sh [--bindings]' >&2; exit 2 ;;
+esac
+
 # Canonical deterministic setup for Linura Codex/cloud development environments.
 # This script intentionally does not apt-install mutable "latest" packages.
 # Host primitives must be supplied by the configured Codex base environment.
@@ -201,9 +216,35 @@ fi
 # Warm the exact Cargo dependency graph without modifying Cargo.lock.
 cargo fetch --locked
 
+if [[ "$BUILD_BINDINGS" == true ]]; then
+  python_root="$TOOL_ROOT/python"
+  # A version-only pip install over an existing venv preserves undeclared wheels.
+  if [[ -L "$TOOL_ROOT" || -L "$python_root" ]]; then
+    echo 'refusing to clear a symlinked Codex bindings environment' >&2
+    exit 1
+  fi
+  # Clear the entire isolated environment on *every* setup/maintenance pass:
+  # a changed lock, a contaminated site-packages tree, or a failed prior run
+  # must never be accepted as a trusted cached build environment.
+  python3 -m venv --clear "$python_root"
+  "$python_root/bin/python3" -m pip install \
+    --disable-pip-version-check --no-cache-dir --require-hashes --only-binary=:all: --no-deps \
+    -r bindings/python/build-requirements.lock
+  # Written only after successful installation. The doctor verifies the
+  # lock digest *and* the complete installed distribution/version set.
+  sha256sum bindings/python/build-requirements.lock |
+    awk '{print $1}' > "$python_root/.linura-bindings-lock-sha256"
+fi
+
+# Run the same task-time preflight in a separate process. CI also runs it from
+# a host-only PATH to verify discovery without inherited setup exports.
+bash scripts/preflight_codex_environment.sh
+if [[ "$BUILD_BINDINGS" == true ]]; then
+  python3 tools/codex/doctor.py --profile bindings
+fi
+
 # Setup is not allowed to repair or rewrite tracked repository state.
-git diff --exit-code -- .
-git diff --cached --exit-code -- .
+codex_verify_source_state "$INITIAL_SOURCE_STATE"
 
 printf 'Linura Codex environment ready.\n'
 printf '  host: %s-%s (%s)\n' "$actual_os" "$actual_arch" "$glibc_version"
