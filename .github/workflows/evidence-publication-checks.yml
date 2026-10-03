@@ -1,0 +1,33 @@
+name: Evidence publication contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/evidence-publication-checks.yml"
+      - ".github/workflows/publish-qualification-evidence.yml"
+      - "contracts/evidence-publication.toml"
+      - "tools/evidence_publication.py"
+      - "tests/tooling/test_evidence_publication.py"
+      - "docs/qualification/evidence-publication.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/evidence-publication-checks.yml"
+      - ".github/workflows/publish-qualification-evidence.yml"
+      - "contracts/evidence-publication.toml"
+      - "tools/evidence_publication.py"
+      - "tests/tooling/test_evidence_publication.py"
+      - "docs/qualification/evidence-publication.md"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test admission, provenance, privacy and R2 publishing behavior
+        run: python3 -m unittest -v tests.tooling.test_evidence_publication
