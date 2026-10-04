@@ -576,8 +576,12 @@ class ValidationGateTests(unittest.TestCase):
         for action in ("github/codeql-action/init@",
                        "github/codeql-action/analyze@"):
             with self.subTest(action=action):
-                old = action + "1c5b675653bb5c22dbe9b12b556ec555138e09fd"
-                self.assertIn(old, original)
+                pin = re.search(
+                    r"(?m)^      - uses: " + re.escape(action) +
+                    r"([0-9a-f]{40})(?:\s+#.*)?$", original,
+                )
+                self.assertIsNotNone(pin, action)
+                old = action + pin.group(1)
                 path.write_text(original.replace(old, action + "main", 1),
                                 encoding="utf-8")
                 errors = gates.check(self.root)
@@ -585,6 +589,44 @@ class ValidationGateTests(unittest.TestCase):
                     any("CodeQL missing unconditional SHA-pinned action: " +
                         action in e for e in errors), errors,
                 )
+        path.write_text(original, encoding="utf-8")
+
+    def test_codeql_init_analyze_must_share_one_pinned_revision(self):
+        path = self.root / ".github/workflows/codeql.yml"
+        original = path.read_text(encoding="utf-8")
+        actions = ("github/codeql-action/init@", "github/codeql-action/analyze@")
+        pins = {}
+        for action in actions:
+            match = re.search(
+                r"(?m)^      - uses: " + re.escape(action) +
+                r"([0-9a-f]{40})(?:\s+#.*)?$", original,
+            )
+            self.assertIsNotNone(match, action)
+            pins[action] = match.group(1)
+        self.assertEqual(pins[actions[0]], pins[actions[1]])
+
+        # Exercise a subsequent grouped Dependabot upgrade without modifying
+        # this test: any common immutable revision is valid for this invariant.
+        upgraded_pin = "f" * 40 if pins[actions[0]] != "f" * 40 else "e" * 40
+        upgraded = original
+        for action in actions:
+            upgraded = upgraded.replace(
+                action + pins[action], action + upgraded_pin, 1,
+            )
+        path.write_text(upgraded, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
+        mismatched_pin = "0" * 40 if upgraded_pin != "0" * 40 else "1" * 40
+        for action in actions:
+            with self.subTest(action=action):
+                path.write_text(upgraded.replace(
+                    action + upgraded_pin, action + mismatched_pin, 1,
+                ), encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "CodeQL init/analyze actions must share the same immutable revision"
+                    in err for err in errors
+                ), errors)
         path.write_text(original, encoding="utf-8")
 
     def test_codex_contamination_injection_cannot_exit_early(self):
