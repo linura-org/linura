@@ -186,6 +186,13 @@ version = "1"
 stability = "experimental"
 
 [[contract]]
+id = "schema.v010-maintained-workstation-fixture.v1"
+kind = "json-schema"
+path = "schemas/v010-maintained-workstation-fixture.v1.schema.json"
+version = "1"
+stability = "experimental"
+
+[[contract]]
 id = "schema.visual-baseline.v1"
 kind = "json-schema"
 path = "schemas/visual-baseline.v1.schema.json"

@@ -140,6 +140,12 @@ REQUIRED_BRIDGE = (
     "bool dispatched = false;",
     "pending_.has_value() && !pending_->dispatched",
     "pending_->dispatched = true;",
+    "constexpr int kPreApplyExpiredObservationRetries = 3;",
+    "pending_->expiredObservationRetries",
+    "pending_->expiredObservationRetries\n                        < kPreApplyExpiredObservationRetries",
+    "++pending_->expiredObservationRetries;",
+    "&& !pending_->dispatched\n                    && pending_->expiredObservationRetries",
+    "observe(ObservePurpose::PreApply);",
     "(!canApply() && !canCommitDraft())",
     'QStringLiteral("Audio controls are inactive.")',
     "observe(ObservePurpose::PostApply)",
@@ -464,6 +470,7 @@ def validate(root: Path) -> list[str]:
         "function trayOverflowCount(index)",
         "function activateTrayInlineControl(index, itemIndex)",
         "function openTrayOverflowControl(index)",
+        "function focusTrayOverflowButtonControl(index)",
         "function cancelTrayOverflowControl(index)",
         "function trayOverflowVisible(index)",
         "function trayOverflowButtonFocused(index)",
@@ -473,7 +480,11 @@ def validate(root: Path) -> list[str]:
         "function restoreKeyboardEntry(control, reason)",
         "function focusKeyboardEntry()",
         "function releaseKeyboardEntry()",
+        "function releaseKeyboardEntryForPopup()",
+        "function trayOverflowReadinessState(index, itemIndex)",
+        "function trayOverflowReadinessState(index)",
         "function keyboardEntryFocused()",
+        "&& commandPaletteButton.activeFocus\n                    && commandPaletteButton.Window.active",
         "panel.keyboardNavigationActive = true",
         "target.forceActiveFocus(reason)",
         "return restoreKeyboardEntry(",
@@ -521,13 +532,25 @@ def validate(root: Path) -> list[str]:
         "anchor.adjustment: PopupAdjustment.All",
         "surfaceFormat.opaque: false",
         "grabFocus: true",
+        "id: workspaceFocusRetry",
+        "repeat: true",
+        "++attempts >= 20",
+        "workspaceOverflowWindow.visible = false",
         "id: workspaceOverflowRepeater",
+        "function focusFirstWorkspaceOverflowEntry()",
+        "return item.Window.active",
+        "return item.activeFocus && item.Window.active",
+        "workspaceOverflowWindow.backingWindowVisible",
+        "onBackingWindowVisibleChanged:",
         "function dismissWorkspaceOverflow()",
         "function keyboardRestoreTarget(control)",
         "const target = keyboardRestoreTarget(control)",
         'sequence: "Escape"',
         "context: Qt.WindowShortcut",
-        "onActivated: panel.dismissWorkspaceOverflow()",
+        "Keys.onEscapePressed: event =>",
+        "Keys.onShortcutOverride: event =>",
+        "event.accepted = event.key === Qt.Key_Escape",
+        "panel.dismissWorkspaceOverflow()",
         "id: workspaceOverflowFlickable",
         "function ensureVisible(item)",
         "workspaceOverflowFlickable.ensureVisible(workspaceOverflowEntry)",
@@ -540,6 +563,7 @@ def validate(root: Path) -> list[str]:
         "inlineItemLimit: panel.trayInlineLimit",
         "itemModelOverride: root.trayItemModelOverride",
         "onInteractionStarted: panel.releaseKeyboardEntry()",
+        "onPopupInteractionStarted: panel.releaseKeyboardEntryForPopup()",
         "onKeyboardReturnRequested: control =>",
         "panel.restoreKeyboardEntry(control, Qt.TabFocusReason)",
         "id: centerZone",
@@ -561,7 +585,11 @@ def validate(root: Path) -> list[str]:
         failures.append(
             "Workstation workspace overflow must use one screen-adjusted PopupWindow"
         )
-    if workstation_panel_qml.count('sequence: "Escape"') != 2:
+    if "HyprlandFocusGrab {" in workstation_panel_qml:
+        failures.append(
+            "Workstation workspace overflow must not combine native popup grabbing with a separate Hyprland focus grab"
+        )
+    if workstation_panel_qml.count('sequence: "Escape"') != 1 or workstation_panel_qml.count("Keys.onEscapePressed: event =>") != 1:
         failures.append(
             "Workstation panel must provide Escape for keyboard entry and workspace overflow"
         )
@@ -582,6 +610,32 @@ def validate(root: Path) -> list[str]:
     if "if (workspaceOverflowButton.visible)" in workstation_panel_qml:
         failures.append(
             "Workstation workspace overflow restoration must remain unconditional when its opener disappears"
+        )
+
+    if workstation_panel_qml.count("Qt.callLater(panel.focusFirstWorkspaceOverflowEntry)") != 2:
+        failures.append(
+            "Workstation workspace focus must follow native popup visibility and backing-window mapping"
+        )
+
+    workspace_external_dismissal = (
+        "onVisibleChanged: {\n"
+        "                    if (visible) {\n"
+        "                        Qt.callLater(panel.focusFirstWorkspaceOverflowEntry)\n"
+        "                    } else {\n"
+        "                        workspaceFocusRetry.stop()\n"
+        "                        panel.releaseKeyboardEntry()"
+    )
+    workspace_activation_handoff = (
+        "onClicked: {\n"
+        "                                    panel.releaseKeyboardEntry()\n"
+        "                                    root.workspaceRequested(modelData.id)"
+    )
+    if (
+        workspace_external_dismissal not in workstation_panel_qml
+        or workspace_activation_handoff not in workstation_panel_qml
+    ):
+        failures.append(
+            "Workstation workspace popup must release temporary no-keyboard mode on dismissal and activation"
         )
 
     workspace_model_closure = (
@@ -614,6 +668,26 @@ def validate(root: Path) -> list[str]:
             "Workstation panel side groups must not mirror unbounded implicit widths"
         )
 
+    popup_keyboard_release = (
+        "function releaseKeyboardEntryForPopup() {\n"
+        "                keyboardReleaseTimer.stop()\n"
+    )
+    popup_release_start = workstation_panel_qml.find("function releaseKeyboardEntryForPopup()")
+    popup_release_end = workstation_panel_qml.find("function keyboardEntryFocused()")
+    popup_release_body = (
+        workstation_panel_qml[popup_release_start:popup_release_end]
+        if 0 <= popup_release_start < popup_release_end else ""
+    )
+    if (
+        popup_keyboard_release not in workstation_panel_qml
+        or "panel.keyboardNavigationActive =" in popup_release_body
+        or "panel.keyboardReleasePending = false" not in popup_release_body
+        or "panel.keyboardReleasePending = true" in popup_release_body
+    ):
+        failures.append(
+            "Workstation native popup handoff must preserve the parent keyboard mode without dropping the parent seat focus"
+        )
+
     keyboard_handoff_fragments = (
         (
             "command palette",
@@ -627,8 +701,12 @@ def validate(root: Path) -> list[str]:
         ),
         (
             "workspace overflow",
-            "panel.releaseKeyboardEntry()\n"
+            "panel.releaseKeyboardEntryForPopup()\n"
             "                            panel.openWorkspaceOverflow()",
+        ),
+        (
+            "tray popup",
+            "onPopupInteractionStarted: panel.releaseKeyboardEntryForPopup()",
         ),
         (
             "tray interaction",
@@ -656,6 +734,7 @@ def validate(root: Path) -> list[str]:
         "import Quickshell",
         "import Quickshell.Services.SystemTray",
         "signal interactionStarted()",
+        "signal popupInteractionStarted()",
         "signal keyboardReturnRequested(var control)",
         "property int inlineItemLimit: 4",
         "property var itemModelOverride: null",
@@ -675,21 +754,43 @@ def validate(root: Path) -> list[str]:
         "anchor.adjustment: PopupAdjustment.All",
         "surfaceFormat.opaque: false",
         "grabFocus: true",
+        "id: overflowFocusRetry",
+        "repeat: true",
+        "++attempts >= 20",
+        "Qt.callLater(root.focusFirstOverflowEntry)",
+        "function overflowReadinessState(index)",
+        "onBackingWindowVisibleChanged:",
+        "overflowWindow.backingWindowVisible",
+        "nativeGrabRequested=",
+        "nativeActive=",
+        "root.overflowKeyboardReturnPending = returnKeyboardFocus === true",
+        "if (!root.overflowKeyboardReturnPending)\n                    root.interactionStarted()",
+        "if (root.overflowKeyboardReturnPending && !overflowWindow.visible)",
+        "return overflowButton.activeFocus && overflowButton.Window.active",
+        "return first.activeFocus && first.Window.active",
+        "return entry.Window.active",
+        "&& entry.Window.active\n            && entry.width > 0 && entry.height > 0",
+        "root.interactionStarted()",
+        "return overflowWindow.grabFocus",
         "id: overflowRepeater",
         "function dismissOverflow(returnKeyboardFocus)",
         "function activateInlineControl(index)",
         "function openOverflowControl()",
+        "function focusOverflowButtonControl()",
+        "if (root.overflowButtonFocused())\n            return true",
+        "overflowButton.forceActiveFocus(Qt.TabFocusReason)",
         "function cancelOverflowControl()",
         "function overflowIsVisible()",
         "function overflowButtonFocused()",
         "function activateOverflowControl(index)",
-        'sequence: "Escape"',
-        "context: Qt.WindowShortcut",
-        "onActivated: root.dismissOverflow(true)",
+        "Keys.onEscapePressed: event =>",
+        "Keys.onShortcutOverride: event =>",
+        "event.accepted = event.key === Qt.Key_Escape",
         "id: overflowFlickable",
         "function ensureVisible(item)",
         "overflowFlickable.ensureVisible(overflowEntry)",
         "root.keyboardReturnRequested(overflowButton)",
+        "root.popupInteractionStarted()",
         "id: inlineRepeater",
         "model: root.itemModel",
         "function boundedText(",
@@ -710,6 +811,7 @@ def validate(root: Path) -> list[str]:
         "hostWindow,",
         "root.openMenu(entry.modelData, entry, root.panelWindow)",
         "root.openMenu(modelData, overflowEntry, overflowWindow)",
+        "if (hostWindow === overflowWindow)\n            root.popupInteractionStarted()",
         "item.onlyMenu",
         "item.hasMenu",
         "Accessible.role: Accessible.Button",
@@ -725,6 +827,11 @@ def validate(root: Path) -> list[str]:
     ):
         if fragment not in system_tray_qml:
             failures.append(f"System tray contract missing: {fragment}")
+
+    if system_tray_qml.count("Qt.callLater(root.focusFirstOverflowEntry)") != 2:
+        failures.append(
+            "System tray focus must respond to native popup visibility and backing-window mapping"
+        )
 
     native_menu_host_lifetime = (
         "root.openMenu(modelData, overflowEntry, overflowWindow)\n"
@@ -763,10 +870,36 @@ def validate(root: Path) -> list[str]:
         failures.append(
             "System tray overflow must use one screen-adjusted PopupWindow"
         )
-    if system_tray_qml.count('sequence: "Escape"') != 1:
+    if "HyprlandFocusGrab {" in system_tray_qml:
+        failures.append(
+            "System tray overflow must not combine native popup grabbing with a separate Hyprland focus grab"
+        )
+    if system_tray_qml.count("Keys.onEscapePressed: event =>") != 1 or 'sequence: "Escape"' in system_tray_qml:
         failures.append(
             "System tray overflow must provide exactly one Escape cancellation path"
         )
+    # Qt's WindowShortcut matcher walks QObject parents until a QQuickItem
+    # supplies its native window. Quickshell window proxies do not supply it.
+    shortcut_hosts = (
+        (workstation_panel_qml, "spacing: theme.spacingSm", "id: leftGroup",
+         "onActivated: panel.releaseKeyboardEntry()"),
+    )
+    for text, start, end, activation in shortcut_hosts:
+        host = text.split(start, 1)[-1].split(end, 1)[0] if start in text else ""
+        if 'sequence: "Escape"' not in host or activation not in host:
+            failures.append("Workstation Escape shortcut must bind to its native window content item")
+    for text, entry, cancellation in (
+        (system_tray_qml, "id: overflowEntry", "root.dismissOverflow(true)"),
+        (workstation_panel_qml, "id: workspaceOverflowEntry", "panel.dismissWorkspaceOverflow()"),
+    ):
+        control = text.split(entry, 1)[-1] if entry in text else ""
+        handler = ("Keys.onEscapePressed: event => {\n"
+                   + ("                            " if entry == "id: overflowEntry" else "                                    ")
+                   + "if (!event.isAutoRepeat)\n"
+                   + ("                                " if entry == "id: overflowEntry" else "                                        ")
+                   + cancellation)
+        if handler not in control or "event.accepted = event.key === Qt.Key_Escape" not in control:
+            failures.append("Popup Escape must be handled once by its focused native action row")
     if system_tray_qml.count("overflowFlickable.ensureVisible(overflowEntry)") != 1:
         failures.append(
             "System tray overflow must scroll the focused action into view"

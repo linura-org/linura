@@ -36,6 +36,108 @@ class LinuraShellContractTests(unittest.TestCase):
     def test_repository_shell_contract_is_valid(self) -> None:
         self.assertEqual(check_linura_shell.validate(ROOT), [])
 
+    def test_workspace_focus_waits_for_native_popup_activation(self) -> None:
+        relative = "apps/linura-shell/panel/WorkstationPanel.qml"
+        for original, weakened in (
+            ("return item.Window.active", "return true"),
+            ("return item.activeFocus && item.Window.active", "return item.activeFocus"),
+        ):
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._copy_fixture(root)
+                panel = root / relative
+                source = panel.read_text(encoding="utf-8")
+                self.assertIn(original, source)
+                panel.write_text(source.replace(original, weakened, 1), encoding="utf-8")
+                self.assertIn(
+                    f"Workstation panel contract missing: {original}",
+                    check_linura_shell.validate(root),
+                )
+
+    def test_escape_shortcuts_cannot_move_to_quickshell_window_proxies(self) -> None:
+        import re
+        for relative, activation in (
+            ("apps/linura-shell/panel/WorkstationPanel.qml", "panel.releaseKeyboardEntry()"),
+        ):
+            with self.subTest(activation=activation), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._copy_fixture(root)
+                path = root / relative
+                text = path.read_text(encoding="utf-8")
+                match = re.search(r'Shortcut \{\s*sequence: "Escape"\s*context: Qt.WindowShortcut\s*enabled: [^\n]+\s*onActivated: '
+                                  + re.escape(activation) + r'\s*\}', text)
+                self.assertIsNotNone(match)
+                shortcut = match.group()
+                text = text[:match.start()] + text[match.end():]
+                marker = "PopupWindow {" if activation != "panel.releaseKeyboardEntry()" else "PanelWindow {"
+                self.assertIn(marker, text)
+                path.write_text(text.replace(marker, marker + "\n" + shortcut, 1), encoding="utf-8")
+                self.assertIn("Workstation Escape shortcut must bind to its native window content item",
+                              check_linura_shell.validate(root))
+
+    def test_popup_escape_requires_native_focused_control_handler(self) -> None:
+        for relative in ("apps/linura-shell/tray/SystemTrayView.qml",
+                         "apps/linura-shell/panel/WorkstationPanel.qml"):
+            for marker in ("Keys.onEscapePressed: event =>",
+                           "event.accepted = event.key === Qt.Key_Escape"):
+                with self.subTest(relative=relative, marker=marker), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self._copy_fixture(root)
+                    path = root / relative
+                    text = path.read_text()
+                    self.assertIn(marker, text)
+                    path.write_text(text.replace(marker, "escape-handler-omitted", 1))
+                    self.assertIn("Popup Escape must be handled once by its focused native action row",
+                                  check_linura_shell.validate(root))
+
+    def test_expired_pre_dispatch_observation_retries_without_ever_dispatching(self) -> None:
+        client = (ROOT / "apps/linura-shell/bridge/audio_session_controller.cpp").read_text(
+            encoding="utf-8"
+        )
+        header = (ROOT / "apps/linura-shell/bridge/audio_session_controller.h").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("constexpr int kPreApplyExpiredObservationRetries = 3;", client)
+        self.assertIn("int expiredObservationRetries = 0;", header)
+        self.assertIn("&& !pending_->dispatched", client)
+        self.assertIn("++pending_->expiredObservationRetries;", client)
+        self.assertIn("observe(ObservePurpose::PreApply);", client)
+        self.assertLess(
+            client.index("++pending_->expiredObservationRetries;"),
+            client.index("void AudioSessionController::dispatchEffect()"),
+        )
+        self.assertIn("samePrecondition(pending_->displayed, snapshot)", client)
+
+    def test_expired_pre_dispatch_retry_is_part_of_checked_shell_contract(self) -> None:
+        # Count every retry, bound the count, and forbid post-dispatch replay.
+        for marker, replacement in (
+            ("++pending_->expiredObservationRetries;", "/* retry removed */"),
+            (
+                "pending_->expiredObservationRetries\n"
+                "                        < kPreApplyExpiredObservationRetries",
+                "true /* retry ceiling removed */",
+            ),
+            (
+                "&& !pending_->dispatched\n"
+                "                    && pending_->expiredObservationRetries",
+                "&& true /* post-dispatch guard removed */\n"
+                "                    && pending_->expiredObservationRetries",
+            ),
+        ):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                client = root / "apps/linura-shell/bridge/audio_session_controller.cpp"
+                before = client.read_text(encoding="utf-8")
+                self.assertIn(marker, before)
+                client.write_text(before.replace(marker, replacement, 1), encoding="utf-8")
+                failures = check_linura_shell.validate(root)
+                self.assertTrue(
+                    any("Linura Shell bridge authority contract missing:" in message
+                        for message in failures),
+                    failures,
+                )
+
     def test_workstation_global_shortcuts_must_remain_bound_in_shipped_profile(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -602,6 +704,25 @@ class LinuraShellContractTests(unittest.TestCase):
                 )
             )
 
+    def test_workspace_overflow_preserves_native_popup_focus_grab(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/panel/WorkstationPanel.qml"
+            text = panel.read_text(encoding="utf-8")
+            marker = "grabFocus: true"
+            self.assertIn(marker, text)
+            self.assertNotIn("HyprlandFocusGrab {", text)
+            panel.write_text(
+                text.replace(marker, "grabFocus: false", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("Workstation panel contract missing" in issue
+                    and marker in issue for issue in failures)
+            )
+
     def test_workspace_overflow_escape_restores_focus_to_opener(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -793,6 +914,183 @@ class LinuraShellContractTests(unittest.TestCase):
                     for item in failures
                 )
             )
+
+    def test_system_tray_overflow_preserves_native_popup_focus_grab(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            tray = root / "apps/linura-shell/tray/SystemTrayView.qml"
+            text = tray.read_text(encoding="utf-8")
+            marker = "grabFocus: true"
+            self.assertIn(marker, text)
+            self.assertNotIn("HyprlandFocusGrab {", text)
+            tray.write_text(
+                text.replace(marker, "grabFocus: false", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any("System tray contract missing" in issue
+                    and marker in issue for issue in failures)
+            )
+
+    def test_system_tray_focus_acquisition_follows_native_popup_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            tray = root / "apps/linura-shell/tray/SystemTrayView.qml"
+            text = tray.read_text(encoding="utf-8")
+            marker = "Qt.callLater(root.focusFirstOverflowEntry)"
+            self.assertIn("if (!overflowWindow.visible || !overflowWindow.backingWindowVisible", text)
+            self.assertIn("&& entry.visible && entry.enabled && entry.activeFocus", text)
+            self.assertEqual(text.count(marker), 2)
+            tray.write_text(text.replace(marker, "Qt.callLater(function() {})"), encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(any("System tray contract missing" in item and marker in item
+                                for item in failures))
+
+    def test_workstation_tray_readiness_is_exported_across_component_boundaries(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/panel/WorkstationPanel.qml"
+            text = panel.read_text(encoding="utf-8")
+            marker = "function trayOverflowReadinessState(index, itemIndex)"
+            self.assertIn(marker, text)
+            panel.write_text(text.replace(marker, "function deletedReadinessMethod(index, itemIndex)", 1),
+                             encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(any("Workstation panel contract missing" in issue
+                                and marker in issue for issue in failures))
+
+    def test_tray_popup_must_preserve_parent_seat_focus_until_native_grab(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/panel/WorkstationPanel.qml"
+            text = panel.read_text(encoding="utf-8")
+            start = text.index("function releaseKeyboardEntryForPopup()")
+            end = text.index("function keyboardEntryFocused()", start)
+            block = text[start:end]
+            self.assertNotIn("panel.keyboardNavigationActive =", block)
+            self.assertIn("panel.keyboardReleasePending = false", block)
+            panel.write_text(text[:start]
+                             + block.replace("panel.keyboardReleasePending = false",
+                                             "panel.keyboardReleasePending = true", 1)
+                             + text[end:], encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(any("native popup handoff must preserve" in issue
+                                for issue in failures))
+
+    def test_popup_handoff_cannot_change_parent_keyboard_mode(self) -> None:
+        for navigation_active in ("true", "false"):
+            with self.subTest(navigation_active=navigation_active), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                panel = root / "apps/linura-shell/panel/WorkstationPanel.qml"
+                text = panel.read_text(encoding="utf-8")
+                marker = "function releaseKeyboardEntryForPopup() {"
+                panel.write_text(text.replace(
+                    marker, marker + "\n                panel.keyboardNavigationActive = " + navigation_active,
+                    1), encoding="utf-8")
+                failures = check_linura_shell.validate(root)
+                self.assertTrue(any("native popup handoff must preserve" in issue
+                                    for issue in failures))
+
+    def test_panel_keyboard_entry_requires_native_window_activation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/panel/WorkstationPanel.qml"
+            text = panel.read_text(encoding="utf-8")
+            marker = "&& commandPaletteButton.Window.active"
+            self.assertIn(marker, text)
+            panel.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(any("Workstation panel contract missing" in issue
+                                and "commandPaletteButton.Window.active" in issue
+                                for issue in failures))
+
+    def test_tray_readiness_requires_native_window_activation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            tray = root / "apps/linura-shell/tray/SystemTrayView.qml"
+            text = tray.read_text(encoding="utf-8")
+            marker = "&& entry.Window.active\n            && entry.width > 0 && entry.height > 0"
+            self.assertIn(marker, text)
+            tray.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(any("System tray contract missing" in issue and marker in issue
+                                for issue in failures))
+
+    def test_tray_cancellation_preserves_mode_until_native_focus_returns(self) -> None:
+        markers = (
+            "root.overflowKeyboardReturnPending = returnKeyboardFocus === true",
+            "if (!root.overflowKeyboardReturnPending)\n                    root.interactionStarted()",
+            "if (root.overflowKeyboardReturnPending && !overflowWindow.visible)",
+            "return overflowButton.activeFocus && overflowButton.Window.active",
+            "if (hostWindow === overflowWindow)\n            root.popupInteractionStarted()",
+        )
+        for marker in markers:
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                tray = root / "apps/linura-shell/tray/SystemTrayView.qml"
+                text = tray.read_text(encoding="utf-8")
+                self.assertIn(marker, text)
+                tray.write_text(text.replace(marker, "", 1), encoding="utf-8")
+                failures = check_linura_shell.validate(root)
+                self.assertTrue(any("System tray contract missing" in issue and marker in issue
+                                    for issue in failures))
+
+    def test_workspace_popup_external_dismissal_exits_no_keyboard_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/panel/WorkstationPanel.qml"
+            content = panel.read_text(encoding="utf-8")
+            marker = "workspaceFocusRetry.stop()\n                        panel.releaseKeyboardEntry()"
+            self.assertIn(marker, content)
+            panel.write_text(content.replace(marker, "workspaceOverflowWindow.visible = false", 1),
+                             encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(any("workspace popup must release temporary" in issue
+                                for issue in failures))
+
+    def test_workspace_popup_focus_waits_for_native_popup_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/panel/WorkstationPanel.qml"
+            text = panel.read_text(encoding="utf-8")
+            marker = "Qt.callLater(panel.focusFirstWorkspaceOverflowEntry)"
+            self.assertEqual(text.count(marker), 2)
+            panel.write_text(text.replace(marker, "Qt.callLater(function() {})"), encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(any("Workstation panel contract missing" in issue
+                                or "workspace focus must follow" in issue
+                                for issue in failures))
+
+    def test_native_popup_focus_acquisition_remains_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            for path in (
+                "apps/linura-shell/tray/SystemTrayView.qml",
+                "apps/linura-shell/panel/WorkstationPanel.qml",
+            ):
+                source = root / path
+                content = source.read_text(encoding="utf-8")
+                marker = "++attempts >= 20"
+                self.assertIn(marker, content)
+                source.write_text(content.replace(marker, "false", 1), encoding="utf-8")
+                failures = check_linura_shell.validate(root)
+                self.assertTrue(
+                    any(marker in issue for issue in failures),
+                    msg=f"unbounded popup focus acquisition was not rejected: {path}",
+                )
+                source.write_text(content, encoding="utf-8")
 
     def test_system_tray_overflow_cannot_regress_to_item_popup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3190,6 +3488,84 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertIn(
                 "Workstation workspace overflow restoration must remain unconditional when its opener disappears",
                 failures,
+            )
+
+
+    def test_workspace_overflow_uses_popup_specific_keyboard_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/panel/WorkstationPanel.qml"
+            text = panel.read_text(encoding="utf-8")
+            marker = (
+                "panel.releaseKeyboardEntryForPopup()\n"
+                "                            panel.openWorkspaceOverflow()"
+            )
+            self.assertIn(marker, text)
+            panel.write_text(
+                text.replace(
+                    marker,
+                    "panel.releaseKeyboardEntry()\n"
+                    "                            panel.openWorkspaceOverflow()",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Workstation panel actions must release keyboard-entry ownership before handoff: workspace overflow"
+                    in item
+                    for item in failures
+                )
+            )
+
+
+    def test_tray_popup_opening_uses_popup_specific_keyboard_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/panel/WorkstationPanel.qml"
+            text = panel.read_text(encoding="utf-8")
+            marker = "onPopupInteractionStarted: panel.releaseKeyboardEntryForPopup()"
+            self.assertIn(marker, text)
+            panel.write_text(
+                text.replace(
+                    marker,
+                    "onPopupInteractionStarted: panel.releaseKeyboardEntry()",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Workstation panel actions must release keyboard-entry ownership before handoff: tray popup"
+                    in item
+                    or ("Workstation panel contract missing" in item and marker in item)
+                    for item in failures
+                )
+            )
+
+
+    def test_system_tray_opening_emits_popup_specific_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            tray = root / "apps/linura-shell/tray/SystemTrayView.qml"
+            text = tray.read_text(encoding="utf-8")
+            marker = "root.popupInteractionStarted()"
+            self.assertIn(marker, text)
+            tray.write_text(
+                text.replace(marker, "root.interactionStarted()", 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "System tray contract missing" in item and marker in item
+                    for item in failures
+                )
             )
 
 

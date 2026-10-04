@@ -23,6 +23,19 @@ test -f "$source_root/packaging/systemd/user/linurad.service"
 }
 
 install -d -o root -g root -m 0755 /usr/local/lib/linura-qualification
+input_build_dir="$(mktemp -d /tmp/linura-native-input-build-XXXXXX)"
+trap 'rm -rf "$input_build_dir"' EXIT
+input_source_dir="$source_root/qualification/v010/shell-runtime"
+wayland-scanner client-header "$input_source_dir/virtual-keyboard-unstable-v1.xml" \
+    "$input_build_dir/virtual-keyboard-unstable-v1-client-protocol.h"
+wayland-scanner private-code "$input_source_dir/virtual-keyboard-unstable-v1.xml" \
+    "$input_build_dir/virtual-keyboard-unstable-v1-protocol.c"
+cc -std=c11 -O2 -Wall -Wextra -Werror -I "$input_build_dir" \
+    $(pkg-config --cflags wayland-client) "$input_source_dir/native-keyboard.c" \
+    "$input_build_dir/virtual-keyboard-unstable-v1-protocol.c" \
+    $(pkg-config --libs wayland-client) -o "$input_build_dir/native-keyboard"
+install -o root -g root -m 0755 "$input_build_dir/native-keyboard" \
+    /usr/local/lib/linura-qualification/native-keyboard
 install -o root -g root -m 0755     "$source_root/qualification/v010/shell-runtime/fixtures/linger-app"     /usr/local/lib/linura-qualification/linger-app
 install -o root -g root -m 0755     "$source_root/qualification/v010/shell-runtime/fixtures/forking-app"     /usr/local/lib/linura-qualification/forking-app
 

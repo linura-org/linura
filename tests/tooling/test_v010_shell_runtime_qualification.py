@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_PATHS = (
     "contracts/v010-shell-runtime-qualification.toml",
     "contracts/v010-shell-runtime-substrate.toml",
+    "contracts/v010-workstation-acceptance.toml",
     "contracts/v010-workstation-qualification.toml",
     ".github/workflows/v010-shell-runtime-qualification.yml",
     ".github/workflows/v010-qualification.yml",
@@ -57,9 +58,21 @@ FIXTURE_PATHS = (
     "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml",
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
     "apps/linura-shell/ui/CMakeLists.txt",
+    "qualification/v010/shell-runtime/native-keyboard.c",
+    "qualification/v010/shell-runtime/virtual-keyboard-unstable-v1.xml",
+    "tools/verify_tray_keyboard.py",
     "qualification/v010/shell-runtime/provision-shell-runtime.sh",
     "qualification/v010/shell-runtime/run-shell-runtime.sh",
     "qualification/v010/shell-runtime/start-vm.sh",
+    "qualification/v010/workstation-acceptance/record-session.sh",
+    "qualification/v010/workstation-acceptance/run-live-session.sh",
+    "qualification/v010/workstation-acceptance/launch-interactive.sh",
+    "qualification/v010/workstation-acceptance/capture-hardware-session.sh",
+    "qualification/v010/workstation-acceptance/run-hardware-qualification.sh",
+    "schemas/v010-maintained-workstation-fixture.v1.schema.json",
+    "tools/workstation_acceptance.py",
+    "tools/workstation_capture_lock.py",
+    "tools/workstation_q11_runner.py",
     "qualification/v010/shell-runtime/prepare-substrate.sh",
     "qualification/v010/shell-runtime/verify-substrate.py",
     "qualification/v010/shell-runtime/fixtures/linger-app",
@@ -99,6 +112,32 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
     def test_runtime_qualification_contract_is_valid(self) -> None:
         result = self._run(ROOT)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_required_qualification_scripts_retain_executable_modes(self) -> None:
+        # The shell runtime calls the recorder directly; losing the Git execute
+        # bit during a rebase must fail locally before expensive guest setup.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self.assertEqual(self._run(root).returncode, 0)
+            for relative in (
+                "qualification/v010/shell-runtime/run-shell-runtime.sh",
+                "qualification/v010/shell-runtime/prepare-substrate.sh",
+                "qualification/v010/workstation-acceptance/record-session.sh",
+                "qualification/v010/workstation-acceptance/launch-interactive.sh",
+                "qualification/v010/workstation-acceptance/run-hardware-qualification.sh",
+            ):
+                with self.subTest(relative=relative):
+                    script = root / relative
+                    original_mode = script.stat().st_mode
+                    script.chmod(0o644)
+                    result = self._run(root)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(
+                        f"shell runtime qualification script not executable or untrusted: {relative}",
+                        result.stderr,
+                    )
+                    script.chmod(original_mode)
 
     def test_runtime_teardown_uses_supported_exact_inactive_state_probe(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1318,6 +1357,231 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(marker, result.stderr)
 
+    def test_workstation_tray_popup_must_remain_visible_after_keyboard_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'fail "workstation tray overflow did not remain visible after keyboard handoff"'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, 'echo "tray persistence check omitted"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_workstation_tray_diagnostic_ipc_must_reach_instantiated_panel(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            panel = root / "apps/linura-shell/qualification-panel.qml"
+            content = panel.read_text(encoding="utf-8")
+            marker = "function trayOverflowReadinessState(index: int): string"
+            self.assertIn(marker, content)
+            panel.write_text(content.replace(marker, "function missingReadinessState(index: int): string", 1),
+                             encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("workstation tray runtime diagnostic IPC missing", result.stderr)
+
+    def test_workstation_tray_parent_native_focus_cannot_be_skipped(self) -> None:
+        markers = (
+            'wait_until "workstation tray parent native keyboard focus" panel_keyboard_focus_ready',
+            'wait_until "workstation tray reopen cycle $panel_tray_cycle parent native keyboard focus" panel_keyboard_focus_ready',
+        )
+        for marker in markers:
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+                content = script.read_text(encoding="utf-8")
+                self.assertIn(marker, content)
+                script.write_text(content.replace(marker, 'echo "parent native focus omitted"', 1),
+                                  encoding="utf-8")
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(marker, result.stderr)
+
+    def test_workstation_tray_parent_native_focus_must_precede_popup_opening(self) -> None:
+        stages = (
+            (
+                'wait_until "workstation tray parent native keyboard focus" panel_keyboard_focus_ready',
+                'panel_tray_open_by_keyboard\npanel_tray_overflow_visible() {',
+            ),
+            (
+                'wait_until "workstation tray reopen cycle $panel_tray_cycle parent native keyboard focus" panel_keyboard_focus_ready',
+                '    panel_tray_open_by_keyboard\n    wait_until "workstation tray reopen cycle $panel_tray_cycle visibility"',
+            ),
+        )
+        for readiness, opening in stages:
+            with self.subTest(readiness=readiness), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+                content = script.read_text(encoding="utf-8")
+                self.assertIn(readiness, content)
+                self.assertIn(opening, content)
+                content = content.replace(readiness + "\n", "", 1)
+                script.write_text(content.replace(opening, opening + "\n" + readiness, 1),
+                                  encoding="utf-8")
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("tray keyboard opening must wait for parent native focus", result.stderr)
+
+    def test_workstation_tray_native_keyboard_press_and_release_are_required(self) -> None:
+        for marker in (
+            'native_input_send "$panel_tray_input_mode"',
+            'focusTrayOverflowButtonControl',
+        ):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+                content = script.read_text(encoding="utf-8")
+                self.assertIn(marker, content)
+                script.write_text(content.replace(marker, "qualification-input-omitted", 1),
+                                  encoding="utf-8")
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(marker, result.stderr)
+
+    def test_workstation_tray_activation_requires_a_real_client_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            before = script.read_text(encoding="utf-8")
+            marker = 'count == panel_tray_open_count_before + 1'
+            self.assertIn(marker, before)
+            script.write_text(before.replace(marker, 'count >= 0', 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_workstation_native_input_behavior_cannot_be_replaced_by_static_proof(self) -> None:
+        for marker in (
+            'wait_until "workstation tray opener settled native keyboard focus" panel_tray_opener_focus_ready',
+            'panel_tray_open_by_keyboard hold',
+            'wait_until "workstation tray observed held-key repeats" panel_tray_held_key_ready',
+            'native_input_send release',
+            'native_input_send escape',
+            'python3 "$source_root/tools/verify_tray_keyboard.py"',
+            'wait "$native_input_pid" || fail',
+        ):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+                text = script.read_text(encoding="utf-8")
+                self.assertIn(marker, text)
+                script.write_text(text.replace(marker, "input-behavior-omitted", 1), encoding="utf-8")
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("native tray behavioral qualification", result.stderr)
+
+    def test_workstation_repeated_run_evidence_is_retained_separately(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            path = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = path.read_text(encoding="utf-8")
+            marker = '-attempt-${{ github.run_attempt }}'
+            self.assertIn(marker, text)
+            path.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("native tray evidence gate", result.stderr)
+
+    def test_workstation_tray_virtual_keyboard_is_pinned_in_substrate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            substrate = root / "contracts/v010-shell-runtime-substrate.toml"
+            before = substrate.read_text(encoding="utf-8")
+            marker = '  "wayland",\n'
+            self.assertIn(marker, before)
+            substrate.write_text(before.replace(marker, "", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("runtime_packages drifted", result.stderr)
+
+    def test_workstation_tray_held_keyboard_input_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            source = script.read_text(encoding="utf-8")
+            marker = 'native_input_send "$panel_tray_input_mode"'
+            self.assertIn(marker, source)
+            script.write_text(
+                source.replace(
+                    marker, "wtype -P space -s 80 -p space -s 200", 1
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "native tray activation must use one press-release without a held key",
+                result.stderr,
+            )
+
+    def test_workstation_tray_initial_focus_cannot_be_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            content = script.read_text(encoding="utf-8")
+            marker = 'wait_until "initial workstation tray overflow keyboard focus" panel_tray_overflow_initial_ready'
+            self.assertIn(marker, content)
+            script.write_text(
+                content.replace(marker, 'echo "initial focus omitted"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_workstation_tray_reopened_delegate_must_be_ready_before_activation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'wait_until "reopened workstation tray overflow delegate readiness" panel_tray_overflow_entry_ready'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, 'echo "delegate readiness omitted"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_workstation_tray_repeated_reopen_and_focus_retention_cannot_disappear(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            source = script.read_text(encoding="utf-8")
+            marker = "for panel_tray_cycle in 1 2 3; do"
+            self.assertIn(marker, source)
+            script.write_text(source.replace(marker, "for panel_tray_cycle in; do", 1),
+                              encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_workstation_tray_timeout_reports_popup_and_focus_state(self) -> None:
+        script = (
+            ROOT / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("trayOverflowReadinessState 4", script)
+        self.assertIn("panel_overflow_ready_attempts % 20 == 0", script)
+
     def test_workstation_tray_runtime_interactions_cannot_disappear(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1364,6 +1628,22 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(marker, result.stderr)
                 fixture.write_text(text, encoding="utf-8")
+
+    def test_level_c_monitor_capture_cannot_retain_raw_hyprland_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'hyprctl monitors -j | python3 "$source_root/tools/workstation_acceptance.py" sanitize-monitors'
+            self.assertIn(marker, text)
+            script.write_text(
+                text.replace(marker, "hyprctl monitors -j", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("sanitize Hyprland monitor evidence", result.stderr)
 
     def test_workstation_tray_status_manifest_validation_cannot_disappear(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1876,6 +2156,21 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("quick-settings-session1-failure.txt", result.stderr)
 
+    def test_verified_effect_uses_one_atomic_ipc_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = 'effectSnapshot 2>/dev/null)" == "ready|63|verified"'
+            self.assertIn(marker, text)
+            script.write_text(text.replace(
+                marker, 'state 2>/dev/null)" == "ready"', 1,
+            ), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("atomic Quick Settings verified-effect snapshot", result.stderr)
+
     def test_session1_volume_wait_must_remain_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -2012,6 +2307,548 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
                     "must stop completed UI qualification fixtures before starting the next surface",
                     result.stderr,
                 )
+
+
+    def test_substrate_must_include_workstation_recording_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            substrate = root / "contracts/v010-shell-runtime-substrate.toml"
+            text = substrate.read_text(encoding="utf-8")
+            marker = '  "wf-recorder",\n'
+            self.assertIn(marker, text)
+            substrate.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("runtime_packages drifted", result.stderr)
+
+    def test_vm_launcher_must_retain_interactive_display_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "qualification/v010/shell-runtime/start-vm.sh"
+            text = launcher.read_text(encoding="utf-8")
+            marker = "interactive:vnc)"
+            self.assertIn(marker, text)
+            launcher.write_text(
+                text.replace(marker, "interactive:removed)", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interactive:vnc)", result.stderr)
+
+    def test_automated_runtime_must_finalize_visual_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = '"$workstation_recorder" stop "$workstation_recording"'
+            self.assertGreaterEqual(text.count(marker), 2)
+            script.write_text(
+                text.replace(marker, 'echo "recording not finalized"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "shell runtime recorder must finalize on both success and cleanup paths",
+                result.stderr,
+            )
+
+    def test_workflow_must_host_verify_automated_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            marker = "Verify automated workstation recording"
+            self.assertIn(marker, text)
+            workflow.write_text(
+                text.replace(marker, "Skip automated workstation recording", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(marker, result.stderr)
+
+    def test_evidence_package_set_must_include_recorder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            text = workflow.read_text(encoding="utf-8")
+            evidence_start = text.index("required_packages = {")
+            marker = '              "wf-recorder",\n'
+            marker_index = text.index(marker, evidence_start)
+            workflow.write_text(
+                text[:marker_index] + text[marker_index + len(marker):],
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("evidence package set must include wf-recorder", result.stderr)
+
+    def test_acceptance_contract_cannot_allow_virtual_level_c(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            contract = root / "contracts/v010-workstation-acceptance.toml"
+            text = contract.read_text(encoding="utf-8")
+            marker = "virtualization_allowed = false"
+            self.assertIn(marker, text)
+            contract.write_text(
+                text.replace(marker, "virtualization_allowed = true", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("level_c.virtualization_allowed", result.stderr)
+
+
+
+    def test_interactive_launcher_must_self_build_exact_source_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+            text = launcher.read_text(encoding="utf-8")
+            marker = 'cargo +"$RUST_VERSION" build --workspace --release --locked --target "$release_target"'
+            self.assertIn(marker, text)
+            launcher.write_text(
+                text.replace(marker, 'echo "exact-source build omitted"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interactive workstation launcher missing exact-source invariant", result.stderr)
+
+    def test_interactive_launcher_rejects_caller_supplied_authority_binary_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+            text = launcher.read_text(encoding="utf-8")
+            marker = '        --source-root) source_root="$2"; shift 2 ;;\n'
+            self.assertIn(marker, text)
+            launcher.write_text(
+                text.replace(
+                    marker,
+                    '        --linurad) linurad_binary="$2"; shift 2 ;;\n' + marker,
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must not accept a caller-supplied authority binary", result.stderr)
+
+    def test_automated_recorder_requires_success_and_cleanup_finalization(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+            text = script.read_text(encoding="utf-8")
+            marker = '"$workstation_recorder" stop "$workstation_recording"'
+            self.assertGreaterEqual(text.count(marker), 2)
+            script.write_text(
+                text.replace(marker, 'echo "cleanup finalization omitted"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("finalize on both success and cleanup paths", result.stderr)
+
+
+
+    def test_recorder_must_reject_early_exit_before_requested_stop(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            recorder = root / "qualification/v010/workstation-acceptance/record-session.sh"
+            text = recorder.read_text(encoding="utf-8")
+            marker = 'workstation recorder exited before requested stop'
+            self.assertIn(marker, text)
+            recorder.write_text(
+                text.replace(marker, "workstation recorder already stopped", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("bounded recording contract", result.stderr)
+
+    def test_hardware_capture_signal_path_must_terminate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            capture = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            text = capture.read_text(encoding="utf-8")
+            marker = "trap 'exit 0' INT TERM"
+            self.assertIn(marker, text)
+            capture.write_text(
+                text.replace(marker, "trap cleanup INT TERM", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("maintained-hardware invariant", result.stderr)
+
+    def test_hardware_capture_evidence_names_remain_fixture_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            capture = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            text = capture.read_text(encoding="utf-8")
+            marker = 'evidence_basename="hardware-$fixture_id"'
+            self.assertIn(marker, text)
+            capture.write_text(
+                text.replace(marker, 'evidence_basename="workstation-hardware"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("maintained-hardware invariant", result.stderr)
+
+
+
+    def test_interactive_launcher_accepts_git_worktree_shape_and_rejects_untracked_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+            text = launcher.read_text(encoding="utf-8")
+            self.assertIn("rev-parse --is-inside-work-tree", text)
+            self.assertNotIn('-d "$source_root/.git"', text)
+            self.assertIn("status --porcelain=v1 --untracked-files=all", text)
+
+            launcher.write_text(
+                text.replace(
+                    "status --porcelain=v1 --untracked-files=all",
+                    "diff --quiet",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("status --porcelain=v1 --untracked-files=all", result.stderr)
+
+    def test_interactive_recording_bundle_must_be_host_cross_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+            text = launcher.read_text(encoding="utf-8")
+            marker = "interactive recording guest metadata differs from host verification"
+            self.assertIn(marker, text)
+            launcher.write_text(text.replace(marker, "metadata accepted without cross-check", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interactive workstation launcher missing", result.stderr)
+
+    def test_live_session_signal_path_finalizes_recording_and_exits(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            session = root / "qualification/v010/workstation-acceptance/run-live-session.sh"
+            text = session.read_text(encoding="utf-8")
+            marker = "trap 'exit 0' INT TERM"
+            self.assertIn(marker, text)
+            session.write_text(text.replace(marker, "trap cleanup INT TERM", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interactive live session missing recorder lifecycle invariant", result.stderr)
+
+    def test_vm_launcher_rejects_unbounded_resource_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "qualification/v010/shell-runtime/start-vm.sh"
+            text = launcher.read_text(encoding="utf-8")
+            marker = "memory >= 1024 && memory <= 65536"
+            self.assertIn(marker, text)
+            launcher.write_text(text.replace(marker, "memory >= 0", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("bounded graphical VM contract", result.stderr)
+
+
+
+    def test_live_session_must_fail_if_compositor_or_shell_dies(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            session = root / "qualification/v010/workstation-acceptance/run-live-session.sh"
+            text = session.read_text(encoding="utf-8")
+            marker = "Linura Shell exited during interactive acceptance"
+            self.assertIn(marker, text)
+            session.write_text(text.replace(marker, "shell exit ignored", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interactive live session missing recorder lifecycle invariant", result.stderr)
+
+    def test_interactive_host_verification_must_stream_digest_check(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+            text = launcher.read_text(encoding="utf-8")
+            marker = "sha256sum --check --strict"
+            self.assertIn(marker, text)
+            launcher.write_text(text.replace(marker, "true # digest check removed", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interactive workstation launcher missing", result.stderr)
+
+    def test_hardware_capture_must_detect_recorder_death_before_user_stop(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            capture = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            text = capture.read_text(encoding="utf-8")
+            marker = "Level C recorder exited before requested stop"
+            self.assertIn(marker, text)
+            capture.write_text(text.replace(marker, "recorder failure ignored", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("maintained-hardware invariant", result.stderr)
+
+
+
+    def test_interactive_authority_build_must_use_exact_git_archive_not_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+            text = launcher.read_text(encoding="utf-8")
+            marker = 'tar -xzf "$source_archive" -C "$build_root"'
+            self.assertIn(marker, text)
+            self.assertIn('cd "$build_root"', text)
+            self.assertIn('linurad_binary="$build_root/target/$release_target/release/linurad"', text)
+            launcher.write_text(text.replace(marker, 'cp -a "$source_root/." "$build_root/"', 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interactive workstation launcher missing exact-source invariant", result.stderr)
+
+
+
+    def test_live_session_must_fail_if_linurad_dies(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            session = root / "qualification/v010/workstation-acceptance/run-live-session.sh"
+            text = session.read_text(encoding="utf-8")
+            marker = "linurad exited during interactive acceptance"
+            self.assertIn(marker, text)
+            session.write_text(text.replace(marker, "linurad exit ignored", 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("interactive live session missing recorder lifecycle invariant", result.stderr)
+
+
+    def test_level_c_runner_cannot_gain_generic_command_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            runner = (
+                root
+                / "qualification/v010/workstation-acceptance/run-hardware-qualification.sh"
+            )
+            text = runner.read_text(encoding="utf-8")
+            runner.write_text(
+                text + '\n# forbidden regression\neval "$@"\n',
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "Level C hardware runner contains forbidden generic command surface",
+                result.stderr,
+            )
+
+    def test_level_c_capture_revalidates_source_before_recorder_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            capture = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            text = capture.read_text(encoding="utf-8")
+            marker = 'source_checkout_matches || fail "Level C source checkout changed before recorder start"'
+            self.assertIn(marker, text)
+            capture.write_text(
+                text.replace(marker, "true # source revalidation removed", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "Level C hardware capture missing physical/fail-closed boundary",
+                result.stderr,
+            )
+
+    def test_level_c_capture_revalidates_source_during_finalization_and_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            capture = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            text = capture.read_text(encoding="utf-8")
+            marker = 'if [[ "$evidence_valid" -eq 1 ]] && ! source_checkout_matches; then'
+            self.assertEqual(text.count(marker), 2)
+            self.assertGreaterEqual(text.count("source_checkout_matches"), 9)
+            capture.write_text(
+                text.replace(marker, 'if [[ "$evidence_valid" -eq 1 ]]; then'),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("exact-source finalization invariant", result.stderr)
+
+
+    def test_level_b_must_verify_private_substrate_copy_before_resize(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            launcher = root / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+            content = launcher.read_text(encoding="utf-8")
+            marker = '[[ "$copied_sha" == "$prepared_sha" ]] || fail'
+            self.assertIn(marker, content)
+            launcher.write_text(
+                content.replace(marker, 'true # private copy verification removed', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("private substrate copy", result.stderr)
+
+    def test_level_c_must_lock_fixture_before_removing_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            capture = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            content = capture.read_text(encoding="utf-8")
+            marker = 'python3 -u "$source_root/tools/workstation_capture_lock.py" "$capture_lock"'
+            self.assertIn(marker, content)
+            capture.write_text(
+                content.replace(marker, 'true # fixture lock removed', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("lock the fixture", result.stderr)
+
+    def test_level_c_non_recorded_capture_clears_stale_recording_first(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            capture = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            text = capture.read_text(encoding="utf-8")
+            marker = 'stale_recordings=()'
+            self.assertIn(marker, text)
+            capture.write_text(text.replace(marker, 'true # stale cleanup removed', 1), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("clear stale recording evidence", result.stderr)
+
+    def test_level_c_lock_helper_must_keep_no_follow_and_single_link_guards(self) -> None:
+        for marker in (
+            "os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC",
+            "lock.st_nlink != 1",
+            "stat.S_IMODE(lock.st_mode) != 0o600",
+            "fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)",
+        ):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                helper = root / "tools/workstation_capture_lock.py"
+                text = helper.read_text(encoding="utf-8")
+                self.assertIn(marker, text)
+                helper.write_text(
+                    text.replace(marker, "False # safety invariant removed", 1),
+                    encoding="utf-8",
+                )
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("capture lock helper missing safety boundary", result.stderr)
+
+    def test_level_c_stale_evidence_purge_must_cover_other_fixtures(self) -> None:
+        for marker in (
+            '"$evidence_root"/hardware-*.mkv',
+            '"$evidence_root"/hardware-*.metadata.json',
+            '"$evidence_root"/hardware-*.sha256',
+            'stale_recordings+=("$stale_recording")',
+        ):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                capture = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+                text = capture.read_text(encoding="utf-8")
+                self.assertIn(marker, text)
+                capture.write_text(
+                    text.replace(marker, "true # cross-fixture cleanup removed", 1),
+                    encoding="utf-8",
+                )
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("preflight and clear every fixture", result.stderr)
+
+    def test_level_c_snapshot_symlink_guard_cannot_be_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            capture = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            text = capture.read_text(encoding="utf-8")
+            marker = '[[ ! -L "$destination" ]]'
+            self.assertIn(marker, text)
+            capture.write_text(
+                text.replace(marker, 'true # snapshot symlink guard removed', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("safely publishing a new snapshot", result.stderr)
+
+    def test_level_c_snapshot_atomic_publication_cannot_be_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            capture = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            text = capture.read_text(encoding="utf-8")
+            marker = 'mv -fT -- "$snapshot_temporary_dir/$snapshot_name" "$evidence_root/$snapshot_name"'
+            self.assertIn(marker, text)
+            capture.write_text(
+                text.replace(marker, 'cp "$snapshot_temporary_dir/$snapshot_name" "$evidence_root/$snapshot_name"', 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("safely publishing a new snapshot", result.stderr)
+
+    def test_level_c_runner_requires_complete_bounded_orchestration_surface(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            runner = root / "qualification/v010/workstation-acceptance/run-hardware-qualification.sh"
+            text = runner.read_text(encoding="utf-8")
+            marker = "finalize-run)"
+            self.assertIn(marker, text)
+            runner.write_text(text.replace(marker, "finalize-disabled)"), encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("bounded case protocol", result.stderr)
+
+    def test_level_c_orchestrator_cannot_gain_generic_subprocess_shell(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            orchestrator = root / "tools/workstation_q11_runner.py"
+            text = orchestrator.read_text(encoding="utf-8")
+            orchestrator.write_text(
+                text + '\n# forbidden regression\nsubprocess.run("id", shell=True)\n',
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("forbidden generic execution surface", result.stderr)
 
 if __name__ == "__main__":
     unittest.main()
