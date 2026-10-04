@@ -3,7 +3,15 @@ set -euo pipefail
 
 source_root="${1:-/opt/linura-source}"
 evidence_root="${2:-/tmp/linura-shell-runtime/evidence}"
+source_sha="${3:-}"
+[[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "exact lowercase 40-hex source SHA is required" >&2
+    exit 2
+}
 shell_root="$source_root/apps/linura-shell"
+workstation_recorder="$source_root/qualification/v010/workstation-acceptance/record-session.sh"
+workstation_recording="$evidence_root/workstation-runtime.mkv"
+recording_started=0
 controller_config="$shell_root/qualification-controller.qml"
 palette_config="$shell_root/qualification-palette.qml"
 quick_settings_config="$shell_root/qualification-quick-settings.qml"
@@ -45,6 +53,13 @@ user_unit_inactive() {
 
 cleanup() {
     set +e
+    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+        timeout 5s hyprctl rollinglog > "$evidence_root/hyprland-rolling.log" 2>&1 || true
+    fi
+    if [[ "$recording_started" -eq 1 ]]; then
+        LINURA_SOURCE_ROOT="$source_root" LINURA_SOURCE_SHA="$source_sha"             "$workstation_recorder" stop "$workstation_recording" >/dev/null 2>&1 || true
+        recording_started=0
+    fi
     systemctl --user stop linura-panel-qualification.service >/dev/null 2>&1
     systemctl --user stop linura-quick-settings-qualification.service >/dev/null 2>&1
     systemctl --user stop linura-palette-qualification.service >/dev/null 2>&1
@@ -74,6 +89,9 @@ command -v pw-dump >/dev/null || fail "pw-dump is missing"
 command -v wpctl >/dev/null || fail "wpctl is missing"
 command -v wpexec >/dev/null || fail "wpexec is missing"
 command -v sqlite3 >/dev/null || fail "sqlite3 is missing"
+command -v wf-recorder >/dev/null || fail "wf-recorder is missing"
+command -v ffprobe >/dev/null || fail "ffprobe is missing"
+[[ -x "$workstation_recorder" && ! -L "$workstation_recorder" ]] || fail "workstation recorder is missing or untrusted"
 [[ -x /usr/bin/linurad && ! -L /usr/bin/linurad ]] || fail "exact-source linurad runtime is missing or untrusted"
 [[ -f "$audio_helper" && ! -L "$audio_helper" ]] || fail "session-audio helper is missing or untrusted"
 audio_helper_uid="$(stat -c '%u' "$audio_helper")"
@@ -258,6 +276,9 @@ rm -f "$hyprland_ipc_last_error"
     printf 'hyprland_instance_signature=%s\n' "$HYPRLAND_INSTANCE_SIGNATURE"
 } > "$evidence_root/hyprland-session.env"
 pass_case "headless-hyprland-runtime"
+
+LINURA_SOURCE_ROOT="$source_root" LINURA_SOURCE_SHA="$source_sha"     "$workstation_recorder" start "$workstation_recording"
+recording_started=1
 
 systemctl --user daemon-reload
 
@@ -793,9 +814,33 @@ panel_tray_menu_requests="$(checked_panel_call linura.panel-qualification trayMe
 
 panel_tray_focus_reentered="$(checked_panel_call linura.panel-qualification focusPanelControl)"
 [[ "$panel_tray_focus_reentered" == "true" ]] || fail "workstation panel could not re-enter keyboard mode before tray overflow qualification"
+# focusPanelControl accepts the request before the compositor commits Exclusive
+# and grants native focus. Opening a popup first lets that commit clear its grab.
+wait_until "workstation tray parent native keyboard focus" panel_keyboard_focus_ready
 panel_tray_overflow_opened="$(checked_panel_call linura.panel-qualification openTrayOverflowControl)"
 [[ "$panel_tray_overflow_opened" == "true" ]] || fail "workstation tray overflow control did not open its popup"
-[[ "$(checked_panel_call linura.panel-qualification trayOverflowVisible)" == "true" ]] || fail "workstation tray overflow popup was not visible after activation"
+panel_tray_overflow_visible() {
+    [[ "$(checked_panel_call linura.panel-qualification trayOverflowVisible 2>/dev/null)" == "true" ]]
+}
+wait_until "workstation tray overflow visibility after keyboard handoff" panel_tray_overflow_visible
+panel_overflow_ready_attempts=0
+panel_tray_overflow_entry_ready() {
+    if [[ "$(checked_panel_call linura.panel-qualification trayOverflowEntryReady 4 2>/dev/null)" == "true" ]]; then
+        return 0
+    fi
+    panel_overflow_ready_attempts=$((panel_overflow_ready_attempts + 1))
+    if (( panel_overflow_ready_attempts % 20 == 0 )); then
+        printf 'tray overflow not ready: %s\n' \
+            "$(checked_panel_call linura.panel-qualification trayOverflowReadinessState 4 2>&1 || printf 'IPC-unavailable')" >&2
+    fi
+    return 1
+}
+panel_tray_overflow_initial_ready() {
+    panel_tray_overflow_entry_ready
+}
+wait_until "initial workstation tray overflow keyboard focus" panel_tray_overflow_initial_ready
+sleep 0.25
+[[ "$(checked_panel_call linura.panel-qualification trayOverflowVisible)" == "true" ]] || fail "workstation tray overflow did not remain visible after keyboard handoff"
 
 panel_tray_cancelled="$(checked_panel_call linura.panel-qualification cancelTrayOverflowControl)"
 [[ "$panel_tray_cancelled" == "true" ]] || fail "workstation tray overflow could not be cancelled through its component path"
@@ -808,12 +853,38 @@ panel_tray_keyboard_focus_restored_value="true"
 
 panel_tray_overflow_reopened="$(checked_panel_call linura.panel-qualification openTrayOverflowControl)"
 [[ "$panel_tray_overflow_reopened" == "true" ]] || fail "workstation tray overflow could not reopen after keyboard cancellation"
+panel_overflow_ready_attempts=0
+wait_until "reopened workstation tray overflow delegate readiness" panel_tray_overflow_entry_ready
+sleep 0.25
+[[ "$(checked_panel_call linura.panel-qualification trayOverflowEntryReady 4)" == "true" ]] || fail "workstation tray overflow delegate did not retain readiness after reopening: $(checked_panel_call linura.panel-qualification trayOverflowReadinessState 4)"
 panel_tray_overflow_activated="$(checked_panel_call linura.panel-qualification activateTrayOverflowControl 4)"
 [[ "$panel_tray_overflow_activated" == "true" ]] || fail "workstation tray overflow item could not invoke its primary action"
 [[ "$(checked_panel_call linura.panel-qualification trayPrimaryCount)" == "2" ]] || fail "workstation tray primary action count did not include inline and overflow activation"
 panel_tray_overflow_closed="$(checked_panel_call linura.panel-qualification trayOverflowVisible)"
 [[ "$panel_tray_overflow_closed" == "false" ]] || fail "workstation tray overflow did not dismiss after primary activation"
 panel_tray_primary_requests="$(checked_panel_call linura.panel-qualification trayPrimaryCount)"
+
+# The original bug was intermittent: one successful popup reopening was not
+# enough to qualify its keyboard/focus lifecycle. Repeat real component-driven
+# open, focus-retention, dismissal, and opener-focus restoration without
+# changing the action counts or substituting visibility for active focus.
+for panel_tray_cycle in 1 2 3; do
+    [[ "$(checked_panel_call linura.panel-qualification focusPanelControl)" == "true" ]] \
+        || fail "workstation tray reopen cycle $panel_tray_cycle could not reenter keyboard mode"
+    wait_until "workstation tray reopen cycle $panel_tray_cycle parent native keyboard focus" panel_keyboard_focus_ready
+    [[ "$(checked_panel_call linura.panel-qualification openTrayOverflowControl)" == "true" ]] \
+        || fail "workstation tray reopen cycle $panel_tray_cycle could not open"
+    panel_overflow_ready_attempts=0
+    wait_until "workstation tray reopen cycle $panel_tray_cycle readiness" panel_tray_overflow_entry_ready
+    sleep 0.25
+    [[ "$(checked_panel_call linura.panel-qualification trayOverflowEntryReady 4)" == "true" ]] \
+        || fail "workstation tray reopen cycle $panel_tray_cycle did not retain delegate keyboard focus: $(checked_panel_call linura.panel-qualification trayOverflowReadinessState 4)"
+    [[ "$(checked_panel_call linura.panel-qualification cancelTrayOverflowControl)" == "true" ]] \
+        || fail "workstation tray reopen cycle $panel_tray_cycle could not dismiss"
+    wait_until "workstation tray reopen cycle $panel_tray_cycle keyboard restoration" panel_tray_keyboard_focus_restored
+    [[ "$(checked_panel_call linura.panel-qualification trayOverflowVisible)" == "false" ]] \
+        || fail "workstation tray reopen cycle $panel_tray_cycle remained open after dismissal"
+done
 
 {
     printf 'screen_count=%s\n' "$panel_screen_count"
@@ -945,7 +1016,7 @@ pass_case "quick-settings-authoritative-observation"
 checked_quick_settings_call linura.quick-settings-qualification resetFeedbackTrace >/dev/null
 [[ "$(checked_quick_settings_call linura.quick-settings-qualification commitVolume 63)" == "requested" ]] || fail "Quick Settings did not dispatch the bounded volume request"
 quick_settings_verified_63() {
-    [[ "$(checked_quick_settings_call linura.quick-settings-qualification state 2>/dev/null)" == "ready" ]] && [[ "$(checked_quick_settings_call linura.quick-settings-qualification volumePercent 2>/dev/null)" == "63" ]] && [[ "$(checked_quick_settings_call linura.quick-settings-qualification receiptStatus 2>/dev/null)" == "verified" ]]
+    [[ "$(checked_quick_settings_call linura.quick-settings-qualification effectSnapshot 2>/dev/null)" == "ready|63|verified" ]]
 }
 quick_settings_effect_verified=0
 quick_settings_effect_deadline=$((SECONDS + 30))
@@ -958,7 +1029,7 @@ while (( SECONDS < quick_settings_effect_deadline )); do
 done
 if [[ "$quick_settings_effect_verified" -ne 1 ]]; then
     {
-        for method in state status freshness authority nodeId volumePercent canApply receiptStatus evidenceId; do
+        for method in effectSnapshot state status freshness authority nodeId volumePercent canApply receiptStatus evidenceId; do
             printf '%s=' "$method"
             quick_settings_qs call linura.quick-settings-qualification "$method" 2>&1 || true
         done
@@ -1195,6 +1266,13 @@ wait_until "Quick Settings recovery after linurad restart" quick_settings_recove
 } > "$evidence_root/quick-settings-restart-recovery.txt"
 pass_case "quick-settings-restart-recovery"
 
+LINURA_SOURCE_ROOT="$source_root" LINURA_SOURCE_SHA="$source_sha"     "$workstation_recorder" stop "$workstation_recording"
+recording_started=0
+[[ -f "$workstation_recording" && ! -L "$workstation_recording" ]]     || fail "automated workstation recording is missing or unsafe"
+[[ -f "${workstation_recording%.mkv}.metadata.json" && ! -L "${workstation_recording%.mkv}.metadata.json" ]]     || fail "automated workstation recording metadata is missing or unsafe"
+[[ -f "${workstation_recording%.mkv}.sha256" && ! -L "${workstation_recording%.mkv}.sha256" ]]     || fail "automated workstation recording digest is missing or unsafe"
+pass_case "workstation-visual-recording"
+
 {
     uname -a
     printf '\n-- systemd --\n'
@@ -1211,10 +1289,10 @@ pass_case "quick-settings-restart-recovery"
     quickshell --version
 } > "$evidence_root/runtime-versions.txt"
 
-pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite \
+pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite ffmpeg wf-recorder \
     | LC_ALL=C sort > "$evidence_root/package-versions.txt"
 
-expected_cases=20
+expected_cases=21
 actual_cases="$(wc -l < "$evidence_root/cases.tsv")"
 [[ "$actual_cases" -eq "$expected_cases" ]]     || fail "expected $expected_cases runtime cases, recorded $actual_cases"
 

@@ -2,7 +2,7 @@ schema_version = 1
 id = "qualification/v010-shell-runtime-substrate"
 state = "development-prerequisite"
 claim = "non-evidence-cacheable-substrate"
-cache_namespace = "linura-v010-shell-substrate-v2"
+cache_namespace = "linura-v010-shell-substrate-v3"
 builder = "qualification/v010/shell-runtime/prepare-substrate.sh"
 verifier = "qualification/v010/shell-runtime/verify-substrate.py"
 base_image_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2"
@@ -31,6 +31,8 @@ runtime_packages = [
   "wireplumber",
   "networkmanager",
   "sqlite",
+  "ffmpeg",
+  "wf-recorder",
 ]
 
 [cache_policy]

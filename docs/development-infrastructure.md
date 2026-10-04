@@ -136,3 +136,32 @@ Repository tooling must fail clearly when host capabilities such as QEMU, KVM, m
 - release bytes are built once and promoted, not rebuilt during publication.
 
 The Arch image harness stages from ArchISO's `releng` profile and overlays Linura additions instead of pretending a sparse custom profile is independently boot-complete.
+## Workstation live acceptance
+
+The v0.10 workstation has a separate acceptance helper rather than extending the generic `tools/vm.py` into a second workstation authority. `qualification/v010/shell-runtime/start-vm.sh` remains the bounded owner of the exact Arch/virtio-GPU topology and supports two modes: deterministic automated/headless execution and opt-in interactive GTK or loopback VNC display. The interactive launcher and automated CI both consume the same substrate/runtime contracts.
+
+Use `python3 tools/workstation_acceptance.py plan --mode <automated|interactive|hardware>` to inspect the selected lane before execution. Recording is performed in the guest/session Wayland environment and verified independently; host display transport is presentation only.
+
+
+## Pull-request qualification sequence
+
+Safety-sensitive Linura work follows one review sequence rather than using external review as the first debugging pass:
+
+```text
+implement
+→ internal architecture/code/adversarial review
+→ fix every valid finding
+→ compact to one coherent clean commit
+→ run the full inherited + milestone gate set
+→ request Codex review
+→ fix only genuinely new valid findings
+→ merge only when required checks are green
+```
+
+Compaction changes the source SHA, so exact-source qualification must run after the final compaction. Review comments are resolved only after the underlying issue is fixed, and a green result must never be obtained by weakening a contract, deleting adversarial coverage, or reclassifying missing evidence as passing.
+
+## Graphical qualification platform and fleet boundary
+
+The repository-owned A/B/C acceptance system is the execution/evidence contract. A future graphical qualification platform such as `qualification.linura.org` is an observability/control surface over that contract, while the graphical qualification fleet is the set of actual automated VM, interactive VM and maintained physical runners. Neither a web UI nor a fleet controller may invent qualification success, widen runner authority, or substitute a VM for Level C.
+
+A fleet is valid with one maintained physical workstation; scale is not part of the trust claim. Public live viewing or a disposable public demo environment must remain observational or sandboxed and cannot inject input into an automated A run or a release-qualifying C run. Privileged fleet/admin control is a separate authority surface from public viewing.
