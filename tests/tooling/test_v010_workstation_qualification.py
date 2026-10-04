@@ -164,6 +164,21 @@ class V010WorkstationQualificationTests(unittest.TestCase):
         provenance_dir.mkdir(parents=True, exist_ok=True)
 
         run_id = "q11-fixture-run"
+        fixture_id = "linura-workstation-01"
+        fixture_path = evidence_dir / "fixture-contract.json"
+        fixture_contract = {
+            "schema_version": 1,
+            "fixture_id": fixture_id,
+            "profile_id": "arch-hyprland-v1",
+            "machine_class": "workstation",
+            "evidence_tier": "maintainer_hardware",
+            "physical_hardware": True,
+        }
+        fixture_path.write_text(
+            json.dumps(fixture_contract, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        fixture_sha = hashlib.sha256(fixture_path.read_bytes()).hexdigest()
         boot_id = "11111111-2222-3333-4444-555555555555"
         case_observations = {
             "bounded-installer-lane": [
@@ -272,6 +287,8 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "artifact_type": "linura-v010-physical-workstation-environment",
             "source_commit_sha": source_commit_sha,
             "run_id": run_id,
+            "fixture_id": fixture_id,
+            "fixture_contract_sha256": fixture_sha,
             "profile_id": "arch-hyprland-v1",
             "profile_sha256": contract_data["profile_sha256"],
             "machine_class": "workstation",
@@ -318,6 +335,8 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 "controller=maintainer-console\n"
                 f"mechanism={mechanism}\n"
                 f"environment_sha256={environment_binding['sha256']}\n"
+                f"fixture_id={fixture_id}\n"
+                f"fixture_contract_sha256={fixture_sha}\n"
                 f"source_commit_sha={source_commit_sha}\n"
                 f"run_id={run_id}\n"
                 "scope=machine\n"
@@ -345,6 +364,8 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 "source_commit_sha": source_commit_sha,
                 "run_id": run_id,
                 "case": name,
+                "fixture_id": fixture_id,
+                "fixture_contract_sha256": fixture_sha,
                 "environment_sha256": environment_binding["sha256"],
                 "boot_id": boot_id,
                 "scope": "machine",
@@ -372,6 +393,8 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 "machine_execution": {
                     "scope": "machine",
                     "environment_sha256": environment_binding["sha256"],
+                    "fixture_id": fixture_id,
+                    "fixture_contract_sha256": fixture_sha,
                     "boot_id": boot_id,
                     "controller": "maintainer-console",
                     "mechanism": mechanism,
@@ -533,6 +556,10 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             "captured_at_utc": "2026-09-27T00:00:00Z",
             "package_manifest_sha256": package_manifest_digest,
             "source": source,
+            "fixture": {
+                "fixture_id": fixture_id,
+                "contract": binding(fixture_path),
+            },
             "machine_environment": environment_binding,
             "hardware": hardware,
             "session": {
@@ -1383,6 +1410,46 @@ class V010WorkstationQualificationTests(unittest.TestCase):
             self._write_interactive_workstation_evidence(root)
             result = self._run(root)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_interactive_workstation_rejects_enrolled_fixture_substitution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._write_interactive_workstation_evidence(root)
+            fixture_path = root / "qualification/v010/interactive-workstation/fixture-contract.json"
+            fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+            fixture["fixture_id"] = "linura-workstation-02"
+            fixture_path.write_text(json.dumps(fixture, indent=2) + "\n", encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("enrolled fixture contract digest mismatch", result.stderr)
+
+    def test_interactive_workstation_rejects_environment_fixture_substitution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            manifest_path = self._write_interactive_workstation_evidence(root)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            environment_path = root / manifest["machine_environment"]["path"]
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            environment["fixture_id"] = "linura-workstation-02"
+            environment_path.write_text(json.dumps(environment, indent=2) + "\n", encoding="utf-8")
+            manifest["machine_environment"]["sha256"] = hashlib.sha256(environment_path.read_bytes()).hexdigest()
+            original_manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+            new_manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+            contract = root / "contracts/v010-workstation-qualification.toml"
+            contract.write_text(
+                contract.read_text(encoding="utf-8").replace(
+                    f'evidence_manifest_sha256 = "{original_manifest_digest}"',
+                    f'evidence_manifest_sha256 = "{new_manifest_digest}"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("fixture identity must match the enrolled fixture", result.stderr)
 
     def test_interactive_workstation_case_digest_is_verified(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

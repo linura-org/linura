@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Wayland
@@ -149,6 +150,11 @@ Scope {
         return instance !== null && instance.openTrayOverflowControl()
     }
 
+    function focusTrayOverflowButtonControl(index) {
+        const instance = panelInstance(index)
+        return instance !== null && instance.focusTrayOverflowButtonControl()
+    }
+
     function cancelTrayOverflowControl(index) {
         const instance = panelInstance(index)
         return instance !== null && instance.cancelTrayOverflowControl()
@@ -159,9 +165,30 @@ Scope {
         return instance !== null && instance.trayOverflowVisible()
     }
 
+    function trayOverflowOpenCount(index) {
+        const instance = panelInstance(index)
+        return instance !== null ? instance.trayOverflowOpenCount() : 0
+    }
+
+    function trayKeyboardSnapshot(index) {
+        const instance = panelInstance(index)
+        return instance !== null ? instance.trayKeyboardSnapshot() : "{}"
+    }
+
     function trayOverflowButtonFocused(index) {
         const instance = panelInstance(index)
         return instance !== null && instance.trayOverflowButtonFocused()
+    }
+
+    function trayOverflowEntryReady(index, itemIndex) {
+        const instance = panelInstance(index)
+        return instance !== null && instance.trayOverflowEntryReady(itemIndex)
+    }
+
+    function trayOverflowReadinessState(index, itemIndex) {
+        const instance = panelInstance(index)
+        return instance !== null
+            ? instance.trayOverflowReadinessState(itemIndex) : "panel-missing"
     }
 
     function activateTrayOverflowControl(index, itemIndex) {
@@ -279,9 +306,21 @@ Scope {
                 keyboardReleaseTimer.restart()
             }
 
+            function releaseKeyboardEntryForPopup() {
+                keyboardReleaseTimer.stop()
+                // The native popup owns its own keyboard grab. Preserve the
+                // parent's current mode throughout that grab: an asynchronous
+                // Exclusive re-entry on cancellation/reopening clears an
+                // already-created xdg_popup grab in the pinned compositor.
+                // Pointer-opened popups retain OnDemand; keyboard-opened popups
+                // retain Exclusive until dismissal releases or restores focus.
+                panel.keyboardReleasePending = false
+            }
+
             function keyboardEntryFocused() {
                 return panel.keyboardNavigationActive
                     && commandPaletteButton.activeFocus
+                    && commandPaletteButton.Window.active
             }
 
             function activateCommandPaletteControl() {
@@ -320,14 +359,32 @@ Scope {
             function openTrayOverflowControl() {
                 return systemTray.openOverflowControl()
             }
+            function focusTrayOverflowButtonControl() {
+                return systemTray.focusOverflowButtonControl()
+            }
             function cancelTrayOverflowControl() {
                 return systemTray.cancelOverflowControl()
             }
             function trayOverflowVisible() {
                 return systemTray.overflowIsVisible()
             }
+            function trayOverflowOpenCount() {
+                return systemTray.overflowOpenCount
+            }
+
+            function trayKeyboardSnapshot() {
+                return systemTray.overflowKeyboardSnapshot()
+            }
             function trayOverflowButtonFocused() {
                 return systemTray.overflowButtonFocused()
+            }
+            function trayOverflowEntryReady(index) {
+                return systemTray.overflowEntryReady(index)
+            }
+            function trayOverflowReadinessState(index) {
+                return systemTray.overflowReadinessState(index)
+                    + " panelKeyboardNavigationActive=" + panel.keyboardNavigationActive
+                    + " panelKeyboardReleasePending=" + panel.keyboardReleasePending
             }
             function activateTrayOverflowControl(index) {
                 return systemTray.activateOverflowControl(index)
@@ -337,6 +394,26 @@ Scope {
                 if (workspaceOverflowCount <= 0)
                     return
                 workspaceOverflowWindow.visible = true
+            }
+
+            function focusFirstWorkspaceOverflowEntry() {
+                if (!workspaceOverflowWindow.visible
+                        || !workspaceOverflowWindow.backingWindowVisible)
+                    return false
+                for (let i = 0; i < workspaceOverflowRepeater.count; i++) {
+                    const item = workspaceOverflowRepeater.itemAt(i)
+                    if (item && item.activeFocus)
+                        return item.Window.active
+                }
+                for (let i = 0; i < workspaceOverflowRepeater.count; i++) {
+                    const item = workspaceOverflowRepeater.itemAt(i)
+                    if (item && item.visible && item.enabled
+                            && item.width > 0 && item.height > 0) {
+                        item.forceActiveFocus(Qt.TabFocusReason)
+                        return item.activeFocus && item.Window.active
+                    }
+                }
+                return false
             }
 
             function dismissWorkspaceOverflow() {
@@ -380,13 +457,6 @@ Scope {
                 onTriggered: panel.keyboardReleasePending = false
             }
 
-            Shortcut {
-                sequence: "Escape"
-                context: Qt.WindowShortcut
-                enabled: panel.keyboardNavigationActive
-                onActivated: panel.releaseKeyboardEntry()
-            }
-
             LinuraSurface {
                 anchors.fill: parent
                 level: "background"
@@ -399,6 +469,15 @@ Scope {
                 anchors.leftMargin: theme.spacingLg
                 anchors.rightMargin: theme.spacingLg
                 spacing: theme.spacingSm
+
+                // Window shortcuts need a content item in the native window;
+                // PanelWindow itself is a proxy rather than a QQuickWindow.
+                Shortcut {
+                    sequence: "Escape"
+                    context: Qt.WindowShortcut
+                    enabled: panel.keyboardNavigationActive
+                    onActivated: panel.releaseKeyboardEntry()
+                }
 
                 RowLayout {
                     id: leftGroup
@@ -448,7 +527,7 @@ Scope {
                             .arg(panel.workspaceOverflowCount)
                         toolTip: accessibleName
                         onClicked: {
-                            panel.releaseKeyboardEntry()
+                            panel.releaseKeyboardEntryForPopup()
                             panel.openWorkspaceOverflow()
                         }
                     }
@@ -493,6 +572,7 @@ Scope {
                         inlineItemLimit: panel.trayInlineLimit
                         itemModelOverride: root.trayItemModelOverride
                         onInteractionStarted: panel.releaseKeyboardEntry()
+                        onPopupInteractionStarted: panel.releaseKeyboardEntryForPopup()
                         onKeyboardReturnRequested: control =>
                             panel.restoreKeyboardEntry(control, Qt.TabFocusReason)
                     }
@@ -541,25 +621,38 @@ Scope {
                 grabFocus: true
                 visible: false
 
-                onVisibleChanged: {
-                    if (!visible)
-                        return
-                    Qt.callLater(function() {
-                        for (let i = 0; i < workspaceOverflowRepeater.count; i++) {
-                            const item = workspaceOverflowRepeater.itemAt(i)
-                            if (item && item.visible) {
-                                item.forceActiveFocus(Qt.TabFocusReason)
-                                break
-                            }
-                        }
-                    })
+                Timer {
+                    id: workspaceFocusRetry
+                    interval: 100
+                    repeat: true
+                    running: false
+                    property int attempts: 0
+
+                    onTriggered: {
+                        if (!workspaceOverflowWindow.visible
+                                || !workspaceOverflowWindow.backingWindowVisible
+                                || panel.focusFirstWorkspaceOverflowEntry()
+                                || ++attempts >= 20)
+                            stop()
+                    }
                 }
 
-                Shortcut {
-                    sequence: "Escape"
-                    context: Qt.WindowShortcut
-                    enabled: workspaceOverflowWindow.visible
-                    onActivated: panel.dismissWorkspaceOverflow()
+                onVisibleChanged: {
+                    if (visible) {
+                        Qt.callLater(panel.focusFirstWorkspaceOverflowEntry)
+                    } else {
+                        workspaceFocusRetry.stop()
+                        panel.releaseKeyboardEntry()
+                    }
+                }
+                onBackingWindowVisibleChanged: {
+                    if (backingWindowVisible) {
+                        workspaceFocusRetry.attempts = 0
+                        workspaceFocusRetry.restart()
+                        Qt.callLater(panel.focusFirstWorkspaceOverflowEntry)
+                    } else {
+                        workspaceFocusRetry.stop()
+                    }
                 }
 
                 LinuraSurface {
@@ -623,7 +716,17 @@ Scope {
                                         workspaceOverflowFlickable.ensureVisible(workspaceOverflowEntry)
                                 }
 
+                                Keys.onShortcutOverride: event => {
+                                    event.accepted = event.key === Qt.Key_Escape
+                                }
+                                Keys.onEscapePressed: event => {
+                                    if (!event.isAutoRepeat)
+                                        panel.dismissWorkspaceOverflow()
+                                    event.accepted = true
+                                }
+
                                 onClicked: {
+                                    panel.releaseKeyboardEntry()
                                     root.workspaceRequested(modelData.id)
                                     workspaceOverflowWindow.visible = false
                                 }

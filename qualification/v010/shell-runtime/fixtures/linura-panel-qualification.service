@@ -19,3 +19,4 @@ UMask=0077
 Environment=QS_DISABLE_FILE_WATCHER=1
 Environment=QML2_IMPORT_PATH=/usr/local/lib/qt6/qml
 Environment=QT_QUICK_BACKEND=software
+Environment=WAYLAND_DEBUG=client

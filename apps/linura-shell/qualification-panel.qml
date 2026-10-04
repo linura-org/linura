@@ -118,6 +118,10 @@ Scope {
     IpcHandler {
         target: "linura.panel-qualification"
 
+        function trayKeyboardSnapshot(): string {
+            return workstationPanel.trayKeyboardSnapshot(0)
+        }
+
         function screenCount(): int { return workstationPanel.screenCount }
         function panelHeight(): int { return workstationPanel.panelHeight }
         function panelWindowCount(): int { return workstationPanel.instantiatedPanelCount }
@@ -162,14 +166,26 @@ Scope {
         function openTrayOverflowControl(): bool {
             return workstationPanel.openTrayOverflowControl(0)
         }
+        function focusTrayOverflowButtonControl(): bool {
+            return workstationPanel.focusTrayOverflowButtonControl(0)
+        }
         function cancelTrayOverflowControl(): bool {
             return workstationPanel.cancelTrayOverflowControl(0)
         }
         function trayOverflowVisible(): bool {
             return workstationPanel.trayOverflowVisible(0)
         }
+        function trayOverflowOpenCount(): int {
+            return workstationPanel.trayOverflowOpenCount(0)
+        }
         function trayOverflowButtonFocused(): bool {
             return workstationPanel.trayOverflowButtonFocused(0)
+        }
+        function trayOverflowEntryReady(index: int): bool {
+            return workstationPanel.trayOverflowEntryReady(0, index)
+        }
+        function trayOverflowReadinessState(index: int): string {
+            return workstationPanel.trayOverflowReadinessState(0, index)
         }
         function activateTrayOverflowControl(index: int): bool {
             return workstationPanel.activateTrayOverflowControl(0, index)

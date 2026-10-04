@@ -123,6 +123,7 @@ private:
         QString requestId;
         qint32 presentationGeneration = 0;
         bool dispatched = false;
+        int expiredObservationRetries = 0;
     };
 
     enum class ObservePurpose {

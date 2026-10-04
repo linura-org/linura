@@ -57,6 +57,9 @@ SPECIALIZED = {
         "apps/linura-shell/bridge/CMakeLists.txt",
         "contracts/v010-workstation-slices.toml",
         "qualification/v010/shell-runtime/run-shell-runtime.sh",
+        "qualification/v010/shell-runtime/native-keyboard.c",
+        "tools/verify_tray_keyboard.py",
+        "tests/tooling/test_native_keyboard.py",
         ".github/workflows/v010-shell-runtime-qualification.yml")),
 }
 

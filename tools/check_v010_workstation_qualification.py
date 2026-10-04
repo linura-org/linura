@@ -1128,6 +1128,16 @@ def _validate_q11_machine_environment(
         failures.append(f"{label} source must match the interactive workstation source")
     if environment.get("run_id") != manifest.get("run_id"):
         failures.append(f"{label} run_id must match the parent qualification run")
+    manifest_fixture = manifest.get("fixture")
+    if not isinstance(manifest_fixture, dict):
+        failures.append(f"{label} requires the enrolled fixture binding")
+    else:
+        fixture_binding = manifest_fixture.get("contract")
+        expected_digest = fixture_binding.get("sha256") if isinstance(fixture_binding, dict) else None
+        if environment.get("fixture_id") != manifest_fixture.get("fixture_id"):
+            failures.append(f"{label} fixture identity must match the enrolled fixture")
+        if environment.get("fixture_contract_sha256") != expected_digest:
+            failures.append(f"{label} fixture digest must match the enrolled fixture")
     if environment.get("profile_id") != EXPECTED_PROFILE:
         failures.append(f"{label} must bind {EXPECTED_PROFILE}")
     if environment.get("machine_class") != EXPECTED_MACHINE_CLASS:
@@ -1271,6 +1281,16 @@ def _validate_q11_case_execution(
         failures.append(f"{label} machine_execution must bind the physical machine environment digest")
     if environment_boot_id is None or execution.get("boot_id") != environment_boot_id:
         failures.append(f"{label} machine_execution must bind the physical machine boot identity")
+    manifest_fixture = manifest.get("fixture")
+    if not isinstance(manifest_fixture, dict):
+        failures.append(f"{label} missing enrolled fixture")
+        return
+    fixture_binding = manifest_fixture.get("contract")
+    expected_fixture_digest = fixture_binding.get("sha256") if isinstance(fixture_binding, dict) else None
+    if execution.get("fixture_id") != manifest_fixture.get("fixture_id"):
+        failures.append(f"{label} machine_execution fixture identity mismatch")
+    if execution.get("fixture_contract_sha256") != expected_fixture_digest:
+        failures.append(f"{label} machine_execution fixture digest mismatch")
     controller = execution.get("controller")
     if controller not in PHYSICAL_EXTERNAL_CONTROLLERS:
         failures.append(f"{label} machine_execution controller must be an external physical-machine controller")
@@ -1309,6 +1329,10 @@ def _validate_q11_case_execution(
         failures.append(f"{label} machine execution provenance must bind the parent run and case")
     if provenance.get("environment_sha256") != environment_sha256:
         failures.append(f"{label} machine execution provenance environment binding mismatch")
+    if provenance.get("fixture_id") != manifest_fixture.get("fixture_id"):
+        failures.append(f"{label} machine execution provenance fixture identity mismatch")
+    if provenance.get("fixture_contract_sha256") != expected_fixture_digest:
+        failures.append(f"{label} machine execution provenance fixture digest mismatch")
     if provenance.get("boot_id") != environment_boot_id:
         failures.append(f"{label} machine execution provenance boot identity mismatch")
     if provenance.get("scope") != "machine":
@@ -1339,6 +1363,8 @@ def _validate_q11_case_execution(
                 f"controller={controller}",
                 f"mechanism={expected_mechanism}",
                 f"environment_sha256={environment_sha256}",
+                f"fixture_id={manifest_fixture.get('fixture_id')}",
+                f"fixture_contract_sha256={expected_fixture_digest}",
                 f"source_commit_sha={source_sha}",
                 f"run_id={manifest.get('run_id')}",
                 "scope=machine",
@@ -1611,6 +1637,46 @@ def _validate_interactive_workstation_evidence(
         failures.append("interactive workstation evidence requires a non-empty run_id")
     if not _nonempty_string(manifest.get("captured_at_utc")):
         failures.append("interactive workstation evidence requires captured_at_utc")
+    fixture = manifest.get("fixture")
+    if not isinstance(fixture, dict) or set(fixture) != {"fixture_id", "contract"}:
+        failures.append("interactive workstation evidence requires exactly one enrolled fixture binding")
+    else:
+        fixture_id = fixture.get("fixture_id")
+        if (
+            not isinstance(fixture_id, str)
+            or not fixture_id
+            or len(fixture_id) > 64
+            or not fixture_id[0].isalnum()
+            or any(ch not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-" for ch in fixture_id)
+        ):
+            failures.append("interactive workstation fixture identifier is invalid")
+        fixture_binding = fixture.get("contract")
+        if (
+            not isinstance(fixture_binding, dict)
+            or fixture_binding.get("path") != "qualification/v010/interactive-workstation/fixture-contract.json"
+        ):
+            failures.append("interactive workstation fixture contract path must be canonical")
+        fixture_path = _validate_q11_bound_artifact(
+            root,
+            fixture_binding,
+            label="interactive workstation enrolled fixture contract",
+            failures=failures,
+        )
+        if fixture_path is not None:
+            fixture_document = _load_json(
+                fixture_path, "interactive workstation enrolled fixture contract", failures
+            )
+            if fixture_document is not None:
+                expected_fixture = {
+                    "schema_version": 1,
+                    "fixture_id": fixture_id,
+                    "profile_id": EXPECTED_PROFILE,
+                    "machine_class": EXPECTED_MACHINE_CLASS,
+                    "evidence_tier": "maintainer_hardware",
+                    "physical_hardware": True,
+                }
+                if fixture_document != expected_fixture:
+                    failures.append("interactive workstation enrolled fixture contract payload mismatch")
     if expected_package_manifest_sha256 is None or expected_provider_versions is None:
         failures.append(
             "interactive workstation evidence requires the frozen qualification package manifest"

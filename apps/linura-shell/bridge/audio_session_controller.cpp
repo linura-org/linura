@@ -29,6 +29,9 @@ constexpr auto kReason = "Linura Shell Control Center audio quick setting";
 constexpr qint64 kFutureSkewMs = 1'000;
 constexpr quint64 kMaximumObservationValidityMs = 10'000;
 constexpr int kObserveTimeoutMs = 3'000;
+// Expiry before dispatch has no external effect; retry only this specific
+// recoverable observation race within a strict, bounded attempt ceiling.
+constexpr int kPreApplyExpiredObservationRetries = 3;
 // Session1 performs a fresh authoritative read, one bounded mutation helper,
 // and an independent authoritative post-effect read. Each provider/helper stage
 // has a two-second hard deadline; leave bounded headroom for durable audit I/O
@@ -554,6 +557,26 @@ void AudioSessionController::observe(ObservePurpose purpose)
             QString error;
             const auto snapshot = parseObservation(reply, &error);
             if (!snapshot.has_value()) {
+                if (purpose == ObservePurpose::PreApply
+                    && error == QStringLiteral(
+                        "Authoritative audio observation expired before use.")
+                    && active_
+                    && pending_.has_value()
+                    && !pending_->dispatched
+                    && pending_->expiredObservationRetries
+                        < kPreApplyExpiredObservationRetries) {
+                    ++pending_->expiredObservationRetries;
+                    setState(
+                        QStringLiteral("applying"),
+                        QStringLiteral(
+                            "Pre-dispatch observation expired; revalidating the unchanged "
+                            "bound request before any effect."));
+                    // The original displayed precondition and request identity
+                    // remain unchanged. A fresh observation must still pass
+                    // samePrecondition() before dispatchEffect() can run.
+                    observe(ObservePurpose::PreApply);
+                    return;
+                }
                 handleObservationFailure(purpose, error);
                 return;
             }

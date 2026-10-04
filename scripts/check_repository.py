@@ -80,6 +80,7 @@ REQUIRED = [
     "schemas/bootstrap.v1.schema.json", "schemas/migration.v1.schema.json", "schemas/update-plan.v1.schema.json",
     "schemas/managed-resource.v1.schema.json", "schemas/hardware-fixture.v1.schema.json", "schemas/acceptance-scenario.v1.schema.json",
     "schemas/visual-baseline.v1.schema.json", "schemas/lifecycle-workflow.v1.schema.json", "schemas/app-supervision.v1.schema.json",
+    "schemas/v010-maintained-workstation-fixture.v1.schema.json",
 ]
 
 FORBIDDEN_SNIPPETS = ["sudo bash -c", "chmod 777"]
