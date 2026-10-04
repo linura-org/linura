@@ -702,14 +702,17 @@ def check(root: Path = ROOT) -> list[str]:
     codeql_gate = mandatory_bodies.get("analyze")
     if codeql_gate:
         body, indent = codeql_gate
+        action_revisions = {}
         for action in ("github/codeql-action/init@", "github/codeql-action/analyze@"):
             step = workflow_step(body, indent, "uses", action)
             pinned = re.search(
                 r"(?m)^ {" + str(indent + 2) + r"}- uses: " +
-                re.escape(action) + r"[0-9a-f]{40}(?:\s+#.*)?$", step or ""
-            ) is not None
-            require(step_is_unconditional(step, indent) and pinned,
+                re.escape(action) + r"([0-9a-f]{40})(?:\s+#.*)?$", step or ""
+            )
+            require(step_is_unconditional(step, indent) and pinned is not None,
                     "CodeQL missing unconditional SHA-pinned action: " + action)
+            if pinned is not None:
+                action_revisions[action] = pinned.group(1)
             if action.endswith("/init@"):
                 settings = section(step or "", "with", indent + 4)
                 # Match the entire setting block. A comment, duplicate YAML
@@ -717,6 +720,11 @@ def check(root: Path = ROOT) -> list[str]:
                 require(settings is not None and
                         re.fullmatch(r"\s*languages: rust\s*", settings) is not None,
                         "CodeQL initialization must configure exactly Rust")
+        require(
+            len(action_revisions) == 2
+            and len(set(action_revisions.values())) == 1,
+            "CodeQL init/analyze actions must share the same immutable revision",
+        )
     codex = read(SPECIALIZED["codex"][0])
     # Workflow- and job-level run defaults override the effective shell of
     # every otherwise reviewed command. Ban inherited defaults, including

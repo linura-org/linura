@@ -12,3 +12,9 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    # CodeQL init and analyze share one process-wide action configuration.
+    # Updating them in separate PRs causes a runtime version mismatch.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action/*"
