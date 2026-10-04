@@ -93,3 +93,36 @@ Typical matrix areas include arm64 and other explicitly supported architectures,
 Fixtures under `hardware/fixtures/` contain structural observations only. They must not contain serial numbers, MAC addresses, hostnames, usernames, IP addresses, account identifiers, or other machine-owner secrets.
 
 A support claim must cite exact evidence. Unknown or mismatched hardware/environment state degrades explicitly rather than pretending to be supported.
+
+
+## Maintained physical workstation fixtures
+
+v0.10 Level C/Q11 requires a maintained **physical workstation**, not merely a machine whose provider markets it as dedicated hardware. The lane must independently prove no virtualization and must retain the real workstation identities and interactions required by Q11: CPU, GPU/driver, connected display geometry/refresh/scale, Wayland/Hyprland, real keyboard/pointer behavior, accessibility/visual evidence, provider identities and the physical Session1 effect/recovery cases.
+
+A cloud VM cannot satisfy Level C. A bare-metal datacenter server may provide useful supplementary hardware evidence, but it satisfies Level C only if the exact machine also meets the workstation GPU/display/input/session evidence contract; bare-metal status alone is insufficient.
+
+Maintained fixtures are enrolled outside the repository at `/etc/linura/qualification-fixture.json` by default. The file is intentionally minimal and must not contain serial numbers, MAC addresses, hostnames, usernames, IP addresses, account IDs or other owner secrets. It follows `schemas/v010-maintained-workstation-fixture.v1.schema.json` and is required to be root-owned, single-link, non-symlink and not group/world writable. A representative contract is:
+
+```json
+{
+  "schema_version": 1,
+  "fixture_id": "linura-workstation-01",
+  "profile_id": "arch-hyprland-v1",
+  "machine_class": "workstation",
+  "evidence_tier": "maintainer_hardware",
+  "physical_hardware": true
+}
+```
+
+The fixture contract is machine identity/configuration, not case execution authority and not evidence. The external controller identity belongs to each Q11 case's execution provenance rather than the machine fixture. Level C independently probes virtualization and the live machine on every run and binds the fixture-contract digest into retained capture evidence.
+
+Retained Level C monitor evidence is sanitized before it is written: connector name, vendor/model, geometry, refresh, scale, transform and focus state may be retained, while Hyprland's raw `serial`, `description` and unrelated monitor fields are discarded. Raw `hyprctl monitors -j` output must never be committed or published as qualification evidence.
+
+
+### Level C run-state and evidence boundary
+
+The maintained-workstation runner uses a bounded lifecycle rather than arbitrary remote commands. A full Q11 attempt starts with `begin-run`, which requires a clean exact source checkout, the enrolled physical fixture, a successful physicality/session doctor, and every prerequisite product slice. It freezes one request for each canonical Q11 case into private state outside the source tree. External controllers may then execute only the named case mechanisms and submit digest-bound case attestations through `record-case`; substitutions of case, mechanism, source, environment, boot identity, controller provenance, event log, or accepted evidence digest fail closed.
+
+`finalize-run` requires all nine case attestations and validates the complete candidate evidence bundle with `tools/check_v010_workstation_qualification.py` against an immutable archive of the exact source. This is candidate validation only: the runner writes `evidence_ready=false` and `release_support_promotion=false`, and never edits the real qualification contract. Q11 becomes release evidence only through the later reviewed promotion path after an actual maintained physical workstation has passed the canonical verifier.
+
+Level C screen recording remains optional supporting evidence. Reused evidence directories hold one current fixture: a new Level C capture clears **all** previous fixture-keyed recordings and sidecars before replacing the shared machine snapshots, including when the new capture is not recorded. Use separate evidence roots to preserve historical captures. A root-owned fixture identity is still required for each run, and the user-owned global recorder lock is acquired through a private no-follow, non-truncating, single-link descriptor before any existing evidence is touched. Recorded Level C capture automatically stops with a bounded finalization margin before the recording contract's maximum duration. Recorded evidence is re-verified after publication, and its digest file is emitted from the verifier's stable snapshot digest rather than by independently reopening the mutable recording path.

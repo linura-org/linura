@@ -171,6 +171,12 @@ Scope {
         function trayOverflowButtonFocused(): bool {
             return workstationPanel.trayOverflowButtonFocused(0)
         }
+        function trayOverflowEntryReady(index: int): bool {
+            return workstationPanel.trayOverflowEntryReady(0, index)
+        }
+        function trayOverflowReadinessState(index: int): string {
+            return workstationPanel.trayOverflowReadinessState(0, index)
+        }
         function activateTrayOverflowControl(index: int): bool {
             return workstationPanel.activateTrayOverflowControl(0, index)
         }

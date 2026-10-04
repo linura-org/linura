@@ -6,6 +6,7 @@ claim = "development-runtime-evidence-only"
 target_profile = "arch-hyprland-v1"
 workflow = ".github/workflows/v010-shell-runtime-qualification.yml"
 substrate_contract = "contracts/v010-shell-runtime-substrate.toml"
+workstation_acceptance_contract = "contracts/v010-workstation-acceptance.toml"
 runner = "github-hosted-ubuntu-qemu-tcg"
 vm_acceleration = "tcg"
 qt_quick_backend = "software"
@@ -37,6 +38,7 @@ required_components = [
   "quick-settings",
   "notifications-osd",
   "workstation-panel",
+  "wayland-session-recorder",
 ]
 
 required_cases = [
@@ -60,6 +62,7 @@ required_cases = [
   "lifecycle-feedback-verified-success",
   "lifecycle-feedback-precondition-drift-no-success",
   "workstation-panel-entrypoints",
+  "workstation-visual-recording",
 ]
 
 [evidence]
@@ -84,4 +87,5 @@ quick_settings_authority_path_required = true
 lifecycle_feedback_evidence_required = true
 workstation_panel_evidence_required = true
 workstation_shortcut_binding_evidence_required = true
+workstation_video_evidence_required = true
 release_support_promotion = false

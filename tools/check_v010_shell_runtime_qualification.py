@@ -3,14 +3,18 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import tomllib
 from urllib.parse import urlparse
 
+from workstation_acceptance import validate_contract as validate_acceptance_contract
+
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = "contracts/v010-shell-runtime-qualification.toml"
 SUBSTRATE_CONTRACT = "contracts/v010-shell-runtime-substrate.toml"
+ACCEPTANCE_CONTRACT = "contracts/v010-workstation-acceptance.toml"
 WORKFLOW = ".github/workflows/v010-shell-runtime-qualification.yml"
 PARENT_WORKFLOW = ".github/workflows/v010-qualification.yml"
 
@@ -31,6 +35,7 @@ EXPECTED_COMPONENTS = [
     "quick-settings",
     "notifications-osd",
     "workstation-panel",
+    "wayland-session-recorder",
 ]
 
 EXPECTED_RUNTIME_PACKAGES = [
@@ -52,6 +57,8 @@ EXPECTED_RUNTIME_PACKAGES = [
     "wireplumber",
     "networkmanager",
     "sqlite",
+    "ffmpeg",
+    "wf-recorder",
 ]
 
 EXPECTED_CASES = [
@@ -75,6 +82,7 @@ EXPECTED_CASES = [
     "lifecycle-feedback-verified-success",
     "lifecycle-feedback-precondition-drift-no-success",
     "workstation-panel-entrypoints",
+    "workstation-visual-recording",
 ]
 
 RUNTIME_FILES = (
@@ -98,6 +106,16 @@ RUNTIME_FILES = (
     "qualification/v010/shell-runtime/provision-shell-runtime.sh",
     "qualification/v010/shell-runtime/run-shell-runtime.sh",
     "qualification/v010/shell-runtime/start-vm.sh",
+    "qualification/v010/workstation-acceptance/record-session.sh",
+    "qualification/v010/workstation-acceptance/run-live-session.sh",
+    "qualification/v010/workstation-acceptance/launch-interactive.sh",
+    "qualification/v010/workstation-acceptance/capture-hardware-session.sh",
+    "qualification/v010/workstation-acceptance/run-hardware-qualification.sh",
+    "tools/workstation_acceptance.py",
+    "tools/workstation_capture_lock.py",
+    "tools/workstation_q11_runner.py",
+    "contracts/v010-workstation-acceptance.toml",
+    "schemas/v010-maintained-workstation-fixture.v1.schema.json",
     "qualification/v010/shell-runtime/prepare-substrate.sh",
     "qualification/v010/shell-runtime/verify-substrate.py",
     "qualification/v010/shell-runtime/fixtures/linger-app",
@@ -115,6 +133,22 @@ RUNTIME_FILES = (
     "qualification/v010/shell-runtime/fixtures/org.linura.QualificationTerminal.desktop",
     "qualification/v010/shell-runtime/fixtures/org.linura.QualificationForking.desktop",
     "qualification/v010/shell-runtime/fixtures/org.linura.QualificationStale.desktop",
+)
+
+# The guest invokes record-session.sh directly. Preserve the executable
+# modes of the entire qualification script set through every tree rebase:
+# a content-only checkout must never appear qualification-ready.
+EXECUTABLE_RUNTIME_SCRIPTS = (
+    "qualification/v010/shell-runtime/prepare-substrate.sh",
+    "qualification/v010/shell-runtime/provision-shell-runtime.sh",
+    "qualification/v010/shell-runtime/run-shell-runtime.sh",
+    "qualification/v010/shell-runtime/start-vm.sh",
+    "qualification/v010/shell-runtime/verify-substrate.py",
+    "qualification/v010/workstation-acceptance/record-session.sh",
+    "qualification/v010/workstation-acceptance/run-live-session.sh",
+    "qualification/v010/workstation-acceptance/launch-interactive.sh",
+    "qualification/v010/workstation-acceptance/capture-hardware-session.sh",
+    "qualification/v010/workstation-acceptance/run-hardware-qualification.sh",
 )
 
 SANDBOX_LINES = (
@@ -224,13 +258,22 @@ def validate(root: Path) -> list[str]:
         "v0.10 shell runtime substrate contract",
         failures,
     )
-    if not contract or not workstation or not cache_substrate:
+    acceptance = _load_toml(
+        root / ACCEPTANCE_CONTRACT,
+        "v0.10 workstation acceptance contract",
+        failures,
+    )
+    if not contract or not workstation or not cache_substrate or not acceptance:
         return failures
+    for failure in validate_acceptance_contract(acceptance):
+        failures.append(f"workstation acceptance contract: {failure}")
 
     if workstation.get("shell_runtime_qualification_contract") != CONTRACT:
         failures.append("v0.10 workstation qualification must bind the shell runtime qualification contract")
     if contract.get("substrate_contract") != SUBSTRATE_CONTRACT:
         failures.append("shell runtime qualification must bind the cacheable substrate contract")
+    if contract.get("workstation_acceptance_contract") != ACCEPTANCE_CONTRACT:
+        failures.append("shell runtime qualification must bind the A/B/C workstation acceptance contract")
 
     expected_scalars = {
         "schema_version": 1,
@@ -259,7 +302,7 @@ def validate(root: Path) -> list[str]:
         "id": "qualification/v010-shell-runtime-substrate",
         "state": "development-prerequisite",
         "claim": "non-evidence-cacheable-substrate",
-        "cache_namespace": "linura-v010-shell-substrate-v2",
+        "cache_namespace": "linura-v010-shell-substrate-v3",
         "builder": "qualification/v010/shell-runtime/prepare-substrate.sh",
         "verifier": "qualification/v010/shell-runtime/verify-substrate.py",
         "base_image_url": contract.get("base_image_url"),
@@ -344,6 +387,7 @@ def validate(root: Path) -> list[str]:
             "lifecycle_feedback_evidence_required",
             "workstation_panel_evidence_required",
             "workstation_shortcut_binding_evidence_required",
+            "workstation_video_evidence_required",
         ):
             if evidence.get(key) is not True:
                 failures.append(f"shell runtime evidence.{key} must remain true")
@@ -358,6 +402,12 @@ def validate(root: Path) -> list[str]:
         path = root / relative
         if not path.is_file() or path.is_symlink():
             failures.append(f"shell runtime qualification file missing or untrusted: {relative}")
+
+    for relative in EXECUTABLE_RUNTIME_SCRIPTS:
+        script = root / relative
+        if (script.is_symlink() or not script.is_file()
+                or not (stat.S_IMODE(script.stat().st_mode) & stat.S_IXUSR)):
+            failures.append(f"shell runtime qualification script not executable or untrusted: {relative}")
 
     workflow_path = root / WORKFLOW
     parent_path = root / PARENT_WORKFLOW
@@ -425,6 +475,8 @@ def validate(root: Path) -> list[str]:
         'LINURAD_SHA256=%s',
         'SESSION_AUDIO_HELPER_SHA256=%s',
         "bash qualification/v010/shell-runtime/start-vm.sh",
+        "--mode automated",
+        "--display none",
         "cloud-localds",
         "QUALIFICATION_NIC_MAC: 52:54:00:12:34:56",
         'QUALIFICATION_GPU_PCI_BDF: "0000:00:02.0"',
@@ -465,6 +517,20 @@ def validate(root: Path) -> list[str]:
         "workstation-panel.txt",
         "workstation-panel-monitors.json",
         "workstation-panel-shortcuts.json",
+        "Verify automated workstation recording",
+        "tools/workstation_acceptance.py",
+        "workstation-runtime.mkv",
+        "workstation-runtime.metadata.json",
+        "workstation-runtime.sha256",
+        "expected_recording_sha",
+        "expected_recording_name",
+        "recording metadata source SHA mismatch",
+        "recording metadata digest mismatch",
+        "recording digest file mismatch",
+        '"workstation_acceptance_contract": {',
+        "compression-level: 0",
+        '"workstation_recording": {',
+        '"scope": "captured-automated-wayland-session"',
         "workstation_panel_values = {}",
         '"global_shortcuts_bound",',
         '"keyboard_entry_focused",',
@@ -498,8 +564,11 @@ def validate(root: Path) -> list[str]:
         failures.append("shell runtime workflow missing exact runtime package evidence set")
     else:
         package_set = workflow.split(package_set_marker, 1)[1].split("}", 1)[0]
-        if '"pipewire-audio"' not in package_set:
-            failures.append("shell runtime evidence package set must include pipewire-audio")
+        for required_package in ("pipewire-audio", "ffmpeg", "wf-recorder"):
+            if f'"{required_package}"' not in package_set:
+                failures.append(
+                    f"shell runtime evidence package set must include {required_package}"
+                )
 
     def workflow_step_block(text: str, step_name: str) -> str:
         marker = f"- name: {step_name}"
@@ -610,6 +679,10 @@ def validate(root: Path) -> list[str]:
         '".github/workflows/v010-shell-runtime-qualification.yml"',
         '"contracts/v010-shell-runtime-qualification.toml"',
         '"contracts/v010-shell-runtime-substrate.toml"',
+        '"contracts/v010-workstation-acceptance.toml"',
+        '"tools/workstation_acceptance.py"',
+        '"tests/tooling/test_workstation_acceptance.py"',
+        '"qualification/v010/workstation-acceptance/**"',
         '"apps/linura-shell/**"',
         '"apps/linurad/**"',
         '"packaging/systemd/user/linurad.service"',
@@ -630,6 +703,7 @@ def validate(root: Path) -> list[str]:
         "shell-runtime:",
         "uses: ./.github/workflows/v010-shell-runtime-qualification.yml",
         "source_sha: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}",
+        "tests.tooling.test_workstation_acceptance",
     )
     for fragment in parent_fragments:
         if fragment not in parent:
@@ -809,6 +883,13 @@ def validate(root: Path) -> list[str]:
     run_script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
     provision_script = root / "qualification/v010/shell-runtime/provision-shell-runtime.sh"
     vm_launcher = root / "qualification/v010/shell-runtime/start-vm.sh"
+    recorder_script = root / "qualification/v010/workstation-acceptance/record-session.sh"
+    live_session_script = root / "qualification/v010/workstation-acceptance/run-live-session.sh"
+    interactive_launcher = root / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+    hardware_capture_script = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+    hardware_runner_script = root / "qualification/v010/workstation-acceptance/run-hardware-qualification.sh"
+    acceptance_tool = root / "tools/workstation_acceptance.py"
+    q11_orchestrator = root / "tools/workstation_q11_runner.py"
     prepare_substrate_script = root / "qualification/v010/shell-runtime/prepare-substrate.sh"
     verify_substrate_script = root / "qualification/v010/shell-runtime/verify-substrate.py"
 
@@ -838,7 +919,17 @@ def validate(root: Path) -> list[str]:
                     f"shell runtime provisioning missing QML module dependency-closure proof: {fragment}"
                 )
 
-    for script in (run_script, provision_script, vm_launcher, prepare_substrate_script):
+    for script in (
+        run_script,
+        provision_script,
+        vm_launcher,
+        recorder_script,
+        live_session_script,
+        interactive_launcher,
+        hardware_capture_script,
+        hardware_runner_script,
+        prepare_substrate_script,
+    ):
         completed = subprocess.run(
             ["bash", "-n", str(script)],
             check=False,
@@ -855,10 +946,328 @@ def validate(root: Path) -> list[str]:
         except SyntaxError as error:
             failures.append(f"invalid prepared-substrate verifier: {error}")
 
+    if hardware_runner_script.is_file():
+        hardware_runner_text = hardware_runner_script.read_text(encoding="utf-8")
+        for fragment in (
+            'case "$command_name" in',
+            "cases)",
+            "hardware-cases --json",
+            "case-request)",
+            "hardware-case-request",
+            "run-requests)",
+            "hardware-run-requests",
+            "begin-run)",
+            "record-case)",
+            "finalize-run)",
+            "status)",
+            'orchestrator="$source_root/tools/workstation_q11_runner.py"',
+            "fixture-check)",
+            "capture)",
+            "this runner cannot set release evidence readiness",
+        ):
+            if fragment not in hardware_runner_text:
+                failures.append(
+                    f"Level C hardware runner missing bounded case protocol: {fragment}"
+                )
+        for forbidden in (
+            'eval ',
+            'bash -c',
+            'sh -c',
+            'exec "$@"',
+            'command "$@"',
+            '--command',
+            '--argv',
+        ):
+            if forbidden in hardware_runner_text:
+                failures.append(
+                    f"Level C hardware runner contains forbidden generic command surface: {forbidden}"
+                )
+
+    if hardware_capture_script.is_file():
+        hardware_capture_text = hardware_capture_script.read_text(encoding="utf-8")
+        for fragment in (
+            "source_checkout_matches() {",
+            "status --porcelain=v1 --untracked-files=all",
+            'source_checkout_matches || fail "Level C source checkout changed before recorder start"',
+            "Level C source checkout changed before recording finalization",
+            "Level C source checkout changed during recording finalization",
+            "Level C source checkout changed before snapshot finalization",
+            "Level C source checkout changed during evidence publication",
+            '--digest-file "$evidence_root/$evidence_basename.sha256"',
+            'virtualization="$(systemd-detect-virt 2>/dev/null)"',
+            "virtualization_status=$?",
+            '[[ "$virtualization_status" -eq 1 ]]',
+            "Level C physicality probe failed with status",
+            "fixture-check",
+            "fixture_contract_sha256",
+            'virtualization="none"',
+            "fully clean exact-source checkout",
+            'record=0',
+            '--record) record=1',
+            'if [[ "$record" -eq 0 ]]; then',
+            "without screen recording",
+            "supporting evidence only; all Q11 cases must pass",
+            "sanitize-monitors",
+        ):
+            if fragment not in hardware_capture_text:
+                failures.append(
+                    f"Level C hardware capture missing physical/fail-closed boundary: {fragment}"
+                )
+
+    if hardware_capture_script.is_file():
+        hardware_capture_text = hardware_capture_script.read_text(encoding="utf-8")
+        if hardware_capture_text.count("source_checkout_matches") < 8:
+            failures.append(
+                "Level C hardware capture missing exact-source finalization invariant"
+            )
+        if any(
+            line.strip() == "hyprctl monitors -j"
+            for line in hardware_capture_text.splitlines()
+        ):
+            failures.append(
+                "Level C hardware capture must sanitize Hyprland monitor evidence before retention"
+            )
+
+    if hardware_capture_script.is_file():
+        hardware_capture_text = hardware_capture_script.read_text(encoding="utf-8")
+        opt_out = hardware_capture_text.find('if [[ "$record" -eq 0 ]]; then')
+        stale_cleanup = hardware_capture_text.find("stale_recordings=()")
+        stale_preflight = hardware_capture_text.find('stale_recordings+=("$stale_recording")')
+        stale_purge = hardware_capture_text.find('rm -f -- "$stale_recording"')
+        snapshot_validation = hardware_capture_text.find(
+            'safe_snapshot_destination "$evidence_root/$snapshot_name"'
+        )
+        snapshot_temporary = hardware_capture_text.find(
+            'snapshot_temporary_dir="$(mktemp -d "$evidence_root/.linura-snapshot.XXXXXXXX")"'
+        )
+        snapshot_start = hardware_capture_text.find(
+            '> "$snapshot_temporary_dir/virtualization.txt"'
+        )
+        snapshot_source_check = hardware_capture_text.find(
+            'source_checkout_matches || fail "Level C source checkout changed before snapshot publication"'
+        )
+        snapshot_publish = hardware_capture_text.find(
+            'mv -fT -- "$snapshot_temporary_dir/$snapshot_name" "$evidence_root/$snapshot_name"'
+        )
+        recording_path = hardware_capture_text.find('recording="$capture_state_dir/hardware-$fixture_id.mkv"')
+        recorder_start = hardware_capture_text.find('"$recorder" start "$recording" "$output_name"')
+        capture_state = hardware_capture_text.find(
+            'capture_state_dir="$HOME/.local/state/linura/acceptance"'
+        )
+        capture_lock_helper = hardware_capture_text.find(
+            'python3 -u "$source_root/tools/workstation_capture_lock.py" "$capture_lock"'
+        )
+        capture_lock = hardware_capture_text.find('case "$capture_lock_state" in')
+        idle_recorder = hardware_capture_text.find(
+            '[[ "$recorder_state" == "inactive" ]]'
+        )
+        if (
+            min(capture_state, capture_lock_helper, capture_lock, idle_recorder, stale_cleanup) < 0
+            or 'coproc capture_lock_holder {' not in hardware_capture_text
+            or 'LOCKED) ;;' not in hardware_capture_text
+            or 'BUSY) fail "Level C capture already in progress' not in hardware_capture_text
+            or not (
+                capture_state < capture_lock_helper < capture_lock
+                < idle_recorder < stale_cleanup
+            )
+        ):
+            failures.append(
+                "Level C capture must lock the fixture and reject active recording before stale cleanup"
+            )
+
+        # The helper provides the actual no-follow, non-truncating authority
+        # boundary. Merely changing the shell syntax without checking this
+        # implementation would silently remove its adversarial guarantees.
+        capture_lock_tool = root / "tools/workstation_capture_lock.py"
+        helper_text = (
+            capture_lock_tool.read_text(encoding="utf-8")
+            if capture_lock_tool.is_file() and not capture_lock_tool.is_symlink()
+            else ""
+        )
+        for fragment in (
+            "os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC",
+            "os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC",
+            "lock.st_nlink != 1",
+            "lock.st_uid != os.geteuid()",
+            "directory.st_uid != os.geteuid()",
+            "stat.S_IMODE(directory.st_mode) != 0o700",
+            "stat.S_IMODE(lock.st_mode) != 0o600",
+            "fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)",
+            "follow_symlinks=False",
+            "(current.st_dev, current.st_ino) != (lock.st_dev, lock.st_ino)",
+            "sys.stdin.buffer.read()",
+        ):
+            if fragment not in helper_text:
+                failures.append(f"Level C capture lock helper missing safety boundary: {fragment}")
+
+        if (
+            min(stale_cleanup, stale_preflight, stale_purge) < 0
+            or not (stale_cleanup < stale_preflight < stale_purge)
+            or 'stale_recordings=()' not in hardware_capture_text
+            or 'stale_recordings+=("$stale_recording")' not in hardware_capture_text
+            or 'for stale_recording in "${stale_recordings[@]}"' not in hardware_capture_text
+            or any(
+                fragment not in hardware_capture_text
+                for fragment in (
+                    '"$evidence_root"/hardware-*.mkv',
+                    '"$evidence_root"/hardware-*.metadata.json',
+                    '"$evidence_root"/hardware-*.sha256',
+                    '[[ ! -d "$stale_recording" ]]',
+                )
+            )
+        ):
+            failures.append(
+                "Level C capture must preflight and clear every fixture recording and sidecar"
+            )
+
+        if (
+            min(
+                opt_out, stale_cleanup, stale_purge, snapshot_validation,
+                snapshot_temporary, snapshot_start, snapshot_source_check,
+                snapshot_publish, recording_path, recorder_start,
+            ) < 0
+            or '[[ ! -L "$destination" ]]' not in hardware_capture_text
+            or 'stat -c %h -- "$destination"' not in hardware_capture_text
+            or not (
+                snapshot_validation < stale_cleanup < stale_purge
+                < snapshot_temporary < snapshot_start < snapshot_source_check
+                < snapshot_publish < opt_out < recording_path < recorder_start
+            )
+        ):
+            failures.append(
+                "Level C capture must clear stale recording evidence before safely publishing a new snapshot"
+            )
+
+        if any(
+            fragment not in hardware_capture_text
+            for fragment in (
+                'maximum_duration_seconds',
+                'capture_start_seconds="$SECONDS"',
+                'SECONDS - capture_start_seconds >= recording_duration_budget',
+                'break',
+                'sleep 1',
+            )
+        ):
+            failures.append(
+                "Level C recording must stop with a bounded margin before its duration limit"
+            )
+
+    panel_qualification_path = root / "apps/linura-shell/qualification-panel.qml"
+    panel_qualification_text = (
+        panel_qualification_path.read_text(encoding="utf-8")
+        if panel_qualification_path.is_file() and not panel_qualification_path.is_symlink()
+        else ""
+    )
+    for fragment in (
+        "function trayOverflowReadinessState(index: int): string",
+        "workstationPanel.trayOverflowReadinessState(0, index)",
+        "function trayOverflowEntryReady(index: int): bool",
+    ):
+        if fragment not in panel_qualification_text:
+            failures.append(
+                f"workstation tray runtime diagnostic IPC missing: {fragment}"
+            )
+
+    if interactive_launcher.is_file():
+        interactive_text = interactive_launcher.read_text(encoding="utf-8")
+        for fragment in (
+            'doctor_args=(doctor --mode interactive --display "$display_backend")',
+            'if [[ "$record" -eq 1 ]]; then',
+            'doctor_args+=(--record)',
+            'python3 "$build_root/tools/workstation_acceptance.py" "${doctor_args[@]}"',
+        ):
+            if fragment not in interactive_text:
+                failures.append(
+                    f"interactive workstation launcher missing recorded-run preflight: {fragment}"
+                )
+
+    if interactive_launcher.is_file():
+        interactive_text = interactive_launcher.read_text(encoding="utf-8")
+        copied = interactive_text.find('cp --reflink=auto "$prepared_image" "$vm_image"')
+        private_digest = interactive_text.find(
+            'copied_sha="$(sha256sum "$vm_image"'
+        )
+        digest_guard = interactive_text.find(
+            '[[ "$copied_sha" == "$prepared_sha" ]] || fail'
+        )
+        resized = interactive_text.find('qemu-img resize "$vm_image" 16G')
+        if (
+            min(copied, private_digest, digest_guard, resized) < 0
+            or not (copied < private_digest < digest_guard < resized)
+        ):
+            failures.append(
+                "Level B launcher must verify its private substrate copy before resizing or booting"
+            )
+
+    if recorder_script.is_file():
+        recorder_text = recorder_script.read_text(encoding="utf-8")
+        for fragment in (
+            "--wait",
+            "workstation-recorder.status",
+            "workstation recorder did not publish its final exit status",
+            "workstation recorder failed while finalizing",
+            "--digest-file",
+        ):
+            if fragment not in recorder_text:
+                failures.append(
+                    f"workstation recorder missing final-status proof: {fragment}"
+                )
+
+    if acceptance_tool.is_file():
+        acceptance_source = acceptance_tool.read_text(encoding="utf-8")
+        try:
+            compile(acceptance_source, str(acceptance_tool), "exec")
+        except SyntaxError as error:
+            failures.append(f"invalid workstation acceptance helper: {error}")
+
+    if q11_orchestrator.is_file():
+        orchestrator_source = q11_orchestrator.read_text(encoding="utf-8")
+        try:
+            compile(orchestrator_source, str(q11_orchestrator), "exec")
+        except SyntaxError as error:
+            failures.append(f"invalid Level C Q11 orchestrator: {error}")
+        for fragment in (
+            'STATE_ARTIFACT_TYPE = "linura-v010-q11-run-state"',
+            'FINALIZATION_ARTIFACT_TYPE = "linura-v010-q11-candidate-finalization"',
+            "hardware_run_requests(",
+            "Q11 run state must live outside the source checkout",
+            "Q11 run state path must not contain symlink components",
+            "def begin_run(",
+            "def record_case(",
+            "def finalize_run(",
+            "_bundle_tree(bundle)",
+            "Q11 bundle path is outside the candidate evidence namespace",
+            "while offset < len(data)",
+            "validated Q11 candidate is immutable",
+            "git",
+            "archive",
+            "check_v010_workstation_qualification.py",
+            '"release_support_promotion": False',
+            '"evidence_ready": False',
+        ):
+            if fragment not in orchestrator_source:
+                failures.append(
+                    f"Level C Q11 orchestrator missing bounded execution/evidence invariant: {fragment}"
+                )
+        for forbidden in (
+            "eval(",
+            "shell=True",
+            "os.system(",
+            "subprocess.call(",
+        ):
+            if forbidden in orchestrator_source:
+                failures.append(
+                    f"Level C Q11 orchestrator contains forbidden generic execution surface: {forbidden}"
+                )
+    else:
+        failures.append("Level C Q11 orchestrator is missing")
+
     if prepare_substrate_script.is_file():
         prepare_text = prepare_substrate_script.read_text(encoding="utf-8")
         for fragment in (
             "--persistent",
+            "--mode automated",
+            "--display none",
             "pacman -Syu",
             "timeout --signal=TERM --kill-after=10s 720",
             "--disable-download-timeout",
@@ -895,15 +1304,38 @@ def validate(root: Path) -> list[str]:
 
     if vm_launcher.is_file():
         launcher_text = vm_launcher.read_text(encoding="utf-8")
-        for fragment in ("--persistent", "snapshot_args=(-snapshot)", "snapshot_args=()", '"${snapshot_args[@]}"'):
+        for fragment in (
+            "--persistent",
+            "snapshot_args=(-snapshot)",
+            "snapshot_args=()",
+            '"${snapshot_args[@]}"',
+            'mode="automated"',
+            'display_backend="none"',
+            "interactive:gtk)",
+            "interactive:vnc)",
+            "automated:none)",
+            'display_args=(-display none)',
+            'display_args=(-display gtk,gl=off,show-cursor=on)',
+            '-vnc "127.0.0.1:$vnc_display"',
+            '"${display_args[@]}"',
+        ):
             if fragment not in launcher_text:
                 failures.append(f"shell runtime VM launcher missing bounded persistence contract: {fragment}")
 
     if run_script.is_file():
         run_text = run_script.read_text(encoding="utf-8")
+        if run_text.count('"$workstation_recorder" stop "$workstation_recording"') < 2:
+            failures.append(
+                "shell runtime recorder must finalize on both success and cleanup paths"
+            )
         for case_id in EXPECTED_CASES:
             if f'pass_case "{case_id}"' not in run_text:
                 failures.append(f"runtime protocol does not positively record required case: {case_id}")
+        if ('effectSnapshot 2>/dev/null)" == "ready|63|verified"' not in run_text
+                or 'function effectSnapshot(): string' not in (
+                    root / "apps/linura-shell/qualification-quick-settings.qml"
+                ).read_text(encoding="utf-8")):
+            failures.append("runtime protocol must use one atomic Quick Settings verified-effect snapshot")
         if run_text.count("SELECT count(*) FROM transient_effect_audit") != 4:
             failures.append(
                 "runtime protocol must retain all four durable-audit count checkpoints "
@@ -994,6 +1426,14 @@ def validate(root: Path) -> list[str]:
             'controller_config="$shell_root/qualification-controller.qml"',
             'palette_config="$shell_root/qualification-palette.qml"',
             'quick_settings_config="$shell_root/qualification-quick-settings.qml"',
+            'source_sha="${3:-}"',
+            'workstation_recorder="$source_root/qualification/v010/workstation-acceptance/record-session.sh"',
+            'workstation_recording="$evidence_root/workstation-runtime.mkv"',
+            'command -v wf-recorder >/dev/null || fail "wf-recorder is missing"',
+            'command -v ffprobe >/dev/null || fail "ffprobe is missing"',
+            '"$workstation_recorder" start "$workstation_recording"',
+            '"$workstation_recorder" stop "$workstation_recording"',
+            'pass_case "workstation-visual-recording"',
             "wait_for_ipc_target()",
             'fail "$service_name exited before publishing $target"',
             "ExitType --value",
@@ -1068,6 +1508,8 @@ def validate(root: Path) -> list[str]:
             "cancelTrayOverflowControl",
             "trayOverflowVisible",
             "trayOverflowButtonFocused",
+            "trayOverflowEntryReady",
+            "trayOverflowReadinessState",
             "activateTrayOverflowControl",
             "trayPrimaryCount",
             "trayMenuCount",
@@ -1096,8 +1538,17 @@ def validate(root: Path) -> list[str]:
             'panel_tray_inline_menu_activated="$(checked_panel_call linura.panel-qualification activateTrayInlineControl 1)"',
             'panel_tray_menu_requests="$(checked_panel_call linura.panel-qualification trayMenuCount)"',
             'panel_tray_overflow_opened="$(checked_panel_call linura.panel-qualification openTrayOverflowControl)"',
+            'wait_until "workstation tray parent native keyboard focus" panel_keyboard_focus_ready',
+            'wait_until "workstation tray reopen cycle $panel_tray_cycle parent native keyboard focus" panel_keyboard_focus_ready',
+            'wait_until "workstation tray overflow visibility after keyboard handoff" panel_tray_overflow_visible',
+            'wait_until "initial workstation tray overflow keyboard focus" panel_tray_overflow_initial_ready',
+            'fail "workstation tray overflow did not remain visible after keyboard handoff"',
             'panel_tray_cancelled="$(checked_panel_call linura.panel-qualification cancelTrayOverflowControl)"',
             'wait_until "workstation tray overflow keyboard-session restoration" panel_tray_keyboard_focus_restored',
+            'wait_until "reopened workstation tray overflow delegate readiness" panel_tray_overflow_entry_ready',
+            'for panel_tray_cycle in 1 2 3; do',
+            'workstation tray reopen cycle $panel_tray_cycle did not retain delegate keyboard focus',
+            '[[ "$(checked_panel_call linura.panel-qualification trayOverflowEntryReady 4)" == "true" ]]',
             'panel_tray_overflow_activated="$(checked_panel_call linura.panel-qualification activateTrayOverflowControl 4)"',
             'printf \'status_timestamp_after=%s\\n\' "$panel_status_timestamp_after"',
             'printf \'tray_primary_requests=%s\\n\' "$panel_tray_primary_requests"',
@@ -1190,13 +1641,31 @@ def validate(root: Path) -> list[str]:
             'wait_until "Quick Settings recovery after linurad restart" quick_settings_recovered',
             'pass_case "quick-settings-restart-recovery"',
             "seat-drm-preflight.txt",
-            'pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite',
+            'pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite ffmpeg wf-recorder',
             'package-versions.txt',
         ):
             if fragment not in run_text:
                 failures.append(f"runtime protocol missing externally observable proof: {fragment}")
 
     if run_script.is_file():
+        for request, readiness, opening in (
+            (
+                'panel_tray_focus_reentered="$(checked_panel_call linura.panel-qualification focusPanelControl)"',
+                'wait_until "workstation tray parent native keyboard focus" panel_keyboard_focus_ready',
+                'panel_tray_overflow_opened="$(checked_panel_call linura.panel-qualification openTrayOverflowControl)"',
+            ),
+            (
+                'for panel_tray_cycle in 1 2 3; do',
+                'wait_until "workstation tray reopen cycle $panel_tray_cycle parent native keyboard focus" panel_keyboard_focus_ready',
+                '[[ "$(checked_panel_call linura.panel-qualification openTrayOverflowControl)" == "true" ]]',
+            ),
+        ):
+            stages = [run_text.find(fragment) for fragment in (request, readiness, opening)]
+            if min(stages) < 0 or not stages[0] < stages[1] < stages[2]:
+                failures.append(
+                    "tray keyboard opening must wait for parent native focus after requesting it"
+                )
+
         mixer_readiness_contract = """wireplumber_fixture_mixer_ready() {
     wpctl get-volume "$qualification_sink_id" >/dev/null 2>&1
 }
@@ -1241,10 +1710,102 @@ wait_until "WirePlumber mixer state for qualification sink" wireplumber_fixture_
             "hostfwd=tcp:127.0.0.1:$ssh_port-:22",
             "--nic-mac)",
             "mac=$nic_mac",
+            "--mode)",
+            "--display)",
+            "--vnc-display)",
+            "interactive:gtk)",
+            "interactive:vnc)",
+            "ssh_port >= 1 && ssh_port <= 65535",
+            "memory >= 1024 && memory <= 65536",
+            "cpus >= 1 && cpus <= 64",
         ):
             if fragment not in launcher_text:
                 failures.append(
                     f"shell runtime VM launcher missing bounded graphical VM contract: {fragment}"
+                )
+
+    if recorder_script.is_file():
+        recorder_text = recorder_script.read_text(encoding="utf-8")
+        for fragment in (
+            "/usr/bin/wf-recorder",
+            "-c ffv1",
+            "systemd-run --user",
+            "--signal=INT",
+            "workstation recorder exited before requested stop",
+            "verify-recording",
+            "LINURA_SOURCE_SHA",
+            "/tmp/linura-shell-runtime/evidence/*.mkv",
+        ):
+            if fragment not in recorder_text:
+                failures.append(
+                    f"workstation recorder missing bounded recording contract: {fragment}"
+                )
+
+    if live_session_script.is_file():
+        live_text = live_session_script.read_text(encoding="utf-8")
+        for fragment in (
+            "recording_started=0",
+            "trap cleanup EXIT",
+            "trap 'exit 0' INT TERM",
+            '"$recorder" stop "$recording_path"',
+            "cleanup_status",
+            "interactive Hyprland session exited unexpectedly",
+            "Linura Shell exited during interactive acceptance",
+            "linurad exited during interactive acceptance",
+            "interactive recorder exited before requested stop",
+        ):
+            if fragment not in live_text:
+                failures.append(
+                    f"interactive live session missing recorder lifecycle invariant: {fragment}"
+                )
+
+    if interactive_launcher.is_file():
+        interactive_text = interactive_launcher.read_text(encoding="utf-8")
+        for fragment in (
+            "verify-substrate.py",
+            "rev-parse --is-inside-work-tree",
+            "status --porcelain=v1 --untracked-files=all",
+            "ssh_port >= 1 && ssh_port <= 65535",
+            "--mode interactive",
+            '--display "$display_backend"',
+            "provision-shell-runtime.sh",
+            "run-live-session.sh",
+            'git -C "$source_root" archive --format=tar.gz --output="$source_archive" "$source_sha"',
+            'tar -xzf "$source_archive" -C "$build_root"',
+            'source "$build_root/tools/codex/versions.env"',
+            'cargo +"$RUST_VERSION" build --workspace --release --locked --target "$release_target"',
+            'RUSTFLAGS="--remap-path-prefix=$build_root=/workspace"',
+            'linurad_binary="$build_root/target/$release_target/release/linurad"',
+            "installed linurad differs from the exact-source local build",
+            "interactive recording guest metadata differs from host verification",
+            "sha256sum --check --strict",
+            "LINURA_SOURCE_SHA=$source_sha",
+        ):
+            if fragment not in interactive_text:
+                failures.append(
+                    f"interactive workstation launcher missing exact-source invariant: {fragment}"
+                )
+        if "--linurad)" in interactive_text:
+            failures.append(
+                "interactive workstation launcher must not accept a caller-supplied authority binary"
+            )
+
+    if hardware_capture_script.is_file():
+        hardware_text = hardware_capture_script.read_text(encoding="utf-8")
+        for fragment in (
+            "Level C evidence requires a fully clean exact-source checkout",
+            "status --porcelain=v1 --untracked-files=all",
+            "Level C evidence root must not be a symlink",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+            "hardware-session.txt",
+            "trap 'exit 0' INT TERM",
+            'evidence_basename="hardware-$fixture_id"',
+            "Level C recorder exited before requested stop",
+            "record-session.sh",
+        ):
+            if fragment not in hardware_text:
+                failures.append(
+                    f"hardware workstation capture missing maintained-hardware invariant: {fragment}"
                 )
 
     if "tools/vm.py" in workflow:

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
@@ -11,8 +12,10 @@ RowLayout {
     required property var panelWindow
     property int inlineItemLimit: 4
     property var itemModelOverride: null
+    property bool overflowKeyboardReturnPending: false
 
     signal interactionStarted()
+    signal popupInteractionStarted()
     signal keyboardReturnRequested(var control)
     readonly property var itemModel:
         itemModelOverride === null ? SystemTray.items : itemModelOverride
@@ -48,7 +51,12 @@ RowLayout {
     function openMenu(item, anchorItem, hostWindow) {
         if (!item.hasMenu || !anchorItem || !hostWindow || !hostWindow.contentItem)
             return
-        root.interactionStarted()
+        // A native menu opened from the overflow is another popup in the
+        // same focus session; retain the mapped host and its keyboard mode.
+        if (hostWindow === overflowWindow)
+            root.popupInteractionStarted()
+        else
+            root.interactionStarted()
         const point = hostWindow.contentItem.mapFromItem(anchorItem, 0, anchorItem.height)
         item.display(
             hostWindow,
@@ -75,16 +83,25 @@ RowLayout {
     function openOverflow() {
         if (overflowCount <= 0 || !panelWindow)
             return
-        root.interactionStarted()
+        root.overflowKeyboardReturnPending = false
+        root.popupInteractionStarted()
         overflowWindow.visible = true
     }
 
     function dismissOverflow(returnKeyboardFocus) {
+        root.overflowKeyboardReturnPending = returnKeyboardFocus === true
         overflowWindow.visible = false
-        if (!returnKeyboardFocus)
+        if (!returnKeyboardFocus) {
+            // An action that completes without keyboard return releases the
+            // panel's keyboard session after the native popup is hidden.
+            root.interactionStarted()
             return
+        }
         Qt.callLater(function() {
-            root.keyboardReturnRequested(overflowButton)
+            if (root.overflowKeyboardReturnPending && !overflowWindow.visible) {
+                root.overflowKeyboardReturnPending = false
+                root.keyboardReturnRequested(overflowButton)
+            }
         })
     }
 
@@ -115,15 +132,62 @@ RowLayout {
     }
 
     function overflowButtonFocused() {
-        return overflowButton.activeFocus
+        return overflowButton.activeFocus && overflowButton.Window.active
+    }
+
+    // Native PopupWindow focus is acquired asynchronously after the Wayland
+    // surface is mapped. Do not infer focus from visibility or delegate geometry.
+    // Do not steal focus from another overflow action when navigating by keyboard.
+    function focusFirstOverflowEntry() {
+        if (!overflowWindow.visible || !overflowWindow.backingWindowVisible)
+            return false
+        for (let i = root.effectiveInlineItemLimit; i < overflowRepeater.count; i++) {
+            const entry = overflowRepeater.itemAt(i)
+            if (entry && entry.activeFocus)
+                return entry.Window.active
+        }
+        const first = overflowRepeater.itemAt(root.effectiveInlineItemLimit)
+        if (!first || !first.visible || !first.enabled
+                || first.width <= 0 || first.height <= 0)
+            return false
+        first.forceActiveFocus(Qt.TabFocusReason)
+        return first.activeFocus && first.Window.active
+    }
+
+    function overflowReadinessState(index) {
+        const entry = overflowRepeater.itemAt(index)
+        return "popup=" + overflowWindow.visible
+            + " mapped=" + overflowWindow.backingWindowVisible
+            + " nativeGrabRequested=" + overflowWindow.grabFocus
+            + " delegates=" + overflowRepeater.count
+            + " item=" + !!entry
+            + " visible=" + (!!entry && entry.visible)
+            + " enabled=" + (!!entry && entry.enabled)
+            + " focused=" + (!!entry && entry.activeFocus)
+            + " nativeActive=" + (!!entry && entry.Window.active)
+            + " width=" + (entry ? entry.width : 0)
+            + " height=" + (entry ? entry.height : 0)
+    }
+
+    function overflowEntryReady(index) {
+        if (!overflowWindow.visible || !overflowWindow.backingWindowVisible)
+            return false
+        const entry = overflowRepeater.itemAt(index)
+        return overflowWindow.grabFocus
+            && !!entry && entry.visible && entry.enabled && entry.activeFocus
+            && entry.Window.active
+            && entry.width > 0 && entry.height > 0
     }
 
     function activateOverflowControl(index) {
-        if (!overflowWindow.visible)
+        if (!overflowEntryReady(index)) {
+            console.warn("Linura tray overflow activation unavailable:"
+                + " popup=" + overflowWindow.visible
+                + " index=" + index
+                + " " + root.overflowReadinessState(index))
             return false
+        }
         const entry = overflowRepeater.itemAt(index)
-        if (!entry || !entry.visible)
-            return false
         entry.click()
         return true
     }
@@ -282,17 +346,45 @@ RowLayout {
         )
         color: "transparent"
         surfaceFormat.opaque: false
+        // Keep the native xdg_popup grab that passed Level A before the
+        // unsupported replacement with a separate HyprlandFocusGrab.
         grabFocus: true
         visible: false
 
+        Timer {
+            id: overflowFocusRetry
+            interval: 100
+            repeat: true
+            running: false
+            property int attempts: 0
+
+            onTriggered: {
+                if (!overflowWindow.visible || !overflowWindow.backingWindowVisible
+                        || root.focusFirstOverflowEntry() || ++attempts >= 20)
+                    stop()
+            }
+        }
+
         onVisibleChanged: {
-            if (!visible)
-                return
-            Qt.callLater(function() {
-                const first = overflowRepeater.itemAt(root.effectiveInlineItemLimit)
-                if (first)
-                    first.forceActiveFocus(Qt.TabFocusReason)
-            })
+            if (visible) {
+                Qt.callLater(root.focusFirstOverflowEntry)
+            } else {
+                overflowFocusRetry.stop()
+                // Outside dismissal releases the panel without stealing focus.
+                // Keyboard cancellation keeps its mode stable while focus
+                // returns to the opener, avoiding a None/Exclusive round trip.
+                if (!root.overflowKeyboardReturnPending)
+                    root.interactionStarted()
+            }
+        }
+        onBackingWindowVisibleChanged: {
+            if (backingWindowVisible) {
+                overflowFocusRetry.attempts = 0
+                overflowFocusRetry.restart()
+                Qt.callLater(root.focusFirstOverflowEntry)
+            } else {
+                overflowFocusRetry.stop()
+            }
         }
 
         Shortcut {

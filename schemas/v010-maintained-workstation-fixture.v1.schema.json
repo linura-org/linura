@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://linura.org/schemas/v010-maintained-workstation-fixture.v1.schema.json",
+  "title": "Linura v0.10 maintained physical workstation fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fixture_id",
+    "profile_id",
+    "machine_class",
+    "evidence_tier",
+    "physical_hardware"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "fixture_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "profile_id": {
+      "const": "arch-hyprland-v1"
+    },
+    "machine_class": {
+      "const": "workstation"
+    },
+    "evidence_tier": {
+      "const": "maintainer_hardware"
+    },
+    "physical_hardware": {
+      "const": true
+    }
+  },
+  "x-linura-contract-id": "schema.v010-maintained-workstation-fixture.v1",
+  "x-linura-stability": "experimental"
+}

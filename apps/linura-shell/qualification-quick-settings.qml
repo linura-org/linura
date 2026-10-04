@@ -111,6 +111,13 @@ Scope {
             return audioController.lastReceiptStatus
         }
 
+        // One serialized IPC read avoids a false negative when independent
+        // status/volume/receipt calls straddle the 2-second freshness expiry.
+        function effectSnapshot(): string {
+            return audioController.state + "|" + audioController.volumePercent
+                + "|" + audioController.lastReceiptStatus
+        }
+
         function evidenceId(): string {
             return audioController.lastEvidenceId
         }

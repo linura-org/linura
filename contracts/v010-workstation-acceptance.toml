@@ -1,0 +1,184 @@
+schema_version = 1
+id = "qualification/v010-workstation-acceptance"
+milestone = "v0.10.0"
+target_profile = "arch-hyprland-v1"
+runtime_contract = "contracts/v010-shell-runtime-qualification.toml"
+substrate_contract = "contracts/v010-shell-runtime-substrate.toml"
+vm_launcher = "qualification/v010/shell-runtime/start-vm.sh"
+interactive_launcher = "qualification/v010/workstation-acceptance/launch-interactive.sh"
+live_session = "qualification/v010/workstation-acceptance/run-live-session.sh"
+guest_recorder = "qualification/v010/workstation-acceptance/record-session.sh"
+hardware_capture = "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+hardware_runner = "qualification/v010/workstation-acceptance/run-hardware-qualification.sh"
+hardware_orchestrator = "tools/workstation_q11_runner.py"
+hardware_fixture_schema = "schemas/v010-maintained-workstation-fixture.v1.schema.json"
+recording_verifier = "tools/workstation_acceptance.py"
+release_support_promotion = false
+
+[level_a]
+id = "automated-vm"
+required = true
+vm_mode = "automated"
+display_backend = "none"
+recording = "required"
+source_scope = "exact-pr-head"
+evidence_scope = "development-runtime"
+
+[level_b]
+id = "interactive-vm"
+required = false
+vm_mode = "interactive"
+display_backends = ["gtk", "vnc"]
+recording = "optional"
+same_runtime_contract = true
+same_substrate_contract = true
+same_exact_source_provisioning = true
+evidence_scope = "developer-interactive"
+
+[level_c]
+id = "maintained-hardware"
+required_for_release_gate = "Q11"
+recording = "optional"
+same_recording_contract = true
+virtualization_allowed = false
+evidence_scope = "maintained-physical-interactive"
+runner = "qualification/v010/workstation-acceptance/run-hardware-qualification.sh"
+capture = "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+fixture_contract_default = "/etc/linura/qualification-fixture.json"
+fixture_schema = "schemas/v010-maintained-workstation-fixture.v1.schema.json"
+fixture_contract_max_bytes = 16384
+fixture_owner_uid = 0
+fixture_forbid_group_world_write = true
+physicality_probe = "systemd-detect-virt"
+physicality_expected = "none"
+required_case_source = "contracts/v010-workstation-qualification.toml#interactive_workstation.required_cases"
+full_q11_case_set_required = true
+runner_may_promote_support = false
+case_protocol = "bounded-q11-case-request-v1"
+run_state_protocol = "bounded-q11-run-state-v1"
+case_evidence_protocol = "digest-bound-q11-case-attestation-v1"
+candidate_verifier = "tools/check_v010_workstation_qualification.py"
+run_state_outside_source_required = true
+candidate_finalization_may_promote_support = false
+arbitrary_commands_allowed = false
+full_run_requires_all_case_prerequisites = true
+
+[[level_c_case]]
+id = "bounded-installer-lane"
+mechanism = "physical-installer-execution"
+prerequisite_slice = "S28"
+required_observations = [
+  "installer-started-from-supported-media",
+  "arch-hyprland-v1-constructed-or-adopted",
+  "disk-encryption-baseline-verified",
+  "firewall-default-deny-verified",
+  "ssh-disabled-default-verified",
+  "owner-enrollment-completed",
+  "install-interruption-injected",
+  "interrupted-install-recovered",
+  "post-install-first-boot-completed",
+]
+
+[[level_c_case]]
+id = "physical-session-start"
+mechanism = "physical-session-observation"
+prerequisite_slice = "S16"
+required_observations = [
+  "physical-hardware-present",
+  "wayland-session-active",
+  "hyprland-session-active",
+]
+
+[[level_c_case]]
+id = "session-supervision"
+mechanism = "systemd-session-observation"
+prerequisite_slice = "S16"
+required_observations = [
+  "hyprland-session-target-active",
+  "graphical-session-target-active",
+  "linura-shell-active-through-session-target",
+  "linura-shell-binds-to-session-target",
+  "linura-shell-part-of-session-target",
+  "linura-shell-stopped-with-graphical-session",
+]
+
+[[level_c_case]]
+id = "shell-render-and-input"
+mechanism = "physical-input-observation"
+prerequisite_slice = "S29"
+required_observations = [
+  "shell-rendered",
+  "keyboard-input",
+  "pointer-input",
+]
+
+[[level_c_case]]
+id = "display-scale-and-hidpi"
+mechanism = "physical-display-observation"
+prerequisite_slice = "S29"
+required_observations = [
+  "display-enumerated",
+  "scale-applied",
+  "hidpi-render-captured",
+]
+
+[[level_c_case]]
+id = "accessibility-and-visual"
+mechanism = "physical-accessibility-visual-observation"
+prerequisite_slice = "S29"
+required_observations = [
+  "screen-reader-semantics-verified",
+  "focus-navigation-verified",
+  "reduced-motion-verified",
+  "visual-artifact-retained",
+]
+
+[[level_c_case]]
+id = "provider-runtime-identities"
+mechanism = "physical-provider-observation"
+prerequisite_slice = "S21"
+required_observations = [
+  "networkmanager-version",
+  "bluez-version",
+  "pipewire-version",
+  "wireplumber-version",
+  "udisks2-version",
+  "polkit-version",
+]
+
+[[level_c_case]]
+id = "session-audio-transient-effect"
+mechanism = "physical-session-audio-effect"
+prerequisite_slice = "S20"
+required_observations = [
+  "numeric-pipewire-output-bound",
+  "typed-session-volume-operation-dispatched",
+  "exact-node-post-effect-reobserved",
+  "executor-failure-fails-closed",
+  "timeout-fails-closed",
+  "restart-reobservation-verified",
+]
+
+[[level_c_case]]
+id = "restart-recovery"
+mechanism = "physical-restart-observation"
+prerequisite_slice = "S29"
+required_observations = [
+  "shell-restart",
+  "authority-restart",
+  "state-reobserved",
+]
+
+[recording]
+container = "matroska"
+extension = ".mkv"
+codec = "ffv1"
+minimum_bytes = 1024
+maximum_bytes = 536870912
+minimum_duration_seconds = 0.25
+maximum_duration_seconds = 600.0
+maximum_width = 16384
+maximum_height = 16384
+video_stream_count = 1
+audio_streams_allowed = false
+metadata_schema_version = 1
