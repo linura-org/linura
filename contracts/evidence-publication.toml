@@ -1,0 +1,41 @@
+schema_version = 1
+id = "qualification/evidence-publication"
+bucket = "linura-qualification-evidence"
+environment = "qualification-archive"
+visibility = "private"
+require_main_source = true
+require_independent_qualification = true
+require_approval = true
+allow_overwrite = false
+max_files = 128
+max_total_bytes = 1073741824
+
+[category.baselines]
+level = "A"
+retention_days = 180
+transport = "github-actions"
+privacy = "sanitized-automated"
+
+[category.regressions]
+level = "A"
+retention_days = 90
+transport = "github-actions"
+privacy = "sanitized-automated"
+
+[category.releases]
+level = "release"
+retention_days = 0
+transport = "future-release-proof"
+privacy = "restricted"
+
+[category.physical]
+level = "C"
+retention_days = 0
+transport = "local-only-approved-derivative"
+privacy = "restricted"
+
+[category.interactive]
+level = "B"
+retention_days = 0
+transport = "local-only-approved-derivative"
+privacy = "restricted"

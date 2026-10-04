@@ -56,3 +56,5 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0031 — v0.10 uses many interfaces over one machine model and one authority path](0031-v010-many-interfaces-one-authority-path.md)
 - [0032 — Classify operations before authority and apply control proportional to consequence](0032-classify-operations-before-authority.md)
 - [0033 — v0.10 requires a complete Experimental workstation product boundary](0033-v010-complete-workstation-product-boundary.md)
+- [0034 — Approve private qualification-evidence publication as a separate authority boundary](0034-private-qualification-evidence-publication.md)
+- [0035 — Isolate media admission from R2 credentials and validate retained approval provenance](0035-isolate-media-admission-from-r2-credentials.md)

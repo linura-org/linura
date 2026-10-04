@@ -73,7 +73,12 @@ It also ensures trusted release proof retains all inherited v0.4–v0.9
 qualification jobs in its isolated-build dependencies and success-gated
 release-promotion chain.
 Changes to the shared validator and its tests trigger the v0.9 qualification
-workflow as well. That workflow selects its full or exact-source regression lane
+workflow as well.
+The private-R2 evidence-publication verification lane is likewise registered as
+a protected specialized workflow. Changes to its publisher, policy contract,
+admission code, tests, threat model or routing validator must trigger its
+scoped check on both PRs and main pushes; its verification job and executable
+test command cannot be silently removed or skipped. That workflow selects its full or exact-source regression lane
 from `contracts/v09-qualification-routing.toml`; ordinary Codex-only changes
 do not implicitly qualify an untouched v0.9 runtime.
 

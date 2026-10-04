@@ -1,0 +1,47 @@
+name: Evidence publication contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/evidence-publication-checks.yml"
+      - ".github/workflows/publish-qualification-evidence.yml"
+      - "contracts/evidence-publication.toml"
+      - "tools/evidence_publication.py"
+      - "tests/tooling/test_evidence_publication.py"
+      - "tools/check_validation_gates.py"
+      - "tests/tooling/test_validation_gates.py"
+      - "docs/qualification/evidence-publication.md"
+      - "docs/qualification/evidence-publication-threat-model.md"
+      - "docs/security-model.md"
+      - "docs/adr/0034-private-qualification-evidence-publication.md"
+      - "docs/adr/0035-isolate-media-admission-from-r2-credentials.md"
+      - "docs/adr/README.md"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/evidence-publication-checks.yml"
+      - ".github/workflows/publish-qualification-evidence.yml"
+      - "contracts/evidence-publication.toml"
+      - "tools/evidence_publication.py"
+      - "tests/tooling/test_evidence_publication.py"
+      - "tools/check_validation_gates.py"
+      - "tests/tooling/test_validation_gates.py"
+      - "docs/qualification/evidence-publication.md"
+      - "docs/qualification/evidence-publication-threat-model.md"
+      - "docs/security-model.md"
+      - "docs/adr/0034-private-qualification-evidence-publication.md"
+      - "docs/adr/0035-isolate-media-admission-from-r2-credentials.md"
+      - "docs/adr/README.md"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test admission, provenance, privacy and R2 publishing behavior
+        run: python3 -m unittest -v tests.tooling.test_evidence_publication

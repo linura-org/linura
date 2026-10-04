@@ -34,6 +34,58 @@ class ValidationGateTests(unittest.TestCase):
         self.assertIn(before, source)
         file.write_text(source.replace(before, after, 1))
 
+    def test_evidence_publication_lane_protects_critical_paths_in_pr_and_main(self):
+        workflow = gates.SPECIALIZED["evidence-publication"][0]
+        paths = (
+            ".github/workflows/publish-qualification-evidence.yml",
+            "contracts/evidence-publication.toml",
+            "tools/evidence_publication.py",
+            "tests/tooling/test_evidence_publication.py",
+            "tools/check_validation_gates.py",
+            "tests/tooling/test_validation_gates.py",
+        )
+        self.assertEqual(gates.check(self.root), [])
+        for path in paths:
+            with self.subTest(path=path):
+                source = (self.root / workflow).read_text(encoding="utf-8")
+                marker = '      - "' + path + '"\n'
+                self.assertIn(marker, source)
+                (self.root / workflow).write_text(source.replace(marker, "", 2),
+                                                  encoding="utf-8")
+                failures = gates.check(self.root)
+                self.assertTrue(any("evidence-publication: missing critical PR trigger: "
+                                    + path in error for error in failures), failures)
+                self.assertTrue(any("evidence-publication: main-push routing must cover"
+                                    in error for error in failures), failures)
+                (self.root / workflow).write_text(source, encoding="utf-8")
+
+    def test_evidence_publication_test_execution_cannot_be_removed_or_nooped(self):
+        workflow = gates.SPECIALIZED["evidence-publication"][0]
+        target = self.root / workflow
+        source = target.read_text(encoding="utf-8")
+        original = "run: python3 -m unittest -v tests.tooling.test_evidence_publication"
+        self.assertIn(original, source)
+        for replacement in ("run: true", "run: echo 'all tests passed'", "run:"):
+            with self.subTest(replacement=replacement):
+                target.write_text(source.replace(original, replacement, 1),
+                                  encoding="utf-8")
+                failures = gates.check(self.root)
+                self.assertTrue(any("evidence-publication: required test execution missing "
+                                    "or weakened" in error for error in failures), failures)
+        target.write_text(source, encoding="utf-8")
+
+    def test_evidence_publication_checkout_cannot_be_weakened(self):
+        workflow = gates.SPECIALIZED["evidence-publication"][0]
+        target = self.root / workflow
+        source = target.read_text(encoding="utf-8")
+        marker = "          persist-credentials: false\n"
+        self.assertIn(marker, source)
+        target.write_text(source.replace(marker, "          persist-credentials: true\n", 1),
+                          encoding="utf-8")
+        failures = gates.check(self.root)
+        self.assertTrue(any("evidence-publication: required verified-source checkout missing "
+                            "or weakened" in error for error in failures), failures)
+
     def test_checked_in_contract(self):
         self.assertEqual(gates.check(ROOT), [])
 
