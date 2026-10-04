@@ -61,6 +61,19 @@ SPECIALIZED = {
         "tools/verify_tray_keyboard.py",
         "tests/tooling/test_native_keyboard.py",
         ".github/workflows/v010-shell-runtime-qualification.yml")),
+    "evidence-publication": (".github/workflows/evidence-publication-checks.yml", (
+        ".github/workflows/publish-qualification-evidence.yml",
+        "contracts/evidence-publication.toml",
+        "tools/evidence_publication.py",
+        "tests/tooling/test_evidence_publication.py",
+        "tools/check_validation_gates.py",
+        "tests/tooling/test_validation_gates.py",
+        "docs/qualification/evidence-publication.md",
+        "docs/qualification/evidence-publication-threat-model.md",
+        "docs/security-model.md",
+        "docs/adr/0034-private-qualification-evidence-publication.md",
+        "docs/adr/0035-isolate-media-admission-from-r2-credentials.md",
+        "docs/adr/README.md")),
 }
 
 # These independent qualification jobs are inherited release requirements;
@@ -427,6 +440,7 @@ SPECIALIZED_REQUIRED_JOBS = {
     "v08": ("qualification",),
     "v09": ("scope", "contract"),
     "v010": ("contract", "shell-runtime"),
+    "evidence-publication": ("verify",),
 }
 
 # Exact allowed step conditions, bound to reviewed step identities.
@@ -807,12 +821,12 @@ def check(root: Path = ROOT) -> list[str]:
             require((root / path).is_file(), name + ": missing critical source: " + path)
             require(path_selected(path, patterns),
                     name + ": missing critical PR trigger: " + path)
-        if name == "codex":
+        if name in ("codex", "evidence-publication"):
             push = section(events or "", "push", 2)
             push_keys = re.findall(r"(?m)^    ([A-Za-z_][\w-]*):", push or "")
             require(push is not None and push_keys == ["branches", "paths"] and
                     re.search(r"(?m)^    branches: \[main\]\s*$", push or "") is not None,
-                    "codex: main-push trigger must target main with scoped paths")
+                    name + ": main-push trigger must target main with scoped paths")
             push_paths = section(push or "", "paths", 4)
             push_patterns = re.findall(
                 r"(?m)^      - [\"']([^\"']+)[\"']\s*$", push_paths or ""
@@ -820,7 +834,7 @@ def check(root: Path = ROOT) -> list[str]:
             require(bool(push_patterns) and len(push_patterns) == len(set(push_patterns)) and
                     path_selected(workflow, push_patterns) and
                     all(path_selected(path, push_patterns) for path in critical_paths),
-                    "codex: main-push routing must cover critical sources")
+                    name + ": main-push routing must cover critical sources")
         jobs = section(text, "jobs") or ""
         for required_job in SPECIALIZED_REQUIRED_JOBS[name]:
             job_body = section(jobs, required_job, 2)
@@ -865,6 +879,29 @@ def check(root: Path = ROOT) -> list[str]:
                         is not None for shell in declared_shells),
                     name + ": unapproved step shell may bypass qualification: " +
                     required_job)
+
+        if name == "evidence-publication":
+            # Path routing and job presence are insufficient if the check
+            # itself can be turned into a passing no-op. Pin this credential-
+            # boundary's source checkout and its exact executable test step.
+            verify = section(jobs, "verify", 2) or ""
+            checkout = workflow_step(verify, 4, "uses", "actions/checkout@")
+            require(checkout is not None and
+                    len(re.findall(r"(?m)^[ ]{6}- uses: actions/checkout@", verify)) == 1 and
+                    step_is_unconditional(checkout, 4) and
+                    re.search(r"(?m)^      - uses: actions/checkout@[0-9a-f]{40}(?:\s+#.*)?$", checkout) is not None and
+                    re.findall(r"(?m)^        with:\s*$", checkout) == ["        with:"] and
+                    re.findall(r"(?m)^          [^\s].*$", checkout) ==
+                    ["          persist-credentials: false"],
+                    "evidence-publication: required verified-source checkout missing or weakened")
+            step_name = "Test admission, provenance, privacy and R2 publishing behavior"
+            verification = workflow_step(verify, 4, "name", step_name)
+            command = "python3 -m unittest -v tests.tooling.test_evidence_publication"
+            require(verification is not None and
+                    len(re.findall(r"(?m)^      - name: " + re.escape(step_name) + "$", verify)) == 1 and
+                    step_is_unconditional(verification, 4) and
+                    re.findall(r"(?m)^        run: (.*)$", verification) == [command],
+                    "evidence-publication: required test execution missing or weakened")
 
         for path in GUIDANCE_EXCLUSIONS.get(name, ()):
             require(not path_selected(path, patterns),

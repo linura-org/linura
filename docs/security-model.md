@@ -190,6 +190,31 @@ v0.6 is the first candidate to integrate the complete eleven-stage lifecycle for
 
 This integration does **not** convert v0.5's qualification-only user/rules or restart fixture namespace into production authority.
 
+## Private qualification-evidence publication boundary
+
+Private R2 evidence archival is separate from Linura runtime authority, deterministic
+qualification and release support promotion. Selected successful exact-main Level A
+evidence is admitted only after independent GitHub run/attempt verification,
+complete canonical case and recording validation, explicit operator selection and
+a recorded `qualification-archive` environment review. A separate credential-free admission job probes untrusted video, snapshots all verified files
+and binds the canonical receipt to a trusted GitHub job-output digest. The distinct
+protected publishing job receives bucket-scoped R2 credentials and checks the
+admission receipt and exact bytes without invoking media decoders. Publication
+reruns cannot reuse run-wide approval history and must use a fresh dispatch and
+approval. Existing indexes with malformed original approval provenance are rejected.
+
+The private index is a remote completion/inventory record, **not** an independent
+signature, WORM guarantee, access authorization, proof that objects remain present
+or a substitute for qualification. A compromised trusted publisher or R2
+Read & Write token can potentially modify or delete evidence; digest checks do
+not detect secrets in video frames or logs. Level B, Level C and release
+publication remain disabled pending their own reviewed privacy/authority paths.
+External GitHub environment and R2 access/lifecycle settings plus the first
+approved real upload must be verified before operational activation. See
+[ADR 0034](adr/0034-private-qualification-evidence-publication.md),
+[ADR 0035](adr/0035-isolate-media-admission-from-r2-credentials.md) and the
+[publication threat model](qualification/evidence-publication-threat-model.md).
+
 ## Remote/fleet security
 
 A future fleet gateway is a separate process/service with mutual authentication, explicit enrollment, revocation, replay resistance, scoped device identity, staged rollout and its own threat model. No remote listener is added to `linurad` or `linura-authorityd` as a shortcut.
