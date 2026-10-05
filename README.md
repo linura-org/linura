@@ -8,40 +8,83 @@
 
 # Linura — The intelligent system layer for Linux.
 
-> **Tell your computer what you want it to become.**
+> **Tell your computer what you want it to become. Linura turns that intent into verified machine state.**
 
-**Linura is an intent-driven, agent-native Linux system that turns human goals into declarative, policy-controlled, verified machine state.**
+**People express goals; AI agents can propose outcomes. Linura turns those inputs into structured intent, classifies the operation, and routes it through deterministic authority semantics appropriate to that operation class.**
+
+Linux already has mature package managers, service managers, configuration tools, and orchestration systems. The harder problem appears when humans and probabilistic agents ask a machine to change across those systems: what is actually true now, what is allowed, what should change, who is authorized, did the effect really happen, and how can the machine recover or reconcile afterward?
+
+Linura treats those as control-plane problems. A model may help interpret or propose intent, but it does not become the authority that mutates the machine.
+
+```text
+Human goal or agent proposal
+        │
+        ▼
+structured intent
+        │
+        ▼
+classify operation semantics
+        │
+        ├─ experience / query / Linura-local
+        │     → typed non-external path
+        │
+        ├─ TransientExternalEffect
+        │     → observe → plan → validate → authorize
+        │     → execute → verify → audit
+        │
+        └─ ManagedExternalEffect
+              → observe → plan → validate → authorize
+              → prepare → execute → verify
+              → commit → audit → reconcile
+```
+
+**Agents propose. Linura decides and executes.**
+
+- Natural-language input becomes structured intent, never privileged executable text.
+- Every external effect crosses a policy-controlled path selected by trusted operation classification; convenience cannot bypass or downgrade that class.
+- Executors are narrow and bounded; there is no generic model-to-root interface.
+- Execution success is not accepted as proof: resulting state is independently verified before the effect is accepted as successful; managed effects commit only after verification.
+- Durable state records **why** a resource exists, so removal, recovery and reconciliation can reason about consequences instead of replaying shell history.
+- The authority paths are model-independent: deterministic CLI, policy, inspection, execution and recovery remain usable without an AI provider.
+
+## Who Linura is for
+
+Linura is being built for people and systems that need Linux to be easier to direct without making probabilistic software authoritative:
+
+- **Linux developers and power users** who want to describe the machine state they need instead of maintaining a pile of one-off commands.
+- **AI-agent developers** who need agents to request real system changes through typed, policy-controlled capabilities rather than unrestricted shell or root access.
+- **Platform and infrastructure teams** that need Linux hosts, containers, and VMs to share an observable, auditable authority model.
+- **Security-sensitive organizations** that need changes to be bounded, authorized, independently verified, recoverable, and attributable.
+- **Desktop, device, and distribution builders** that want intent-driven system experiences without putting a model inside the trusted execution boundary.
+
+## What you can do with Linura
+
+Linura is still experimental, so current support is deliberately narrow. The product model is designed for workflows such as:
+
+- turn “make this a minimal Rust development workstation” into structured intent and a plan derived from observed machine state;
+- let an agent request a supported package, service, network, audio, or system change without giving the model generic privileged execution;
+- save a working configuration as portable intent and re-plan it on another supported machine instead of replaying shell history;
+- detect and reconcile supported drift after machine state changes outside Linura; and
+- retire an intent while checking dependencies and shared ownership before removing resources that other intents still need.
+
+The long-term scope is one authority model across Linux desktops and servers, AI agents, containers, and virtual machines. Capability coverage can grow without changing the trust rule: proposals may be probabilistic; authorization, execution, verification, and state commitment remain deterministic.
+
+## What Linura is
+
+**Linura** is the umbrella system layer and code namespace, not merely an AI shell, desktop environment, or Linux distribution. **Linura OS** is reserved for the installable distribution. **Linura Control**, **Linura Agent**, **Linura Library**, **Linura Shell**, **Linura Control Center**, **Linura First Boot**, and **Linura SDK** are product surfaces or subsystems under that umbrella. “System control plane” and “authority plane” are architectural terms, not separate brands.
+
+The name is inspired by **Linux + aura**: Linux underneath, with a coherent, intelligent layer around it. See [`docs/naming.md`](docs/naming.md) for the full naming contract.
+
+## Current status
+
+Linura is pre-1.0 and experimental. [`contracts/roadmap.toml`](contracts/roadmap.toml) is the machine-readable source of truth for current and next release metadata, while immutable release and version-scoped qualification evidence define what is actually supported. The `Status:` record below is a human-facing projection maintained by release tooling; roadmap work does not silently expand the support boundary.
+
+<details>
+<summary>Exact v0.9.0 support boundary</summary>
 
 Status: `v0.9.0` released — Experimental First Boot and supported reference environment. The immutable release is independently verified. `executor_state = "integrated-narrow"`, `managed_mutation_support = "narrow-experimental"`, `complete_lifecycle = true` and `platform_support = "reference-experimental"` remain the authoritative v0.9.0 boundary. The release remains Experimental; the next roadmap milestone is `v0.10.0`.
 
-
-## Project navigation
-
-| Resource | Link |
-| --- | --- |
-| Website | https://linura.org |
-| Repository | https://github.com/linura-org/linura |
-| Documentation | [`docs/index.md`](docs/index.md) |
-| Architecture | [`docs/architecture.md`](docs/architecture.md) |
-| Landscape | [`docs/concepts/landscape.md`](docs/concepts/landscape.md) |
-| Roadmap | [`docs/roadmap.md`](docs/roadmap.md) |
-| Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
-| Community | https://github.com/linura-org/linura/discussions |
-| Issues | https://github.com/linura-org/linura/issues |
-| Security | https://github.com/linura-org/linura/security/policy |
-| Releases | https://github.com/linura-org/linura/releases |
-
-## Try Linura
-
-Linura is still experimental. Use release-qualified artifacts and disposable/reference environments for evaluation; do not treat the current pre-1.0 release as a production support guarantee.
-
-For repository development, install the pinned Rust toolchain and run:
-
-```bash
-cargo xtask check
-```
-
-The canonical development, VM, image, visual, qualification, and release paths are repository-owned. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for a first contribution or [`docs/development-infrastructure.md`](docs/development-infrastructure.md) for system-level development.
+</details>
 
 ## The product idea
 
@@ -176,6 +219,38 @@ The control plane is reusable without AI. The intelligence plane can be replaced
 - Generated/derived UI is constrained to typed resources/actions or isolated extensions.
 - Local deterministic operation, Library use and recovery work without network/model access.
 
+## First platform profile
+
+The first interactive workstation PlatformProfile target stays deliberately narrow: Arch Linux + systemd + Wayland/Hyprland + NetworkManager + PipeWire/WirePlumber + BlueZ + UDisks2 + Polkit + Btrfs/Snapper. `arch-hyprland-v1` remains a **development candidate for v0.10**, not an architectural dependency of the core model and not part of the current v0.9.0 release-qualified support boundary.
+
+## Project navigation
+
+| Resource | Link |
+| --- | --- |
+| Website | https://linura.org |
+| Repository | https://github.com/linura-org/linura |
+| Documentation | [`docs/index.md`](docs/index.md) |
+| Architecture | [`docs/architecture.md`](docs/architecture.md) |
+| Landscape | [`docs/concepts/landscape.md`](docs/concepts/landscape.md) |
+| Roadmap | [`docs/roadmap.md`](docs/roadmap.md) |
+| Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Community | https://github.com/linura-org/linura/discussions |
+| Issues | https://github.com/linura-org/linura/issues |
+| Security | https://github.com/linura-org/linura/security/policy |
+| Releases | https://github.com/linura-org/linura/releases |
+
+## Try Linura
+
+Linura is still experimental. Use release-qualified artifacts and disposable/reference environments for evaluation; do not treat the current pre-1.0 release as a production support guarantee.
+
+For repository development and local qualification, install the pinned Rust toolchain and run:
+
+```bash
+cargo xtask check
+```
+
+The canonical development, VM, image, visual, qualification, and release paths are repository-owned. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for a first contribution or [`docs/development-infrastructure.md`](docs/development-infrastructure.md) for system-level development.
+
 ## Repository layout
 
 ```text
@@ -221,16 +296,6 @@ docs/                          product, architecture, security, ADRs, operations
 
 The complete top-level ownership map, including declarative/evidence roots, is defined in [`docs/repository-topology.md`](docs/repository-topology.md) and enforced by `contracts/repository-topology.toml`.
 
-## Product and namespace naming
-
-**Linura** is the umbrella brand and code namespace. **Linura OS** is reserved for the installable distribution. **Linura Control**, **Linura Agent**, **Linura Library**, **Linura Shell**, **Linura Control Center**, **Linura First Boot**, and **Linura SDK** are product surfaces/subsystems under that umbrella. “System control plane” and “authority plane” remain architectural terms, not separate brands.
-
-The name is inspired by **Linux + aura**: Linux underneath, with a coherent, intelligent and beautiful layer around it. See [`docs/naming.md`](docs/naming.md).
-
-## First platform profile
-
-The first interactive workstation PlatformProfile target stays deliberately narrow: Arch Linux + systemd + Wayland/Hyprland + NetworkManager + PipeWire/WirePlumber + BlueZ + UDisks2 + Polkit + Btrfs/Snapper. `arch-hyprland-v1` remains a **development candidate for v0.10**, not an architectural dependency of the core model and not part of the current v0.9.0 release-qualified support boundary.
-
 ## Development order
 
 We will prove the entire model with a narrow vertical slice before building a broad desktop:
@@ -261,6 +326,23 @@ python3 scripts/check_repository.py
 
 The bootstrap deliberately keeps Rust crates dependency-light while public contracts are still stabilizing.
 
+
+## Development and system proof
+
+Linura keeps its production-oriented development path in the repository rather than in maintainer folklore.
+
+```bash
+cargo xtask check
+cargo xtask acceptance-list
+cargo xtask vm-plan
+cargo xtask image-plan
+cargo xtask slices-ready
+cargo xtask slices-waves
+```
+
+The grand development foundation includes checkpointed bootstrap, migrations, coordinated updates, config ownership/drift, sanitized hardware evidence, disposable QEMU/KVM acceptance, visual-regression contracts, exact-SHA release candidate proof, build/publish separation, and independent release-asset verification.
+
+See [Development infrastructure](docs/development-infrastructure.md), [Development lessons adopted from Omarchy](docs/omarchy-development-lessons.md), and the non-normative [Landscape and architectural boundaries](docs/concepts/landscape.md). crates.io publication is governed by [crates.io publishing](docs/crates-io-publishing.md). Linura adopts [Omarchy](https://github.com/basecamp/omarchy)'s strong distro-development discipline while deliberately rejecting unsandboxed plugins, shell strings as the authority API, arbitrary privileged hooks, and model-to-root execution.
 
 ## Contributing
 
@@ -311,20 +393,3 @@ For partnership discussions, contact **partners@linura.org**. See the [partnersh
 ## License
 
 Apache License 2.0. See [`LICENSE`](LICENSE).
-
-## Development and system proof
-
-Linura keeps its production-oriented development path in the repository rather than in maintainer folklore.
-
-```bash
-cargo xtask check
-cargo xtask acceptance-list
-cargo xtask vm-plan
-cargo xtask image-plan
-cargo xtask slices-ready
-cargo xtask slices-waves
-```
-
-The grand development foundation includes checkpointed bootstrap, migrations, coordinated updates, config ownership/drift, sanitized hardware evidence, disposable QEMU/KVM acceptance, visual-regression contracts, exact-SHA release candidate proof, build/publish separation, and independent release-asset verification.
-
-See [Development infrastructure](docs/development-infrastructure.md), [Development lessons adopted from Omarchy](docs/omarchy-development-lessons.md), and the non-normative [Landscape and architectural boundaries](docs/concepts/landscape.md). crates.io publication is governed by [crates.io publishing](docs/crates-io-publishing.md). Linura adopts [Omarchy](https://github.com/basecamp/omarchy)'s strong distro-development discipline while deliberately rejecting unsandboxed plugins, shell strings as the authority API, arbitrary privileged hooks, and model-to-root execution.
