@@ -167,7 +167,9 @@ Use `python3 tools/workstation_acceptance.py plan --mode <automated|interactive|
 
 ## Pull-request qualification sequence
 
-Safety-sensitive Linura work follows one review sequence rather than using external review as the first debugging pass:
+Safety-sensitive Linura work follows one review sequence rather than using external review as the first debugging pass. During implementation, perform a **regression-impact review**: search existing callers, consumers, tests, fixtures, contracts and qualification routes for assumptions that the change affects. Reconcile old expectations deliberately, preserve valid guarantees and add positive, negative and adversarial cases. For example, a routing-policy change must inspect *all* existing tests of the previous policy, not just add tests for the new policy. Never delete or weaken an inconvenient test merely to obtain a green result.
+
+Before compaction, finish a concise **internal-review record** in the PR template covering architecture/ownership, code and API consequences, security and adversarial cases, regression impact and the applicable native and specialized gate inventory. Document meaningful exceptions or blocked evidence; a checked box is a human attestation, not independent proof. Routine documentation-only changes need a proportionate review.
 
 ```text
 implement
@@ -180,7 +182,7 @@ implement
 → merge only when required checks are green
 ```
 
-Compaction changes the source SHA, so exact-source qualification must run after the final compaction. Review comments are resolved only after the underlying issue is fixed, and a green result must never be obtained by weakening a contract, deleting adversarial coverage, or reclassifying missing evidence as passing.
+Compaction changes the source SHA, so exact-source qualification must run after the final compaction. If Codex identifies a genuinely new defect, fix it, recompact and rerun the applicable exact-head gates before merging. Do not request final review on an incomplete or red head; do not add routine progress comments to PR history. The repository-owned development-workflow checker keeps the root/scoped agent instructions, contributor guidance and PR template aligned with this sequence, but cannot prove that a human review happened. Review comments are resolved only after the underlying issue is fixed, and a green result must never be obtained by weakening a contract, deleting adversarial coverage, or reclassifying missing evidence as passing.
 
 ## Graphical qualification platform and fleet boundary
 

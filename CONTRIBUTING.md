@@ -61,6 +61,23 @@ Domain, security-sensitive, and architectural changes require an ADR/RFC when an
 
 Accepted ADRs are append-only historical records. Do not silently rewrite an accepted architectural decision to match newer code. A materially changed decision must be recorded in a new ADR that refines or supersedes the earlier record.
 
+## Regression-impact and internal review
+
+Perform a regression-impact review before changing behavior, a contract, CI routing or qualification semantics: search existing
+consumers, callers, tests, fixtures and documentation for assumptions about the old behavior.
+Record the affected assertions and distinguish deliberately changed expectations from regressions.
+Update justified expectations and add positive, negative and adversarial tests in the same change;
+never remove a failing test simply to obtain a green result. A typo-only change does not require
+a heavyweight architecture review.
+
+Before final validation, review the completed change for architecture and ownership, code and
+API compatibility, trust boundaries and failure/recovery behavior, regression impact and
+applicable qualification gates. Complete the concise **Regression impact** and **Internal review**
+sections of the PR template; mark anything unfinished as pending rather than claiming it passed.
+The canonical sequence and exact-head rules are in
+[Pull-request qualification sequence](docs/development-infrastructure.md#pull-request-qualification-sequence).
+These human review attestations supplement but cannot replace tests or independent evidence.
+
 ## Development quality gate
 
 Run:
@@ -91,7 +108,7 @@ Keep changes atomic and explain:
 - migration/rollback/recovery impact;
 - release-note impact.
 
-Do not mix unrelated refactors with privileged or trust-boundary changes. Resolve review conversations rather than hiding disagreement in follow-up commits.
+Do not mix unrelated refactors with privileged or trust-boundary changes. Resolve review conversations rather than hiding disagreement in follow-up commits. Keep a PR in draft until internal review is complete, its work is compacted into one coherent commit and all applicable exact-head checks succeed; request Codex review only then. Address genuinely new findings, recompact and revalidate the new head before a green-only authorized merge. Routine progress belongs in the commits and checks, not repetitive PR comments.
 
 Security vulnerabilities must not be disclosed in a public pull request before coordinated handling under [`SECURITY.md`](SECURITY.md).
 

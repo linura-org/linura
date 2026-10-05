@@ -163,6 +163,8 @@ an omitted trigger as success.
 
 ## Review and handoff
 
+The [canonical pull-request qualification sequence](development-infrastructure.md#pull-request-qualification-sequence) is the single source for stage order. During implementation, perform a **regression-impact review** of existing consumers, assertions, tests, fixtures and qualification routes. Complete the architecture/code/adversarial **internal-review record** in the PR template before compacting; an unchecked item or unavailable gate stays pending, and a checkbox is not qualification evidence.
+
 Implement → internal architecture/code/adversarial review → fix findings → compact
 to one clean commit → run full gates → request Codex review → fix genuinely new
 findings → merge only when green. A missing dependency or unexecuted gate is

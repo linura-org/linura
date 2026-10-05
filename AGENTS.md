@@ -67,11 +67,12 @@ Implement that by converting human/model input into typed intent and determinist
 3. Classify operation semantics and trusted risk independently; identify whether it is experience-ephemeral, authoritative-query, Linura-owned-state, transient-external-effect or managed-external-effect.
 4. Identify trust/privilege boundary crossed and verify the selected path is permitted by `contracts/operation-semantics.toml`.
 5. Identify whether code is obsolete, live, or deliberate future scaffold before deleting it.
-6. Update core/intent/graph/protocol first where their contract actually changes.
-7. Update planner/policy/provider/executor as applicable without creating parallel authority paths.
-8. Add failure/denial/shared-ownership, operation-class downgrade and anti-drift tests before UI work.
-9. Update ADR/RFC and threat model for contract or trust-boundary changes.
-10. Run the repository quality gate.
+6. Perform a regression-impact review before editing behavior or contracts: search all affected consumers, tests and fixtures; identify existing assertions that the change invalidates, applicable qualification routes, and failure/denial/recovery cases. Update justified old expectations and add negative tests in the same change; never delete or relax an assertion merely to make CI green.
+7. Update core/intent/graph/protocol first where their contract actually changes.
+8. Update planner/policy/provider/executor as applicable without creating parallel authority paths.
+9. Add failure/denial/shared-ownership, operation-class downgrade and anti-drift tests before UI work.
+10. Update ADR/RFC and threat model for contract or trust-boundary changes.
+11. Run affected local checks and the repository quality gate.
 
 ## Codex repository workflow
 
@@ -80,6 +81,8 @@ Implement that by converting human/model input into typed intent and determinist
 - Use `bash scripts/run_codex.sh cargo xtask check` when setup's PATH exports are absent from task shells.
 - Scoped `AGENTS.md` files route specialized work to existing guides. When starting at the root, read the scoped file for every directory you modify; automatic discovery may only cover the current working-directory ancestors.
 - Implement → internal architecture/code/adversarial review → fix findings → compact to one clean commit → full gates → Codex review → fix genuinely new findings → merge only when green. Required validation that is blocked keeps the PR draft; do not request final review on incomplete evidence.
+- Before compaction, finish a concise internal-review record covering architecture, code, security/adversarial cases, regression impact and applicable gates. Use the PR template; unchecked items mean unfinished work, not passing evidence. CI validates the code and routes, not the truth of a self-reported review.
+- After any post-review edit, consolidate again and rerun all applicable checks on the new exact head. Do not use old-head passes or routine progress comments as review evidence; comment only when a lasting decision or finding merits PR history.
 - Work only on the assigned PR/scope. Do not create duplicate PRs, weaken checks, invent qualification evidence, add production credentials or bypass repository protections.
 
 ## Task-specific guides
