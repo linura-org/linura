@@ -80,7 +80,24 @@ admission code, tests, threat model or routing validator must trigger its
 scoped check on both PRs and main pushes; its verification job and executable
 test command cannot be silently removed or skipped. That workflow selects its full or exact-source regression lane
 from `contracts/v09-qualification-routing.toml`; ordinary Codex-only changes
-do not implicitly qualify an untouched v0.9 runtime.
+do not implicitly qualify an untouched v0.9 runtime. Shared authority, policy,
+protocol, provider SDK, agent runtime, Library, lifecycle, D-Bus transport,
+firstboot-offline VM clients (linurad, linuractl and linura-sdk),
+observation, persistence, executor/verifier, toolchain and Cargo configuration changes, and recovery changes,
+as well as changes to the acceptance runner, v0.9 adversarial guest harness,
+either recognized Cargo configuration file (`.cargo/config` or
+`.cargo/config.toml`) or the compiled-in WirePlumber audio helper require
+full v0.9 VM/adversarial qualification. In the firstboot-offline VM lane,
+the production authority daemon is built and unit-tested, installed with
+host/guest digest and size equality, and exercised on a deliberately invalid
+state directory to prove fail-closed startup. Its binary identity is bound
+into the full v0.9 evidence. This narrow startup check is not a claim
+of full managed-lifecycle or privileged execution qualification.
+The central routing
+validator also ensures that every contract-declared full-impact source retains
+an actual PR workflow trigger. Pure AGENTS/README guidance changes remain on
+the fast regression lane, but mixed guidance and implementation changes cannot
+skip the full qualification lane.
 
 Follow the S16 tiered model: mandatory canonical CI, Security and CodeQL run
 on each PR revision; path-scoped qualification runs when affected implementation

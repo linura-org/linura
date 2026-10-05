@@ -101,7 +101,13 @@ jobs:
           rustup default "$RUST_VERSION"
 
       - name: Build exact-source acceptance clients
-        run: cargo build --release --locked -p linurad -p linuractl -p linura-firstboot
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p linurad -p linuractl -p linura-firstboot
+          if [[ "$ACCEPTANCE_SCENARIO" == firstboot-offline ]]; then
+            cargo test --locked -p linura-authorityd --bin linura-authorityd
+            cargo build --release --locked -p linura-authorityd --bin linura-authorityd
+          fi
 
       - name: Install disposable VM harness dependencies
         run: |
@@ -232,12 +238,21 @@ jobs:
             linura@127.0.0.1:/tmp/
           ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 \
             'sudo -n install -o root -g root -m 0755 /tmp/linurad /usr/local/bin/linurad && sudo -n install -o root -g root -m 0755 /tmp/linuractl /usr/local/bin/linuractl && sudo -n install -o root -g root -m 0755 /tmp/linura-firstboot /usr/local/bin/linura-firstboot && rm -f /tmp/linurad /tmp/linuractl /tmp/linura-firstboot'
+          if [[ "$ACCEPTANCE_SCENARIO" == firstboot-offline ]]; then
+            scp "${ssh_common[@]}" -P 2222 target/release/linura-authorityd linura@127.0.0.1:/tmp/
+            ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 \
+              'sudo -n install -o root -g root -m 0755 /tmp/linura-authorityd /usr/local/bin/linura-authorityd && rm -f /tmp/linura-authorityd'
+          fi
 
           # Installation success is not identity evidence. Hash and size the
           # installed guest bytes independently and require exact equality with
           # the SOURCE_SHA host build before any scenario can pass.
           : > "$ARTIFACT_DIR/installed-binaries.tsv"
-          for name in linurad linuractl linura-firstboot; do
+          binaries=(linurad linuractl linura-firstboot)
+          if [[ "$ACCEPTANCE_SCENARIO" == firstboot-offline ]]; then
+            binaries+=(linura-authorityd)
+          fi
+          for name in "${binaries[@]}"; do
             host_path="target/release/$name"
             host_sha="$(sha256sum "$host_path" | cut -c1-64)"
             host_size="$(stat -c %s "$host_path")"
@@ -315,6 +330,11 @@ jobs:
                   "guest_installed": {"sha256": guest_sha, "size": int(guest_size)},
                   "identity_match": True,
               }
+          required_binaries = {"linurad", "linuractl", "linura-firstboot"}
+          if scenario_id == "firstboot-offline":
+              required_binaries.add("linura-authorityd")
+          if set(binaries) != required_binaries:
+              raise SystemExit("guest executable identity evidence is incomplete or unexpected")
 
           guest_environment = {}
           guest_environment_path = artifact_dir / "guest-environment.env"
