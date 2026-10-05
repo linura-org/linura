@@ -1277,6 +1277,464 @@ class ValidationGateTests(unittest.TestCase):
         self.assertTrue(any("codex: specialized PR event may contain only paths" in x
                             for x in gates.check(self.root)))
 
+    def test_v09_duplicate_path_filters_are_rejected(self):
+        workflow = ".github/workflows/v09-qualification.yml"
+        target = self.root / workflow
+        original = target.read_text(encoding="utf-8")
+        marker = '      - "crates/linura-provenance/**"\n'
+        self.assertEqual(original.count(marker), 1)
+        target.write_text(original.replace(marker, marker + marker, 1),
+                          encoding="utf-8")
+        errors = gates.check(self.root)
+        self.assertTrue(any("v09: missing or duplicated path filters"
+                            in error for error in errors), errors)
+
+    def test_v09_untriggered_full_route_must_fail_the_canonical_gate(self):
+        contract = self.root / "contracts/v09-qualification-routing.toml"
+        original = contract.read_text(encoding="utf-8")
+        protected = '  "crates/linura-policy/",\n'
+        self.assertIn(protected, original)
+        contract.write_text(original.replace(
+            protected, '  "unrouted-v09-authority/",\n', 1), encoding="utf-8")
+        errors = gates.check(self.root)
+        self.assertTrue(any(
+            "v0.9: untriggered full-qualification prefix: unrouted-v09-authority/"
+            in error for error in errors), errors)
+
+    def test_v09_required_full_prefixes_cannot_self_erase(self):
+        contract = self.root / "contracts/v09-qualification-routing.toml"
+        original = contract.read_text(encoding="utf-8")
+        for prefix in gates.V09_REQUIRED_FULL_PREFIXES:
+            with self.subTest(prefix=prefix):
+                token = '  "' + prefix + '",\n'
+                self.assertIn(token, original)
+                contract.write_text(original.replace(token, "", 1),
+                                    encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: missing required full-qualification prefix: " + prefix
+                    in error for error in errors), errors)
+                contract.write_text(original, encoding="utf-8")
+
+    def test_v09_required_full_exact_inputs_cannot_self_erase(self):
+        contract = self.root / "contracts/v09-qualification-routing.toml"
+        original = contract.read_text(encoding="utf-8")
+        for path in gates.V09_REQUIRED_FULL_EXACT:
+            with self.subTest(path=path):
+                token = '  "' + path + '",\n'
+                self.assertIn(token, original)
+                contract.write_text(original.replace(token, "", 1),
+                                    encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: missing required full-qualification exact input: " + path
+                    in error for error in errors), errors)
+                contract.write_text(original, encoding="utf-8")
+
+    def test_v09_cargo_config_must_trigger_full_qualification(self):
+        for path in (".cargo/config", ".cargo/config.toml"):
+            with self.subTest(path=path):
+                contract = self.root / "contracts/v09-qualification-routing.toml"
+                workflow = self.root / ".github/workflows/v09-qualification.yml"
+                contract_original = contract.read_text(encoding="utf-8")
+                workflow_original = workflow.read_text(encoding="utf-8")
+                self.assertIn('  "' + path + '",\n', contract_original)
+                self.assertIn('      - "' + path + '"\n', workflow_original)
+                contract.write_text(contract_original.replace(
+                    '  "' + path + '",\n', "", 1), encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: missing required full-qualification toolchain: " + path
+                    in error for error in errors), errors)
+                contract.write_text(contract_original, encoding="utf-8")
+                workflow.write_text(workflow_original.replace(
+                    '      - "' + path + '"\n', "", 1), encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any("v0.9: untriggered full-qualification path: " +
+                                    path in error for error in errors), errors)
+                workflow.write_text(workflow_original, encoding="utf-8")
+
+    def test_v09_embedded_audio_input_cannot_skip_full_lane(self):
+        path = "packaging/wireplumber/linura-session-audio.lua"
+        contract = self.root / "contracts/v09-qualification-routing.toml"
+        workflow = self.root / ".github/workflows/v09-qualification.yml"
+        old_contract = contract.read_text(encoding="utf-8")
+        old_workflow = workflow.read_text(encoding="utf-8")
+        self.assertIn('  "' + path + '",\n', old_contract)
+        self.assertIn('      - "' + path + '"\n', old_workflow)
+        contract.write_text(old_contract.replace('  "' + path + '",\n', "", 1),
+                            encoding="utf-8")
+        errors = gates.check(self.root)
+        self.assertTrue(any(
+            "v0.9: missing embedded audio helper qualification input" in error
+            for error in errors), errors)
+        contract.write_text(old_contract, encoding="utf-8")
+        workflow.write_text(old_workflow.replace(
+            '      - "' + path + '"\n', "", 1), encoding="utf-8")
+        errors = gates.check(self.root)
+        self.assertTrue(any(
+            "v0.9: untriggered full-qualification path: " + path in error
+            for error in errors), errors)
+
+    def test_v09_production_authority_vm_qualification_is_not_optional(self):
+        vm = ".github/workflows/vm-acceptance.yml"
+        mutations = (
+            ("cargo test --locked -p linura-authorityd --bin linura-authorityd",
+             "echo unit-tests-skipped"),
+            ("cargo build --release --locked -p linura-authorityd --bin linura-authorityd",
+             "echo production-build-skipped"),
+            ('binaries+=(linura-authorityd)', 'echo authority-identity-omitted'),
+            ('required_binaries.add("linura-authorityd")', "pass"),
+        )
+        for before, after in mutations:
+            with self.subTest(mutation=before):
+                target = self.root / vm
+                original = target.read_text(encoding="utf-8")
+                self.change(vm, before, after)
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: production authority " in error for error in errors),
+                    errors)
+                target.write_text(original, encoding="utf-8")
+
+    def test_v09_authority_negative_case_and_proof_are_required(self):
+        scenario_path = "tests/acceptance/002-firstboot-offline.json"
+        target = self.root / scenario_path
+        original = target.read_text(encoding="utf-8")
+        mutations = (
+            ("linura-authorityd failed closed:", "authority-accepted-invalid-state"),
+            (
+                "if output=$(LINURA_AUTHORITY_STATE_DIR=",
+                "true; # if output=$(LINURA_AUTHORITY_STATE_DIR=",
+            ),
+            (
+                "/usr/local/bin/linura-authorityd 2>&1",
+                "/bin/true 2>&1",
+            ),
+        )
+        for before, after in mutations:
+            with self.subTest(mutation=after):
+                self.assertIn(before, original)
+                target.write_text(original.replace(before, after, 1),
+                                  encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: production authority negative VM acceptance step missing"
+                    in error for error in errors), errors)
+                target.write_text(original, encoding="utf-8")
+        self.change(".github/workflows/v09-qualification.yml",
+                    'production = evidence.get("binaries", {}).get("linura-authorityd")',
+                    'production = None')
+        errors = gates.check(self.root)
+        self.assertTrue(any(
+            "v0.9: production authority executable evidence not bound to full proof"
+            in error for error in errors), errors)
+
+    def test_v09_changed_file_provenance_cannot_be_substituted(self):
+        workflow = ".github/workflows/v09-qualification.yml"
+        mutations = (
+            ('changed_path = pathlib.Path(sys.argv[1])',
+             'changed_path = pathlib.Path("docs/harmless.md")'),
+            ('pathlib.Path("contracts/v09-qualification-routing.toml")',
+             'pathlib.Path("docs/harmless.toml")'),
+            ('          changed = sorted(\n'
+             '              {\n'
+             '                  os.fsdecode(path)\n'
+             '                  for path in changed_path.read_bytes().split(b"\\0")\n'
+             '                  if path\n'
+             '              }\n'
+             '          )',
+             '          changed = ["docs/harmless.md"]'),
+            ('full = requires_full_qualification(changed, contract)',
+             'changed = ["docs/harmless.md"]\n'
+             '          full = requires_full_qualification(changed, contract)'),
+        )
+        for before, after in mutations:
+            with self.subTest(mutation=after):
+                target = self.root / workflow
+                original = target.read_text(encoding="utf-8")
+                self.assertIn(before, original)
+                target.write_text(original.replace(before, after, 1), encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: shared qualification classifier disconnected" in error
+                    for error in errors), errors)
+                target.write_text(original, encoding="utf-8")
+
+    def test_v09_diff_input_must_be_the_exact_source(self):
+        workflow = ".github/workflows/v09-qualification.yml"
+        self.change(workflow,
+                    'git diff --no-renames --name-only -z "$merge_base" "$SOURCE_SHA" > "$changed"',
+                    'git diff --no-renames --name-only -z "$merge_base" "$SOURCE_SHA" > /dev/null')
+        errors = gates.check(self.root)
+        self.assertTrue(any(
+            "v0.9: shared qualification classifier disconnected" in error
+            for error in errors), errors)
+
+    def test_v09_diff_execution_order_cannot_be_bypassed(self):
+        workflow = ".github/workflows/v09-qualification.yml"
+        diff = ('          git diff --no-renames --name-only -z '
+                '"$merge_base" "$SOURCE_SHA" > "$changed"')
+        mutations = (
+            ('          if false; then\n' + diff + '\n          fi\n'
+             '          printf \'docs/harmless.md\\0\' > "$changed"'),
+            (diff + '\n'
+             '          printf \'docs/harmless.md\\0\' > "$changed"'),
+        )
+        for replacement in mutations:
+            with self.subTest(replacement=replacement):
+                target = self.root / workflow
+                original = target.read_text(encoding="utf-8")
+                self.assertIn(diff, original)
+                target.write_text(original.replace(diff, replacement, 1),
+                                  encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: shared qualification classifier disconnected" in error
+                    for error in errors), errors)
+                target.write_text(original, encoding="utf-8")
+
+    def test_v09_routing_guards_cannot_remove_their_own_full_lane(self):
+        for guard in gates.V09_ROUTING_GUARD_EXACT:
+            with self.subTest(guard=guard):
+                contract = self.root / "contracts/v09-qualification-routing.toml"
+                original = contract.read_text(encoding="utf-8")
+                token = '  "' + guard + '",\n'
+                self.assertIn(token, original)
+                contract.write_text(original.replace(token, "", 1),
+                                    encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: missing required routing guard full qualification: " +
+                    guard in error for error in errors), errors)
+                contract.write_text(original, encoding="utf-8")
+
+    def test_v09_executable_harness_cannot_drop_full_routing(self):
+        for harness in ("tools/acceptance.py", "scripts/qualification/v09-adversarial-guest.sh"):
+            with self.subTest(harness=harness):
+                contract = self.root / "contracts/v09-qualification-routing.toml"
+                original = contract.read_text(encoding="utf-8")
+                token = '  "' + harness + '",\n'
+                self.assertIn(token, original)
+                contract.write_text(original.replace(token, "", 1), encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: missing required full-qualification harness: " + harness
+                    in error for error in errors), errors)
+                contract.write_text(original, encoding="utf-8")
+
+    def test_v09_executable_harness_pr_filter_cannot_be_removed(self):
+        for harness in ("tools/acceptance.py", "scripts/qualification/v09-adversarial-guest.sh"):
+            with self.subTest(harness=harness):
+                workflow = self.root / ".github/workflows/v09-qualification.yml"
+                original = workflow.read_text(encoding="utf-8")
+                token = '      - "' + harness + '"\n'
+                self.assertIn(token, original)
+                workflow.write_text(original.replace(token, "", 1), encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: untriggered full-qualification path: " + harness
+                    in error for error in errors), errors)
+                workflow.write_text(original, encoding="utf-8")
+
+    def test_v09_shared_classifier_must_stay_connected(self):
+        self.change(".github/workflows/v09-qualification.yml",
+                    "full = requires_full_qualification(changed, contract)",
+                    "full = False")
+        errors = gates.check(self.root)
+        self.assertTrue(any(
+            "v0.9: shared qualification classifier disconnected" in error
+            for error in errors), errors)
+
+    def test_v09_commented_classifier_cannot_fake_live_routing(self):
+        self.change(".github/workflows/v09-qualification.yml",
+                    "          full = requires_full_qualification(changed, contract)",
+                    "          # full = requires_full_qualification(changed, contract)\n"
+                    "          full = False")
+        errors = gates.check(self.root)
+        self.assertTrue(any(
+            "v0.9: shared qualification classifier disconnected" in error
+            for error in errors), errors)
+
+    def test_v09_classifier_result_cannot_be_overwritten(self):
+        self.change(".github/workflows/v09-qualification.yml",
+                    "          full = requires_full_qualification(changed, contract)",
+                    "          full = requires_full_qualification(changed, contract)\n"
+                    "          full = False")
+        errors = gates.check(self.root)
+        self.assertTrue(any(
+            "v0.9: shared qualification classifier disconnected" in error
+            for error in errors), errors)
+
+    def test_v09_classifier_cannot_be_hidden_in_dead_branch(self):
+        self.change(".github/workflows/v09-qualification.yml",
+                    "          full = requires_full_qualification(changed, contract)",
+                    "          if False:\n"
+                    "              full = requires_full_qualification(changed, contract)")
+        errors = gates.check(self.root)
+        self.assertTrue(any(
+            "v0.9: shared qualification classifier disconnected" in error
+            for error in errors), errors)
+
+    def test_v09_scope_output_must_forward_classifier_result(self):
+        workflow = ".github/workflows/v09-qualification.yml"
+        mutations = (
+            ("      full_qualification: ${{ steps.route.outputs.full_qualification }}",
+             "      full_qualification: ${{ 'false' }}"),
+            ("        id: route", "        id: harmless"),
+        )
+        for before, after in mutations:
+            with self.subTest(replacement=after):
+                target = self.root / workflow
+                original = target.read_text(encoding="utf-8")
+                self.assertIn(before, original)
+                target.write_text(original.replace(before, after, 1),
+                                  encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: shared qualification classifier disconnected" in error
+                    for error in errors), errors)
+                target.write_text(original, encoding="utf-8")
+
+    def test_v09_scope_output_cannot_be_shadowed(self):
+        workflow = ".github/workflows/v09-qualification.yml"
+        target = self.root / workflow
+        original = target.read_text(encoding="utf-8")
+        marker = "      full_qualification: ${{ steps.route.outputs.full_qualification }}\n"
+        self.assertIn(marker, original)
+        target.write_text(original.replace(
+            marker,
+            marker + "      alternate: ${{ 'false' }}\n",
+            1,
+        ), encoding="utf-8")
+        errors = gates.check(self.root)
+        self.assertTrue(any(
+            "v0.9: shared qualification classifier disconnected" in error
+            for error in errors), errors)
+
+    def test_v09_classifier_output_must_reflect_classifier_result(self):
+        workflow = ".github/workflows/v09-qualification.yml"
+        original_write = r"""handle.write(f"full_qualification={'true' if full else 'false'}\n")"""
+        for replacement in (
+            r'handle.write("full_qualification=false\n")',
+            r'handle.write("full_qualification=true\n")',
+            r"""handle.write(f"full_qualification={'false' if full else 'true'}\n")""",
+            r"""handle.write(f"full_qualification={'true' if not full else 'false'}\n")""",
+            r"""print(f"full_qualification={'true' if full else 'false'}")""",
+            r"""handle.write(f"qualification={'true' if full else 'false'}\n")""",
+        ):
+            with self.subTest(replacement=replacement):
+                target = self.root / workflow
+                original = target.read_text(encoding="utf-8")
+                self.assertIn(original_write, original)
+                target.write_text(original.replace(original_write, replacement, 1),
+                                  encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: shared qualification classifier disconnected" in error
+                    for error in errors), errors)
+                target.write_text(original, encoding="utf-8")
+
+    def test_v09_classifier_output_cannot_be_overwritten(self):
+        workflow = ".github/workflows/v09-qualification.yml"
+        original_write = r"""handle.write(f"full_qualification={'true' if full else 'false'}\n")"""
+        replacement = original_write + '\n' + '          handle.write("full_qualification=false\\n")'
+        self.change(workflow, original_write, replacement)
+        errors = gates.check(self.root)
+        self.assertTrue(any(
+            "v0.9: shared qualification classifier disconnected" in error
+            for error in errors), errors)
+
+    def test_v09_offline_vm_clients_must_trigger_full_qualification(self):
+        for prefix in ("apps/linurad/", "apps/linuractl/", "crates/linura-sdk/"):
+            with self.subTest(prefix=prefix):
+                contract = self.root / "contracts/v09-qualification-routing.toml"
+                workflow = self.root / ".github/workflows/v09-qualification.yml"
+                contract_original = contract.read_text(encoding="utf-8")
+                workflow_original = workflow.read_text(encoding="utf-8")
+                declared = '  "' + prefix + '",\n'
+                filter_line = '      - "' + prefix + '**"\n'
+                self.assertIn(declared, contract_original)
+                self.assertIn(filter_line, workflow_original)
+                contract.write_text(contract_original.replace(declared, "", 1),
+                                    encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: missing required full-qualification prefix: " + prefix
+                    in error for error in errors), errors)
+                contract.write_text(contract_original, encoding="utf-8")
+                workflow.write_text(workflow_original.replace(filter_line, "", 1),
+                                    encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: untriggered full-qualification prefix: " + prefix
+                    in error for error in errors), errors)
+                workflow.write_text(workflow_original, encoding="utf-8")
+
+    def test_v09_lane_job_graph_must_follow_classifier_output(self):
+        workflow = ".github/workflows/v09-qualification.yml"
+        mutations = (
+            (
+                "  scope:\n"
+                "    name: v0.9 qualification scope\n"
+                "    runs-on: ubuntu-24.04\n",
+                "  scope:\n"
+                "    name: v0.9 qualification scope\n"
+                "    if: false\n"
+                "    runs-on: ubuntu-24.04\n",
+            ),
+            (
+                "  offline-reference:\n"
+                "    name: v0.9 offline QualificationEnvironment VM\n"
+                "    needs: [scope, contract]\n"
+                "    if: needs.scope.outputs.full_qualification == 'true'\n",
+                "  offline-reference:\n"
+                "    name: v0.9 offline QualificationEnvironment VM\n"
+                "    needs: [scope, contract]\n"
+                "    if: false\n",
+            ),
+            (
+                "  adversarial-security:\n"
+                "    name: v0.9 adversarial bootstrap and Q11\n"
+                "    needs: [scope, contract]\n",
+                "  adversarial-security:\n"
+                "    name: v0.9 adversarial bootstrap and Q11\n"
+                "    needs: [contract]\n",
+            ),
+            (
+                "  regression-proof:\n"
+                "    name: v0.9 exact-source regression proof\n"
+                "    needs: [scope, contract]\n"
+                "    if: needs.scope.outputs.full_qualification != 'true'\n",
+                "  regression-proof:\n"
+                "    name: v0.9 exact-source regression proof\n"
+                "    needs: [scope, contract]\n"
+                "    if: true\n",
+            ),
+            (
+                "  qualification-proof:\n"
+                "    name: bind v0.9 qualification evidence\n"
+                "    needs: [scope, contract, offline-reference, adversarial-security]\n"
+                "    if: needs.scope.outputs.full_qualification == 'true'\n",
+                "  qualification-proof:\n"
+                "    name: bind v0.9 qualification evidence\n"
+                "    needs: [scope, contract, offline-reference]\n"
+                "    if: needs.scope.outputs.full_qualification == 'true'\n",
+            ),
+        )
+        target = self.root / workflow
+        original = target.read_text(encoding="utf-8")
+        for before, after in mutations:
+            with self.subTest(replacement=after):
+                self.assertIn(before, original)
+                target.write_text(original.replace(before, after, 1),
+                                  encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "v0.9: qualification lane job graph disconnected" in error
+                    for error in errors), errors)
+                target.write_text(original, encoding="utf-8")
+
     def test_v09_routing_guard_must_trigger_v09_regression(self):
         self.change(".github/workflows/v09-qualification.yml",
                     '      - "tools/check_validation_gates.py"\n', "")

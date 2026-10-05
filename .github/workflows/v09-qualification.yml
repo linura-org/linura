@@ -20,11 +20,24 @@ on:
       - ".github/workflows/vm-acceptance.yml"
       - ".github/workflows/trusted-release-proof.yml"
       - "apps/linura-firstboot/**"
-      - "apps/linura-authorityd/Cargo.toml"
-      - "apps/linura-authorityd/src/bin/linura-migrations-qualification.rs"
+      - "apps/linura-authorityd/**"
+      - "apps/linurad/**"
+      - "apps/linuractl/**"
+      - "crates/linura-sdk/**"
       - "crates/linura-bootstrap/**"
       - "crates/linura-capability-sdk/**"
       - "crates/linura-control/**"
+      - "crates/linura-agent-runtime/**"
+      - "crates/linura-dbus/**"
+      - "crates/linura-library/**"
+      - "crates/linura-lifecycle/**"
+      - "crates/linura-provider-sdk/**"
+      - "crates/linura-policy/**"
+      - "crates/linura-transaction/**"
+      - "crates/linura-persistence-sqlite/**"
+      - "crates/linura-graph/**"
+      - "crates/linura-intent/**"
+      - "crates/linura-provenance/**"
       - "crates/linura-core/**"
       - "crates/linura-hardware/**"
       - "crates/linura-linux-observation/**"
@@ -34,6 +47,15 @@ on:
       - "crates/linura-planner/**"
       - "crates/linura-protocol/**"
       - "crates/linura-update/**"
+      - "interfaces/dbus/**"
+      - "executors/**"
+      - "verifiers/**"
+      - "contracts/stability.toml"
+      - "tools/v09_qualification_scope.py"
+      - "tests/tooling/test_v09_qualification_scope.py"
+      - "tools/vm.py"
+      - "tools/acceptance.py"
+      - "scripts/qualification/v09-adversarial-guest.sh"
       - "contracts/components.toml"
       - "contracts/operation-semantics.toml"
       - "contracts/roadmap.toml"
@@ -68,6 +90,9 @@ on:
       - "rust-toolchain.toml"
       - "Cargo.toml"
       - "Cargo.lock"
+      - ".cargo/config"
+      - ".cargo/config.toml"
+      - "packaging/wireplumber/linura-session-audio.lua"
 
 permissions:
   actions: read
@@ -119,14 +144,13 @@ jobs:
           import pathlib
           import sys
           import tomllib
+          from tools.v09_qualification_scope import requires_full_qualification
 
           changed_path = pathlib.Path(sys.argv[1])
           output_path = pathlib.Path(sys.argv[2])
           contract = tomllib.loads(
               pathlib.Path("contracts/v09-qualification-routing.toml").read_text(encoding="utf-8")
           )
-          exact = set(contract["full_exact"])
-          prefixes = tuple(contract["full_prefixes"])
           changed = sorted(
               {
                   os.fsdecode(path)
@@ -134,7 +158,7 @@ jobs:
                   if path
               }
           )
-          full = any(path in exact or path.startswith(prefixes) for path in changed)
+          full = requires_full_qualification(changed, contract)
           with output_path.open("a", encoding="utf-8") as handle:
               handle.write(f"full_qualification={'true' if full else 'false'}\n")
           print("v0.9 lane:", "full-qualification" if full else "exact-source-regression")
@@ -179,6 +203,7 @@ jobs:
           python3 -m unittest \
             tests.tooling.test_roadmap \
             tests.tooling.test_operation_semantics \
+            tests.tooling.test_v09_qualification_scope \
             tests.tooling.test_v09_recovery_qualification \
             tests.tooling.test_v09_bootstrap_provisioning_contract \
             tests.tooling.test_v09_adversarial_fast_forward_contract \
@@ -332,6 +357,18 @@ jobs:
               raise SystemExit("v0.9 VM qualification did not pass")
           if evidence.get("scenario", {}).get("id") != "firstboot-offline":
               raise SystemExit("v0.9 VM evidence scenario mismatch")
+          production = evidence.get("binaries", {}).get("linura-authorityd")
+          if not isinstance(production, dict) or production.get("identity_match") is not True:
+              raise SystemExit("v0.9 production authority identity evidence is missing")
+          host = production.get("host_build")
+          guest = production.get("guest_installed")
+          if (not isinstance(host, dict) or not isinstance(guest, dict) or
+                  not isinstance(host.get("sha256"), str) or
+                  len(host["sha256"]) != 64 or
+                  any(char not in "0123456789abcdef" for char in host["sha256"]) or
+                  not isinstance(host.get("size"), int) or host["size"] <= 0 or
+                  guest != host):
+              raise SystemExit("v0.9 production authority executable identity mismatch")
           qualification_environment = evidence.get("qualification_environment", {})
           if qualification_environment.get("id") != qualification_id:
               raise SystemExit("v0.9 QualificationEnvironment identity mismatch")

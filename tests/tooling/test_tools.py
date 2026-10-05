@@ -135,7 +135,7 @@ class ToolingTests(unittest.TestCase):
         self.assertIn("cargo build --release --locked -p linurad -p linuractl", workflow)
         self.assertIn("VM-ACCEPTANCE-EVIDENCE.json", workflow)
 
-    def test_v09_pr_routing_keeps_shared_changes_on_fast_regression(self) -> None:
+    def test_v09_pr_routing_selects_full_for_shared_authority_changes(self) -> None:
         import tomllib
 
         contract = tomllib.loads(
@@ -144,10 +144,27 @@ class ToolingTests(unittest.TestCase):
         self.assertEqual(contract["pull_request_default_lane"], "exact-source-regression")
         self.assertEqual(contract["workflow_call_lane"], "full-qualification")
         self.assertEqual(contract["workflow_dispatch_lane"], "full-qualification")
-        self.assertNotIn("crates/linura-control/", contract["full_prefixes"])
-        self.assertNotIn("crates/linura-core/", contract["full_prefixes"])
-        self.assertIn("crates/linura-bootstrap/", contract["full_prefixes"])
-        self.assertIn("crates/linura-update/", contract["full_prefixes"])
+        for prefix in (
+            "crates/linura-control/",
+            "crates/linura-core/",
+            "crates/linura-agent-runtime/",
+            "crates/linura-dbus/",
+            "crates/linura-library/",
+            "crates/linura-lifecycle/",
+            "crates/linura-provider-sdk/",
+            "crates/linura-sdk/",
+            "apps/linurad/",
+            "apps/linuractl/",
+            "crates/linura-policy/",
+            "crates/linura-protocol/",
+            "crates/linura-observation/",
+            "crates/linura-persistence-sqlite/",
+            "crates/linura-bootstrap/",
+            "crates/linura-update/",
+        ):
+            with self.subTest(prefix=prefix):
+                self.assertIn(prefix, contract["full_prefixes"])
+        self.assertEqual(contract["guidance_only_basenames"], ["AGENTS.md", "README.md"])
 
     def test_v09_full_vm_jobs_are_path_routed_but_release_calls_remain_full(self) -> None:
         workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(encoding="utf-8")

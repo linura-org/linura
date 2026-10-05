@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 from pathlib import Path
 import re
 import sys
+import tomllib
+import textwrap
 
 ROOT = Path(__file__).resolve().parents[1]
 MANDATORY = {
@@ -50,6 +53,10 @@ SPECIALIZED = {
         "crates/linura-agent-runtime/Cargo.toml",
         "crates/linura-control/Cargo.toml", "scripts/check_repository.py")),
     "v09": (".github/workflows/v09-qualification.yml", (
+        "tools/v09_qualification_scope.py",
+        "tests/tooling/test_v09_qualification_scope.py",
+        "tests/acceptance/002-firstboot-offline.json",
+        "contracts/v09-qualification-routing.toml",
         "tools/image.py", "contracts/operation-semantics.toml",
         "tools/check_validation_gates.py", "tests/tooling/test_validation_gates.py",
         "crates/linura-control/Cargo.toml")),
@@ -78,6 +85,96 @@ SPECIALIZED = {
 
 # These independent qualification jobs are inherited release requirements;
 # preserving PR triggers alone cannot prevent a release-proof bypass.
+V09_ROUTING_GUARD_EXACT = (
+    ".github/workflows/v09-qualification.yml",
+    "contracts/v09-qualification-routing.toml",
+    "tools/v09_qualification_scope.py",
+    "tests/tooling/test_v09_qualification_scope.py",
+    "tools/check_validation_gates.py",
+    "tests/tooling/test_validation_gates.py",
+)
+
+# Reviewed exact-path minimum for the v0.9 full-qualification lane.
+# Like the required prefix set below, this is intentionally independent of
+# the TOML allowlist: deleting a protected route from the contract must not
+# make the validator forget that the route is mandatory.
+V09_REQUIRED_FULL_EXACT = (
+    ".github/workflows/v09-qualification.yml",
+    ".github/workflows/v09-adversarial-security.yml",
+    ".github/workflows/vm-acceptance.yml",
+    ".github/workflows/trusted-release-proof.yml",
+    "Cargo.toml",
+    "Cargo.lock",
+    ".cargo/config",
+    ".cargo/config.toml",
+    "packaging/wireplumber/linura-session-audio.lua",
+    "rust-toolchain.toml",
+    "tools/codex/versions.env",
+    "tools/vm.py",
+    "tools/acceptance.py",
+    "scripts/qualification/v09-adversarial-guest.sh",
+    "tools/image.py",
+    "tools/check_validation_gates.py",
+    "tests/tooling/test_validation_gates.py",
+    "tools/v09_qualification_scope.py",
+    "tests/tooling/test_v09_qualification_scope.py",
+    "contracts/components.toml",
+    "contracts/operation-semantics.toml",
+    "contracts/stability.toml",
+    "hardware/support-matrix.json",
+    "contracts/v09-qualification-routing.toml",
+    "tests/tooling/test_v09_recovery_qualification.py",
+    "tests/tooling/test_v09_bootstrap_provisioning_contract.py",
+    "tests/tooling/test_v09_adversarial_fast_forward_contract.py",
+    "tests/tooling/test_v09_adversarial_transport_contract.py",
+    "tests/tooling/test_v09_adversarial_sharding_contract.py",
+)
+
+V09_REQUIRED_FULL_PREFIXES = (
+    "apps/linura-firstboot/",
+    "apps/linura-authorityd/",
+    "apps/linurad/",
+    "apps/linuractl/",
+    "crates/linura-sdk/",
+    "crates/linura-bootstrap/",
+    "crates/linura-migrations/",
+    "crates/linura-update/",
+    "crates/linura-control/",
+    "crates/linura-core/",
+    "crates/linura-agent-runtime/",
+    "crates/linura-dbus/",
+    "crates/linura-library/",
+    "crates/linura-lifecycle/",
+    "crates/linura-provider-sdk/",
+    "crates/linura-policy/",
+    "crates/linura-planner/",
+    "crates/linura-transaction/",
+    "crates/linura-persistence-sqlite/",
+    "crates/linura-graph/",
+    "crates/linura-intent/",
+    "crates/linura-provenance/",
+    "crates/linura-protocol/",
+    "crates/linura-capability-sdk/",
+    "crates/linura-hardware/",
+    "crates/linura-linux-observation/",
+    "crates/linura-observation/",
+    "crates/linura-observation-control/",
+    "interfaces/dbus/",
+    "executors/",
+    "verifiers/",
+    "tests/acceptance/",
+)
+
+V09_AUTHORITY_NEGATIVE_COMMAND = (
+    "if output=$(LINURA_AUTHORITY_STATE_DIR=/dev/null/linura-authority-qualification "
+    "/usr/local/bin/linura-authorityd 2>&1); then "
+    "printf '%s\\n' 'authority daemon unexpectedly accepted invalid state directory' >&2; "
+    "exit 1; fi; case \"$output\" in *'linura-authorityd failed closed:'*) "
+    "printf '%s\\n' 'authority daemon rejected invalid state directory' ;; "
+    "*) printf '%s\\n' \"$output\" >&2; exit 1 ;; esac"
+)
+
+
 RELEASE_INHERITED = {
     "observation-acceptance": ".github/workflows/vm-acceptance.yml",
     "plan-preview-acceptance": ".github/workflows/vm-acceptance.yml",
@@ -575,6 +672,153 @@ CODEX_OTHER_EXECUTION_CONTRACTS = {
 }
 
 
+def v09_lane_job_graph_connected(workflow: str) -> bool:
+    """Pin full/regression jobs to the reviewed classifier output and dependency graph."""
+    jobs = section(workflow, "jobs") or ""
+
+    expected = {
+        "scope": {
+            "needs": None,
+            "if": None,
+            "uses": None,
+        },
+        "contract": {
+            "needs": "scope",
+            "if": None,
+            "uses": None,
+        },
+        "offline-reference": {
+            "needs": "[scope, contract]",
+            "if": "needs.scope.outputs.full_qualification == 'true'",
+            "uses": "./.github/workflows/vm-acceptance.yml",
+        },
+        "adversarial-security": {
+            "needs": "[scope, contract]",
+            "if": "needs.scope.outputs.full_qualification == 'true'",
+            "uses": "./.github/workflows/v09-adversarial-security.yml",
+        },
+        "regression-proof": {
+            "needs": "[scope, contract]",
+            "if": "needs.scope.outputs.full_qualification != 'true'",
+            "uses": None,
+        },
+        "qualification-proof": {
+            "needs": "[scope, contract, offline-reference, adversarial-security]",
+            "if": "needs.scope.outputs.full_qualification == 'true'",
+            "uses": None,
+        },
+    }
+    for job_name, controls in expected.items():
+        body = section(jobs, job_name, 2)
+        if body is None:
+            return False
+        needs = re.findall(r"(?m)^    needs:[ \t]*(.+?)[ \t]*$", body)
+        expected_needs = ([] if controls["needs"] is None else [controls["needs"]])
+        if needs != expected_needs:
+            return False
+        guards = re.findall(r"(?m)^    if:[ \t]*(.+?)[ \t]*$", body)
+        expected_guard = ([] if controls["if"] is None else [controls["if"]])
+        if guards != expected_guard:
+            return False
+        uses = re.findall(r"(?m)^    uses:[ \t]*(.+?)[ \t]*$", body)
+        expected_uses = ([] if controls["uses"] is None else [controls["uses"]])
+        if uses != expected_uses:
+            return False
+        if re.search(r"(?m)^    continue-on-error:", body) is not None:
+            return False
+    return True
+
+
+def v09_classifier_connected(workflow: str) -> bool:
+    """Fail closed unless the live router matches the reviewed executable AST.
+
+    This protects changed-path provenance, canonical contract loading,
+    classification and exact GITHUB_OUTPUT publication as one data flow.
+    Refactors require changing the reviewed reference and adversarial tests.
+    """
+    jobs = section(workflow, "jobs") or ""
+    scope = section(jobs, "scope", 2) or ""
+    outputs = section(scope, "outputs", 4)
+    output_entries = [
+        line.strip() for line in (outputs or "").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if output_entries != [
+            "full_qualification: ${{ steps.route.outputs.full_qualification }}"]:
+        return False
+    route = workflow_step(scope, 4, "name", "Resolve exact-source qualification lane")
+    if (not step_is_unconditional(route, 4) or
+            re.findall(r"(?m)^        id:[ \t]*(\S+)[ \t]*$", route or "") != ["route"] or
+            len(re.findall(r"(?m)^        id:[ \t]*route[ \t]*$", scope)) != 1):
+        return False
+    marker = "        run: |"
+    lines = (route or "").splitlines()
+    if lines.count(marker) != 1:
+        return False
+    body = lines[lines.index(marker) + 1:]
+    while body and not body[-1].strip():
+        body.pop()
+    if (not body or
+            any(line.strip() and not line.startswith("          ") for line in body)):
+        return False
+    run = "\n".join(line[10:] if line else "" for line in body) + "\n"
+    heredoc = 'python3 - "$changed" "$GITHUB_OUTPUT" <<\'PY\'\n'
+    parts = run.split(heredoc)
+    if len(parts) != 2 or not parts[1].endswith("PY\n"):
+        return False
+    shell = parts[0]
+    source = parts[1][:-len("PY\n")]
+    executable_shell = tuple(
+        line.strip() for line in shell.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+    expected_shell = (
+        "set -euo pipefail",
+        'test "$(git rev-parse HEAD)" = "$SOURCE_SHA"',
+        'if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then',
+        'printf \'full_qualification=true\\n\' >> "$GITHUB_OUTPUT"',
+        "exit 0",
+        "fi",
+        '[[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]',
+        'merge_base="$(git merge-base "$BASE_SHA" "$SOURCE_SHA")"',
+        '[[ "$merge_base" =~ ^[0-9a-f]{40}$ ]]',
+        'git merge-base --is-ancestor "$merge_base" "$BASE_SHA"',
+        'git merge-base --is-ancestor "$merge_base" "$SOURCE_SHA"',
+        'changed="$RUNNER_TEMP/v09-changed-paths.bin"',
+        'git diff --no-renames --name-only -z "$merge_base" "$SOURCE_SHA" > "$changed"',
+    )
+    if executable_shell != expected_shell:
+        return False
+    expected_source = textwrap.dedent(r'''          import os
+          import pathlib
+          import sys
+          import tomllib
+          from tools.v09_qualification_scope import requires_full_qualification
+
+          changed_path = pathlib.Path(sys.argv[1])
+          output_path = pathlib.Path(sys.argv[2])
+          contract = tomllib.loads(
+              pathlib.Path("contracts/v09-qualification-routing.toml").read_text(encoding="utf-8")
+          )
+          changed = sorted(
+              {
+                  os.fsdecode(path)
+                  for path in changed_path.read_bytes().split(b"\0")
+                  if path
+              }
+          )
+          full = requires_full_qualification(changed, contract)
+          with output_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"full_qualification={'true' if full else 'false'}\n")
+          print("v0.9 lane:", "full-qualification" if full else "exact-source-regression")
+          for path in changed:
+              print(path)''')
+    try:
+        return ast.dump(ast.parse(source), include_attributes=False) == ast.dump(
+            ast.parse(expected_source), include_attributes=False)
+    except SyntaxError:
+        return False
+
 def check(root: Path = ROOT) -> list[str]:
     failures = []
 
@@ -908,6 +1152,51 @@ def check(root: Path = ROOT) -> list[str]:
                     name + ": guidance-only change triggers machine qualification: " + path)
 
     v09 = read(SPECIALIZED["v09"][0])
+    routing_contract = read("contracts/v09-qualification-routing.toml")
+    try:
+        contract = tomllib.loads(routing_contract)
+        require(contract.get("schema_version") == 1 and
+                contract.get("guidance_only_basenames") == ["AGENTS.md", "README.md"],
+                "v0.9: invalid routing contract")
+        events = section(v09, "on") or ""
+        pr = section(events, "pull_request", 2) or ""
+        filters = section(pr, "paths", 4) or ""
+        patterns = re.findall(r'(?m)^      - "([^"]+)"', filters)
+        # Pin every reviewed exact input independently from the mutable
+        # contract so a route cannot delete itself from both classification
+        # and validation in one edit.
+        for required in V09_REQUIRED_FULL_EXACT:
+            require(required in contract["full_exact"],
+                    "v0.9: missing required full-qualification exact input: " + required)
+        for guard in V09_ROUTING_GUARD_EXACT:
+            require(guard in contract["full_exact"],
+                    "v0.9: missing required routing guard full qualification: " + guard)
+        for harness in ("tools/acceptance.py", "scripts/qualification/v09-adversarial-guest.sh"):
+            require(harness in contract["full_exact"],
+                    "v0.9: missing required full-qualification harness: " + harness)
+        for required in (".cargo/config", ".cargo/config.toml"):
+            require(required in contract["full_exact"],
+                    "v0.9: missing required full-qualification toolchain: " + required)
+        require("packaging/wireplumber/linura-session-audio.lua" in contract["full_exact"],
+                "v0.9: missing embedded audio helper qualification input")
+        # The reviewed full-impact prefix set is a security contract, not a
+        # self-describing allowlist. A contract edit cannot delete a route and
+        # thereby make the validator forget that the route was mandatory.
+        for prefix in V09_REQUIRED_FULL_PREFIXES:
+            require(prefix in contract["full_prefixes"],
+                    "v0.9: missing required full-qualification prefix: " + prefix)
+        for path in contract["full_exact"]:
+            require(path_selected(path, patterns),
+                    "v0.9: untriggered full-qualification path: " + path)
+        for prefix in contract["full_prefixes"]:
+            require(path_selected(prefix + "__routing-probe__.rs", patterns),
+                    "v0.9: untriggered full-qualification prefix: " + prefix)
+    except (ValueError, KeyError, TypeError) as error:
+        require(False, "v0.9: invalid routing contract: " + str(error))
+    require(v09_classifier_connected(v09),
+            "v0.9: shared qualification classifier disconnected")
+    require(v09_lane_job_graph_connected(v09),
+            "v0.9: qualification lane job graph disconnected")
     require('if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then' in v09 and
             "full_qualification=true" in v09 and
             "full_qualification != 'true'" in v09,
@@ -948,6 +1237,58 @@ def check(root: Path = ROOT) -> list[str]:
 
     v010 = read(SPECIALIZED["v010"][0])
     vm = read(SPECIALIZED["vm"][0])
+    vm_body = section(section(vm, "jobs") or "", "vm", 2) or ""
+    build_step = workflow_step(vm_body, 4, "name", "Build exact-source acceptance clients")
+    build_lines = executable_run_block(build_step, 4)
+    require(step_is_unconditional(build_step, 4) and
+            build_lines[:2] == (
+                "set -euo pipefail",
+                "cargo build --release --locked -p linurad -p linuractl -p linura-firstboot",
+            ) and
+            build_lines[2:] == (
+                'if [[ "$ACCEPTANCE_SCENARIO" == firstboot-offline ]]; then',
+                "  cargo test --locked -p linura-authorityd --bin linura-authorityd",
+                "  cargo build --release --locked -p linura-authorityd --bin linura-authorityd",
+                "fi",
+            ),
+            "v0.9: production authority build and unit checks missing from full VM lane")
+    install_step = workflow_step(
+        vm_body, 4, "name", "Wait for cloud-init and install exact-source binaries")
+    install_lines = executable_run_block(install_step, 4)
+    install_text = "\\n".join(install_lines)
+    require(step_is_unconditional(install_step, 4) and
+            'if [[ "$ACCEPTANCE_SCENARIO" == firstboot-offline ]]; then' in install_lines and
+            '  scp "${ssh_common[@]}" -P 2222 target/release/linura-authorityd linura@127.0.0.1:/tmp/' in install_lines and
+            "'sudo -n install -o root -g root -m 0755 /tmp/linura-authorityd /usr/local/bin/linura-authorityd && rm -f /tmp/linura-authorityd'" in install_text and
+            '  binaries+=(linura-authorityd)' in install_lines and
+            'for name in "${binaries[@]}"; do' in install_lines and
+            '  test "$host_sha" = "$guest_sha"' in install_lines and
+            '  test "$host_size" = "$guest_size"' in install_lines,
+            "v0.9: production authority guest installation or exact-byte identity missing")
+    evidence_step = workflow_step(
+        vm_body, 4, "name", "Record exact-source VM acceptance evidence")
+    evidence_lines = executable_run_block(evidence_step, 4)
+    require(step_is_unconditional(evidence_step, 4) and
+            '    required_binaries.add("linura-authorityd")' in evidence_lines and
+            'if set(binaries) != required_binaries:' in evidence_lines and
+            '    raise SystemExit("guest executable identity evidence is incomplete or unexpected")'
+            in evidence_lines,
+            "v0.9: production authority identity must be bound into VM evidence")
+    scenario = read("tests/acceptance/002-firstboot-offline.json")
+    try:
+        steps = json.loads(scenario)
+        smoke = [entry["command"] for entry in steps["steps"]
+                 if entry.get("name") ==
+                 "verify-production-authority-fails-closed-on-invalid-state-dir"]
+        require("linura-authorityd" in steps["requires"] and
+                smoke == [V09_AUTHORITY_NEGATIVE_COMMAND],
+                "v0.9: production authority negative VM acceptance step missing")
+    except (ValueError, TypeError, KeyError) as error:
+        require(False, "v0.9: invalid production authority VM scenario: " + str(error))
+    require('production = evidence.get("binaries", {}).get("linura-authorityd")' in v09 and
+            'guest != host' in v09 and
+            'raise SystemExit("v0.9 production authority executable identity mismatch")' in v09,
+            "v0.9: production authority executable evidence not bound to full proof")
     shell_call = section(section(v010, "jobs") or "", "shell-runtime", 2) or ""
     require("    uses: ./.github/workflows/v010-shell-runtime-qualification.yml" in shell_call and
             "      source_sha: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}" in
