@@ -131,7 +131,7 @@ Linura extends the problem in a different direction:
 - capability-scoped authorization;
 - user-session state;
 - immediate lifecycle evidence;
-- heterogeneous execution semantics behind one authority path.
+- heterogeneous execution semantics behind one Control-owned authority model.
 
 Linura should reuse the conceptual lesson:
 
@@ -199,7 +199,7 @@ Its contribution is the composition of desired state with an explicit authority 
 
 `proposal → semantic resolution → policy → authorization → controlled effects → authoritative observation → verification → managed state`
 
-This lifecycle is intended to work for immediate interactive operations as well as persistent configuration.
+This authority model is intended to handle immediate interactive operations as well as persistent configuration by selecting class-appropriate operation semantics rather than forcing every request through the managed lifecycle.
 
 That makes Linura closer to a **machine authority layer** than to a traditional configuration-management tool.
 

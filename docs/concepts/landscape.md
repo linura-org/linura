@@ -15,11 +15,19 @@ Its central architectural boundary is:
 
 Linura places an independent control and execution plane between intent and authoritative machine effects.
 
-The intended authority path is:
+Linura has **one Control-owned authority architecture**, but it does not force every operation through one universal lifecycle. Trusted operation classification selects the deterministic semantics required by the operation's actual effect:
+
+- `ExperienceEphemeral` — local experience/navigation state;
+- `AuthoritativeQuery` — read-only authoritative observation;
+- `LinuraOwnedState` — typed Linura-local durable state;
+- `TransientExternalEffect` — bounded, unprivileged external effect with authoritative preconditions, plan-bound authorization, independent verification, and audit;
+- `ManagedExternalEffect` — durable, consequential, privileged, or ambiguity-sensitive external effect.
+
+Only `ManagedExternalEffect` uses the complete managed lifecycle:
 
 `request/intent → observe → plan → validate → authorize → prepare → execute → verify → commit → audit → reconcile`
 
-The source of intent may be a human, graphical interface, CLI, AI agent, automation, or another trusted system component. The authority model remains the same.
+The source of intent may be a human, graphical interface, CLI, AI agent, automation, or another trusted system component. Equivalent operations resolve to the same trusted class and authority semantics regardless of interface.
 
 ## Why this document exists
 
@@ -101,11 +109,11 @@ Modern agent runtimes such as NVIDIA OpenShell already contain a distinct contro
 
 Linura's model can be summarized as:
 
-> **Many interfaces. One machine model. One authority path.**
+> **Many interfaces. One machine model. One authority model.**
 
 An AI agent is therefore not a privileged architectural category. It is one possible producer of intent.
 
-A human using a GUI, a CLI command, an automation rule, and an AI agent should ultimately cross the same authority boundary when requesting equivalent machine effects.
+A human using a GUI, a CLI request, an automation rule, and an AI agent should resolve equivalent machine effects through the same trusted operation classification and Control-owned authority model.
 
 The model is intended to span Linux host state, system services, user-session state, applications, devices, containers, virtual machines, agents, managed configuration, and workflows composed from those capabilities.
 
