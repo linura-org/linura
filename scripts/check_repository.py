@@ -33,6 +33,7 @@ REQUIRED = [
     "contracts/stability.toml", "tools/check_contract_stability.py", "tests/tooling/test_contract_stability.py",
     "contracts/roadmap.toml", "contracts/v010-workstation-slices.toml", "tools/check_roadmap.py", "tools/v010_slice_graph.py", "tests/tooling/test_roadmap.py",
     "tools/check_validation_gates.py", "tests/tooling/test_validation_gates.py", ".github/workflows/codex-environment.yml",
+    "tools/check_development_workflow.py", "tests/tooling/test_development_workflow.py", ".github/PULL_REQUEST_TEMPLATE.md",
     "contracts/layering.toml", "tools/check_layering.py", "tests/tooling/test_layering.py",
     "contracts/operation-semantics.toml", "tools/check_operation_semantics.py", "tests/tooling/test_operation_semantics.py",
     "contracts/components.toml", "tools/check_component_maturity.py", "tests/tooling/test_component_maturity.py",
@@ -272,6 +273,14 @@ def main() -> int:
             candidate = (markdown.parent / target).resolve()
             if not candidate.exists():
                 failures.append(f"broken Markdown link: {markdown.relative_to(ROOT)} -> {target}")
+
+    development_result = subprocess.run(
+        [sys.executable, str(ROOT / "tools/check_development_workflow.py"), str(ROOT)],
+        check=False, capture_output=True, text=True,
+    )
+    if development_result.returncode != 0:
+        details = development_result.stderr.strip() or development_result.stdout.strip()
+        failures.append(f"development workflow alignment failed: {details}")
 
     validation_result = subprocess.run(
         [sys.executable, str(ROOT / "tools/check_validation_gates.py"), str(ROOT)],
