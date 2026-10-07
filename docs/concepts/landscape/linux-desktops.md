@@ -51,8 +51,8 @@ Those are different layers.
 | Product center | Desktop experience | Machine-state model |
 | Current Linux environment | Arch + Hyprland + Quickshell | Linux; initial workstation profile may target Arch/Hyprland |
 | UI | Product experience itself | Derived interface over authoritative state |
-| Configuration | Distribution/configuration mechanisms | Managed state through capabilities and authority lifecycle |
-| System changes | Conventional Linux/configuration paths | Intended authorize → execute → observe → verify path |
+| Configuration | Distribution/configuration mechanisms | Managed state through capabilities and class-specific authority semantics |
+| System changes | Conventional Linux/configuration paths | Trusted operation classification selects class-appropriate deterministic handling; external effects are independently observed and verified |
 | AI agents | Not a central architectural object | First-class intent producers, but non-authoritative |
 | Deterministic authority plane | Not the primary product goal | Core architectural goal |
 | State verification | Conventional system/application mechanisms | Explicit post-effect verification model |
@@ -93,9 +93,9 @@ Linura should avoid making its first workstation implementation into an architec
 
 ### Conventional mutation paths remain valid
 
-An opinionated desktop does not inherently require all machine effects to cross one independent authorization and verification lifecycle.
+An opinionated desktop does not inherently require all effectful requests to cross an independent deterministic authority model.
 
-Linura does.
+Linura does. Trusted operation classification selects the class-appropriate path inside that one Control-owned authority model; only managed external effects use the complete durable lifecycle.
 
 ### User experience and machine authority are separate concerns
 
@@ -139,7 +139,7 @@ Linura's presentation layer should consume authoritative state rather than inven
 
 For the intended desktop architecture:
 
-`UI → Linura client/bridge → control-plane capability → authorization → executor → system → observer → verification → authoritative lifecycle state → UI`
+`UI → Linura client/bridge → typed operation → trusted classification → class-appropriate Control path → bounded effect mechanism where required → authoritative observation/verification → UI`
 
 The graphical surface is therefore replaceable.
 

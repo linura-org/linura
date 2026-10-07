@@ -32,6 +32,9 @@ UI_ARCHITECTURE_PATH = "docs/ui-architecture.md"
 AGENTS_PATH = "AGENTS.md"
 POLICY_GUIDE_PATH = "agents/skills/policy.md"
 README_PATH = "README.md"
+LANDSCAPE_PATH = "docs/concepts/landscape.md"
+CONFIGURATION_LANDSCAPE_PATH = "docs/concepts/landscape/configuration-management.md"
+LINUX_DESKTOPS_LANDSCAPE_PATH = "docs/concepts/landscape/linux-desktops.md"
 
 EXPECTED_MANAGED_LIFECYCLE = ["request", "observe", "plan", "validate", "authorize", "prepare", "execute", "verify", "commit", "audit", "reconcile"]
 EXPECTED_TRANSIENT_LIFECYCLE = ["request", "observe", "plan", "validate-classify", "authorize", "execute", "verify", "audit"]
@@ -246,11 +249,35 @@ def validate(root: Path) -> list[str]:
             "Supported `ManagedExternalEffect` operations require durable pre-execution prepare/recovery state.",
             "A qualified `TransientExternalEffect` is the narrow exception defined by the operation-semantics contract",
         ),
+        LANDSCAPE_PATH: (
+            "one Control-owned authority architecture",
+            "Only `ManagedExternalEffect` uses the complete managed lifecycle",
+            "Many interfaces. One machine model. One authority model.",
+        ),
+        CONFIGURATION_LANDSCAPE_PATH: (
+            "heterogeneous execution semantics behind one Control-owned authority model.",
+            "class-appropriate operation semantics",
+        ),
+        LINUX_DESKTOPS_LANDSCAPE_PATH: (
+            "class-specific authority semantics",
+            "one Control-owned authority model",
+        ),
     }
     forbidden_markers = {
         README_PATH: (
             "External effects are never supported without a durable pre-execution recovery record.",
             "External effects require durable pre-execution prepare/recovery state.",
+        ),
+        LANDSCAPE_PATH: (
+            "The intended authority path is:",
+            "Many interfaces. One machine model. One authority path.",
+        ),
+        CONFIGURATION_LANDSCAPE_PATH: (
+            "heterogeneous execution semantics behind one authority path.",
+        ),
+        LINUX_DESKTOPS_LANDSCAPE_PATH: (
+            "Managed state through capabilities and authority lifecycle",
+            "Intended authorize → execute → observe → verify path",
         ),
     }
     for path, markers in forbidden_markers.items():
