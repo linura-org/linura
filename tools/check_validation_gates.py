@@ -557,34 +557,34 @@ REVIEWED_STEP_CONDITIONS = {
     ("vm", "vm"): {
         "Stop disposable guest": "always()",
         "Collect VM diagnostics": "always()",
-        "Upload VM acceptance evidence and diagnostics": "always()",
+        "Upload unqualified VM diagnostics": "failure()",
     },
     ("v04-durability", "durability"): {
         "Stop disposable guest": "always()",
-        "Upload v0.4 durability evidence and diagnostics": "always()",
+        "Upload unqualified v0.4 durability diagnostics": "failure()",
     },
     ("v04-enospc", "enospc"): {
         "Record exact-source ENOSPC evidence": "always()",
         "Stop disposable guest": "always()",
-        "Upload ENOSPC qualification evidence": "always()",
+        "Upload unqualified ENOSPC diagnostics": "failure()",
     },
     ("v05", "qualification"): {
         "Collect executor hardening evidence": "always()",
         "Stop disposable guest": "always()",
         "Collect QEMU diagnostics": "always()",
-        "Upload qualification evidence and diagnostics": "always()",
+        "Upload unqualified v05-executor-verifier diagnostics": "failure()",
     },
     ("v06", "qualification"): {
         "Collect authority and executor hardening evidence": "always()",
         "Stop disposable guest": "always()",
         "Collect QEMU diagnostics": "always()",
-        "Upload qualification evidence and diagnostics": "always()",
+        "Upload unqualified v06-managed-lifecycle diagnostics": "failure()",
     },
     ("v07", "qualification"): {
-        "Upload v0.7 qualification evidence": "always()",
+        "Upload unqualified v0.7 diagnostics": "failure()",
     },
     ("v08", "qualification"): {
-        "Upload v0.8 qualification evidence": "always()",
+        "Upload unqualified v0.8 diagnostics": "failure()",
     },
     ("v09", "contract"): {
         "Build exact-source adversarial qualification binaries":
@@ -607,7 +607,7 @@ REVIEWED_STEP_CONDITIONS = {
     ("v010-reusable", "runtime"): {
         "Stop disposable guest": "always()",
         "Collect QEMU diagnostics": "always()",
-        "Upload exact-source shell runtime evidence": "always()",
+        "Upload unqualified v0.10 shell diagnostics": "failure()",
     },
 }
 

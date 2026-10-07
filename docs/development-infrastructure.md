@@ -149,6 +149,31 @@ envelope digest and their own results/artifacts. RustSec advisory identity and
 retrieval time remain variable observations so security freshness is never
 frozen for reproducibility.
 
+## Qualification evidence binding
+
+Execution identity and evidence acceptance are deliberately separate contracts.
+The execution-envelope layer may create runner/guest/aggregate envelopes and
+execution-component manifests, but it must not add acceptance fields to
+qualification or release receipts. The evidence-binding layer consumes verified
+envelopes, independent verifier results, reviewed test/contract IDs and retained
+artifact bytes.
+
+`contracts/qualification-evidence-binding.toml` pins the execution-envelope
+schema and must classify every envelope lane exactly once. Each evidence-bearing
+profile selects a reviewed semantic verifier adapter; the adapter derives pass,
+environment verification, test/contract conclusions and verified claims from
+retained proof material rather than trusting the producer's pass receipt. The
+canonical repository checker runs both validators, so a change to the execution
+lane inventory cannot silently drift past evidence acceptance.
+
+After semantic verification and byte binding, the admission action creates a
+deterministic `qualification-evidence.tar`, verifies that sealed object, and
+uploads that exact tar internally. Workflow-level success uploads of the mutable
+artifact directory are forbidden. Failure diagnostics use a separate
+`failure()`-gated, explicitly unqualified artifact name. Downstream release
+machinery structurally verifies and unseals the accepted tar before consuming
+its files; publication and release authority remain separate.
+
 ## Layers
 
 ```text
@@ -212,3 +237,6 @@ Compaction changes the source SHA, so exact-source qualification must run after 
 The repository-owned A/B/C acceptance system is the execution/evidence contract. A future graphical qualification platform such as `qualification.linura.org` is an observability/control surface over that contract, while the graphical qualification fleet is the set of actual automated VM, interactive VM and maintained physical runners. Neither a web UI nor a fleet controller may invent qualification success, widen runner authority, or substitute a VM for Level C.
 
 A fleet is valid with one maintained physical workstation; scale is not part of the trust claim. Public live viewing or a disposable public demo environment must remain observational or sandboxed and cannot inject input into an automated A run or a release-qualifying C run. Privileged fleet/admin control is a separate authority surface from public viewing.
+
+
+Envelope-bound evidence admission is defined by contracts/qualification-evidence-binding.toml. Reviewed semantic adapters, required artifact inventories, exact artifact-set digests, deterministic sealed uploads, and verifier/binder provenance fail closed before a result can be accepted; publication and release authority remain separate.

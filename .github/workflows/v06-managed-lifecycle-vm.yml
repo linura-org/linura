@@ -21,6 +21,11 @@ on:
       - "tools/qualification_envelope.py"
       - "tools/qualification_guest_identity.py"
       - "tests/tooling/test_qualification_envelope.py"
+      - ".github/actions/qualification-evidence/**"
+      - "contracts/qualification-evidence-binding.toml"
+      - "tools/qualification_evidence.py"
+      - "tools/qualification_evidence_verifiers.py"
+      - "tests/tooling/test_qualification_evidence.py"
       - ".github/workflows/trusted-release-proof.yml"
       - "apps/linura-authorityd/**"
       - "crates/linura-control/**"
@@ -363,6 +368,7 @@ jobs:
           source-sha: ${{ env.SOURCE_SHA }}
           execution-subject-file: ${{ env.ARTIFACT_DIR }}/guest-execution-identity.json
 
+
       - name: Stop disposable guest
         if: always()
         run: |
@@ -382,11 +388,17 @@ jobs:
             cp "$VM_LOG" "$artifact_dir/qemu.log"
           fi
 
-      - name: Upload qualification evidence and diagnostics
-        if: always()
+      - name: Admit and upload sealed qualification evidence
+        uses: ./.github/actions/qualification-evidence
+        with:
+          lane: v06-managed-lifecycle
+          artifact-root: ${{ env.ARTIFACT_DIR }}
+          artifact-name: linura-v06-managed-lifecycle-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+      - name: Upload unqualified v06-managed-lifecycle diagnostics
+        if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: linura-v06-managed-lifecycle-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          name: linura-v06-managed-lifecycle-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}-unqualified-diagnostics
           path: ${{ runner.temp }}/linura-v06-managed-lifecycle-artifacts/
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 7

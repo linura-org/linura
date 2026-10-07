@@ -1,0 +1,536 @@
+schema_version = 3
+id = "qualification/evidence-binding"
+repository = "linura-org/linura"
+digest_algorithm = "sha256"
+canonicalization = "json-sort-keys-compact-utf8-v1"
+execution_envelope_contract = "contracts/qualification-execution-envelopes.toml"
+execution_envelope_schema_version = 2
+publication_policy = "contracts/evidence-publication.toml"
+binding_model = "semantic-adapter-plus-envelope-plus-sealed-artifact-set-v3"
+
+non_evidence_lanes = [
+  "canonical-ci",
+  "security-rustsec",
+  "codeql",
+  "codex-environment",
+  "evidence-publication",
+  "v09-qualification-contract",
+  "v09-adversarial-security",
+  "v09-adversarial-security-shard",
+  "v010-workstation-contract",
+  "trusted-release-proof",
+  "v010-maintained-hardware",
+]
+
+[authority_boundary]
+role = "evidence-acceptance-only"
+consumes_execution_envelopes = true
+mutates_execution_envelopes = false
+grants_publication_authority = false
+grants_release_authority = false
+
+[acceptance]
+self_declared_pass_allowed = false
+stale_source_allowed = false
+cross_envelope_substitution_allowed = false
+cross_lane_substitution_allowed = false
+missing_artifact_allowed = false
+extra_artifact_claims_allowed = false
+symlink_artifact_allowed = false
+artifact_sha256_required = true
+artifact_set_sha256_required = true
+verifier_result_sha256_required = true
+verifier_implementation_identity_required = true
+semantic_verification_required = true
+sealed_upload_required = true
+
+[artifact_policy]
+inventory = "recursive-bind-all-retained-files-v1"
+control_files = [
+  "qualification-execution-envelope.json",
+  "qualification-execution-envelope.json.sha256",
+  "verifier-result.json",
+  "verifier-result.json.sha256",
+  "evidence-binding.json",
+  "evidence-binding.json.sha256",
+]
+required_artifacts_are_contract_owned = true
+auxiliary_files_are_bound_not_claims = true
+admission_must_immediately_precede_upload = true
+reserved_control_basenames_forbidden_in_auxiliary = true
+stable_no_follow_hashing_required = true
+single_link_regular_files_required = true
+accepted_upload_uses_sealed_copy = true
+workflow_direct_accepted_upload_forbidden = true
+post_upload_readback_required = true
+
+[privacy]
+physical_recording_publication = "explicit-approval-and-redaction-required"
+private_evidence_default = true
+
+[[profile]]
+id = "vm-acceptance"
+lane_id = "vm-acceptance"
+verifier_adapter = "vm-acceptance-semantic-v1"
+test_ids = ["qualification/vm-acceptance/result-v1"]
+contract_ids = ["qualification/vm-acceptance/v1"]
+verification_class = "deterministic-machine"
+verifier_id = "vm-acceptance-verifier"
+primary_artifact = "result"
+accepted_results = ["passed"]
+accepted_schema_versions = [2]
+required_json_values = []
+require_observation_identity = false
+publication_default = "private"
+[[profile.artifact]]
+role = "result"
+filename = "VM-ACCEPTANCE-EVIDENCE.json"
+kind = "json-result"
+[[profile.artifact]]
+role = "runner_result"
+filename = "acceptance-result.json"
+kind = "file"
+
+[[profile]]
+id = "control1-plan-preview-vm"
+lane_id = "control1-plan-preview-vm"
+verifier_adapter = "control1-plan-preview-vm-semantic-v1"
+test_ids = ["qualification/control1-plan-preview/result-v1"]
+contract_ids = ["qualification/control1-plan-preview/v1"]
+verification_class = "deterministic-machine"
+verifier_id = "control1-plan-preview-verifier"
+primary_artifact = "result"
+accepted_results = ["passed"]
+accepted_schema_versions = [2]
+required_json_values = ["scenario.id=control1-plan-preview"]
+require_observation_identity = false
+publication_default = "private"
+[[profile.artifact]]
+role = "result"
+filename = "VM-ACCEPTANCE-EVIDENCE.json"
+kind = "json-result"
+[[profile.artifact]]
+role = "runner_result"
+filename = "acceptance-result.json"
+kind = "file"
+
+[[profile]]
+id = "v04-durability"
+lane_id = "v04-durability"
+verifier_adapter = "v04-durability-semantic-v1"
+test_ids = ["qualification/v0.4/durability/result-v1"]
+contract_ids = ["qualification/v0.4/durability/v1"]
+verification_class = "deterministic-machine"
+verifier_id = "v04-durability-verifier"
+primary_artifact = "result"
+accepted_results = ["passed"]
+accepted_schema_versions = [1]
+required_json_values = []
+require_observation_identity = false
+publication_default = "private"
+[[profile.artifact]]
+role = "result"
+filename = "V04-DURABILITY-EVIDENCE.json"
+kind = "json-result"
+[[profile.artifact]]
+role = "probe_executable"
+filename = "v04-fault-probe.bin"
+kind = "file"
+[[profile.artifact]]
+role = "semantic_witness"
+filename = "durability-verifier.log"
+kind = "file"
+
+[[profile]]
+id = "v04-enospc"
+lane_id = "v04-enospc"
+verifier_adapter = "v04-enospc-semantic-v1"
+test_ids = ["qualification/v0.4/enospc-recovery/result-v1"]
+contract_ids = ["qualification/v0.4/enospc-recovery/v1"]
+verification_class = "deterministic-machine"
+verifier_id = "v04-enospc-verifier"
+primary_artifact = "result"
+accepted_results = ["success"]
+accepted_schema_versions = [1]
+required_json_values = []
+require_observation_identity = false
+publication_default = "private"
+[[profile.artifact]]
+role = "result"
+filename = "evidence.json"
+kind = "json-result"
+[[profile.artifact]]
+role = "qualification_witness"
+filename = "enospc-qualification.log"
+kind = "file"
+[[profile.artifact]]
+role = "semantic_witness"
+filename = "enospc-verifier.log"
+kind = "file"
+
+[[profile]]
+id = "v05-executor-verifier"
+lane_id = "v05-executor-verifier"
+verifier_adapter = "v05-executor-verifier-semantic-v1"
+test_ids = ["qualification/v0.5/executor-verifier/result-v1"]
+contract_ids = ["qualification/v0.5/executor-verifier/v1"]
+verification_class = "deterministic-machine"
+verifier_id = "v05-executor-verifier"
+primary_artifact = "result"
+accepted_results = ["passed"]
+accepted_schema_versions = [1]
+required_json_values = []
+require_observation_identity = false
+publication_default = "private"
+[[profile.artifact]]
+role = "result"
+filename = "V05-EXECUTOR-VERIFIER-EVIDENCE.json"
+kind = "json-result"
+[[profile.artifact]]
+role = "qualification_transcript"
+filename = "qualification.log"
+kind = "file"
+
+[[profile]]
+id = "v06-managed-lifecycle"
+lane_id = "v06-managed-lifecycle"
+verifier_adapter = "v06-managed-lifecycle-semantic-v1"
+test_ids = ["qualification/v0.6/managed-lifecycle/result-v1"]
+contract_ids = ["qualification/v0.6/managed-lifecycle/v1"]
+verification_class = "deterministic-machine"
+verifier_id = "v06-managed-lifecycle-verifier"
+primary_artifact = "result"
+accepted_results = ["passed"]
+accepted_schema_versions = [1]
+required_json_values = []
+require_observation_identity = false
+publication_default = "private"
+[[profile.artifact]]
+role = "result"
+filename = "V06-MANAGED-LIFECYCLE-EVIDENCE.json"
+kind = "json-result"
+[[profile.artifact]]
+role = "qualification_transcript"
+filename = "qualification.log"
+kind = "file"
+[[profile.artifact]]
+role = "fault_matrix_transcript"
+filename = "v06-matrix.log"
+kind = "file"
+
+[[profile]]
+id = "v07-library"
+lane_id = "v07-library"
+verifier_adapter = "v07-library-semantic-v1"
+test_ids = ["qualification/v0.7/library/result-v1"]
+contract_ids = ["qualification/v0.7/library/v1"]
+verification_class = "deterministic-host"
+verifier_id = "v07-library-verifier"
+primary_artifact = "result"
+accepted_results = ["passed"]
+accepted_schema_versions = [1]
+required_json_values = ["database_integrity_after_restart_recovery=ok"]
+require_observation_identity = false
+publication_default = "private"
+[[profile.artifact]]
+role = "result"
+filename = "qualification.json"
+kind = "json-result"
+[[profile.artifact]]
+role = "portable_roundtrip_digest"
+filename = "portable-roundtrip.sha256"
+kind = "file"
+[[profile.artifact]]
+role = "process_crash_atomicity"
+filename = "process-crash-atomicity.txt"
+kind = "file"
+[[profile.artifact]]
+role = "library_unit_transcript"
+filename = "library-unit-tests.txt"
+kind = "file"
+[[profile.artifact]]
+role = "qualification_matrix_transcript"
+filename = "v07-qualification-tests.txt"
+kind = "file"
+[[profile.artifact]]
+role = "sdk_transcript"
+filename = "sdk-tests.txt"
+kind = "file"
+
+[[profile]]
+id = "v08-agent"
+lane_id = "v08-agent"
+verifier_adapter = "v08-agent-semantic-v1"
+test_ids = ["qualification/v0.8/agent/result-v1"]
+contract_ids = ["qualification/v0.8/agent/v1"]
+verification_class = "deterministic-host"
+verifier_id = "v08-agent-verifier"
+primary_artifact = "result"
+accepted_results = ["passed"]
+accepted_schema_versions = [2]
+required_json_values = ["agent_can_mint_executor_authority=false", "library_acceptance_requires_provisioned_verifier=true"]
+require_observation_identity = false
+publication_default = "private"
+[[profile.artifact]]
+role = "result"
+filename = "qualification.json"
+kind = "json-result"
+[[profile.artifact]]
+role = "boundary_check"
+filename = "boundary-check.txt"
+kind = "file"
+[[profile.artifact]]
+role = "intent_tests"
+filename = "linura-intent-tests.txt"
+kind = "file"
+[[profile.artifact]]
+role = "provider_sdk_tests"
+filename = "linura-provider-sdk-tests.txt"
+kind = "file"
+[[profile.artifact]]
+role = "agent_runtime_tests"
+filename = "linura-agent-runtime-tests.txt"
+kind = "file"
+[[profile.artifact]]
+role = "control_unit_tests"
+filename = "linura-control-unit-tests.txt"
+kind = "file"
+[[profile.artifact]]
+role = "library_unit_tests"
+filename = "linura-library-unit-tests.txt"
+kind = "file"
+[[profile.artifact]]
+role = "integration_tests"
+filename = "v08-integration-tests.txt"
+kind = "file"
+
+[[profile]]
+id = "v09-qualification"
+lane_id = "v09-qualification"
+verifier_adapter = "v09-qualification-semantic-v1"
+test_ids = ["qualification/v0.9/result-v1"]
+contract_ids = ["qualification/v0.9/v1"]
+verification_class = "deterministic-machine-plus-adversarial"
+verifier_id = "v09-qualification-verifier"
+primary_artifact = "result"
+accepted_results = ["passed"]
+accepted_schema_versions = [2]
+required_json_values = ["qualification_environment.id=qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"]
+require_observation_identity = false
+publication_default = "private"
+[[profile.artifact]]
+role = "result"
+filename = "qualification.json"
+kind = "json-result"
+[[profile.artifact]]
+role = "vm_evidence"
+filename = "VM-ACCEPTANCE-EVIDENCE.json"
+kind = "file"
+[[profile.artifact]]
+role = "adversarial_evidence"
+filename = "V09-ADVERSARIAL-EVIDENCE.json"
+kind = "file"
+[[profile.artifact]]
+role = "adversarial_transcript"
+filename = "guest-qualification.txt"
+kind = "file"
+
+[[profile]]
+id = "v010-shell-runtime"
+lane_id = "v010-shell-runtime"
+verifier_adapter = "v010-shell-runtime-semantic-v1"
+test_ids = ["qualification/v0.10/shell-runtime/result-v1"]
+contract_ids = ["qualification/v0.10/shell-runtime/v1"]
+verification_class = "bounded-semantic-visual"
+verifier_id = "v010-shell-runtime-verifier"
+primary_artifact = "result"
+accepted_results = ["passed"]
+accepted_schema_versions = [1]
+required_json_values = [
+  "claim=development-runtime-evidence-only",
+  "target_profile=arch-hyprland-v1",
+  "prepared_substrate.scope=sanitized-non-authoritative-prerequisite",
+  "rendering.scope=headless-development-runtime",
+  "workstation_recording.scope=captured-automated-wayland-session",
+  "authority_runtime.scope=real-session-authority",
+  "release_support_promotion=false",
+]
+require_observation_identity = true
+observation_policy = "contracts/v010-shell-runtime-qualification.toml"
+observation_identity_fields = [
+  "claim",
+  "target_profile",
+  "runtime_contract.sha256",
+  "substrate_contract.sha256",
+  "workstation_acceptance_contract.sha256",
+  "arch_archive.snapshot",
+  "virtualization.acceleration",
+  "rendering.qt_quick_backend",
+  "workstation_recording.sha256",
+  "workstation_recording.metadata_sha256",
+  "workstation_recording.scope",
+  "authority_runtime.scope",
+  "release_support_promotion",
+]
+publication_default = "private"
+
+[[profile.artifact]]
+role = "result"
+filename = "V010-SHELL-RUNTIME-EVIDENCE.json"
+kind = "json-result"
+[[profile.artifact]]
+role = "cases"
+filename = "cases.tsv"
+kind = "file"
+[[profile.artifact]]
+role = "transcript"
+filename = "shell-runtime-transcript.log"
+kind = "file"
+[[profile.artifact]]
+role = "runtime_versions"
+filename = "runtime-versions.txt"
+kind = "file"
+[[profile.artifact]]
+role = "package_versions"
+filename = "package-versions.txt"
+kind = "file"
+[[profile.artifact]]
+role = "visible_application_systemd"
+filename = "visible-application-systemd.txt"
+kind = "file"
+[[profile.artifact]]
+role = "forking_application_systemd"
+filename = "forking-application-systemd.txt"
+kind = "file"
+[[profile.artifact]]
+role = "palette_session"
+filename = "palette-session.txt"
+kind = "file"
+[[profile.artifact]]
+role = "hyprland_session"
+filename = "hyprland-session.env"
+kind = "file"
+[[profile.artifact]]
+role = "guest_storage"
+filename = "guest-storage.txt"
+kind = "file"
+[[profile.artifact]]
+role = "seat_drm_preflight"
+filename = "seat-drm-preflight.txt"
+kind = "file"
+[[profile.artifact]]
+role = "seat_drm_setup"
+filename = "seat-drm-setup.log"
+kind = "file"
+[[profile.artifact]]
+role = "ui_module_linkage"
+filename = "ui-module-linkage.txt"
+kind = "file"
+[[profile.artifact]]
+role = "bridge_module_linkage"
+filename = "bridge-module-linkage.txt"
+kind = "file"
+[[profile.artifact]]
+role = "qt_quick_rendering"
+filename = "qt-quick-rendering.env"
+kind = "file"
+[[profile.artifact]]
+role = "runtime_install_integrity"
+filename = "runtime-install-integrity.txt"
+kind = "file"
+[[profile.artifact]]
+role = "authority_runtime_integrity"
+filename = "authority-runtime-integrity.txt"
+kind = "file"
+[[profile.artifact]]
+role = "prepared_substrate_manifest"
+filename = "prepared-substrate-manifest.json"
+kind = "file"
+[[profile.artifact]]
+role = "prepared_substrate_packages"
+filename = "prepared-substrate-packages.txt"
+kind = "file"
+[[profile.artifact]]
+role = "pipewire_fixture_create"
+filename = "pipewire-fixture-create.txt"
+kind = "file"
+[[profile.artifact]]
+role = "pipewire_fixture_props"
+filename = "pipewire-fixture-props.txt"
+kind = "file"
+[[profile.artifact]]
+role = "pipewire_snapshot_initial"
+filename = "pipewire-snapshot-initial.txt"
+kind = "file"
+[[profile.artifact]]
+role = "quick_settings_audio_fixture"
+filename = "quick-settings-audio-fixture.txt"
+kind = "file"
+[[profile.artifact]]
+role = "quick_settings_observation"
+filename = "quick-settings-observation.txt"
+kind = "file"
+[[profile.artifact]]
+role = "quick_settings_effect"
+filename = "quick-settings-session1-effect.txt"
+kind = "file"
+[[profile.artifact]]
+role = "quick_settings_audit"
+filename = "quick-settings-audit.txt"
+kind = "file"
+[[profile.artifact]]
+role = "quick_settings_drift"
+filename = "quick-settings-precondition-drift.txt"
+kind = "file"
+[[profile.artifact]]
+role = "quick_settings_service_loss"
+filename = "quick-settings-service-loss.txt"
+kind = "file"
+[[profile.artifact]]
+role = "quick_settings_recovery"
+filename = "quick-settings-restart-recovery.txt"
+kind = "file"
+[[profile.artifact]]
+role = "lifecycle_feedback_success"
+filename = "lifecycle-feedback-success.txt"
+kind = "file"
+[[profile.artifact]]
+role = "lifecycle_feedback_drift"
+filename = "lifecycle-feedback-precondition-drift.txt"
+kind = "file"
+[[profile.artifact]]
+role = "workstation_panel"
+filename = "workstation-panel.txt"
+kind = "file"
+[[profile.artifact]]
+role = "workstation_panel_monitors"
+filename = "workstation-panel-monitors.json"
+kind = "file"
+[[profile.artifact]]
+role = "workstation_panel_shortcuts"
+filename = "workstation-panel-shortcuts.json"
+kind = "file"
+[[profile.artifact]]
+role = "tray_keyboard_behavior"
+filename = "tray-keyboard-behavior.jsonl"
+kind = "file"
+[[profile.artifact]]
+role = "native_keyboard_events"
+filename = "native-keyboard-events.txt"
+kind = "file"
+[[profile.artifact]]
+role = "native_keyboard_digest"
+filename = "native-keyboard.sha256"
+kind = "file"
+[[profile.artifact]]
+role = "recording"
+filename = "workstation-runtime.mkv"
+kind = "file"
+[[profile.artifact]]
+role = "recording_metadata"
+filename = "workstation-runtime.metadata.json"
+kind = "file"
+[[profile.artifact]]
+role = "recording_digest"
+filename = "workstation-runtime.sha256"
+kind = "file"

@@ -34,6 +34,7 @@ REQUIRED = [
     "contracts/roadmap.toml", "contracts/v010-workstation-slices.toml", "tools/check_roadmap.py", "tools/v010_slice_graph.py", "tests/tooling/test_roadmap.py",
     "tools/check_validation_gates.py", "tests/tooling/test_validation_gates.py", ".github/workflows/codex-environment.yml",
     "contracts/qualification-execution-envelopes.toml", "tools/qualification_envelope.py", "tests/tooling/test_qualification_envelope.py", "docs/qualification/execution-envelopes.md",
+    "contracts/qualification-evidence-binding.toml", "tools/qualification_evidence.py", "tests/tooling/test_qualification_evidence.py", "docs/qualification/evidence-binding.md", ".github/actions/qualification-evidence/action.yml",
     "tools/check_development_workflow.py", "tests/tooling/test_development_workflow.py", ".github/PULL_REQUEST_TEMPLATE.md", ".github/actions/qualification-envelope/action.yml",
     "contracts/layering.toml", "tools/check_layering.py", "tests/tooling/test_layering.py",
     "contracts/operation-semantics.toml", "tools/check_operation_semantics.py", "tests/tooling/test_operation_semantics.py",
@@ -298,6 +299,22 @@ def main() -> int:
     if envelope_result.returncode != 0:
         details = envelope_result.stderr.strip() or envelope_result.stdout.strip()
         failures.append(f"qualification execution-envelope validation failed: {details}")
+
+    evidence_result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools/qualification_evidence.py"),
+            "--root",
+            str(ROOT),
+            "validate",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if evidence_result.returncode != 0:
+        details = evidence_result.stderr.strip() or evidence_result.stdout.strip()
+        failures.append(f"qualification evidence-binding validation failed: {details}")
 
     validation_result = subprocess.run(
         [sys.executable, str(ROOT / "tools/check_validation_gates.py"), str(ROOT)],

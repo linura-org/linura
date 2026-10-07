@@ -59,3 +59,5 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0034 — Approve private qualification-evidence publication as a separate authority boundary](0034-private-qualification-evidence-publication.md)
 - [0035 — Isolate media admission from R2 credentials and validate retained approval provenance](0035-isolate-media-admission-from-r2-credentials.md)
 - [0036 — Bind qualification execution to versioned immutable envelopes](0036-qualification-execution-envelopes.md)
+- [0037 — Accept qualification evidence only through envelope-bound independent verification](0037-envelope-bound-qualification-evidence.md)
+- [0038 — Derive qualification acceptance semantically and upload only sealed evidence](0038-semantic-verification-and-sealed-evidence-upload.md)

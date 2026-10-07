@@ -343,17 +343,34 @@ class QualificationEnvelopeTests(unittest.TestCase):
         self.assertIn('test ! -L "$audit_bin"', workflow)
         self.assertIn('"$HOME/.cargo/bin/cargo-audit" audit', workflow)
 
-    def test_trusted_release_auxiliary_source_stays_outside_primary_worktree(self):
+    def test_trusted_release_auxiliary_sources_stay_outside_primary_worktree(self):
         workflow = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(
             encoding="utf-8"
         )
         self.assertIn(
-            "V010_SOURCE_ROOT: /tmp/linura-v010-source", workflow
+            "V010_QUALIFICATION_SOURCE_ROOT: /tmp/linura-v010-qualification-source",
+            workflow,
         )
-        self.assertNotIn("path: v010-source", workflow)
         self.assertIn(
-            'worktree add --detach "$V010_SOURCE_ROOT" "$SOURCE_SHA"', workflow
+            "V010_PREPARED_SOURCE_ROOT: /tmp/linura-v010-prepared-source",
+            workflow,
         )
+        self.assertNotIn("V010_SOURCE_ROOT:", workflow)
+        self.assertNotIn("path: v010-source", workflow)
+        self.assertIn('test "$QUALIFICATION_SOURCE_SHA" != "$SOURCE_SHA"', workflow)
+        self.assertIn(
+            '"$V010_QUALIFICATION_SOURCE_ROOT" "$QUALIFICATION_SOURCE_SHA"',
+            workflow,
+        )
+        self.assertIn(
+            '"$V010_PREPARED_SOURCE_ROOT" "$SOURCE_SHA"',
+            workflow,
+        )
+        self.assertIn(
+            'git -C "$V010_QUALIFICATION_SOURCE_ROOT" rev-parse \'HEAD^{tree}\'',
+            workflow,
+        )
+        self.assertIn('"$QUALIFICATION_TREE_SHA"', workflow)
 
     def test_round_trip_binds_exact_source_tree_runner_and_repo_inputs(self):
         source_sha = subprocess.check_output(

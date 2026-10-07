@@ -10,6 +10,11 @@ on:
       - "tools/qualification_envelope.py"
       - "tools/qualification_guest_identity.py"
       - "tests/tooling/test_qualification_envelope.py"
+      - ".github/actions/qualification-evidence/**"
+      - "contracts/qualification-evidence-binding.toml"
+      - "tools/qualification_evidence.py"
+      - "tools/qualification_evidence_verifiers.py"
+      - "tests/tooling/test_qualification_evidence.py"
       - "crates/linura-persistence-sqlite/**"
       - "crates/linura-transaction/**"
       - "tools/vm.py"
@@ -154,7 +159,7 @@ jobs:
         run: |
           set -euo pipefail
           ssh_common=(-i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3)
-          ssh "${ssh_common[@]}" -p 2234 linura@127.0.0.1 'bash -se' <<'GUEST'
+          ssh "${ssh_common[@]}" -p 2234 linura@127.0.0.1 'bash -se' <<'GUEST' | tee "$ARTIFACT_DIR/enospc-qualification.log"
           set -euo pipefail
           image=/var/lib/linura-v04-enospc.ext4
           mountpoint=/mnt/linura-v04-enospc
@@ -178,6 +183,9 @@ jobs:
           # slots. Each slot is at least 1 MiB on the qualified 4 KiB page size.
           test "$logical" -ge 2097152
           test "$allocated" -ge "$logical"
+          echo 'check=reserve-prepared'
+          printf 'reserve_logical_before_abort_bytes=%s\n' "$logical"
+          printf 'reserve_allocated_before_abort_bytes=%s\n' "$allocated"
           test -e "$db-wal"
           sync
 
@@ -188,10 +196,14 @@ jobs:
           test "$fill_rc" -ne 0
           available="$(df --output=avail -B1 "$mountpoint" | tail -n 1 | tr -d ' ')"
           test "$available" -lt 262144
+          echo 'check=real-enospc-pressure'
+          printf 'filler_exit_code=%s\n' "$fill_rc"
+          printf 'available_before_abort_bytes=%s\n' "$available"
 
           # This is a new process/open while the backing ext4 filesystem is
           # genuinely exhausted. The terminal transition must consume the
           # externally preallocated emergency slot before SQLite appends WAL.
+          echo 'check=aborted-under-enospc'
           linura-v04-enospc-probe abort "$db" "$namespace"
           linura-v04-enospc-probe inspect-aborted "$db" "$namespace"
 
@@ -200,9 +212,16 @@ jobs:
           sudo -n umount "$mountpoint"
           sudo -n mount -o loop "$image" "$mountpoint"
           sudo -n chown linura:linura "$mountpoint"
+          echo 'check=aborted-after-remount'
           linura-v04-enospc-probe inspect-aborted "$db" "$namespace"
+          if [[ -e "$reserve" ]]; then
+            reserve_after="$(stat -c %s "$reserve")"
+          else
+            reserve_after=0
+          fi
+          test "$reserve_after" -eq 0
+          printf 'reserve_logical_after_abort_bytes=%s\n' "$reserve_after"
           df -B1 "$mountpoint"
-          stat -c 'reserve logical=%s blocks=%b block_bytes=%B' "$reserve"
           GUEST
 
       - name: Capture guest package identity
@@ -223,6 +242,10 @@ jobs:
             "schema_version": 1,
             "repository": "$GITHUB_REPOSITORY",
             "source_sha": "$SOURCE_SHA",
+            "base_image": {
+              "url": "$BASE_IMAGE_URL",
+              "sha256": "$BASE_IMAGE_SHA256"
+            },
             "qualification": "real ext4 ENOSPC Prepared-to-Aborted recovery",
             "filesystem": "loop-mounted ext4 with zero reserved-block percentage",
             "reserve": "same-filesystem physically allocated sidecar",
@@ -232,12 +255,48 @@ jobs:
           EOF
           cat "$ARTIFACT_DIR/evidence.json"
 
+      - name: Independently re-observe ENOSPC terminal state
+        run: |
+          set -euo pipefail
+          ssh_common=(-i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3)
+          ssh "${ssh_common[@]}" -p 2234 linura@127.0.0.1 'bash -se' <<'GUEST'             | tee "$ARTIFACT_DIR/enospc-verifier.log"
+          set -euo pipefail
+          image=/var/lib/linura-v04-enospc.ext4
+          mountpoint=/mnt/linura-v04-enospc
+          db="$mountpoint/authority.db"
+          reserve="$db.linura-recovery-reserve"
+          namespace=real-ext4-enospc
+          sudo -n mkdir -p "$mountpoint"
+          sudo -n mount -o loop "$image" "$mountpoint"
+          trap 'sudo -n umount "$mountpoint" 2>/dev/null || true' EXIT
+          echo 'check=aborted-after-remount'
+          linura-v04-enospc-probe inspect-aborted "$db" "$namespace"
+          filesystem="$(findmnt -no FSTYPE "$mountpoint")"
+          test "$filesystem" = ext4
+          printf 'filesystem=%s\n' "$filesystem"
+          test -f "$mountpoint/filler"
+          filler_allocated="$(( $(stat -c %b "$mountpoint/filler") * 512 ))"
+          test "$filler_allocated" -gt 0
+          printf 'filler_allocated_bytes=%s\n' "$filler_allocated"
+          if [[ -e "$reserve" ]]; then
+            reserve_after="$(stat -c %s "$reserve")"
+          else
+            reserve_after=0
+          fi
+          test "$reserve_after" -eq 0
+          printf 'reserve_logical_after_abort_bytes=%s\n' "$reserve_after"
+          available="$(df --output=avail -B1 "$mountpoint" | tail -n 1 | tr -d ' ')"
+          printf 'available_after_abort_bytes=%s\n' "$available"
+          echo 'verifier=enospc-complete'
+          GUEST
+
       - name: Bind qualification execution envelope
         uses: ./.github/actions/qualification-envelope
         with:
           lane: v04-enospc
           source-sha: ${{ env.SOURCE_SHA }}
           execution-subject-file: ${{ env.ARTIFACT_DIR }}/guest-execution-identity.json
+
 
       - name: Stop disposable guest
         if: always()
@@ -247,10 +306,17 @@ jobs:
             wait "$VM_PID" 2>/dev/null || true
           fi
 
-      - name: Upload ENOSPC qualification evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - name: Admit and upload sealed qualification evidence
+        uses: ./.github/actions/qualification-evidence
         with:
-          name: v04-enospc-${{ env.SOURCE_SHA }}
+          lane: v04-enospc
+          artifact-root: ${{ env.ARTIFACT_DIR }}
+          artifact-name: v04-enospc-${{ env.SOURCE_SHA }}
+      - name: Upload unqualified ENOSPC diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: v04-enospc-${{ env.SOURCE_SHA }}-unqualified-diagnostics
           path: ${{ env.ARTIFACT_DIR }}
-          if-no-files-found: error
+          if-no-files-found: warn
+          retention-days: 7
