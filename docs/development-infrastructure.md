@@ -126,6 +126,29 @@ Normal CI is not fully bit-reproducible: hosted OS packages and advisory data
 can change, so a version-pinned runner alone is not immutable. Fresh security
 audits remain deliberately time-dependent; offline Cargo metadata is not one.
 
+
+## Qualification execution envelopes
+
+`contracts/qualification-execution-envelopes.toml` is the reviewed inventory
+of qualification lanes that require execution-context identity.
+`python3 tools/qualification_envelope.py validate` is invoked by the canonical
+repository checker, while the tooling tests run under `cargo xtask check`.
+
+Envelope creation requires the exact checked-out source and verifies every
+repository-controlled input against the Git blob at that source commit. Runner
+identity includes kernel, OS-release digest, installed-package manifest,
+architecture and virtualization; GitHub-hosted lanes additionally bind the
+published runner image identity. Maintained physical execution fails closed
+when virtualization is detected. Cache bytes must be independently hashed
+before they can enter an envelope, and a cache hit never counts as
+qualification.
+
+The envelope SHA-256 is a stable content identity, not a signature or pass
+receipt. Accepted evidence and release proof must independently bind the
+envelope digest and their own results/artifacts. RustSec advisory identity and
+retrieval time remain variable observations so security freshness is never
+frozen for reproducibility.
+
 ## Layers
 
 ```text

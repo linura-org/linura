@@ -6,6 +6,11 @@ on:
   pull_request:
     paths:
       - ".github/workflows/v04-durability-vm.yml"
+      - ".github/actions/qualification-envelope/**"
+      - "contracts/qualification-execution-envelopes.toml"
+      - "tools/qualification_envelope.py"
+      - "tools/qualification_guest_identity.py"
+      - "tests/tooling/test_qualification_envelope.py"
       - "crates/linura-transaction/**"
       - "crates/linura-persistence-sqlite/**"
       - "crates/linura-control/**"
@@ -294,6 +299,11 @@ jobs:
           )
           filesystem="$(ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 'findmnt -no FSTYPE /')"
           kernel="$(ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 'uname -r')"
+          /usr/bin/python3 -I tools/qualification_guest_identity.py capture-ssh \
+            --host 127.0.0.1 --port 2222 --user linura --identity "$SSH_KEY" \
+            --package-manager dpkg \
+            --output "$ARTIFACT_DIR/guest-execution-identity.json" \
+            --github-env "$GITHUB_ENV"
           export QUALIFIED_FILESYSTEM="$filesystem"
           export GUEST_KERNEL="$kernel"
           python3 - <<'PY'
@@ -354,6 +364,13 @@ jobs:
           output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           print(f"wrote {output}")
           PY
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        with:
+          lane: v04-durability
+          source-sha: ${{ env.SOURCE_SHA }}
+          execution-subject-file: ${{ env.ARTIFACT_DIR }}/guest-execution-identity.json
 
       - name: Stop disposable guest
         if: always()

@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - ".github/workflows/evidence-publication-checks.yml"
+      - ".github/actions/qualification-envelope/**"
+      - "contracts/qualification-execution-envelopes.toml"
+      - "tools/qualification_envelope.py"
+      - "tests/tooling/test_qualification_envelope.py"
       - ".github/workflows/publish-qualification-evidence.yml"
       - "contracts/evidence-publication.toml"
       - "tools/evidence_publication.py"
@@ -20,6 +24,10 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/evidence-publication-checks.yml"
+      - ".github/actions/qualification-envelope/**"
+      - "contracts/qualification-execution-envelopes.toml"
+      - "tools/qualification_envelope.py"
+      - "tests/tooling/test_qualification_envelope.py"
       - ".github/workflows/publish-qualification-evidence.yml"
       - "contracts/evidence-publication.toml"
       - "tools/evidence_publication.py"
@@ -45,3 +53,9 @@ jobs:
           persist-credentials: false
       - name: Test admission, provenance, privacy and R2 publishing behavior
         run: python3 -m unittest -v tests.tooling.test_evidence_publication
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        with:
+          lane: evidence-publication
+          source-sha: ${{ github.sha }}

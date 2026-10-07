@@ -31,7 +31,53 @@ case "$command_name" in
         exec python3 "$orchestrator" record-case --source-root "$source_root" "$@"
         ;;
     finalize-run)
-        exec python3 "$orchestrator" finalize-run --source-root "$source_root" "$@"
+        state_root=""
+        state_root_count=0
+        arguments=("$@")
+        for ((index = 0; index < ${#arguments[@]}; index++)); do
+            argument="${arguments[$index]}"
+            case "$argument" in
+                --state-root)
+                    state_root_count=$((state_root_count + 1))
+                    [[ "$state_root_count" -eq 1 ]] || {
+                        printf '%s\n' "finalize-run accepts exactly one --state-root" >&2
+                        exit 2
+                    }
+                    next=$((index + 1))
+                    [[ "$next" -lt "${#arguments[@]}" && "${arguments[$next]}" != --* ]] || {
+                        printf '%s\n' "finalize-run requires a value for --state-root" >&2
+                        exit 2
+                    }
+                    state_root="${arguments[$next]}"
+                    index=$next
+                    ;;
+                --state-root=*)
+                    state_root_count=$((state_root_count + 1))
+                    [[ "$state_root_count" -eq 1 ]] || {
+                        printf '%s\n' "finalize-run accepts exactly one --state-root" >&2
+                        exit 2
+                    }
+                    state_root="${argument#--state-root=}"
+                    [[ -n "$state_root" ]] || {
+                        printf '%s\n' "finalize-run requires a value for --state-root" >&2
+                        exit 2
+                    }
+                    ;;
+            esac
+        done
+        [[ "$state_root_count" -eq 1 && -n "$state_root" ]] || {
+            printf '%s\n' "finalize-run requires --state-root for execution-envelope publication" >&2
+            exit 2
+        }
+        python3 "$orchestrator" finalize-run --source-root "$source_root" "$@"
+        source_sha="$(/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C /usr/bin/git -C "$source_root" rev-parse HEAD)"
+        envelope="$state_root/qualification-execution-envelope.json"
+        /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C \
+            /usr/bin/python3 -I "$source_root/tools/qualification_envelope.py" --root "$source_root" \
+            create-physical --state-root "$state_root" --output "$envelope"
+        /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C \
+            /usr/bin/python3 -I "$source_root/tools/qualification_envelope.py" --root "$source_root" \
+            verify --envelope "$envelope" --source-sha "$source_sha"
         ;;
     status)
         exec python3 "$orchestrator" status --source-root "$source_root" "$@"

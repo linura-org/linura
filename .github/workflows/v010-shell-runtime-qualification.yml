@@ -248,11 +248,25 @@ jobs:
           PY
           )"
           [[ "$base_sha" =~ ^[0-9a-f]{64}$ ]]
+          arch_snapshot="$(python3 - "$RUNTIME_CONTRACT" <<'PY'
+          import pathlib
+          import sys
+          import tomllib
+          data = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          value = data.get("arch_archive_snapshot")
+          if not isinstance(value, str) or not value:
+              raise SystemExit("runtime contract lacks arch_archive_snapshot")
+          print(value)
+          PY
+          )"
           {
             printf 'PREPARED_IMAGE=%s\n' "$image"
             printf 'PREPARED_IMAGE_SHA256=%s\n' "$prepared_sha"
             printf 'PREPARED_MANIFEST=%s\n' "$manifest"
             printf 'BASE_IMAGE_SHA256=%s\n' "$base_sha"
+            printf 'PREPARED_SUBSTRATE_PATH=%s\n' "$image"
+            printf 'PREPARED_SUBSTRATE_SHA256=%s\n' "$prepared_sha"
+            printf 'ARCH_SNAPSHOT=%s\n' "$arch_snapshot"
           } >> "$GITHUB_ENV"
 
       - name: Create disposable Arch cloud-init guest
@@ -577,6 +591,23 @@ jobs:
             exit "$copy_status"
           fi
 
+      - name: Capture runtime package identity
+        run: |
+          set -euo pipefail
+          ssh_common=(-i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5)
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 'pacman -Q' | LC_ALL=C sort > "$ARTIFACT_DIR/runtime-package-manifest.txt"
+          runtime_package_manifest_sha256="$(sha256sum "$ARTIFACT_DIR/runtime-package-manifest.txt" | awk '{print $1}')"
+          [[ "$runtime_package_manifest_sha256" =~ ^[0-9a-f]{64}$ ]]
+          {
+            printf 'GUEST_PACKAGE_MANIFEST_SHA256=%s\n' "$runtime_package_manifest_sha256"
+            printf 'RUNTIME_PACKAGE_MANIFEST_SHA256=%s\n' "$runtime_package_manifest_sha256"
+          } >> "$GITHUB_ENV"
+          /usr/bin/python3 -I tools/qualification_guest_identity.py capture-ssh \
+            --host 127.0.0.1 --port 2223 --user linura --identity "$SSH_KEY" \
+            --package-manager pacman \
+            --output "$ARTIFACT_DIR/guest-execution-identity.json" \
+            --github-env "$GITHUB_ENV"
+
       - name: Verify automated workstation recording
         run: |
           set -euo pipefail
@@ -891,6 +922,13 @@ jobs:
               encoding="utf-8",
           )
           PY
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        with:
+          lane: v010-shell-runtime
+          source-sha: ${{ env.SOURCE_SHA }}
+          execution-subject-file: ${{ env.ARTIFACT_DIR }}/guest-execution-identity.json
 
       - name: Stop disposable guest
         if: always()

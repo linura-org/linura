@@ -26,6 +26,7 @@ env:
   SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
   BASE_IMAGE_URL: https://cloud-images.ubuntu.com/releases/noble/release-20260725/ubuntu-24.04-server-cloudimg-amd64.img
   BASE_IMAGE_SHA256: d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac
+  VM_ACCELERATION: tcg
   QUALIFICATION_ENVIRONMENT_ID: qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless
 
 jobs:
@@ -134,6 +135,16 @@ jobs:
           V09_PRIMARY_SHARD: ${{ matrix.primary }}
           V09_FINAL_SHARD: ${{ matrix.final }}
         run: bash scripts/qualification/v09-adversarial-guest.sh
+      - name: Bind executing shard qualification envelope
+        uses: ./.github/actions/qualification-envelope
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/linura-v09-adversarial-artifacts
+          SHARD_ID: ${{ matrix.shard_id }}
+        with:
+          lane: v09-adversarial-security-shard
+          source-sha: ${{ env.SOURCE_SHA }}
+          artifact-suffix: ${{ matrix.shard_id }}
+          execution-subject-file: ${{ runner.temp }}/linura-v09-adversarial-artifacts/guest-execution-identity.json
 
       - name: Upload immutable-source shard evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -219,6 +230,8 @@ jobs:
           import json
           import os
           from pathlib import Path
+          import subprocess
+          import tomllib
 
           root = Path.cwd()
           shard_root = Path(os.environ["SHARD_ROOT"])
@@ -230,16 +243,35 @@ jobs:
           base_image_url = os.environ["BASE_IMAGE_URL"]
           base_image_sha = os.environ["BASE_IMAGE_SHA256"]
           workflow = root / ".github/workflows/v09-adversarial-security.yml"
-          expected_shards = {
-              "primary": (1, 2, True, False),
-              "persistence": (3, 3, False, False),
-              "security": (4, 4, False, False),
-              "connectivity": (5, 6, False, False),
-              "discovery-source": (7, 8, False, False),
-              "observation-plan": (9, 10, False, False),
-              "checkpoint": (11, 11, False, False),
-              "owner-final": (12, 13, False, True),
-          }
+          execution_contract = tomllib.loads(
+              (root / "contracts/qualification-execution-envelopes.toml").read_text(
+                  encoding="utf-8"
+              )
+          )
+          shard_rows = execution_contract.get("v09_adversarial_shard")
+          if not isinstance(shard_rows, list) or len(shard_rows) != 8:
+              raise SystemExit("reviewed v0.9 adversarial shard inventory is missing")
+          expected_shards = {}
+          for row in shard_rows:
+              if (
+                  not isinstance(row, dict)
+                  or set(row) != {"id", "boundary_start", "boundary_end", "primary", "final"}
+                  or not isinstance(row.get("id"), str)
+                  or not isinstance(row.get("boundary_start"), int)
+                  or isinstance(row.get("boundary_start"), bool)
+                  or not isinstance(row.get("boundary_end"), int)
+                  or isinstance(row.get("boundary_end"), bool)
+                  or not isinstance(row.get("primary"), bool)
+                  or not isinstance(row.get("final"), bool)
+                  or row["id"] in expected_shards
+              ):
+                  raise SystemExit("reviewed v0.9 adversarial shard inventory is invalid")
+              expected_shards[row["id"]] = (
+                  row["boundary_start"],
+                  row["boundary_end"],
+                  row["primary"],
+                  row["final"],
+              )
           expected_environment = {
               "id": qualification_id,
               "architecture": "x86_64",
@@ -252,6 +284,7 @@ jobs:
           workflow_sha = digest(workflow)
           binaries = None
           shard_bindings = []
+          component_envelopes = []
           transcript_parts = []
           for shard_id, (start, end, primary, final) in expected_shards.items():
               directory = shard_root / shard_id
@@ -297,6 +330,44 @@ jobs:
               environment = directory / environment_name
               if not environment.is_file() or environment.is_symlink() or environment_binding.get("size") != environment.stat().st_size or environment_binding.get("sha256") != digest(environment):
                   raise SystemExit(f"shard environment binding mismatch: {shard_id}")
+              guest_identity_path = directory / "guest-execution-identity.json"
+              if not guest_identity_path.is_file() or guest_identity_path.is_symlink():
+                  raise SystemExit(f"guest execution identity is missing or unsafe: {shard_id}")
+              guest_identity = json.loads(guest_identity_path.read_text(encoding="utf-8"))
+
+              envelope_path = directory / "qualification-execution-envelope.json"
+              envelope_checksum = directory / "qualification-execution-envelope.json.sha256"
+              if not envelope_path.is_file() or envelope_path.is_symlink() or not envelope_checksum.is_file() or envelope_checksum.is_symlink():
+                  raise SystemExit(f"shard execution envelope is missing or unsafe: {shard_id}")
+              verified = subprocess.run(
+                  [
+                      "/usr/bin/python3", "-I", "tools/qualification_envelope.py",
+                      "verify", "--envelope", str(envelope_path), "--source-sha", source_sha,
+                  ],
+                  check=False, capture_output=True, text=True,
+              )
+              if verified.returncode:
+                  raise SystemExit(
+                      f"shard execution envelope verification failed: {shard_id}: "
+                      + (verified.stderr.strip() or verified.stdout.strip())
+                  )
+              envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
+              if envelope.get("lane", {}).get("id") != "v09-adversarial-security-shard":
+                  raise SystemExit(f"shard envelope lane mismatch: {shard_id}")
+              subject = envelope.get("execution_subject", {})
+              if subject.get("kind") != "virtual-machine":
+                  raise SystemExit(f"shard envelope is not guest-executed: {shard_id}")
+              for key, value in guest_identity.items():
+                  if subject.get(key) != value:
+                      raise SystemExit(f"shard envelope guest identity mismatch: {shard_id}:{key}")
+              if subject.get("image_digests", {}).get("base_image_sha256") != base_image_sha:
+                  raise SystemExit(f"shard envelope base-image mismatch: {shard_id}")
+              if envelope.get("observations", {}).get("shard_id") != shard_id:
+                  raise SystemExit(f"shard envelope id mismatch: {shard_id}")
+              if envelope.get("observations", {}).get("qualification_environment_id") != qualification_id:
+                  raise SystemExit(
+                      f"shard envelope qualification environment mismatch: {shard_id}"
+                  )
               transcript_parts.append(transcript.read_text(encoding="utf-8"))
               shard_bindings.append({
                   "id": shard_id,
@@ -307,6 +378,36 @@ jobs:
                   "workflow_run_id": evidence.get("workflow", {}).get("run_id"),
                   "workflow_run_attempt": evidence.get("workflow", {}).get("run_attempt"),
               })
+              component_envelopes.append({
+                  "id": shard_id,
+                  "sha256": envelope["envelope_sha256"],
+              })
+          component_envelopes.sort(key=lambda item: item["id"])
+          if [item["id"] for item in component_envelopes] != sorted(expected_shards):
+              raise SystemExit("adversarial component-envelope inventory mismatch")
+          component_envelope_set_sha256 = hashlib.sha256(
+              json.dumps(component_envelopes, sort_keys=True, separators=(",", ":")).encode("utf-8")
+          ).hexdigest()
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as github_env:
+              github_env.write(f"COMPONENT_ENVELOPE_SET_SHA256={component_envelope_set_sha256}\n")
+          execution_components = {
+              "schema_version": 1,
+              "kind": "qualification-execution-component-set",
+              "lane": "v09-adversarial-security",
+              "source_sha": source_sha,
+              "qualification_environment_id": qualification_id,
+              "component_envelope_set_sha256": component_envelope_set_sha256,
+              "components": component_envelopes,
+          }
+          execution_components_path = artifact / "qualification-execution-components.json"
+          execution_components_path.write_text(
+              json.dumps(execution_components, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          (artifact / "qualification-execution-components.json.sha256").write_text(
+              f"{digest(execution_components_path)}  {execution_components_path.name}\n",
+              encoding="utf-8",
+          )
           canonical_transcript = artifact / "guest-qualification.txt"
           canonical_transcript.write_text("\n".join(part.rstrip("\n") for part in transcript_parts) + "\n", encoding="utf-8")
           text = canonical_transcript.read_text(encoding="utf-8")
@@ -348,6 +449,14 @@ jobs:
           evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           (artifact / "V09-ADVERSARIAL-EVIDENCE.sha256").write_text(f"{digest(evidence_path)}  {evidence_path.name}\n", encoding="utf-8")
           PY
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        env:
+          ARTIFACT_DIR: /tmp/linura-v09-adversarial
+        with:
+          lane: v09-adversarial-security
+          source-sha: ${{ env.SOURCE_SHA }}
 
       - name: Upload immutable-source adversarial evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

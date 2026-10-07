@@ -1,0 +1,65 @@
+name: Qualification execution envelope
+description: Create, verify, and retain an exact-source qualification execution envelope.
+inputs:
+  lane:
+    description: Reviewed qualification lane id.
+    required: true
+  source-sha:
+    description: Exact source SHA executed by the lane.
+    required: true
+  artifact-suffix:
+    description: Bounded execution discriminator for repeated reusable-lane runs.
+    required: false
+    default: primary
+  execution-subject-file:
+    description: Typed captured guest identity for guest-executed lanes.
+    required: false
+    default: ""
+outputs:
+  sha256:
+    description: Canonical execution-envelope digest.
+    value: ${{ steps.envelope.outputs.sha256 }}
+runs:
+  using: composite
+  steps:
+    - id: envelope
+      name: Create and verify execution envelope
+      shell: bash
+      env:
+        LINURA_ENVELOPE_LANE: ${{ inputs.lane }}
+        LINURA_ENVELOPE_SOURCE_SHA: ${{ inputs.source-sha }}
+        LINURA_ENVELOPE_EXECUTION_SUBJECT_FILE: ${{ inputs.execution-subject-file }}
+      run: |
+        set -euo pipefail
+        [[ "$LINURA_ENVELOPE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+        output_dir="$RUNNER_TEMP/linura-qualification-envelope-$LINURA_ENVELOPE_LANE"
+        output="$output_dir/qualification-execution-envelope.json"
+        mkdir -p "$output_dir"
+        subject_args=()
+        if [[ -n "$LINURA_ENVELOPE_EXECUTION_SUBJECT_FILE" ]]; then
+          test -f "$LINURA_ENVELOPE_EXECUTION_SUBJECT_FILE"
+          test ! -L "$LINURA_ENVELOPE_EXECUTION_SUBJECT_FILE"
+          subject_args+=(--execution-subject-file "$LINURA_ENVELOPE_EXECUTION_SUBJECT_FILE")
+        fi
+        created="$(/usr/bin/python3 -I tools/qualification_envelope.py create-from-environment \
+          --lane "$LINURA_ENVELOPE_LANE" \
+          --source-sha "$LINURA_ENVELOPE_SOURCE_SHA" \
+          "${subject_args[@]}" \
+          --output "$output")"
+        verified="$(/usr/bin/python3 -I tools/qualification_envelope.py verify \
+          --envelope "$output" \
+          --source-sha "$LINURA_ENVELOPE_SOURCE_SHA")"
+        test "$created" = "$verified"
+        if [[ -n "${ARTIFACT_DIR:-}" ]]; then
+          mkdir -p "$ARTIFACT_DIR"
+          cp "$output" "$output.sha256" "$ARTIFACT_DIR/"
+        fi
+        printf 'sha256=%s\n' "$verified" >> "$GITHUB_OUTPUT"
+        printf 'qualification-envelope[%s]=%s\n' "$LINURA_ENVELOPE_LANE" "$verified" >> "$GITHUB_STEP_SUMMARY"
+    - name: Retain execution envelope
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: qualification-envelope-${{ inputs.lane }}-${{ inputs.source-sha }}-${{ inputs.artifact-suffix }}-attempt-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/linura-qualification-envelope-${{ inputs.lane }}/
+        if-no-files-found: error
+        retention-days: 30

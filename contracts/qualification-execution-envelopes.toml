@@ -1,0 +1,364 @@
+schema_version = 2
+id = "qualification/execution-envelopes"
+digest_algorithm = "sha256"
+canonicalization = "json-sort-keys-compact-utf8-v1"
+source_identity = "git-commit-and-tree-v1"
+runner_identity = "explicit-runner-image-and-architecture-v1"
+toolchain_identity = "repository-file-digests-v1"
+cache_identity = "content-digest-after-independent-verification-v1"
+freshness_identity = "separate-observation-not-deterministic-input-v1"
+execution_identity = "orchestrator-and-execution-subject-v1"
+
+implementation_files = [
+  "tools/qualification_envelope.py",
+  ".github/actions/qualification-envelope/action.yml",
+  "tools/qualification_guest_identity.py",
+]
+
+toolchain_files = [
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  "tools/codex/versions.env",
+]
+
+[authority_boundary]
+role = "execution-context-only"
+accepts_qualification_evidence = false
+writes_pass_receipts = false
+binds_verifier_results = false
+binds_accepted_artifacts = false
+
+[cache_policy]
+cache_hit_is_qualification = false
+content_digest_required = true
+independent_verification_required = true
+source_pass_reuse_allowed = false
+qualification_evidence_cache_allowed = false
+build_output_cache_allowed = false
+
+[runner.github_hosted]
+required_environment = ["RUNNER_OS", "RUNNER_ARCH", "ImageOS", "ImageVersion"]
+package_manager = "dpkg"
+require_kernel_release = true
+require_os_release_digest = true
+require_package_manifest = true
+
+[runner.physical]
+required_environment = []
+package_manager = "pacman"
+require_kernel_release = true
+require_os_release_digest = true
+require_package_manifest = true
+require_no_virtualization = true
+
+[guest_profile.ubuntu_24_04_qemu]
+architecture = "x86_64"
+virtualization = "qemu"
+acceleration = "tcg"
+distribution_id = "ubuntu"
+distribution_version = "24.04"
+package_manager = "dpkg"
+
+[guest_profile.arch_rolling_qemu]
+architecture = "x86_64"
+virtualization = "qemu"
+acceleration = "tcg"
+distribution_id = "arch"
+distribution_version = "rolling"
+package_manager = "pacman"
+
+[[v09_adversarial_shard]]
+id = "primary"
+boundary_start = 1
+boundary_end = 2
+primary = true
+final = false
+
+[[v09_adversarial_shard]]
+id = "persistence"
+boundary_start = 3
+boundary_end = 3
+primary = false
+final = false
+
+[[v09_adversarial_shard]]
+id = "security"
+boundary_start = 4
+boundary_end = 4
+primary = false
+final = false
+
+[[v09_adversarial_shard]]
+id = "connectivity"
+boundary_start = 5
+boundary_end = 6
+primary = false
+final = false
+
+[[v09_adversarial_shard]]
+id = "discovery-source"
+boundary_start = 7
+boundary_end = 8
+primary = false
+final = false
+
+[[v09_adversarial_shard]]
+id = "observation-plan"
+boundary_start = 9
+boundary_end = 10
+primary = false
+final = false
+
+[[v09_adversarial_shard]]
+id = "checkpoint"
+boundary_start = 11
+boundary_end = 11
+primary = false
+final = false
+
+[[v09_adversarial_shard]]
+id = "owner-final"
+boundary_start = 12
+boundary_end = 13
+primary = false
+final = true
+
+[[lane]]
+id = "canonical-ci"
+execution_subject = "runner"
+kind = "github-hosted"
+workflow = ".github/workflows/ci.yml"
+profile_version = 1
+input_files = ["tools/xtask/src/main.rs", "scripts/check_repository.py"]
+required_digests = []
+required_cache_digests = []
+required_observations = []
+
+[[lane]]
+id = "security-rustsec"
+execution_subject = "runner"
+kind = "github-hosted"
+workflow = ".github/workflows/security.yml"
+profile_version = 1
+input_files = ["tools/codex/versions.env", "Cargo.lock"]
+required_digests = ["cargo_audit_sha256"]
+required_cache_digests = []
+required_observations = ["advisory_db_identity", "advisory_retrieved_at"]
+freshness_is_nondeterministic = true
+
+[[lane]]
+id = "codeql"
+execution_subject = "runner"
+kind = "github-hosted"
+workflow = ".github/workflows/codeql.yml"
+profile_version = 1
+input_files = [".github/workflows/codeql.yml"]
+required_digests = []
+required_cache_digests = []
+required_observations = []
+
+[[lane]]
+id = "codex-environment"
+execution_subject = "runner"
+kind = "github-hosted"
+workflow = ".github/workflows/codex-environment.yml"
+profile_version = 1
+input_files = ["scripts/setup_codex_environment.sh", "scripts/maintain_codex_environment.sh", "tools/codex/doctor.py"]
+required_digests = []
+required_cache_digests = []
+required_observations = []
+
+[[lane]]
+id = "evidence-publication"
+execution_subject = "runner"
+kind = "github-hosted"
+workflow = ".github/workflows/evidence-publication-checks.yml"
+profile_version = 1
+input_files = ["contracts/evidence-publication.toml", "tools/evidence_publication.py", "tests/tooling/test_evidence_publication.py"]
+required_digests = []
+required_cache_digests = []
+required_observations = []
+
+[[lane]]
+id = "vm-acceptance"
+execution_subject = "guest"
+kind = "github-hosted"
+guest_profile = "ubuntu_24_04_qemu"
+workflow = ".github/workflows/vm-acceptance.yml"
+profile_version = 1
+input_files = ["tools/vm.py", "tools/acceptance.py"]
+required_digests = ["base_image_sha256"]
+required_cache_digests = []
+required_observations = ["guest_package_manifest_sha256"]
+
+[[lane]]
+id = "control1-plan-preview-vm"
+execution_subject = "guest"
+kind = "github-hosted"
+guest_profile = "ubuntu_24_04_qemu"
+workflow = ".github/workflows/control1-plan-preview-vm.yml"
+profile_version = 1
+input_files = ["tests/acceptance/008-control1-plan-preview.json", "tools/vm.py"]
+required_digests = ["base_image_sha256"]
+required_cache_digests = []
+required_observations = []
+
+[[lane]]
+id = "v04-durability"
+execution_subject = "guest"
+kind = "github-hosted"
+guest_profile = "ubuntu_24_04_qemu"
+workflow = ".github/workflows/v04-durability-vm.yml"
+profile_version = 1
+input_files = ["crates/linura-transaction/Cargo.toml", "crates/linura-persistence-sqlite/Cargo.toml", "tools/vm.py"]
+required_digests = ["base_image_sha256"]
+required_cache_digests = []
+required_observations = ["guest_package_manifest_sha256"]
+
+[[lane]]
+id = "v04-enospc"
+execution_subject = "guest"
+kind = "github-hosted"
+guest_profile = "ubuntu_24_04_qemu"
+workflow = ".github/workflows/v04-enospc-recovery-vm.yml"
+profile_version = 1
+input_files = ["crates/linura-transaction/Cargo.toml", "crates/linura-persistence-sqlite/Cargo.toml", "tools/vm.py"]
+required_digests = ["base_image_sha256"]
+required_cache_digests = []
+required_observations = ["guest_package_manifest_sha256"]
+
+[[lane]]
+id = "v05-executor-verifier"
+execution_subject = "guest"
+kind = "github-hosted"
+guest_profile = "ubuntu_24_04_qemu"
+workflow = ".github/workflows/v05-executor-verifier-vm.yml"
+profile_version = 1
+input_files = ["executors/linura-executor-systemd/Cargo.toml", "verifiers/linura-verifier-systemd/Cargo.toml", "tools/vm.py"]
+required_digests = ["base_image_sha256"]
+required_cache_digests = []
+required_observations = ["guest_package_manifest_sha256"]
+
+[[lane]]
+id = "v06-managed-lifecycle"
+execution_subject = "guest"
+kind = "github-hosted"
+guest_profile = "ubuntu_24_04_qemu"
+workflow = ".github/workflows/v06-managed-lifecycle-vm.yml"
+profile_version = 1
+input_files = ["crates/linura-lifecycle/Cargo.toml", "crates/linura-transaction/Cargo.toml", "tools/vm.py"]
+required_digests = ["base_image_sha256"]
+required_cache_digests = []
+required_observations = ["guest_package_manifest_sha256"]
+
+[[lane]]
+id = "v07-library"
+execution_subject = "runner"
+kind = "github-hosted"
+workflow = ".github/workflows/v07-library-qualification.yml"
+profile_version = 1
+input_files = ["crates/linura-library/Cargo.toml", "crates/linura-intent/Cargo.toml"]
+required_digests = []
+required_cache_digests = []
+required_observations = []
+
+[[lane]]
+id = "v08-agent"
+execution_subject = "runner"
+kind = "github-hosted"
+workflow = ".github/workflows/v08-agent-qualification.yml"
+profile_version = 1
+input_files = ["crates/linura-agent-runtime/Cargo.toml", "crates/linura-control/Cargo.toml"]
+required_digests = []
+required_cache_digests = []
+required_observations = []
+
+[[lane]]
+id = "v09-qualification-contract"
+execution_subject = "runner"
+kind = "github-hosted"
+workflow = ".github/workflows/v09-qualification.yml"
+profile_version = 1
+input_files = ["contracts/v09-qualification-routing.toml", "docs/qualification/v0.9.0.md", "tools/v09_qualification_scope.py"]
+required_digests = []
+required_cache_digests = []
+required_observations = ["qualification_environment_id"]
+
+[[lane]]
+id = "v09-qualification"
+execution_subject = "aggregate"
+kind = "github-hosted"
+workflow = ".github/workflows/v09-qualification.yml"
+profile_version = 1
+input_files = ["contracts/v09-qualification-routing.toml", "docs/qualification/v0.9.0.md"]
+required_digests = []
+required_cache_digests = []
+required_observations = ["qualification_environment_id", "component_envelope_set_sha256"]
+
+[[lane]]
+id = "v09-adversarial-security"
+execution_subject = "aggregate"
+kind = "github-hosted"
+workflow = ".github/workflows/v09-adversarial-security.yml"
+profile_version = 1
+input_files = [".github/workflows/v09-adversarial-security.yml", "scripts/qualification/v09-adversarial-guest.sh", "contracts/v09-qualification-routing.toml"]
+required_digests = []
+required_cache_digests = []
+required_observations = ["qualification_environment_id", "component_envelope_set_sha256"]
+
+[[lane]]
+id = "v09-adversarial-security-shard"
+execution_subject = "guest"
+kind = "github-hosted"
+guest_profile = "ubuntu_24_04_qemu"
+workflow = ".github/workflows/v09-adversarial-security.yml"
+profile_version = 1
+input_files = [".github/workflows/v09-adversarial-security.yml", "scripts/qualification/v09-adversarial-guest.sh", "contracts/v09-qualification-routing.toml"]
+required_digests = ["base_image_sha256"]
+required_cache_digests = []
+required_observations = ["qualification_environment_id", "shard_id"]
+
+[[lane]]
+id = "v010-workstation-contract"
+execution_subject = "runner"
+kind = "github-hosted"
+workflow = ".github/workflows/v010-qualification.yml"
+profile_version = 1
+input_files = ["contracts/v010-workstation-qualification.toml", "contracts/v010-workstation-slices.toml"]
+required_digests = []
+required_cache_digests = []
+required_observations = []
+
+[[lane]]
+id = "v010-shell-runtime"
+execution_subject = "guest"
+kind = "github-hosted"
+guest_profile = "arch_rolling_qemu"
+workflow = ".github/workflows/v010-shell-runtime-qualification.yml"
+profile_version = 1
+input_files = ["contracts/v010-shell-runtime-qualification.toml", "contracts/v010-shell-runtime-substrate.toml", "contracts/v010-workstation-acceptance.toml"]
+required_digests = ["base_image_sha256", "prepared_image_sha256", "guest_package_manifest_sha256"]
+required_cache_digests = ["prepared_substrate"]
+required_observations = ["arch_snapshot", "runtime_package_manifest_sha256"]
+
+[[lane]]
+id = "trusted-release-proof"
+execution_subject = "runner"
+kind = "github-hosted"
+workflow = ".github/workflows/trusted-release-proof.yml"
+profile_version = 1
+input_files = ["docs/release-engineering.md", ".github/workflows/reusable-release-build.yml"]
+required_digests = []
+required_cache_digests = []
+required_observations = []
+
+[[lane]]
+id = "v010-maintained-hardware"
+execution_subject = "runner"
+kind = "physical"
+entrypoint = "qualification/v010/workstation-acceptance/run-hardware-qualification.sh"
+profile_version = 1
+input_files = ["contracts/v010-workstation-qualification.toml", "contracts/v010-workstation-acceptance.toml", "schemas/v010-maintained-workstation-fixture.v1.schema.json"]
+required_digests = ["machine_fixture_sha256", "os_release_sha256", "provider_manifest_sha256"]
+required_cache_digests = []
+required_observations = ["kernel_release", "machine_class", "virtualization"]

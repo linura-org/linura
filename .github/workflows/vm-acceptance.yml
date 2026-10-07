@@ -3,6 +3,11 @@ name: Disposable VM acceptance
 on:
   workflow_call:
     inputs:
+      envelope_lane:
+        description: Reviewed execution-envelope lane id for reusable delegations
+        required: false
+        type: string
+        default: ""
       scenario:
         description: Acceptance scenario ID
         required: false
@@ -26,6 +31,11 @@ on:
   pull_request:
     paths:
       - ".github/workflows/vm-acceptance.yml"
+      - ".github/actions/qualification-envelope/**"
+      - "contracts/qualification-execution-envelopes.toml"
+      - "tools/qualification_envelope.py"
+      - "tools/qualification_guest_identity.py"
+      - "tests/tooling/test_qualification_envelope.py"
       - ".github/workflows/trusted-release-proof.yml"
       - ".github/workflows/v09-qualification.yml"
       - "apps/linurad/**"
@@ -280,6 +290,12 @@ jobs:
             printf 'distribution_version=%s\n' "$guest_os_version"
           } > "$ARTIFACT_DIR/guest-environment.env"
 
+          /usr/bin/python3 -I tools/qualification_guest_identity.py capture-ssh \
+            --host 127.0.0.1 --port 2222 --user linura --identity "$SSH_KEY" \
+            --package-manager dpkg \
+            --output "$ARTIFACT_DIR/guest-execution-identity.json" \
+            --github-env "$GITHUB_ENV"
+
       - name: Run repository acceptance scenario
         run: |
           set -euo pipefail
@@ -354,6 +370,23 @@ jobs:
                   f"guest QualificationEnvironment mismatch: expected {expected_guest}, got {guest_environment}"
               )
 
+          guest_identity_path = artifact_dir / "guest-execution-identity.json"
+          if not guest_identity_path.is_file() or guest_identity_path.is_symlink():
+              raise SystemExit("typed guest execution identity is missing or unsafe")
+          guest_identity = json.loads(guest_identity_path.read_text(encoding="utf-8"))
+          identity_environment = {
+              key: guest_identity.get(key)
+              for key in ("architecture", "virtualization", "distribution_id", "distribution_version")
+          }
+          if identity_environment != guest_environment:
+              raise SystemExit("typed guest execution identity disagrees with VM evidence")
+          if guest_identity.get("schema_version") != 1 or guest_identity.get("kind") != "virtual-machine":
+              raise SystemExit("typed guest execution identity schema mismatch")
+          if guest_identity.get("package_manager") != "dpkg":
+              raise SystemExit("typed guest package manager mismatch")
+          if guest_identity.get("package_manifest_sha256") != os.environ["GUEST_PACKAGE_MANIFEST_SHA256"]:
+              raise SystemExit("typed guest package manifest binding mismatch")
+
           package_versions = {}
           for package in ("cloud-image-utils", "qemu-system-x86", "qemu-utils"):
               value = subprocess.check_output(
@@ -410,6 +443,14 @@ jobs:
           print(f"wrote {output}")
           print(f"wrote {checksum}")
           PY
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        with:
+          lane: ${{ inputs.envelope_lane || 'vm-acceptance' }}
+          source-sha: ${{ env.SOURCE_SHA }}
+          artifact-suffix: ${{ inputs.scenario || 'authoritative-observation' }}
+          execution-subject-file: ${{ env.ARTIFACT_DIR }}/guest-execution-identity.json
 
       - name: Stop disposable guest
         if: always()

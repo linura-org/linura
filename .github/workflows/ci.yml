@@ -195,3 +195,9 @@ jobs:
         run: |
           set -euo pipefail
           while IFS= read -r -d '' file; do bash -n "$file"; done < <(find packaging scripts -type f -name '*.sh' -print0)
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        with:
+          lane: canonical-ci
+          source-sha: ${{ github.sha }}

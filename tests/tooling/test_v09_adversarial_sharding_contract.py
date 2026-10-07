@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import tomllib
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/v09-adversarial-security.yml"
 SCRIPT = ROOT / "scripts/qualification/v09-adversarial-guest.sh"
+CONTRACT = ROOT / "contracts/qualification-execution-envelopes.toml"
 
 EXPECTED = [
     ("primary", 1, 2, True, False),
@@ -39,6 +41,18 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
             for name, first, last, primary, final in rows
         ]
         self.assertEqual(parsed, EXPECTED)
+        contract = tomllib.loads(CONTRACT.read_text(encoding="utf-8"))
+        reviewed = [
+            (
+                item["id"],
+                item["boundary_start"],
+                item["boundary_end"],
+                item["primary"],
+                item["final"],
+            )
+            for item in contract["v09_adversarial_shard"]
+        ]
+        self.assertEqual(reviewed, EXPECTED)
         covered = [
             boundary
             for _, first, last, _, _ in parsed
@@ -51,11 +65,7 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
 
     def test_assembler_binds_every_parallel_shard(self) -> None:
         source = WORKFLOW.read_text(encoding="utf-8")
-        for shard_id, first, last, primary, final in EXPECTED:
-            self.assertIn(
-                f'"{shard_id}": ({first}, {last}, {primary}, {final})',
-                source,
-            )
+        for shard_id, _first, _last, _primary, _final in EXPECTED:
             self.assertIn(
                 f"name: linura-v09-adversarial-shard-{shard_id}-${{{{ inputs.source_sha || github.sha }}}}",
                 source,
@@ -64,6 +74,40 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
                 f"path: /tmp/linura-v09-adversarial-shards/{shard_id}",
                 source,
             )
+        self.assertIn("Bind executing shard qualification envelope", source)
+        self.assertIn("lane: v09-adversarial-security-shard", source)
+        self.assertIn(
+            "execution-subject-file: ${{ runner.temp }}/linura-v09-adversarial-artifacts/guest-execution-identity.json",
+            source,
+        )
+        self.assertIn(
+            '"/usr/bin/python3", "-I", "tools/qualification_envelope.py"',
+            source,
+        )
+        self.assertIn('component_envelopes.append({', source)
+        self.assertIn('"sha256": envelope["envelope_sha256"]', source)
+        self.assertIn("COMPONENT_ENVELOPE_SET_SHA256=", source)
+        self.assertIn('component_envelopes.sort(key=lambda item: item["id"])', source)
+        self.assertIn("adversarial component-envelope inventory mismatch", source)
+        self.assertIn("shard envelope qualification environment mismatch", source)
+        self.assertIn('execution_contract.get("v09_adversarial_shard")', source)
+        self.assertIn("qualification-execution-components.json", source)
+        self.assertIn('"kind": "qualification-execution-component-set"', source)
+        self.assertNotIn(
+            '"execution_envelopes": {"sha256": component_envelope_set_sha256, "components": component_envelopes}',
+            source,
+        )
+
+    def test_each_shard_captures_guest_execution_identity_before_shutdown(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        capture = source.index("qualification_guest_identity.py capture-ssh")
+        evidence = source.index("evidence = {", capture)
+        hard_stop = source.rindex("hard_stop")
+        self.assertLess(capture, evidence)
+        self.assertLess(evidence, hard_stop)
+        self.assertNotIn("'guest_execution_identity': {", source)
+        self.assertIn("GUEST_IDENTITY=", source)
+        self.assertIn("--package-manager dpkg", source)
 
     def test_final_shard_qualifies_production_owned_boundary_twelve_revocation(self) -> None:
         final = next(row for row in EXPECTED if row[4])
@@ -103,7 +147,9 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
             "remote \"set -euo pipefail; sudo -n rm -rf '$PUBLIC_BOOTSTRAP_ROOT';",
             source,
         )
-        self.assertIn("--accel tcg", source)
+        self.assertIn('--accel "$VM_ACCELERATION"', source)
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("  VM_ACCELERATION: tcg", workflow)
 
 
 if __name__ == "__main__":

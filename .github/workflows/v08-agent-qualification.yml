@@ -16,6 +16,10 @@ on:
   pull_request:
     paths:
       - ".github/workflows/v08-agent-qualification.yml"
+      - ".github/actions/qualification-envelope/**"
+      - "contracts/qualification-execution-envelopes.toml"
+      - "tools/qualification_envelope.py"
+      - "tests/tooling/test_qualification_envelope.py"
       - ".github/workflows/trusted-release-proof.yml"
       - ".github/workflows/release.yml"
       - "crates/linura-agent-runtime/**"
@@ -236,6 +240,12 @@ jobs:
           grep -F '"library_acceptance_requires_provisioned_verifier": true' "$ARTIFACT_DIR/qualification.json"
           grep -F '"retired_control_token_present": false' "$ARTIFACT_DIR/qualification.json"
           test "$(sed -n 's/^source_sha=//p' "$ARTIFACT_DIR/qualification-status.txt")" = "$SOURCE_SHA"
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        with:
+          lane: v08-agent
+          source-sha: ${{ env.SOURCE_SHA }}
 
       - name: Upload v0.8 qualification evidence
         if: always()

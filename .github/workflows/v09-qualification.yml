@@ -16,6 +16,11 @@ on:
   pull_request:
     paths:
       - ".github/workflows/v09-qualification.yml"
+      - ".github/actions/qualification-envelope/**"
+      - "contracts/qualification-execution-envelopes.toml"
+      - "tools/qualification_envelope.py"
+      - "tools/qualification_guest_identity.py"
+      - "tests/tooling/test_qualification_envelope.py"
       - ".github/workflows/v09-adversarial-security.yml"
       - ".github/workflows/vm-acceptance.yml"
       - ".github/workflows/trusted-release-proof.yml"
@@ -104,6 +109,8 @@ concurrency:
 
 env:
   SOURCE_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+  BASE_IMAGE_SHA256: d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac
+  QUALIFICATION_ENVIRONMENT_ID: qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless
 
 jobs:
   scope:
@@ -261,6 +268,23 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: Bind v0.9 contract execution envelope
+        uses: ./.github/actions/qualification-envelope
+        env:
+          ARTIFACT_DIR: /tmp/linura-v09-contract-envelope
+        with:
+          lane: v09-qualification-contract
+          source-sha: ${{ env.SOURCE_SHA }}
+          artifact-suffix: contract
+
+      - name: Upload stable v0.9 contract envelope hand-off
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-v09-contract-envelope-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/linura-v09-contract-envelope/
+          if-no-files-found: error
+          retention-days: 30
+
   offline-reference:
     name: v0.9 offline QualificationEnvironment VM
     needs: [scope, contract]
@@ -288,14 +312,117 @@ jobs:
     needs: [scope, contract]
     if: needs.scope.outputs.full_qualification != 'true'
     runs-on: ubuntu-24.04
+    env:
+      CONTRACT_ENVELOPE_ROOT: /tmp/linura-v09-contract-envelope
+      REGRESSION_ROOT: /tmp/linura-v09-regression
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
       - name: Confirm bounded regression lane
         run: |
           set -euo pipefail
           test "${{ needs.scope.result }}" = success
           test "${{ needs.contract.result }}" = success
           test "${{ needs.scope.outputs.full_qualification }}" = false
-          printf 'v0.9 exact-source regression passed for %s\n' "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Download exact-source contract execution envelope
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-v09-contract-envelope-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/linura-v09-contract-envelope
+
+      - name: Bind bounded regression execution set
+        run: |
+          set -euo pipefail
+          mkdir -p "$REGRESSION_ROOT"
+          /usr/bin/python3 -I - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          source_sha = os.environ["SOURCE_SHA"]
+          qualification_id = os.environ["QUALIFICATION_ENVIRONMENT_ID"]
+          root = Path(os.environ["CONTRACT_ENVELOPE_ROOT"])
+          envelope_path = root / "qualification-execution-envelope.json"
+          checksum_path = root / "qualification-execution-envelope.json.sha256"
+          if not envelope_path.is_file() or envelope_path.is_symlink() or not checksum_path.is_file() or checksum_path.is_symlink():
+              raise SystemExit("v0.9 contract execution envelope is missing or unsafe")
+          verified = subprocess.run(
+              ["/usr/bin/python3", "-I", "tools/qualification_envelope.py", "verify",
+               "--envelope", str(envelope_path), "--source-sha", source_sha],
+              check=False, capture_output=True, text=True,
+          )
+          if verified.returncode:
+              raise SystemExit("v0.9 contract envelope verification failed: " +
+                               (verified.stderr.strip() or verified.stdout.strip()))
+          envelope = json.loads(envelope_path.read_text(encoding="utf-8"))
+          if envelope.get("lane", {}).get("id") != "v09-qualification-contract":
+              raise SystemExit("v0.9 contract envelope lane mismatch")
+          if envelope.get("execution_subject", {}).get("kind") != "runner":
+              raise SystemExit("v0.9 contract envelope execution subject mismatch")
+          if envelope.get("observations", {}).get("qualification_environment_id") != qualification_id:
+              raise SystemExit("v0.9 contract envelope qualification environment mismatch")
+          components = sorted(
+              [{
+                  "role": "contract",
+                  "lane": "v09-qualification-contract",
+                  "sha256": envelope["envelope_sha256"],
+                  "subject_kind": "runner",
+              }],
+              key=lambda item: (
+                  item["role"], item["lane"], item["sha256"], item["subject_kind"]
+              ),
+          )
+          component_sha = hashlib.sha256(
+              json.dumps(components, sort_keys=True, separators=(",", ":")).encode("utf-8")
+          ).hexdigest()
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write(f"COMPONENT_ENVELOPE_SET_SHA256={component_sha}\n")
+          manifest = {
+              "schema_version": 1,
+              "kind": "qualification-execution-component-set",
+              "lane": "v09-qualification",
+              "route": "exact-source-regression",
+              "source_sha": source_sha,
+              "qualification_environment_id": qualification_id,
+              "component_envelope_set_sha256": component_sha,
+              "components": components,
+          }
+          manifest_path = Path(os.environ["REGRESSION_ROOT"]) / "qualification-execution-components.json"
+          manifest_path.write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+          manifest_path.with_name(manifest_path.name + ".sha256").write_text(
+              f"{manifest_sha}  {manifest_path.name}\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Bind regression qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        env:
+          ARTIFACT_DIR: ${{ env.REGRESSION_ROOT }}
+        with:
+          lane: v09-qualification
+          source-sha: ${{ env.SOURCE_SHA }}
+          artifact-suffix: regression
+
+      - name: Upload exact-source regression execution context
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linura-v09-regression-execution-context-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/linura-v09-regression/
+          if-no-files-found: error
+          retention-days: 30
 
   qualification-proof:
     name: bind v0.9 qualification evidence
@@ -303,10 +430,23 @@ jobs:
     if: needs.scope.outputs.full_qualification == 'true'
     runs-on: ubuntu-24.04
     env:
+      CONTRACT_ENVELOPE_ROOT: /tmp/linura-v09-contract-envelope
       EVIDENCE_ROOT: /tmp/linura-v09-vm
       ADVERSARIAL_ROOT: /tmp/linura-v09-adversarial
       QUALIFICATION_ROOT: /tmp/linura-v09-qualification
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Download exact-source contract execution envelope
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: linura-v09-contract-envelope-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/linura-v09-contract-envelope
+
       - name: Download exact-source VM evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -328,11 +468,14 @@ jobs:
           import os
           import pathlib
           import shutil
+          import subprocess
+          import tomllib
 
           source_sha = os.environ["SOURCE_SHA"]
           repository = os.environ["GITHUB_REPOSITORY"]
           qualification_id = "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"
           base_image_sha = "d1940f7d69d343355e183dff1e08a59852d32e7309baa7a4bad8365b11b005ac"
+          contract_root = pathlib.Path(os.environ["CONTRACT_ENVELOPE_ROOT"])
           evidence_root = pathlib.Path(os.environ["EVIDENCE_ROOT"])
           adversarial_root = pathlib.Path(os.environ["ADVERSARIAL_ROOT"])
           qualification_root = pathlib.Path(os.environ["QUALIFICATION_ROOT"])
@@ -340,6 +483,41 @@ jobs:
 
           def digest(path: pathlib.Path) -> str:
               return hashlib.sha256(path.read_bytes()).hexdigest()
+          def verified_envelope(directory: pathlib.Path, role: str, lane_id: str, subject_kind: str) -> dict:
+              path = directory / "qualification-execution-envelope.json"
+              checksum = directory / "qualification-execution-envelope.json.sha256"
+              if not path.is_file() or path.is_symlink() or not checksum.is_file() or checksum.is_symlink():
+                  raise SystemExit(f"{role} execution envelope is missing or unsafe")
+              result = subprocess.run(
+                  [
+                      "/usr/bin/python3", "-I", "tools/qualification_envelope.py",
+                      "verify", "--envelope", str(path), "--source-sha", source_sha,
+                  ],
+                  check=False, capture_output=True, text=True,
+              )
+              if result.returncode:
+                  raise SystemExit(
+                      f"{role} execution envelope verification failed: "
+                      + (result.stderr.strip() or result.stdout.strip())
+                  )
+              payload = json.loads(path.read_text(encoding="utf-8"))
+              if payload.get("lane", {}).get("id") != lane_id:
+                  raise SystemExit(f"{role} execution envelope lane mismatch")
+              if payload.get("execution_subject", {}).get("kind") != subject_kind:
+                  raise SystemExit(f"{role} execution subject mismatch")
+              return {
+                  "role": role,
+                  "lane": lane_id,
+                  "sha256": payload["envelope_sha256"],
+                  "subject_kind": subject_kind,
+                  "payload": payload,
+              }
+
+          contract_envelope = verified_envelope(
+              contract_root, "contract", "v09-qualification-contract", "runner"
+          )
+          if contract_envelope["payload"].get("observations", {}).get("qualification_environment_id") != qualification_id:
+              raise SystemExit("v0.9 contract envelope qualification environment mismatch")
 
           evidence_path = evidence_root / "VM-ACCEPTANCE-EVIDENCE.json"
           checksum_path = evidence_root / "VM-ACCEPTANCE-EVIDENCE.sha256"
@@ -395,6 +573,141 @@ jobs:
               raise SystemExit("v0.9 adversarial environment identity mismatch")
           if adversarial.get("base_image", {}).get("sha256") != base_image_sha:
               raise SystemExit("v0.9 adversarial base-image mismatch")
+          vm_envelope = verified_envelope(
+              evidence_root, "offline-reference", "vm-acceptance", "virtual-machine"
+          )
+          adversarial_envelope = verified_envelope(
+              adversarial_root, "adversarial-security", "v09-adversarial-security", "aggregate"
+          )
+          if vm_envelope["payload"].get("execution_subject", {}).get("image_digests", {}).get("base_image_sha256") != base_image_sha:
+              raise SystemExit("v0.9 offline execution envelope base-image mismatch")
+          component_manifest_path = adversarial_root / "qualification-execution-components.json"
+          component_manifest_checksum = adversarial_root / "qualification-execution-components.json.sha256"
+          if (
+              not component_manifest_path.is_file()
+              or component_manifest_path.is_symlink()
+              or not component_manifest_checksum.is_file()
+              or component_manifest_checksum.is_symlink()
+          ):
+              raise SystemExit("v0.9 adversarial execution-component manifest is missing or unsafe")
+          component_manifest_file_sha = digest(component_manifest_path)
+          if component_manifest_checksum.read_text(encoding="utf-8").strip() != (
+              f"{component_manifest_file_sha}  {component_manifest_path.name}"
+          ):
+              raise SystemExit("v0.9 adversarial execution-component manifest checksum mismatch")
+          component_manifest = json.loads(
+              component_manifest_path.read_text(encoding="utf-8")
+          )
+          if (
+              not isinstance(component_manifest, dict)
+              or set(component_manifest)
+              != {
+                  "schema_version",
+                  "kind",
+                  "lane",
+                  "source_sha",
+                  "qualification_environment_id",
+                  "component_envelope_set_sha256",
+                  "components",
+              }
+              or component_manifest.get("schema_version") != 1
+              or component_manifest.get("kind") != "qualification-execution-component-set"
+              or component_manifest.get("lane") != "v09-adversarial-security"
+              or component_manifest.get("source_sha") != source_sha
+              or component_manifest.get("qualification_environment_id") != qualification_id
+          ):
+              raise SystemExit("v0.9 adversarial execution-component manifest identity mismatch")
+          adversarial_components = component_manifest.get("components")
+          if not isinstance(adversarial_components, list):
+              raise SystemExit("v0.9 adversarial component-envelope set is missing")
+          execution_contract = tomllib.loads(
+              (pathlib.Path.cwd() / "contracts/qualification-execution-envelopes.toml").read_text(
+                  encoding="utf-8"
+              )
+          )
+          expected_shard_ids = sorted(
+              item["id"] for item in execution_contract["v09_adversarial_shard"]
+          )
+          normalized_adversarial_components = []
+          seen_shard_ids = set()
+          for item in adversarial_components:
+              if (
+                  not isinstance(item, dict)
+                  or set(item) != {"id", "sha256"}
+                  or not isinstance(item.get("id"), str)
+                  or item["id"] in seen_shard_ids
+                  or not isinstance(item.get("sha256"), str)
+                  or len(item["sha256"]) != 64
+                  or any(char not in "0123456789abcdef" for char in item["sha256"])
+              ):
+                  raise SystemExit("v0.9 adversarial component-envelope entry is invalid")
+              seen_shard_ids.add(item["id"])
+              normalized_adversarial_components.append(
+                  {"id": item["id"], "sha256": item["sha256"]}
+              )
+          normalized_adversarial_components.sort(key=lambda item: item["id"])
+          if [item["id"] for item in normalized_adversarial_components] != expected_shard_ids:
+              raise SystemExit("v0.9 adversarial component-envelope inventory mismatch")
+          canonical_adversarial_component_digest = hashlib.sha256(
+              json.dumps(
+                  normalized_adversarial_components,
+                  sort_keys=True,
+                  separators=(",", ":"),
+              ).encode("utf-8")
+          ).hexdigest()
+          if (
+              component_manifest.get("component_envelope_set_sha256")
+              != canonical_adversarial_component_digest
+          ):
+              raise SystemExit("v0.9 adversarial component-envelope digest mismatch")
+          if (
+              adversarial_envelope["payload"].get("execution_subject", {}).get("component_envelope_set_sha256")
+              != canonical_adversarial_component_digest
+          ):
+              raise SystemExit("v0.9 adversarial aggregate envelope binding mismatch")
+          if (
+              adversarial_envelope["payload"].get("observations", {}).get("qualification_environment_id")
+              != qualification_id
+          ):
+              raise SystemExit("v0.9 adversarial aggregate environment mismatch")
+          execution_components = sorted(
+              (
+                  {key: item[key] for key in ("role", "lane", "sha256", "subject_kind")}
+                  for item in (contract_envelope, vm_envelope, adversarial_envelope)
+              ),
+              key=lambda item: (
+                  item["role"], item["lane"], item["sha256"], item["subject_kind"]
+              ),
+          )
+          component_envelope_set_sha256 = hashlib.sha256(
+              json.dumps(execution_components, sort_keys=True, separators=(",", ":")).encode("utf-8")
+          ).hexdigest()
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as github_env:
+              github_env.write(f"COMPONENT_ENVELOPE_SET_SHA256={component_envelope_set_sha256}\n")
+          qualification_context = {
+              "schema_version": 1,
+              "kind": "qualification-execution-component-set",
+              "lane": "v09-qualification",
+              "route": "full",
+              "source_sha": source_sha,
+              "qualification_environment_id": qualification_id,
+              "component_envelope_set_sha256": component_envelope_set_sha256,
+              "components": execution_components,
+          }
+          qualification_context_path = (
+              qualification_root / "qualification-execution-components.json"
+          )
+          qualification_context_path.write_text(
+              json.dumps(qualification_context, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          qualification_context_sha = digest(qualification_context_path)
+          qualification_context_path.with_name(
+              qualification_context_path.name + ".sha256"
+          ).write_text(
+              f"{qualification_context_sha}  {qualification_context_path.name}\n",
+              encoding="utf-8",
+          )
 
           transcript_binding = adversarial.get("transcript")
           if not isinstance(transcript_binding, dict):
@@ -460,6 +773,14 @@ jobs:
               encoding="utf-8",
           )
           PY
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        env:
+          ARTIFACT_DIR: /tmp/linura-v09-qualification
+        with:
+          lane: v09-qualification
+          source-sha: ${{ env.SOURCE_SHA }}
 
       - name: Upload exact-source v0.9 qualification evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

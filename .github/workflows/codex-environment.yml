@@ -19,6 +19,10 @@ on:
       - "Cargo.lock"
       - "Cargo.toml"
       - ".github/workflows/codex-environment.yml"
+      - ".github/actions/qualification-envelope/**"
+      - "contracts/qualification-execution-envelopes.toml"
+      - "tools/qualification_envelope.py"
+      - "tests/tooling/test_qualification_envelope.py"
   push:
     branches: [main]
     paths:
@@ -38,6 +42,10 @@ on:
       - "Cargo.lock"
       - "Cargo.toml"
       - ".github/workflows/codex-environment.yml"
+      - ".github/actions/qualification-envelope/**"
+      - "contracts/qualification-execution-envelopes.toml"
+      - "tools/qualification_envelope.py"
+      - "tests/tooling/test_qualification_envelope.py"
   workflow_dispatch:
 
 permissions:
@@ -99,3 +107,9 @@ jobs:
             --wheel-dir "$RUNNER_TEMP/linura-python-wheel" ./bindings/python
           PYTHONPATH=bindings/python/src python3 -m unittest discover \
             -s bindings/python/tests -p 'test_*.py'
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        with:
+          lane: codex-environment
+          source-sha: ${{ github.sha }}

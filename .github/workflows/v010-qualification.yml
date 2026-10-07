@@ -16,6 +16,11 @@ on:
   pull_request:
     paths:
       - ".github/workflows/v010-qualification.yml"
+      - ".github/actions/qualification-envelope/**"
+      - "contracts/qualification-execution-envelopes.toml"
+      - "tools/qualification_envelope.py"
+      - "tools/qualification_guest_identity.py"
+      - "tests/tooling/test_qualification_envelope.py"
       - ".github/workflows/v010-shell-runtime-qualification.yml"
       - "contracts/v010-shell-runtime-qualification.toml"
       - "contracts/v010-shell-runtime-substrate.toml"
@@ -265,6 +270,12 @@ jobs:
         run: |
           cargo test -p linura-linux-observation --locked
           cargo test -p linura-control platform_compatibility --locked
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        with:
+          lane: v010-workstation-contract
+          source-sha: ${{ env.SOURCE_SHA }}
 
   shell-runtime:
     name: v0.10 shell runtime qualification
