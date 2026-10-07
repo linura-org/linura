@@ -5,6 +5,11 @@ on:
   pull_request:
     paths:
       - ".github/workflows/v04-enospc-recovery-vm.yml"
+      - ".github/actions/qualification-envelope/**"
+      - "contracts/qualification-execution-envelopes.toml"
+      - "tools/qualification_envelope.py"
+      - "tools/qualification_guest_identity.py"
+      - "tests/tooling/test_qualification_envelope.py"
       - "crates/linura-persistence-sqlite/**"
       - "crates/linura-transaction/**"
       - "tools/vm.py"
@@ -200,6 +205,15 @@ jobs:
           stat -c 'reserve logical=%s blocks=%b block_bytes=%B' "$reserve"
           GUEST
 
+      - name: Capture guest package identity
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -I tools/qualification_guest_identity.py capture-ssh \
+            --host 127.0.0.1 --port 2234 --user linura --identity "$SSH_KEY" \
+            --package-manager dpkg \
+            --output "$ARTIFACT_DIR/guest-execution-identity.json" \
+            --github-env "$GITHUB_ENV"
+
       - name: Record exact-source ENOSPC evidence
         if: always()
         run: |
@@ -217,6 +231,13 @@ jobs:
           }
           EOF
           cat "$ARTIFACT_DIR/evidence.json"
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        with:
+          lane: v04-enospc
+          source-sha: ${{ env.SOURCE_SHA }}
+          execution-subject-file: ${{ env.ARTIFACT_DIR }}/guest-execution-identity.json
 
       - name: Stop disposable guest
         if: always()

@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - ".github/workflows/control1-plan-preview-vm.yml"
+      - ".github/actions/qualification-envelope/**"
+      - "contracts/qualification-execution-envelopes.toml"
+      - "tools/qualification_envelope.py"
+      - "tests/tooling/test_qualification_envelope.py"
       - ".github/workflows/vm-acceptance.yml"
       - "apps/linurad/**"
       - "apps/linuractl/**"
@@ -34,3 +38,4 @@ jobs:
     uses: ./.github/workflows/vm-acceptance.yml
     with:
       scenario: control1-plan-preview
+      envelope_lane: control1-plan-preview-vm

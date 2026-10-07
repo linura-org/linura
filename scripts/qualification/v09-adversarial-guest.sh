@@ -10,6 +10,8 @@ set -euo pipefail
 : "${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
 : "${GITHUB_RUN_ATTEMPT:?GITHUB_RUN_ATTEMPT is required}"
 : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
+: "${VM_ACCELERATION:?VM_ACCELERATION is required}"
+[[ "$VM_ACCELERATION" == tcg ]] || { echo "v0.9 adversarial qualification requires tcg" >&2; exit 2; }
 
 V09_SHARD_ID="${V09_SHARD_ID:-full}"
 V09_BOUNDARY_START="${V09_BOUNDARY_START:-1}"
@@ -54,6 +56,7 @@ VM_LOG="$RUNNER_TEMP/linura-v09-adversarial-${V09_SHARD_ID}.log"
 ARTIFACT_DIR="$RUNNER_TEMP/linura-v09-adversarial-artifacts"
 TRANSCRIPT="$ARTIFACT_DIR/guest-qualification-${V09_SHARD_ID}.txt"
 ENVIRONMENT="$ARTIFACT_DIR/guest-environment-${V09_SHARD_ID}.env"
+GUEST_IDENTITY="$ARTIFACT_DIR/guest-execution-identity.json"
 ROOT=/var/lib/linura-qualification/v0.9
 PRODUCTION_ROOT="$ROOT/production-firstboot"
 PUBLIC_BOOTSTRAP_ROOT="$ROOT/public-bootstrap"
@@ -198,7 +201,7 @@ start_guest() {
     --seed "$SEED_IMAGE" \
     --ssh-port "$SSH_PORT" \
     --ssh-guest-port "$SSH_GUEST_PORT" \
-    --accel tcg \
+    --accel "$VM_ACCELERATION" \
     --persistent \
     --uuid "$hardware_uuid" \
     >"$log" 2>&1 &
@@ -796,8 +799,11 @@ virtualization=$guest_virt
 distribution_id=$guest_os
 distribution_version=$guest_version
 EOF
+/usr/bin/python3 -I tools/qualification_guest_identity.py capture-ssh \
+  --host 127.0.0.1 --port "$SSH_PORT" --user "$SSH_USER" --identity "$SSH_KEY" \
+  --package-manager dpkg --output "$GUEST_IDENTITY" --github-env "$GITHUB_ENV"
 
-export ARTIFACT_DIR TRANSCRIPT ENVIRONMENT
+export ARTIFACT_DIR TRANSCRIPT ENVIRONMENT GUEST_IDENTITY
 export V09_SHARD_ID V09_BOUNDARY_START V09_BOUNDARY_END V09_PRIMARY_SHARD V09_FINAL_SHARD
 export LINURA_FIRSTBOOT_SHA LINURA_BOOTSTRAP_QUALIFICATION_SHA
 export LINURA_BOOTSTRAP_TRANSITION_QUALIFICATION_SHA
@@ -813,6 +819,7 @@ root = Path.cwd()
 artifact = Path(os.environ['ARTIFACT_DIR'])
 transcript = Path(os.environ['TRANSCRIPT'])
 environment = Path(os.environ['ENVIRONMENT'])
+guest_identity_path = Path(os.environ['GUEST_IDENTITY'])
 shard_id = os.environ['V09_SHARD_ID']
 start = int(os.environ['V09_BOUNDARY_START'])
 end = int(os.environ['V09_BOUNDARY_END'])
@@ -867,6 +874,25 @@ facts = dict(line.split('=', 1) for line in environment.read_text().splitlines()
 expected = {'architecture': 'x86_64', 'virtualization': 'qemu', 'distribution_id': 'ubuntu', 'distribution_version': '24.04'}
 if facts != expected:
     raise SystemExit(f'qualification environment mismatch: {facts}')
+guest_identity = json.loads(guest_identity_path.read_text(encoding='utf-8'))
+if guest_identity.get('schema_version') != 1 or guest_identity.get('kind') != 'virtual-machine':
+    raise SystemExit('guest execution identity schema mismatch')
+expected_identity = {
+    'architecture': facts['architecture'],
+    'virtualization': facts['virtualization'],
+    'distribution_id': facts['distribution_id'],
+    'distribution_version': facts['distribution_version'],
+    'package_manager': 'dpkg',
+}
+for key, value in expected_identity.items():
+    if guest_identity.get(key) != value:
+        raise SystemExit(f'guest execution identity mismatch for {key}: {guest_identity.get(key)!r}')
+if not isinstance(guest_identity.get('package_count'), int) or guest_identity['package_count'] <= 0:
+    raise SystemExit('guest package count is invalid')
+for key in ('os_release_sha256', 'package_manifest_sha256'):
+    value = guest_identity.get(key)
+    if not isinstance(value, str) or len(value) != 64 or any(char not in '0123456789abcdef' for char in value):
+        raise SystemExit(f'guest execution identity digest is invalid: {key}')
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 workflow = root / '.github/workflows/v09-adversarial-security.yml'

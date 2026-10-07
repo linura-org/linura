@@ -29,3 +29,9 @@ jobs:
         with:
           languages: rust
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        with:
+          lane: codeql
+          source-sha: ${{ github.sha }}

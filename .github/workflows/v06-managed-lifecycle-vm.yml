@@ -16,6 +16,11 @@ on:
   pull_request:
     paths:
       - ".github/workflows/v06-managed-lifecycle-vm.yml"
+      - ".github/actions/qualification-envelope/**"
+      - "contracts/qualification-execution-envelopes.toml"
+      - "tools/qualification_envelope.py"
+      - "tools/qualification_guest_identity.py"
+      - "tests/tooling/test_qualification_envelope.py"
       - ".github/workflows/trusted-release-proof.yml"
       - "apps/linura-authorityd/**"
       - "crates/linura-control/**"
@@ -235,6 +240,15 @@ jobs:
             'systemctl --version; uname -a; /usr/bin/pkcheck --version || true; sqlite3 --version' \
             > "$artifact_dir/guest-platform.txt" 2>&1 || true
 
+      - name: Capture guest package identity
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -I tools/qualification_guest_identity.py capture-ssh \
+            --host 127.0.0.1 --port "$SSH_PORT" --user linura --identity "$SSH_KEY" \
+            --package-manager dpkg \
+            --output "$ARTIFACT_DIR/guest-execution-identity.json" \
+            --github-env "$GITHUB_ENV"
+
       - name: Record exact-source v0.6 qualification evidence
         run: |
           set -euo pipefail
@@ -341,6 +355,13 @@ jobs:
           output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
           print(f"wrote {output}")
           PY
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        with:
+          lane: v06-managed-lifecycle
+          source-sha: ${{ env.SOURCE_SHA }}
+          execution-subject-file: ${{ env.ARTIFACT_DIR }}/guest-execution-identity.json
 
       - name: Stop disposable guest
         if: always()

@@ -16,6 +16,10 @@ on:
   pull_request:
     paths:
       - ".github/workflows/v07-library-qualification.yml"
+      - ".github/actions/qualification-envelope/**"
+      - "contracts/qualification-execution-envelopes.toml"
+      - "tools/qualification_envelope.py"
+      - "tests/tooling/test_qualification_envelope.py"
       - ".github/workflows/trusted-release-proof.yml"
       - "crates/linura-library/**"
       - "crates/linura-intent/**"
@@ -174,6 +178,12 @@ jobs:
           python3 -m json.tool "$ARTIFACT_DIR/qualification.json" >/dev/null
           grep -F '"imported_approval_or_executor_authority": false' "$ARTIFACT_DIR/qualification.json"
           grep -F '"database_integrity_after_restart_recovery": "ok"' "$ARTIFACT_DIR/qualification.json"
+
+      - name: Bind qualification execution envelope
+        uses: ./.github/actions/qualification-envelope
+        with:
+          lane: v07-library
+          source-sha: ${{ env.SOURCE_SHA }}
 
       - name: Upload v0.7 qualification evidence
         if: always()
