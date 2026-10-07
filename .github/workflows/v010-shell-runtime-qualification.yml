@@ -930,6 +930,7 @@ jobs:
           source-sha: ${{ env.SOURCE_SHA }}
           execution-subject-file: ${{ env.ARTIFACT_DIR }}/guest-execution-identity.json
 
+
       - name: Stop disposable guest
         if: always()
         run: |
@@ -949,12 +950,19 @@ jobs:
             cp "$VM_LOG" "$artifact_dir/qemu.log"
           fi
 
-      - name: Upload exact-source shell runtime evidence
-        if: always()
+      - name: Admit and upload sealed qualification evidence
+        uses: ./.github/actions/qualification-evidence
+        with:
+          lane: v010-shell-runtime
+          artifact-root: ${{ env.ARTIFACT_DIR }}
+          artifact-name: linura-v010-shell-runtime-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}
+          compression-level: "0"
+      - name: Upload unqualified v0.10 shell diagnostics
+        if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: linura-v010-shell-runtime-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}
+          name: linura-v010-shell-runtime-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}-unqualified-diagnostics
           path: ${{ runner.temp }}/linura-v010-shell-artifacts/
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 7
           compression-level: 0

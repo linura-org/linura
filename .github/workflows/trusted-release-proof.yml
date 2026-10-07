@@ -227,7 +227,8 @@ jobs:
       PROOF_ROOT: /tmp/linura-final-proof
       QUALIFICATION_ROOT: /tmp/linura-v08-qualification
       V09_QUALIFICATION_ROOT: /tmp/linura-v09-qualification
-      V010_SOURCE_ROOT: /tmp/linura-v010-source
+      V010_QUALIFICATION_SOURCE_ROOT: /tmp/linura-v010-qualification-source
+      V010_PREPARED_SOURCE_ROOT: /tmp/linura-v010-prepared-source
       V010_QUALIFICATION_RUNTIME_ROOT: /tmp/linura-v010-qualification-shell-runtime
       V010_PREPARED_RUNTIME_ROOT: /tmp/linura-v010-prepared-shell-runtime
       QUALIFICATION_SOURCE_SHA: ${{ needs.validate.outputs.qualification_source_sha }}
@@ -240,14 +241,23 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
 
-      - name: Materialize reviewed v0.10 evidence-seal tree outside source worktree
+      - name: Materialize reviewed v0.10 qualification and prepared-release source trees
         if: ${{ needs.validate.outputs.tag == 'v0.10.0' }}
         shell: bash
         run: |
           set -euo pipefail
-          test ! -e "$V010_SOURCE_ROOT"
-          /usr/bin/git -c core.hooksPath=/dev/null worktree add --detach "$V010_SOURCE_ROOT" "$SOURCE_SHA"
-          test "$(/usr/bin/git -C "$V010_SOURCE_ROOT" rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$QUALIFICATION_SOURCE_SHA" != "$SOURCE_SHA"
+          test ! -e "$V010_QUALIFICATION_SOURCE_ROOT"
+          test ! -e "$V010_PREPARED_SOURCE_ROOT"
+          /usr/bin/git -c core.hooksPath=/dev/null worktree add --detach \
+            "$V010_QUALIFICATION_SOURCE_ROOT" "$QUALIFICATION_SOURCE_SHA"
+          /usr/bin/git -c core.hooksPath=/dev/null worktree add --detach \
+            "$V010_PREPARED_SOURCE_ROOT" "$SOURCE_SHA"
+          test "$(/usr/bin/git -C "$V010_QUALIFICATION_SOURCE_ROOT" rev-parse HEAD)" = \
+            "$QUALIFICATION_SOURCE_SHA"
+          test "$(/usr/bin/git -C "$V010_QUALIFICATION_SOURCE_ROOT" rev-parse 'HEAD^{tree}')" = \
+            "$QUALIFICATION_TREE_SHA"
+          test "$(/usr/bin/git -C "$V010_PREPARED_SOURCE_ROOT" rev-parse HEAD)" = "$SOURCE_SHA"
 
       - name: Download reproducible build proof
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -255,31 +265,62 @@ jobs:
           name: linura-trusted-release-proof-${{ github.sha }}
           path: /tmp/linura-final-proof
 
-      - name: Download exact-source v0.8 qualification evidence
+      - name: Download sealed exact-source v0.8 qualification evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: linura-v08-agent-${{ github.sha }}
-          path: /tmp/linura-v08-qualification
+          path: /tmp/linura-v08-qualification-sealed
 
-      - name: Download exact-source v0.9 qualification evidence
+      - name: Unseal exact-source v0.8 qualification evidence
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -I tools/qualification_evidence.py unseal             --archive /tmp/linura-v08-qualification-sealed/qualification-evidence.tar             --destination "$QUALIFICATION_ROOT"
+
+      - name: Download sealed exact-source v0.9 qualification evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: linura-v09-qualification-${{ github.sha }}
-          path: /tmp/linura-v09-qualification
+          path: /tmp/linura-v09-qualification-sealed
 
-      - name: Download pre-seal v0.10 shell runtime evidence
+      - name: Unseal exact-source v0.9 qualification evidence
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -I tools/qualification_evidence.py unseal             --archive /tmp/linura-v09-qualification-sealed/qualification-evidence.tar             --destination "$V09_QUALIFICATION_ROOT"
+
+      - name: Download sealed pre-seal v0.10 shell runtime evidence
         if: ${{ needs.validate.outputs.tag == 'v0.10.0' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: linura-v010-shell-runtime-${{ needs.validate.outputs.qualification_source_sha }}
-          path: /tmp/linura-v010-qualification-shell-runtime
+          name: linura-v010-shell-runtime-${{ needs.validate.outputs.qualification_source_sha }}-attempt-${{ github.run_attempt }}
+          path: /tmp/linura-v010-qualification-shell-runtime-sealed
 
-      - name: Download prepared-release v0.10 shell runtime evidence
+      - name: Unseal pre-seal v0.10 shell runtime evidence
+        if: ${{ needs.validate.outputs.tag == 'v0.10.0' }}
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -I "$V010_QUALIFICATION_SOURCE_ROOT/tools/qualification_evidence.py" \
+            --root "$V010_QUALIFICATION_SOURCE_ROOT" unseal \
+            --archive /tmp/linura-v010-qualification-shell-runtime-sealed/qualification-evidence.tar \
+            --destination "$V010_QUALIFICATION_RUNTIME_ROOT"
+
+      - name: Download sealed prepared-release v0.10 shell runtime evidence
         if: ${{ needs.validate.outputs.tag == 'v0.10.0' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: linura-v010-shell-runtime-${{ github.sha }}
-          path: /tmp/linura-v010-prepared-shell-runtime
+          name: linura-v010-shell-runtime-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: /tmp/linura-v010-prepared-shell-runtime-sealed
+
+      - name: Unseal prepared-release v0.10 shell runtime evidence
+        if: ${{ needs.validate.outputs.tag == 'v0.10.0' }}
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -I "$V010_PREPARED_SOURCE_ROOT/tools/qualification_evidence.py" \
+            --root "$V010_PREPARED_SOURCE_ROOT" unseal \
+            --archive /tmp/linura-v010-prepared-shell-runtime-sealed/qualification-evidence.tar \
+            --destination "$V010_PREPARED_RUNTIME_ROOT"
+
+      - name: Verify v0.8 evidence admission binding
+        run: /usr/bin/python3 -I tools/qualification_evidence.py verify --structural-only --binding "$QUALIFICATION_ROOT/evidence-binding.json"
 
       - name: Verify and bind v0.8 qualification evidence
         shell: bash
@@ -349,6 +390,9 @@ jobs:
           )
           PY
 
+      - name: Verify v0.9 evidence admission binding
+        run: /usr/bin/python3 -I tools/qualification_evidence.py verify --structural-only --binding "$V09_QUALIFICATION_ROOT/evidence-binding.json"
+
       - name: Verify and bind v0.9 qualification evidence
         shell: bash
         run: |
@@ -413,6 +457,17 @@ jobs:
           )
           PY
 
+      - name: Verify v0.10 evidence admission bindings
+        if: ${{ needs.validate.outputs.tag == 'v0.10.0' }}
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -I "$V010_QUALIFICATION_SOURCE_ROOT/tools/qualification_evidence.py" \
+            --root "$V010_QUALIFICATION_SOURCE_ROOT" verify --structural-only \
+            --binding "$V010_QUALIFICATION_RUNTIME_ROOT/evidence-binding.json"
+          /usr/bin/python3 -I "$V010_PREPARED_SOURCE_ROOT/tools/qualification_evidence.py" \
+            --root "$V010_PREPARED_SOURCE_ROOT" verify --structural-only \
+            --binding "$V010_PREPARED_RUNTIME_ROOT/evidence-binding.json"
+
       - name: Bind exact-source v0.10 qualification evidence
         if: ${{ needs.validate.outputs.tag == 'v0.10.0' }}
         shell: bash
@@ -420,7 +475,7 @@ jobs:
           LINURA_EXPECTED_SOURCE_SHA: ${{ needs.validate.outputs.qualification_source_sha }}
         run: |
           set -euo pipefail
-          cd "$V010_SOURCE_ROOT"
+          cd "$V010_PREPARED_SOURCE_ROOT"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           qualification_runtime="$V010_QUALIFICATION_RUNTIME_ROOT/V010-SHELL-RUNTIME-EVIDENCE.json"
           prepared_runtime="$V010_PREPARED_RUNTIME_ROOT/V010-SHELL-RUNTIME-EVIDENCE.json"

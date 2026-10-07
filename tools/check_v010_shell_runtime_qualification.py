@@ -1367,7 +1367,7 @@ def validate(root: Path) -> list[str]:
             'from tools.verify_tray_keyboard import verify_retained',
             'verify_retained(tray_keyboard_behavior, native_keyboard_events, native_keyboard_digest)',
             'tests.tooling.test_native_keyboard',
-            'name: linura-v010-shell-runtime-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}',
+            'artifact-name: linura-v010-shell-runtime-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}',
         ):
             if marker not in workflow + (root / ".github/workflows/v010-qualification.yml").read_text(encoding="utf-8"):
                 failures.append(f"native tray evidence gate missing {marker}")

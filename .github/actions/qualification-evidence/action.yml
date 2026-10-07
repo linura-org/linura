@@ -1,0 +1,153 @@
+name: Qualification evidence admission
+description: Semantically verify, bind, deterministically seal, and upload reviewed qualification evidence.
+inputs:
+  lane:
+    description: Reviewed evidence-bearing qualification lane.
+    required: true
+  artifact-root:
+    description: Mutable qualification evidence bundle root produced by the lane.
+    required: true
+  artifact-name:
+    description: Canonical accepted evidence artifact name.
+    required: true
+  retention-days:
+    description: Accepted sealed evidence retention in days.
+    required: false
+    default: "30"
+  compression-level:
+    description: GitHub artifact wrapper compression level for the sealed tar object.
+    required: false
+    default: "6"
+outputs:
+  sha256:
+    description: Canonical evidence-binding digest.
+    value: ${{ steps.verify.outputs.sha256 }}
+  archive-sha256:
+    description: SHA-256 of the exact sealed tar object uploaded by this action.
+    value: ${{ steps.seal.outputs.archive-sha256 }}
+runs:
+  using: composite
+  steps:
+    - id: attest
+      name: Independently verify retained qualification evidence
+      shell: bash
+      env:
+        LINURA_EVIDENCE_LANE: ${{ inputs.lane }}
+        LINURA_EVIDENCE_ROOT: ${{ inputs.artifact-root }}
+      run: |
+        set -euo pipefail
+        test -d "$LINURA_EVIDENCE_ROOT"
+        test ! -L "$LINURA_EVIDENCE_ROOT"
+        verifier="$LINURA_EVIDENCE_ROOT/verifier-result.json"
+        digest="$(/usr/bin/python3 -I tools/qualification_evidence.py attest \
+          --lane "$LINURA_EVIDENCE_LANE" \
+          --bundle "$LINURA_EVIDENCE_ROOT" \
+          --output "$verifier")"
+        printf 'sha256=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
+    - id: bind
+      name: Bind independent verifier result to exact artifact set
+      shell: bash
+      env:
+        LINURA_EVIDENCE_LANE: ${{ inputs.lane }}
+        LINURA_EVIDENCE_ROOT: ${{ inputs.artifact-root }}
+      run: |
+        set -euo pipefail
+        verifier="$LINURA_EVIDENCE_ROOT/verifier-result.json"
+        binding="$LINURA_EVIDENCE_ROOT/evidence-binding.json"
+        digest="$(/usr/bin/python3 -I tools/qualification_evidence.py bind \
+          --lane "$LINURA_EVIDENCE_LANE" \
+          --bundle "$LINURA_EVIDENCE_ROOT" \
+          --verifier-result "$verifier" \
+          --output "$binding")"
+        printf 'sha256=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
+    - id: verify
+      name: Re-run semantic verification over completed binding
+      shell: bash
+      env:
+        LINURA_EVIDENCE_ROOT: ${{ inputs.artifact-root }}
+        LINURA_BOUND_SHA256: ${{ steps.bind.outputs.sha256 }}
+      run: |
+        set -euo pipefail
+        binding="$LINURA_EVIDENCE_ROOT/evidence-binding.json"
+        verified="$(/usr/bin/python3 -I tools/qualification_evidence.py verify \
+          --binding "$binding")"
+        test "$LINURA_BOUND_SHA256" = "$verified"
+        printf 'sha256=%s\n' "$verified" >> "$GITHUB_OUTPUT"
+
+    - id: seal
+      name: Deterministically seal the exact verified bundle
+      shell: bash
+      env:
+        LINURA_EVIDENCE_LANE: ${{ inputs.lane }}
+        LINURA_EVIDENCE_ROOT: ${{ inputs.artifact-root }}
+        LINURA_BOUND_SHA256: ${{ steps.verify.outputs.sha256 }}
+      run: |
+        set -euo pipefail
+        sealed="$RUNNER_TEMP/qualification-evidence.tar"
+        test ! -e "$sealed"
+        result="$(/usr/bin/python3 -I tools/qualification_evidence.py seal \
+          --bundle "$LINURA_EVIDENCE_ROOT" \
+          --binding "$LINURA_EVIDENCE_ROOT/evidence-binding.json" \
+          --destination "$sealed")"
+        archive_sha="$(RESULT="$result" /usr/bin/python3 -I - <<'PY'
+        import json
+        import os
+        payload = json.loads(os.environ["RESULT"])
+        print(payload["archive_sha256"])
+        PY
+        )"
+        binding_sha="$(RESULT="$result" /usr/bin/python3 -I - <<'PY'
+        import json
+        import os
+        payload = json.loads(os.environ["RESULT"])
+        print(payload["binding_sha256"])
+        PY
+        )"
+        test "$binding_sha" = "$LINURA_BOUND_SHA256"
+        actual_archive_sha="$(sha256sum "$sealed" | awk '{print $1}')"
+        test "$archive_sha" = "$actual_archive_sha"
+        printf 'archive=%s\n' "$sealed" >> "$GITHUB_OUTPUT"
+        printf 'archive-sha256=%s\n' "$archive_sha" >> "$GITHUB_OUTPUT"
+
+    - name: Upload exact sealed qualification evidence
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.seal.outputs.archive }}
+        if-no-files-found: error
+        retention-days: ${{ inputs.retention-days }}
+        compression-level: ${{ inputs.compression-level }}
+
+    - name: Read back stored sealed qualification evidence
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ runner.temp }}/qualification-evidence-readback
+
+    - id: verify-upload
+      name: Verify stored artifact matches sealed bytes
+      shell: bash
+      env:
+        LINURA_EXPECTED_ARCHIVE_SHA256: ${{ steps.seal.outputs.archive-sha256 }}
+      run: |
+        set -euo pipefail
+        readback="$RUNNER_TEMP/qualification-evidence-readback/qualification-evidence.tar"
+        test -f "$readback"
+        test ! -L "$readback"
+        actual="$(sha256sum "$readback" | awk '{print $1}')"
+        test "$actual" = "$LINURA_EXPECTED_ARCHIVE_SHA256"
+        printf 'archive-sha256=%s\n' "$actual" >> "$GITHUB_OUTPUT"
+
+    - name: Record accepted evidence identity
+      shell: bash
+      env:
+        LINURA_EVIDENCE_LANE: ${{ inputs.lane }}
+        LINURA_BINDING_SHA256: ${{ steps.verify.outputs.sha256 }}
+        LINURA_ARCHIVE_SHA256: ${{ steps.verify-upload.outputs.archive-sha256 }}
+      run: |
+        set -euo pipefail
+        printf 'qualification-evidence[%s]=%s sealed=%s\n' \
+          "$LINURA_EVIDENCE_LANE" "$LINURA_BINDING_SHA256" "$LINURA_ARCHIVE_SHA256" \
+          >> "$GITHUB_STEP_SUMMARY"

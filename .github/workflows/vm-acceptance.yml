@@ -36,6 +36,11 @@ on:
       - "tools/qualification_envelope.py"
       - "tools/qualification_guest_identity.py"
       - "tests/tooling/test_qualification_envelope.py"
+      - ".github/actions/qualification-evidence/**"
+      - "contracts/qualification-evidence-binding.toml"
+      - "tools/qualification_evidence.py"
+      - "tools/qualification_evidence_verifiers.py"
+      - "tests/tooling/test_qualification_evidence.py"
       - ".github/workflows/trusted-release-proof.yml"
       - ".github/workflows/v09-qualification.yml"
       - "apps/linurad/**"
@@ -303,7 +308,9 @@ jobs:
             --host 127.0.0.1 \
             --port 2222 \
             --user linura \
-            --identity "$SSH_KEY"
+            --identity "$SSH_KEY" \
+            --source-sha "$SOURCE_SHA" \
+            --result-file "$ARTIFACT_DIR/acceptance-result.json"
 
       - name: Record exact-source VM acceptance evidence
         run: |
@@ -452,6 +459,7 @@ jobs:
           artifact-suffix: ${{ inputs.scenario || 'authoritative-observation' }}
           execution-subject-file: ${{ env.ARTIFACT_DIR }}/guest-execution-identity.json
 
+
       - name: Stop disposable guest
         if: always()
         run: |
@@ -471,11 +479,17 @@ jobs:
             cp "$VM_LOG" "$artifact_dir/qemu.log"
           fi
 
-      - name: Upload VM acceptance evidence and diagnostics
-        if: always()
+      - name: Admit and upload sealed qualification evidence
+        uses: ./.github/actions/qualification-evidence
+        with:
+          lane: ${{ inputs.envelope_lane || 'vm-acceptance' }}
+          artifact-root: ${{ env.ARTIFACT_DIR }}
+          artifact-name: linura-vm-acceptance-${{ inputs.scenario || 'authoritative-observation' }}-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+      - name: Upload unqualified VM diagnostics
+        if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: linura-vm-acceptance-${{ inputs.scenario || 'authoritative-observation' }}-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          name: linura-vm-acceptance-${{ inputs.scenario || 'authoritative-observation' }}-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}-unqualified-diagnostics
           path: ${{ runner.temp }}/linura-vm-artifacts/
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 7

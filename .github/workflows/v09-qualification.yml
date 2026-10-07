@@ -21,6 +21,11 @@ on:
       - "tools/qualification_envelope.py"
       - "tools/qualification_guest_identity.py"
       - "tests/tooling/test_qualification_envelope.py"
+      - ".github/actions/qualification-evidence/**"
+      - "contracts/qualification-evidence-binding.toml"
+      - "tools/qualification_evidence.py"
+      - "tools/qualification_evidence_verifiers.py"
+      - "tests/tooling/test_qualification_evidence.py"
       - ".github/workflows/v09-adversarial-security.yml"
       - ".github/workflows/vm-acceptance.yml"
       - ".github/workflows/trusted-release-proof.yml"
@@ -447,11 +452,16 @@ jobs:
           name: linura-v09-contract-envelope-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
           path: /tmp/linura-v09-contract-envelope
 
-      - name: Download exact-source VM evidence
+      - name: Download exact-source sealed VM evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: linura-vm-acceptance-firstboot-offline-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
-          path: /tmp/linura-v09-vm
+          path: /tmp/linura-v09-vm-sealed
+
+      - name: Unseal and structurally verify exact-source VM evidence
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -I tools/qualification_evidence.py unseal             --archive /tmp/linura-v09-vm-sealed/qualification-evidence.tar             --destination "$EVIDENCE_ROOT"
 
       - name: Download exact-source adversarial evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -782,9 +792,18 @@ jobs:
           lane: v09-qualification
           source-sha: ${{ env.SOURCE_SHA }}
 
-      - name: Upload exact-source v0.9 qualification evidence
+
+      - name: Admit and upload sealed qualification evidence
+        uses: ./.github/actions/qualification-evidence
+        with:
+          lane: v09-qualification
+          artifact-root: /tmp/linura-v09-qualification
+          artifact-name: linura-v09-qualification-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+      - name: Upload unqualified v0.9 diagnostics
+        if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: linura-v09-qualification-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          name: linura-v09-qualification-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}-unqualified-diagnostics
           path: /tmp/linura-v09-qualification/
-          if-no-files-found: error
+          if-no-files-found: warn
+          retention-days: 7

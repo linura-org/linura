@@ -20,6 +20,11 @@ on:
       - "contracts/qualification-execution-envelopes.toml"
       - "tools/qualification_envelope.py"
       - "tests/tooling/test_qualification_envelope.py"
+      - ".github/actions/qualification-evidence/**"
+      - "contracts/qualification-evidence-binding.toml"
+      - "tools/qualification_evidence.py"
+      - "tools/qualification_evidence_verifiers.py"
+      - "tests/tooling/test_qualification_evidence.py"
       - ".github/workflows/trusted-release-proof.yml"
       - "crates/linura-library/**"
       - "crates/linura-intent/**"
@@ -88,15 +93,21 @@ jobs:
       - name: Run Library unit and failure-injection qualification
         env:
           LINURA_V07_EVIDENCE_DIR: ${{ env.ARTIFACT_DIR }}
-        run: cargo test --locked -p linura-library --lib -- --test-threads=1
+        run: |
+          set -euo pipefail
+          cargo test --locked -p linura-library --lib -- --test-threads=1 2>&1             | tee "$ARTIFACT_DIR/library-unit-tests.txt"
 
       - name: Run persistent Library acceptance matrix
         env:
           LINURA_V07_EVIDENCE_DIR: ${{ env.ARTIFACT_DIR }}
-        run: cargo test --locked -p linura-library --test v07_qualification -- --test-threads=1
+        run: |
+          set -euo pipefail
+          cargo test --locked -p linura-library --test v07_qualification -- --test-threads=1 2>&1             | tee "$ARTIFACT_DIR/v07-qualification-tests.txt"
 
       - name: Verify public non-privileged SDK integration
-        run: cargo test --locked -p linura-sdk
+        run: |
+          set -euo pipefail
+          cargo test --locked -p linura-sdk 2>&1 | tee "$ARTIFACT_DIR/sdk-tests.txt"
 
       - name: Record exact-source v0.7 qualification evidence
         shell: bash
@@ -185,11 +196,18 @@ jobs:
           lane: v07-library
           source-sha: ${{ env.SOURCE_SHA }}
 
-      - name: Upload v0.7 qualification evidence
-        if: always()
+
+      - name: Admit and upload sealed qualification evidence
+        uses: ./.github/actions/qualification-evidence
+        with:
+          lane: v07-library
+          artifact-root: ${{ env.ARTIFACT_DIR }}
+          artifact-name: linura-v07-library-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+      - name: Upload unqualified v0.7 diagnostics
+        if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: linura-v07-library-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+          name: linura-v07-library-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}-unqualified-diagnostics
           path: ${{ env.ARTIFACT_DIR }}
-          if-no-files-found: error
-          retention-days: 30
+          if-no-files-found: warn
+          retention-days: 7
