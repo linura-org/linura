@@ -1,0 +1,49 @@
+schema_version = 1
+id = "ci/dependency-input-cache"
+state = "development-prerequisite"
+claim = "non-authoritative-cacheable-inputs"
+cache_action_sha = "55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
+cargo_action = ".github/actions/cargo-input-cache/action.yml"
+ubuntu_apt_action = ".github/actions/ubuntu-apt-input-cache/action.yml"
+
+[cache_policy]
+cargo_registry_index = true
+cargo_registry_archives = true
+cargo_git_database = true
+ubuntu_package_payloads = true
+linura_source = false
+linura_build_outputs = false
+qml_cmake_build_outputs = false
+qualification_evidence = false
+runtime_binaries = false
+release_support_promotion = false
+
+[identity]
+cargo = [
+  "runner.os",
+  "runner.arch",
+  "rust-version",
+  "rust-toolchain.toml",
+  "Cargo.lock",
+  ".github/actions/cargo-input-cache/action.yml",
+]
+ubuntu_apt = [
+  "runner.os",
+  "runner.arch",
+  "os-release.id",
+  "os-release.version_id",
+  "installed-package-universe-sha256",
+  "requested-candidate-versions",
+  "simulated-install-closure",
+  ".github/actions/ubuntu-apt-input-cache/action.yml",
+]
+
+[storage]
+ubuntu_apt_root = "runner.temp"
+broad_restore_keys = false
+
+[verification]
+apt_signed_index_resolution = true
+apt_requested_candidate_match_after_install = true
+exact_source_builds_remain_required = true
+cache_hit_is_qualification_evidence = false

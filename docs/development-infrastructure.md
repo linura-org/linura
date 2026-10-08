@@ -118,6 +118,17 @@ three native gate contexts; a successful dispatch or local validation is not
 a substitute for the exact-PR native checks. Missing/skipped mandatory tests
 and unavailable physical/visual/VM evidence remain blocked, never passed.
 
+## Dependency-input caching
+
+Canonical CI follows the same cache-authority boundary as the prepared v0.10 runtime substrate: caches accelerate immutable prerequisites but never become correctness authority. Repository-owned composite actions may retain Cargo registry/git inputs and Ubuntu package payloads only. Cache identities bind the reviewed implementation plus exact dependency/toolchain or runner-package resolution state; broad restore keys are forbidden.
+
+Linura source, Cargo `target/` outputs, QML/CMake build trees, qualification evidence, and runtime binaries are always rebuilt or regenerated from the exact checked-out source. Ubuntu payload caches live under `runner.temp`, are installed through normal APT signed-index resolution, and requested packages are rechecked against their exact candidate versions after installation.
+
+The machine-readable policy is `.github/actions/dependency-input-cache-policy.toml`. The anti-drift policy is executable in `tools/check_ci_cache_policy.py` and adversarially covered by `tests/tooling/test_ci_cache_policy.py`. Both composite-action source files have reviewed SHA-256 fingerprints in that checker: an edit to executable shell semantics (including inert here-document or unreachable-branch decoys) is rejected until the action is explicitly audited and its fingerprint intentionally updated. These reviewed-source fingerprints are separate from runtime cache keys.
+
+The canonical CI job and step structure is also verified: conditional, skipped or failure-suppressed builds and checks cannot silently satisfy the policy. The QML source-build script has its own reviewed fingerprint; ordinary unrelated CI changes do not require re-pinning it. A fingerprint update requires a deliberate code and adversarial review, not automatic acceptance.
+
+Cache bytes are untrusted: the cache service does not sign the stored content. APT validates package integrity against signed repository metadata during normal installation, while Cargo continues to enforce the lockfile and crate checksums. Pull-request caches are scoped to their merge refs and do not automatically accelerate unrelated PRs; a trusted default-branch run can warm shared inputs.
 The routing report sets `qualification_evidence` to false. Qualified records
 must independently bind the exact source SHA, environment/image and toolchain,
 configuration, results and artifact digests. The existing isolated release
