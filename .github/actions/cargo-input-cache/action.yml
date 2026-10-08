@@ -1,0 +1,38 @@
+name: Cache Cargo dependency inputs
+description: Restore immutable Cargo registry and git dependency inputs without caching Linura build outputs.
+inputs:
+  namespace:
+    description: Stable repository-owned cache namespace.
+    required: true
+  rust-version:
+    description: Exact reviewed Rust toolchain version.
+    required: true
+outputs:
+  cache-hit:
+    description: Whether the exact dependency-input cache key was restored.
+    value: ${{ steps.cache.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - name: Validate Cargo cache identity
+      shell: bash
+      env:
+        LINURA_CACHE_NAMESPACE: ${{ inputs.namespace }}
+        LINURA_RUST_VERSION: ${{ inputs.rust-version }}
+      run: |
+        set -euo pipefail
+        [[ "$LINURA_CACHE_NAMESPACE" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]]
+        [[ "$LINURA_RUST_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+        test -f Cargo.lock
+        test -f rust-toolchain.toml
+        test -f "$GITHUB_ACTION_PATH/action.yml"
+
+    - id: cache
+      name: Restore exact Cargo dependency inputs
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+        key: linura-${{ inputs.namespace }}-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.rust-version }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.github/actions/cargo-input-cache/action.yml') }}

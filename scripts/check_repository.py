@@ -33,6 +33,7 @@ REQUIRED = [
     "contracts/stability.toml", "tools/check_contract_stability.py", "tests/tooling/test_contract_stability.py",
     "contracts/roadmap.toml", "contracts/v010-workstation-slices.toml", "tools/check_roadmap.py", "tools/v010_slice_graph.py", "tests/tooling/test_roadmap.py",
     "tools/check_validation_gates.py", "tests/tooling/test_validation_gates.py", ".github/workflows/codex-environment.yml",
+    ".github/actions/dependency-input-cache-policy.toml", "tools/check_ci_cache_policy.py", "tests/tooling/test_ci_cache_policy.py", ".github/actions/cargo-input-cache/action.yml", ".github/actions/ubuntu-apt-input-cache/action.yml",
     "contracts/qualification-execution-envelopes.toml", "tools/qualification_envelope.py", "tests/tooling/test_qualification_envelope.py", "docs/qualification/execution-envelopes.md",
     "contracts/qualification-evidence-binding.toml", "tools/qualification_evidence.py", "tests/tooling/test_qualification_evidence.py", "docs/qualification/evidence-binding.md", ".github/actions/qualification-evidence/action.yml",
     "tools/check_development_workflow.py", "tests/tooling/test_development_workflow.py", ".github/PULL_REQUEST_TEMPLATE.md", ".github/actions/qualification-envelope/action.yml",
@@ -323,6 +324,16 @@ def main() -> int:
     if validation_result.returncode != 0:
         details = validation_result.stderr.strip() or validation_result.stdout.strip()
         failures.append(f"validation gate routing failed: {details}")
+
+    cache_policy_result = subprocess.run(
+        [sys.executable, str(ROOT / "tools/check_ci_cache_policy.py"), str(ROOT)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if cache_policy_result.returncode != 0:
+        details = cache_policy_result.stderr.strip() or cache_policy_result.stdout.strip()
+        failures.append(f"CI dependency-input cache policy failed: {details}")
 
     adr_result = subprocess.run(
         [sys.executable, str(ROOT / "tools/check_adrs.py"), str(ROOT)],

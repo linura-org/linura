@@ -28,6 +28,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Validate CI dependency cache policy before builds
+        run: python3 tools/check_ci_cache_policy.py
       - name: Load repository toolchain contract
         run: |
           set -euo pipefail
@@ -96,15 +98,22 @@ jobs:
         run: rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy --component rustfmt
       - name: Use pinned Rust toolchain
         run: rustup default "$RUST_VERSION"
+
+      - name: Restore Cargo dependency inputs
+        uses: ./.github/actions/cargo-input-cache
+        with:
+          namespace: canonical-ci
+          rust-version: ${{ env.RUST_VERSION }}
+
       - name: Install Linura Shell bridge build dependencies
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            cmake \
-            ninja-build \
-            pkg-config \
-            qt6-base-dev \
+        uses: ./.github/actions/ubuntu-apt-input-cache
+        with:
+          namespace: canonical-ci-shell
+          packages: |
+            cmake
+            ninja-build
+            pkg-config
+            qt6-base-dev
             qt6-declarative-dev
       - name: Build and install Linura Shell QML modules
         run: |

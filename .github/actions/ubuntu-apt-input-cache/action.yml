@@ -1,0 +1,135 @@
+name: Cache Ubuntu package inputs
+description: Restore exact APT package payloads while preserving normal signed-index resolution and installation.
+inputs:
+  namespace:
+    description: Stable repository-owned cache namespace.
+    required: true
+  packages:
+    description: Whitespace-separated Ubuntu package names.
+    required: true
+outputs:
+  cache-hit:
+    description: Whether the exact package-payload cache key was restored.
+    value: ${{ steps.cache.outputs.cache-hit }}
+  cache-key:
+    description: Exact primary cache key.
+    value: ${{ steps.resolve.outputs.cache-key }}
+  manifest-sha256:
+    description: Digest of the runner/package resolution manifest used as cache identity.
+    value: ${{ steps.resolve.outputs.manifest-sha256 }}
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      name: Resolve exact Ubuntu package input identity
+      shell: bash
+      env:
+        LINURA_APT_NAMESPACE: ${{ inputs.namespace }}
+        LINURA_APT_PACKAGES: ${{ inputs.packages }}
+      run: |
+        set -euo pipefail
+        [[ "$LINURA_APT_NAMESPACE" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]]
+
+        mapfile -t packages < <(
+          printf '%s\n' "$LINURA_APT_PACKAGES" |
+            tr '[:space:]' '\n' |
+            sed '/^$/d' |
+            LC_ALL=C sort -u
+        )
+        test "${#packages[@]}" -gt 0
+        for package in "${packages[@]}"; do
+          [[ "$package" =~ ^[a-z0-9][a-z0-9+.-]*(:[a-z0-9-]+)?$ ]]
+        done
+
+        sudo apt-get update
+
+        os_id="$(. /etc/os-release && printf '%s' "$ID")"
+        os_version="$(. /etc/os-release && printf '%s' "$VERSION_ID")"
+        installed_universe_sha256="$(
+          dpkg-query -W -f='${binary:Package}=${Version}\n' |
+            LC_ALL=C sort |
+            sha256sum |
+            awk '{print $1}'
+        )"
+        action_sha256="$(sha256sum "$GITHUB_ACTION_PATH/action.yml" | awk '{print $1}')"
+
+        requested="$(
+          for package in "${packages[@]}"; do
+            candidate="$(apt-cache policy "$package" | awk '/Candidate:/ {print $2; exit}')"
+            test -n "$candidate"
+            test "$candidate" != "(none)"
+            printf '%s=%s\n' "$package" "$candidate"
+          done |
+            LC_ALL=C sort
+        )"
+        install_plan="$(
+          apt-get --simulate install --no-install-recommends "${packages[@]}" |
+            sed -n 's/^Inst \([^ ]*\) (\([^ ]*\).*/\1=\2/p' |
+            LC_ALL=C sort -u
+        )"
+
+        manifest="$(
+          {
+            printf 'schema=1\n'
+            printf 'namespace=%s\n' "$LINURA_APT_NAMESPACE"
+            printf 'runner_os=%s\n' "$RUNNER_OS"
+            printf 'runner_arch=%s\n' "$RUNNER_ARCH"
+            printf 'os=%s\n' "$os_id"
+            printf 'os_version=%s\n' "$os_version"
+            printf 'installed_universe_sha256=%s\n' "$installed_universe_sha256"
+            printf 'action_sha256=%s\n' "$action_sha256"
+            printf '%s\n' "$requested"
+            printf '%s\n' "$install_plan"
+          } |
+            sed '/^$/d'
+        )"
+        digest="$(printf '%s\n' "$manifest" | sha256sum | awk '{print $1}')"
+        cache_dir="$RUNNER_TEMP/linura-apt-inputs/$LINURA_APT_NAMESPACE/$digest"
+        key="linura-$LINURA_APT_NAMESPACE-apt-v1-$RUNNER_OS-$RUNNER_ARCH-$digest"
+
+        {
+          printf 'cache-dir=%s\n' "$cache_dir"
+          printf 'cache-key=%s\n' "$key"
+          printf 'manifest-sha256=%s\n' "$digest"
+        } >> "$GITHUB_OUTPUT"
+
+    - id: cache
+      name: Restore exact Ubuntu package payloads
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.resolve.outputs.cache-dir }}
+        key: ${{ steps.resolve.outputs.cache-key }}
+
+    - name: Install and verify exact Ubuntu packages
+      shell: bash
+      env:
+        LINURA_APT_CACHE_DIR: ${{ steps.resolve.outputs.cache-dir }}
+        LINURA_APT_PACKAGES: ${{ inputs.packages }}
+      run: |
+        set -euo pipefail
+        mapfile -t packages < <(
+          printf '%s\n' "$LINURA_APT_PACKAGES" |
+            tr '[:space:]' '\n' |
+            sed '/^$/d' |
+            LC_ALL=C sort -u
+        )
+        test "${#packages[@]}" -gt 0
+
+        install -d -m 0755 "$LINURA_APT_CACHE_DIR"
+        sudo install -d -o _apt -g root -m 0700 "$LINURA_APT_CACHE_DIR/partial"
+        sudo apt-get install --yes --no-install-recommends \
+          -o "APT::Keep-Downloaded-Packages=true" \
+          -o "Dir::Cache::archives=$LINURA_APT_CACHE_DIR" \
+          "${packages[@]}"
+
+        for package in "${packages[@]}"; do
+          candidate="$(apt-cache policy "$package" | awk '/Candidate:/ {print $2; exit}')"
+          installed="$(dpkg-query -W -f='${Version}' "$package")"
+          test -n "$candidate"
+          test "$candidate" != "(none)"
+          test "$installed" = "$candidate"
+        done
+
+        sudo rm -rf "$LINURA_APT_CACHE_DIR/partial" "$LINURA_APT_CACHE_DIR/lock"
+        sudo chown -R "$(id -u):$(id -g)" "$LINURA_APT_CACHE_DIR"
+        find "$LINURA_APT_CACHE_DIR" -type f -name '*.deb' -exec chmod 0644 {} +
