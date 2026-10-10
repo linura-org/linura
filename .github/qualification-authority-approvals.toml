@@ -1,0 +1,6 @@
+# Protected main holds explicit decisions; candidate PR cannot approve itself.
+# A separate, ledger-only PR must merge before a gate-changing PR qualifies.
+# Approval modes: independent-review or solo-operator (no human independence claim).
+# Solo mode requires exact-head native CI on the separate ledger PR as well.
+schema_version = 1
+solo_operator = "Ehsan-Azari"

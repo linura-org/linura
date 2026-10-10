@@ -1,5 +1,7 @@
 name: Disposable VM acceptance
 
+run-name: '${{ github.workflow }} :: PR${{ github.event.pull_request.number || 0 }} :: ${{ github.sha }}'
+
 on:
   workflow_call:
     inputs:
@@ -65,6 +67,9 @@ on:
       - "docs/qualification/v0.9.0.md"
       - "docs/releases/**"
 
+      - "schemas/acceptance-scenario.v1.schema.json"
+      - "schemas/bootstrap.v1.schema.json"
+      - "schemas/setup.v1.schema.json"
 permissions:
   contents: read
 

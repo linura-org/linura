@@ -1,5 +1,7 @@
 name: v0.8 agent interpretation qualification
 
+run-name: '${{ github.workflow }} :: PR${{ github.event.pull_request.number || 0 }} :: ${{ github.sha }}'
+
 on:
   workflow_call:
     inputs:
@@ -45,6 +47,9 @@ on:
       - "docs/milestones/v0.8.0.md"
       - "docs/qualification/v0.8.0.md"
 
+      - "schemas/capability-blueprint.v1.schema.json"
+      - "schemas/capability-snapshot.v1.schema.json"
+      - "schemas/intent.v1.schema.json"
 permissions:
   contents: read
 

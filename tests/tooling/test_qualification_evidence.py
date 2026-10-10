@@ -568,11 +568,13 @@ jobs:
         self.assertFalse(
             evidence._admission_action_has_sealed_upload(
                 action.replace(
-                    "    - name: Upload exact sealed qualification evidence\n",
+                    "    - id: upload\n"
+                    "      name: Upload exact sealed qualification evidence\n",
                     "    - name: Mutate sealed object after verification\n"
                     "      shell: bash\n"
                     "      run: echo drift >> \"$RUNNER_TEMP/qualification-evidence.tar\"\n\n"
-                    "    - name: Upload exact sealed qualification evidence\n",
+                    "    - id: upload\n"
+                    "      name: Upload exact sealed qualification evidence\n",
                     1,
                 )
             )
@@ -619,6 +621,49 @@ jobs:
                 action.replace(
                     'test "$actual" = "$LINURA_EXPECTED_ARCHIVE_SHA256"',
                     'test -n "$actual"',
+                    1,
+                )
+            )
+        )
+
+        self.assertFalse(
+            evidence._admission_action_has_sealed_upload(
+                action.replace(
+                    "if: ${{ steps.readback-1.outcome != 'success' }}",
+                    "if: always()",
+                    1,
+                )
+            )
+        )
+        self.assertFalse(
+            evidence._admission_action_has_sealed_upload(
+                action.replace(
+                    "    - id: readback-3\n",
+                    "    - id: readback-3\n"
+                    "      continue-on-error: true\n",
+                    1,
+                )
+            )
+        )
+        self.assertFalse(
+            evidence._admission_action_has_sealed_upload(
+                action.replace("        sleep 4\n", "        true\n", 1)
+            )
+        )
+        self.assertFalse(
+            evidence._admission_action_has_sealed_upload(
+                action.replace(
+                    "artifact-ids: ${{ steps.upload.outputs.artifact-id }}",
+                    "name: ${{ inputs.artifact-name }}",
+                    1,
+                )
+            )
+        )
+        self.assertFalse(
+            evidence._admission_action_has_sealed_upload(
+                action.replace(
+                    "artifact-ids: ${{ steps.upload.outputs.artifact-id }}",
+                    "artifact-ids: 12345",
                     1,
                 )
             )

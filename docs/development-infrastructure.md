@@ -111,13 +111,46 @@ critical positive sources. An updated final PR head must pass every applicable
 gate; results from superseded commits are not qualification evidence. Trusted
 release proof independently executes the complete inherited machine suite.
 
-The built-in map is a minimum anti-drift contract, not exhaustive dependency
-inference. Extend it and the applicable specialized workflow in the same PR
-when adding new subsystems. Branch rulesets must independently require the
-three native gate contexts; a successful dispatch or local validation is not
-a substitute for the exact-PR native checks. Missing/skipped mandatory tests
-and unavailable physical/visual/VM evidence remain blocked, never passed.
+The legacy constants in `tools/check_validation_gates.py` remain an independent
+minimum anti-drift guard. The exhaustive PR routing authority is
+`contracts/qualification-gate-matrix.toml`, verified by
+`tools/applicable_qualification.py`. It classifies every execution lane, component, top-level TOML contract, and
+public contract registered by `contracts/stability.toml` (including JSON
+schemas), and requires its ordered path rules to match the executable
+specialized workflow filters. New active components or registered contracts
+fail closed until explicitly routed or deliberately classified as native-only.
 
+The event-driven `Applicable qualification` workflow derives the exact gate
+set for every PR revision and accepts only GitHub `pull_request` workflow runs
+bound to the same PR and exact head SHA. Trusted default-branch
+`pull_request_target` (including `closed`), native `workflow_run`, and
+protected `main` push events reconcile one fail-closed status on each affected
+contributor head SHA across every open PR sharing that SHA.
+Native and specialized runs require the current PR's exact head/base identity;
+the diagnostic Actions status writers serialize by deterministic SHA-prefix shard
+across all event kinds, invalidating every affected head before fallible
+PR checks. They then recheck live runs immediately before publishing success. The reconciler rechecks both identities immediately before
+publication, preventing same-head PRs or a concurrent base update from sharing
+authorization. The write-capable job never checks out PR-head code and never polls for hours
+while occupying a hosted runner. It verifies reviewed job identities for every
+applicable gate and independently enforces the v0.9 full-versus-regression job
+group using the same routing contract as the v0.9 workflow. Missing or running
+gates leave the status pending; skipped, cancelled, failed, timed-out, stale or
+dispatched substitutes fail it. Pure routing-authority edits are validated
+statically and must not fan out to every specialized VM lane. The Actions-authored `applicable-qualification` commit status is
+**diagnostic only**, not a merge authority: same-repository PR workflows can
+forge that context with `statuses: write`. The protected `main` ruleset
+must continue to require `canonical-check`, `dependency-audit`, and
+`analyze` independently, with strict up-to-date branch protection. Only
+**after** the isolated GitHub App is deployed and the real adversarial,
+shared-head, stale-success and ruleset acceptance in
+`docs/qualification/trusted-publisher.md` passes may the ruleset
+add the **App-owned** `linura/applicable-qualification` Check Run pinned
+to its dedicated integration ID. Never require the diagnostic Actions
+status, the same-named check from GitHub Actions, or `Any source`.
+Path-filtered specialized workflows remain non-required globally;
+the trusted App verifies their exact-head applicability. Missing
+physical/visual/VM evidence remains blocked, never passed.
 ## Dependency-input caching
 
 Canonical CI follows the same cache-authority boundary as the prepared v0.10 runtime substrate: caches accelerate immutable prerequisites but never become correctness authority. Repository-owned composite actions may retain Cargo registry/git inputs and Ubuntu package payloads only. Cache identities bind the reviewed implementation plus exact dependency/toolchain or runner-package resolution state; broad restore keys are forbidden.
@@ -129,6 +162,7 @@ The machine-readable policy is `.github/actions/dependency-input-cache-policy.to
 The canonical CI job and step structure is also verified: conditional, skipped or failure-suppressed builds and checks cannot silently satisfy the policy. The QML source-build script has its own reviewed fingerprint; ordinary unrelated CI changes do not require re-pinning it. A fingerprint update requires a deliberate code and adversarial review, not automatic acceptance.
 
 Cache bytes are untrusted: the cache service does not sign the stored content. APT validates package integrity against signed repository metadata during normal installation, while Cargo continues to enforce the lockfile and crate checksums. Pull-request caches are scoped to their merge refs and do not automatically accelerate unrelated PRs; a trusted default-branch run can warm shared inputs.
+
 The routing report sets `qualification_evidence` to false. Qualified records
 must independently bind the exact source SHA, environment/image and toolchain,
 configuration, results and artifact digests. The existing isolated release

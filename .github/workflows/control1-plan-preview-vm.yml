@@ -1,5 +1,7 @@
 name: Control1 plan-preview VM acceptance
 
+run-name: '${{ github.workflow }} :: PR${{ github.event.pull_request.number || 0 }} :: ${{ github.sha }}'
+
 on:
   pull_request:
     paths:
@@ -35,6 +37,10 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
 
+      - "schemas/acceptance-scenario.v1.schema.json"
+      - "schemas/desired-state.v1.schema.json"
+      - "schemas/plan-preview.v1.schema.json"
+      - "schemas/system-graph.v1.schema.json"
 permissions:
   contents: read
 

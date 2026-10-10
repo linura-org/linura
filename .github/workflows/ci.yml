@@ -1,6 +1,6 @@
 name: CI
 
-run-name: '${{ github.workflow }} :: ${{ inputs.dispatch_nonce || github.sha }}'
+run-name: "${{ github.workflow }} :: ${{ github.event_name == 'pull_request' && format('PR{0} :: {1}', github.event.pull_request.number, github.sha) || (inputs.dispatch_nonce || github.sha) }}"
 
 on:
   pull_request:
@@ -123,6 +123,8 @@ jobs:
           /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --check services/qualification-publisher/publisher.mjs
           /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --check services/qualification-publisher/server.mjs
           /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --test services/qualification-publisher/test/*.test.mjs
+      - name: Validate Python tooling syntax before builds
+        run: python3 -m compileall -q scripts tools tests/tooling
       - name: Validate CI dependency cache policy before builds
         run: python3 tools/check_ci_cache_policy.py
       - name: Load repository toolchain contract
@@ -168,7 +170,7 @@ jobs:
           printf '%s  %s\n' "$ACTIONLINT_SHA256" "$archive_path" | sha256sum --check --strict
           mkdir -p "$install_dir"
           tar -xzf "$archive_path" -C "$install_dir" actionlint
-          "$install_dir/actionlint" -color
+          bash scripts/lint_github_workflows.sh "$install_dir/actionlint"
 
           regression="$RUNNER_TEMP/invalid-job-env-runner.yml"
           cat > "$regression" <<'YAML'
@@ -293,8 +295,6 @@ jobs:
           set -euo pipefail
           git diff --exit-code -- .
           git diff --cached --exit-code -- .
-      - name: Validate Python tooling syntax
-        run: python3 -m compileall -q scripts tools
       - name: Validate shell syntax
         run: |
           set -euo pipefail

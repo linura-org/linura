@@ -62,3 +62,4 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0037 — Accept qualification evidence only through envelope-bound independent verification](0037-envelope-bound-qualification-evidence.md)
 - [0038 — Derive qualification acceptance semantically and upload only sealed evidence](0038-semantic-verification-and-sealed-evidence-upload.md)
 - [0039 — Isolate qualification publication under an independent GitHub App](0039-external-qualification-publisher.md)
+- [0040 — Centralize PR qualification routing and exact-head gate admission](0040-applicable-qualification-summary.md)

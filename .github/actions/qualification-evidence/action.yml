@@ -111,7 +111,8 @@ runs:
         printf 'archive=%s\n' "$sealed" >> "$GITHUB_OUTPUT"
         printf 'archive-sha256=%s\n' "$archive_sha" >> "$GITHUB_OUTPUT"
 
-    - name: Upload exact sealed qualification evidence
+    - id: upload
+      name: Upload exact sealed qualification evidence
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: ${{ inputs.artifact-name }}
@@ -120,10 +121,47 @@ runs:
         retention-days: ${{ inputs.retention-days }}
         compression-level: ${{ inputs.compression-level }}
 
-    - name: Read back stored sealed qualification evidence
+    - id: readback-1
+      name: Read back stored sealed qualification evidence (attempt 1)
+      continue-on-error: true
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
-        name: ${{ inputs.artifact-name }}
+        artifact-ids: ${{ steps.upload.outputs.artifact-id }}
+        path: ${{ runner.temp }}/qualification-evidence-readback
+
+    - id: readback-retry-1
+      name: Prepare qualification evidence readback retry 1
+      if: ${{ steps.readback-1.outcome != 'success' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        rm -rf "$RUNNER_TEMP/qualification-evidence-readback"
+        sleep 2
+
+    - id: readback-2
+      name: Read back stored sealed qualification evidence (attempt 2)
+      if: ${{ steps.readback-1.outcome != 'success' }}
+      continue-on-error: true
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        artifact-ids: ${{ steps.upload.outputs.artifact-id }}
+        path: ${{ runner.temp }}/qualification-evidence-readback
+
+    - id: readback-retry-2
+      name: Prepare qualification evidence readback retry 2
+      if: ${{ steps.readback-1.outcome != 'success' && steps.readback-2.outcome != 'success' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        rm -rf "$RUNNER_TEMP/qualification-evidence-readback"
+        sleep 4
+
+    - id: readback-3
+      name: Read back stored sealed qualification evidence (attempt 3)
+      if: ${{ steps.readback-1.outcome != 'success' && steps.readback-2.outcome != 'success' }}
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        artifact-ids: ${{ steps.upload.outputs.artifact-id }}
         path: ${{ runner.temp }}/qualification-evidence-readback
 
     - id: verify-upload

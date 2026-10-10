@@ -1,5 +1,7 @@
 name: v0.10 workstation qualification contract
 
+run-name: '${{ github.workflow }} :: PR${{ github.event.pull_request.number || 0 }} :: ${{ github.sha }}'
+
 on:
   workflow_call:
     inputs:
@@ -99,6 +101,31 @@ on:
       - "tests/tooling/test_operation_semantics.py"
       - "tests/tooling/test_v010_workstation_qualification.py"
 
+      - "hardware/fixtures/**"
+      - "visual/**"
+      - "packaging/arch/**"
+      - "profiles/**"
+      - "supervision/**"
+      - "schemas/hardware-fixture.v1.schema.json"
+      - "schemas/visual-baseline.v1.schema.json"
+      - "schemas/app-supervision.v1.schema.json"
+      - "tools/visual.py"
+      - "tools/workstation_capture_lock.py"
+      - "interfaces/dbus/org.linura.Control1.xml"
+      - "interfaces/dbus/org.linura.Session1.xml"
+      - "schemas/capability-blueprint.v1.schema.json"
+      - "schemas/capability-snapshot.v1.schema.json"
+      - "schemas/derived-surface.v1.schema.json"
+      - "schemas/desired-state.v1.schema.json"
+      - "schemas/plan-preview.v1.schema.json"
+      - "schemas/intent-proposal.v1.schema.json"
+      - "schemas/intent.v1.schema.json"
+      - "schemas/lifecycle-workflow.v1.schema.json"
+      - "schemas/managed-resource.v1.schema.json"
+      - "schemas/provenance.v1.schema.json"
+      - "schemas/system-graph.v1.schema.json"
+      - "schemas/update-plan.v1.schema.json"
+      - "schemas/workflow.v1.schema.json"
 permissions:
   contents: read
 

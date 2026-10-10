@@ -159,8 +159,15 @@ rustup run "$RUST_TOOLCHAIN" cargo clippy --version >/dev/null
 # Prove the exact dependency graph is locally available without network mutation.
 "$cargo_bin" metadata --locked --offline --format-version 1 >/dev/null
 
-# Validate workflow syntax/contexts with the same pinned semantic validator CI uses.
-"$actionlint_bin" -color
+# Validate workflows using the same checked compatibility path as canonical CI.
+# The standalone Codex preflight contract fixture intentionally has no
+# qualification matrix or workflow tree; it still validates its workflow
+# syntax with the pinned executable rather than silently skipping actionlint.
+if [[ -f contracts/qualification-gate-matrix.toml ]]; then
+  bash scripts/lint_github_workflows.sh "$actionlint_bin"
+else
+  "$actionlint_bin" -color
+fi
 
 # Environment verification must not change tracked source.
 codex_verify_source_state "$INITIAL_SOURCE_STATE"

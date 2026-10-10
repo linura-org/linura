@@ -139,11 +139,13 @@ V09_REQUIRED_FULL_EXACT = (
     "tests/tooling/test_v09_adversarial_fast_forward_contract.py",
     "tests/tooling/test_v09_adversarial_transport_contract.py",
     "tests/tooling/test_v09_adversarial_sharding_contract.py",
+    "packaging/arch/hooks/95-linura-update-guard.hook",
 )
 
 V09_REQUIRED_FULL_PREFIXES = (
     "apps/linura-firstboot/",
     "apps/linura-authorityd/",
+    "apps/linura-update-guard/",
     "apps/linurad/",
     "apps/linuractl/",
     "crates/linura-sdk/",
@@ -174,6 +176,7 @@ V09_REQUIRED_FULL_PREFIXES = (
     "executors/",
     "verifiers/",
     "tests/acceptance/",
+    "migrations/",
 )
 
 V09_AUTHORITY_NEGATIVE_COMMAND = (

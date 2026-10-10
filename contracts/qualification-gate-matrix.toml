@@ -1,0 +1,1255 @@
+schema_version = 1
+id = "qualification/applicable-gates"
+repository = "linura-org/linura"
+required_event = "pull_request"
+summary_workflow = ".github/workflows/applicable-qualification.yml"
+summary_job = "reconcile"
+branch_required_check = "applicable-qualification" # diagnostic Actions status; not the App-owned required Check Run
+mandatory_gate_ids = ["canonical-ci", "security-rustsec", "codeql"]
+
+routing_authority_paths = [
+  ".github/workflows/applicable-qualification.yml",
+  "contracts/qualification-gate-matrix.toml",
+  "tools/applicable_qualification.py",
+  "tests/tooling/test_applicable_qualification.py",
+  "services/qualification-publisher/publisher.mjs",
+  "services/qualification-publisher/server.mjs",
+  "services/qualification-publisher/test/publisher.test.mjs",
+]
+
+native_only_components = [
+  "linura",
+  "linura-python",
+  "linura-config",
+  "linura-testkit",
+  "xtask",
+  "linura-agent-ui",
+  "linura-control-center",
+]
+
+native_only_contracts = [
+  "contracts/community.toml",
+  "contracts/qualification-gate-matrix.toml",
+  "contracts/namespaces.toml",
+  "contracts/release-branch-cleanup.toml",
+  "contracts/repository-topology.toml",
+]
+
+release_workflows = [
+  ".github/workflows/crates-io-publish.yml",
+  ".github/workflows/post-release-cleanup.yml",
+  ".github/workflows/post-release-closure.yml",
+  ".github/workflows/release-authorization.yml",
+  ".github/workflows/release-closure-handoff.yml",
+  ".github/workflows/release-preparation.yml",
+  ".github/workflows/release-promotion.yml",
+  ".github/workflows/release-proof-dispatch.yml",
+  ".github/workflows/release-verification.yml",
+  ".github/workflows/release.yml",
+  ".github/workflows/reusable-release-build.yml",
+  ".github/workflows/trusted-release-proof.yml",
+]
+
+[[gate]]
+id = "canonical-ci"
+workflow = ".github/workflows/ci.yml"
+workflow_name = "CI"
+mandatory = true
+execution_lanes = ["canonical-ci"]
+required_jobs = ["canonical-check"]
+paths = []
+
+[[gate]]
+id = "security-rustsec"
+workflow = ".github/workflows/security.yml"
+workflow_name = "Security"
+mandatory = true
+execution_lanes = ["security-rustsec"]
+required_jobs = ["dependency-audit"]
+paths = []
+
+[[gate]]
+id = "codeql"
+workflow = ".github/workflows/codeql.yml"
+workflow_name = "CodeQL"
+mandatory = true
+execution_lanes = ["codeql"]
+required_jobs = ["analyze"]
+paths = []
+
+[[gate]]
+id = "codex-environment"
+workflow = ".github/workflows/codex-environment.yml"
+workflow_name = "Codex environment"
+mandatory = false
+execution_lanes = ["codex-environment"]
+required_jobs = [
+  "fresh-environment",
+]
+paths = [
+  "AGENTS.md",
+  "**/AGENTS.md",
+  "CONTRIBUTING.md",
+  "docs/codex-development.md",
+  "docs/development-infrastructure.md",
+  "scripts/*codex*.sh",
+  "scripts/lib/*.sh",
+  "scripts/lint_github_workflows.sh",
+  "tools/codex/**",
+  "tests/tooling/test_codex*.py",
+  "tools/check_validation_gates.py",
+  "tests/tooling/test_validation_gates.py",
+  "bindings/python/build-requirements.lock",
+  "rust-toolchain.toml",
+  "Cargo.lock",
+  "Cargo.toml",
+  ".github/workflows/codex-environment.yml",
+  ".github/actions/qualification-envelope/**",
+  "contracts/qualification-execution-envelopes.toml",
+  "tools/qualification_envelope.py",
+  "tests/tooling/test_qualification_envelope.py",
+  "bindings/python/src/linura/__init__.py",
+]
+
+[[gate]]
+id = "evidence-publication"
+workflow = ".github/workflows/evidence-publication-checks.yml"
+workflow_name = "Evidence publication contract"
+mandatory = false
+execution_lanes = ["evidence-publication"]
+required_jobs = [
+  "verify",
+]
+paths = [
+  ".github/workflows/evidence-publication-checks.yml",
+  ".github/actions/qualification-envelope/**",
+  "contracts/qualification-execution-envelopes.toml",
+  "tools/qualification_envelope.py",
+  "tests/tooling/test_qualification_envelope.py",
+  ".github/workflows/publish-qualification-evidence.yml",
+  "contracts/evidence-publication.toml",
+  "tools/evidence_publication.py",
+  "tests/tooling/test_evidence_publication.py",
+  "tools/check_validation_gates.py",
+  "tests/tooling/test_validation_gates.py",
+  "docs/qualification/evidence-publication.md",
+  "docs/qualification/evidence-publication-threat-model.md",
+  "docs/security-model.md",
+  "docs/adr/0034-private-qualification-evidence-publication.md",
+  "docs/adr/0035-isolate-media-admission-from-r2-credentials.md",
+  "docs/adr/README.md",
+  "schemas/release-evidence.v1.schema.json",
+]
+
+[[gate]]
+id = "vm-acceptance"
+workflow = ".github/workflows/vm-acceptance.yml"
+workflow_name = "Disposable VM acceptance"
+mandatory = false
+execution_lanes = ["vm-acceptance"]
+required_jobs = [
+  "exact-source disposable VM acceptance",
+]
+paths = [
+  ".github/workflows/vm-acceptance.yml",
+  ".github/actions/qualification-envelope/**",
+  "contracts/qualification-execution-envelopes.toml",
+  "tools/qualification_envelope.py",
+  "tools/qualification_guest_identity.py",
+  "tests/tooling/test_qualification_envelope.py",
+  ".github/actions/qualification-evidence/**",
+  "contracts/qualification-evidence-binding.toml",
+  "tools/qualification_evidence.py",
+  "tools/qualification_evidence_verifiers.py",
+  "tests/tooling/test_qualification_evidence.py",
+  ".github/workflows/trusted-release-proof.yml",
+  ".github/workflows/v09-qualification.yml",
+  "apps/linurad/**",
+  "apps/linuractl/**",
+  "apps/linura-firstboot/**",
+  "crates/linura-bootstrap/**",
+  "crates/linura-hardware/**",
+  "crates/linura-dbus/**",
+  "crates/linura-linux-observation/**",
+  "crates/linura-observation/**",
+  "crates/linura-observation-control/**",
+  "crates/linura-sdk/**",
+  "tests/acceptance/**",
+  "tools/acceptance.py",
+  "tools/vm.py",
+  "tools/codex/versions.env",
+  "rust-toolchain.toml",
+  "Cargo.toml",
+  "Cargo.lock",
+  "contracts/components.toml",
+  "docs/milestones/v0.9.0.md",
+  "docs/qualification/v0.9.0.md",
+  "docs/releases/**",
+  "schemas/acceptance-scenario.v1.schema.json",
+  "schemas/bootstrap.v1.schema.json",
+  "schemas/setup.v1.schema.json",
+]
+
+[[gate]]
+id = "control1-plan-preview"
+workflow = ".github/workflows/control1-plan-preview-vm.yml"
+workflow_name = "Control1 plan-preview VM acceptance"
+mandatory = false
+execution_lanes = ["control1-plan-preview-vm"]
+required_jobs = [
+  "plan-preview-vm / exact-source disposable VM acceptance",
+]
+paths = [
+  ".github/workflows/control1-plan-preview-vm.yml",
+  ".github/actions/qualification-envelope/**",
+  "contracts/qualification-execution-envelopes.toml",
+  "tools/qualification_envelope.py",
+  "tests/tooling/test_qualification_envelope.py",
+  ".github/actions/qualification-evidence/**",
+  "contracts/qualification-evidence-binding.toml",
+  "tools/qualification_evidence.py",
+  "tools/qualification_evidence_verifiers.py",
+  "tests/tooling/test_qualification_evidence.py",
+  ".github/workflows/vm-acceptance.yml",
+  "apps/linurad/**",
+  "apps/linuractl/**",
+  "crates/linura-control/**",
+  "crates/linura-core/**",
+  "crates/linura-dbus/**",
+  "crates/linura-graph/**",
+  "crates/linura-linux-observation/**",
+  "crates/linura-observation/**",
+  "crates/linura-observation-control/**",
+  "crates/linura-planner/**",
+  "crates/linura-protocol/**",
+  "crates/linura-sdk/**",
+  "interfaces/dbus/**",
+  "tests/acceptance/008-control1-plan-preview.json",
+  "tools/acceptance.py",
+  "tools/vm.py",
+  "tools/codex/versions.env",
+  "rust-toolchain.toml",
+  "Cargo.toml",
+  "Cargo.lock",
+  "schemas/acceptance-scenario.v1.schema.json",
+  "schemas/desired-state.v1.schema.json",
+  "schemas/plan-preview.v1.schema.json",
+  "schemas/system-graph.v1.schema.json",
+]
+
+[[gate]]
+id = "v04-durability"
+workflow = ".github/workflows/v04-durability-vm.yml"
+workflow_name = "v0.4 durability fault qualification"
+mandatory = false
+execution_lanes = ["v04-durability"]
+required_jobs = [
+  "exact-source SQLite/WAL crash and power-loss qualification",
+]
+paths = [
+  ".github/workflows/v04-durability-vm.yml",
+  ".github/actions/qualification-envelope/**",
+  "contracts/qualification-execution-envelopes.toml",
+  "tools/qualification_envelope.py",
+  "tools/qualification_guest_identity.py",
+  "tests/tooling/test_qualification_envelope.py",
+  ".github/actions/qualification-evidence/**",
+  "contracts/qualification-evidence-binding.toml",
+  "tools/qualification_evidence.py",
+  "tools/qualification_evidence_verifiers.py",
+  "tests/tooling/test_qualification_evidence.py",
+  "crates/linura-transaction/**",
+  "crates/linura-persistence-sqlite/**",
+  "crates/linura-control/**",
+  "tools/vm.py",
+  "tools/codex/versions.env",
+  "rust-toolchain.toml",
+  "Cargo.toml",
+  "Cargo.lock",
+  "docs/milestones/v0.4.0.md",
+  "docs/releases/v0.4.0.md",
+]
+
+[[gate]]
+id = "v04-enospc"
+workflow = ".github/workflows/v04-enospc-recovery-vm.yml"
+workflow_name = "v0.4 filesystem ENOSPC recovery qualification"
+mandatory = false
+execution_lanes = ["v04-enospc"]
+required_jobs = [
+  "exact-source real ext4 ENOSPC recovery qualification",
+]
+paths = [
+  ".github/workflows/v04-enospc-recovery-vm.yml",
+  ".github/actions/qualification-envelope/**",
+  "contracts/qualification-execution-envelopes.toml",
+  "tools/qualification_envelope.py",
+  "tools/qualification_guest_identity.py",
+  "tests/tooling/test_qualification_envelope.py",
+  ".github/actions/qualification-evidence/**",
+  "contracts/qualification-evidence-binding.toml",
+  "tools/qualification_evidence.py",
+  "tools/qualification_evidence_verifiers.py",
+  "tests/tooling/test_qualification_evidence.py",
+  "crates/linura-persistence-sqlite/**",
+  "crates/linura-transaction/**",
+  "tools/vm.py",
+  "tools/codex/versions.env",
+  "rust-toolchain.toml",
+  "Cargo.toml",
+  "Cargo.lock",
+]
+
+[[gate]]
+id = "v05-executor-verifier"
+workflow = ".github/workflows/v05-executor-verifier-vm.yml"
+workflow_name = "v0.5 executor/verifier qualification"
+mandatory = false
+execution_lanes = ["v05-executor-verifier"]
+required_jobs = [
+  "exact-source isolated executor and independent verifier qualification",
+]
+paths = [
+  ".github/workflows/v05-executor-verifier-vm.yml",
+  ".github/actions/qualification-envelope/**",
+  "contracts/qualification-execution-envelopes.toml",
+  "tools/qualification_envelope.py",
+  "tools/qualification_guest_identity.py",
+  "tests/tooling/test_qualification_envelope.py",
+  ".github/actions/qualification-evidence/**",
+  "contracts/qualification-evidence-binding.toml",
+  "tools/qualification_evidence.py",
+  "tools/qualification_evidence_verifiers.py",
+  "tests/tooling/test_qualification_evidence.py",
+  ".github/workflows/trusted-release-proof.yml",
+  "crates/linura-linux-observation/**",
+  "crates/linura-observation/**",
+  "crates/linura-provider-sdk/**",
+  "executors/linura-executor-systemd/**",
+  "verifiers/linura-verifier-systemd/**",
+  "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
+  "packaging/polkit-1/actions/org.linura.executor.systemd.policy",
+  "packaging/systemd/system/linura-executor-systemd.service",
+  "tests/acceptance/v05/**",
+  "tools/vm.py",
+  "tools/codex/versions.env",
+  "rust-toolchain.toml",
+  "Cargo.toml",
+  "Cargo.lock",
+  "docs/milestones/v0.5.0.md",
+  "docs/releases/v0.5.0.md",
+]
+
+[[gate]]
+id = "v06-managed-lifecycle"
+workflow = ".github/workflows/v06-managed-lifecycle-vm.yml"
+workflow_name = "v0.6 managed lifecycle qualification"
+mandatory = false
+execution_lanes = ["v06-managed-lifecycle"]
+required_jobs = [
+  "exact-source disposable Authority1 managed mutation qualification",
+]
+paths = [
+  ".github/workflows/v06-managed-lifecycle-vm.yml",
+  ".github/actions/qualification-envelope/**",
+  "contracts/qualification-execution-envelopes.toml",
+  "tools/qualification_envelope.py",
+  "tools/qualification_guest_identity.py",
+  "tests/tooling/test_qualification_envelope.py",
+  ".github/actions/qualification-evidence/**",
+  "contracts/qualification-evidence-binding.toml",
+  "tools/qualification_evidence.py",
+  "tools/qualification_evidence_verifiers.py",
+  "tests/tooling/test_qualification_evidence.py",
+  ".github/workflows/trusted-release-proof.yml",
+  "apps/linura-authorityd/**",
+  "crates/linura-control/**",
+  "crates/linura-dbus/**",
+  "crates/linura-lifecycle/**",
+  "crates/linura-linux-observation/**",
+  "crates/linura-observation/**",
+  "crates/linura-observation-control/**",
+  "crates/linura-persistence-sqlite/**",
+  "crates/linura-transaction/**",
+  "executors/linura-executor-systemd/**",
+  "verifiers/linura-verifier-systemd/**",
+  "interfaces/dbus/org.linura.Authority1.xml",
+  "interfaces/dbus/org.linura.Executor.Systemd1.xml",
+  "packaging/dbus-1/system.d/org.linura.Authority1.conf",
+  "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
+  "packaging/polkit-1/actions/org.linura.authority.policy",
+  "packaging/polkit-1/actions/org.linura.executor.systemd.policy",
+  "packaging/polkit-1/rules.d/50-linura-executor-systemd.rules",
+  "packaging/systemd/system/linura-authorityd.service",
+  "packaging/systemd/system/linura-executor-systemd.service",
+  "tests/acceptance/v06/**",
+  "tools/vm.py",
+  "tools/codex/versions.env",
+  "rust-toolchain.toml",
+  "Cargo.toml",
+  "Cargo.lock",
+  "docs/milestones/v0.6.0.md",
+  "schemas/lifecycle-workflow.v1.schema.json",
+  "schemas/managed-resource.v1.schema.json",
+  "schemas/workflow.v1.schema.json",
+]
+
+[[gate]]
+id = "v07-library"
+workflow = ".github/workflows/v07-library-qualification.yml"
+workflow_name = "v0.7 Library qualification"
+mandatory = false
+execution_lanes = ["v07-library"]
+required_jobs = [
+  "exact-source persistent intent and local Library qualification",
+]
+paths = [
+  ".github/workflows/v07-library-qualification.yml",
+  ".github/actions/qualification-envelope/**",
+  "contracts/qualification-execution-envelopes.toml",
+  "tools/qualification_envelope.py",
+  "tests/tooling/test_qualification_envelope.py",
+  ".github/actions/qualification-evidence/**",
+  "contracts/qualification-evidence-binding.toml",
+  "tools/qualification_evidence.py",
+  "tools/qualification_evidence_verifiers.py",
+  "tests/tooling/test_qualification_evidence.py",
+  ".github/workflows/trusted-release-proof.yml",
+  "crates/linura-library/**",
+  "crates/linura-intent/**",
+  "crates/linura-planner/**",
+  "crates/linura-sdk/**",
+  "contracts/components.toml",
+  "contracts/layering.toml",
+  "scripts/check_repository.py",
+  "tools/codex/versions.env",
+  "rust-toolchain.toml",
+  "Cargo.toml",
+  "Cargo.lock",
+  "docs/milestones/v0.7.0.md",
+  "docs/qualification/v0.7.0.md",
+  "schemas/intent.v1.schema.json",
+  "schemas/portable-profile.v1.schema.json",
+  "schemas/portable-setup.v1.schema.json",
+]
+
+[[gate]]
+id = "v08-agent"
+workflow = ".github/workflows/v08-agent-qualification.yml"
+workflow_name = "v0.8 agent interpretation qualification"
+mandatory = false
+execution_lanes = ["v08-agent"]
+required_jobs = [
+  "exact-source proposal-only agent interpretation qualification",
+]
+paths = [
+  ".github/workflows/v08-agent-qualification.yml",
+  ".github/actions/qualification-envelope/**",
+  "contracts/qualification-execution-envelopes.toml",
+  "tools/qualification_envelope.py",
+  "tests/tooling/test_qualification_envelope.py",
+  ".github/actions/qualification-evidence/**",
+  "contracts/qualification-evidence-binding.toml",
+  "tools/qualification_evidence.py",
+  "tools/qualification_evidence_verifiers.py",
+  "tests/tooling/test_qualification_evidence.py",
+  ".github/workflows/trusted-release-proof.yml",
+  ".github/workflows/release.yml",
+  "crates/linura-agent-runtime/**",
+  "crates/linura-control/**",
+  "crates/linura-intent/**",
+  "crates/linura-library/**",
+  "crates/linura-provider-sdk/**",
+  "crates/linura-transaction/**",
+  "schemas/intent-proposal.v1.schema.json",
+  "tools/check_v08_boundaries.py",
+  "contracts/components.toml",
+  "contracts/layering.toml",
+  "scripts/check_repository.py",
+  "tools/codex/versions.env",
+  "rust-toolchain.toml",
+  "Cargo.toml",
+  "Cargo.lock",
+  "docs/milestones/v0.8.0.md",
+  "docs/qualification/v0.8.0.md",
+  "schemas/capability-blueprint.v1.schema.json",
+  "schemas/capability-snapshot.v1.schema.json",
+  "schemas/intent.v1.schema.json",
+]
+
+[[gate]]
+id = "v09-qualification"
+workflow = ".github/workflows/v09-qualification.yml"
+workflow_name = "v0.9 qualification-environment qualification"
+mandatory = false
+execution_lanes = ["v09-qualification-contract","v09-qualification","v09-adversarial-security","v09-adversarial-security-shard"]
+required_jobs = [
+  "v0.9 qualification scope",
+  "v0.9 exact-source contract",
+]
+job_policy = "v09-full-vs-regression"
+full_required_jobs = [
+  "v0.9 offline QualificationEnvironment VM / exact-source disposable VM acceptance",
+  "v0.9 adversarial bootstrap and Q11 / exact Ubuntu/QEMU adversarial guest (primary)",
+  "v0.9 adversarial bootstrap and Q11 / exact Ubuntu/QEMU adversarial guest (persistence)",
+  "v0.9 adversarial bootstrap and Q11 / exact Ubuntu/QEMU adversarial guest (security)",
+  "v0.9 adversarial bootstrap and Q11 / exact Ubuntu/QEMU adversarial guest (connectivity)",
+  "v0.9 adversarial bootstrap and Q11 / exact Ubuntu/QEMU adversarial guest (discovery-source)",
+  "v0.9 adversarial bootstrap and Q11 / exact Ubuntu/QEMU adversarial guest (observation-plan)",
+  "v0.9 adversarial bootstrap and Q11 / exact Ubuntu/QEMU adversarial guest (checkpoint)",
+  "v0.9 adversarial bootstrap and Q11 / exact Ubuntu/QEMU adversarial guest (owner-final)",
+  "v0.9 adversarial bootstrap and Q11 / bind parallel exact-guest adversarial evidence",
+  "bind v0.9 qualification evidence",
+]
+regression_required_jobs = [
+  "v0.9 exact-source regression proof",
+]
+paths = [
+  ".github/workflows/v09-qualification.yml",
+  ".github/actions/qualification-envelope/**",
+  "contracts/qualification-execution-envelopes.toml",
+  "tools/qualification_envelope.py",
+  "tools/qualification_guest_identity.py",
+  "tests/tooling/test_qualification_envelope.py",
+  ".github/actions/qualification-evidence/**",
+  "contracts/qualification-evidence-binding.toml",
+  "tools/qualification_evidence.py",
+  "tools/qualification_evidence_verifiers.py",
+  "tests/tooling/test_qualification_evidence.py",
+  ".github/workflows/v09-adversarial-security.yml",
+  ".github/workflows/vm-acceptance.yml",
+  ".github/workflows/trusted-release-proof.yml",
+  "apps/linura-firstboot/**",
+  "apps/linura-authorityd/**",
+  "apps/linurad/**",
+  "apps/linuractl/**",
+  "crates/linura-sdk/**",
+  "crates/linura-bootstrap/**",
+  "crates/linura-capability-sdk/**",
+  "crates/linura-control/**",
+  "crates/linura-agent-runtime/**",
+  "crates/linura-dbus/**",
+  "crates/linura-library/**",
+  "crates/linura-lifecycle/**",
+  "crates/linura-provider-sdk/**",
+  "crates/linura-policy/**",
+  "crates/linura-transaction/**",
+  "crates/linura-persistence-sqlite/**",
+  "crates/linura-graph/**",
+  "crates/linura-intent/**",
+  "crates/linura-provenance/**",
+  "crates/linura-core/**",
+  "crates/linura-hardware/**",
+  "crates/linura-linux-observation/**",
+  "crates/linura-migrations/**",
+  "crates/linura-observation/**",
+  "crates/linura-observation-control/**",
+  "crates/linura-planner/**",
+  "crates/linura-protocol/**",
+  "crates/linura-update/**",
+  "interfaces/dbus/**",
+  "executors/**",
+  "verifiers/**",
+  "contracts/stability.toml",
+  "tools/v09_qualification_scope.py",
+  "tests/tooling/test_v09_qualification_scope.py",
+  "tools/vm.py",
+  "tools/acceptance.py",
+  "scripts/qualification/v09-adversarial-guest.sh",
+  "contracts/components.toml",
+  "contracts/operation-semantics.toml",
+  "contracts/roadmap.toml",
+  "contracts/v09-qualification-routing.toml",
+  "hardware/support-matrix.json",
+  "docs/adr/0029-v09-first-boot-reference-and-provisioning-boundary.md",
+  "docs/first-boot.md",
+  "docs/hardware-validation.md",
+  "docs/machine-profiles.md",
+  "docs/operation-semantics.md",
+  "docs/platform-profiles.md",
+  "docs/milestones/v0.9.0.md",
+  "docs/qualification/v0.9.0.md",
+  "docs/threat-model-v0.9-recovery.md",
+  "docs/threat-model-v0.9-update-migration.md",
+  "docs/threat-model-v0.9-bootstrap-provisioning.md",
+  "tests/acceptance/**",
+  "tests/tooling/test_component_maturity.py",
+  "tests/tooling/test_operation_semantics.py",
+  "tests/tooling/test_roadmap.py",
+  "tests/tooling/test_v09_recovery_qualification.py",
+  "tests/tooling/test_v09_bootstrap_provisioning_contract.py",
+  "tests/tooling/test_v09_adversarial_fast_forward_contract.py",
+  "tests/tooling/test_v09_adversarial_transport_contract.py",
+  "tests/tooling/test_v09_adversarial_sharding_contract.py",
+  "tools/check_machine_classes.py",
+  "tools/check_operation_semantics.py",
+  "tools/image.py",
+  "tools/check_validation_gates.py",
+  "tests/tooling/test_validation_gates.py",
+  "tools/codex/versions.env",
+  "rust-toolchain.toml",
+  "Cargo.toml",
+  "Cargo.lock",
+  ".cargo/config",
+  ".cargo/config.toml",
+  "packaging/wireplumber/linura-session-audio.lua",
+  "apps/linura-update-guard/**",
+  "packaging/arch/hooks/95-linura-update-guard.hook",
+  "migrations/**",
+  "schemas/acceptance-scenario.v1.schema.json",
+  "schemas/bootstrap.v1.schema.json",
+  "schemas/capability-blueprint.v1.schema.json",
+  "schemas/capability-snapshot.v1.schema.json",
+  "schemas/desired-state.v1.schema.json",
+  "schemas/plan-preview.v1.schema.json",
+  "schemas/intent-proposal.v1.schema.json",
+  "schemas/intent.v1.schema.json",
+  "schemas/lifecycle-workflow.v1.schema.json",
+  "schemas/managed-resource.v1.schema.json",
+  "schemas/migration.v1.schema.json",
+  "schemas/portable-profile.v1.schema.json",
+  "schemas/portable-setup.v1.schema.json",
+  "schemas/provenance.v1.schema.json",
+  "schemas/setup.v1.schema.json",
+  "schemas/system-graph.v1.schema.json",
+  "schemas/update-plan.v1.schema.json",
+  "schemas/workflow.v1.schema.json",
+]
+
+[[gate]]
+id = "v010-workstation"
+workflow = ".github/workflows/v010-qualification.yml"
+workflow_name = "v0.10 workstation qualification contract"
+mandatory = false
+execution_lanes = ["v010-workstation-contract","v010-shell-runtime"]
+required_jobs = [
+  "v0.10 exact-source workstation contract",
+  "v0.10 shell runtime qualification / prepared immutable Arch runtime substrate",
+  "v0.10 shell runtime qualification / exact-source Arch/Hyprland/Quickshell runtime",
+]
+paths = [
+  ".github/workflows/v010-qualification.yml",
+  ".github/actions/qualification-envelope/**",
+  "contracts/qualification-execution-envelopes.toml",
+  "tools/qualification_envelope.py",
+  "tools/qualification_guest_identity.py",
+  "tests/tooling/test_qualification_envelope.py",
+  ".github/actions/qualification-evidence/**",
+  "contracts/qualification-evidence-binding.toml",
+  "tools/qualification_evidence.py",
+  "tools/qualification_evidence_verifiers.py",
+  "tests/tooling/test_qualification_evidence.py",
+  ".github/workflows/v010-shell-runtime-qualification.yml",
+  "contracts/v010-shell-runtime-qualification.toml",
+  "contracts/v010-shell-runtime-substrate.toml",
+  "contracts/v010-workstation-acceptance.toml",
+  "schemas/v010-maintained-workstation-fixture.v1.schema.json",
+  "apps/linura-shell/**",
+  "!apps/linura-shell/AGENTS.md",
+  "!apps/linura-shell/README.md",
+  "apps/linurad/**",
+  "packaging/systemd/user/linura-shell.service",
+  "packaging/systemd/user/linurad.service",
+  "packaging/wireplumber/linura-session-audio.lua",
+  "qualification/v010/shell-runtime/**",
+  "qualification/v010/workstation-acceptance/**",
+  "tools/check_linura_shell.py",
+  "tools/check_v010_shell_runtime_qualification.py",
+  "tools/verify_tray_keyboard.py",
+  "tests/tooling/test_native_keyboard.py",
+  "tools/workstation_acceptance.py",
+  "tools/workstation_q11_runner.py",
+  "tests/tooling/test_linura_shell.py",
+  "tests/tooling/test_v010_shell_runtime_qualification.py",
+  "tests/tooling/test_workstation_acceptance.py",
+  "tests/tooling/test_workstation_q11_runner.py",
+  "contracts/roadmap.toml",
+  "contracts/v010-workstation-qualification.toml",
+  "contracts/v010-workstation-slices.toml",
+  "docs/adr/0033-v010-complete-workstation-product-boundary.md",
+  "contracts/operation-semantics.toml",
+  "contracts/components.toml",
+  "profiles/arch-hyprland-v1.toml",
+  "crates/linura-agent-runtime/**",
+  "crates/linura-capability-sdk/**",
+  "crates/linura-control/**",
+  "crates/linura-core/**",
+  "crates/linura-dbus/**",
+  "crates/linura-graph/**",
+  "crates/linura-hardware/**",
+  "crates/linura-intent/**",
+  "crates/linura-library/**",
+  "crates/linura-lifecycle/**",
+  "crates/linura-linux-observation/**",
+  "crates/linura-observation/**",
+  "crates/linura-observation-control/**",
+  "crates/linura-planner/**",
+  "crates/linura-policy/**",
+  "crates/linura-protocol/**",
+  "crates/linura-provenance/**",
+  "crates/linura-provider-sdk/**",
+  "crates/linura-transaction/**",
+  "contracts/layering.toml",
+  "Cargo.toml",
+  "Cargo.lock",
+  "tools/codex/versions.env",
+  "hardware/support-matrix.json",
+  "packaging/arch/archiso/packages.linura",
+  "qualification/v010/**",
+  "docs/milestones/v0.10.0.md",
+  "docs/operation-semantics.md",
+  "docs/adr/0032-classify-operations-before-authority.md",
+  "docs/platform-profiles.md",
+  "docs/qualification/v0.10.0.md",
+  "tools/check_machine_classes.py",
+  "tools/check_operation_semantics.py",
+  "tools/check_roadmap.py",
+  "tools/v010_slice_graph.py",
+  "tools/check_v010_workstation_qualification.py",
+  "tests/tooling/test_roadmap.py",
+  "tests/tooling/test_operation_semantics.py",
+  "tests/tooling/test_v010_workstation_qualification.py",
+  "hardware/fixtures/**",
+  "visual/**",
+  "packaging/arch/**",
+  "profiles/**",
+  "supervision/**",
+  "schemas/hardware-fixture.v1.schema.json",
+  "schemas/visual-baseline.v1.schema.json",
+  "schemas/app-supervision.v1.schema.json",
+  "tools/visual.py",
+  "tools/workstation_capture_lock.py",
+  "interfaces/dbus/org.linura.Control1.xml",
+  "interfaces/dbus/org.linura.Session1.xml",
+  "schemas/capability-blueprint.v1.schema.json",
+  "schemas/capability-snapshot.v1.schema.json",
+  "schemas/derived-surface.v1.schema.json",
+  "schemas/desired-state.v1.schema.json",
+  "schemas/plan-preview.v1.schema.json",
+  "schemas/intent-proposal.v1.schema.json",
+  "schemas/intent.v1.schema.json",
+  "schemas/lifecycle-workflow.v1.schema.json",
+  "schemas/managed-resource.v1.schema.json",
+  "schemas/provenance.v1.schema.json",
+  "schemas/system-graph.v1.schema.json",
+  "schemas/update-plan.v1.schema.json",
+  "schemas/workflow.v1.schema.json",
+]
+
+[[lane]]
+id = "canonical-ci"
+kind = "pr-gate"
+gate_id = "canonical-ci"
+workflow = ".github/workflows/ci.yml"
+
+[[lane]]
+id = "security-rustsec"
+kind = "pr-gate"
+gate_id = "security-rustsec"
+workflow = ".github/workflows/security.yml"
+
+[[lane]]
+id = "codeql"
+kind = "pr-gate"
+gate_id = "codeql"
+workflow = ".github/workflows/codeql.yml"
+
+[[lane]]
+id = "codex-environment"
+kind = "pr-gate"
+gate_id = "codex-environment"
+workflow = ".github/workflows/codex-environment.yml"
+
+[[lane]]
+id = "evidence-publication"
+kind = "pr-gate"
+gate_id = "evidence-publication"
+workflow = ".github/workflows/evidence-publication-checks.yml"
+
+[[lane]]
+id = "vm-acceptance"
+kind = "pr-gate"
+gate_id = "vm-acceptance"
+workflow = ".github/workflows/vm-acceptance.yml"
+
+[[lane]]
+id = "control1-plan-preview-vm"
+kind = "pr-gate"
+gate_id = "control1-plan-preview"
+workflow = ".github/workflows/control1-plan-preview-vm.yml"
+
+[[lane]]
+id = "v04-durability"
+kind = "pr-gate"
+gate_id = "v04-durability"
+workflow = ".github/workflows/v04-durability-vm.yml"
+
+[[lane]]
+id = "v04-enospc"
+kind = "pr-gate"
+gate_id = "v04-enospc"
+workflow = ".github/workflows/v04-enospc-recovery-vm.yml"
+
+[[lane]]
+id = "v05-executor-verifier"
+kind = "pr-gate"
+gate_id = "v05-executor-verifier"
+workflow = ".github/workflows/v05-executor-verifier-vm.yml"
+
+[[lane]]
+id = "v06-managed-lifecycle"
+kind = "pr-gate"
+gate_id = "v06-managed-lifecycle"
+workflow = ".github/workflows/v06-managed-lifecycle-vm.yml"
+
+[[lane]]
+id = "v07-library"
+kind = "pr-gate"
+gate_id = "v07-library"
+workflow = ".github/workflows/v07-library-qualification.yml"
+
+[[lane]]
+id = "v08-agent"
+kind = "pr-gate"
+gate_id = "v08-agent"
+workflow = ".github/workflows/v08-agent-qualification.yml"
+
+[[lane]]
+id = "v09-qualification-contract"
+kind = "pr-gate"
+gate_id = "v09-qualification"
+workflow = ".github/workflows/v09-qualification.yml"
+
+[[lane]]
+id = "v09-qualification"
+kind = "pr-gate"
+gate_id = "v09-qualification"
+workflow = ".github/workflows/v09-qualification.yml"
+
+[[lane]]
+id = "v09-adversarial-security"
+kind = "pr-gate"
+gate_id = "v09-qualification"
+workflow = ".github/workflows/v09-adversarial-security.yml"
+
+[[lane]]
+id = "v09-adversarial-security-shard"
+kind = "pr-gate"
+gate_id = "v09-qualification"
+workflow = ".github/workflows/v09-adversarial-security.yml"
+
+[[lane]]
+id = "v010-workstation-contract"
+kind = "pr-gate"
+gate_id = "v010-workstation"
+workflow = ".github/workflows/v010-qualification.yml"
+
+[[lane]]
+id = "v010-shell-runtime"
+kind = "pr-gate"
+gate_id = "v010-workstation"
+workflow = ".github/workflows/v010-shell-runtime-qualification.yml"
+
+[[lane]]
+id = "trusted-release-proof"
+kind = "release"
+workflow = ".github/workflows/trusted-release-proof.yml"
+
+[[lane]]
+id = "v010-maintained-hardware"
+kind = "physical"
+entrypoint = "qualification/v010/workstation-acceptance/run-hardware-qualification.sh"
+
+[[component]]
+id = "linurad"
+path = "apps/linurad"
+gates = ["vm-acceptance","control1-plan-preview","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linuractl"
+path = "apps/linuractl"
+gates = ["vm-acceptance","control1-plan-preview","v09-qualification"]
+
+[[component]]
+id = "linura-firstboot"
+path = "apps/linura-firstboot"
+gates = ["vm-acceptance","v09-qualification"]
+
+[[component]]
+id = "linura-authorityd"
+path = "apps/linura-authorityd"
+gates = ["v06-managed-lifecycle","v09-qualification"]
+
+[[component]]
+id = "linura-update-guard"
+path = "apps/linura-update-guard"
+gates = ["v09-qualification"]
+
+[[component]]
+id = "linura"
+path = "crates/linura"
+gates = []
+
+[[component]]
+id = "linura-python"
+path = "bindings/python"
+gates = []
+
+[[component]]
+id = "linura-agent-runtime"
+path = "crates/linura-agent-runtime"
+gates = ["v08-agent","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-capability-sdk"
+path = "crates/linura-capability-sdk"
+gates = ["v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-core"
+path = "crates/linura-core"
+gates = ["control1-plan-preview","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-graph"
+path = "crates/linura-graph"
+gates = ["control1-plan-preview","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-intent"
+path = "crates/linura-intent"
+gates = ["v07-library","v08-agent","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-observation"
+path = "crates/linura-observation"
+gates = ["vm-acceptance","control1-plan-preview","v05-executor-verifier","v06-managed-lifecycle","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-observation-control"
+path = "crates/linura-observation-control"
+gates = ["vm-acceptance","control1-plan-preview","v06-managed-lifecycle","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-linux-observation"
+path = "crates/linura-linux-observation"
+gates = ["vm-acceptance","control1-plan-preview","v05-executor-verifier","v06-managed-lifecycle","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-dbus"
+path = "crates/linura-dbus"
+gates = ["vm-acceptance","control1-plan-preview","v06-managed-lifecycle","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-planner"
+path = "crates/linura-planner"
+gates = ["control1-plan-preview","v07-library","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-policy"
+path = "crates/linura-policy"
+gates = ["v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-protocol"
+path = "crates/linura-protocol"
+gates = ["control1-plan-preview","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-sdk"
+path = "crates/linura-sdk"
+gates = ["vm-acceptance","control1-plan-preview","v07-library","v09-qualification"]
+
+[[component]]
+id = "linura-provenance"
+path = "crates/linura-provenance"
+gates = ["v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-provider-sdk"
+path = "crates/linura-provider-sdk"
+gates = ["v05-executor-verifier","v08-agent","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-transaction"
+path = "crates/linura-transaction"
+gates = ["v04-durability","v04-enospc","v06-managed-lifecycle","v08-agent","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-library"
+path = "crates/linura-library"
+gates = ["v07-library","v08-agent","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-persistence-sqlite"
+path = "crates/linura-persistence-sqlite"
+gates = ["v04-durability","v04-enospc","v06-managed-lifecycle","v09-qualification"]
+
+[[component]]
+id = "linura-control"
+path = "crates/linura-control"
+gates = ["control1-plan-preview","v04-durability","v06-managed-lifecycle","v08-agent","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-bootstrap"
+path = "crates/linura-bootstrap"
+gates = ["vm-acceptance","v09-qualification"]
+
+[[component]]
+id = "linura-migrations"
+path = "crates/linura-migrations"
+gates = ["v09-qualification"]
+
+[[component]]
+id = "linura-update"
+path = "crates/linura-update"
+gates = ["v09-qualification"]
+
+[[component]]
+id = "linura-config"
+path = "crates/linura-config"
+gates = []
+
+[[component]]
+id = "linura-hardware"
+path = "crates/linura-hardware"
+gates = ["vm-acceptance","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "linura-testkit"
+path = "crates/linura-testkit"
+gates = []
+
+[[component]]
+id = "linura-lifecycle"
+path = "crates/linura-lifecycle"
+gates = ["v06-managed-lifecycle","v09-qualification","v010-workstation"]
+
+[[component]]
+id = "xtask"
+path = "tools/xtask"
+gates = []
+
+[[component]]
+id = "linura-executor-systemd"
+path = "executors/linura-executor-systemd"
+gates = ["v05-executor-verifier","v06-managed-lifecycle","v09-qualification"]
+
+[[component]]
+id = "linura-verifier-systemd"
+path = "verifiers/linura-verifier-systemd"
+gates = ["v05-executor-verifier","v06-managed-lifecycle","v09-qualification"]
+
+[[component]]
+id = "linura-agent-ui"
+path = "apps/linura-agent-ui"
+gates = []
+
+[[component]]
+id = "linura-control-center"
+path = "apps/linura-control-center"
+gates = []
+
+[[component]]
+id = "linura-shell"
+path = "apps/linura-shell"
+gates = ["v010-workstation"]
+
+[[contract]]
+path = "contracts/community.toml"
+gates = []
+
+[[contract]]
+path = "contracts/components.toml"
+gates = ["vm-acceptance","v07-library","v08-agent","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "contracts/evidence-publication.toml"
+gates = ["evidence-publication"]
+
+[[contract]]
+path = "contracts/layering.toml"
+gates = ["v07-library","v08-agent","v010-workstation"]
+
+[[contract]]
+path = "contracts/namespaces.toml"
+gates = []
+
+[[contract]]
+path = "contracts/operation-semantics.toml"
+gates = ["v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "contracts/qualification-evidence-binding.toml"
+gates = ["vm-acceptance","control1-plan-preview","v04-durability","v04-enospc","v05-executor-verifier","v06-managed-lifecycle","v07-library","v08-agent","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "contracts/qualification-execution-envelopes.toml"
+gates = ["codex-environment","evidence-publication","vm-acceptance","control1-plan-preview","v04-durability","v04-enospc","v05-executor-verifier","v06-managed-lifecycle","v07-library","v08-agent","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "contracts/qualification-gate-matrix.toml"
+gates = []
+
+[[contract]]
+path = "contracts/release-branch-cleanup.toml"
+gates = []
+
+[[contract]]
+path = "contracts/repository-topology.toml"
+gates = []
+
+[[contract]]
+path = "contracts/roadmap.toml"
+gates = ["v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "contracts/stability.toml"
+gates = ["v09-qualification"]
+
+[[contract]]
+path = "contracts/v010-shell-runtime-qualification.toml"
+gates = ["v010-workstation"]
+
+[[contract]]
+path = "contracts/v010-shell-runtime-substrate.toml"
+gates = ["v010-workstation"]
+
+[[contract]]
+path = "contracts/v010-workstation-acceptance.toml"
+gates = ["v010-workstation"]
+
+[[contract]]
+path = "contracts/v010-workstation-qualification.toml"
+gates = ["v010-workstation"]
+
+[[contract]]
+path = "contracts/v010-workstation-slices.toml"
+gates = ["v010-workstation"]
+
+[[contract]]
+path = "contracts/v09-qualification-routing.toml"
+gates = ["v09-qualification"]
+[[contract]]
+path = "interfaces/dbus/org.linura.Control1.xml"
+gates = ["control1-plan-preview","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "interfaces/dbus/org.linura.Session1.xml"
+gates = ["control1-plan-preview","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "apps/linuractl/src/main.rs"
+gates = ["vm-acceptance","control1-plan-preview","v09-qualification"]
+
+[[contract]]
+path = "crates/linura-sdk/src/lib.rs"
+gates = ["vm-acceptance","control1-plan-preview","v07-library","v09-qualification"]
+
+[[contract]]
+path = "bindings/python/src/linura/__init__.py"
+gates = ["codex-environment"]
+
+[[contract]]
+path = "schemas/acceptance-scenario.v1.schema.json"
+gates = ["vm-acceptance","control1-plan-preview","v09-qualification"]
+
+[[contract]]
+path = "schemas/app-supervision.v1.schema.json"
+gates = ["v010-workstation"]
+
+[[contract]]
+path = "schemas/bootstrap.v1.schema.json"
+gates = ["vm-acceptance","v09-qualification"]
+
+[[contract]]
+path = "schemas/capability-blueprint.v1.schema.json"
+gates = ["v08-agent","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "schemas/capability-snapshot.v1.schema.json"
+gates = ["v08-agent","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "schemas/derived-surface.v1.schema.json"
+gates = ["v010-workstation"]
+
+[[contract]]
+path = "schemas/desired-state.v1.schema.json"
+gates = ["control1-plan-preview","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "schemas/plan-preview.v1.schema.json"
+gates = ["control1-plan-preview","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "schemas/hardware-fixture.v1.schema.json"
+gates = ["v010-workstation"]
+
+[[contract]]
+path = "schemas/intent-proposal.v1.schema.json"
+gates = ["v08-agent","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "schemas/intent.v1.schema.json"
+gates = ["v07-library","v08-agent","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "schemas/lifecycle-workflow.v1.schema.json"
+gates = ["v06-managed-lifecycle","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "schemas/managed-resource.v1.schema.json"
+gates = ["v06-managed-lifecycle","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "schemas/migration.v1.schema.json"
+gates = ["v09-qualification"]
+
+[[contract]]
+path = "schemas/portable-profile.v1.schema.json"
+gates = ["v07-library","v09-qualification"]
+
+[[contract]]
+path = "schemas/portable-setup.v1.schema.json"
+gates = ["v07-library","v09-qualification"]
+
+[[contract]]
+path = "schemas/provenance.v1.schema.json"
+gates = ["v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "schemas/release-evidence.v1.schema.json"
+gates = ["evidence-publication"]
+
+[[contract]]
+path = "schemas/setup.v1.schema.json"
+gates = ["vm-acceptance","v09-qualification"]
+
+[[contract]]
+path = "schemas/system-graph.v1.schema.json"
+gates = ["control1-plan-preview","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "schemas/update-plan.v1.schema.json"
+gates = ["v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "schemas/v010-maintained-workstation-fixture.v1.schema.json"
+gates = ["v010-workstation"]
+
+[[contract]]
+path = "schemas/visual-baseline.v1.schema.json"
+gates = ["v010-workstation"]
+
+[[contract]]
+path = "schemas/workflow.v1.schema.json"
+gates = ["v06-managed-lifecycle","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "interfaces/dbus/org.linura.Executor.Systemd1.xml"
+gates = ["control1-plan-preview","v06-managed-lifecycle","v09-qualification"]
+
+[[contract]]
+path = "interfaces/dbus/org.linura.Authority1.xml"
+gates = ["control1-plan-preview","v06-managed-lifecycle","v09-qualification"]
