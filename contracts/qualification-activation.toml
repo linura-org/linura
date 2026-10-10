@@ -1,0 +1,6 @@
+# Protected main declares intent; this file never activates a GitHub App by itself.
+schema_version = 1
+mode = "off" # off | shadow | enforced
+publisher = "independent-github-app"
+required_app_check = "linura/applicable-qualification"
+acceptance_evidence = "" # Must be populated for enforced; not proof of deployment.

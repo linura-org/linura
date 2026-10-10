@@ -137,37 +137,34 @@ schemas), and requires its ordered path rules to match the executable
 specialized workflow filters. New active components or registered contracts
 fail closed until explicitly routed or deliberately classified as native-only.
 
-The event-driven `Applicable qualification` workflow derives the exact gate
-set for every PR revision and accepts only GitHub `pull_request` workflow runs
-bound to the same PR and exact head SHA. Trusted default-branch
-`pull_request_target` (including `closed`), native `workflow_run`, and
-protected `main` push events reconcile one fail-closed status on each affected
-contributor head SHA across every open PR sharing that SHA.
-Native and specialized runs require the current PR's exact head/base identity;
-the diagnostic Actions status writers serialize by deterministic SHA-prefix shard
-across all event kinds, invalidating every affected head before fallible
-PR checks. They then recheck live runs immediately before publishing success. The reconciler rechecks both identities immediately before
-publication, preventing same-head PRs or a concurrent base update from sharing
-authorization. The write-capable job never checks out PR-head code and never polls for hours
-while occupying a hosted runner. It verifies reviewed job identities for every
-applicable gate and independently enforces the v0.9 full-versus-regression job
-group using the same routing contract as the v0.9 workflow. Missing or running
-gates leave the status pending; skipped, cancelled, failed, timed-out, stale or
-dispatched substitutes fail it. Pure routing-authority edits are validated
-statically and must not fan out to every specialized VM lane. The Actions-authored `applicable-qualification` commit status is
-**diagnostic only**, not a merge authority: same-repository PR workflows can
-forge that context with `statuses: write`. The protected `main` ruleset
-must continue to require `canonical-check`, `dependency-audit`, and
-`analyze` independently, with strict up-to-date branch protection. Only
-**after** the isolated GitHub App is deployed and the real adversarial,
-shared-head, stale-success and ruleset acceptance in
-`docs/qualification/trusted-publisher.md` passes may the ruleset
-add the **App-owned** `linura/applicable-qualification` Check Run pinned
-to its dedicated integration ID. Never require the diagnostic Actions
-status, the same-named check from GitHub Actions, or `Any source`.
-Path-filtered specialized workflows remain non-required globally;
-the trusted App verifies their exact-head applicability. Missing
-physical/visual/VM evidence remains blocked, never passed.
+The applicable-qualification gate matrix continues to define exact
+PR/head/base qualification and each specialized workflow's reviewed paths.
+ADR 0041 supersedes ADR 0040's automatic GitHub Actions diagnostic writer:
+`contracts/qualification-activation.toml` declares **OFF by default** until
+the dedicated independent GitHub App passes the full #196 operator acceptance.
+The `Applicable qualification` workflow has only an explicit
+`workflow_dispatch` input, reads trusted protected-`main` source, and
+has no permission to publish commit statuses or check runs. In OFF it
+validates only the activation policy; SHADOW permits a manually requested
+read-only exact-head decision recorded as advisory JSON in Actions logs.
+A successful manual run is not merge authorization. The complete workflow
+template is pinned by `tools/applicable_qualification.py validate`, which
+rejects additional triggers, jobs, or write permissions.
+
+The previous Python reconciliation code remains available as reviewed
+test-covered implementation but is not invoked by Actions in OFF/SHADOW.
+When ENFORCED is permitted, **only** the separately operated,
+credential-isolated App may publish `linura/applicable-qualification`,
+and branch protection must pin its unique integration ID after operational
+spoofing, shared-head, stale-success, outage, and ruleset acceptance.
+Editing TOML alone does not deploy the App or establish enforcement.
+The existing independent `canonical-check`, `dependency-audit`, and
+`analyze` checks, strict up-to-date branch protection, specialized
+VM/guest/workstation qualification and release proof remain unchanged.
+Historical diagnostic failures remain recorded and do not automatically
+turn green; absence of the optional diagnostic is not evidence of a pass.
+Do not switch OFF to evade an already-required App check.
+
 ## Dependency-input caching
 
 Canonical CI follows the same cache-authority boundary as the prepared v0.10 runtime substrate: caches accelerate immutable prerequisites but never become correctness authority. Repository-owned composite actions may retain Cargo registry/git inputs and Ubuntu package payloads only. Cache identities bind the reviewed implementation plus exact dependency/toolchain or runner-package resolution state; broad restore keys are forbidden.
