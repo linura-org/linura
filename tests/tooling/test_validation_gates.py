@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-import shutil
+import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -622,6 +624,559 @@ class ValidationGateTests(unittest.TestCase):
                     ), errors)
             target.write_text(original, encoding="utf-8")
 
+    def test_codeql_preserves_rust_and_covers_trusted_publisher_javascript(self):
+        path = self.root / ".github/workflows/codeql.yml"
+        original = path.read_text(encoding="utf-8")
+        self.assertIn("languages: rust,javascript-typescript", original)
+        self.assertEqual(gates.check(self.root), [])
+        for replacement in (
+            "languages: rust",
+            "languages: javascript-typescript",
+            "languages: rust,javascript-typescript,python",
+            "languages: javascript-typescript,rust",
+        ):
+            with self.subTest(replacement=replacement):
+                path.write_text(
+                    original.replace(
+                        "languages: rust,javascript-typescript", replacement, 1
+                    ), encoding="utf-8",
+                )
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "CodeQL initialization must configure exactly Rust and JavaScript"
+                    in error for error in errors
+                ), errors)
+        path.write_text(original, encoding="utf-8")
+
+    def test_publisher_authority_tests_cannot_be_removed_or_weakened_in_canonical_ci(self):
+        """Canonical CI itself must preserve the independent App tests.
+
+        The publisher-specific workflow is path-filtered, so merely testing
+        its own YAML does not protect a CI-only malicious workflow edit.
+        """
+        path = self.root / ".github/workflows/ci.yml"
+        original = path.read_text(encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+        pin = "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020"
+        mutations = (
+            ("remove pinned setup", "      - name: Install pinned Node runtime for trusted publisher tests",
+             "      - name: Publisher runtime disabled"),
+            ("replace pinned action", pin, "actions/setup-node@main"),
+            ("use unreviewed Node", "          node-version: '22.23.3'",
+             "          node-version: '22.16.0'"),
+            ("skip runtime", "      - name: Install pinned Node runtime for trusted publisher tests\n",
+             "      - name: Install pinned Node runtime for trusted publisher tests\n"
+             "        if: false\n"),
+            ("disable tests", "      - name: Validate trusted qualification publisher in canonical CI\n",
+             "      - name: Validate trusted qualification publisher in canonical CI\n"
+             "        if: false\n"),
+            ("permit false success", "      - name: Validate trusted qualification publisher in canonical CI\n",
+             "      - name: Validate trusted qualification publisher in canonical CI\n"
+             "        continue-on-error: true\n"),
+            ("remove suite", "          /usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --test services/qualification-publisher/test/*.test.mjs",
+             "          echo 'suite not run'"),
+            ("exit early", "          /usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --check services/qualification-publisher/server.mjs",
+             "          exit 0"),
+            ("drop version check", "          test \"$(/usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --version)\" = 'v22.23.3'",
+             "          echo version ignored"),
+            ("bypass syntax checks", "          /usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --check services/qualification-publisher/publisher.mjs",
+             "          true"),
+            ("override shell", "      - name: Validate trusted qualification publisher in canonical CI\n",
+             "      - name: Validate trusted qualification publisher in canonical CI\n"
+             "        shell: custom-shell {0}\n"),
+        )
+        try:
+            for label, before, after in mutations:
+                with self.subTest(label=label):
+                    self.assertIn(before, original)
+                    path.write_text(original.replace(before, after, 1),
+                                    encoding="utf-8")
+                    errors = gates.check(self.root)
+                    self.assertTrue(any(
+                        "canonical CI missing mandatory publisher authority step"
+                        in e for e in errors
+                    ), errors)
+        finally:
+            path.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_pinned_node_setup_and_authority_suite_must_be_adjacent(self):
+        path = self.root / ".github/workflows/ci.yml"
+        original = path.read_text(encoding="utf-8")
+        marker = "      - name: Validate trusted qualification publisher in canonical CI\n"
+        self.assertIn(marker, original)
+        attacks = (
+            ("GITHUB_PATH fake Node",
+             "      - name: Shadow pinned Node through GITHUB_PATH\n"
+             "        run: |\n"
+             "          mkdir -p \"$RUNNER_TEMP/fake-bin\"\n"
+             "          printf '#!/bin/sh\\nexit 0\\n' > \"$RUNNER_TEMP/fake-bin/node\"\n"
+             "          chmod +x \"$RUNNER_TEMP/fake-bin/node\"\n"
+             "          echo \"$RUNNER_TEMP/fake-bin\" >> \"$GITHUB_PATH\"\n"),
+            ("unreviewed action", "      - uses: actions/cache@9b0c1e0a101ad007e1859fe7b2f2dbd0b5eeafd3\n"),
+            ("additional command", "      - run: echo bypass\n"),
+            ("duplicate protected label",
+             "      - name: Install pinned Node runtime for trusted publisher tests\n"
+             "        run: echo spoof\n"),
+            ("flow mapping",
+             "      - {name: Shadow pinned Node, run: echo shadow}\n"),
+        )
+        try:
+            for label, inserted in attacks:
+                with self.subTest(attack=label):
+                    path.write_text(
+                        original.replace(marker, inserted + marker, 1),
+                        encoding="utf-8",
+                    )
+                    errors = gates.check(self.root)
+                    self.assertTrue(
+                        any("canonical CI must run publisher tests immediately after"
+                            " pinned Node setup" in error for error in errors),
+                        errors,
+                    )
+        finally:
+            path.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_publisher_suite_is_the_first_repository_controlled_execution(self):
+        """Absolute system executables cannot be trusted after an earlier sudo."""
+        path = self.root / ".github/workflows/ci.yml"
+        source = path.read_text(encoding="utf-8")
+        checkout = (
+            "      - uses: actions/checkout@"
+            "3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+            "        with:\n"
+            "          fetch-depth: 0\n"
+        )
+        node = "      - name: Install pinned Node runtime for trusted publisher tests\n"
+        cache = "      - name: Validate CI dependency cache policy before builds\n"
+        self.assertIn(checkout, source)
+        self.assertIn(node, source)
+        self.assertIn(cache, source)
+        malicious = (
+            "      - name: Sudo replace system tools\n"
+            "        run: |\n"
+            "          sudo cp /tmp/attacker-python /usr/bin/python3\n"
+            "          sudo cp /tmp/attacker-env /usr/bin/env\n"
+        )
+        mutations = (
+            ("sudo before checkout", source.replace(checkout, malicious + checkout, 1)),
+            ("sudo before setup", source.replace(node, malicious + node, 1)),
+            ("unreviewed action before setup", source.replace(
+                node, "      - uses: attacker/tool@main\n" + node, 1)),
+            ("altered checkout configuration", source.replace(
+                "          fetch-depth: 0\n",
+                "          fetch-depth: 0\n          submodules: true\n", 1)),
+            ("unreviewed checkout environment", source.replace(
+                checkout, checkout + "        env: { UNTRUSTED: 'true' }\n", 1)),
+            ("cache runs before suite", source.replace(cache, "", 1).replace(
+                node, cache + node, 1)),
+        )
+        try:
+            for label, modified in mutations:
+                with self.subTest(attack=label):
+                    self.assertNotEqual(modified, source)
+                    path.write_text(modified, encoding="utf-8")
+                    errors = gates.check(self.root)
+                    self.assertTrue(any(
+                        "canonical CI must run publisher tests immediately after"
+                        in e or "canonical CI publisher checkout must use exact"
+                        in e or "canonical CI missing mandatory publisher authority step"
+                        in e for e in errors), errors)
+        finally:
+            path.write_text(source, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_canonical_publisher_job_cannot_change_host_or_add_container(self):
+        """Job container/runner injection otherwise bypasses first-step checks."""
+        path = self.root / ".github/workflows/ci.yml"
+        source = path.read_text(encoding="utf-8")
+        base = "  canonical-check:\n    runs-on: ubuntu-24.04\n    steps:\n"
+        self.assertIn(base, source)
+        mutants = (
+            ("attacker runner", base.replace("ubuntu-24.04", "self-hosted")),
+            ("untrusted container", base.replace(
+                "    steps:\n", "    container: attacker/runner:latest\n    steps:\n")),
+            ("untrusted inline container", base.replace(
+                "    steps:\n", "    container: {image: attacker/runner:latest}\n    steps:\n")),
+            ("job service", base.replace(
+                "    steps:\n", "    services: {unsafe: {image: attacker/runner}}\n    steps:\n")),
+            ("job strategy", base.replace(
+                "    steps:\n", "    strategy: {matrix: {os: [self-hosted]}}\n    steps:\n")),
+            ("job-level permissions", base.replace(
+                "    steps:\n", "    permissions: write-all\n    steps:\n")),
+            ("duplicate runner", base.replace(
+                "    steps:\n", "    runs-on: ubuntu-24.04\n    steps:\n")),
+        )
+        try:
+            for label, changed in mutants:
+                with self.subTest(attack=label):
+                    path.write_text(source.replace(base, changed, 1), encoding="utf-8")
+                    errors = gates.check(self.root)
+                    self.assertTrue(any(
+                        "canonical CI publisher job must use exact trusted hosted runner"
+                        in e for e in errors), errors)
+        finally:
+            path.write_text(source, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_publisher_node_suite_does_not_invoke_exported_bash_functions(self):
+        """An upstream GITHUB_ENV Bash function cannot impersonate Node."""
+        path = self.root / ".github/workflows/ci.yml"
+        source = path.read_text(encoding="utf-8")
+        guard = '/usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node'
+        self.assertEqual(source.count(guard), 4)
+        executable = self.root / "fake-node-executable"
+        executable.mkdir()
+        node = executable / "node"
+        node.write_text("#!/bin/sh\nprintf 'real-executable\\n'\n", encoding="utf-8")
+        node.chmod(0o755)
+        env = os.environ.copy()
+        env["PATH"] = str(executable) + os.pathsep + env.get("PATH", "")
+        env["BASH_FUNC_node%%"] = "() { printf 'spoofed-function\\n'; }"
+        actual = subprocess.run(
+            ["/usr/bin/bash", "-c",
+             "node --version; /usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --version"],
+            env=env, capture_output=True, text=True, check=True, timeout=15)
+        self.assertEqual(actual.stdout.splitlines(),
+                         ["spoofed-function", "real-executable"])
+        for replacement in ("node --test", "env node --test",
+                            "/usr/bin/env node --test"):
+            with self.subTest(replacement=replacement):
+                weakened = source.replace(
+                    guard + " --test", replacement, 1)
+                self.assertNotEqual(source, weakened)
+                path.write_text(weakened, encoding="utf-8")
+                self.assertTrue(any(
+                    "canonical CI missing mandatory publisher authority step" in error
+                    for error in gates.check(self.root)))
+        path.write_text(source, encoding="utf-8")
+
+    def test_publisher_provenance_attestation_rejects_stale_and_untracked_code(self):
+        """Run the actual protected CI attestor against a real Git fixture."""
+        source = (self.root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        prefix = "          /usr/bin/python3 -I -S - <<'PY'\n"
+        suffix = "\n          PY\n"
+        self.assertEqual(source.count(prefix), 1)
+        fragment = source.split(prefix, 1)[1].split(suffix, 1)[0]
+        script = "\n".join(line[10:] for line in fragment.splitlines()) + "\n"
+        fixture = self.root / "publisher-source-fixture"
+        fixture.mkdir()
+        scopes = (".github/workflows/ci.yml", "tools/check_validation_gates.py",
+                  "tests/tooling/test_validation_gates.py")
+        for name in scopes:
+            target = fixture / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(self.root / name, target)
+        shutil.copytree(ROOT / "services/qualification-publisher",
+                        fixture / "services/qualification-publisher")
+        def git(*args):
+            return subprocess.run(["/usr/bin/git", *args], cwd=fixture,
+                                  capture_output=True, text=True, check=True, timeout=20
+                                  ).stdout.strip()
+        git("init", "-q")
+        git("add", ".")
+        git("-c", "user.name=Linura Test",
+            "-c", "user.email=linura-test@invalid.example",
+            "commit", "-qm", "source fixture")
+        sha = git("rev-parse", "HEAD")
+        env = os.environ.copy()
+        env["GITHUB_SHA"] = sha
+        fake_bin = fixture / "untrusted-bin"
+        fake_bin.mkdir()
+        (fake_bin / "git").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (fake_bin / "git").chmod(0o755)
+        env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
+        env["GIT_CONFIG_COUNT"] = "1"
+        env["GIT_CONFIG_KEY_0"] = "core.fsmonitor"
+        env["GIT_CONFIG_VALUE_0"] = "true"
+        def attest():
+            return subprocess.run(["/usr/bin/python3", "-I", "-S", "-"],
+                                  input=script, env=env, cwd=fixture,
+                                  capture_output=True, text=True, timeout=30,
+                                  check=False)
+        self.assertEqual(attest().returncode, 0, attest().stderr)
+        publisher = fixture / "services/qualification-publisher/publisher.mjs"
+        original = publisher.read_bytes()
+        publisher.write_bytes(b"// stale publisher code\n")
+        git("update-index", "--assume-unchanged",
+            "services/qualification-publisher/publisher.mjs")
+        self.assertNotEqual(attest().returncode, 0)
+        git("update-index", "--no-assume-unchanged",
+            "services/qualification-publisher/publisher.mjs")
+        publisher.write_bytes(original)
+        self.assertEqual(attest().returncode, 0)
+        injected = fixture / "services/qualification-publisher/test/bypass.test.mjs"
+        injected.write_text("// unexpected suite\n", encoding="utf-8")
+        self.assertNotEqual(attest().returncode, 0)
+        injected.unlink()
+        for name in scopes:
+            target = fixture / name
+            original = target.read_bytes()
+            target.write_bytes(original + b"\n# prior step changed code\n")
+            with self.subTest(name=name):
+                self.assertNotEqual(attest().returncode, 0)
+            target.write_bytes(original)
+        self.assertEqual(attest().returncode, 0)
+        env["GITHUB_SHA"] = "0" * 40
+        self.assertNotEqual(attest().returncode, 0)
+
+    def test_publisher_validator_ignores_path_and_python_startup(self):
+        """Earlier Python PATH/startup injection cannot forge validator success.
+
+        The path-filtered publisher workflow cannot protect ci.yml-only changes,
+        so this must exercise the real interpreter, not just compare YAML text.
+        """
+        path = self.root / ".github/workflows/ci.yml"
+        original = path.read_text(encoding="utf-8")
+        self.assertIn("          /usr/bin/python3 -I -S tools/check_validation_gates.py\n", original)
+        # Simulate an earlier step installing a fake Python executable, while
+        # also poisoning ordinary CPython startup through inherited variables.
+        fake_bin = self.root / "malicious-bin"
+        fake_bin.mkdir()
+        fake = fake_bin / "python3"
+        fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake.chmod(0o755)
+        injected_site = self.root / "untrusted-site"
+        injected_site.mkdir()
+        (injected_site / "sitecustomize.py").write_text(
+            "raise SystemExit(0)\n", encoding="utf-8"
+        )
+        env = os.environ.copy()
+        env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
+        env["PYTHONPATH"] = str(injected_site)
+        env["PYTHONHOME"] = str(self.root / "untrusted-python-home")
+
+        # A PATH-resolved invocation is defeated by the same fake Python.
+        vulnerable = subprocess.run(
+            ["python3", "-c", "raise SystemExit(1)"],
+            env=env, capture_output=True, text=True, check=False, timeout=10,
+        )
+        self.assertEqual(vulnerable.returncode, 0, vulnerable.stderr)
+
+        # Disable the actual Node suite in a CI-only mutation. The pinned,
+        # isolated OS interpreter must execute the checker and reject it.
+        target = "          /usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --test services/qualification-publisher/test/*.test.mjs"
+        self.assertIn(target, original)
+        path.write_text(original.replace(target, "          echo suite bypassed", 1),
+                        encoding="utf-8")
+        verified = subprocess.run(
+            ["/usr/bin/python3", "-I", "-S",
+             str(ROOT / "tools/check_validation_gates.py"), str(self.root)],
+            env=env, capture_output=True, text=True, check=False, timeout=30,
+        )
+        self.assertNotEqual(verified.returncode, 0, verified.stdout)
+        self.assertIn("canonical CI missing mandatory publisher authority step",
+                      verified.stderr)
+
+    def test_canonical_publisher_pins_effective_shell_against_defaults(self):
+        """A no-op inherited shell cannot prevent the checker from executing.
+
+        The checker cannot reject an inherited workflow shell if that same
+        shell already makes its own step a successful no-op. Bind the runner
+        to its absolute trusted Bash executable at the protected step.
+        """
+        path = self.root / ".github/workflows/ci.yml"
+        original = path.read_text(encoding="utf-8")
+        reviewed_shell = "        shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}\n"
+        self.assertEqual(original.count(reviewed_shell), 1)
+        attacks = (
+            ("remove explicit shell", ""),
+            ("use PATH-resolved Bash", "        shell: bash\n"),
+            ("use no-op shell", "        shell: /bin/true {0}\n"),
+            ("use unreviewed Bash flags",
+             "        shell: /usr/bin/bash --noprofile --norc -e {0}\n"),
+            ("use environment-resolved interpreter",
+             "        shell: /usr/bin/env bash --noprofile --norc -euo pipefail {0}\n"),
+            ("append duplicate effective shell",
+             reviewed_shell + "        shell: /bin/true {0}\n"),
+        )
+        try:
+            for label, replacement in attacks:
+                with self.subTest(attack=label):
+                    modified = original.replace(reviewed_shell, replacement, 1)
+                    self.assertNotEqual(modified, original)
+                    path.write_text(modified, encoding="utf-8")
+                    errors = gates.check(self.root)
+                    self.assertTrue(any(
+                        "canonical CI missing mandatory publisher authority step"
+                        in error for error in errors
+                    ), errors)
+            # Realistic CI-only tampering: change effective job/workflow
+            # defaults while removing the protected step-level shell.
+            for scope, mutation in (
+                ("workflow", "defaults:\n  run:\n    shell: /bin/true {0}\n"),
+                ("job", "    defaults:\n      run:\n        shell: /bin/true {0}\n"),
+            ):
+                with self.subTest(scope=scope):
+                    modified = original.replace(reviewed_shell, "", 1)
+                    if scope == "workflow":
+                        modified = mutation + modified
+                    else:
+                        modified = modified.replace(
+                            "  canonical-check:\n",
+                            "  canonical-check:\n" + mutation, 1)
+                    path.write_text(modified, encoding="utf-8")
+                    errors = gates.check(self.root)
+                    self.assertTrue(any(
+                        "canonical CI missing mandatory publisher authority step"
+                        in error for error in errors
+                    ), errors)
+        finally:
+            path.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_canonical_publisher_clears_inherited_node_options(self):
+        path = self.root / ".github/workflows/ci.yml"
+        target = self.root / path
+        original = target.read_text(encoding="utf-8")
+        protected = ("      - name: Validate trusted qualification publisher in canonical CI\n"
+                     "        env:\n"
+                     "          NODE_OPTIONS: ''\n")
+        self.assertIn(protected, original)
+        for replacement in (
+            protected.replace("          NODE_OPTIONS: ''\n", ""),
+            protected.replace("          NODE_OPTIONS: ''", "          NODE_OPTIONS: --test-only"),
+            protected.replace("        env:\n", ""),
+            protected.replace("          NODE_OPTIONS: ''", "          NODE_OPTIONS: $BAD"),
+        ):
+            with self.subTest(replacement=replacement):
+                target.write_text(original.replace(protected, replacement, 1), encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "canonical CI missing mandatory publisher authority step" in e
+                    for e in errors
+                ), errors)
+        target.write_text(original, encoding="utf-8")
+
+    def test_publisher_bash_env_startup_hook_is_blocked_by_canonical_contract(self):
+        path = self.root / ".github/workflows/ci.yml"
+        target = self.root / path
+        original = target.read_text(encoding="utf-8")
+        guarded = ("      - name: Validate trusted qualification publisher in canonical CI\n"
+                   "        env:\n"
+                   "          NODE_OPTIONS: ''\n"
+                   "          BASH_ENV: ''\n"
+                   "          ENV: ''\n")
+        self.assertIn(guarded, original)
+        for token, bad in (
+            ("          BASH_ENV: ''\n", ""),
+            ("          BASH_ENV: ''", "          BASH_ENV: $RUNNER_TEMP/bypass.sh"),
+            ("          BASH_ENV: ''", "          BASH_ENV: $ATTACKER_FILE"),
+            ("          ENV: ''\n", ""),
+            ("          ENV: ''", "          ENV: $RUNNER_TEMP/bypass.sh"),
+            ("          NODE_OPTIONS: ''", "          NODE_OPTIONS: --test-only"),
+        ):
+            with self.subTest(replacement=bad):
+                target.write_text(original.replace(guarded, guarded.replace(token, bad), 1),
+                                  encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "canonical CI missing mandatory publisher authority step" in e
+                    for e in errors), errors)
+        target.write_text(original, encoding="utf-8")
+
+    def test_canonical_publisher_blocks_inherited_bash_options_and_executes_validator(self):
+        path = self.root / ".github/workflows/ci.yml"
+        original = path.read_text(encoding="utf-8")
+        guarded = ("      - name: Validate trusted qualification publisher in canonical CI\n"
+                   "        env:\n"
+                   "          NODE_OPTIONS: ''\n"
+                   "          BASH_ENV: ''\n"
+                   "          ENV: ''\n"
+                   "          SHELLOPTS: ''\n"
+                   "          BASHOPTS: ''\n"
+                   "        shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}\n"
+                   "        run: |\n"
+                   "          set -euo pipefail\n"
+                   "          /usr/bin/python3 -I -S - <<'PY'\n")
+        self.assertIn(guarded, original)
+        for old, new in (
+            ("          SHELLOPTS: ''\n", ""),
+            ("          SHELLOPTS: ''", "          SHELLOPTS: noexec"),
+            ("          BASHOPTS: ''\n", ""),
+            ("          BASHOPTS: ''", "          BASHOPTS: extdebug"),
+            ("          /usr/bin/python3 -I -S - <<'PY'\n", ""),
+            ("          /usr/bin/python3 -I -S - <<'PY'",
+             "          echo 'qualification source attested'"),
+            ("          set -euo pipefail\n", ""),
+        ):
+            with self.subTest(injection=new):
+                modified = original.replace(guarded, guarded.replace(old, new), 1)
+                self.assertNotEqual(modified, original)
+                path.write_text(modified, encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "canonical CI missing mandatory publisher authority step"
+                    in error for error in errors
+                ), errors)
+        # The source attestation runs before the policy checker, so these
+        # mutations must target its later command without assuming adjacency.
+        command = "          /usr/bin/python3 -I -S tools/check_validation_gates.py"
+        self.assertEqual(original.count(command + "\n"), 1)
+        for replacement in (
+            "",
+            "          echo 'qualification checked'",
+            "          python3 tools/check_validation_gates.py",
+            "          /usr/bin/env python3 tools/check_validation_gates.py",
+            "          /usr/bin/python3 tools/check_validation_gates.py",
+            "          /usr/bin/python3 -I tools/check_validation_gates.py",
+        ):
+            with self.subTest(validator_replacement=replacement):
+                modified = original.replace(command + "\n",
+                                            (replacement + "\n") if replacement else "", 1)
+                self.assertNotEqual(modified, original)
+                path.write_text(modified, encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "canonical CI missing mandatory publisher authority step"
+                    in error for error in errors
+                ), errors)
+        for label, needle, injection in (
+            ("workflow inherited", "permissions:\n",
+             "env:\n  SHELLOPTS: noexec\npermissions:\n"),
+            ("job inherited", "    runs-on: ubuntu-24.04\n",
+             "    env:\n      SHELLOPTS: noexec\n    runs-on: ubuntu-24.04\n"),
+            ("job inherited Bash opts", "    runs-on: ubuntu-24.04\n",
+             "    env: { BASHOPTS: extdebug }\n    runs-on: ubuntu-24.04\n"),
+        ):
+            with self.subTest(label=label):
+                path.write_text(original.replace(needle, injection, 1), encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(any(
+                    "canonical CI may not inherit workflow/job environment variables"
+                    in error for error in errors
+                ), errors)
+        path.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_native_canonical_checks_reject_step_environment_noexec(self):
+        path = self.root / ".github/workflows/ci.yml"
+        original = path.read_text(encoding="utf-8")
+        for label in (
+            "Run canonical Linura checks",
+            "Verify canonical crates.io package",
+            "Verify canonical PyPI package",
+        ):
+            before = "      - name: " + label + "\n        run:"
+            self.assertIn(before, original)
+            for injection in (
+                "        env:\n          SHELLOPTS: noexec\n",
+                "        env: {SHELLOPTS: noexec}\n",
+                "        env:\n          BASH_ENV: /tmp/override.sh\n",
+            ):
+                with self.subTest(label=label, injection=injection):
+                    modified = original.replace(
+                        before, "      - name: " + label + "\n" + injection + "        run:", 1)
+                    path.write_text(modified, encoding="utf-8")
+                    errors = gates.check(self.root)
+                    self.assertTrue(any(
+                        "canonical CI missing unconditional executable step: " + label
+                        in error for error in errors
+                    ), errors)
+        path.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
     def test_codeql_actions_must_use_immutable_shas(self):
         path = self.root / ".github/workflows/codeql.yml"
         original = path.read_text(encoding="utf-8")
@@ -938,31 +1493,31 @@ class ValidationGateTests(unittest.TestCase):
                 for e in errors), errors,
         )
 
-    def test_codeql_must_analyze_the_configured_rust_language(self):
+    def test_codeql_must_analyze_configured_rust_and_javascript(self):
         path = ".github/workflows/codeql.yml"
         target = self.root / path
         original = target.read_text(encoding="utf-8")
         for replacement in (
-            "          languages: python # languages: rust\n",
-            "          languages: python\n          languages: rust\n",
-            "          languages: rust, python\n",
+            "          languages: python # languages: rust,javascript-typescript\n",
+            "          languages: python\n          languages: rust,javascript-typescript\n",
+            "          languages: rust,javascript-typescript,python\n",
         ):
             with self.subTest(setting=replacement.strip()):
                 target.write_text(
-                    original.replace("          languages: rust\n", replacement, 1),
+                    original.replace("          languages: rust,javascript-typescript\n", replacement, 1),
                     encoding="utf-8",
                 )
                 errors = gates.check(self.root)
                 self.assertTrue(
-                    any("CodeQL initialization must configure exactly Rust" in e
+                    any("CodeQL initialization must configure exactly Rust and JavaScript" in e
                         for e in errors), errors,
                 )
         target.write_text(original, encoding="utf-8")
 
     def test_codeql_actions_cannot_be_conditional(self):
         path = ".github/workflows/codeql.yml"
-        self.change(path, "          languages: rust\n",
-                    "          languages: rust\n        if: false\n")
+        self.change(path, "          languages: rust,javascript-typescript\n",
+                    "          languages: rust,javascript-typescript\n        if: false\n")
         self.assertTrue(any("CodeQL missing unconditional SHA-pinned action: "
                             "github/codeql-action/init@" in e
                             for e in gates.check(self.root)))

@@ -1,0 +1,41 @@
+[Unit]
+Description=Linura independently authenticated qualification publisher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=linura-qualification-publisher
+StateDirectoryMode=0700
+WorkingDirectory=/opt/linura/qualification-publisher/current
+EnvironmentFile=/etc/linura/qualification-publisher.env
+LoadCredential=app-private-key.pem:/etc/linura/qualification-publisher/app-private-key.pem
+LoadCredential=webhook-secret:/etc/linura/qualification-publisher/webhook-secret
+Environment=PUBLISHER_KEY_FILE=%d/app-private-key.pem
+Environment=PUBLISHER_WEBHOOK_SECRET_FILE=%d/webhook-secret
+ExecStart=/usr/bin/node /opt/linura/qualification-publisher/current/services/qualification-publisher/server.mjs
+Restart=on-failure
+RestartSec=15s
+TimeoutStopSec=30s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+UMask=0077
+ReadOnlyPaths=/opt/linura/qualification-publisher
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

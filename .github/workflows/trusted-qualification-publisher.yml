@@ -1,0 +1,61 @@
+name: Trusted qualification publisher contract
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/trusted-qualification-publisher.yml'
+      - 'services/qualification-publisher/**'
+      - 'docs/adr/0039-external-qualification-publisher.md'
+      - 'docs/qualification/trusted-publisher.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/trusted-qualification-publisher.yml'
+      - 'services/qualification-publisher/**'
+      - 'docs/adr/0039-external-qualification-publisher.md'
+      - 'docs/qualification/trusted-publisher.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    name: qualification-publisher-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22.23.3'
+      - name: Verify runtime and syntax without installing packages
+        run: |
+          test "$(node -p 'process.versions.node')" = '22.23.3'
+          node --check services/qualification-publisher/publisher.mjs
+          node --check services/qualification-publisher/server.mjs
+      - name: Test GitHub App identity, adversarial denial and failure behavior
+        run: node --test services/qualification-publisher/test/*.test.mjs
+      - name: Verify check publisher is isolated from GitHub Actions secrets
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/trusted-qualification-publisher.yml').read_text()
+          # Ignore assertion-source lines: otherwise searching this file
+          # for its own expected strings produces a false failure.
+          directives = [
+              line.strip() for line in source.splitlines()
+              if not line.lstrip().startswith(('assert ', 'for ', 'if '))
+          ]
+          assert 'permissions:' in directives and 'contents: read' in directives
+          assert not any(
+              line == f'{capability}: write'
+              for line in directives
+              for capability in ('statuses', 'checks')
+          )
+          assert not any(
+              line.startswith(key + ':')
+              for line in directives
+              for key in ('PUBLISHER_KEY_FILE', 'PUBLISHER_WEBHOOK_SECRET_FILE')
+          )
+          print('publisher test workflow has no signing or publishing authority')
+          PY

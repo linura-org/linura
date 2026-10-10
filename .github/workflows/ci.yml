@@ -25,9 +25,104 @@ jobs:
   canonical-check:
     runs-on: ubuntu-24.04
     steps:
+      # The publisher owns a required merge authority. Its tests are part of
+      # canonical CI, not solely a path-filtered optional qualification lane.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Install pinned Node runtime for trusted publisher tests
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22.23.3'
+      - name: Validate trusted qualification publisher in canonical CI
+        env:
+          NODE_OPTIONS: ''
+          BASH_ENV: ''
+          ENV: ''
+          SHELLOPTS: ''
+          BASHOPTS: ''
+        shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -I -S - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          
+          def deny(message):
+              raise SystemExit("publisher source provenance denied: " + message)
+          
+          sha = os.environ.get("GITHUB_SHA", "")
+          if not re.fullmatch(r"[0-9a-f]{40}", sha):
+              deny("invalid triggering SHA")
+          git_env = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent",
+                     "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+                     "GIT_NO_REPLACE_OBJECTS": "1"}
+          
+          def git(*args):
+              result = subprocess.run(["/usr/bin/git", *args], env=git_env,
+                                      check=False, stdout=subprocess.PIPE,
+                                      stderr=subprocess.DEVNULL, timeout=20)
+              if result.returncode:
+                  deny("cannot read source commit")
+              return result.stdout
+          
+          if git("rev-parse", "--verify", "HEAD^{commit}").strip().decode("ascii") != sha:
+              deny("checkout is not the triggering revision")
+          scopes = (".github/workflows/ci.yml", "tools/check_validation_gates.py",
+                    "tests/tooling/test_validation_gates.py", "services/qualification-publisher")
+          raw_tree = git("ls-tree", "-r", "-z", "--full-tree", sha, "--", *scopes)
+          expected = {}
+          for item in raw_tree.split(b"\x00"):
+              if not item:
+                  continue
+              try:
+                  info, path = item.split(b"\t", 1)
+                  mode, kind, digest = info.split(b" ")
+                  name = path.decode("utf-8")
+              except (ValueError, UnicodeDecodeError):
+                  deny("malformed source tree")
+              if (mode not in (b"100644", b"100755") or kind != b"blob"
+                      or not re.fullmatch(rb"[0-9a-f]{40}", digest)
+                      or name in expected):
+                  deny("unsafe source tree entry")
+              expected[name] = digest.decode("ascii")
+          root = Path.cwd()
+          seen = set()
+          def visit(path):
+              if path.is_symlink():
+                  deny("source symlink")
+              if path.is_dir():
+                  for entry in path.iterdir():
+                      visit(entry)
+              elif path.is_file():
+                  relative = path.relative_to(root).as_posix()
+                  if relative not in expected:
+                      deny("unexpected source file")
+                  data = path.read_bytes()
+                  actual = hashlib.sha1(b"blob " + str(len(data)).encode("ascii")
+                                        + b"\x00" + data).hexdigest()
+                  if actual != expected[relative]:
+                      deny("source differs from triggering commit")
+                  seen.add(relative)
+              else:
+                  deny("missing or special source entry")
+          for scope in scopes:
+              path = root / scope
+              if not path.exists() and not path.is_symlink():
+                  deny("missing protected source")
+              visit(path)
+          if seen != set(expected) or len(seen) < 6:
+              deny("incomplete protected source inventory")
+          print("publisher tests bound to triggering source SHA")
+          PY
+          /usr/bin/python3 -I -S tools/check_validation_gates.py
+          test "$(/usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --version)" = 'v22.23.3'
+          /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --check services/qualification-publisher/publisher.mjs
+          /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --check services/qualification-publisher/server.mjs
+          /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --test services/qualification-publisher/test/*.test.mjs
       - name: Validate CI dependency cache policy before builds
         run: python3 tools/check_ci_cache_policy.py
       - name: Load repository toolchain contract
