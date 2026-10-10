@@ -40,6 +40,25 @@ full_exact = [
   "tests/tooling/test_v09_adversarial_fast_forward_contract.py",
   "tests/tooling/test_v09_adversarial_transport_contract.py",
   "tests/tooling/test_v09_adversarial_sharding_contract.py",
+  "packaging/arch/hooks/95-linura-update-guard.hook",
+  "schemas/acceptance-scenario.v1.schema.json",
+  "schemas/bootstrap.v1.schema.json",
+  "schemas/capability-blueprint.v1.schema.json",
+  "schemas/capability-snapshot.v1.schema.json",
+  "schemas/desired-state.v1.schema.json",
+  "schemas/plan-preview.v1.schema.json",
+  "schemas/intent-proposal.v1.schema.json",
+  "schemas/intent.v1.schema.json",
+  "schemas/lifecycle-workflow.v1.schema.json",
+  "schemas/managed-resource.v1.schema.json",
+  "schemas/migration.v1.schema.json",
+  "schemas/portable-profile.v1.schema.json",
+  "schemas/portable-setup.v1.schema.json",
+  "schemas/provenance.v1.schema.json",
+  "schemas/setup.v1.schema.json",
+  "schemas/system-graph.v1.schema.json",
+  "schemas/update-plan.v1.schema.json",
+  "schemas/workflow.v1.schema.json",
 ]
 
 full_prefixes = [
@@ -47,6 +66,7 @@ full_prefixes = [
   "apps/linura-authorityd/",
   "apps/linurad/",
   "apps/linuractl/",
+  "apps/linura-update-guard/",
   "crates/linura-sdk/",
   "crates/linura-bootstrap/",
   "crates/linura-migrations/",
@@ -75,6 +95,7 @@ full_prefixes = [
   "executors/",
   "verifiers/",
   "tests/acceptance/",
+  "migrations/",
 ]
 
 # AGENTS/README alone do not change the executable environment.

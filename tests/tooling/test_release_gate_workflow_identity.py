@@ -92,8 +92,7 @@ class ReleaseGateWorkflowIdentityTests(unittest.TestCase):
                 text = (WORKFLOWS / name).read_text(encoding="utf-8")
                 self.assertIn("dispatch_nonce:", text)
                 self.assertIn(
-                    f"run-name: '${{{{ github.workflow }}}} :: "
-                    f"${{{{ inputs.dispatch_nonce || github.sha }}}}'",
+                    "run-name: \"${{ github.workflow }} :: ${{ github.event_name == 'pull_request' && format('PR{0} :: {1}', github.event.pull_request.number, github.sha) || (inputs.dispatch_nonce || github.sha) }}\"",
                     text,
                 )
                 self.assertIn(f"name: {workflow}", text)

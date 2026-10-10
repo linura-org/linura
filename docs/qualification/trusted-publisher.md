@@ -4,9 +4,18 @@
 
 `services/qualification-publisher/` is a **separately operated GitHub App check-run publisher**. The GitHub Actions publisher-specific workflow performs tests only; required canonical CI runs the publisher adversarial suite immediately after pinned checkout and Node setup, before any repository-controlled command. The canonical job also pins its exact hosted runner and rejects job containers, services and alternate job-level configuration; this prevents an attacker-controlled container from replacing system tools before any step begins. This prevents prior passwordless-sudo steps from replacing absolute system tools; CodeQL scans JavaScript as well as Rust: no private key, webhook secret, installation token, App deployment or check publication is permitted in Actions. PR-controlled workflows must have no path to publisher credentials, host filesystem, deployment control, or runtime inputs. Never use a repo/organization Actions secret for the private key, even with environment approvals.
 
-There are two independent policies: (1) GitHub's existing `canonical-check`, `dependency-audit`, and `analyze`, which remain required and unchanged, and (2) the reviewed default-branch qualification policy in #206. The publisher **does not accept an Actions commit status** named `applicable-qualification` as proof of (2); that status is diagnostic only. The producer's check is named **`linura/applicable-qualification`**, deliberately different from the Actions status. The only way to obtain a successful producer check is a fresh, bounded, exact-head decision from `tools/applicable_qualification.py decision-head` executed from a protected host checkout of reviewed `main`. This read-only command is an **integration contract still to be implemented in #206**. Missing command, malformed result, changed PR/base or unavailable GitHub API fails closed; a pending decision leaves the check running.
+There are two independent policies: (1) GitHub's existing `canonical-check`, `dependency-audit`, and `analyze`, which remain required and unchanged, and (2) the reviewed default-branch qualification policy in #206. The publisher **does not accept an Actions commit status** named `applicable-qualification` as proof of (2); that status is diagnostic only. The producer's check is named **`linura/applicable-qualification`**, deliberately different from the Actions status. The only way to obtain a successful producer check is a fresh, bounded, exact-head decision from `tools/applicable_qualification.py decision-head` executed from a protected host checkout of reviewed `main`. This read-only command is implemented by PR #206 and must be merged, installed
+from reviewed protected `main`, and exercised against a real App installation
+before publication is enabled. Missing command, malformed result, changed PR/base or unavailable GitHub API fails closed; a pending decision leaves the check running.
 
-**Default is `PUBLISHER_ENABLED=false`.** Merge the publisher PR first without registering a required check. Provision, test in diagnostic mode, merge the read-only verifier into #206, and only then enable the App and lock branch protection to its integration ID after spoofing tests. #196 remains open until these deployment checks pass.
+**Default is `PUBLISHER_ENABLED=false`.** The independent publisher from
+#208 is already merged, but it has **not** thereby been deployed or enabled.
+Merge #206 only after its exact-head review and checks; install its reviewed
+read-only verifier from protected `main` on the isolated App host. Complete
+diagnostic-mode provisioning, provenance, spoofing, shared-head, outage and
+recovery acceptance **before** enabling publication and pinning the required
+Check Run to the dedicated App integration ID. Keep #196 open until the
+real operational/ruleset evidence is collected and accepted.
 
 ## GitHub App provisioning (requires maintainer actions)
 
@@ -48,6 +57,15 @@ Its stdout must be a single JSON object with exact fields:
 {"schema_version":1,"repository":"linura-org/linura","head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","state":"pending","prs":[{"number":206,"head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","base_ref":"main","base_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","required_gate_ids":["canonical-ci","security-rustsec","codeql"],"accepted_gate_ids":[]}]}
 ```
 
+The verifier binds native `pull_request` runs through their event-derived
+original PR number and synthetic test-merge SHA recorded in the protected
+workflow `run-name`. The
+immutable merge commit's base/head parents must match the live PR identity;
+mutable `workflow_run.pull_requests` base metadata is not trusted as proof.
+The Python verifier reserves an internal 115-second API deadline inside the
+App's 120-second subprocess limit. One request batch reuses only immutable
+run-attempt job and PR-file inventories; a candidate success must fetch an
+independent second batch. API timeouts or exhausted budget deny approval.
 The verifier is bounded to 120 seconds. It must independently enumerate *all* open PRs sharing the head, use the reviewed matrix and exact PR-native runs/base association, validate all required gate jobs, and return no `success` while anything is stale/skipped/missing. Its protected source may not be patched by an incoming PR. The publisher additionally re-fetches live PR head/base identities after the verifier responds and verifies the mandatory gate set. **It never publishes a successful check on the shared contributor head.** On an accepted decision it fetches each PR's `refs/pull/<number>/merge` from GitHub, verifies that the synthetic test-merge commit has exactly the current base and contributor head as its parents, detects duplicate merge SHAs, and publishes an independent App check only on that PR-specific test-merge commit. GitHub's branch protection evaluates test-merge checks when present. The contributor-head check remains non-passing; a subsequently opened PR sharing the head does not inherit the earlier PR's merge-ref approval. The App journal records the potentially successful **merge SHA**, not the shared contributor head. The publisher never reads JSON attached to PR comments, artifacts, Actions statuses, event payloads, or issue text as its decision.
 
 ## Activation acceptance / red-team proof
@@ -62,7 +80,13 @@ Before editing `main` ruleset `21831344`:
 - [ ] Real source update after base change, correctly qualified PR, webhook loss plus scheduled recovery, maintenance outage, restart, rollback and credential rotation are proved end to end.
 - [ ] Existing required native gates stay required, strict up-to-date protection remains active, and an operator verifies the independent App check's identity on the exact **PR-specific test-merge SHA**, with no successful App check on the shared contributor head.
 
-Never mark #206 or #196 complete based only on the local/mock tests or a green GitHub Actions workflow. This PR installs no GitHub App, key, external host, DNS, ruleset update or final #206 read-only interface; these are explicit activation dependencies, not silent assumed work.
+Never treat green mock tests or GitHub Actions as proof of completion of
+#196. The merged #208 publisher and the pending #206 verifier are repository
+implementations, **not** a deployed App, private key, external host, DNS
+configuration, ruleset integration-ID pinning, or real-App acceptance proof.
+#206 may merge when its code, documentation, adversarial review, and exact-head
+gates are complete, but operational acceptance must remain explicitly open
+under #196.
 
 ## Incident response
 

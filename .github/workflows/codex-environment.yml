@@ -1,5 +1,7 @@
 name: Codex environment
 
+run-name: '${{ github.workflow }} :: PR${{ github.event.pull_request.number || 0 }} :: ${{ github.sha }}'
+
 on:
   pull_request:
     paths:
@@ -10,6 +12,7 @@ on:
       - "docs/development-infrastructure.md"
       - "scripts/*codex*.sh"
       - "scripts/lib/*.sh"
+      - "scripts/lint_github_workflows.sh"
       - "tools/codex/**"
       - "tests/tooling/test_codex*.py"
       - "tools/check_validation_gates.py"
@@ -23,6 +26,7 @@ on:
       - "contracts/qualification-execution-envelopes.toml"
       - "tools/qualification_envelope.py"
       - "tests/tooling/test_qualification_envelope.py"
+      - "bindings/python/src/linura/__init__.py"
   push:
     branches: [main]
     paths:
@@ -33,6 +37,7 @@ on:
       - "docs/development-infrastructure.md"
       - "scripts/*codex*.sh"
       - "scripts/lib/*.sh"
+      - "scripts/lint_github_workflows.sh"
       - "tools/codex/**"
       - "tests/tooling/test_codex*.py"
       - "tools/check_validation_gates.py"
@@ -46,6 +51,7 @@ on:
       - "contracts/qualification-execution-envelopes.toml"
       - "tools/qualification_envelope.py"
       - "tests/tooling/test_qualification_envelope.py"
+      - "bindings/python/src/linura/__init__.py"
   workflow_dispatch:
 
 permissions:
@@ -57,6 +63,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate qualification Python syntax before bootstrap
+        run: python3 -m py_compile tools/applicable_qualification.py
       - name: Prepare isolated environment
         run: |
           set -euo pipefail

@@ -1,5 +1,7 @@
 name: Evidence publication contract
 
+run-name: '${{ github.workflow }} :: PR${{ github.event.pull_request.number || 0 }} :: ${{ github.sha }}'
+
 on:
   pull_request:
     paths:
@@ -20,6 +22,7 @@ on:
       - "docs/adr/0034-private-qualification-evidence-publication.md"
       - "docs/adr/0035-isolate-media-admission-from-r2-credentials.md"
       - "docs/adr/README.md"
+      - "schemas/release-evidence.v1.schema.json"
   push:
     branches: [main]
     paths:
@@ -40,6 +43,7 @@ on:
       - "docs/adr/0034-private-qualification-evidence-publication.md"
       - "docs/adr/0035-isolate-media-admission-from-r2-credentials.md"
       - "docs/adr/README.md"
+      - "schemas/release-evidence.v1.schema.json"
 
 permissions:
   contents: read

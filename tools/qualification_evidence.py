@@ -1148,30 +1148,35 @@ def _admission_action_has_sealed_upload(source: str) -> bool:
         if envelope_lib.workflow_step_uses_prefix(block, "actions/download-artifact@"):
             downloads.append((start, block))
 
-    required = ("attest", "bind", "verify", "seal", "verify-upload")
+    required = (
+        "attest",
+        "bind",
+        "verify",
+        "seal",
+        "upload",
+        "readback-1",
+        "readback-retry-1",
+        "readback-2",
+        "readback-retry-2",
+        "readback-3",
+        "verify-upload",
+    )
     if (
         any(step_id not in by_id for step_id in required)
         or len(uploads) != 1
-        or len(downloads) != 1
+        or len(downloads) != 3
     ):
-        return False
-    ordered = [
-        by_id["attest"][0],
-        by_id["bind"][0],
-        by_id["verify"][0],
-        by_id["seal"][0],
-        uploads[0][0],
-        downloads[0][0],
-        by_id["verify-upload"][0],
-    ]
-    if ordered != sorted(ordered) or len(set(ordered)) != len(ordered):
         return False
 
     step_index = {start: index for index, (start, _) in enumerate(steps)}
     sealed_chain = [
         by_id["seal"][0],
-        uploads[0][0],
-        downloads[0][0],
+        by_id["upload"][0],
+        by_id["readback-1"][0],
+        by_id["readback-retry-1"][0],
+        by_id["readback-2"][0],
+        by_id["readback-retry-2"][0],
+        by_id["readback-3"][0],
         by_id["verify-upload"][0],
     ]
     try:
@@ -1179,23 +1184,49 @@ def _admission_action_has_sealed_upload(source: str) -> bool:
     except KeyError:
         return False
     if sealed_chain_indexes != list(
-        range(sealed_chain_indexes[0], sealed_chain_indexes[0] + len(sealed_chain_indexes))
+        range(
+            sealed_chain_indexes[0],
+            sealed_chain_indexes[0] + len(sealed_chain_indexes),
+        )
     ):
+        return False
+
+    ordered = [
+        by_id["attest"][0],
+        by_id["bind"][0],
+        by_id["verify"][0],
+        *sealed_chain,
+    ]
+    if ordered != sorted(ordered) or len(set(ordered)) != len(ordered):
         return False
 
     attest = by_id["attest"][1]
     bind = by_id["bind"][1]
     verify = by_id["verify"][1]
     seal = by_id["seal"][1]
-    upload = uploads[0][1]
-    download = downloads[0][1]
+    upload = by_id["upload"][1]
+    if uploads[0][0] != by_id["upload"][0]:
+        return False
+    readback_1 = by_id["readback-1"][1]
+    retry_1 = by_id["readback-retry-1"][1]
+    readback_2 = by_id["readback-2"][1]
+    retry_2 = by_id["readback-retry-2"][1]
+    readback_3 = by_id["readback-3"][1]
     verify_upload = by_id["verify-upload"][1]
 
-    # Every authority-bearing step must use normal success semantics.  A caller
-    # or future edit may not resurrect admission/upload with always()/failure().
-    for block in (attest, bind, verify, seal, upload, download, verify_upload):
-        if envelope_lib.workflow_step_direct_value(block, "if") is not None:
+    # Authority-bearing steps keep normal success semantics. The bounded
+    # readback retries are storage-observation retries only; they can never
+    # mutate the sealed upload or turn a failed digest comparison into a pass.
+    for block in (attest, bind, verify, seal, upload, verify_upload):
+        if (
+            envelope_lib.workflow_step_direct_value(block, "if") is not None
+            or envelope_lib.workflow_step_direct_value(
+                block, "continue-on-error"
+            )
+            is not None
+        ):
             return False
+
     if "qualification_evidence.py attest" not in attest:
         return False
     if "qualification_evidence.py bind" not in bind:
@@ -1211,25 +1242,90 @@ def _admission_action_has_sealed_upload(source: str) -> bool:
         return False
     if '--binding "$LINURA_EVIDENCE_ROOT/evidence-binding.json"' not in seal:
         return False
-    if envelope_lib.workflow_step_input_value(upload, "path") != "${{ steps.seal.outputs.archive }}":
+    if (
+        envelope_lib.workflow_step_input_value(upload, "path")
+        != "${{ steps.seal.outputs.archive }}"
+        or envelope_lib.workflow_step_input_value(upload, "name")
+        != "${{ inputs.artifact-name }}"
+        or envelope_lib.workflow_step_input_value(upload, "if-no-files-found")
+        != "error"
+    ):
         return False
-    if envelope_lib.workflow_step_input_value(upload, "name") != "${{ inputs.artifact-name }}":
+
+    readbacks = (readback_1, readback_2, readback_3)
+    if any(
+        envelope_lib.workflow_step_input_value(block, "artifact-ids")
+        != "${{ steps.upload.outputs.artifact-id }}"
+        or envelope_lib.workflow_step_input_value(block, "name") is not None
+        or envelope_lib.workflow_step_input_value(block, "repository") is not None
+        or envelope_lib.workflow_step_input_value(block, "run-id") is not None
+        or envelope_lib.workflow_step_input_value(block, "github-token") is not None
+        or envelope_lib.workflow_step_input_value(block, "path")
+        != "${{ runner.temp }}/qualification-evidence-readback"
+        for block in readbacks
+    ):
         return False
-    if envelope_lib.workflow_step_input_value(upload, "if-no-files-found") != "error":
+
+    first_condition = envelope_lib.workflow_step_direct_value(
+        readback_1, "if"
+    )
+    second_condition = envelope_lib.workflow_step_direct_value(
+        readback_2, "if"
+    )
+    third_condition = envelope_lib.workflow_step_direct_value(
+        readback_3, "if"
+    )
+    retry_1_condition = envelope_lib.workflow_step_direct_value(retry_1, "if")
+    retry_2_condition = envelope_lib.workflow_step_direct_value(retry_2, "if")
+    expected_retry_1 = "${{ steps.readback-1.outcome != 'success' }}"
+    expected_retry_2 = (
+        "${{ steps.readback-1.outcome != 'success' && "
+        "steps.readback-2.outcome != 'success' }}"
+    )
+    if (
+        first_condition is not None
+        or envelope_lib.workflow_step_direct_value(
+            readback_1, "continue-on-error"
+        )
+        != "true"
+        or second_condition != expected_retry_1
+        or envelope_lib.workflow_step_direct_value(
+            readback_2, "continue-on-error"
+        )
+        != "true"
+        or third_condition != expected_retry_2
+        or envelope_lib.workflow_step_direct_value(
+            readback_3, "continue-on-error"
+        )
+        is not None
+        or retry_1_condition != expected_retry_1
+        or retry_2_condition != expected_retry_2
+    ):
         return False
-    if envelope_lib.workflow_step_input_value(download, "name") != "${{ inputs.artifact-name }}":
+
+    if not (
+        'rm -rf "$RUNNER_TEMP/qualification-evidence-readback"' in retry_1
+        and "sleep 2" in retry_1
+        and 'rm -rf "$RUNNER_TEMP/qualification-evidence-readback"' in retry_2
+        and "sleep 4" in retry_2
+    ):
         return False
-    if envelope_lib.workflow_step_input_value(download, "path") != "${{ runner.temp }}/qualification-evidence-readback":
-        return False
+
     return (
         'sealed="$RUNNER_TEMP/qualification-evidence.tar"' in seal
         and 'test "$archive_sha" = "$actual_archive_sha"' in seal
-        and "printf 'archive=%s\\n' \"$sealed\" >> \"$GITHUB_OUTPUT\"" in seal
-        and 'LINURA_EXPECTED_ARCHIVE_SHA256: ${{ steps.seal.outputs.archive-sha256 }}' in verify_upload
-        and 'readback="$RUNNER_TEMP/qualification-evidence-readback/qualification-evidence.tar"' in verify_upload
-        and 'test "$actual" = "$LINURA_EXPECTED_ARCHIVE_SHA256"' in verify_upload
-        and "printf 'archive-sha256=%s\\n' \"$actual\" >> \"$GITHUB_OUTPUT\"" in verify_upload
+        and "printf 'archive=%s\\n' \"$sealed\" >> \"$GITHUB_OUTPUT\""
+        in seal
+        and "LINURA_EXPECTED_ARCHIVE_SHA256: "
+        "${{ steps.seal.outputs.archive-sha256 }}" in verify_upload
+        and 'readback="$RUNNER_TEMP/qualification-evidence-readback/'
+        'qualification-evidence.tar"' in verify_upload
+        and 'test "$actual" = "$LINURA_EXPECTED_ARCHIVE_SHA256"'
+        in verify_upload
+        and "printf 'archive-sha256=%s\\n' \"$actual\" >> "
+        '\"$GITHUB_OUTPUT\"' in verify_upload
     )
+
 
 def _workflow_job_at(source: str, start_line: int) -> str | None:
     lines = source.splitlines()

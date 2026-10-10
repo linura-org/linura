@@ -1,6 +1,6 @@
 name: Security
 
-run-name: '${{ github.workflow }} :: ${{ inputs.dispatch_nonce || github.sha }}'
+run-name: "${{ github.workflow }} :: ${{ github.event_name == 'pull_request' && format('PR{0} :: {1}', github.event.pull_request.number, github.sha) || (inputs.dispatch_nonce || github.sha) }}"
 
 on:
   pull_request:

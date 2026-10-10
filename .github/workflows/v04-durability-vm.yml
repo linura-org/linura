@@ -1,5 +1,7 @@
 name: v0.4 durability fault qualification
 
+run-name: '${{ github.workflow }} :: PR${{ github.event.pull_request.number || 0 }} :: ${{ github.sha }}'
+
 on:
   workflow_call:
   workflow_dispatch:

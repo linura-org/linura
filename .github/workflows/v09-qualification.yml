@@ -1,5 +1,7 @@
 name: v0.9 qualification-environment qualification
 
+run-name: '${{ github.workflow }} :: PR${{ github.event.pull_request.number || 0 }} :: ${{ github.sha }}'
+
 on:
   workflow_call:
     inputs:
@@ -104,6 +106,27 @@ on:
       - ".cargo/config.toml"
       - "packaging/wireplumber/linura-session-audio.lua"
 
+      - "apps/linura-update-guard/**"
+      - "packaging/arch/hooks/95-linura-update-guard.hook"
+      - "migrations/**"
+      - "schemas/acceptance-scenario.v1.schema.json"
+      - "schemas/bootstrap.v1.schema.json"
+      - "schemas/capability-blueprint.v1.schema.json"
+      - "schemas/capability-snapshot.v1.schema.json"
+      - "schemas/desired-state.v1.schema.json"
+      - "schemas/plan-preview.v1.schema.json"
+      - "schemas/intent-proposal.v1.schema.json"
+      - "schemas/intent.v1.schema.json"
+      - "schemas/lifecycle-workflow.v1.schema.json"
+      - "schemas/managed-resource.v1.schema.json"
+      - "schemas/migration.v1.schema.json"
+      - "schemas/portable-profile.v1.schema.json"
+      - "schemas/portable-setup.v1.schema.json"
+      - "schemas/provenance.v1.schema.json"
+      - "schemas/setup.v1.schema.json"
+      - "schemas/system-graph.v1.schema.json"
+      - "schemas/update-plan.v1.schema.json"
+      - "schemas/workflow.v1.schema.json"
 permissions:
   actions: read
   contents: read

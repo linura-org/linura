@@ -33,6 +33,7 @@ REQUIRED = [
     "contracts/stability.toml", "tools/check_contract_stability.py", "tests/tooling/test_contract_stability.py",
     "contracts/roadmap.toml", "contracts/v010-workstation-slices.toml", "tools/check_roadmap.py", "tools/v010_slice_graph.py", "tests/tooling/test_roadmap.py",
     "tools/check_validation_gates.py", "tests/tooling/test_validation_gates.py", ".github/workflows/codex-environment.yml",
+    "contracts/qualification-gate-matrix.toml", "tools/applicable_qualification.py", "tests/tooling/test_applicable_qualification.py", "docs/qualification/applicable-gates.md", ".github/workflows/applicable-qualification.yml", "scripts/lint_github_workflows.sh",
     ".github/actions/dependency-input-cache-policy.toml", "tools/check_ci_cache_policy.py", "tests/tooling/test_ci_cache_policy.py", ".github/actions/cargo-input-cache/action.yml", ".github/actions/ubuntu-apt-input-cache/action.yml",
     "contracts/qualification-execution-envelopes.toml", "tools/qualification_envelope.py", "tests/tooling/test_qualification_envelope.py", "docs/qualification/execution-envelopes.md",
     "contracts/qualification-evidence-binding.toml", "tools/qualification_evidence.py", "tests/tooling/test_qualification_evidence.py", "docs/qualification/evidence-binding.md", ".github/actions/qualification-evidence/action.yml",
@@ -324,6 +325,22 @@ def main() -> int:
     if validation_result.returncode != 0:
         details = validation_result.stderr.strip() or validation_result.stdout.strip()
         failures.append(f"validation gate routing failed: {details}")
+
+    applicable_result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools/applicable_qualification.py"),
+            "--root",
+            str(ROOT),
+            "validate",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if applicable_result.returncode != 0:
+        details = applicable_result.stderr.strip() or applicable_result.stdout.strip()
+        failures.append(f"applicable qualification routing failed: {details}")
 
     cache_policy_result = subprocess.run(
         [sys.executable, str(ROOT / "tools/check_ci_cache_policy.py"), str(ROOT)],

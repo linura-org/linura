@@ -1,0 +1,107 @@
+name: Applicable qualification
+
+run-name: 'Applicable qualification reconcile :: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}'
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, ready_for_review, closed]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 * * * *'
+  workflow_run:
+    workflows:
+      - "CI"
+      - "Security"
+      - "CodeQL"
+      - "Codex environment"
+      - "Evidence publication contract"
+      - "Disposable VM acceptance"
+      - "Control1 plan-preview VM acceptance"
+      - "v0.4 durability fault qualification"
+      - "v0.4 filesystem ENOSPC recovery qualification"
+      - "v0.5 executor/verifier qualification"
+      - "v0.6 managed lifecycle qualification"
+      - "v0.7 Library qualification"
+      - "v0.8 agent interpretation qualification"
+      - "v0.9 qualification-environment qualification"
+      - "v0.10 workstation qualification contract"
+    types: [in_progress, completed]
+
+permissions:
+  contents: read
+
+jobs:
+  affected-heads:
+    name: resolve-affected-heads
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    outputs:
+      head_groups: ${{ steps.resolve.outputs.head_groups }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Validate reviewed qualification matrix
+        run: python3 tools/applicable_qualification.py validate
+
+      - id: resolve
+        name: Resolve affected PR head commits
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 tools/applicable_qualification.py event-heads
+          --repository "${{ github.repository }}"
+          --event-name "${{ github.event_name }}"
+          --event-path "$GITHUB_EVENT_PATH"
+          --output "$GITHUB_OUTPUT"
+          --token-env GITHUB_TOKEN
+
+  reconcile:
+    name: reconcile
+    needs: [affected-heads]
+    if: needs.affected-heads.outputs.head_groups != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.affected-heads.outputs.head_groups) }}
+    concurrency:
+      group: applicable-qualification-shard-${{ matrix.group.shard }}
+      queue: max
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Reconcile all affected PR heads in writer shard
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HEAD_SHAS: ${{ toJSON(matrix.group.heads) }}
+          HEAD_SHARD: ${{ matrix.group.shard }}
+          RETRY_ONLY: ${{ github.event_name == 'schedule' }}
+          INVALIDATE_ONLY: ${{ github.event_name == 'workflow_run' && github.event.action == 'in_progress' }}
+        run: >-
+          python3 tools/applicable_qualification.py reconcile-heads
+          --repository "${{ github.repository }}"
+          --heads-json "$HEAD_SHAS"
+          --shard "$HEAD_SHARD"
+          --retry-only "$RETRY_ONLY"
+          --invalidate-only "$INVALIDATE_ONLY"
+          --token-env GITHUB_TOKEN

@@ -1,5 +1,7 @@
 name: v0.6 managed lifecycle qualification
 
+run-name: '${{ github.workflow }} :: PR${{ github.event.pull_request.number || 0 }} :: ${{ github.sha }}'
+
 on:
   workflow_call:
     inputs:
@@ -55,6 +57,9 @@ on:
       - "Cargo.lock"
       - "docs/milestones/v0.6.0.md"
 
+      - "schemas/lifecycle-workflow.v1.schema.json"
+      - "schemas/managed-resource.v1.schema.json"
+      - "schemas/workflow.v1.schema.json"
 permissions:
   contents: read
 
