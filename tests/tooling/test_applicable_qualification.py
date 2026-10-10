@@ -939,7 +939,6 @@ class ApplicableQualificationTests(unittest.TestCase):
         )
 
     def test_modified_vm_harness_cannot_self_certify_from_successful_run(self):
-        contract = aq.load_contract(ROOT)
         head = "a" * 40
         harness_path = "qualification/v010/shell-runtime/run-shell-runtime.sh"
         pr = {
@@ -952,6 +951,7 @@ class ApplicableQualificationTests(unittest.TestCase):
             harness_path,
         ]
         with (
+            mock.patch.object(aq, "_approved_gate_bundles", return_value={}),
             mock.patch.object(aq, "_api_json", return_value=pr),
             mock.patch.object(aq, "_pr_changed_paths", return_value=changed),
             mock.patch.object(aq, "_head_runs") as runs,
@@ -1015,6 +1015,7 @@ class ApplicableQualificationTests(unittest.TestCase):
                      "repo": {"id": 1350812666}},
         }
         with (
+            mock.patch.object(aq, "_approved_gate_bundles", return_value={}),
             mock.patch.object(aq, "_api_json", return_value=pr),
             mock.patch.object(aq, "_pr_changed_paths", return_value=[fixture]),
             mock.patch.object(aq, "_head_runs") as runs,
@@ -1056,6 +1057,7 @@ class ApplicableQualificationTests(unittest.TestCase):
             },
         }
         with (
+            mock.patch.object(aq, "_approved_gate_bundles", return_value={}),
             mock.patch.object(aq, "_api_json", return_value=pr),
             mock.patch.object(
                 aq, "_pr_changed_paths",
@@ -1178,6 +1180,7 @@ class ApplicableQualificationTests(unittest.TestCase):
                              "repo": {"id": 1350812666}},
                 }
                 with (
+                    mock.patch.object(aq, "_approved_gate_bundles", return_value={}),
                     mock.patch.object(aq, "_api_json", return_value=pr),
                     mock.patch.object(aq, "_pr_changed_paths", return_value=[path]),
                     mock.patch.object(aq, "_head_runs") as runs,
@@ -1199,6 +1202,7 @@ class ApplicableQualificationTests(unittest.TestCase):
         }
         path = "tools/xtask/src/main.rs"
         with (
+            mock.patch.object(aq, "_approved_gate_bundles", return_value={}),
             mock.patch.object(aq, "_api_json", return_value=pr),
             mock.patch.object(aq, "_pr_changed_paths", return_value=[path]),
             mock.patch.object(aq, "_head_runs") as runs,
@@ -1212,10 +1216,44 @@ class ApplicableQualificationTests(unittest.TestCase):
         self.assertIn("executable qualification authority", result["failures"][0])
         runs.assert_not_called()
 
+    def test_unrelated_protected_approval_cannot_authorize_changed_gate(self):
+        head = "a" * 40
+        path = "tools/xtask/src/main.rs"
+        pr = {
+            "head": {"sha": head},
+            "changed_files": 1,
+            "base": {"ref": "main", "sha": "1" * 40,
+                     "repo": {"id": 1350812666}},
+        }
+        with (
+            mock.patch.object(aq, "_api_json", return_value=pr),
+            mock.patch.object(aq, "_pr_changed_paths", return_value=[path]),
+            mock.patch.object(
+                aq, "_approved_gate_bundles",
+                return_value={"sha256:" + "d" * 64: (213, "solo-operator")},
+            ),
+            mock.patch.object(
+                aq, "_authority_bundle_digest",
+                return_value="sha256:" + "e" * 64,
+            ) as digest,
+            mock.patch.object(
+                aq, "_independently_reviewed_authority_upgrade",
+            ) as approve,
+            mock.patch.object(aq, "_head_runs") as runs,
+        ):
+            result = aq.evaluate_pr(
+                root=ROOT, repository="linura-org/linura",
+                pr_number=99, head_sha=head, token="token",
+            )
+        self.assertEqual(result["state"], "failure")
+        self.assertIn("executable qualification authority", result["failures"][0])
+        digest.assert_called_once()
+        approve.assert_not_called()
+        runs.assert_not_called()
+
     def test_authority_upgrade_requires_protected_independent_bundle(self):
         import tempfile
 
-        contract = aq.load_contract(ROOT)
         path = "tools/check_ci_cache_policy.py"
         files = [{"filename": path, "status": "modified", "sha": "b" * 40}]
         identity = {
@@ -1259,11 +1297,18 @@ class ApplicableQualificationTests(unittest.TestCase):
 
         digest = digest_for()
         self.assertTrue(digest.startswith("sha256:"))
-        self.assertEqual(aq._approved_gate_bundles(ROOT), {})
+        # Approval-state fixtures must not depend on the live repository
+        # ledger: valid entries are expected to accumulate on protected main.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             ledger = root / ".github/qualification-authority-approvals.toml"
             ledger.parent.mkdir(parents=True)
+            ledger.write_text(
+                "schema_version = 1\n"
+                'solo_operator = "Ehsan-Azari"\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(aq._approved_gate_bundles(root), {})
             ledger.write_text(
                 "schema_version = 1\n"
                 'solo_operator = "Ehsan-Azari"\n'
@@ -1696,6 +1741,7 @@ class ApplicableQualificationTests(unittest.TestCase):
             return [destination, original] if include_rename_sources else [destination]
 
         with (
+            mock.patch.object(aq, "_approved_gate_bundles", return_value={}),
             mock.patch.object(aq, "_api_json", return_value=pr),
             mock.patch.object(aq, "_pr_changed_paths", side_effect=path_inventory),
             mock.patch.object(aq, "_head_runs") as runs,
@@ -1715,6 +1761,7 @@ class ApplicableQualificationTests(unittest.TestCase):
               "base": {"ref": "main", "sha": "1" * 40,
                        "repo": {"id": 1350812666}}}
         with (
+            mock.patch.object(aq, "_approved_gate_bundles", return_value={}),
             mock.patch.object(aq, "_api_json", return_value=pr),
             mock.patch.object(aq, "_pr_changed_paths",
                               return_value=[".github/workflows/ci.yml"]),

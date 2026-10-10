@@ -16,10 +16,12 @@ bash scripts/maintain_codex_environment.sh --bindings
 
 Both resolve the repository root from their own path. Maintenance reruns the
 idempotent pinned setup for the selected checkout, fetching its locked Cargo
-graph. The optional `--bindings` installs the existing hash-locked Python build
-requirements, including pip, into `$HOME/.local/linura-tools/python`; it never
-changes the host Python. Every setup/maintenance pass clears and recreates that
-isolated virtual environment before installing from the hash-locked requirements.
+graph. Core setup also provisions the repository-pinned, hash-locked Ruff
+environment used by the canonical gate. The optional `--bindings` additionally
+installs the existing hash-locked Python build requirements, including pip, into
+`$HOME/.local/linura-tools/python`; neither environment changes the host Python.
+Every bindings setup/maintenance pass clears and recreates that isolated build
+environment before installing from the hash-locked requirements.
 This intentionally discards undeclared packages and partially installed caches;
 the doctor checks the lock digest and exact installed distribution set. No
 task-time installer, `latest` tool selection, shell
@@ -28,10 +30,11 @@ startup-file modification, or repository credential is needed.
 The environment owner must supply Linux x86_64, glibc >= 2.17, Python 3.12 with
 venv support, Bash, curl, Git, SHA-256 tooling, tar, a working C linker, and the
 standard text tools used by the scripts. Setup provisions the declared rustup,
-Rust, rustfmt, Clippy, cargo-audit and actionlint versions. Configure setup-phase
+Rust, rustfmt, Clippy, cargo-audit, actionlint and Ruff versions. Configure setup-phase
 network access to the tool/dependency origins listed in
-[development infrastructure](development-infrastructure.md), plus `pypi.org` and
-`files.pythonhosted.org` when using `--bindings`. Task-phase offline Cargo checks
+[development infrastructure](development-infrastructure.md), including `pypi.org`
+and `files.pythonhosted.org` for the hash-locked Ruff wheel and optional binding
+build environment. Task-phase offline Cargo checks
 remain possible after preparation. A fresh security audit needs a current RustSec
 advisory database and its own network access; cached dependency availability is
 not a fresh security audit.

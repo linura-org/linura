@@ -9,6 +9,8 @@ For a documentation fix, focused test improvement, contained Rust change, or oth
 ```bash
 git clone https://github.com/linura-org/linura.git
 cd linura
+# Provision the repository-pinned development tools, including Ruff.
+bash scripts/setup_codex_environment.sh
 cargo xtask check
 ```
 
@@ -86,7 +88,7 @@ Run:
 cargo xtask check
 ```
 
-before opening a pull request. It is the canonical local entry point for the same primary repository checks used by CI.
+before opening a pull request. It is the canonical local entry point for the same primary repository checks used by CI. The gate expects the exact Ruff version from `tools/codex/versions.env`; the repository development setup provisions it from the hash-locked wheel contract rather than accepting an arbitrary global linter.
 
 New managed mutation behavior must test allow/deny, unsupported capability, executor failure, verification failure, provenance origin, and retry/idempotency semantics.
 

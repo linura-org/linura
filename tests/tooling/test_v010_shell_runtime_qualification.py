@@ -1978,7 +1978,7 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertIn('[[ "$audio_helper_uid" == "0" && "$audio_helper_gid" == "0" ]]', text)
             self.assertIn('cmp -s "$audio_helper" "$source_root/packaging/wireplumber/linura-session-audio.lua"', text)
 
-    def test_pipewire_fixture_must_be_declarative_and_daemon_owned(self) -> None:
+    def test_pipewire_fixture_declarative_denies_comment_marker_and_cli_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -1997,7 +1997,7 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("daemon-owned declarative context.objects", result.stderr)
 
-    def test_pipewire_fixture_must_be_installed_before_pipewire_starts(self) -> None:
+    def test_pipewire_fixture_startup_rejects_reintroduced_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -2015,7 +2015,7 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("must be installed before PipeWire starts", result.stderr)
 
-    def test_pipewire_fixture_failure_must_retain_diagnostics(self) -> None:
+    def test_pipewire_fixture_diagnostic_evidence_path_cannot_change(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)

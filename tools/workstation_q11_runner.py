@@ -113,6 +113,16 @@ def _atomic_json(path: Path, value: object) -> None:
     os.replace(temporary, path)
 
 
+def _regular_file_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
 def _read_regular(path: Path, maximum: int = MAX_FILE_BYTES) -> bytes:
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -136,14 +146,7 @@ def _read_regular(path: Path, maximum: int = MAX_FILE_BYTES) -> bytes:
         if os.read(fd, 1):
             raise RunnerError(f"artifact grew while reading: {path}")
         after = os.fstat(fd)
-        identity = lambda value: (
-            value.st_dev,
-            value.st_ino,
-            value.st_size,
-            value.st_mtime_ns,
-            value.st_ctime_ns,
-        )
-        if identity(before) != identity(after):
+        if _regular_file_identity(before) != _regular_file_identity(after):
             raise RunnerError(f"artifact changed while reading: {path}")
         return bytes(data)
     finally:
@@ -173,10 +176,7 @@ def _digest_regular(path: Path, maximum: int = MAX_FILE_BYTES) -> tuple[str, int
         if os.read(fd, 1):
             raise RunnerError(f"artifact grew while hashing: {path}")
         after = os.fstat(fd)
-        identity = lambda value: (
-            value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
-        )
-        if identity(before) != identity(after):
+        if _regular_file_identity(before) != _regular_file_identity(after):
             raise RunnerError(f"artifact changed while hashing: {path}")
         return digest.hexdigest(), before.st_size
     finally:

@@ -1,0 +1,6 @@
+# Hash-locked Ruff toolchain for Linura's canonical Linux x86_64 development host.
+# Keep the Ruff version aligned with tools/codex/versions.env.
+pip==25.0.1 \
+    --hash=sha256:c46efd13b6aa8279f33f2864459c8ce587ea6a1a59ee20de055868d8f7688f7f
+ruff==0.16.10 \
+    --hash=sha256:f33f43a864a8483eebd160e713336c8bab02c934feaff0a33cf5ccb41546d09a

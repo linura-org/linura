@@ -254,7 +254,7 @@ def main() -> int:
         print(f"shell/UI Qt6 dev metadata: {'present' if qt_ready else 'missing'}")
         return 0 if path and RELENG.is_dir() and not missing and all(shell_tools.values()) and qt_ready else 1
     if args.command == "plan":
-        print(f"1. cargo build --workspace --release --locked")
+        print("1. cargo build --workspace --release --locked")
         print(f"2. copy {RELENG} -> {STAGED}")
         print(f"3. overlay Linura profile/security files from {OVERLAY}")
         print("4. merge packages.linura into releng packages.x86_64")
