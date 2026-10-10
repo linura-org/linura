@@ -318,7 +318,7 @@ jobs:
           subject-path: "/tmp/linura-release-proof/release-payload/*"
 
       - name: Upload exact-source proof and payload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linura-trusted-release-proof-${{ inputs.source_sha }}
           path: /tmp/linura-release-proof/
