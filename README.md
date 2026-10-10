@@ -243,11 +243,13 @@ The first interactive workstation PlatformProfile target stays deliberately narr
 
 Linura is still experimental. Use release-qualified artifacts and disposable/reference environments for evaluation; do not treat the current pre-1.0 release as a production support guarantee.
 
-For repository development and local qualification, install the pinned Rust toolchain and run:
+For repository development and local qualification, install the pinned Rust toolchain and the repository-pinned Ruff CLI, then run:
 
 ```bash
 cargo xtask check
 ```
+
+The exact Ruff version and hash-locked wheel are declared in `tools/codex/versions.env` and `tools/python/ruff-requirements.lock`; the deterministic Linura development setup provisions them automatically.
 
 The canonical development, VM, image, visual, qualification, and release paths are repository-owned. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for a first contribution or [`docs/development-infrastructure.md`](docs/development-infrastructure.md) for system-level development.
 

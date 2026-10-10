@@ -51,6 +51,7 @@ jobs:
           # shellcheck disable=SC1091
           source tools/codex/versions.env
           : "${RUST_VERSION:?}"
+          : "${RUFF_VERSION:?}"
           : "${PYTHON_RELEASE:?}"
           : "${PYTHON_PIP_VERSION:?}"
           test "$(python3 -c 'import platform; print(platform.python_version())')" = "$PYTHON_RELEASE"
@@ -67,6 +68,7 @@ jobs:
           test "$repo_rust_version" = "$RUST_VERSION"
           {
             printf 'RUST_VERSION=%s\n' "$RUST_VERSION"
+            printf 'RUFF_VERSION=%s\n' "$RUFF_VERSION"
             printf 'PYTHON_RELEASE=%s\n' "$PYTHON_RELEASE"
             printf 'PYTHON_PIP_VERSION=%s\n' "$PYTHON_PIP_VERSION"
           } >> "$GITHUB_ENV"
@@ -136,6 +138,17 @@ jobs:
                       f"Python build requirement mismatch: {name} expected {version}, got {actual}"
                   )
           PY
+
+      - name: Install hash-locked Ruff
+        run: |
+          set -euo pipefail
+          ruff_root="$RUNNER_TEMP/ruff"
+          python3 -m venv "$ruff_root"
+          "$ruff_root/bin/python3" -m pip install \
+            --disable-pip-version-check --no-cache-dir --require-hashes --only-binary=:all: --no-deps \
+            -r tools/python/ruff-requirements.lock
+          test "$("$ruff_root/bin/ruff" --version)" = "ruff $RUFF_VERSION"
+          printf '%s\n' "$ruff_root/bin" >> "$GITHUB_PATH"
 
       - name: Run canonical validation
         run: cargo xtask check
@@ -351,6 +364,7 @@ jobs:
           # shellcheck disable=SC1091
           source tools/codex/versions.env
           : "${RUST_VERSION:?}"
+          : "${RUFF_VERSION:?}"
           : "${PYTHON_RELEASE:?}"
           : "${PYTHON_PIP_VERSION:?}"
           test "$(python3 -c 'import platform; print(platform.python_version())')" = "$PYTHON_RELEASE"
@@ -367,6 +381,7 @@ jobs:
           test "$repo_rust_version" = "$RUST_VERSION"
           {
             printf 'RUST_VERSION=%s\n' "$RUST_VERSION"
+            printf 'RUFF_VERSION=%s\n' "$RUFF_VERSION"
             printf 'PYTHON_RELEASE=%s\n' "$PYTHON_RELEASE"
             printf 'PYTHON_PIP_VERSION=%s\n' "$PYTHON_PIP_VERSION"
           } >> "$GITHUB_ENV"

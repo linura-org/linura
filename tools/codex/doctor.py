@@ -166,8 +166,13 @@ def inventory(selected: set[str]) -> list[Check]:
         "Align the reviewed Codex contract with rust-toolchain.toml.")
     commands("core", ("bash", "cc", "curl", "getconf", "git", "python3",
                       "sha256sum", "tar", "uname", "awk", "tr", "mktemp",
-                      "mkdir", "ln", "chmod", "rm", "head", "rustup", "cargo-audit"))
-    for binary, expected in (("rustup", pins["RUSTUP_VERSION"]), ("cargo-audit", pins["CARGO_AUDIT_VERSION"])):
+                      "mkdir", "ln", "chmod", "rm", "head", "rustup", "cargo-audit",
+                      "ruff"))
+    for binary, expected in (
+        ("rustup", pins["RUSTUP_VERSION"]),
+        ("cargo-audit", pins["CARGO_AUDIT_VERSION"]),
+        ("ruff", pins["RUFF_VERSION"]),
+    ):
         add("core", f"{binary}-version", exact_version(probe([binary, "--version"], env), expected),
             "Run setup/maintenance during environment preparation, then restart the task.")
     toolchain = f"{pins['RUST_VERSION']}-x86_64-unknown-linux-gnu"

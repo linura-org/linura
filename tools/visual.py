@@ -28,10 +28,12 @@ def main() -> int:
         return 0
     compare_bin = shutil.which("compare")
     if compare_bin is None:
-        print("ImageMagick compare is required for visual comparison", file=sys.stderr); return 2
+        print("ImageMagick compare is required for visual comparison", file=sys.stderr)
+        return 2
     args.diff.parent.mkdir(parents=True, exist_ok=True)
     completed = subprocess.run([compare_bin, "-metric", "AE", str(args.baseline), str(args.actual), str(args.diff)], check=False)
     return 0 if completed.returncode == 0 else completed.returncode
 
 
-if __name__ == "__main__": raise SystemExit(main())
+if __name__ == "__main__":
+    raise SystemExit(main())

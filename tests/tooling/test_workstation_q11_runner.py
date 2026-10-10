@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 import time

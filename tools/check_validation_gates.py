@@ -203,7 +203,7 @@ RELEASE_INHERITED = {
 
 
 # Pin the executable canonical check body; strings in Rust comments are not evidence.
-XTASK_CHECK_BODY = "    run(\"cargo\", &[\"fmt\", \"--all\", \"--check\"])?;\n    run(\n        \"cargo\",\n        &[\n            \"clippy\",\n            \"--workspace\",\n            \"--all-targets\",\n            \"--all-features\",\n            \"--locked\",\n            \"--\",\n            \"-D\",\n            \"warnings\",\n        ],\n    )?;\n    run(\n        \"cargo\",\n        &[\"test\", \"--workspace\", \"--all-features\", \"--locked\"],\n    )?;\n    run(\"python3\", &[\"scripts/check_repository.py\"])?;\n    component_maturity()?;\n    authority_foundation()?;\n    run(\"python3\", &[\"scripts/validate_assets.py\"])?;\n    desktop_identity()?;\n    release_contracts()?;\n    run(\n        \"python3\",\n        &[\n            \"-m\",\n            \"unittest\",\n            \"discover\",\n            \"-s\",\n            \"tests/tooling\",\n            \"-p\",\n            \"test_*.py\",\n        ],\n    )?;\n    Ok(())\n"
+XTASK_CHECK_BODY = "    run(\"cargo\", &[\"fmt\", \"--all\", \"--check\"])?;\n    run(\"ruff\", &[\"check\", \".\"])?;\n    run(\n        \"cargo\",\n        &[\n            \"clippy\",\n            \"--workspace\",\n            \"--all-targets\",\n            \"--all-features\",\n            \"--locked\",\n            \"--\",\n            \"-D\",\n            \"warnings\",\n        ],\n    )?;\n    run(\n        \"cargo\",\n        &[\"test\", \"--workspace\", \"--all-features\", \"--locked\"],\n    )?;\n    run(\"python3\", &[\"scripts/check_repository.py\"])?;\n    component_maturity()?;\n    authority_foundation()?;\n    run(\"python3\", &[\"scripts/validate_assets.py\"])?;\n    desktop_identity()?;\n    release_contracts()?;\n    run(\n        \"python3\",\n        &[\n            \"-m\",\n            \"unittest\",\n            \"discover\",\n            \"-s\",\n            \"tests/tooling\",\n            \"-p\",\n            \"test_*.py\",\n        ],\n    )?;\n    Ok(())\n"
 
 PYPI_VERIFICATION_COMMANDS = (
     "set -euo pipefail",
@@ -1172,7 +1172,6 @@ def check(root: Path = ROOT) -> list[str]:
     for forbidden in ("|| true", "continue-on-error:", "--ignore", "--no-fail"):
         require(forbidden not in security, "security audit may be bypassed: " + forbidden)
 
-    codeql = read(MANDATORY["analyze"])
     codeql_gate = mandatory_bodies.get("analyze")
     if codeql_gate:
         body, indent = codeql_gate

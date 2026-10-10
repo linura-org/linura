@@ -34,6 +34,7 @@ source "$VERSION_CONTRACT"
 : "${CARGO_AUDIT_VERSION:?}"
 : "${ACTIONLINT_VERSION:?}"
 : "${ACTIONLINT_SHA256:?}"
+: "${RUFF_VERSION:?}"
 : "${PYTHON_MAJOR_MINOR:?}"
 : "${HOST_OS:?}"
 : "${HOST_ARCH:?}"
@@ -46,6 +47,8 @@ readonly RUSTUP_INIT_URL="https://static.rust-lang.org/rustup/archive/${RUSTUP_V
 readonly ACTIONLINT_ARCHIVE="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
 readonly ACTIONLINT_URL="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${ACTIONLINT_ARCHIVE}"
 readonly TOOL_ROOT="${HOME}/.local/linura-tools"
+readonly RUFF_ROOT="${TOOL_ROOT}/ruff"
+readonly RUFF_LOCK="tools/python/ruff-requirements.lock"
 readonly ACTIONLINT_ROOT="${TOOL_ROOT}/actionlint/${ACTIONLINT_VERSION}"
 readonly BIN_ROOT="${HOME}/.local/bin"
 readonly CARGO_ROOT="${CARGO_HOME:-${HOME}/.cargo}"
@@ -213,6 +216,34 @@ if ! reports_exact_version "$ACTIONLINT_VERSION" "$actionlint_bin" -version; the
   exit 1
 fi
 
+# Provision Ruff from a hash-locked wheel set. Keep it isolated from the
+# optional bindings build environment so core lint readiness is deterministic
+# and a bindings refresh cannot remove the canonical linter.
+ruff_bin="$RUFF_ROOT/bin/ruff"
+ruff_marker="$RUFF_ROOT/.linura-ruff-lock-sha256"
+ruff_lock_digest="$(sha256sum "$RUFF_LOCK" | awk '{print $1}')"
+ruff_marker_digest=""
+if [[ -f "$ruff_marker" && ! -L "$ruff_marker" ]]; then
+  read -r ruff_marker_digest < "$ruff_marker" || true
+fi
+if [[ ! -x "$ruff_bin" || "$ruff_marker_digest" != "$ruff_lock_digest" ]] \
+  || ! reports_exact_version "$RUFF_VERSION" "$ruff_bin" --version; then
+  if [[ -L "$TOOL_ROOT" || -L "$RUFF_ROOT" ]]; then
+    echo 'refusing to recreate a symlinked Ruff environment' >&2
+    exit 1
+  fi
+  python3 -m venv --clear "$RUFF_ROOT"
+  "$RUFF_ROOT/bin/python3" -m pip install \
+    --disable-pip-version-check --no-cache-dir --require-hashes --only-binary=:all: --no-deps \
+    -r "$RUFF_LOCK"
+  printf '%s\n' "$ruff_lock_digest" > "$ruff_marker"
+fi
+ln -sfn "$ruff_bin" "$BIN_ROOT/ruff"
+if ! reports_exact_version "$RUFF_VERSION" "$ruff_bin" --version; then
+  printf 'unexpected Ruff version after setup; expected exactly %s\n' "$RUFF_VERSION" >&2
+  exit 1
+fi
+
 # Warm the exact Cargo dependency graph without modifying Cargo.lock.
 cargo fetch --locked
 
@@ -255,4 +286,5 @@ printf '  rustc: %s\n' "$(rustc --version)"
 printf '  cargo: %s\n' "$(cargo --version)"
 printf '  cargo-audit: %s\n' "$(cargo-audit --version)"
 printf '  actionlint: %s\n' "$("$actionlint_bin" -version | head -1)"
+printf '  ruff: %s\n' "$("$ruff_bin" --version)"
 printf 'Run: bash scripts/preflight_codex_environment.sh\n'
