@@ -370,13 +370,21 @@ def workflow_step(job_body: str, job_indent: int, key: str, value: str) -> str |
     return None
 
 
-def step_is_unconditional(step: str | None, job_indent: int) -> bool:
-    """A required step must not be skipped or convert a failure to success."""
+def step_is_unconditional(
+        step: str | None, job_indent: int, *, allow_reviewed_shell: bool = False,
+) -> bool:
+    """A mandatory step must not be skipped or turn a failure into success.
+
+    The sole explicit-shell exception is for the publisher's first executable
+    step. Its precise trusted shell is independently pinned by byte-for-byte
+    comparison to reviewed_tests. Every other caller still rejects shell.
+    """
     if step is None:
         return False
     prop_indent = job_indent + 4
+    guards = "if|continue-on-error" if allow_reviewed_shell else "if|continue-on-error|shell"
     return re.search(
-        r"(?m)^ {" + str(prop_indent) + r"}(?:if|continue-on-error|shell):", step
+        r"(?m)^ {" + str(prop_indent) + r"}(?:" + guards + r"):", step
     ) is None
 
 
@@ -913,6 +921,24 @@ def check(root: Path = ROOT) -> list[str]:
     canonical = mandatory_bodies.get("canonical-check")
     if canonical:
         body, indent = canonical
+        # No job-level container, alternate runner, service, custom strategy,
+        # privilege or environment escape hatch may precede the suite.
+        # An untrusted container can replace every absolute system binary
+        # before pinned checkout/setup-node even begin.
+        direct_properties = [
+            line for line in body.splitlines()
+            if line.strip() and line.startswith(" " * indent)
+            and not line.startswith(" " * (indent + 1))
+            and not line.lstrip().startswith("#")
+        ]
+        require(
+            direct_properties == [
+                " " * indent + "runs-on: ubuntu-24.04",
+                " " * indent + "steps:",
+            ],
+            "canonical CI publisher job must use exact trusted hosted runner"
+            " without container or alternate job configuration",
+        )
         for label, command in (
             ("Run canonical Linura checks", "cargo xtask check"),
             ("Verify canonical crates.io package", "cargo package --locked -p linura"),
@@ -934,8 +960,181 @@ def check(root: Path = ROOT) -> list[str]:
                 executable = actual == "|" and tuple(actual_commands) == PYPI_VERIFICATION_COMMANDS
             else:
                 executable = actual == command
-            require(step_is_unconditional(step, indent) and executable,
+            # A step-level SHELLOPTS/BASH_ENV mapping can render an exact
+            # reviewed command a no-op. These three native gate steps have
+            # no approved environment override; reject every step-level env.
+            injected_env = re.search(
+                r"(?m)^ {" + str(prop_indent) + r"}env\s*:", step or ""
+            )
+            require(step_is_unconditional(step, indent)
+                    and injected_env is None and executable,
                     "canonical CI missing unconditional executable step: " + label)
+    # There is no reviewed workflow- or job-level environment mapping in
+    # canonical CI. Such mappings can inject readonly Bash startup flags
+    # (SHELLOPTS=noexec) across otherwise exact native qualification commands.
+    # The publisher's protected step also runs this policy checker itself,
+    # after clearing shell startup variables, before any Node test invocation.
+    require(re.search(r"(?m)^(?:env|    env)\s*:", ci) is None,
+            "canonical CI may not inherit workflow/job environment variables")
+    # Publisher source is a separate merge authority, so its Node security
+    # suite must remain in the unfiltered native CI gate. A path-filtered
+    # publisher workflow cannot defend a PR editing only canonical CI.
+    if canonical:
+        body, indent = canonical
+        reviewed_node = (
+            "      - name: Install pinned Node runtime for trusted publisher tests\n"
+            "        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0\n"
+            "        with:\n"
+            "          node-version: '22.23.3'\n"
+        )
+        reviewed_tests = (
+            "      - name: Validate trusted qualification publisher in canonical CI\n"
+            "        env:\n"
+            "          NODE_OPTIONS: ''\n"
+            "          BASH_ENV: ''\n"
+            "          ENV: ''\n"
+            "          SHELLOPTS: ''\n"
+            "          BASHOPTS: ''\n"
+            "        shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}\n"
+            "        run: |\n"
+            "          set -euo pipefail\n"
+            "          /usr/bin/python3 -I -S - <<'PY'\n"
+            "          import hashlib\n"
+            "          import os\n"
+            "          from pathlib import Path\n"
+            "          import re\n"
+            "          import subprocess\n"
+            "          \n"
+            "          def deny(message):\n"
+            "              raise SystemExit(\"publisher source provenance denied: \" + message)\n"
+            "          \n"
+            "          sha = os.environ.get(\"GITHUB_SHA\", \"\")\n"
+            "          if not re.fullmatch(r\"[0-9a-f]{40}\", sha):\n"
+            "              deny(\"invalid triggering SHA\")\n"
+            "          git_env = {\"PATH\": \"/usr/bin:/bin\", \"HOME\": \"/nonexistent\",\n"
+            "                     \"GIT_CONFIG_NOSYSTEM\": \"1\", \"GIT_CONFIG_GLOBAL\": \"/dev/null\",\n"
+            "                     \"GIT_NO_REPLACE_OBJECTS\": \"1\"}\n"
+            "          \n"
+            "          def git(*args):\n"
+            "              result = subprocess.run([\"/usr/bin/git\", *args], env=git_env,\n"
+            "                                      check=False, stdout=subprocess.PIPE,\n"
+            "                                      stderr=subprocess.DEVNULL, timeout=20)\n"
+            "              if result.returncode:\n"
+            "                  deny(\"cannot read source commit\")\n"
+            "              return result.stdout\n"
+            "          \n"
+            "          if git(\"rev-parse\", \"--verify\", \"HEAD^{commit}\").strip().decode(\"ascii\") != sha:\n"
+            "              deny(\"checkout is not the triggering revision\")\n"
+            "          scopes = (\".github/workflows/ci.yml\", \"tools/check_validation_gates.py\",\n"
+            "                    \"tests/tooling/test_validation_gates.py\", \"services/qualification-publisher\")\n"
+            "          raw_tree = git(\"ls-tree\", \"-r\", \"-z\", \"--full-tree\", sha, \"--\", *scopes)\n"
+            "          expected = {}\n"
+            "          for item in raw_tree.split(b\"\\x00\"):\n"
+            "              if not item:\n"
+            "                  continue\n"
+            "              try:\n"
+            "                  info, path = item.split(b\"\\t\", 1)\n"
+            "                  mode, kind, digest = info.split(b\" \")\n"
+            "                  name = path.decode(\"utf-8\")\n"
+            "              except (ValueError, UnicodeDecodeError):\n"
+            "                  deny(\"malformed source tree\")\n"
+            "              if (mode not in (b\"100644\", b\"100755\") or kind != b\"blob\"\n"
+            "                      or not re.fullmatch(rb\"[0-9a-f]{40}\", digest)\n"
+            "                      or name in expected):\n"
+            "                  deny(\"unsafe source tree entry\")\n"
+            "              expected[name] = digest.decode(\"ascii\")\n"
+            "          root = Path.cwd()\n"
+            "          seen = set()\n"
+            "          def visit(path):\n"
+            "              if path.is_symlink():\n"
+            "                  deny(\"source symlink\")\n"
+            "              if path.is_dir():\n"
+            "                  for entry in path.iterdir():\n"
+            "                      visit(entry)\n"
+            "              elif path.is_file():\n"
+            "                  relative = path.relative_to(root).as_posix()\n"
+            "                  if relative not in expected:\n"
+            "                      deny(\"unexpected source file\")\n"
+            "                  data = path.read_bytes()\n"
+            "                  actual = hashlib.sha1(b\"blob \" + str(len(data)).encode(\"ascii\")\n"
+            "                                        + b\"\\x00\" + data).hexdigest()\n"
+            "                  if actual != expected[relative]:\n"
+            "                      deny(\"source differs from triggering commit\")\n"
+            "                  seen.add(relative)\n"
+            "              else:\n"
+            "                  deny(\"missing or special source entry\")\n"
+            "          for scope in scopes:\n"
+            "              path = root / scope\n"
+            "              if not path.exists() and not path.is_symlink():\n"
+            "                  deny(\"missing protected source\")\n"
+            "              visit(path)\n"
+            "          if seen != set(expected) or len(seen) < 6:\n"
+            "              deny(\"incomplete protected source inventory\")\n"
+            "          print(\"publisher tests bound to triggering source SHA\")\n"
+            "          PY\n"
+            "          /usr/bin/python3 -I -S tools/check_validation_gates.py\n"
+            "          test \"$(/usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --version)\" = 'v22.23.3'\n"
+            "          /usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --check services/qualification-publisher/publisher.mjs\n"
+            "          /usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --check services/qualification-publisher/server.mjs\n"
+            "          /usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --test services/qualification-publisher/test/*.test.mjs\n"
+        )
+        for label, expected in (
+            ("Install pinned Node runtime for trusted publisher tests", reviewed_node),
+            ("Validate trusted qualification publisher in canonical CI", reviewed_tests),
+        ):
+            step = workflow_step(body, indent, "name", label)
+            require(
+                step_is_unconditional(
+                    step, indent,
+                    allow_reviewed_shell=(
+                        label == "Validate trusted qualification publisher in canonical CI"
+                    ),
+                )
+                and (step or "").strip() == expected.strip(),
+                "canonical CI missing mandatory publisher authority step: " + label,
+            )
+        # Pre-test repository code can use sudo on GitHub's ubuntu-24.04
+        # runner to overwrite even absolute system binaries. Only the
+        # immutable checkout and setup-node actions may precede this suite.
+        reviewed_checkout = (
+            "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+            "        with:\n"
+            "          fetch-depth: 0\n"
+        )
+        checkout_step = workflow_step(
+            body, indent, "uses",
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        )
+        require(
+            step_is_unconditional(checkout_step, indent)
+            and (checkout_step or "").strip() == reviewed_checkout.strip(),
+            "canonical CI publisher checkout must use exact pinned configuration",
+        )
+        steps_body = section(body, "steps", indent) or ""
+        step_indent = indent + 2
+        all_headers = re.findall(
+            r"(?m)^ {" + str(step_indent) + r"}-[ \t]+[^\r\n]+$",
+            steps_body,
+        )
+        headers = re.findall(
+            r"(?m)^ {" + str(step_indent) +
+            r"}- (?:name|uses|run):[^\r\n]*$",
+            steps_body,
+        )
+        checkout_header = " " * step_indent + (
+            "- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1"
+        )
+        setup_header = " " * step_indent + "- name: Install pinned Node runtime for trusted publisher tests"
+        test_header = " " * step_indent + "- name: Validate trusted qualification publisher in canonical CI"
+        require(
+            len(headers) == len(all_headers)
+            and headers[:3] == [checkout_header, setup_header, test_header]
+            and headers.count(checkout_header) == 1
+            and headers.count(setup_header) == 1
+            and headers.count(test_header) == 1,
+            "canonical CI must run publisher tests immediately after pinned Node setup"
+            " and checkout, before any untrusted executable step",
+        )
     check_entry = "fn check() -> Result<(), String> {\n"
     pieces = xtask.split(check_entry)
     actual_body = (pieces[1].split("\n}\n")[0] + "\n"
@@ -990,8 +1189,8 @@ def check(root: Path = ROOT) -> list[str]:
                 # Match the entire setting block. A comment, duplicate YAML
                 # key or a different effective language must not satisfy Rust.
                 require(settings is not None and
-                        re.fullmatch(r"\s*languages: rust\s*", settings) is not None,
-                        "CodeQL initialization must configure exactly Rust")
+                        re.fullmatch(r"\s*languages: rust,javascript-typescript\s*", settings) is not None,
+                        "CodeQL initialization must configure exactly Rust and JavaScript")
         require(
             len(action_revisions) == 2
             and len(set(action_revisions.values())) == 1,

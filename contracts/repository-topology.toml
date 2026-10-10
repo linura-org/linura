@@ -3,7 +3,7 @@ version = 1
 forbidden_legacy_roots = ["bootstrap"]
 
 [policy]
-implementation_roots = ["apps", "bindings", "crates", "executors", "verifiers", "tools"]
+implementation_roots = ["apps", "bindings", "crates", "executors", "services", "verifiers", "tools"]
 infrastructure_roots = [".cargo", ".github"]
 support_roots = ["docs", "qualification", "scripts", "tests"]
 rule = "Every tracked top-level directory, including hidden infrastructure roots, must own real implementation, declarative assets, evidence, packaging, tests, tooling, or infrastructure. README-only future placeholders are forbidden."
@@ -132,6 +132,12 @@ allow_readme_only = false
 path = "scripts"
 kind = "tooling"
 purpose = "Small operational and repository scripts that are not standalone Rust tools."
+allow_readme_only = false
+
+[[roots]]
+path = "services"
+kind = "implementation"
+purpose = "Independently deployed bounded backend services with separate runtime identities and production credentials."
 allow_readme_only = false
 
 [[roots]]
