@@ -15,6 +15,47 @@ fn run(program: &str, args: &[&str]) -> Result<(), String> {
     }
 }
 
+fn pinned_ruff_version(contract: &str) -> Result<&str, String> {
+    let mut matches = contract
+        .lines()
+        .filter_map(|line| line.strip_prefix("RUFF_VERSION="));
+    let version = matches
+        .next()
+        .ok_or("RUFF_VERSION missing from toolchain contract")?;
+    if matches.next().is_some()
+        || version.split('.').count() != 3
+        || !version
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b'.')
+    {
+        return Err("RUFF_VERSION must be a single pinned major.minor.patch".into());
+    }
+    Ok(version)
+}
+
+fn verify_ruff_version() -> Result<(), String> {
+    let contract = std::fs::read_to_string("tools/codex/versions.env")
+        .map_err(|error| format!("failed to read pinned Ruff toolchain: {error}"))?;
+    let expected = pinned_ruff_version(&contract)?;
+    let output = Command::new("ruff")
+        .arg("--version")
+        .output()
+        .map_err(|error| format!("failed to start ruff --version: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("ruff --version exited with {}", output.status));
+    }
+    let observed = std::str::from_utf8(&output.stdout)
+        .map_err(|error| format!("ruff --version returned invalid UTF-8: {error}"))?
+        .trim();
+    let required = format!("ruff {expected}");
+    if observed != required {
+        return Err(format!(
+            "Ruff version mismatch: expected {required}, got {observed:?}; install the pinned development toolchain"
+        ));
+    }
+    Ok(())
+}
+
 fn release_contracts() -> Result<(), String> {
     run(
         "python3",
@@ -41,6 +82,8 @@ fn desktop_identity() -> Result<(), String> {
 
 fn check() -> Result<(), String> {
     run("cargo", &["fmt", "--all", "--check"])?;
+    verify_ruff_version()?;
+    run("ruff", &["check", "."])?;
     run(
         "cargo",
         &[
@@ -122,6 +165,28 @@ fn main() -> ExitCode {
         Err(error) => {
             eprintln!("error: {error}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pinned_ruff_version;
+
+    #[test]
+    fn ruff_pin_requires_one_exact_semver_assignment() {
+        assert_eq!(
+            pinned_ruff_version("RUST_VERSION=1.98.0\nRUFF_VERSION=0.16.10\n"),
+            Ok("0.16.10")
+        );
+        for invalid in [
+            "RUST_VERSION=1.98.0\n",
+            "RUFF_VERSION=\n",
+            "RUFF_VERSION=0.16\n",
+            "RUFF_VERSION=0.16.10\nRUFF_VERSION=0.15.12\n",
+            "RUFF_VERSION=0.16.10 --untrusted\n",
+        ] {
+            assert!(pinned_ruff_version(invalid).is_err(), "{invalid}");
         }
     }
 }

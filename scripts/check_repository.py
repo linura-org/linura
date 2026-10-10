@@ -33,6 +33,7 @@ REQUIRED = [
     "contracts/stability.toml", "tools/check_contract_stability.py", "tests/tooling/test_contract_stability.py",
     "contracts/roadmap.toml", "contracts/v010-workstation-slices.toml", "tools/check_roadmap.py", "tools/v010_slice_graph.py", "tests/tooling/test_roadmap.py",
     "tools/check_validation_gates.py", "tests/tooling/test_validation_gates.py", ".github/workflows/codex-environment.yml",
+    ".gitignore", ".vscode/extensions.json", ".vscode/settings.json", "ruff.toml", "tools/python/ruff-requirements.lock", "tests/tooling/test_editor_tooling.py",
     "contracts/qualification-gate-matrix.toml", "tools/applicable_qualification.py", "tests/tooling/test_applicable_qualification.py", "docs/qualification/applicable-gates.md", ".github/workflows/applicable-qualification.yml", "scripts/lint_github_workflows.sh",
     ".github/actions/dependency-input-cache-policy.toml", "tools/check_ci_cache_policy.py", "tests/tooling/test_ci_cache_policy.py", ".github/actions/cargo-input-cache/action.yml", ".github/actions/ubuntu-apt-input-cache/action.yml",
     "contracts/qualification-execution-envelopes.toml", "tools/qualification_envelope.py", "tests/tooling/test_qualification_envelope.py", "docs/qualification/execution-envelopes.md",

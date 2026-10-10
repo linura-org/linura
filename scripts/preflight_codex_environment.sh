@@ -28,6 +28,7 @@ source "$VERSION_CONTRACT"
 : "${RUST_VERSION:?}"
 : "${CARGO_AUDIT_VERSION:?}"
 : "${ACTIONLINT_VERSION:?}"
+: "${RUFF_VERSION:?}"
 : "${PYTHON_MAJOR_MINOR:?}"
 : "${HOST_OS:?}"
 : "${HOST_ARCH:?}"
@@ -83,7 +84,7 @@ require_supported_glibc() {
   printf '%s\n' "$version_text"
 }
 
-for command_name in bash cargo-audit cc getconf git python3 rustup sha256sum uname; do
+for command_name in bash cargo-audit cc getconf git python3 ruff rustup sha256sum uname; do
   require_command "$command_name"
 done
 
@@ -144,6 +145,20 @@ if ! reports_exact_version "$CARGO_AUDIT_VERSION" cargo-audit --version; then
   printf 'unexpected cargo-audit version; expected exactly %s\n' "$CARGO_AUDIT_VERSION" >&2
   exit 1
 fi
+if ! reports_exact_version "$RUFF_VERSION" ruff --version; then
+  printf 'unexpected Ruff version; expected exactly %s (run Codex environment setup)\n' "$RUFF_VERSION" >&2
+  exit 1
+fi
+ruff_lock_digest="$(sha256sum tools/python/ruff-requirements.lock | awk '{print $1}')"
+ruff_marker="${HOME}/.local/linura-tools/ruff/.linura-ruff-lock-sha256"
+ruff_marker_digest=""
+if [[ -f "$ruff_marker" && ! -L "$ruff_marker" ]]; then
+  read -r ruff_marker_digest < "$ruff_marker" || true
+fi
+if [[ "$ruff_marker_digest" != "$ruff_lock_digest" ]]; then
+  echo 'Ruff lock identity mismatch; run Codex environment setup' >&2
+  exit 1
+fi
 
 actionlint_bin="${HOME}/.local/linura-tools/actionlint/${ACTIONLINT_VERSION}/actionlint"
 test -x "$actionlint_bin"
@@ -184,4 +199,5 @@ printf '  rustup: %s\n' "$(rustup --version | head -1)"
 printf '  toolchain: %s\n' "$active_toolchain"
 printf '  rustc: %s\n' "$("$rustc_bin" --version)"
 printf '  cargo-audit: %s\n' "$(cargo-audit --version)"
+printf '  ruff: %s\n' "$(ruff --version)"
 printf '  actionlint: %s\n' "$("$actionlint_bin" -version | head -1)"
