@@ -25,6 +25,7 @@ CONTRACT_PATH = Path("contracts/qualification-gate-matrix.toml")
 ENVELOPE_CONTRACT_PATH = Path("contracts/qualification-execution-envelopes.toml")
 COMPONENTS_PATH = Path("contracts/components.toml")
 SUMMARY_WORKFLOW = Path(".github/workflows/applicable-qualification.yml")
+ACTIVATION_CONTRACT_PATH = Path("contracts/qualification-activation.toml")
 AUTHORITY_APPROVALS_PATH = Path(".github/qualification-authority-approvals.toml")
 STABILITY_CONTRACT_PATH = Path("contracts/stability.toml")
 V09_ROUTING_CONTRACT_PATH = Path("contracts/v09-qualification-routing.toml")
@@ -333,7 +334,7 @@ def load_contract(root: Path = ROOT) -> dict[str, Any]:
         "summary workflow identity drifted",
     )
     _require(
-        contract["summary_job"] == "reconcile",
+        contract["summary_job"] == "shadow",
         "summary reconciliation job identity drifted",
     )
     _require(
@@ -577,6 +578,128 @@ def required_gate_ids(
     ]
 
 
+def activation_mode(root: Path = ROOT) -> str:
+    """Read reviewed activation intent, not a claim of deployed App authority."""
+    policy = _load_toml(root, ACTIVATION_CONTRACT_PATH)
+    _require(
+        set(policy) == {
+            "schema_version", "mode", "publisher", "required_app_check",
+            "acceptance_evidence",
+        }
+        and type(policy.get("schema_version")) is int
+        and policy["schema_version"] == 1
+        and policy.get("mode") in ("off", "shadow", "enforced")
+        and policy.get("publisher") == "independent-github-app"
+        and policy.get("required_app_check") == "linura/applicable-qualification"
+        and isinstance(policy.get("acceptance_evidence"), str),
+        "invalid qualification activation contract",
+    )
+    evidence = policy["acceptance_evidence"]
+    if policy["mode"] == "enforced":
+        _require(
+            evidence.startswith("https://github.com/linura-org/linura/")
+            and len(evidence) > len("https://github.com/linura-org/linura/"),
+            "enforced declaration requires recorded separate App acceptance",
+        )
+    else:
+        _require(not evidence, "inactive mode must not assert App acceptance")
+    return policy["mode"]
+
+
+EXPECTED_SHADOW_WORKFLOW = """\
+name: Applicable qualification
+
+run-name: 'Qualification shadow :: ${{ inputs.head_sha }}'
+
+# No automatic PR or workflow events; GitHub Actions cannot be a trusted check issuer.
+on:
+  workflow_dispatch:
+    inputs:
+      head_sha:
+        description: Exact contributor head SHA for read-only qualification
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  shadow:
+    name: read-only-shadow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Validate reviewed qualification policy
+        run: python3 tools/applicable_qualification.py validate
+
+      - id: activation
+        name: Read protected activation mode
+        run: python3 tools/applicable_qualification.py activation-mode --output "$GITHUB_OUTPUT"
+
+      - name: Produce read-only advisory shadow decision
+        if: steps.activation.outputs.shadow == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+        run: >-
+          python3 tools/applicable_qualification.py decision-head
+          --repository "${{ github.repository }}"
+          --head-sha "$HEAD_SHA"
+          --token-env GITHUB_TOKEN
+"""
+
+
+def _validate_shadow_workflow(summary: str) -> None:
+    """Actions remains manual-only and never publishes checks or statuses."""
+    _require(summary == EXPECTED_SHADOW_WORKFLOW,
+             "manual qualification workflow deviates from reviewed immutable template")
+    _require(
+        summary.count("\non:\n") == 1
+        and summary.count("\npermissions:\n") == 1,
+        "shadow workflow must have one event and permission mapping",
+    )
+    on_block = summary.split("\non:\n", 1)[1].split("\npermissions:\n", 1)[0]
+    _require(
+        re.findall(r"(?m)^  ([a-z_]+):$", on_block) == ["workflow_dispatch"]
+        and "      head_sha:" in on_block
+        and "        required: true" in on_block
+        and "        type: string" in on_block,
+        "qualification Actions must be manual-only with exact-head input",
+    )
+    for forbidden in (
+        "statuses: write", "checks: write", "contents: write",
+        "pull_request_target", "workflow_run:", "  push:", "  schedule:",
+        "repository_dispatch", "secrets.", "reconcile-heads", "event-heads",
+        "reconcile-head", "reconcile-pr",
+    ):
+        _require(forbidden not in summary,
+                 f"unreviewed automatic or write-capable qualification workflow: {forbidden}")
+    _require(
+        "  shadow:" in summary
+        and "    name: read-only-shadow" in summary
+        and "    permissions:\n      contents: read\n      actions: read\n      pull-requests: read" in summary
+        and "persist-credentials: false" in summary
+        and "ref: ${{ github.event.repository.default_branch }}" in summary
+        and "python3 tools/applicable_qualification.py validate" in summary
+        and "python3 tools/applicable_qualification.py activation-mode" in summary
+        and "steps.activation.outputs.shadow == 'true'" in summary
+        and "python3 tools/applicable_qualification.py decision-head" in summary
+        and '--head-sha "$HEAD_SHA"' in summary
+        and "GITHUB_TOKEN: ${{ github.token }}" in summary,
+        "shadow decision must use protected-main read-only policy",
+    )
+
+
 def validate_repository(
     root: Path = ROOT, contract: dict[str, Any] | None = None
 ) -> dict[str, Any]:
@@ -627,82 +750,8 @@ def validate_repository(
                     f"{gate['id']}: {path}",
                 )
 
-    summary = _read(root, contract["summary_workflow"])
-    _require(
-        "  pull_request_target:" in summary
-        and "  workflow_run:" in summary
-        and "workflow_dispatch" not in summary,
-        "applicable-qualification summary must be event-driven",
-    )
-    _require(
-        "    types: [opened, reopened, synchronize, edited, ready_for_review, closed]" in summary,
-        "PR close event must refresh shared-head qualification",
-    )
-    _require(
-        "  push:\n    branches: [main]" in summary
-        and "    - cron: '17 * * * *'" in summary,
-        "protected main base pushes and hourly recovery must refresh PR heads",
-    )
-    _require(
-        "  affected-heads:" in summary
-        and "  reconcile:" in summary
-        and "      head_groups: ${{ steps.resolve.outputs.head_groups }}" in summary
-        and "        group: ${{ fromJSON(needs.affected-heads.outputs.head_groups) }}" in summary
-        and "      group: applicable-qualification-shard-${{ matrix.group.shard }}" in summary
-        and "      queue: max" in summary
-        and summary.count("      queue: max") == 1
-        and "      cancel-in-progress: false" in summary
-        and "  statuses: write" not in summary.split("  affected-heads:", 1)[1].split("  reconcile:", 1)[0],
-        "head-derived matrix must serialize every status writer without write privilege during discovery",
-    )
-    for permission in (
-        "actions: read",
-        "contents: read",
-        "pull-requests: read",
-        "statuses: write",
-    ):
-        _require(
-            permission in summary,
-            f"summary workflow permission missing: {permission}",
-        )
-    workflow_block = re.search(
-        r'(?ms)^    workflows:\n(?P<body>(?:      - "[^"]+"\n)+)    types: \[in_progress, completed\]$',
-        summary,
-    )
-    _require(
-        workflow_block is not None,
-        "summary workflow_run inventory is malformed",
-    )
-    observed_workflows = set(
-        re.findall(r'^      - "([^"]+)"$', workflow_block.group("body"), re.MULTILINE)
-    )
-    expected_workflows = {gate["workflow_name"] for gate in contract["gate"]}
-    _require(
-        observed_workflows == expected_workflows,
-        "summary workflow_run inventory drifted",
-    )
-    _require(
-        "ref: ${{ github.event.repository.default_branch }}" in summary
-        and "python3 tools/applicable_qualification.py event-heads" in summary
-        and "python3 tools/applicable_qualification.py reconcile-heads" in summary
-        and '--heads-json "$HEAD_SHAS"' in summary
-        and '--shard "$HEAD_SHARD"' in summary
-        and '--retry-only "$RETRY_ONLY"' in summary
-        and '--invalidate-only "$INVALIDATE_ONLY"' in summary
-        and "INVALIDATE_ONLY: ${{ github.event_name == 'workflow_run' && github.event.action == 'in_progress' }}" in summary
-        and "RETRY_ONLY: ${{ github.event_name == 'schedule' }}" in summary
-        and "python3 tools/applicable_qualification.py verify-pr" not in summary
-        and "--timeout-seconds" not in summary
-        and "--poll-seconds" not in summary,
-        "summary workflow must discover affected heads and reconcile using protected main code",
-    )
-    summary_job = re.escape(contract["summary_job"])
-    _require(
-        re.search(rf"(?m)^  {summary_job}:\s*$", summary) is not None
-        and re.search(rf"(?m)^    name: {summary_job}\s*$", summary) is not None,
-        "summary reconciliation job identity drifted",
-    )
-
+    activation_mode(root)
+    _validate_shadow_workflow(_read(root, contract["summary_workflow"]))
 
     envelope = _load_toml(root, ENVELOPE_CONTRACT_PATH)
     envelope_ids = {lane["id"] for lane in envelope.get("lane", [])}
@@ -2760,6 +2809,16 @@ def _command_authority_bundle(args: argparse.Namespace) -> int:
     return 0
 
 
+def _command_activation_mode(args: argparse.Namespace) -> int:
+    mode = activation_mode(args.root)
+    if args.output is not None:
+        _require(args.output.is_file(), "GitHub output file is missing")
+        with args.output.open("a", encoding="utf-8") as output:
+            output.write(f"shadow={'true' if mode == 'shadow' else 'false'}\n")
+    print(json.dumps({"mode": mode, "shadow_enabled": mode == "shadow"}))
+    return 0
+
+
 def _command_validate(args: argparse.Namespace) -> int:
     print(
         json.dumps(
@@ -2819,6 +2878,10 @@ def main() -> int:
 
     validate = sub.add_parser("validate")
     validate.set_defaults(func=_command_validate)
+
+    activation = sub.add_parser("activation-mode")
+    activation.add_argument("--output", type=Path)
+    activation.set_defaults(func=_command_activation_mode)
 
     plan = sub.add_parser("plan")
     plan.add_argument("--paths-file", type=Path, required=True)

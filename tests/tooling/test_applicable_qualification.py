@@ -231,58 +231,79 @@ class ApplicableQualificationTests(unittest.TestCase):
         matrix = {item["path"]: item for item in contract["contract"]}
         self.assertEqual(matrix[path]["gates"], [])
 
-    def test_summary_reconciles_events_without_long_lived_polling(self):
-        workflow = (
-            ROOT / ".github/workflows/applicable-qualification.yml"
-        ).read_text(encoding="utf-8")
-        self.assertIn("  pull_request_target:", workflow)
-        self.assertIn("  workflow_run:", workflow)
-        self.assertIn("types: [in_progress, completed]", workflow)
-        self.assertIn("statuses: write", workflow)
-        self.assertIn("reconcile-head", workflow)
-        self.assertIn("event-heads", workflow)
-        self.assertIn("ready_for_review, closed", workflow)
-        self.assertIn("  push:\n    branches: [main]", workflow)
-        self.assertIn("  schedule:\n    - cron: '17 * * * *'", workflow)
-        self.assertIn('--retry-only "$RETRY_ONLY"', workflow)
-        self.assertIn('--invalidate-only "$INVALIDATE_ONLY"', workflow)
-        self.assertIn("fromJSON(needs.affected-heads.outputs.head_groups)", workflow)
-        self.assertIn("group: applicable-qualification-shard-${{ matrix.group.shard }}", workflow)
-        self.assertIn("      queue: max", workflow)
-        self.assertEqual(workflow.count("      queue: max"), 1)
-        self.assertIn("reconcile-heads", workflow)
-        self.assertIn('--heads-json "$HEAD_SHAS"', workflow)
-        self.assertIn("cancel-in-progress: false", workflow)
-        self.assertNotIn("workflow_dispatch:", workflow)
-        prepare, reconcile = workflow.split("  affected-heads:", 1)[1].split("  reconcile:", 1)
-        self.assertNotIn("statuses: write", prepare)
-        self.assertIn("statuses: write", reconcile)
-        self.assertIn(
-            "ref: ${{ github.event.repository.default_branch }}",
-            workflow,
-        )
-        self.assertNotIn("verify-pr", workflow)
-        self.assertNotIn("--timeout-seconds", workflow)
-        self.assertNotIn("--poll-seconds", workflow)
+    def test_qualification_action_is_manual_and_read_only(self):
+        summary = (ROOT / ".github/workflows/applicable-qualification.yml").read_text()
+        self.assertEqual(aq.activation_mode(ROOT), "off")
+        aq._validate_shadow_workflow(summary)
+        for attack in (
+            "  pull_request: {}\n",
+            "  pull_request: [opened]\n",
+            "  pull_request_target: {}\n",
+            "  workflow_run: {workflows: [CI], types: [completed]}\n",
+            "  workflow_dispatch: {inputs: {head_sha: {required: false}}}\n",
+            "  permissions: {statuses: write}\n",
+            "  pull_request_target:\n    types: [opened]\n",
+            "  workflow_run:\n    types: [completed]\n",
+            "  schedule:\n    - cron: '17 * * * *'\n",
+            "      statuses: write\n",
+            "      checks: write\n",
+        ):
+            with self.subTest(attack=attack):
+                with self.assertRaises(aq.QualificationError):
+                    aq._validate_shadow_workflow(summary + attack)
+        for mutation in (
+            summary.replace("  workflow_dispatch:", "  pull_request: {}\n  workflow_dispatch:"),
+            summary.replace("  workflow_dispatch:", "  workflow_dispatch: {}\n  pull_request: {}"),
+            summary.replace("      contents: read", "      contents: write", 1),
+            summary.replace("python3 tools/applicable_qualification.py validate",
+                            "python3 tools/applicable_qualification.py reconcile-heads"),
+            summary + "  pull_request: {}\n",
+        ):
+            with self.subTest(mutation=mutation[:95]):
+                with self.assertRaises(aq.QualificationError):
+                    aq._validate_shadow_workflow(mutation)
 
+    def test_activation_mode_has_strict_schema_and_acceptance_boundary(self):
+        import tempfile
 
-    def test_pinned_linter_does_not_skip_workflows_for_queue_compatibility(self):
-        canonical = (
-            ROOT / ".github/workflows/ci.yml"
-        ).read_text(encoding="utf-8")
-        summary = (
-            ROOT / ".github/workflows/applicable-qualification.yml"
-        ).read_text(encoding="utf-8")
-        helper = (ROOT / "scripts/lint_github_workflows.sh").read_text(encoding="utf-8")
-        preflight = (ROOT / "scripts/preflight_codex_environment.sh").read_text(encoding="utf-8")
-        self.assertIn('bash scripts/lint_github_workflows.sh "$install_dir/actionlint"', canonical)
+        original = (ROOT / "contracts/qualification-activation.toml").read_text()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "contracts/qualification-activation.toml"
+            path.parent.mkdir()
+            for mode in ("off", "shadow"):
+                path.write_text(original.replace('mode = "off"', f'mode = "{mode}"'))
+                self.assertEqual(aq.activation_mode(root), mode)
+            for mutant in (
+                original.replace('mode = "off"', 'mode = "invalid"'),
+                original.replace('mode = "off"', 'mode = "enforced"'),
+                original + 'unreviewed = true\n',
+                original.replace('publisher = "independent-github-app"',
+                                 'publisher = "github-actions"'),
+                original.replace('required_app_check = "linura/applicable-qualification"',
+                                 'required_app_check = "applicable-qualification"'),
+            ):
+                path.write_text(mutant)
+                with self.assertRaises(aq.QualificationError):
+                    aq.activation_mode(root)
+            path.write_text(
+                original.replace('mode = "off"', 'mode = "enforced"').replace(
+                    'acceptance_evidence = ""',
+                    'acceptance_evidence = "https://github.com/linura-org/linura/issues/196"'
+                )
+            )
+            self.assertEqual(aq.activation_mode(root), "enforced")
+
+    def test_pinned_linter_includes_manual_qualification(self):
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        preflight = (ROOT / "scripts/preflight_codex_environment.sh").read_text()
+        helper = (ROOT / "scripts/lint_github_workflows.sh").read_text()
+        self.assertIn('bash scripts/lint_github_workflows.sh "$install_dir/actionlint"', ci)
         self.assertIn('bash scripts/lint_github_workflows.sh "$actionlint_bin"', preflight)
         self.assertIn('python3 tools/applicable_qualification.py validate', helper)
         self.assertIn('"$actionlint_bin" -color "${workflow_files[@]}"', helper)
         self.assertIn("-name '*.yml' -o -name '*.yaml'", helper)
-        self.assertIn("sed '/^      queue: max$/d'", helper)
-        self.assertIn('"$actionlint_bin" -color -', helper)
-        self.assertEqual(summary.count("      queue: max"), 1)
+        self.assertNotIn("sed '/^      queue: max$/d'", helper)
 
     def test_protected_main_push_discovers_affected_pr_heads(self):
         sha_a, sha_b = "a" * 40, "b" * 40

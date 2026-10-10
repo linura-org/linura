@@ -185,151 +185,54 @@ same-repository malicious `statuses: write` job cannot satisfy the
 required check, and test key rotation, outage/reconciliation, revocation,
 base updates and rollback before enabling enforcement.
 
-The Actions-based status writer in this PR is **diagnostic infrastructure
-only** until that independent publisher and ruleset are established.
+The original Actions commit-status writer is now dormant: OFF publishes
+nothing and manual SHADOW writes an advisory JSON receipt only. The independent
+App-owned check remains undeployed and unenforced until operational acceptance.
 Neither green existing GitHub Actions checks nor this PR alone completes
 the required-summary acceptance criterion of issue #196. Keep the
 existing three native required gates and strict updated-base policy
 intact. This is a hard deployment blocker, not a waiver to be signed by
 the code-changing PR or an automatically resolvable review comment.
 
-## Exact-head reconciliation
+## Activation lifecycle: OFF, SHADOW, ENFORCED
 
-`.github/workflows/applicable-qualification.yml` is event-driven rather than
-a long-lived polling job. A read-only event-discovery job identifies the
-affected contributor heads for `pull_request_target` (including `closed`),
-native `workflow_run` events and **pushes to protected `main`**. All jobs
-check out **only reviewed default-branch code**, never PR-head scripts.
-No privileged workflow runs on arbitrary feature-branch pushes. On a `main`
-base update, the discovery job enumerates open PRs targeting `main` and
-emits their unique head SHAs; a PR closure similarly causes the remaining
-open PRs sharing that head to be reevaluated. A PR `synchronize` event
-schedules both the new SHA and GitHub's validated previous `before` SHA,
-so PRs still using the old SHA do not retain obsolete aggregate status.
-Malformed/missing synchronization identities are rejected rather than
-silently dropping old-head reconciliation.
+This activation contract implements [ADR 0041](../adr/0041-applicable-qualification-activation.md), which supersedes only the diagnostic event-writer behavior of ADR 0040.
 
-Head discovery groups arbitrary-sized sets of open PR heads into at most
-**16 deterministic writer shards** by their leading SHA hex digit, avoiding
-GitHub's 256-job matrix ceiling. Each shard has one shared concurrency group
-across **all** event kinds and runs without in-progress cancellation.
-The writer sets `concurrency.queue: max` to retain up to 100 pending events.
-The pinned actionlint version predates this supported GitHub syntax; the
-canonical and Codex preflight checks share `scripts/lint_github_workflows.sh`:
-it first validates the actual workflow's required queue setting, then passes a
-projection omitting only that independently checked key to actionlint while
-fully linting all other workflow files. Dropped
-events above GitHub's queue capacity remain a liveness risk, not an
-authorization success. A shard
-writer first attempts to publish `pending` for **every event-affected head
-in that shard**, then performs **at most one expensive full reconciliation**
-per shard job, bounding its GitHub REST requests and runtime. Other heads stay
-pending, never receiving an inferred pass. A workflow-run `in_progress`
-event performs invalidation only; the completion event can fully reconcile.
-A trusted scheduled event runs at 17 minutes past each hour and rotates over
-open PR heads. Scheduled retries invalidate **only the selected head**, rather
-than revoking the successes of all previously requalified heads. This drains
-stable backlogs across GitHub token quota windows while preserving the single
-writer per SHA prefix. A transient error still fails that job, leaving
-published pending status intact and eligible for hourly retry. No check is
-weakened or bypassed; a large base update may leave affected PRs temporarily
-pending while the bounded queue drains. The discovery job remains
-read-only; only the serialized shard writer receives `statuses: write`.
-The PR inventory is paginated past 3,000 heads without silently truncating.
-Status publication retries transient GitHub errors up to three times with
-bounded delays, but a depleted token or GitHub outage cannot be assumed to
-revoke an existing commit status. GitHub commit statuses do not offer an
-atomic compare-and-swap. Native merge gates and strict up-to-date-branch
-protection must remain independently required. Before enabling the **App-owned** required Check Run on `main`, verify
-operational alerting for long-pending decisions,
-API-write failures and missed schedules; periodic schedules can be delayed or
-dropped and are **not a guaranteed delivery queue**.
+Protected `contracts/qualification-activation.toml` declares `mode = "off"`
+until the independent GitHub App and #196 operational acceptance are complete.
+`tools/applicable_qualification.py validate` checks the activation contract
+and the Actions workflow's strictly manual, read-only execution boundary.
 
-GitHub native PR checks are normally attached to the contributor **head SHA**.
-The Actions summary publishes its **diagnostic-only** `applicable-qualification`
-status to that SHA. It never satisfies the separately required App-owned
-`linura/applicable-qualification` Check Run, which #208 publishes only on a
-freshly verified PR-specific synthetic test-merge SHA.
-Two open PRs can share one head SHA, so the reconciler enumerates **all**
-currently open PRs associated with that commit, computes the applicable
-qualifications separately, and publishes one shared status. A head shared
-by more than eight open PRs receives an explicit fail-closed status instead
-of performing unbounded REST work; these PRs must be separated. It succeeds only
-when **every** associated PR qualifies. One failed PR fails the shared status;
-one still-running/absent gate keeps it pending. The reconciler publishes
-`pending` **before** any fallible lookup of associated PRs or their metadata.
-If a newly opened shared-head PR temporarily lacks a merge SHA, reconciliation
-cannot leave the head's earlier success usable; the pending status remains
-until a later event can revalidate all associated PRs.
-A tree-identical release-authorization PR legitimately has an empty GitHub
-changed-files inventory: this selects all three native mandatory gates and no
-path-routed specialized gates. The empty list is **not** missing evidence;
-API errors or malformed file entries still fail closed.
+| Mode | GitHub Actions workflow | Merge authority |
+| --- | --- | --- |
+| `off` | No automatic PR, workflow-run, push or scheduled qualification reconciliation. Manual dispatch only validates the trusted policy. | No new diagnostic status and no App Check Run |
+| `shadow` | Maintainer may explicitly dispatch the workflow with a 40-character contributor-head SHA; reviewed protected `main` runs a read-only `decision-head` verification. | Advisory JSON in job logs only; never a commit status or merge authorization |
+| `enforced` | Remains manual-only and read-only. No GitHub Actions publisher credentials. | Only the independently deployed GitHub App may issue `linura/applicable-qualification`, pinned as required to its specific integration ID after real acceptance |
 
-The trust-boundary validator accepts native `pull_request` workflow runs only
-when their associated PR **number, exact head SHA, base branch ref, base commit
-SHA, and base repository ID** match GitHub's current PR. A historical run on
-a different base cannot be reused following PR retargeting or a base update.
-The protected-base push trigger explicitly refreshes the shared status even
-when GitHub emits no `synchronize` event for the unchanged contributor head.
-**It cannot manufacture new native PR checks.** GitHub does not generate
-`pull_request` runs when the target branch advances alone. Re-running a
-historical check (or substituting `workflow_dispatch`) cannot authorize
-the new base identity. If a required gate has attributable earlier-base
-native runs but no current-base run, the reconciler publishes an explicit
-**failure** with a branch-refresh instruction rather than an ambiguous,
-unbounded `pending`. The contributor or maintainer must update the PR
-branch against current `main` (preferably by rebase for a clean history)
-or close/reopen the PR to cause a fresh native `pull_request` event.
-Once new exact-head/current-base native runs complete, the normal event
-reconciliation can restore success. This matches the repository's
-`strict_required_status_checks_policy` and does not grant the trusted
-status writer source-branch mutation privileges.
-An empty `workflow_run.pull_requests` array can still trigger discovery
-through the commit-to-PR API, but the run itself is never accepted as
-qualification without independently verifiable base identity. This deliberately
-fails closed for fork runs lacking sufficient GitHub association metadata.
+The workflow's **only event** is `workflow_dispatch`, its job checks out
+protected `main`, and it has no `statuses: write` or `checks: write`
+permissions. A green manual shadow job means the command completed, **not**
+that its JSON decision was accepted. Historical red diagnostic commit statuses
+on earlier heads remain recorded; OFF does not fabricate new successful checks.
+Previously event-driven reconciliation functions remain as dormant,
+test-covered implementation; they are no longer wired to automatic Actions
+events. Normal native and specialized CI workflows still run on their own
+reviewed triggers, and release qualification remains unchanged.
 
-Immediately before publishing any aggregate success, the reconciler
-reevaluates all required runs and rechecks the complete set of open PRs and
-their head/base/merge identities. Concurrent gate reruns therefore cause
-pending instead of authorizing a stale earlier pass. As GitHub statuses and
-events have no atomic compare-and-swap, this is an event-driven consistency
-boundary, not a claim of transactional merge authorization: strict required
-native checks and repository branch protection remain independent.
+OFF → SHADOW requires a reviewed protected-main activation change. Moving to
+ENFORCED additionally requires independently recorded #196 acceptance of real
+App deployment, source/credential isolation, forged-status and same-name-check
+attacks, exact PR-specific test-merge identity, restart/recovery and outage
+behavior, and operator evidence. An evidence URL in the declaration is not
+proof of App installation or real branch enforcement. Only after passing that
+acceptance may the operator change branch protection to require the App-owned
+check, preserving `canonical-check`, `dependency-audit`, `analyze`,
+strict up-to-date protection and applicable specialized gates.
 
-For each PR, the gate matrix resolves native and specialized workflows from
-the current GitHub changed-file `filename` values. For renames, that is the
-new destination path; `previous_filename` is informational and **not** used to
-select a workflow GitHub never triggered. Deleted-file `filename` values
-remain eligible for path matching. A
-run is accepted only when it has the reviewed workflow path (with an optional
-valid `@ref` suffix), event `pull_request`, exact current head and base
-identity, newest run attempt, conclusion `success`, and all required job
-identities successful. An in-progress rerun supersedes older success. A
-workflow-dispatch run, wrong-base run, skipped job, cancelled run, or absent
-evidence cannot satisfy qualification.
-
-v0.9 additionally derives `full` versus `regression` from
-`contracts/v09-qualification-routing.toml`, checking the corresponding
-nested required jobs. Unlike GitHub workflow *applicability*, its mode must
-match the workflow's `git diff --no-renames` classification: for a rename,
-both the previous and destination paths are included. Moving an update or
-recovery implementation file into a regression-only destination therefore
-**still requires full v0.9 qualification**; a missing rename source fails
-closed rather than silently downgrading coverage. Routing-authority edits are statically verified by
-canonical CI rather than fanning out to every specialized lane. Execution
-substrate changes still trigger the dependent VM/visual gates.
-
-After this workflow is merged, test the protected read-only `decision-head`
-interface with the separately deployed App from PR #208; validate real merge-ref
-identity, App-source pinning, journal revocation, failure recovery and stale
-success during API outages. **Only then** add `linura/applicable-qualification`
-as a required App-owned Check Run alongside the three original native gates.
-Path-filtered specialized workflows must not be globally required. A base
-advance without fresh PR-native gates is an actionable failure rather than
-reusing earlier-base evidence. Issue #196 remains open until real ruleset
-acceptance; the Actions diagnostic status is never qualifying authority.
+Do not close #196 or claim ENFORCED merely because a workflow or a model test
+passes. An already activated required App check must never be bypassed by
+changing this mode to OFF on an outage. Independent verification and incident
+freeze procedures remain part of the enforcement contract.
 
 ## Boundary
 

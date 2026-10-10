@@ -4,18 +4,38 @@
 
 `services/qualification-publisher/` is a **separately operated GitHub App check-run publisher**. The GitHub Actions publisher-specific workflow performs tests only; required canonical CI runs the publisher adversarial suite immediately after pinned checkout and Node setup, before any repository-controlled command. The canonical job also pins its exact hosted runner and rejects job containers, services and alternate job-level configuration; this prevents an attacker-controlled container from replacing system tools before any step begins. This prevents prior passwordless-sudo steps from replacing absolute system tools; CodeQL scans JavaScript as well as Rust: no private key, webhook secret, installation token, App deployment or check publication is permitted in Actions. PR-controlled workflows must have no path to publisher credentials, host filesystem, deployment control, or runtime inputs. Never use a repo/organization Actions secret for the private key, even with environment approvals.
 
-There are two independent policies: (1) GitHub's existing `canonical-check`, `dependency-audit`, and `analyze`, which remain required and unchanged, and (2) the reviewed default-branch qualification policy in #206. The publisher **does not accept an Actions commit status** named `applicable-qualification` as proof of (2); that status is diagnostic only. The producer's check is named **`linura/applicable-qualification`**, deliberately different from the Actions status. The only way to obtain a successful producer check is a fresh, bounded, exact-head decision from `tools/applicable_qualification.py decision-head` executed from a protected host checkout of reviewed `main`. This read-only command is implemented by PR #206 and must be merged, installed
-from reviewed protected `main`, and exercised against a real App installation
-before publication is enabled. Missing command, malformed result, changed PR/base or unavailable GitHub API fails closed; a pending decision leaves the check running.
+There are two independent policies: (1) GitHub's existing `canonical-check`, `dependency-audit`, and `analyze`, which remain required and unchanged, and (2) the reviewed default-branch qualification policy in #206. The publisher **does not accept an Actions commit status** named `applicable-qualification` as proof of (2); that status is diagnostic only. The producer's check is named **`linura/applicable-qualification`**, deliberately different from the Actions status. The only way to obtain a successful producer check is a fresh, bounded, exact-head decision from `tools/applicable_qualification.py decision-head` executed from a protected host checkout of reviewed `main`. This read-only command was merged with PR #206. Its reviewed protected-`main`
+source must be independently deployed and exercised against a real GitHub App
+installation before publication is enabled. Missing command, malformed result, changed PR/base or unavailable GitHub API fails closed; a pending decision leaves the check running.
 
 **Default is `PUBLISHER_ENABLED=false`.** The independent publisher from
 #208 is already merged, but it has **not** thereby been deployed or enabled.
-Merge #206 only after its exact-head review and checks; install its reviewed
-read-only verifier from protected `main` on the isolated App host. Complete
+PR #206 is merged; install its reviewed read-only verifier from protected
+`main` on the isolated App host only during the separate #196 rollout. Complete
 diagnostic-mode provisioning, provenance, spoofing, shared-head, outage and
 recovery acceptance **before** enabling publication and pinning the required
 Check Run to the dedicated App integration ID. Keep #196 open until the
 real operational/ruleset evidence is collected and accepted.
+
+## Activation declaration and pre-deployment modes
+
+The reviewed `contracts/qualification-activation.toml` policy defaults to
+`off`. The GitHub Actions Applicable qualification workflow has only an
+explicit `workflow_dispatch` trigger and read-only permissions; ordinary PRs
+cause no qualification summary run or new diagnostic commit status.
+`shadow` permits manual evaluation of one explicit head SHA through the
+protected-main read-only `decision-head` interface. Its JSON receipt is
+advisory and never grants merge authorization.
+
+An `enforced` contract entry is only a documented intent: actual enforcement
+needs the separately provisioned GitHub App, verified installation and
+credential isolation, negative spoofing/outage tests, accepted #196 evidence,
+and required-check pinning to the **specific App integration ID**. Keep
+`PUBLISHER_ENABLED=false` until all of those prerequisites are met.
+The three original required native checks, strict branch up-to-date policy,
+specialized qualification workflows, and release evidence stay active in all
+modes. Switching OFF must not be used to bypass a previously required App
+check. A workflow configuration change does not delete historical statuses.
 
 ## GitHub App provisioning (requires maintainer actions)
 

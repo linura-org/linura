@@ -3,12 +3,13 @@ id = "qualification/applicable-gates"
 repository = "linura-org/linura"
 required_event = "pull_request"
 summary_workflow = ".github/workflows/applicable-qualification.yml"
-summary_job = "reconcile"
+summary_job = "shadow"
 branch_required_check = "applicable-qualification" # diagnostic Actions status; not the App-owned required Check Run
 mandatory_gate_ids = ["canonical-ci", "security-rustsec", "codeql"]
 
 routing_authority_paths = [
   ".github/workflows/applicable-qualification.yml",
+  "contracts/qualification-activation.toml",
   "contracts/qualification-gate-matrix.toml",
   "tools/applicable_qualification.py",
   "tests/tooling/test_applicable_qualification.py",
@@ -30,6 +31,7 @@ native_only_components = [
 native_only_contracts = [
   "contracts/community.toml",
   "contracts/qualification-gate-matrix.toml",
+  "contracts/qualification-activation.toml",
   "contracts/namespaces.toml",
   "contracts/release-branch-cleanup.toml",
   "contracts/repository-topology.toml",
@@ -1089,6 +1091,10 @@ gates = ["vm-acceptance","control1-plan-preview","v04-durability","v04-enospc","
 [[contract]]
 path = "contracts/qualification-execution-envelopes.toml"
 gates = ["codex-environment","evidence-publication","vm-acceptance","control1-plan-preview","v04-durability","v04-enospc","v05-executor-verifier","v06-managed-lifecycle","v07-library","v08-agent","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "contracts/qualification-activation.toml"
+gates = []
 
 [[contract]]
 path = "contracts/qualification-gate-matrix.toml"
