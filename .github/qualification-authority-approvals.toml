@@ -4,3 +4,15 @@
 # Solo mode requires exact-head native CI on the separate ledger PR as well.
 schema_version = 1
 solo_operator = "Ehsan-Azari"
+
+[[approval]]
+bundle_sha256 = "sha256:138bed3d3db2c82432293ab753d9dd3061b115d9afb2a22450bd97bae646e0a4"
+review_pr = 213
+approval_mode = "solo-operator"
+rationale = "Explicit single-maintainer risk acceptance for code PR #204: exact whole-PR diff v2, 34 file identities, immutable previous base-tree entries and review PR number. The changes pin Ruff and its wheel hashes, add editor tooling, extend canonical Rust/Python checks, update workflow/matrix routing, and preserve existing VM, publisher, security, CodeQL and native CI requirements. CI spoofing, omitted checks, stale bases, altered gate scripts and cached evidence must continue to fail closed. This is not an independent human security review; qualifying both code and ledger PRs via original exact-head native checks remains mandatory."
+
+[[approval]]
+bundle_sha256 = "sha256:f764c36443175adea9dc1045466f317c9e951c73c8c87b6bc27c11eb4e2a7d5a"
+review_pr = 213
+approval_mode = "solo-operator"
+rationale = "Explicit single-maintainer risk acceptance for code PR #214: the entire six-file research-radar diff, reviewed prior tree identities, standalone documentation and canonical regression tests are bound to this v2 digest and PR identity. Malformed table rows, invalid record references, unqualified publication claims, and test-harness self-certification remain denied. The code PR must independently pass its exact-head original native checks. This is not independent human review and does not activate the separate GitHub App."
