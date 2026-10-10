@@ -41,6 +41,7 @@ fn desktop_identity() -> Result<(), String> {
 
 fn check() -> Result<(), String> {
     run("cargo", &["fmt", "--all", "--check"])?;
+    run("ruff", &["check", "."])?;
     run(
         "cargo",
         &[

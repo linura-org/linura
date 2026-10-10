@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -42,7 +43,9 @@ class CodexReadinessTests(unittest.TestCase):
     def test_guidance_changes_trigger_both_pr_and_main_environment_checks(self) -> None:
         workflow = (ROOT / ".github/workflows/codex-environment.yml").read_text()
         guidance = ("AGENTS.md", "**/AGENTS.md", "CONTRIBUTING.md",
-                    "docs/codex-development.md", "docs/development-infrastructure.md")
+                    "docs/codex-development.md", "docs/development-infrastructure.md",
+                    "ruff.toml", "tools/python/ruff-requirements.lock",
+                    "tests/tooling/test_editor_tooling.py")
         for path in guidance:
             self.assertEqual(workflow.count(f'      - "{path}"'), 2, path)
         self.assertIn("  pull_request:\n    paths:", workflow)
@@ -212,17 +215,23 @@ class CodexReadinessTests(unittest.TestCase):
 
 
 class CodexPreflightExecutionTests(unittest.TestCase):
-    def _run(self, *, dirty=False, staged=False, mutate=False, mutate_index=False, missing_component=False, full=False, validator_fails=False):
+    def _run(self, *, dirty=False, staged=False, mutate=False, mutate_index=False, missing_component=False, full=False, validator_fails=False, invalid_ruff_lock=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "repo with spaces"
             root.mkdir()
-            for path in ("scripts/preflight_codex_environment.sh", "scripts/lib/codex_source_state.sh", "tools/codex/versions.env", "rust-toolchain.toml"):
+            for path in ("scripts/preflight_codex_environment.sh", "scripts/lib/codex_source_state.sh", "tools/codex/versions.env", "tools/python/ruff-requirements.lock", "rust-toolchain.toml"):
                 target = root / path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(ROOT / path, target)
             watched = root / "watched"
             watched.write_text("baseline\n")
-            git = lambda *args: subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+            def git(*args):
+                return subprocess.run(
+                    ["git", "-C", str(root), *args],
+                    check=True,
+                    capture_output=True,
+                )
+
             git("init")
             git("add", ".")
             git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "fixture")
@@ -248,6 +257,20 @@ class CodexPreflightExecutionTests(unittest.TestCase):
   *) echo '{pins["RUST_VERSION"]}' ;;
 esac
 ''')
+            # Model the isolated, hash-locked tool and published PATH entry.
+            ruff_home = home / ".local/linura-tools/ruff"
+            ruff_binary = ruff_home / "bin/ruff"
+            executable(ruff_binary, f"echo 'ruff {pins['RUFF_VERSION']}'\n")
+            ruff_link = home / ".local/bin/ruff"
+            ruff_link.parent.mkdir(parents=True, exist_ok=True)
+            ruff_link.symlink_to(ruff_binary)
+            lock_digest = hashlib.sha256(
+                (root / "tools/python/ruff-requirements.lock").read_bytes()
+            ).hexdigest()
+            (ruff_home / ".linura-ruff-lock-sha256").write_text(
+                ("0" * 64 if invalid_ruff_lock else lock_digest) + "\n",
+                encoding="utf-8",
+            )
             executable(fake_bin / "cargo-audit", f"echo 'cargo-audit {pins['CARGO_AUDIT_VERSION']}'\n")
             executable(fake_bin / "rustc", f"echo 'rustc {pins['RUST_VERSION']}'\n")
             executable(fake_bin / "cargo", 'exit 0\n')
@@ -281,6 +304,11 @@ if [[ "$*" == '-color' && "${{VALIDATOR_FAIL:-0}}" == 1 ]]; then exit 67; fi
             result = subprocess.run(["bash", str(root / "scripts/preflight_codex_environment.sh"), *(["--full"] if full else [])],
                                     cwd=nested, env=env, capture_output=True, text=True, check=False)
             return result
+
+    def test_preflight_denies_stale_ruff_lock_identity(self):
+        result = self._run(invalid_ruff_lock=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Ruff lock identity mismatch", result.stderr)
 
     def test_preflight_accepts_existing_unstaged_task_edits(self):
         result = self._run(dirty=True)

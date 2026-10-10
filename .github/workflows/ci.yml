@@ -137,6 +137,7 @@ jobs:
             printf 'CARGO_AUDIT_VERSION=%s\n' "$CARGO_AUDIT_VERSION"
             printf 'ACTIONLINT_VERSION=%s\n' "$ACTIONLINT_VERSION"
             printf 'ACTIONLINT_SHA256=%s\n' "$ACTIONLINT_SHA256"
+            printf 'RUFF_VERSION=%s\n' "$RUFF_VERSION"
             printf 'PYTHON_MAJOR_MINOR=%s\n' "$PYTHON_MAJOR_MINOR"
             printf 'HOST_OS=%s\n' "$HOST_OS"
             printf 'HOST_ARCH=%s\n' "$HOST_ARCH"
@@ -191,6 +192,16 @@ jobs:
             exit 1
           fi
           grep -F 'context "runner" is not allowed here' "$RUNNER_TEMP/actionlint-regression.log"
+      - name: Install hash-locked Ruff
+        run: |
+          set -euo pipefail
+          ruff_root="$RUNNER_TEMP/ruff"
+          python3 -m venv "$ruff_root"
+          "$ruff_root/bin/python3" -m pip install \
+            --disable-pip-version-check --no-cache-dir --require-hashes --only-binary=:all: --no-deps \
+            -r tools/python/ruff-requirements.lock
+          test "$("$ruff_root/bin/ruff" --version)" = "ruff $RUFF_VERSION"
+          printf '%s\n' "$ruff_root/bin" >> "$GITHUB_PATH"
       - name: Install pinned Rust toolchain
         run: rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy --component rustfmt
       - name: Use pinned Rust toolchain

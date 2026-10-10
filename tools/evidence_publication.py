@@ -387,7 +387,16 @@ def snapshot_file(source: Path, target: Path, expected_sha: str, expected_size: 
             writer.flush()
             os.fsync(writer.fileno())
         after = os.fstat(reader.fileno())
-        identity = lambda x: (x.st_dev, x.st_ino, x.st_size, x.st_mtime_ns, x.st_ctime_ns)
+
+        def identity(value):
+            return (
+                value.st_dev,
+                value.st_ino,
+                value.st_size,
+                value.st_mtime_ns,
+                value.st_ctime_ns,
+            )
+
         require(identity(before) == identity(after) and digest.hexdigest() == expected_sha,
                 "evidence changed during private publication snapshot")
     require(target.stat().st_size == expected_size and sha256(target) == expected_sha,

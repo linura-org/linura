@@ -8,7 +8,22 @@ Linura treats development infrastructure as part of the product safety boundary.
 cargo xtask check
 ```
 
-This executes formatting, Clippy, workspace tests, repository invariants, and structured asset validation. Additional commands expose acceptance scenarios and build plans without requiring contributors to memorize implementation-specific scripts.
+This executes Rust formatting, the pinned Ruff Python correctness baseline, Clippy, workspace tests, repository invariants, and structured asset validation. Additional commands expose acceptance scenarios and build plans without requiring contributors to memorize implementation-specific scripts.
+
+## Editor and Python analysis baseline
+
+VS Code recommendations are repository-owned in `.vscode/extensions.json`: rust-analyzer for Rust, the Microsoft Python/Pylance pair for Python language intelligence, and Ruff for Python lint/format integration. `.vscode/settings.json` contains only project-relevant behavior; personal UI preferences and other workspace state remain ignored. Editor diagnostics are convenience feedback and never replace repository gates.
+
+The language-specific rulers are tiered review guides rather than new compiler semantics:
+
+- Rust uses columns **100 / 120 / 140**: rustfmt-aligned primary width, extended review boundary, then an exceptional-line boundary.
+- Python uses columns **88 / 100 / 120**: Ruff formatter-aligned primary width, extended review boundary, then an exceptional-line boundary.
+
+Rust formatting runs on save because rustfmt is already a canonical gate. Python formatting stays explicit so adopting Ruff does not silently rewrite the existing tooling corpus; Ruff lint diagnostics are still active in the editor and `ruff check .` is enforced by `cargo xtask check`.
+
+The canonical Ruff version is pinned in `tools/codex/versions.env` and installed from `tools/python/ruff-requirements.lock` with hashes. `ruff.toml` selects `E4`, `E7`, `E9` and `F` explicitly instead of inheriting Ruff's changing default rule set. Repository tooling targets the canonical Python 3.12 host while `bindings/python/**` is checked against its public Python 3.10 minimum. This starts with high-signal Python correctness and compatibility checks; broader style/security categories should be adopted deliberately with a clean migration rather than appearing implicitly after a tool upgrade.
+
+Pylance runs basic workspace analysis for interactive feedback, but Linura does **not** yet have a repository-enforced Python type checker. Before type checking becomes a required gate, evaluate **Pyright versus mypy** against the real scripts, tooling, qualification code and Python binding, then choose one canonical checker and migration plan. Do not make both mandatory by default and create competing diagnostic standards.
 
 ## Deterministic Codex/cloud environment
 
@@ -32,6 +47,7 @@ The setup script:
 - installs the exact Rust language version declared by both `rust-toolchain.toml` and `tools/codex/versions.env`, including rustfmt and Clippy, while the setup contract fixes the host triple independently;
 - installs exactly `cargo-audit` 0.22.2 with Cargo's locked install mode; this source build uses the host-provided `cc` linker;
 - downloads exactly actionlint 1.7.12 and verifies the same SHA-256 used by CI before extracting it;
+- installs exactly Ruff 0.16.10 into an isolated environment from the repository hash-locked wheel contract and exposes only that reviewed binary on the development PATH;
 - fetches only the locked Cargo dependency graph;
 - fails if setup changes tracked repository state.
 
@@ -49,7 +65,8 @@ The Codex product-side environment still has to be created/selected for `linura-
 
 - `static.rust-lang.org` for the pinned rustup bootstrap and Rust toolchain;
 - `index.crates.io`, `static.crates.io`, and `crates.io` for locked Cargo dependencies and the pinned cargo-audit install;
-- `github.com` and GitHub release-asset hosts required to fetch the pinned actionlint release.
+- `github.com` and GitHub release-asset hosts required to fetch the pinned actionlint release;
+- `pypi.org` and `files.pythonhosted.org` for the hash-locked Ruff wheel and, when requested, the hash-locked Python binding build environment.
 
 Ordinary delegated implementation should begin with the preflight and should not install, update or substitute tool versions. Once setup has warmed the locked Cargo graph, the normal preflight and `--full` verification are designed to run without dependency mutation; task-time internet access is not a substitute for a correctly provisioned environment.
 
