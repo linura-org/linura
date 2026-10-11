@@ -37,7 +37,7 @@ jobs:
       TRIGGER_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
     steps:
       - name: Download terminal verification evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: linura-release-verification-${{ github.event.workflow_run.id }}
           path: verification-evidence
@@ -292,7 +292,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.bind-verification.outputs.source_sha }}
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: linura-crates-io-candidate-${{ needs.bind-verification.outputs.source_sha }}
           path: crates-io-candidate
