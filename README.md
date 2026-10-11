@@ -232,6 +232,7 @@ The first interactive workstation PlatformProfile target stays deliberately narr
 | Documentation | [`docs/index.md`](docs/index.md) |
 | Architecture | [`docs/architecture.md`](docs/architecture.md) |
 | Landscape | [`docs/concepts/landscape.md`](docs/concepts/landscape.md) |
+| Technology research | [Technology Radar](docs/research/technology-radar.md) · [Research process](docs/research/README.md) |
 | Roadmap | [`docs/roadmap.md`](docs/roadmap.md) |
 | Contributing | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | Community | https://github.com/linura-org/linura/discussions |
