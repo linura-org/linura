@@ -147,7 +147,7 @@ jobs:
           execution-subject-file: ${{ runner.temp }}/linura-v09-adversarial-artifacts/guest-execution-identity.json
 
       - name: Upload immutable-source shard evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linura-v09-adversarial-shard-${{ matrix.shard_id }}-${{ inputs.source_sha || github.sha }}
           path: ${{ runner.temp }}/linura-v09-adversarial-artifacts/
@@ -459,7 +459,7 @@ jobs:
           source-sha: ${{ env.SOURCE_SHA }}
 
       - name: Upload immutable-source adversarial evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linura-v09-adversarial-${{ inputs.source_sha || github.sha }}
           path: /tmp/linura-v09-adversarial/
