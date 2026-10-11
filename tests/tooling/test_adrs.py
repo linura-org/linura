@@ -6,13 +6,17 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("check_adrs", ROOT / "tools/check_adrs.py")
+SPEC = importlib.util.spec_from_file_location(
+    "check_adrs", ROOT / "tools/check_adrs.py"
+)
 assert SPEC is not None and SPEC.loader is not None
 check_adrs = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(check_adrs)
 
 
-def write_adr(root: Path, filename: str, heading_number: str, status: str = "Accepted") -> None:
+def write_adr(
+    root: Path, filename: str, heading_number: str, status: str = "Accepted"
+) -> None:
     adr_dir = root / "docs/adr"
     adr_dir.mkdir(parents=True, exist_ok=True)
     (adr_dir / filename).write_text(
@@ -48,7 +52,9 @@ class AdrGovernanceTests(unittest.TestCase):
             write_adr(root, "0001-second.md", "0001")
             write_index(root, [("0001", "0001-example.md")])
             failures = check_adrs.validate(root)
-            self.assertTrue(any("duplicate ADR identifier 0001" in failure for failure in failures))
+            self.assertTrue(
+                any("duplicate ADR identifier 0001" in failure for failure in failures)
+            )
 
     def test_unindexed_record_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -57,7 +63,9 @@ class AdrGovernanceTests(unittest.TestCase):
             write_adr(root, "0002-second.md", "0002")
             write_index(root, [("0001", "0001-example.md")])
             failures = check_adrs.validate(root)
-            self.assertTrue(any("ADR records missing from index" in failure for failure in failures))
+            self.assertTrue(
+                any("ADR records missing from index" in failure for failure in failures)
+            )
 
     def test_heading_must_match_filename(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -65,7 +73,9 @@ class AdrGovernanceTests(unittest.TestCase):
             write_adr(root, "0001-example.md", "0002")
             write_index(root, [("0001", "0001-example.md")])
             failures = check_adrs.validate(root)
-            self.assertTrue(any("heading/filename mismatch" in failure for failure in failures))
+            self.assertTrue(
+                any("heading/filename mismatch" in failure for failure in failures)
+            )
 
     def test_invalid_status_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -73,7 +83,9 @@ class AdrGovernanceTests(unittest.TestCase):
             write_adr(root, "0001-example.md", "0001", "Final")
             write_index(root, [("0001", "0001-example.md")])
             failures = check_adrs.validate(root)
-            self.assertTrue(any("invalid ADR status" in failure for failure in failures))
+            self.assertTrue(
+                any("invalid ADR status" in failure for failure in failures)
+            )
 
     def test_superseded_record_requires_forward_reference(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,7 +94,9 @@ class AdrGovernanceTests(unittest.TestCase):
             write_adr(root, "0002-second.md", "0002")
             write_index(root, [("0001", "0001-example.md"), ("0002", "0002-second.md")])
             failures = check_adrs.validate(root)
-            self.assertTrue(any("must declare Superseded by" in failure for failure in failures))
+            self.assertTrue(
+                any("must declare Superseded by" in failure for failure in failures)
+            )
 
 
 if __name__ == "__main__":

@@ -68,13 +68,23 @@ class QualificationEnvelopeTests(unittest.TestCase):
         contract = envelopes.load_contract(ROOT)
         by_id = {lane["id"]: lane for lane in contract["lane"]}
         self.assertEqual(by_id["canonical-ci"]["execution_subject"], "runner")
-        self.assertEqual(by_id["v010-maintained-hardware"]["execution_subject"], "runner")
+        self.assertEqual(
+            by_id["v010-maintained-hardware"]["execution_subject"], "runner"
+        )
         self.assertEqual(by_id["vm-acceptance"]["execution_subject"], "guest")
-        self.assertEqual(by_id["v010-shell-runtime"]["guest_profile"], "arch_rolling_qemu")
-        self.assertEqual(by_id["v09-qualification-contract"]["execution_subject"], "runner")
-        self.assertEqual(by_id["v09-adversarial-security"]["execution_subject"], "aggregate")
+        self.assertEqual(
+            by_id["v010-shell-runtime"]["guest_profile"], "arch_rolling_qemu"
+        )
+        self.assertEqual(
+            by_id["v09-qualification-contract"]["execution_subject"], "runner"
+        )
+        self.assertEqual(
+            by_id["v09-adversarial-security"]["execution_subject"], "aggregate"
+        )
         self.assertEqual(by_id["v09-qualification"]["execution_subject"], "aggregate")
-        self.assertEqual(by_id["v09-adversarial-security-shard"]["execution_subject"], "guest")
+        self.assertEqual(
+            by_id["v09-adversarial-security-shard"]["execution_subject"], "guest"
+        )
         self.assertEqual(
             [
                 (
@@ -112,12 +122,18 @@ class QualificationEnvelopeTests(unittest.TestCase):
                     )
 
     def test_qualification_environment_observation_is_reviewed(self):
-        valid = {"qualification_environment_id": "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"}
+        valid = {
+            "qualification_environment_id": "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"
+        }
         self.assertEqual(
-            envelopes._validate_observations(valid, set(valid), "v09-qualification-contract"),
+            envelopes._validate_observations(
+                valid, set(valid), "v09-qualification-contract"
+            ),
             valid,
         )
-        with self.assertRaisesRegex(envelopes.EnvelopeError, "qualification environment id is not reviewed"):
+        with self.assertRaisesRegex(
+            envelopes.EnvelopeError, "qualification environment id is not reviewed"
+        ):
             envelopes._validate_observations(
                 {"qualification_environment_id": "qualification/forged"},
                 {"qualification_environment_id"},
@@ -241,51 +257,79 @@ class QualificationEnvelopeTests(unittest.TestCase):
         )
 
     def test_v09_routes_bind_contract_and_final_execution_envelopes(self):
-        workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("lane: v09-qualification-contract", workflow)
         self.assertIn("artifact-suffix: contract", workflow)
         self.assertIn("Upload stable v0.9 contract envelope hand-off", workflow)
-        self.assertEqual(workflow.count("name: linura-v09-contract-envelope-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}"), 3)
-        self.assertNotIn("qualification-envelope-v09-qualification-contract-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}-contract-attempt-${{ github.run_attempt }}", workflow)
+        self.assertEqual(
+            workflow.count(
+                "name: linura-v09-contract-envelope-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}"
+            ),
+            3,
+        )
+        self.assertNotIn(
+            "qualification-envelope-v09-qualification-contract-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}-contract-attempt-${{ github.run_attempt }}",
+            workflow,
+        )
         envelope_steps = envelopes.workflow_action_steps(
             workflow, "./.github/actions/qualification-envelope"
         )
         self.assertEqual(
             sum(
-                envelopes.workflow_step_has_value(
-                    block, "lane", "v09-qualification"
-                )
+                envelopes.workflow_step_has_value(block, "lane", "v09-qualification")
                 for _, block in envelope_steps
             ),
             2,
         )
         self.assertIn("artifact-suffix: regression", workflow)
-        self.assertIn("CONTRACT_ENVELOPE_ROOT: /tmp/linura-v09-contract-envelope", workflow)
-        self.assertIn("for item in (contract_envelope, vm_envelope, adversarial_envelope)", workflow)
+        self.assertIn(
+            "CONTRACT_ENVELOPE_ROOT: /tmp/linura-v09-contract-envelope", workflow
+        )
+        self.assertIn(
+            "for item in (contract_envelope, vm_envelope, adversarial_envelope)",
+            workflow,
+        )
         self.assertIn("COMPONENT_ENVELOPE_SET_SHA256=", workflow)
-        self.assertGreaterEqual(workflow.count("qualification-execution-components.json"), 3)
+        self.assertGreaterEqual(
+            workflow.count("qualification-execution-components.json"), 3
+        )
         self.assertIn('"route": "exact-source-regression"', workflow)
         self.assertIn('"route": "full"', workflow)
         self.assertIn("Upload exact-source regression execution context", workflow)
         self.assertIn("canonical_adversarial_component_digest", workflow)
-        self.assertIn("normalized_adversarial_components.sort(key=lambda item: item[\"id\"])", workflow)
+        self.assertIn(
+            'normalized_adversarial_components.sort(key=lambda item: item["id"])',
+            workflow,
+        )
         self.assertIn("execution_components = sorted(", workflow)
         self.assertIn("v0.9 adversarial aggregate environment mismatch", workflow)
         self.assertNotIn("V09-REGRESSION-EVIDENCE.json", workflow)
         self.assertNotIn('"execution_envelopes":', workflow)
 
     def test_execution_context_layer_never_accepts_evidence(self):
-        qualification = (ROOT / ".github/workflows/v09-qualification.yml").read_text(encoding="utf-8")
-        adversarial = (ROOT / ".github/workflows/v09-adversarial-security.yml").read_text(encoding="utf-8")
+        qualification = (ROOT / ".github/workflows/v09-qualification.yml").read_text(
+            encoding="utf-8"
+        )
+        adversarial = (
+            ROOT / ".github/workflows/v09-adversarial-security.yml"
+        ).read_text(encoding="utf-8")
         vm = (ROOT / ".github/workflows/vm-acceptance.yml").read_text(encoding="utf-8")
-        release = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(encoding="utf-8")
-        shard = (ROOT / "scripts/qualification/v09-adversarial-guest.sh").read_text(encoding="utf-8")
+        release = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(
+            encoding="utf-8"
+        )
+        shard = (ROOT / "scripts/qualification/v09-adversarial-guest.sh").read_text(
+            encoding="utf-8"
+        )
 
         self.assertNotIn('"execution_envelopes":', qualification)
         self.assertNotIn('"execution_envelopes":', adversarial)
         self.assertNotIn('"guest_execution_identity": {', vm)
         self.assertNotIn("'guest_execution_identity': {", shard)
-        self.assertNotIn("Bind execution-envelope digest into release proof receipt", release)
+        self.assertNotIn(
+            "Bind execution-envelope digest into release proof receipt", release
+        )
         self.assertNotIn('receipt["execution_envelope"]', release)
         self.assertIn("qualification-execution-components.json", adversarial)
         self.assertIn("Bind trusted-release execution envelope", release)
@@ -297,7 +341,9 @@ class QualificationEnvelopeTests(unittest.TestCase):
                 lane = envelopes.lane_by_id(contract, lane_id)
                 self.assertEqual(lane["execution_subject"], "aggregate")
                 self.assertEqual(lane["required_digests"], [])
-                self.assertIn("component_envelope_set_sha256", lane["required_observations"])
+                self.assertIn(
+                    "component_envelope_set_sha256", lane["required_observations"]
+                )
 
     def test_rustsec_producer_binds_canonical_repository_under_isolated_git(self):
         workflow = (ROOT / ".github/workflows/security.yml").read_text(encoding="utf-8")
@@ -305,8 +351,8 @@ class QualificationEnvelopeTests(unittest.TestCase):
         self.assertIn("GIT_CONFIG_GLOBAL=/dev/null", workflow)
         self.assertIn("https://github.com/RustSec/advisory-db.git", workflow)
         self.assertIn("/usr/bin/git --no-replace-objects", workflow)
-        self.assertIn("test ! -L \"$advisory_db\"", workflow)
-        self.assertIn("test ! -L \"$advisory_db/.git\"", workflow)
+        self.assertIn('test ! -L "$advisory_db"', workflow)
+        self.assertIn('test ! -L "$advisory_db/.git"', workflow)
 
     def test_cache_policy_never_promotes_a_cache_hit_to_qualification(self):
         contract = envelopes.load_contract(ROOT)
@@ -367,7 +413,7 @@ class QualificationEnvelopeTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(
-            'git -C "$V010_QUALIFICATION_SOURCE_ROOT" rev-parse \'HEAD^{tree}\'',
+            "git -C \"$V010_QUALIFICATION_SOURCE_ROOT\" rev-parse 'HEAD^{tree}'",
             workflow,
         )
         self.assertIn('"$QUALIFICATION_TREE_SHA"', workflow)
@@ -381,7 +427,7 @@ class QualificationEnvelopeTests(unittest.TestCase):
             "RUNNER_ARCH": "X64",
             "ImageOS": "ubuntu24",
             "ImageVersion": "20261001.1",
-                "VM_ACCELERATION": "tcg",
+            "VM_ACCELERATION": "tcg",
         }
         envelope = envelopes.create_envelope(
             root=ROOT,
@@ -396,7 +442,9 @@ class QualificationEnvelopeTests(unittest.TestCase):
         self.assertRegex(envelope["source"]["tree_sha"], r"^[0-9a-f]{40}$")
         self.assertEqual(envelope["runner"]["image_version"], "20261001.1")
         self.assertRegex(envelope["runner"]["os_release_sha256"], r"^[0-9a-f]{64}$")
-        self.assertRegex(envelope["runner"]["package_manifest_sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(
+            envelope["runner"]["package_manifest_sha256"], r"^[0-9a-f]{64}$"
+        )
         self.assertGreater(envelope["runner"]["package_count"], 0)
         self.assertIn("Cargo.lock", envelope["repository_inputs"])
         self.assertIn(
@@ -423,12 +471,12 @@ class QualificationEnvelopeTests(unittest.TestCase):
                 envelopes.EnvelopeError,
                 "package manager does not match runner profile",
             ):
-                envelopes.verify_envelope(
-                    ROOT, forged_path, source_sha=source_sha
-                )
+                envelopes.verify_envelope(ROOT, forged_path, source_sha=source_sha)
 
     def test_wrong_source_is_rejected_before_envelope_creation(self):
-        with self.assertRaisesRegex(envelopes.EnvelopeError, "exact checked-out source"):
+        with self.assertRaisesRegex(
+            envelopes.EnvelopeError, "exact checked-out source"
+        ):
             envelopes.create_envelope(
                 root=ROOT,
                 lane_id="canonical-ci",
@@ -441,7 +489,7 @@ class QualificationEnvelopeTests(unittest.TestCase):
                     "RUNNER_ARCH": "X64",
                     "ImageOS": "ubuntu24",
                     "ImageVersion": "20261001.1",
-                "VM_ACCELERATION": "tcg",
+                    "VM_ACCELERATION": "tcg",
                 },
             )
 
@@ -462,7 +510,7 @@ class QualificationEnvelopeTests(unittest.TestCase):
                     "RUNNER_ARCH": "X64",
                     "ImageOS": "ubuntu24",
                     "ImageVersion": "20261001.1",
-                "VM_ACCELERATION": "tcg",
+                    "VM_ACCELERATION": "tcg",
                 },
             )
 
@@ -471,13 +519,13 @@ class QualificationEnvelopeTests(unittest.TestCase):
             path = Path(directory) / "cache.bin"
             path.write_bytes(b"verified-cache")
             actual = envelopes._sha256_file(path)
-            accepted = envelopes._verified_caches([f"prepared_substrate={path}@{actual}"])
+            accepted = envelopes._verified_caches(
+                [f"prepared_substrate={path}@{actual}"]
+            )
             self.assertEqual(accepted["prepared_substrate"]["sha256"], actual)
             self.assertFalse(accepted["prepared_substrate"]["qualification_authority"])
             with self.assertRaisesRegex(envelopes.EnvelopeError, "digest mismatch"):
-                envelopes._verified_caches(
-                    [f"prepared_substrate={path}@{'0' * 64}"]
-                )
+                envelopes._verified_caches([f"prepared_substrate={path}@{'0' * 64}"])
 
     def test_tampering_breaks_canonical_digest(self):
         source_sha = subprocess.check_output(
@@ -503,8 +551,12 @@ class QualificationEnvelopeTests(unittest.TestCase):
             envelopes.write_envelope(path, envelope)
             payload = json.loads(path.read_text(encoding="utf-8"))
             payload["runner"]["image_version"] = "substituted"
-            path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
-            with self.assertRaisesRegex(envelopes.EnvelopeError, "canonical digest mismatch"):
+            path.write_text(
+                json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            with self.assertRaisesRegex(
+                envelopes.EnvelopeError, "canonical digest mismatch"
+            ):
                 envelopes.verify_envelope(ROOT, path)
 
     def test_eol_normalization_cannot_hide_raw_worktree_byte_drift(self):
@@ -519,7 +571,9 @@ class QualificationEnvelopeTests(unittest.TestCase):
                 ["git", "-C", str(root), "config", "user.name", "Linura Test"],
                 check=True,
             )
-            (root / ".gitattributes").write_text("* text=auto eol=lf\n", encoding="utf-8")
+            (root / ".gitattributes").write_text(
+                "* text=auto eol=lf\n", encoding="utf-8"
+            )
             tracked = root / "outside-lane-input.sh"
             tracked.write_bytes(b"#!/bin/sh\necho clean\n")
             subprocess.run(
@@ -542,61 +596,64 @@ class QualificationEnvelopeTests(unittest.TestCase):
                 ).returncode,
                 0,
             )
-            with self.assertRaisesRegex(
-                envelopes.EnvelopeError, "raw bytes differ"
-            ):
+            with self.assertRaisesRegex(envelopes.EnvelopeError, "raw bytes differ"):
                 envelopes._require_clean_tracked_checkout(root, source_sha)
 
     def test_composite_action_integration_is_structurally_enforced(self):
-        action = (
-            ROOT / ".github/actions/qualification-envelope/action.yml"
-        ).read_text(encoding="utf-8")
+        action = (ROOT / ".github/actions/qualification-envelope/action.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertTrue(envelopes._hosted_action_has_integration(action))
 
-        create_spoof = action.replace(
-            " create-from-environment \\\n",
-            " disconnected-create \\\n",
-            1,
-        ) + "\n# create-from-environment qualification_envelope.py\n"
-        self.assertFalse(
-            envelopes._hosted_action_has_integration(create_spoof)
+        create_spoof = (
+            action.replace(
+                " create-from-environment \\\n",
+                " disconnected-create \\\n",
+                1,
+            )
+            + "\n# create-from-environment qualification_envelope.py\n"
         )
+        self.assertFalse(envelopes._hosted_action_has_integration(create_spoof))
 
-        verify_spoof = action.replace(
-            " tools/qualification_envelope.py verify \\\n",
-            " tools/qualification_envelope.py disconnected-verify \\\n",
-            1,
-        ) + "\n# qualification_envelope.py verify \n"
-        self.assertFalse(
-            envelopes._hosted_action_has_integration(verify_spoof)
+        verify_spoof = (
+            action.replace(
+                " tools/qualification_envelope.py verify \\\n",
+                " tools/qualification_envelope.py disconnected-verify \\\n",
+                1,
+            )
+            + "\n# qualification_envelope.py verify \n"
         )
+        self.assertFalse(envelopes._hosted_action_has_integration(verify_spoof))
 
-        output_spoof = action.replace(
-            "    value: ${{ steps.envelope.outputs.sha256 }}",
-            "    value: ${{ steps.disconnected.outputs.sha256 }}",
-            1,
-        ) + "\n# value: ${{ steps.envelope.outputs.sha256 }}\n"
-        self.assertFalse(
-            envelopes._hosted_action_has_integration(output_spoof)
+        output_spoof = (
+            action.replace(
+                "    value: ${{ steps.envelope.outputs.sha256 }}",
+                "    value: ${{ steps.disconnected.outputs.sha256 }}",
+                1,
+            )
+            + "\n# value: ${{ steps.envelope.outputs.sha256 }}\n"
         )
+        self.assertFalse(envelopes._hosted_action_has_integration(output_spoof))
 
-        upload_spoof = action.replace(
-            "uses: actions/upload-artifact@",
-            "uses: actions/checkout@",
-            1,
-        ) + "\n# actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a\n"
-        self.assertFalse(
-            envelopes._hosted_action_has_integration(upload_spoof)
+        upload_spoof = (
+            action.replace(
+                "uses: actions/upload-artifact@",
+                "uses: actions/checkout@",
+                1,
+            )
+            + "\n# actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a\n"
         )
+        self.assertFalse(envelopes._hosted_action_has_integration(upload_spoof))
 
-        subject_spoof = action.replace(
-            "  execution-subject-file:\n",
-            "  disconnected-execution-subject-file:\n",
-            1,
-        ) + "\n# execution-subject-file:\n"
-        self.assertFalse(
-            envelopes._hosted_action_has_integration(subject_spoof)
+        subject_spoof = (
+            action.replace(
+                "  execution-subject-file:\n",
+                "  disconnected-execution-subject-file:\n",
+                1,
+            )
+            + "\n# execution-subject-file:\n"
         )
+        self.assertFalse(envelopes._hosted_action_has_integration(subject_spoof))
 
     def test_declared_targets_have_enforced_envelope_integration(self):
         contract = envelopes.load_contract(ROOT)
@@ -632,9 +689,7 @@ jobs:
             [],
         )
         self.assertFalse(
-            envelopes._hosted_target_has_integration(
-                "canonical-ci", scalar_spoof
-            )
+            envelopes._hosted_target_has_integration("canonical-ci", scalar_spoof)
         )
         disabled_step = """
 jobs:
@@ -714,9 +769,7 @@ jobs:
           lane: canonical-ci
 """
         self.assertFalse(
-            envelopes._hosted_target_has_integration(
-                "canonical-ci", error_tolerant_job
-            )
+            envelopes._hosted_target_has_integration("canonical-ci", error_tolerant_job)
         )
         with_spoof = """
 jobs:
@@ -733,9 +786,7 @@ jobs:
           lane: disconnected
 """
         self.assertFalse(
-            envelopes._hosted_target_has_integration(
-                "canonical-ci", with_spoof
-            )
+            envelopes._hosted_target_has_integration("canonical-ci", with_spoof)
         )
         reusable_vm = (ROOT / ".github/workflows/vm-acceptance.yml").read_text(
             encoding="utf-8"
@@ -753,13 +804,16 @@ jobs:
                 ),
             )
         )
-        evidence_consumer = reusable_vm + """
+        evidence_consumer = (
+            reusable_vm
+            + """
       - name: Downstream evidence consumer
         uses: ./.github/actions/qualification-evidence
         with:
           lane: ${{ inputs.envelope_lane || 'vm-acceptance' }}
           artifact-root: ${{ env.ARTIFACT_DIR }}
 """
+        )
         disconnected_execution = evidence_consumer.replace(
             "lane: ${{ inputs.envelope_lane || 'vm-acceptance' }}",
             "lane: disconnected",
@@ -770,19 +824,22 @@ jobs:
                 "vm-acceptance", disconnected_execution
             )
         )
-        control1 = (
-            ROOT / ".github/workflows/control1-plan-preview-vm.yml"
-        ).read_text(encoding="utf-8")
+        control1 = (ROOT / ".github/workflows/control1-plan-preview-vm.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertTrue(
             envelopes._hosted_target_has_integration(
                 "control1-plan-preview-vm", control1
             )
         )
-        disconnected_control1 = control1.replace(
-            "envelope_lane: control1-plan-preview-vm",
-            "envelope_lane: disconnected",
-            1,
-        ) + "\n# envelope_lane: control1-plan-preview-vm\n"
+        disconnected_control1 = (
+            control1.replace(
+                "envelope_lane: control1-plan-preview-vm",
+                "envelope_lane: disconnected",
+                1,
+            )
+            + "\n# envelope_lane: control1-plan-preview-vm\n"
+        )
         self.assertFalse(
             envelopes._hosted_target_has_integration(
                 "control1-plan-preview-vm", disconnected_control1
@@ -814,9 +871,7 @@ EOF
         ;;
 esac
 """
-        self.assertFalse(
-            envelopes._physical_target_has_integration(physical_spoof)
-        )
+        self.assertFalse(envelopes._physical_target_has_integration(physical_spoof))
         unreachable_physical_spoof = r"""
 case "$command_name" in
     finalize-run)
@@ -828,9 +883,7 @@ case "$command_name" in
 esac
 """
         self.assertFalse(
-            envelopes._physical_target_has_integration(
-                unreachable_physical_spoof
-            )
+            envelopes._physical_target_has_integration(unreachable_physical_spoof)
         )
 
     def test_hardware_finalize_rejects_duplicate_state_roots_before_execution(self):
@@ -901,14 +954,28 @@ esac
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             subprocess.run(["git", "init", "-q", str(root)], check=True)
-            subprocess.run(["git", "-C", str(root), "config", "user.email", "test@linura.invalid"], check=True)
-            subprocess.run(["git", "-C", str(root), "config", "user.name", "Linura Test"], check=True)
-            (root / ".gitignore").write_text("/target/\n.env\n__pycache__/\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.email", "test@linura.invalid"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.name", "Linura Test"],
+                check=True,
+            )
+            (root / ".gitignore").write_text(
+                "/target/\n.env\n__pycache__/\n", encoding="utf-8"
+            )
             tracked = root / "tracked.rs"
             tracked.write_text("clean\n", encoding="utf-8")
-            subprocess.run(["git", "-C", str(root), "add", ".gitignore", tracked.name], check=True)
-            subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "fixture"], check=True)
-            source_sha = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+            subprocess.run(
+                ["git", "-C", str(root), "add", ".gitignore", tracked.name], check=True
+            )
+            subprocess.run(
+                ["git", "-C", str(root), "commit", "-q", "-m", "fixture"], check=True
+            )
+            source_sha = subprocess.check_output(
+                ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+            ).strip()
 
             (root / "target").mkdir()
             (root / "target/generated.bin").write_bytes(b"generated")
@@ -918,12 +985,16 @@ esac
 
             build_script = root / "build.rs"
             build_script.write_text("fn main() {}\n", encoding="utf-8")
-            with self.assertRaisesRegex(envelopes.EnvelopeError, "untracked or ignored source inputs"):
+            with self.assertRaisesRegex(
+                envelopes.EnvelopeError, "untracked or ignored source inputs"
+            ):
                 envelopes._require_clean_tracked_checkout(root, source_sha)
             build_script.unlink()
 
             (root / ".env").write_text("RUSTFLAGS=--cfg injected\n", encoding="utf-8")
-            with self.assertRaisesRegex(envelopes.EnvelopeError, "untracked or ignored source inputs"):
+            with self.assertRaisesRegex(
+                envelopes.EnvelopeError, "untracked or ignored source inputs"
+            ):
                 envelopes._require_clean_tracked_checkout(root, source_sha)
 
     def test_security_identity_commands_ignore_caller_path(self):
@@ -944,7 +1015,9 @@ esac
         for name, candidates in envelopes.TRUSTED_EXECUTABLES.items():
             with self.subTest(command=name):
                 self.assertTrue(candidates)
-                self.assertTrue(all(candidate.is_absolute() for candidate in candidates))
+                self.assertTrue(
+                    all(candidate.is_absolute() for candidate in candidates)
+                )
 
     def test_executable_bit_drift_rejects_clean_source_claim(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1142,7 +1215,7 @@ esac
             "RUNNER_ARCH": "X64",
             "ImageOS": "ubuntu24",
             "ImageVersion": "20261001.1",
-                "VM_ACCELERATION": "tcg",
+            "VM_ACCELERATION": "tcg",
         }
         with self.assertRaisesRegex(
             envelopes.EnvelopeError,
@@ -1205,7 +1278,7 @@ esac
                         "RUNNER_ARCH": "X64",
                         "ImageOS": "ubuntu24",
                         "ImageVersion": "20261001.1",
-                "VM_ACCELERATION": "tcg",
+                        "VM_ACCELERATION": "tcg",
                     },
                 )
 
@@ -1390,7 +1463,9 @@ esac
         for relative in workflows:
             with self.subTest(workflow=relative):
                 source = (ROOT / relative).read_text(encoding="utf-8")
-                self.assertEqual(source.count("qualification_guest_identity.py capture-ssh"), 1)
+                self.assertEqual(
+                    source.count("qualification_guest_identity.py capture-ssh"), 1
+                )
                 self.assertNotIn('guest_package_manifest_sha256="$(ssh ', source)
         remote_script = guest_identity._remote_script("dpkg")
         self.assertIn("/usr/bin/dpkg-query", remote_script)
@@ -1432,13 +1507,31 @@ esac
                 )
 
     def test_entrypoints_pin_execution_envelope_interpreters(self):
-        hosted = (ROOT / ".github/actions/qualification-envelope/action.yml").read_text(encoding="utf-8")
-        physical = (ROOT / "qualification/v010/workstation-acceptance/run-hardware-qualification.sh").read_text(encoding="utf-8")
+        hosted = (ROOT / ".github/actions/qualification-envelope/action.yml").read_text(
+            encoding="utf-8"
+        )
+        physical = (
+            ROOT
+            / "qualification/v010/workstation-acceptance/run-hardware-qualification.sh"
+        ).read_text(encoding="utf-8")
         self.assertIn("/usr/bin/python3 -I tools/qualification_envelope.py", hosted)
-        self.assertNotIn("\n        created=\"$(python3 tools/qualification_envelope.py", hosted)
-        self.assertIn("/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C /usr/bin/git -C \"$source_root\" rev-parse HEAD", physical)
-        self.assertGreaterEqual(physical.count("/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C"), 2)
-        self.assertIn("/usr/bin/python3 -I \"$source_root/tools/qualification_envelope.py\"", physical)
+        self.assertNotIn(
+            '\n        created="$(python3 tools/qualification_envelope.py', hosted
+        )
+        self.assertIn(
+            '/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C /usr/bin/git -C "$source_root" rev-parse HEAD',
+            physical,
+        )
+        self.assertGreaterEqual(
+            physical.count(
+                "/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C LC_ALL=C"
+            ),
+            2,
+        )
+        self.assertIn(
+            '/usr/bin/python3 -I "$source_root/tools/qualification_envelope.py"',
+            physical,
+        )
 
     def test_runner_profiles_pin_native_package_manager(self):
         contract = envelopes.load_contract(ROOT)
@@ -1451,17 +1544,20 @@ esac
             stdout="base 1.0\nlinux 6.17\n",
             stderr="",
         )
-        with mock.patch.object(
-            envelopes,
-            "_trusted_executable",
-            side_effect=lambda name, required=True: (
-                "/usr/bin/pacman"
-                if name == "pacman"
-                else (_ for _ in ()).throw(
-                    AssertionError(f"unexpected executable: {name}")
-                )
+        with (
+            mock.patch.object(
+                envelopes,
+                "_trusted_executable",
+                side_effect=lambda name, required=True: (
+                    "/usr/bin/pacman"
+                    if name == "pacman"
+                    else (_ for _ in ()).throw(
+                        AssertionError(f"unexpected executable: {name}")
+                    )
+                ),
             ),
-        ), mock.patch.object(envelopes.subprocess, "run", return_value=completed):
+            mock.patch.object(envelopes.subprocess, "run", return_value=completed),
+        ):
             identity = envelopes._host_package_identity("pacman")
         self.assertEqual(identity["package_manager"], "pacman")
         self.assertEqual(identity["package_count"], 2)
@@ -1478,9 +1574,7 @@ esac
             mock.patch.object(
                 envelopes, "_host_package_identity", return_value=package_identity
             ),
-            mock.patch.object(
-                envelopes, "_detect_virtualization", return_value="kvm"
-            ),
+            mock.patch.object(envelopes, "_detect_virtualization", return_value="kvm"),
         ):
             with self.assertRaisesRegex(
                 envelopes.EnvelopeError, "non-virtualized maintained hardware"

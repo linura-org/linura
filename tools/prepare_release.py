@@ -25,24 +25,34 @@ def _version_tuple(value: str) -> tuple[int, int, int]:
 
 def _workspace_package_names(root: Path, workspace: dict[str, object]) -> set[str]:
     members = workspace.get("members")
-    if not isinstance(members, list) or not members or not all(isinstance(item, str) for item in members):
+    if (
+        not isinstance(members, list)
+        or not members
+        or not all(isinstance(item, str) for item in members)
+    ):
         raise PreparationError("workspace.members must be a non-empty string array")
 
     names: set[str] = set()
     for member in members:
         manifest_path = root / member / "Cargo.toml"
         if not manifest_path.is_file():
-            raise PreparationError(f"workspace member manifest is missing: {member}/Cargo.toml")
+            raise PreparationError(
+                f"workspace member manifest is missing: {member}/Cargo.toml"
+            )
         manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
         package = manifest.get("package")
         if not isinstance(package, dict):
             raise PreparationError(f"workspace member has no [package] table: {member}")
         name = package.get("name")
         if not isinstance(name, str) or not name:
-            raise PreparationError(f"workspace member has invalid package name: {member}")
+            raise PreparationError(
+                f"workspace member has invalid package name: {member}"
+            )
 
         version = package.get("version")
-        uses_workspace_version = isinstance(version, dict) and version.get("workspace") is True
+        uses_workspace_version = (
+            isinstance(version, dict) and version.get("workspace") is True
+        )
         if uses_workspace_version:
             names.add(name)
         elif isinstance(version, str):
@@ -65,7 +75,9 @@ def _replace_workspace_version(cargo_text: str, old: str, new: str) -> str:
     )
     updated, count = pattern.subn(rf"\g<1>{new}\g<2>", cargo_text, count=1)
     if count != 1:
-        raise PreparationError("unable to replace exactly one [workspace.package] version")
+        raise PreparationError(
+            "unable to replace exactly one [workspace.package] version"
+        )
     return updated
 
 
@@ -112,7 +124,9 @@ def prepare(root: Path, tag: str) -> list[str]:
     lock_path = root / "Cargo.lock"
     for path in (roadmap_path, cargo_path, lock_path):
         if not path.is_file():
-            raise PreparationError(f"required file is missing: {path.relative_to(root)}")
+            raise PreparationError(
+                f"required file is missing: {path.relative_to(root)}"
+            )
 
     roadmap = tomllib.loads(roadmap_path.read_text(encoding="utf-8"))
     if roadmap.get("next_release") != tag:
@@ -141,14 +155,18 @@ def prepare(root: Path, tag: str) -> list[str]:
         ("milestone_contract", milestone_contract),
     ):
         if not isinstance(value, str) or not (root / value).is_file():
-            raise PreparationError(f"{tag}: required {label} is missing or invalid: {value!r}")
+            raise PreparationError(
+                f"{tag}: required {label} is missing or invalid: {value!r}"
+            )
 
     for required in (
         root / "docs" / "qualification" / f"{tag}-security.md",
         root / "docs" / "qualification" / f"{tag}-release-review.md",
     ):
         if not required.is_file():
-            raise PreparationError(f"release-readiness document is missing: {required.relative_to(root)}")
+            raise PreparationError(
+                f"release-readiness document is missing: {required.relative_to(root)}"
+            )
 
     cargo_text = cargo_path.read_text(encoding="utf-8")
     cargo = tomllib.loads(cargo_text)
@@ -171,9 +189,13 @@ def prepare(root: Path, tag: str) -> list[str]:
     # coherence and return a zero-change result; the workflow records a zero-diff,
     # SHA-addressed preparation handoff instead of mutating the reviewed tree.
     if current_version == target_version:
-        lock_verified = _rewrite_lock(lock_text, package_names, target_version, target_version)
+        lock_verified = _rewrite_lock(
+            lock_text, package_names, target_version, target_version
+        )
         if lock_verified != lock_text:
-            raise PreparationError("idempotent release preparation unexpectedly changed Cargo.lock")
+            raise PreparationError(
+                "idempotent release preparation unexpectedly changed Cargo.lock"
+            )
         return []
 
     if _version_tuple(target_version) <= _version_tuple(current_version):
@@ -181,8 +203,12 @@ def prepare(root: Path, tag: str) -> list[str]:
             f"release version must advance monotonically: {current_version} -> {target_version}"
         )
 
-    cargo_updated = _replace_workspace_version(cargo_text, current_version, target_version)
-    lock_updated = _rewrite_lock(lock_text, package_names, current_version, target_version)
+    cargo_updated = _replace_workspace_version(
+        cargo_text, current_version, target_version
+    )
+    lock_updated = _rewrite_lock(
+        lock_text, package_names, current_version, target_version
+    )
 
     changed: list[str] = []
     if cargo_updated != cargo_text:
@@ -193,7 +219,9 @@ def prepare(root: Path, tag: str) -> list[str]:
         changed.append("Cargo.lock")
 
     if changed != ["Cargo.toml", "Cargo.lock"]:
-        raise PreparationError(f"release preparation must change exactly Cargo.toml and Cargo.lock, got {changed}")
+        raise PreparationError(
+            f"release preparation must change exactly Cargo.toml and Cargo.lock, got {changed}"
+        )
     return changed
 
 

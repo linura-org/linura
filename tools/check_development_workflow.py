@@ -4,6 +4,7 @@
 This checks checked-in policy and validation wiring, not whether a contributor
 actually performed a human review or whether external qualification passed.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -85,10 +86,21 @@ REQUIRED = {
     "scripts/check_repository.py": (),
 }
 
-GENERATED_DISCOVERY_PARTS = frozenset({
-    ".git", ".mypy_cache", ".nox", ".pytest_cache", ".ruff_cache", ".tox",
-    ".venv", "__pycache__", "node_modules", "target", "venv",
-})
+GENERATED_DISCOVERY_PARTS = frozenset(
+    {
+        ".git",
+        ".mypy_cache",
+        ".nox",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".venv",
+        "__pycache__",
+        "node_modules",
+        "target",
+        "venv",
+    }
+)
 
 CANONICAL_REPOSITORY_HOOK = """development_result = subprocess.run(
     [sys.executable, str(ROOT / "tools/check_development_workflow.py"), str(ROOT)],
@@ -126,14 +138,15 @@ def discover_scoped_agents(root: Path) -> tuple[str, ...]:
 
     if result is not None and result.returncode == 0:
         candidates = {
-            entry.decode("utf-8")
-            for entry in result.stdout.split(b"\0")
-            if entry
+            entry.decode("utf-8") for entry in result.stdout.split(b"\0") if entry
         }
-        return tuple(sorted(
-            path for path in candidates
-            if path != "AGENTS.md" and Path(path).name == "AGENTS.md"
-        ))
+        return tuple(
+            sorted(
+                path
+                for path in candidates
+                if path != "AGENTS.md" and Path(path).name == "AGENTS.md"
+            )
+        )
 
     discovered: list[str] = []
     for candidate in root.rglob("AGENTS.md"):
@@ -213,10 +226,7 @@ def _target_references_failures(target: ast.expr) -> bool:
     if isinstance(target, (ast.Tuple, ast.List)):
         return any(_target_references_failures(item) for item in target.elts)
     if isinstance(target, (ast.Attribute, ast.Subscript)):
-        return (
-            isinstance(target.value, ast.Name)
-            and target.value.id == "failures"
-        )
+        return isinstance(target.value, ast.Name) and target.value.id == "failures"
     return False
 
 
@@ -256,7 +266,10 @@ def _statement_clobbers_failures(statement: ast.stmt) -> bool:
                 return True
             if any(
                 _expression_references_failures(argument)
-                for argument in (*node.args, *(keyword.value for keyword in node.keywords))
+                for argument in (
+                    *node.args,
+                    *(keyword.value for keyword in node.keywords),
+                )
             ):
                 return True
     return False
@@ -272,8 +285,10 @@ def repository_checker_hook_connected(source: str) -> bool:
     except SyntaxError:
         return False
     mains = [
-        node for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "main"
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "main"
     ]
     if (
         len(mains) != 1
@@ -284,9 +299,8 @@ def repository_checker_hook_connected(source: str) -> bool:
         return False
     if not tree.body:
         return False
-    if (
-        ast.dump(tree.body[-1], include_attributes=False)
-        != ast.dump(expected_entry[0], include_attributes=False)
+    if ast.dump(tree.body[-1], include_attributes=False) != ast.dump(
+        expected_entry[0], include_attributes=False
     ):
         return False
 
@@ -296,19 +310,16 @@ def repository_checker_hook_connected(source: str) -> bool:
 
     epilogue_index = len(body) - len(expected_epilogue)
     actual_epilogue = tuple(
-        ast.dump(node, include_attributes=False)
-        for node in body[epilogue_index:]
+        ast.dump(node, include_attributes=False) for node in body[epilogue_index:]
     )
     expected_epilogue_shapes = tuple(
-        ast.dump(node, include_attributes=False)
-        for node in expected_epilogue
+        ast.dump(node, include_attributes=False) for node in expected_epilogue
     )
     if actual_epilogue != expected_epilogue_shapes:
         return False
 
     expected_hook_shapes = tuple(
-        ast.dump(node, include_attributes=False)
-        for node in expected_hook
+        ast.dump(node, include_attributes=False) for node in expected_hook
     )
     for index in range(epilogue_index - 1):
         actual_hook_shapes = (
@@ -319,7 +330,7 @@ def repository_checker_hook_connected(source: str) -> bool:
             continue
         if any(_statement_contains_exit(statement) for statement in body[:index]):
             continue
-        remainder = body[index + len(expected_hook):epilogue_index]
+        remainder = body[index + len(expected_hook) : epilogue_index]
         if any(_statement_contains_exit(statement) for statement in remainder):
             continue
         if any(_statement_clobbers_failures(statement) for statement in remainder):
@@ -339,8 +350,9 @@ def check(root: Path = ROOT) -> list[str]:
             continue
         for fragment in fragments:
             if fragment not in contents[path]:
-                errors.append(path + ": missing development-workflow contract: " +
-                              fragment)
+                errors.append(
+                    path + ": missing development-workflow contract: " + fragment
+                )
 
     scoped_agents = set(discover_scoped_agents(root))
     for path in REQUIRED_SCOPED_AGENTS:
@@ -378,14 +390,18 @@ def check(root: Path = ROOT) -> list[str]:
 
     root_agent = contents.get("AGENTS.md", "")
     compact = re.sub(r"\s+", " ", root_agent)
-    if ("Implement → internal architecture/code/adversarial review → fix findings "
-            "→ compact to one clean commit → full gates → Codex review → fix genuinely "
-            "new findings → merge only when green." not in compact):
+    if (
+        "Implement → internal architecture/code/adversarial review → fix findings "
+        "→ compact to one clean commit → full gates → Codex review → fix genuinely "
+        "new findings → merge only when green." not in compact
+    ):
         errors.append("AGENTS.md: root review-stage order drift")
     codex = re.sub(r"\s+", " ", contents.get("docs/codex-development.md", ""))
-    if ("Implement → internal architecture/code/adversarial review → fix findings "
-            "→ compact to one clean commit → run full gates → request Codex review "
-            "→ fix genuinely new findings → merge only when green." not in codex):
+    if (
+        "Implement → internal architecture/code/adversarial review → fix findings "
+        "→ compact to one clean commit → run full gates → request Codex review "
+        "→ fix genuinely new findings → merge only when green." not in codex
+    ):
         errors.append("codex development: review-stage order drift")
     return errors
 

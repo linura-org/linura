@@ -10,7 +10,9 @@ import tomllib
 TAG_RE = re.compile(r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY_URL = "https://github.com/linura-org/linura"
-CRATE_VERSION_RE = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?$")
+CRATE_VERSION_RE = re.compile(
+    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?$"
+)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -42,7 +44,9 @@ def _roadmap(root: Path, tag: str) -> tuple[dict[str, object], dict[str, object]
     milestones = contract.get("milestone")
     if not isinstance(milestones, list):
         raise TerminalSyncError("roadmap milestone array is missing")
-    target_index = next((i for i, item in enumerate(milestones) if item.get("version") == tag), None)
+    target_index = next(
+        (i for i, item in enumerate(milestones) if item.get("version") == tag), None
+    )
     if target_index is None:
         raise TerminalSyncError(f"roadmap milestone is missing: {tag}")
     target = milestones[target_index]
@@ -51,18 +55,27 @@ def _roadmap(root: Path, tag: str) -> tuple[dict[str, object], dict[str, object]
     next_release = contract.get("next_release")
     if not isinstance(next_release, str) or not TAG_RE.fullmatch(next_release):
         raise TerminalSyncError(f"invalid roadmap next_release: {next_release!r}")
-    if target_index + 1 >= len(milestones) or milestones[target_index + 1].get("version") != next_release:
-        raise TerminalSyncError("next_release must be the milestone immediately after the current release")
+    if (
+        target_index + 1 >= len(milestones)
+        or milestones[target_index + 1].get("version") != next_release
+    ):
+        raise TerminalSyncError(
+            "next_release must be the milestone immediately after the current release"
+        )
     return contract, target, next_release
 
 
 def normalize_milestone_terminal_prose(text: str, tag: str) -> str:
-    section = re.search(r"(?ms)^## (?:Release gate|Exit criteria)\s*\n(?P<body>.*?)(?=^## |\Z)", text)
+    section = re.search(
+        r"(?ms)^## (?:Release gate|Exit criteria)\s*\n(?P<body>.*?)(?=^## |\Z)", text
+    )
     if section is None:
         raise TerminalSyncError(f"{tag} milestone has no release gate")
     body = section.group("body")
     if re.search(r"(?m)^\s*-\s+\[ \]", body):
-        raise TerminalSyncError(f"{tag} milestone still contains unchecked release-gate criteria")
+        raise TerminalSyncError(
+            f"{tag} milestone still contains unchecked release-gate criteria"
+        )
 
     paragraphs = re.split(r"(\n\s*\n)", body)
     for index, paragraph in enumerate(paragraphs):
@@ -74,7 +87,9 @@ def normalize_milestone_terminal_prose(text: str, tag: str) -> str:
             )
     updated_body = "".join(paragraphs)
     if "remaining unchecked criteria" in updated_body.casefold():
-        raise TerminalSyncError(f"{tag} milestone retains contradictory unchecked-criteria prose")
+        raise TerminalSyncError(
+            f"{tag} milestone retains contradictory unchecked-criteria prose"
+        )
     if "post-release closure" not in updated_body.casefold():
         raise TerminalSyncError(f"{tag} milestone lacks terminal closure explanation")
     return text[: section.start("body")] + updated_body + text[section.end("body") :]
@@ -100,7 +115,9 @@ def normalize_qualification_terminal_state(text: str, tag: str) -> str:
     status_pattern = re.compile(r"(?m)^\*\*(?P<label>State|Status):\*\* .+$")
     matches = list(status_pattern.finditer(text))
     if len(matches) != 1:
-        raise TerminalSyncError(f"{tag} qualification must contain exactly one State/Status field")
+        raise TerminalSyncError(
+            f"{tag} qualification must contain exactly one State/Status field"
+        )
     match = matches[0]
     label = match.group("label")
     text = (
@@ -109,7 +126,9 @@ def normalize_qualification_terminal_state(text: str, tag: str) -> str:
         + text[match.end() :]
     )
 
-    matrix = re.search(r"(?ms)^## Qualification matrix\s*\n(?P<body>.*?)(?=^## |\Z)", text)
+    matrix = re.search(
+        r"(?ms)^## Qualification matrix\s*\n(?P<body>.*?)(?=^## |\Z)", text
+    )
     if matrix is None:
         return text
 
@@ -125,11 +144,15 @@ def normalize_qualification_terminal_state(text: str, tag: str) -> str:
                 f"{tag} qualification contains an unrecognized pending terminal row: {line.strip()}"
             )
         cells[-1] = "qualified"
-        lines[index] = "| " + " | ".join(cells) + " |" + ("\n" if line.endswith("\n") else "")
+        lines[index] = (
+            "| " + " | ".join(cells) + " |" + ("\n" if line.endswith("\n") else "")
+        )
 
     body = "".join(lines)
     if re.search(r"(?im)^\|.*\|\s*pending\s*\|\s*$", body):
-        raise TerminalSyncError(f"{tag} qualification matrix still contains pending terminal rows")
+        raise TerminalSyncError(
+            f"{tag} qualification matrix still contains pending terminal rows"
+        )
     return text[: matrix.start("body")] + body + text[matrix.end("body") :]
 
 
@@ -159,11 +182,19 @@ def update_docs_index(text: str, root: Path, tag: str) -> str:
     if current is None:
         raise TerminalSyncError("docs/index.md current-release section is missing")
     old_tag = current.group("old")
-    old_links = [line for line in current.group("body").splitlines() if line.startswith("- [")]
-    replacement = f"### Current {tag} documentation set\n" + "\n".join(_documentation_links(root, tag)) + "\n\n"
+    old_links = [
+        line for line in current.group("body").splitlines() if line.startswith("- [")
+    ]
+    replacement = (
+        f"### Current {tag} documentation set\n"
+        + "\n".join(_documentation_links(root, tag))
+        + "\n\n"
+    )
     text = text[: current.start()] + replacement + text[current.end() :]
 
-    prior = re.search(r"(?ms)^### Prior release documentation\n(?P<body>.*?)(?=^## |\Z)", text)
+    prior = re.search(
+        r"(?ms)^### Prior release documentation\n(?P<body>.*?)(?=^## |\Z)", text
+    )
     if prior is None:
         raise TerminalSyncError("docs/index.md prior-release section is missing")
     prior_body = prior.group("body")
@@ -189,7 +220,9 @@ def _release_qualified_profile_requests(
     if not isinstance(machine_classes, list) or not all(
         isinstance(value, str) and value for value in machine_classes
     ):
-        raise TerminalSyncError("roadmap target_machine_classes must be a non-empty string array")
+        raise TerminalSyncError(
+            "roadmap target_machine_classes must be a non-empty string array"
+        )
     allowed_classes = set(machine_classes)
 
     result: list[tuple[str, str]] = []
@@ -240,7 +273,9 @@ def _promote_platform_profile(
     try:
         profile = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
-        raise TerminalSyncError(f"invalid PlatformProfile {profile_id}: {error}") from error
+        raise TerminalSyncError(
+            f"invalid PlatformProfile {profile_id}: {error}"
+        ) from error
     if profile.get("id") != profile_id:
         raise TerminalSyncError(
             f"PlatformProfile identity mismatch for {profile_id}: {profile.get('id')!r}"
@@ -273,16 +308,21 @@ def sync_release_qualified_environments(
 ) -> None:
     matrix_path_value = contract.get("hardware_support_matrix")
     if not isinstance(matrix_path_value, str) or not matrix_path_value:
-        raise TerminalSyncError("roadmap hardware_support_matrix must be a non-empty path")
+        raise TerminalSyncError(
+            "roadmap hardware_support_matrix must be a non-empty path"
+        )
     requested = milestone.get("release_qualified_qualification_environments", [])
     if not isinstance(requested, list) or not all(
-        isinstance(value, str) and value.startswith("qualification/") for value in requested
+        isinstance(value, str) and value.startswith("qualification/")
+        for value in requested
     ):
         raise TerminalSyncError(
             "release_qualified_qualification_environments must be qualification/ IDs"
         )
     if len(requested) != len(set(requested)):
-        raise TerminalSyncError("release-qualified QualificationEnvironment IDs contain duplicates")
+        raise TerminalSyncError(
+            "release-qualified QualificationEnvironment IDs contain duplicates"
+        )
     requested_profiles = _release_qualified_profile_requests(contract, milestone)
     if (
         milestone.get("platform_support") == "reference-experimental"
@@ -302,15 +342,23 @@ def sync_release_qualified_environments(
         raise TerminalSyncError("hardware support matrix root must be an object")
     environments = matrix.get("qualification_environments")
     if not isinstance(environments, dict):
-        raise TerminalSyncError("hardware support matrix qualification_environments must be an object")
+        raise TerminalSyncError(
+            "hardware support matrix qualification_environments must be an object"
+        )
     existing = environments.get("release_qualified")
-    if not isinstance(existing, list) or not all(isinstance(value, str) for value in existing):
-        raise TerminalSyncError("hardware support matrix release_qualified must be an array")
+    if not isinstance(existing, list) or not all(
+        isinstance(value, str) for value in existing
+    ):
+        raise TerminalSyncError(
+            "hardware support matrix release_qualified must be an array"
+        )
     environments["release_qualified"] = sorted(set(existing).union(requested))
 
     classes = matrix.get("machine_classes")
     if not isinstance(classes, dict):
-        raise TerminalSyncError("hardware support matrix machine_classes must be an object")
+        raise TerminalSyncError(
+            "hardware support matrix machine_classes must be an object"
+        )
     for machine_class, profile_id in requested_profiles:
         entry = classes.get(machine_class)
         if not isinstance(entry, dict):
@@ -339,19 +387,21 @@ def sync_release_qualified_environments(
     )
 
 
-def published_record(args: argparse.Namespace, milestone: dict[str, object], next_release: str) -> str:
+def published_record(
+    args: argparse.Namespace, milestone: dict[str, object], next_release: str
+) -> str:
     source_url = f"{REPOSITORY_URL}/commit/{args.source_sha}"
     return f"""# Linura {args.tag} — terminal release record
 
 **Status:** released; immutable GitHub Release published and independently verified.
-**Claim class:** {milestone.get('claim_class')}
+**Claim class:** {milestone.get("claim_class")}
 **Published:** {args.published_at}
 **Release ID:** `{args.release_id}`
 **Release source:** `{args.source_sha}`
 
 ## Release outcome
 
-Linura {args.tag} released **{milestone.get('title')}** within its frozen {milestone.get('claim_class')} claim. Publication does not widen the canonical authority or platform boundary.
+Linura {args.tag} released **{milestone.get("title")}** within its frozen {milestone.get("claim_class")} claim. Publication does not widen the canonical authority or platform boundary.
 
 ## Publication and verification
 
@@ -371,11 +421,11 @@ The immutable `{args.tag}` tag and GitHub Release remain bound to source commit 
 
 ## Claim boundary retained
 
-- `executor_state = \"{milestone.get('executor_state')}\"`;
-- `complete_lifecycle = {str(milestone.get('complete_lifecycle')).lower()}`;
-- `managed_mutation_support = \"{milestone.get('managed_mutation_support')}\"`;
-- `platform_support = \"{milestone.get('platform_support')}\"`;
-- `agent_role = \"{milestone.get('agent_role')}\"`.
+- `executor_state = \"{milestone.get("executor_state")}\"`;
+- `complete_lifecycle = {str(milestone.get("complete_lifecycle")).lower()}`;
+- `managed_mutation_support = \"{milestone.get("managed_mutation_support")}\"`;
+- `platform_support = \"{milestone.get("platform_support")}\"`;
+- `agent_role = \"{milestone.get("agent_role")}\"`.
 
 ## Next milestone
 
@@ -383,14 +433,18 @@ The canonical roadmap is ready for `{next_release}`. Future capability must pres
 """
 
 
-def update_release_readme(text: str, args: argparse.Namespace, milestone: dict[str, object]) -> str:
+def update_release_readme(
+    text: str, args: argparse.Namespace, milestone: dict[str, object]
+) -> str:
     table = re.search(
         r"(?ms)(^\| Version \| Live status \| Frozen contract \| Terminal release record \| Terminal evidence \|\n"
         r"^\| --- \| --- \| --- \| --- \| --- \|\n)(?P<rows>.*?)(?=\n\n)",
         text,
     )
     if table is None:
-        raise TerminalSyncError("docs/releases/README.md current-release table is missing")
+        raise TerminalSyncError(
+            "docs/releases/README.md current-release table is missing"
+        )
     row = (
         f"| `{args.tag}` | **Released — {milestone.get('claim_class')}; independently verified** | "
         f"[`{args.tag}.md`]({args.tag}.md) | [`published-{args.tag}.md`](published-{args.tag}.md) | "
@@ -399,9 +453,13 @@ def update_release_readme(text: str, args: argparse.Namespace, milestone: dict[s
     text = text[: table.start("rows")] + row + text[table.end("rows") :]
 
     paragraph_start = text.find("\n\n", table.start())
-    publication_heading = text.find("\n## Publication-stable contracts", paragraph_start)
+    publication_heading = text.find(
+        "\n## Publication-stable contracts", paragraph_start
+    )
     if paragraph_start == -1 or publication_heading == -1:
-        raise TerminalSyncError("docs/releases/README.md live-state paragraph boundary is missing")
+        raise TerminalSyncError(
+            "docs/releases/README.md live-state paragraph boundary is missing"
+        )
     paragraph = (
         f"\n\nThe immutable GitHub Release for `{args.tag}` is bound to the frozen publication-stable contract. "
         f"The terminal record [`published-{args.tag}.md`](published-{args.tag}.md), the publication-evidence dossier, "
@@ -412,11 +470,15 @@ def update_release_readme(text: str, args: argparse.Namespace, milestone: dict[s
 
 def add_terminal_record_reference(publication: str, tag: str) -> str:
     marker = f"- Frozen release contract: `docs/releases/{tag}.md` (unchanged after publication)."
-    record = f"- Terminal human-facing release record: `docs/releases/published-{tag}.md`."
+    record = (
+        f"- Terminal human-facing release record: `docs/releases/published-{tag}.md`."
+    )
     if record in publication:
         return publication
     if publication.count(marker) != 1:
-        raise TerminalSyncError(f"{tag} publication evidence lacks unique frozen-contract identity line")
+        raise TerminalSyncError(
+            f"{tag} publication evidence lacks unique frozen-contract identity line"
+        )
     return publication.replace(marker, marker + "\n" + record, 1)
 
 
@@ -426,22 +488,35 @@ def sync(args: argparse.Namespace) -> list[str]:
         raise TerminalSyncError(f"invalid tag: {args.tag!r}")
     if not SHA_RE.fullmatch(args.source_sha):
         raise TerminalSyncError("source_sha must be a lowercase 40-character SHA")
-    for field in ("proof_run_id", "promotion_run_id", "release_run_id", "release_id", "verification_run_id", "crates_io_run_id"):
+    for field in (
+        "proof_run_id",
+        "promotion_run_id",
+        "release_run_id",
+        "release_id",
+        "verification_run_id",
+        "crates_io_run_id",
+    ):
         if getattr(args, field) <= 0:
             raise TerminalSyncError(f"{field} must be positive")
 
     if not CRATE_VERSION_RE.fullmatch(args.crate_version):
         raise TerminalSyncError("crate_version must be a valid SemVer version")
     if not SHA256_RE.fullmatch(args.crate_package_sha256):
-        raise TerminalSyncError("crate_package_sha256 must be a lowercase 64-character SHA-256")
+        raise TerminalSyncError(
+            "crate_package_sha256 must be a lowercase 64-character SHA-256"
+        )
 
     contract, milestone, next_release = _roadmap(root, args.tag)
     changed: list[str] = []
     sync_release_qualified_environments(root, contract, milestone, changed)
     milestone_path_value = milestone.get("milestone_contract")
     qualification_path_value = milestone.get("qualification")
-    if not isinstance(milestone_path_value, str) or not isinstance(qualification_path_value, str):
-        raise TerminalSyncError(f"{args.tag} released milestone lacks milestone/qualification contracts")
+    if not isinstance(milestone_path_value, str) or not isinstance(
+        qualification_path_value, str
+    ):
+        raise TerminalSyncError(
+            f"{args.tag} released milestone lacks milestone/qualification contracts"
+        )
 
     milestone_path = root / milestone_path_value
     write_if_changed(
@@ -461,7 +536,9 @@ def sync(args: argparse.Namespace) -> list[str]:
     record_path = root / f"docs/releases/published-{args.tag}.md"
     record = published_record(args, milestone, next_release)
     if record_path.exists() and read(record_path) != record:
-        raise TerminalSyncError(f"existing terminal release record differs: {record_path}")
+        raise TerminalSyncError(
+            f"existing terminal release record differs: {record_path}"
+        )
     write_if_changed(record_path, record, changed, root)
 
     publication_path = root / f"docs/qualification/{args.tag}-publication.md"
@@ -472,7 +549,9 @@ def sync(args: argparse.Namespace) -> list[str]:
         root,
     )
     index_path = root / "docs/index.md"
-    write_if_changed(index_path, update_docs_index(read(index_path), root, args.tag), changed, root)
+    write_if_changed(
+        index_path, update_docs_index(read(index_path), root, args.tag), changed, root
+    )
     releases_readme = root / "docs/releases/README.md"
     write_if_changed(
         releases_readme,
@@ -484,7 +563,9 @@ def sync(args: argparse.Namespace) -> list[str]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Synchronize live terminal release documentation after protected closure.")
+    parser = argparse.ArgumentParser(
+        description="Synchronize live terminal release documentation after protected closure."
+    )
     parser.add_argument("--root", type=Path, default=Path("."))
     parser.add_argument("--tag", required=True)
     parser.add_argument("--source-sha", required=True)

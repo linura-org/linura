@@ -16,13 +16,19 @@ spec.loader.exec_module(module)
 
 class ReleaseDispatchIdentityTests(unittest.TestCase):
     def test_canonical_gates_expose_nonce_correlated_manual_dispatch(self) -> None:
-        for filename, name in (("ci.yml", "CI"), ("security.yml", "Security"), ("codeql.yml", "CodeQL")):
+        for filename, name in (
+            ("ci.yml", "CI"),
+            ("security.yml", "Security"),
+            ("codeql.yml", "CodeQL"),
+        ):
             text = (WORKFLOWS / filename).read_text(encoding="utf-8")
             self.assertIn("dispatch_nonce:", text, filename)
             self.assertIn("inputs.dispatch_nonce || github.sha", text, filename)
             self.assertIn("github.workflow", text, filename)
 
-    def test_matching_runs_requires_nonce_title_exact_sha_ref_path_and_boundary(self) -> None:
+    def test_matching_runs_requires_nonce_title_exact_sha_ref_path_and_boundary(
+        self,
+    ) -> None:
         expected = {
             "id": 101,
             "event": "workflow_dispatch",
@@ -77,9 +83,9 @@ class ReleaseDispatchIdentityTests(unittest.TestCase):
 
     def test_release_preparation_requires_native_exact_main_push_gates(self) -> None:
         text = (WORKFLOWS / "release-preparation.yml").read_text(encoding="utf-8")
-        authority = text.split("- name: Prove Release App automation authority", 1)[1].split(
-            "- name: Build or re-prove SHA-addressed mechanical preparation", 1
-        )[0]
+        authority = text.split("- name: Prove Release App automation authority", 1)[
+            1
+        ].split("- name: Build or re-prove SHA-addressed mechanical preparation", 1)[0]
         self.assertIn("python3 tools/release_native_gates.py", authority)
         self.assertIn('--head-sha "$SOURCE_SHA"', authority)
         self.assertIn("--head-branch main", authority)
@@ -87,11 +93,22 @@ class ReleaseDispatchIdentityTests(unittest.TestCase):
         self.assertIn("commit --event push", authority)
         self.assertNotIn("release_workflow_dispatch.py", authority)
 
-    def test_machine_handoffs_use_native_gate_tool_not_dispatched_gate_evidence(self) -> None:
+    def test_machine_handoffs_use_native_gate_tool_not_dispatched_gate_evidence(
+        self,
+    ) -> None:
         expected = {
-            "release-preparation.yml": ("commit --event push", '--expected-changed-files "$EXPECTED_CHANGED_FILES"'),
-            "release-authorization.yml": ("commit --event push", "--expected-changed-files 0"),
-            "post-release-closure.yml": ("--expected-changed-files", "--timeout-seconds 0"),
+            "release-preparation.yml": (
+                "commit --event push",
+                '--expected-changed-files "$EXPECTED_CHANGED_FILES"',
+            ),
+            "release-authorization.yml": (
+                "commit --event push",
+                "--expected-changed-files 0",
+            ),
+            "post-release-closure.yml": (
+                "--expected-changed-files",
+                "--timeout-seconds 0",
+            ),
         }
         for filename, markers in expected.items():
             text = (WORKFLOWS / filename).read_text(encoding="utf-8")
@@ -101,8 +118,13 @@ class ReleaseDispatchIdentityTests(unittest.TestCase):
             self.assertNotIn("release_workflow_dispatch.py", text, filename)
             self.assertNotIn("dispatch-boundaries.tsv", text, filename)
 
-        preparation = (WORKFLOWS / "release-preparation.yml").read_text(encoding="utf-8")
-        self.assertIn('[[ "$EXPECTED_CHANGED_FILES" = "0" || "$EXPECTED_CHANGED_FILES" = "2" ]]', preparation)
+        preparation = (WORKFLOWS / "release-preparation.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            '[[ "$EXPECTED_CHANGED_FILES" = "0" || "$EXPECTED_CHANGED_FILES" = "2" ]]',
+            preparation,
+        )
         self.assertIn("expected_changed_files=0", preparation)
         self.assertIn("expected_changed_files=2", preparation)
 
@@ -115,13 +137,16 @@ class ReleaseDispatchIdentityTests(unittest.TestCase):
         self.assertIn("validate_run(payload, record)", text)
 
     def test_release_stage_timeouts_cover_bounded_native_gate_windows(self) -> None:
-        preparation = (WORKFLOWS / "release-preparation.yml").read_text(encoding="utf-8")
-        authorization = (WORKFLOWS / "release-authorization.yml").read_text(encoding="utf-8")
+        preparation = (WORKFLOWS / "release-preparation.yml").read_text(
+            encoding="utf-8"
+        )
+        authorization = (WORKFLOWS / "release-authorization.yml").read_text(
+            encoding="utf-8"
+        )
         closure = (WORKFLOWS / "post-release-closure.yml").read_text(encoding="utf-8")
 
         self.assertIn(
-            "qualify:\n    name: qualify reviewed release readiness\n"
-            "    if:",
+            "qualify:\n    name: qualify reviewed release readiness\n    if:",
             preparation,
         )
         self.assertIn("timeout-minutes: 20", preparation.split("  prepare:", 1)[0])
@@ -132,7 +157,9 @@ class ReleaseDispatchIdentityTests(unittest.TestCase):
         )
         self.assertIn("--timeout-seconds 1800", preparation)
 
-        self.assertIn("qualify:\n    name: qualify reviewed release preparation", authorization)
+        self.assertIn(
+            "qualify:\n    name: qualify reviewed release preparation", authorization
+        )
         self.assertIn("timeout-minutes: 20", authorization.split("  authorize:", 1)[0])
         self.assertIn(
             "authorize:\n    name: create and merge protected metadata-only authorization\n"
@@ -140,7 +167,9 @@ class ReleaseDispatchIdentityTests(unittest.TestCase):
             authorization,
         )
         self.assertIn("--timeout-seconds 1800", authorization)
-        self.assertIn("close:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 55", closure)
+        self.assertIn(
+            "close:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 55", closure
+        )
         self.assertIn("--timeout-seconds 1800", closure)
 
 

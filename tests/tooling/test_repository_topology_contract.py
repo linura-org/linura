@@ -90,7 +90,9 @@ class RepositoryTopologyContractTests(unittest.TestCase):
     def test_hidden_infrastructure_roots_are_explicit(self) -> None:
         root_by_path = {entry["path"]: entry for entry in self.contract["roots"]}
         for path in self.contract["policy"]["infrastructure_roots"]:
-            self.assertTrue(path.startswith("."), f"infrastructure root must be hidden: {path}")
+            self.assertTrue(
+                path.startswith("."), f"infrastructure root must be hidden: {path}"
+            )
             self.assertIn(path, root_by_path)
             self.assertEqual(
                 root_by_path[path]["kind"],

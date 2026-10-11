@@ -45,7 +45,10 @@ def resolve_acceleration(requested: str) -> str:
 def validate_uuid(value: str | None) -> str | None:
     if value is None:
         return None
-    if not UUID_PATTERN.fullmatch(value) or value.lower() == "00000000-0000-0000-0000-000000000000":
+    if (
+        not UUID_PATTERN.fullmatch(value)
+        or value.lower() == "00000000-0000-0000-0000-000000000000"
+    ):
         raise ValueError("--uuid must be a canonical nonzero UUID")
     return value.lower()
 
@@ -166,7 +169,10 @@ def main() -> int:
         return 0 if qemu and ssh else 1
 
     if args.command == "start" and args.accel == "kvm" and not kvm_available():
-        print("KVM was explicitly requested but /dev/kvm is unavailable to this process", file=sys.stderr)
+        print(
+            "KVM was explicitly requested but /dev/kvm is unavailable to this process",
+            file=sys.stderr,
+        )
         return 2
 
     try:
@@ -188,7 +194,9 @@ def main() -> int:
     if args.command == "plan":
         return 0
     if shutil.which("qemu-system-x86_64") is None:
-        print("qemu-system-x86_64 is required to start a disposable VM", file=sys.stderr)
+        print(
+            "qemu-system-x86_64 is required to start a disposable VM", file=sys.stderr
+        )
         return 2
     if not args.image.is_file():
         print(f"image not found: {args.image}", file=sys.stderr)

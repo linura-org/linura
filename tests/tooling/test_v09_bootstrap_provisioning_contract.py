@@ -55,10 +55,12 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
             self.assertIn(forbidden, threat_model)
 
     def test_milestone_and_qualification_keep_release_boundary_explicit(self) -> None:
-        milestone = (ROOT / "docs/milestones/v0.9.0.md").read_text(encoding="utf-8").lower()
-        qualification = (ROOT / "docs/qualification/v0.9.0.md").read_text(
-            encoding="utf-8"
-        ).lower()
+        milestone = (
+            (ROOT / "docs/milestones/v0.9.0.md").read_text(encoding="utf-8").lower()
+        )
+        qualification = (
+            (ROOT / "docs/qualification/v0.9.0.md").read_text(encoding="utf-8").lower()
+        )
 
         for phrase in [
             "provisioning manifest",
@@ -76,8 +78,12 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
         ]:
             self.assertIn(phrase, qualification)
 
-    def test_existing_bootstrap_contract_has_canonical_monotonic_stage_order(self) -> None:
-        source = (ROOT / "crates/linura-bootstrap/src/lib.rs").read_text(encoding="utf-8")
+    def test_existing_bootstrap_contract_has_canonical_monotonic_stage_order(
+        self,
+    ) -> None:
+        source = (ROOT / "crates/linura-bootstrap/src/lib.rs").read_text(
+            encoding="utf-8"
+        )
 
         for contract in [
             "pub enum BootstrapStage",
@@ -91,8 +97,12 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
         ]:
             self.assertIn(contract, source)
 
-    def test_durable_bootstrap_implementation_keeps_fail_closed_boundaries(self) -> None:
-        root = (ROOT / "crates/linura-bootstrap/src/root.rs").read_text(encoding="utf-8")
+    def test_durable_bootstrap_implementation_keeps_fail_closed_boundaries(
+        self,
+    ) -> None:
+        root = (ROOT / "crates/linura-bootstrap/src/root.rs").read_text(
+            encoding="utf-8"
+        )
         durable = durable_source()
 
         self.assertIn("pub mod durable", root)
@@ -114,7 +124,7 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
 
     def test_durable_state_has_no_authority_or_secret_fields(self) -> None:
         durable = durable_source()
-        serialization_region = durable[durable.index("fn serialize_state"):]
+        serialization_region = durable[durable.index("fn serialize_state") :]
         for forbidden in [
             "password=",
             "private_key=",
@@ -125,12 +135,18 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
         ]:
             # The strings occur only in negative tests; the canonical serializer
             # must not persist them as fields.
-            self.assertNotIn(forbidden, serialization_region.split("#[cfg(test)]", 1)[0])
+            self.assertNotIn(
+                forbidden, serialization_region.split("#[cfg(test)]", 1)[0]
+            )
 
     def test_firstboot_planning_derives_and_durably_binds_canonical_plans(self) -> None:
         main = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(encoding="utf-8")
-        runtime = (ROOT / "apps/linura-firstboot/src/bootstrap_runtime.rs").read_text(encoding="utf-8")
-        library = (ROOT / "crates/linura-library/src/store.rs").read_text(encoding="utf-8")
+        runtime = (ROOT / "apps/linura-firstboot/src/bootstrap_runtime.rs").read_text(
+            encoding="utf-8"
+        )
+        library = (ROOT / "crates/linura-library/src/store.rs").read_text(
+            encoding="utf-8"
+        )
         durable = durable_source()
 
         planning_start = main.index("BootstrapStage::FirstBootPlanning => {")
@@ -142,9 +158,14 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
         self.assertIn("desired_state_for_intent_revision", library)
         self.assertIn("bind_first_boot_plan", durable)
         self.assertIn("first_boot_plan_sha256", durable)
-        self.assertIn("First Boot planning completed without a durable canonical plan binding", durable)
+        self.assertIn(
+            "First Boot planning completed without a durable canonical plan binding",
+            durable,
+        )
 
-    def test_qualification_harness_binds_planning_fixture_before_completion(self) -> None:
+    def test_qualification_harness_binds_planning_fixture_before_completion(
+        self,
+    ) -> None:
         source = (
             ROOT / "crates/linura-bootstrap/src/bin/linura-bootstrap-qualification.rs"
         ).read_text(encoding="utf-8")
@@ -169,9 +190,15 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
         )
         self.assertFalse(list(durable_root.glob("part*.rs")))
 
-    def test_release_exposes_real_deferred_owner_bootstrap_and_release_aware_environment_status(self) -> None:
-        source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(encoding="utf-8")
-        workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(encoding="utf-8")
+    def test_release_exposes_real_deferred_owner_bootstrap_and_release_aware_environment_status(
+        self,
+    ) -> None:
+        source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(
+            encoding="utf-8"
+        )
+        workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(
+            encoding="utf-8"
+        )
         durable = durable_source()
 
         self.assertIn('Some("--bootstrap")', source)
@@ -182,37 +209,55 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
         self.assertIn("CARGO_PKG_VERSION", source)
         self.assertIn("PREPARER_REVOCATION_PRODUCER", durable)
         self.assertIn("linura-firstboot-preparer-revocation-v1", durable)
-        self.assertIn("expected_environment_status=release-qualified-experimental", workflow)
+        self.assertIn(
+            "expected_environment_status=release-qualified-experimental", workflow
+        )
 
-    def test_frozen_release_claim_exposes_only_real_v09_production_provisioning_entry(self) -> None:
+    def test_frozen_release_claim_exposes_only_real_v09_production_provisioning_entry(
+        self,
+    ) -> None:
         release = (ROOT / "docs/releases/v0.9.0.md").read_text(encoding="utf-8")
         first_boot = (ROOT / "docs/first-boot.md").read_text(encoding="utf-8")
-        qualification = (ROOT / "docs/qualification/v0.9.0.md").read_text(encoding="utf-8")
+        qualification = (ROOT / "docs/qualification/v0.9.0.md").read_text(
+            encoding="utf-8"
+        )
 
         for text in (release, first_boot, qualification):
             self.assertIn("linura-firstboot --bootstrap <absolute-state-root>", text)
         self.assertIn("release-exposed production", release.lower())
         self.assertIn("not** user-selectable production entry points", release)
-        self.assertNotIn("Users may provision as the eventual interactive owner", release)
+        self.assertNotIn(
+            "Users may provision as the eventual interactive owner", release
+        )
         self.assertIn("linura-firstboot-preparer-revocation-v1", qualification)
         self.assertIn("not a raw Ubuntu hardening or installer entry point", release)
         self.assertIn("not a raw-host hardening command", first_boot)
 
-    def test_production_bootstrap_verifies_q8_and_does_not_claim_generic_hardening(self) -> None:
-        source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(encoding="utf-8")
+    def test_production_bootstrap_verifies_q8_and_does_not_claim_generic_hardening(
+        self,
+    ) -> None:
+        source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("BootstrapStage::SecurityBaseline => {}", source)
         self.assertIn(".verify_security_baseline()", source)
         self.assertIn("security-baseline/ssh-exposure", source)
         self.assertIn("security-baseline/firewall-policy", source)
         self.assertIn("security-baseline/apt-policy", source)
 
-    def test_revocation_rotates_post_handoff_key_and_binds_numeric_preparer_identity(self) -> None:
-        source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(encoding="utf-8")
+    def test_revocation_rotates_post_handoff_key_and_binds_numeric_preparer_identity(
+        self,
+    ) -> None:
+        source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(
+            encoding="utf-8"
+        )
         revocation_start = source.index("fn trusted_or_produced_preparer_revocation(")
         revocation_end = source.index("fn require_effective_root()", revocation_start)
         revocation = source[revocation_start:revocation_end]
         observation_start = source.index("fn revoke_and_verify_preparer_os_authority()")
-        observation_end = source.index("fn preparer_has_effective_sudo_authority()", observation_start)
+        observation_end = source.index(
+            "fn preparer_has_effective_sudo_authority()", observation_start
+        )
         observation = source[observation_start:observation_end]
 
         self.assertIn("revoke_and_verify_preparer_os_authority()?", revocation)
@@ -225,7 +270,7 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
         self.assertIn("expected linura-preparer identity is absent", observation)
         self.assertIn('for selector in ["-u", "-U"]', source)
         self.assertIn('.args(["-KILL", selector, uid])', source)
-        self.assertIn('.args([selector, uid])', source)
+        self.assertIn(".args([selector, uid])", source)
         self.assertIn("preparer_has_processes(&identity.uid)?", observation)
         self.assertIn("preparer_has_ssh_authority(&identity)?", observation)
         self.assertIn("authorizedkeysfile ", source)
@@ -246,13 +291,19 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
         self.assertIn('format!("%#{}", value.gid)', source)
 
     def test_offline_vm_environment_status_tracks_exact_source_version(self) -> None:
-        scenario = (ROOT / "tests/acceptance/002-firstboot-offline.json").read_text(encoding="utf-8")
+        scenario = (ROOT / "tests/acceptance/002-firstboot-offline.json").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("linuractl version", scenario)
         self.assertIn("release-qualified-experimental", scenario)
         self.assertIn("candidate-not-yet-release-supported", scenario)
 
-    def test_firstboot_bounds_virtual_identity_payload_not_reported_stat_size(self) -> None:
-        source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(encoding="utf-8")
+    def test_firstboot_bounds_virtual_identity_payload_not_reported_stat_size(
+        self,
+    ) -> None:
+        source = (ROOT / "apps/linura-firstboot/src/main.rs").read_text(
+            encoding="utf-8"
+        )
         start = source.index("fn read_protected_identity_file(")
         end = source.index("fn verify_candidate_environment()", start)
         reader = source[start:end]
@@ -262,7 +313,9 @@ class V09BootstrapProvisioningContractTests(unittest.TestCase):
         self.assertIn("bytes.len() as u64 > max_bytes", reader)
         self.assertNotIn("before.len() > max_bytes", reader)
         self.assertNotIn("opened.len() > max_bytes", reader)
-        self.assertIn('DMI_PRODUCT_UUID: &str = "/sys/class/dmi/id/product_uuid"', source)
+        self.assertIn(
+            'DMI_PRODUCT_UUID: &str = "/sys/class/dmi/id/product_uuid"', source
+        )
 
 
 if __name__ == "__main__":

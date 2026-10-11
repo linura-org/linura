@@ -18,7 +18,9 @@ SPEC.loader.exec_module(cleanup)
 
 
 class ReleaseBranchCleanupTests(unittest.TestCase):
-    def test_selects_only_sha_addressed_namespace_and_exact_ledger_entries(self) -> None:
+    def test_selects_only_sha_addressed_namespace_and_exact_ledger_entries(
+        self,
+    ) -> None:
         tag = "v0.8.0"
         prep_sha = "1" * 40
         auth_sha = "2" * 40
@@ -48,8 +50,13 @@ class ReleaseBranchCleanupTests(unittest.TestCase):
             [item.name for item in selected],
         )
         by_name = {item.name: item for item in selected}
-        self.assertEqual(prep_sha, by_name[f"automation/release-prep-v0.8.0-{prep_sha}"].expected_sha)
-        self.assertEqual("sha-addressed-automation", by_name[f"automation/release-prep-v0.8.0-{prep_sha}"].source)
+        self.assertEqual(
+            prep_sha, by_name[f"automation/release-prep-v0.8.0-{prep_sha}"].expected_sha
+        )
+        self.assertEqual(
+            "sha-addressed-automation",
+            by_name[f"automation/release-prep-v0.8.0-{prep_sha}"].source,
+        )
         self.assertEqual("a" * 40, by_name["tmp/v08-reviewed"].expected_sha)
         self.assertEqual("explicit-ledger", by_name["tmp/v08-reviewed"].source)
 
@@ -57,10 +64,14 @@ class ReleaseBranchCleanupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "cleanup.toml"
             path.write_text(
-                'schema_version = 1\n\n[[legacy_branch]]\nrelease = "v0.8.0"\nname = "main"\nexpected_sha = "' + "a" * 40 + '"\n',
+                'schema_version = 1\n\n[[legacy_branch]]\nrelease = "v0.8.0"\nname = "main"\nexpected_sha = "'
+                + "a" * 40
+                + '"\n',
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(cleanup.CleanupError, "invalid explicit cleanup branch name"):
+            with self.assertRaisesRegex(
+                cleanup.CleanupError, "invalid explicit cleanup branch name"
+            ):
                 cleanup.load_legacy(path, "v0.8.0")
 
     def test_moved_ledger_branch_is_preserved(self) -> None:
@@ -105,7 +116,9 @@ class ReleaseBranchCleanupTests(unittest.TestCase):
         with (
             mock.patch.object(cleanup, "_open_pr_count", return_value=0),
             mock.patch.object(cleanup, "_ref_sha", return_value=expected),
-            mock.patch.object(cleanup, "_atomic_delete", return_value=succeeded) as atomic_delete,
+            mock.patch.object(
+                cleanup, "_atomic_delete", return_value=succeeded
+            ) as atomic_delete,
         ):
             result = cleanup.delete_candidate("linura-org/linura", candidate, "token")
         self.assertIn("deleted", result)

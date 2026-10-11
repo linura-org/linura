@@ -20,8 +20,12 @@ class V06PolkitBoundaryTests(unittest.TestCase):
     def test_authority_action_owner_matches_unprivileged_service_identity(self) -> None:
         policy_path = ROOT / "packaging/polkit-1/actions/org.linura.authority.policy"
         root = ET.fromstring(policy_path.read_text(encoding="utf-8"))
-        actions = [action for action in root.findall("action") if action.get("id") == ACTION_ID]
-        self.assertEqual(len(actions), 1, "Authority1 must own exactly one canonical Polkit action")
+        actions = [
+            action for action in root.findall("action") if action.get("id") == ACTION_ID
+        ]
+        self.assertEqual(
+            len(actions), 1, "Authority1 must own exactly one canonical Polkit action"
+        )
 
         action = actions[0]
         owners = [
@@ -39,9 +43,9 @@ class V06PolkitBoundaryTests(unittest.TestCase):
         self.assertEqual(defaults.findtext("allow_active"), "auth_admin")
         self.assertNotIn("auth_admin_keep", policy_path.read_text(encoding="utf-8"))
 
-        service = (ROOT / "packaging/systemd/system/linura-authorityd.service").read_text(
-            encoding="utf-8"
-        )
+        service = (
+            ROOT / "packaging/systemd/system/linura-authorityd.service"
+        ).read_text(encoding="utf-8")
         self.assertIn("User=linura-authority\n", service)
         self.assertIn("Group=linura-authority\n", service)
         self.assertIn("NoNewPrivileges=yes\n", service)
@@ -50,9 +54,9 @@ class V06PolkitBoundaryTests(unittest.TestCase):
 
     def test_executor_dbus_transport_is_authority_only_for_mutation(self) -> None:
         config = ET.fromstring(
-            (ROOT / "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf").read_text(
-                encoding="utf-8"
-            )
+            (
+                ROOT / "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf"
+            ).read_text(encoding="utf-8")
         )
         policies = config.findall("policy")
 
@@ -82,7 +86,9 @@ class V06PolkitBoundaryTests(unittest.TestCase):
         assert authority_allow is not None
         self.assertIsNone(authority_allow.get("send_interface"))
 
-        root_policy = next(policy for policy in policies if policy.get("user") == "root")
+        root_policy = next(
+            policy for policy in policies if policy.get("user") == "root"
+        )
         self.assertIsNotNone(root_policy.find(f"allow[@own='{EXECUTOR_DESTINATION}']"))
         self.assertIsNotNone(
             root_policy.find(
@@ -108,7 +114,9 @@ class V06PolkitBoundaryTests(unittest.TestCase):
             if policy.get("user") == "linura-v05-qualifier"
         )
         self.assertIsNotNone(
-            qualification_policy.find(f"allow[@send_destination='{EXECUTOR_DESTINATION}']")
+            qualification_policy.find(
+                f"allow[@send_destination='{EXECUTOR_DESTINATION}']"
+            )
         )
 
     def test_qualification_approval_remains_test_only(self) -> None:
@@ -132,9 +140,15 @@ class V06PolkitBoundaryTests(unittest.TestCase):
         self.assertIn("trap on_error ERR", guest)
         self.assertIn('if output="$("$@" 2>&1)"; then', guest)
         self.assertNotIn("set +e", guest)
-        self.assertIn("expect_failure unapproved-human call_authority_unapproved", guest)
-        self.assertIn("expect_failure direct-executor-ordinary call_executor_direct", guest)
-        self.assertIn("expect_failure direct-executor-root call_executor_direct_root", guest)
+        self.assertIn(
+            "expect_failure unapproved-human call_authority_unapproved", guest
+        )
+        self.assertIn(
+            "expect_failure direct-executor-ordinary call_executor_direct", guest
+        )
+        self.assertIn(
+            "expect_failure direct-executor-root call_executor_direct_root", guest
+        )
 
 
 if __name__ == "__main__":

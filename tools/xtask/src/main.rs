@@ -84,6 +84,7 @@ fn check() -> Result<(), String> {
     run("cargo", &["fmt", "--all", "--check"])?;
     verify_ruff_version()?;
     run("ruff", &["check", "."])?;
+    run("ruff", &["format", "--check", "."])?;
     run(
         "cargo",
         &[

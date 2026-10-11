@@ -10,22 +10,30 @@ import tomllib
 TAG_RE = re.compile(r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY_URL = "https://github.com/linura-org/linura"
-CRATE_VERSION_RE = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?$")
+CRATE_VERSION_RE = re.compile(
+    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?$"
+)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 RELEASE_GATE_HEADINGS = ("Release gate", "Exit criteria")
 RELEASE_CONTROL_CRITERIA: dict[str, frozenset[str]] = {
     "protected proof-first/tag-last publication and independent release verification complete before roadmap bookkeeping advances to v0.6": frozenset(
         {"publication", "verification", "closure"}
     ),
-    "canonical ci, security and codeql pass on the exact candidate source": frozenset({"pre-release-checks"}),
+    "canonical ci, security and codeql pass on the exact candidate source": frozenset(
+        {"pre-release-checks"}
+    ),
     "dedicated v0.6 managed-lifecycle disposable-vm qualification passes on the exact candidate source": frozenset(
         {"qualification"}
     ),
     "trusted release proof reruns all mandatory inherited v0.4/v0.5 qualifications plus the v0.6 qualification against the exact release authorization": frozenset(
         {"proof"}
     ),
-    "trusted release proof includes v0.8 qualification and succeeds": frozenset({"proof", "qualification"}),
-    "metadata-only release authorization preserves the reviewed implementation tree": frozenset({"authorization"}),
+    "trusted release proof includes v0.8 qualification and succeeds": frozenset(
+        {"proof", "qualification"}
+    ),
+    "metadata-only release authorization preserves the reviewed implementation tree": frozenset(
+        {"authorization"}
+    ),
     "independent binary reproduction succeeds": frozenset({"reproduction"}),
     "tag-last publication succeeds": frozenset({"publication"}),
     "independent published-release verification succeeds": frozenset({"verification"}),
@@ -33,7 +41,9 @@ RELEASE_CONTROL_CRITERIA: dict[str, frozenset[str]] = {
         {"closure"}
     ),
 }
-CHECKBOX_PATTERN = re.compile(r"^(?P<prefix>[ \t]*-[ \t]+\[)(?P<state>[ xX])(?P<suffix>\][ \t]+(?P<label>.+))$")
+CHECKBOX_PATTERN = re.compile(
+    r"^(?P<prefix>[ \t]*-[ \t]+\[)(?P<state>[ xX])(?P<suffix>\][ \t]+(?P<label>.+))$"
+)
 
 
 class ClosureError(RuntimeError):
@@ -73,7 +83,9 @@ def milestone_block(text: str, tag: str) -> tuple[int, int, str]:
 
 
 def replace_markdown_version_section(text: str, tag: str, transform) -> str:
-    pattern = re.compile(rf'(?ms)(^## {re.escape(tag)} — [^\n]+\n)(.*?)(?=^## v\d+\.\d+\.\d+ — |\Z)')
+    pattern = re.compile(
+        rf"(?ms)(^## {re.escape(tag)} — [^\n]+\n)(.*?)(?=^## v\d+\.\d+\.\d+ — |\Z)"
+    )
     match = pattern.search(text)
     if match is None:
         raise ClosureError(f"canonical roadmap section not found for {tag}")
@@ -82,7 +94,7 @@ def replace_markdown_version_section(text: str, tag: str, transform) -> str:
 
 
 def replace_heading_section(text: str, heading: str, body: str) -> str:
-    pattern = re.compile(rf'(?ms)^{re.escape(heading)}\n.*?(?=^## |\Z)')
+    pattern = re.compile(rf"(?ms)^{re.escape(heading)}\n.*?(?=^## |\Z)")
     match = pattern.search(text)
     replacement = f"{heading}\n\n{body.rstrip()}\n"
     if match is None:
@@ -102,7 +114,9 @@ def replace_optional_document_status(text: str, replacement: str, label: str) ->
     pattern = re.compile(r"(?m)^\*\*Status:\*\* .+$")
     matches = list(pattern.finditer(text))
     if len(matches) > 1:
-        raise ClosureError(f"{label}: expected at most one Status field, found {len(matches)}")
+        raise ClosureError(
+            f"{label}: expected at most one Status field, found {len(matches)}"
+        )
     if not matches:
         return text
     match = matches[0]
@@ -113,7 +127,9 @@ def rename_optional_heading(text: str, old: str, new: str, label: str) -> str:
     pattern = re.compile(rf"(?m)^{re.escape(old)}$")
     matches = list(pattern.finditer(text))
     if len(matches) > 1:
-        raise ClosureError(f"{label}: expected at most one {old!r} heading, found {len(matches)}")
+        raise ClosureError(
+            f"{label}: expected at most one {old!r} heading, found {len(matches)}"
+        )
     if not matches:
         return text
     match = matches[0]
@@ -124,7 +140,9 @@ def require_absent(text: str, fragments: tuple[str, ...], label: str) -> None:
     remaining = [fragment for fragment in fragments if fragment in text]
     if remaining:
         rendered = "; ".join(repr(fragment) for fragment in remaining)
-        raise ClosureError(f"{label}: live pre-publication assertions remain after terminal normalization: {rendered}")
+        raise ClosureError(
+            f"{label}: live pre-publication assertions remain after terminal normalization: {rendered}"
+        )
 
 
 def normalize_pending_qualification(text: str, tag: str) -> str:
@@ -254,7 +272,9 @@ def normalize_terminal_review(text: str, tag: str) -> str:
             "## Historical pre-publication decision",
         ),
     ):
-        text = rename_optional_heading(text, old, new, f"{tag} release-review historical heading")
+        text = rename_optional_heading(
+            text, old, new, f"{tag} release-review historical heading"
+        )
 
     text = text.replace(
         "**Current decision: READY FOR RELEASE PREPARATION; PUBLICATION PENDING.**",
@@ -330,9 +350,7 @@ def normalize_terminal_security(text: str, tag: str) -> str:
     if old in text:
         text = text.replace(old, new, 1)
 
-    old = (
-        "Terminal security evidence must be recorded only after final exact-head and release-authorization runs actually succeed."
-    )
+    old = "Terminal security evidence must be recorded only after final exact-head and release-authorization runs actually succeed."
     new = (
         "Terminal security evidence was recorded only after final exact-head, release-authorization, publication and independent verification runs succeeded; "
         f"the exact terminal record is `{publication_doc}`."
@@ -348,7 +366,9 @@ def normalize_api_versioning(text: str, tag: str) -> str:
     )
     matches = list(section_pattern.finditer(text))
     if len(matches) > 1:
-        raise ClosureError(f"API versioning: expected at most one section for {tag}, found {len(matches)}")
+        raise ClosureError(
+            f"API versioning: expected at most one section for {tag}, found {len(matches)}"
+        )
     if not matches:
         return text
 
@@ -419,18 +439,26 @@ def close_release_control_criteria(text: str, tag: str) -> str:
             changed = True
 
     if not checkbox_labels:
-        raise ClosureError(f"{tag} milestone: release gate contains no checkbox criteria")
+        raise ClosureError(
+            f"{tag} milestone: release gate contains no checkbox criteria"
+        )
     if "publication" not in mapped_evidence:
-        raise ClosureError(f"{tag} milestone: release gate does not contain an exactly mapped publication criterion")
+        raise ClosureError(
+            f"{tag} milestone: release gate does not contain an exactly mapped publication criterion"
+        )
     if "verification" not in mapped_evidence:
-        raise ClosureError(f"{tag} milestone: release gate does not contain an exactly mapped verification criterion")
+        raise ClosureError(
+            f"{tag} milestone: release gate does not contain an exactly mapped verification criterion"
+        )
     if unknown_unchecked:
         rendered = "; ".join(unknown_unchecked)
         raise ClosureError(
             f"{tag} milestone: unchecked release-gate criteria are not exactly mapped to terminal release evidence: {rendered}"
         )
     if not changed and any("- [ ]" in line for line in lines):
-        raise ClosureError(f"{tag} milestone: release gate still contains unchecked criteria")
+        raise ClosureError(
+            f"{tag} milestone: release gate still contains unchecked criteria"
+        )
 
     updated_body = "".join(lines)
     return text[: section.start("body")] + updated_body + text[section.end("body") :]
@@ -453,12 +481,14 @@ The immutable tag resolves to the exact source commit {source_url}. Independent 
 Post-publication repository bookkeeping advances the canonical roadmap to `current_release = \"{args.tag}\"` and `next_release = \"{next_release}\"`. The frozen release contract and immutable GitHub Release remain unchanged."""
 
 
-def publication_document(args: argparse.Namespace, milestone: dict[str, object], next_release: str) -> str:
+def publication_document(
+    args: argparse.Namespace, milestone: dict[str, object], next_release: str
+) -> str:
     source_url = commit_url(args.source_sha)
     boundary = (
         f'executor_state = "{milestone.get("executor_state")}", '
         f'managed_mutation_support = "{milestone.get("managed_mutation_support")}", '
-        f'complete_lifecycle = {str(milestone.get("complete_lifecycle")).lower()}, '
+        f"complete_lifecycle = {str(milestone.get('complete_lifecycle')).lower()}, "
         f'platform_support = "{milestone.get("platform_support")}"'
     )
     return f"""# {args.tag} terminal publication evidence
@@ -500,17 +530,34 @@ def close_release(args: argparse.Namespace) -> list[str]:
     if args.tag == "v0.10.0":
         qualification_source_sha = getattr(args, "qualification_source_sha", None)
         qualification_tree_sha = getattr(args, "qualification_tree_sha", None)
-        if not isinstance(qualification_source_sha, str) or not SHA_RE.fullmatch(qualification_source_sha):
-            raise ClosureError("v0.10 closure requires qualification_source_sha as a lowercase 40-character SHA")
-        if not isinstance(qualification_tree_sha, str) or not SHA_RE.fullmatch(qualification_tree_sha):
-            raise ClosureError("v0.10 closure requires qualification_tree_sha as a lowercase 40-character SHA")
-    for field in ("proof_run_id", "promotion_run_id", "release_run_id", "release_id", "verification_run_id", "crates_io_run_id"):
+        if not isinstance(qualification_source_sha, str) or not SHA_RE.fullmatch(
+            qualification_source_sha
+        ):
+            raise ClosureError(
+                "v0.10 closure requires qualification_source_sha as a lowercase 40-character SHA"
+            )
+        if not isinstance(qualification_tree_sha, str) or not SHA_RE.fullmatch(
+            qualification_tree_sha
+        ):
+            raise ClosureError(
+                "v0.10 closure requires qualification_tree_sha as a lowercase 40-character SHA"
+            )
+    for field in (
+        "proof_run_id",
+        "promotion_run_id",
+        "release_run_id",
+        "release_id",
+        "verification_run_id",
+        "crates_io_run_id",
+    ):
         if getattr(args, field) <= 0:
             raise ClosureError(f"{field} must be positive")
     if not CRATE_VERSION_RE.fullmatch(args.crate_version):
         raise ClosureError("crate_version must be a valid SemVer version")
     if not SHA256_RE.fullmatch(args.crate_package_sha256):
-        raise ClosureError("crate_package_sha256 must be a lowercase 64-character SHA-256")
+        raise ClosureError(
+            "crate_package_sha256 must be a lowercase 64-character SHA-256"
+        )
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T[^\s]+", args.published_at):
         raise ClosureError("published_at must be an ISO-8601 timestamp")
 
@@ -521,7 +568,10 @@ def close_release(args: argparse.Namespace) -> list[str]:
     if not isinstance(milestones, list):
         raise ClosureError("roadmap milestone array is missing")
 
-    target_index = next((i for i, item in enumerate(milestones) if item.get("version") == args.tag), None)
+    target_index = next(
+        (i for i, item in enumerate(milestones) if item.get("version") == args.tag),
+        None,
+    )
     if target_index is None:
         raise ClosureError(f"roadmap does not contain {args.tag}")
     target = milestones[target_index]
@@ -538,7 +588,9 @@ def close_release(args: argparse.Namespace) -> list[str]:
         raise ClosureError(f"{args.tag} has no following roadmap milestone")
     next_release = milestones[target_index + 1].get("version")
     if not isinstance(next_release, str) or not TAG_RE.fullmatch(next_release):
-        raise ClosureError(f"invalid following milestone after {args.tag}: {next_release!r}")
+        raise ClosureError(
+            f"invalid following milestone after {args.tag}: {next_release!r}"
+        )
 
     changed: list[str] = []
 
@@ -558,7 +610,9 @@ def close_release(args: argparse.Namespace) -> list[str]:
         "next_release",
     )
     start, end, block = milestone_block(updated_contract, args.tag)
-    updated_block = replace_once(block, 'status = "planned"', 'status = "released"', f"{args.tag} status")
+    updated_block = replace_once(
+        block, 'status = "planned"', 'status = "released"', f"{args.tag} status"
+    )
     if args.tag == "v0.10.0":
         updated_block = replace_once(
             updated_block,
@@ -576,15 +630,24 @@ def close_release(args: argparse.Namespace) -> list[str]:
     roadmap_text = read(roadmap_path)
 
     def update_roadmap_body(body: str) -> str:
-        body = replace_once(body, "**Status:** planned", "**Status:** released", f"{args.tag} roadmap status")
+        body = replace_once(
+            body,
+            "**Status:** planned",
+            "**Status:** released",
+            f"{args.tag} roadmap status",
+        )
         body = re.sub(r"(?m)^(\*\*Status:\*\* released)[ \t]+$", r"\1", body)
-        target_claim = f'**Target claim class:** {claim_class}'
-        claim = f'**Claim class:** {claim_class}'
+        target_claim = f"**Target claim class:** {claim_class}"
+        claim = f"**Claim class:** {claim_class}"
         if target_claim in body:
-            body = replace_once(body, target_claim, claim, f"{args.tag} roadmap claim class")
+            body = replace_once(
+                body, target_claim, claim, f"{args.tag} roadmap claim class"
+            )
         return body
 
-    roadmap_text = replace_markdown_version_section(roadmap_text, args.tag, update_roadmap_body)
+    roadmap_text = replace_markdown_version_section(
+        roadmap_text, args.tag, update_roadmap_body
+    )
     write_if_changed(roadmap_path, roadmap_text, changed, root)
 
     milestone_path_value = target.get("milestone_contract")
@@ -618,9 +681,13 @@ def close_release(args: argparse.Namespace) -> list[str]:
 
     readme_path = root / "README.md"
     readme_text = read(readme_path)
-    status_lines = [line for line in readme_text.splitlines() if line.startswith("Status:")]
+    status_lines = [
+        line for line in readme_text.splitlines() if line.startswith("Status:")
+    ]
     if len(status_lines) != 1:
-        raise ClosureError(f"README: expected one Status line, found {len(status_lines)}")
+        raise ClosureError(
+            f"README: expected one Status line, found {len(status_lines)}"
+        )
     status = (
         f"Status: `{args.tag}` released — {claim_class} {target.get('title')}. "
         "The immutable release is independently verified. "
@@ -635,14 +702,18 @@ def close_release(args: argparse.Namespace) -> list[str]:
 
     api_versioning_path = root / "docs/api-versioning.md"
     if api_versioning_path.exists():
-        api_versioning_text = normalize_api_versioning(read(api_versioning_path), args.tag)
+        api_versioning_text = normalize_api_versioning(
+            read(api_versioning_path), args.tag
+        )
         write_if_changed(api_versioning_path, api_versioning_text, changed, root)
 
     qualification_path_value = target.get("qualification")
     if not isinstance(qualification_path_value, str):
         raise ClosureError(f"{args.tag} does not name qualification")
     qualification_path = root / qualification_path_value
-    qualification_text = normalize_terminal_qualification(read(qualification_path), args.tag, claim_class)
+    qualification_text = normalize_terminal_qualification(
+        read(qualification_path), args.tag, claim_class
+    )
     qualification_text = replace_heading_section(
         qualification_text,
         "## Terminal publication evidence",
@@ -681,12 +752,19 @@ def close_release(args: argparse.Namespace) -> list[str]:
     frozen = root / f"docs/releases/{args.tag}.md"
     read(frozen)
 
-    print(json.dumps({"tag": args.tag, "next_release": next_release, "changed": changed}, sort_keys=True))
+    print(
+        json.dumps(
+            {"tag": args.tag, "next_release": next_release, "changed": changed},
+            sort_keys=True,
+        )
+    )
     return changed
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Prepare deterministic post-release repository closure.")
+    parser = argparse.ArgumentParser(
+        description="Prepare deterministic post-release repository closure."
+    )
     parser.add_argument("--root", type=Path, default=Path("."))
     parser.add_argument("--tag", required=True)
     parser.add_argument("--source-sha", required=True)

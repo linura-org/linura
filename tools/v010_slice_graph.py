@@ -96,7 +96,9 @@ def validate_graph(contract: dict[str, Any]) -> list[str]:
             elif state[dependency] == 1:
                 start = stack.index(dependency)
                 cycle = stack[start:] + [dependency]
-                errors.append("slice dependency graph contains cycle: " + " -> ".join(cycle))
+                errors.append(
+                    "slice dependency graph contains cycle: " + " -> ".join(cycle)
+                )
                 cycle_reported = True
                 return
         stack.pop()
@@ -112,9 +114,7 @@ def validate_graph(contract: dict[str, Any]) -> list[str]:
         return errors
 
     complete = {
-        slice_id
-        for slice_id in ids
-        if by_id[slice_id].get("status") == "complete"
+        slice_id for slice_id in ids if by_id[slice_id].get("status") == "complete"
     }
     for slice_id in ids:
         if slice_id not in complete:
@@ -146,11 +146,7 @@ def _validated_index(
 
 def ready_ids(contract: dict[str, Any]) -> list[str]:
     ids, by_id = _validated_index(contract)
-    complete = {
-        slice_id
-        for slice_id in ids
-        if by_id[slice_id]["status"] == "complete"
-    }
+    complete = {slice_id for slice_id in ids if by_id[slice_id]["status"] == "complete"}
     return [
         slice_id
         for slice_id in ids
@@ -161,23 +157,17 @@ def ready_ids(contract: dict[str, Any]) -> list[str]:
 
 def execution_waves(contract: dict[str, Any]) -> list[list[str]]:
     ids, by_id = _validated_index(contract)
-    complete = {
-        slice_id
-        for slice_id in ids
-        if by_id[slice_id]["status"] == "complete"
-    }
-    pending = [
-        slice_id
-        for slice_id in ids
-        if by_id[slice_id]["status"] == "planned"
-    ]
+    complete = {slice_id for slice_id in ids if by_id[slice_id]["status"] == "complete"}
+    pending = [slice_id for slice_id in ids if by_id[slice_id]["status"] == "planned"]
     waves: list[list[str]] = []
 
     while pending:
         wave = [
             slice_id
             for slice_id in pending
-            if all(dependency in complete for dependency in by_id[slice_id]["depends_on"])
+            if all(
+                dependency in complete for dependency in by_id[slice_id]["depends_on"]
+            )
         ]
         if not wave:
             raise SliceGraphError(
@@ -196,18 +186,10 @@ def explain_slice(contract: dict[str, Any], slice_id: str) -> dict[str, Any]:
     if slice_id not in by_id:
         raise SliceGraphError(f"unknown slice: {slice_id}")
     item = by_id[slice_id]
-    complete = {
-        value
-        for value in ids
-        if by_id[value]["status"] == "complete"
-    }
+    complete = {value for value in ids if by_id[value]["status"] == "complete"}
     dependencies = list(item["depends_on"])
     blockers = [value for value in dependencies if value not in complete]
-    dependents = [
-        value
-        for value in ids
-        if slice_id in by_id[value]["depends_on"]
-    ]
+    dependents = [value for value in ids if slice_id in by_id[value]["depends_on"]]
     return {
         "id": slice_id,
         "title": item.get("title"),
@@ -293,7 +275,10 @@ def main() -> int:
                 print(f"status: {result['status']}")
                 print("depends_on: " + (" ".join(result["depends_on"]) or "-"))
                 print("blocked_by: " + (" ".join(result["blocked_by"]) or "-"))
-                print("direct_dependents: " + (" ".join(result["direct_dependents"]) or "-"))
+                print(
+                    "direct_dependents: "
+                    + (" ".join(result["direct_dependents"]) or "-")
+                )
                 print(f"ready: {'yes' if result['ready'] else 'no'}")
             return 0
         raise SliceGraphError(f"unsupported command: {args.command}")

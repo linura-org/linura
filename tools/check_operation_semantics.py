@@ -36,14 +36,85 @@ LANDSCAPE_PATH = "docs/concepts/landscape.md"
 CONFIGURATION_LANDSCAPE_PATH = "docs/concepts/landscape/configuration-management.md"
 LINUX_DESKTOPS_LANDSCAPE_PATH = "docs/concepts/landscape/linux-desktops.md"
 
-EXPECTED_MANAGED_LIFECYCLE = ["request", "observe", "plan", "validate", "authorize", "prepare", "execute", "verify", "commit", "audit", "reconcile"]
-EXPECTED_TRANSIENT_LIFECYCLE = ["request", "observe", "plan", "validate-classify", "authorize", "execute", "verify", "audit"]
+EXPECTED_MANAGED_LIFECYCLE = [
+    "request",
+    "observe",
+    "plan",
+    "validate",
+    "authorize",
+    "prepare",
+    "execute",
+    "verify",
+    "commit",
+    "audit",
+    "reconcile",
+]
+EXPECTED_TRANSIENT_LIFECYCLE = [
+    "request",
+    "observe",
+    "plan",
+    "validate-classify",
+    "authorize",
+    "execute",
+    "verify",
+    "audit",
+]
 EXPECTED_CLASSES = {
-    "experience-ephemeral": {"rust_variant": "ExperienceEphemeral", "changes_external_state": True, "changes_linura_durable_state": False, "control_mediated": False, "risk_classification_required": False, "plan_bound_authorization": False, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "experience-local"},
-    "authoritative-query": {"rust_variant": "AuthoritativeQuery", "changes_external_state": False, "changes_linura_durable_state": False, "control_mediated": True, "risk_classification_required": False, "plan_bound_authorization": False, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "observation-query"},
-    "linura-owned-state": {"rust_variant": "LinuraOwnedState", "changes_external_state": False, "changes_linura_durable_state": True, "control_mediated": True, "risk_classification_required": True, "plan_bound_authorization": False, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "linura-local-transaction"},
-    "transient-external-effect": {"rust_variant": "TransientExternalEffect", "changes_external_state": True, "changes_linura_durable_state": False, "control_mediated": True, "risk_classification_required": True, "plan_bound_authorization": True, "privileged_executor_allowed": False, "canonical_managed_lifecycle": False, "path": "bounded-transient-effect"},
-    "managed-external-effect": {"rust_variant": "ManagedExternalEffect", "changes_external_state": True, "changes_linura_durable_state": True, "control_mediated": True, "risk_classification_required": True, "plan_bound_authorization": True, "privileged_executor_allowed": True, "canonical_managed_lifecycle": True, "path": "canonical-managed-mutation"},
+    "experience-ephemeral": {
+        "rust_variant": "ExperienceEphemeral",
+        "changes_external_state": True,
+        "changes_linura_durable_state": False,
+        "control_mediated": False,
+        "risk_classification_required": False,
+        "plan_bound_authorization": False,
+        "privileged_executor_allowed": False,
+        "canonical_managed_lifecycle": False,
+        "path": "experience-local",
+    },
+    "authoritative-query": {
+        "rust_variant": "AuthoritativeQuery",
+        "changes_external_state": False,
+        "changes_linura_durable_state": False,
+        "control_mediated": True,
+        "risk_classification_required": False,
+        "plan_bound_authorization": False,
+        "privileged_executor_allowed": False,
+        "canonical_managed_lifecycle": False,
+        "path": "observation-query",
+    },
+    "linura-owned-state": {
+        "rust_variant": "LinuraOwnedState",
+        "changes_external_state": False,
+        "changes_linura_durable_state": True,
+        "control_mediated": True,
+        "risk_classification_required": True,
+        "plan_bound_authorization": False,
+        "privileged_executor_allowed": False,
+        "canonical_managed_lifecycle": False,
+        "path": "linura-local-transaction",
+    },
+    "transient-external-effect": {
+        "rust_variant": "TransientExternalEffect",
+        "changes_external_state": True,
+        "changes_linura_durable_state": False,
+        "control_mediated": True,
+        "risk_classification_required": True,
+        "plan_bound_authorization": True,
+        "privileged_executor_allowed": False,
+        "canonical_managed_lifecycle": False,
+        "path": "bounded-transient-effect",
+    },
+    "managed-external-effect": {
+        "rust_variant": "ManagedExternalEffect",
+        "changes_external_state": True,
+        "changes_linura_durable_state": True,
+        "control_mediated": True,
+        "risk_classification_required": True,
+        "plan_bound_authorization": True,
+        "privileged_executor_allowed": True,
+        "canonical_managed_lifecycle": True,
+        "path": "canonical-managed-mutation",
+    },
 }
 EXPECTED_REGISTERED_OPERATIONS = {
     "managed-systemd-active-state": {
@@ -157,17 +228,23 @@ def validate(root: Path) -> list[str]:
     }
     for key, expected in expected_root.items():
         if contract.get(key) != expected:
-            failures.append(f"operation-semantics {key} drifted from the canonical contract")
+            failures.append(
+                f"operation-semantics {key} drifted from the canonical contract"
+            )
     classes = contract.get("classes")
     if not isinstance(classes, dict):
         failures.append("operation-semantics contract missing classes")
     elif classes != EXPECTED_CLASSES:
-        failures.append("operation-semantics classes drifted from the canonical contract")
+        failures.append(
+            "operation-semantics classes drifted from the canonical contract"
+        )
     registered_operations = contract.get("registered_operations")
     if not isinstance(registered_operations, dict):
         failures.append("operation-semantics contract missing registered_operations")
     elif registered_operations != EXPECTED_REGISTERED_OPERATIONS:
-        failures.append("operation-semantics registered_operations drifted from the canonical contract")
+        failures.append(
+            "operation-semantics registered_operations drifted from the canonical contract"
+        )
     required_files = (
         (ADR_PATH, "ADR 0032"),
         (DOC_PATH, "operation semantics documentation"),
@@ -287,7 +364,9 @@ def validate(root: Path) -> list[str]:
         text = candidate.read_text(encoding="utf-8")
         for marker in markers:
             if marker in text:
-                failures.append(f"{path} contains forbidden operation-semantics marker: {marker}")
+                failures.append(
+                    f"{path} contains forbidden operation-semantics marker: {marker}"
+                )
 
     for path, markers in required_markers.items():
         candidate = root / path
@@ -301,13 +380,29 @@ def validate(root: Path) -> list[str]:
     if core_path.is_file() and not core_path.is_symlink():
         variants = _rust_operation_variants(core_path.read_text(encoding="utf-8"))
         if variants != EXPECTED_RUST_VARIANTS:
-            failures.append("linura_core::OperationClass variants drifted from the machine-readable contract")
+            failures.append(
+                "linura_core::OperationClass variants drifted from the machine-readable contract"
+            )
     descriptor_path = root / DESCRIPTOR_PATH
     if descriptor_path.is_file() and not descriptor_path.is_symlink():
         descriptor = descriptor_path.read_text(encoding="utf-8")
-        for fragment in ("pub struct OperationDescriptor", "pub struct OperationEffectBinding", "pub struct OperationRegistry", "MissingEffectBinding", "DuplicateOperation", "effect_binding", "matches_resource", "resource_suffix", "OperationClass", "RiskClass", "pub fn try_new"):
+        for fragment in (
+            "pub struct OperationDescriptor",
+            "pub struct OperationEffectBinding",
+            "pub struct OperationRegistry",
+            "MissingEffectBinding",
+            "DuplicateOperation",
+            "effect_binding",
+            "matches_resource",
+            "resource_suffix",
+            "OperationClass",
+            "RiskClass",
+            "pub fn try_new",
+        ):
             if fragment not in descriptor:
-                failures.append(f"linura_capability_sdk::OperationDescriptor missing required fragment: {fragment}")
+                failures.append(
+                    f"linura_capability_sdk::OperationDescriptor missing required fragment: {fragment}"
+                )
     control_operation_path = root / CONTROL_OPERATION_PATH
     if control_operation_path.is_file() and not control_operation_path.is_symlink():
         control_operation = control_operation_path.read_text(encoding="utf-8")
@@ -330,17 +425,17 @@ def validate(root: Path) -> list[str]:
     if registry_path.is_file() and not registry_path.is_symlink():
         registry_text = registry_path.read_text(encoding="utf-8")
         for fragment in (
-            'MANAGED_SYSTEMD_REGISTERED_OPERATION_ID',
+            "MANAGED_SYSTEMD_REGISTERED_OPERATION_ID",
             '"operation:systemd.unit.set-active-state"',
-            'OperationClass::ManagedExternalEffect',
-            'Some(RiskClass::SecuritySensitive)',
-            'MANAGED_SYSTEMD_RESOURCE_PREFIX',
-            'MANAGED_SYSTEMD_RESOURCE_SUFFIX',
-            'MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID',
+            "OperationClass::ManagedExternalEffect",
+            "Some(RiskClass::SecuritySensitive)",
+            "MANAGED_SYSTEMD_RESOURCE_PREFIX",
+            "MANAGED_SYSTEMD_RESOURCE_SUFFIX",
+            "MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID",
             '"operation-registry.managed-systemd-active-state.risk-floor"',
-            '.with_resource_suffix(MANAGED_SYSTEMD_RESOURCE_SUFFIX)',
-            'vec![MANAGED_SYSTEMD_CHANGE_KEY.into()]',
-            'trusted_builtin_operation_registry',
+            ".with_resource_suffix(MANAGED_SYSTEMD_RESOURCE_SUFFIX)",
+            "vec![MANAGED_SYSTEMD_CHANGE_KEY.into()]",
+            "trusted_builtin_operation_registry",
         ):
             if fragment not in registry_text:
                 failures.append(
@@ -350,18 +445,18 @@ def validate(root: Path) -> list[str]:
     if managed_path.is_file() and not managed_path.is_symlink():
         managed_text = managed_path.read_text(encoding="utf-8")
         for fragment in (
-            'trusted_builtin_operation_registry()',
-            'validate_managed_systemd_registration(&operation_semantics)',
-            'self.validate_registered_managed_systemd_candidate(&candidate)?',
-            'self.validate_registered_managed_systemd_candidate(&refreshed)?',
-            'self.handoff_registered_managed_systemd(&principal, &mut prepared)?',
-            'self.handoff_registered_managed_systemd(&principal, prepared.as_mut())?',
-            'candidate_with_risk_floor',
-            'recover_indeterminate_with_risk_floor',
-            'recover_indeterminate_with_approver_and_risk_floor',
-            'registered_managed_systemd_risk_floor',
-            'prepared.binding().trusted_risk()',
-            'semantics.risk() != bound_risk',
+            "trusted_builtin_operation_registry()",
+            "validate_managed_systemd_registration(&operation_semantics)",
+            "self.validate_registered_managed_systemd_candidate(&candidate)?",
+            "self.validate_registered_managed_systemd_candidate(&refreshed)?",
+            "self.handoff_registered_managed_systemd(&principal, &mut prepared)?",
+            "self.handoff_registered_managed_systemd(&principal, prepared.as_mut())?",
+            "candidate_with_risk_floor",
+            "recover_indeterminate_with_risk_floor",
+            "recover_indeterminate_with_approver_and_risk_floor",
+            "registered_managed_systemd_risk_floor",
+            "prepared.binding().trusted_risk()",
+            "semantics.risk() != bound_risk",
         ):
             if fragment not in managed_text:
                 failures.append(
@@ -431,7 +526,9 @@ def validate(root: Path) -> list[str]:
     transient_path = root / TRANSIENT_EFFECT_PATH
     if transient_path.is_file() and not transient_path.is_symlink():
         transient_text = transient_path.read_text(encoding="utf-8")
-        policy_review_index = transient_text.find("let review = review_plan_with_classification")
+        policy_review_index = transient_text.find(
+            "let review = review_plan_with_classification"
+        )
         no_change_success_index = transient_text.find(
             "TransientEffectAuditDisposition::NoChange"
         )
@@ -443,7 +540,9 @@ def validate(root: Path) -> list[str]:
             failures.append(
                 "transient no-change success must remain downstream of trusted policy review"
             )
-        audit_record_start = transient_text.find("pub struct TransientEffectAuditRecord")
+        audit_record_start = transient_text.find(
+            "pub struct TransientEffectAuditRecord"
+        )
         audit_record_end = transient_text.find("\n}\n", audit_record_start)
         if audit_record_start < 0 or audit_record_end < 0:
             failures.append("transient audit record shape is missing")
@@ -505,9 +604,15 @@ def validate(root: Path) -> list[str]:
                 failures.append(
                     f"transient effect Control lifecycle missing required fragment: {fragment}"
                 )
-    core_text = core_path.read_text(encoding="utf-8") if core_path.is_file() and not core_path.is_symlink() else ""
+    core_text = (
+        core_path.read_text(encoding="utf-8")
+        if core_path.is_file() and not core_path.is_symlink()
+        else ""
+    )
     if "requires_plan_bound_external_authorization" not in core_text:
-        failures.append("linura_core::OperationClass missing plan-bound external authorization invariant")
+        failures.append(
+            "linura_core::OperationClass missing plan-bound external authorization invariant"
+        )
 
     session_dbus = root / SESSION_DBUS_PATH
     if session_dbus.is_file() and not session_dbus.is_symlink():
@@ -524,7 +629,12 @@ def validate(root: Path) -> list[str]:
                 failures.append(
                     f"Session1 transport missing required transient-effect fragment: {fragment}"
                 )
-        for forbidden in ("Command::new", "/usr/bin/wpctl", "PolicyDecision", "OperationClass"):
+        for forbidden in (
+            "Command::new",
+            "/usr/bin/wpctl",
+            "PolicyDecision",
+            "OperationClass",
+        ):
             if forbidden in session_dbus_text:
                 failures.append(
                     f"Session1 transport must not own effect authority/execution: {forbidden}"
@@ -555,7 +665,9 @@ def validate(root: Path) -> list[str]:
                 failures.append(
                     f"PipeWire session-volume runtime missing hardening fragment: {fragment}"
                 )
-        session_runtime_production_text = session_runtime_text.split("#[cfg(test)]", 1)[0]
+        session_runtime_production_text = session_runtime_text.split("#[cfg(test)]", 1)[
+            0
+        ]
         default_alias_dispatch = (
             '"audio:session:default-output"' in session_runtime_production_text
         )
@@ -612,13 +724,10 @@ def validate(root: Path) -> list[str]:
                     f"transient session audit missing durability fragment: {fragment}"
                 )
 
-
     arch_profile = root / ARCH_PROFILE_PATH
     if arch_profile.is_file() and not arch_profile.is_symlink():
         arch_profile_text = arch_profile.read_text(encoding="utf-8")
-        helper_permission = (
-            '["/usr/lib/linura/linura-session-audio.lua"]="0:0:0644"'
-        )
+        helper_permission = '["/usr/lib/linura/linura-session-audio.lua"]="0:0:0644"'
         if helper_permission not in arch_profile_text:
             failures.append(
                 "Arch workstation image must pin the trusted WirePlumber helper to root:root 0644"
@@ -636,11 +745,11 @@ def validate(root: Path) -> list[str]:
             'properties["object.serial"] == args.object_serial',
             'properties["node.name"] == args.node_name',
             'properties["media.class"] == "Audio/Sink"',
-            'bound_id == args.node_id',
+            "bound_id == args.node_id",
             'mixer:call("set-volume", matched_id, args.volume_percent / 100.0)',
             'mixer["scale"] = "cubic"',
             'sinks:connect("installed"',
-            'sinks:activate()',
+            "sinks:activate()",
         )
         for fragment in required_helper_fragments:
             if fragment not in helper_text:
@@ -648,7 +757,7 @@ def validate(root: Path) -> list[str]:
                     f"WirePlumber session-audio helper missing identity-bound fragment: {fragment}"
                 )
         identity_indices = [
-            helper_text.find('bound_id == args.node_id'),
+            helper_text.find("bound_id == args.node_id"),
             helper_text.find('local properties = node["global-properties"]'),
             helper_text.find('properties["object.serial"] == args.object_serial'),
             helper_text.find('properties["node.name"] == args.node_name'),
@@ -668,7 +777,14 @@ def validate(root: Path) -> list[str]:
             failures.append(
                 "WirePlumber session-audio helper must bind identity from immutable PipeWire global properties"
             )
-        for forbidden in ("os.execute", "io.", "/usr/bin/wpctl", "load(", "loadstring", "dofile"):
+        for forbidden in (
+            "os.execute",
+            "io.",
+            "/usr/bin/wpctl",
+            "load(",
+            "loadstring",
+            "dofile",
+        ):
             if forbidden in helper_text:
                 failures.append(
                     f"WirePlumber session-audio helper contains forbidden execution surface: {forbidden}"
@@ -679,7 +795,7 @@ def validate(root: Path) -> list[str]:
         linux_observation_text = linux_observation.read_text(encoding="utf-8")
         for fragment in (
             'WIREPLUMBER_EXECUTABLE_PATH: &str = "/usr/bin/wpexec"',
-            'LINURA_SESSION_AUDIO_HELPER_PATH',
+            "LINURA_SESSION_AUDIO_HELPER_PATH",
             "parse_wireplumber_sink_snapshot",
             "verify_packaged_session_audio_helper",
             "open_file_descriptor(",
@@ -704,7 +820,11 @@ def validate(root: Path) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[1]
+    root = (
+        Path(argv[1]).resolve()
+        if len(argv) > 1
+        else Path(__file__).resolve().parents[1]
+    )
     failures = validate(root)
     if failures:
         for failure in failures:

@@ -5,6 +5,7 @@ These adapters do not accept a workflow's self-declared pass bit.  Each adapter
 re-derives the lane outcome from retained command results, transcripts, exact
 repository contracts, and the already-verified execution envelope.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -36,7 +37,9 @@ def _stable_bytes(path: Path) -> bytes:
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
-        raise VerificationError(f"cannot open verifier input safely: {path}: {exc}") from exc
+        raise VerificationError(
+            f"cannot open verifier input safely: {path}: {exc}"
+        ) from exc
     try:
         before = os.fstat(descriptor)
         _require(stat.S_ISREG(before.st_mode), f"verifier input is not regular: {path}")
@@ -49,8 +52,20 @@ def _stable_bytes(path: Path) -> bytes:
             chunks.append(chunk)
         after = os.fstat(descriptor)
         _require(
-            (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
-            == (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns),
+            (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            )
+            == (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
+            ),
             f"verifier input changed while being read: {path}",
         )
         named = os.lstat(path)
@@ -148,30 +163,51 @@ def _sha256(path: Path) -> str:
 
 
 def _repo_file(root: Path, relative: str) -> Path:
-    _require(relative and not relative.startswith("/"), "repository path must be relative")
+    _require(
+        relative and not relative.startswith("/"), "repository path must be relative"
+    )
     _require(".." not in Path(relative).parts, "repository path may not traverse")
     path = root / relative
-    _require(path.is_file() and not path.is_symlink(), f"missing repository verifier input: {relative}")
-    _require(path.resolve().is_relative_to(root.resolve()), f"repository input escapes root: {relative}")
+    _require(
+        path.is_file() and not path.is_symlink(),
+        f"missing repository verifier input: {relative}",
+    )
+    _require(
+        path.resolve().is_relative_to(root.resolve()),
+        f"repository input escapes root: {relative}",
+    )
     return path
 
 
 def _bundle_file(bundle: Path, name: str) -> Path:
-    _require(name and Path(name).name == name, f"unsafe verifier artifact name: {name!r}")
+    _require(
+        name and Path(name).name == name, f"unsafe verifier artifact name: {name!r}"
+    )
     path = bundle / name
-    _require(path.is_file() and not path.is_symlink(), f"missing verifier artifact: {name}")
-    _require(path.resolve().parent == bundle.resolve(), f"verifier artifact escapes bundle: {name}")
+    _require(
+        path.is_file() and not path.is_symlink(), f"missing verifier artifact: {name}"
+    )
+    _require(
+        path.resolve().parent == bundle.resolve(),
+        f"verifier artifact escapes bundle: {name}",
+    )
     return path
 
 
 def _common_primary(primary: dict[str, Any], envelope: dict[str, Any]) -> None:
     _require(primary.get("repository") == REPOSITORY, "primary repository mismatch")
-    _require(primary.get("source_sha") == envelope["source"]["commit_sha"], "primary source mismatch")
+    _require(
+        primary.get("source_sha") == envelope["source"]["commit_sha"],
+        "primary source mismatch",
+    )
 
 
 def _artifact_digest_record(root: Path, record: object, label: str) -> None:
     _require(isinstance(record, dict), f"{label} artifact binding is missing")
-    _require(set(record) == {"path", "sha256", "size"}, f"{label} artifact binding fields drifted")
+    _require(
+        set(record) == {"path", "sha256", "size"},
+        f"{label} artifact binding fields drifted",
+    )
     path_value = record["path"]
     _require(isinstance(path_value, str), f"{label} path is invalid")
     path = _repo_file(root, path_value)
@@ -196,16 +232,23 @@ def _cargo_log(
 ) -> dict[str, Any]:
     text = _text(path)
     _require("test result: ok." in text, f"{label} has no successful cargo test result")
-    _require("test result: FAILED" not in text and "\nFAILED" not in text, f"{label} contains a failed test")
+    _require(
+        "test result: FAILED" not in text and "\nFAILED" not in text,
+        f"{label} contains a failed test",
+    )
     matches = re.findall(r"test result: ok\. ([0-9]+) passed; ([0-9]+) failed;", text)
     _require(matches, f"{label} cargo result summary is missing")
-    _require(all(int(failed) == 0 for _, failed in matches), f"{label} reports failed tests")
+    _require(
+        all(int(failed) == 0 for _, failed in matches), f"{label} reports failed tests"
+    )
     missing = [
         pattern
         for pattern in required_runner_patterns
         if re.search(pattern, text, re.MULTILINE) is None
     ]
-    _require(not missing, f"{label} does not identify reviewed Cargo runners: {missing}")
+    _require(
+        not missing, f"{label} does not identify reviewed Cargo runners: {missing}"
+    )
     return {
         "result_blocks": len(matches),
         "passed_tests": sum(int(passed) for passed, _ in matches),
@@ -215,14 +258,26 @@ def _cargo_log(
 
 def _envelope_guest_environment(envelope: dict[str, Any]) -> dict[str, Any]:
     subject = envelope.get("execution_subject")
-    _require(isinstance(subject, dict) and subject.get("kind") == "virtual-machine",
-             "lane did not execute in a verified virtual-machine subject")
-    for key in ("architecture", "virtualization", "distribution_id", "distribution_version"):
-        _require(isinstance(subject.get(key), str) and subject[key], f"guest subject lacks {key}")
+    _require(
+        isinstance(subject, dict) and subject.get("kind") == "virtual-machine",
+        "lane did not execute in a verified virtual-machine subject",
+    )
+    for key in (
+        "architecture",
+        "virtualization",
+        "distribution_id",
+        "distribution_version",
+    ):
+        _require(
+            isinstance(subject.get(key), str) and subject[key],
+            f"guest subject lacks {key}",
+        )
     return subject
 
 
-def _require_base_image_binding(primary: dict[str, Any], envelope: dict[str, Any]) -> None:
+def _require_base_image_binding(
+    primary: dict[str, Any], envelope: dict[str, Any]
+) -> None:
     subject = _envelope_guest_environment(envelope)
     images = subject.get("image_digests")
     _require(isinstance(images, dict), "guest subject image identity is missing")
@@ -270,7 +325,8 @@ def _aggregate_environment_verified(
     return (
         isinstance(subject, dict)
         and subject.get("kind") == "aggregate"
-        and HEX64.fullmatch(str(subject.get("component_envelope_set_sha256", ""))) is not None
+        and HEX64.fullmatch(str(subject.get("component_envelope_set_sha256", "")))
+        is not None
         and isinstance(observations, dict)
         and observations.get("qualification_environment_id") == expected_environment_id
     )
@@ -285,12 +341,12 @@ def _outcome(
     environment_verified: bool,
     details: dict[str, Any],
 ) -> dict[str, Any]:
-    _require(bool(claims) and len(claims) == len(set(claims)), f"{adapter} verified-claim inventory is invalid")
+    _require(
+        bool(claims) and len(claims) == len(set(claims)),
+        f"{adapter} verified-claim inventory is invalid",
+    )
     semantic_verification_complete = (
-        environment_verified
-        and bool(test_ids)
-        and bool(contract_ids)
-        and bool(claims)
+        environment_verified and bool(test_ids) and bool(contract_ids) and bool(claims)
     )
     _require(
         semantic_verification_complete,
@@ -323,33 +379,57 @@ def _verify_vm(
     _require(primary.get("schema_version") == 2, "VM primary schema mismatch")
     result = _json(_bundle_file(bundle, "acceptance-result.json"))
     _require(result.get("schema_version") == 1, "VM runner result schema mismatch")
-    _require(result.get("source_sha") == envelope["source"]["commit_sha"], "VM runner source mismatch")
-    _require(result.get("result") == "passed", "VM runner did not complete successfully")
+    _require(
+        result.get("source_sha") == envelope["source"]["commit_sha"],
+        "VM runner source mismatch",
+    )
+    _require(
+        result.get("result") == "passed", "VM runner did not complete successfully"
+    )
     scenario = result.get("scenario")
-    _require(isinstance(scenario, dict) and set(scenario) == {"id", "path", "sha256"},
-             "VM runner scenario identity is malformed")
+    _require(
+        isinstance(scenario, dict) and set(scenario) == {"id", "path", "sha256"},
+        "VM runner scenario identity is malformed",
+    )
     if required_scenario is not None:
         _require(scenario["id"] == required_scenario, "VM runner scenario mismatch")
     primary_scenario = primary.get("scenario")
-    _require(primary_scenario == scenario, "VM primary scenario identity disagrees with runner result")
+    _require(
+        primary_scenario == scenario,
+        "VM primary scenario identity disagrees with runner result",
+    )
     scenario_path = _repo_file(root, scenario["path"])
-    _require(_sha256(scenario_path) == scenario["sha256"], "VM scenario repository digest mismatch")
+    _require(
+        _sha256(scenario_path) == scenario["sha256"],
+        "VM scenario repository digest mismatch",
+    )
     scenario_payload = _json(scenario_path)
     _require(scenario_payload.get("schema_version") == 1, "VM scenario schema mismatch")
     _require(scenario_payload.get("id") == scenario["id"], "VM scenario id mismatch")
     expected_steps = scenario_payload.get("steps")
     observed_steps = result.get("steps")
-    _require(isinstance(expected_steps, list) and expected_steps, "VM scenario has no steps")
-    _require(isinstance(observed_steps, list) and len(observed_steps) == len(expected_steps),
-             "VM runner step inventory mismatch")
+    _require(
+        isinstance(expected_steps, list) and expected_steps, "VM scenario has no steps"
+    )
+    _require(
+        isinstance(observed_steps, list) and len(observed_steps) == len(expected_steps),
+        "VM runner step inventory mismatch",
+    )
     for expected, observed in zip(expected_steps, observed_steps, strict=True):
-        _require(isinstance(expected, dict) and isinstance(observed, dict), "VM runner step is malformed")
+        _require(
+            isinstance(expected, dict) and isinstance(observed, dict),
+            "VM runner step is malformed",
+        )
         command = expected.get("command")
         name = expected.get("name")
-        _require(isinstance(command, str) and isinstance(name, str), "VM scenario step is invalid")
+        _require(
+            isinstance(command, str) and isinstance(name, str),
+            "VM scenario step is invalid",
+        )
         expected_digest = hashlib.sha256(command.encode("utf-8")).hexdigest()
         _require(
-            observed == {
+            observed
+            == {
                 "name": name,
                 "command_sha256": expected_digest,
                 "returncode": 0,
@@ -363,19 +443,44 @@ def _verify_vm(
     _require(isinstance(qualification, dict), "VM qualification environment is missing")
     guest = qualification.get("guest_observation")
     _require(isinstance(guest, dict), "VM guest observation is missing")
-    for key in ("architecture", "virtualization", "distribution_id", "distribution_version"):
-        _require(guest.get(key) == subject.get(key), f"VM guest environment mismatch: {key}")
+    for key in (
+        "architecture",
+        "virtualization",
+        "distribution_id",
+        "distribution_version",
+    ):
+        _require(
+            guest.get(key) == subject.get(key), f"VM guest environment mismatch: {key}"
+        )
 
     binaries = primary.get("binaries")
-    _require(isinstance(binaries, dict) and binaries, "VM executable identity evidence is missing")
+    _require(
+        isinstance(binaries, dict) and binaries,
+        "VM executable identity evidence is missing",
+    )
     for name, binding in binaries.items():
-        _require(isinstance(name, str) and isinstance(binding, dict), "VM binary binding is malformed")
+        _require(
+            isinstance(name, str) and isinstance(binding, dict),
+            "VM binary binding is malformed",
+        )
         host = binding.get("host_build")
         guest_binding = binding.get("guest_installed")
-        _require(binding.get("identity_match") is True, f"VM binary identity did not match: {name}")
-        _require(isinstance(host, dict) and guest_binding == host, f"VM installed bytes differ: {name}")
-        _require(HEX64.fullmatch(str(host.get("sha256", ""))) is not None, f"VM binary digest invalid: {name}")
-        _require(isinstance(host.get("size"), int) and host["size"] > 0, f"VM binary size invalid: {name}")
+        _require(
+            binding.get("identity_match") is True,
+            f"VM binary identity did not match: {name}",
+        )
+        _require(
+            isinstance(host, dict) and guest_binding == host,
+            f"VM installed bytes differ: {name}",
+        )
+        _require(
+            HEX64.fullmatch(str(host.get("sha256", ""))) is not None,
+            f"VM binary digest invalid: {name}",
+        )
+        _require(
+            isinstance(host.get("size"), int) and host["size"] > 0,
+            f"VM binary size invalid: {name}",
+        )
 
     return _outcome(
         adapter=f"{lane_id}-semantic-v1",
@@ -388,7 +493,11 @@ def _verify_vm(
             "installed-binary-bytes-matched-host-build",
         ],
         environment_verified=_machine_environment_verified(primary, envelope),
-        details={"scenario_id": scenario["id"], "step_count": len(observed_steps), "binary_count": len(binaries)},
+        details={
+            "scenario_id": scenario["id"],
+            "step_count": len(observed_steps),
+            "binary_count": len(binaries),
+        },
     )
 
 
@@ -398,8 +507,10 @@ def _verify_v04_durability(
     _common_primary(primary, envelope)
     _require(primary.get("schema_version") == 1, "v0.4 durability schema mismatch")
     _require(primary.get("result") == "passed", "v0.4 durability primary is not a pass")
-    _require(primary.get("qualified_boundary", {}).get("hypervisor") == "QEMU TCG",
-             "v0.4 durability hypervisor claim mismatch")
+    _require(
+        primary.get("qualified_boundary", {}).get("hypervisor") == "QEMU TCG",
+        "v0.4 durability hypervisor claim mismatch",
+    )
     _require_base_image_binding(primary, envelope)
     probe = primary.get("probe")
     _require(
@@ -448,9 +559,13 @@ def _verify_v04_durability(
         ],
         "v0.4 durability verifier witness",
     )
-    _require(witness.count("indeterminate transaction=") >= 4,
-             "v0.4 durability witness lacks independently reopened indeterminate states")
-    probe_sha = re.search(r"^probe_executable_sha256=([0-9a-f]{64})$", witness, re.MULTILINE)
+    _require(
+        witness.count("indeterminate transaction=") >= 4,
+        "v0.4 durability witness lacks independently reopened indeterminate states",
+    )
+    probe_sha = re.search(
+        r"^probe_executable_sha256=([0-9a-f]{64})$", witness, re.MULTILINE
+    )
     probe_size = re.search(r"^probe_executable_size=([0-9]+)$", witness, re.MULTILINE)
     _require(
         probe_sha is not None
@@ -459,7 +574,10 @@ def _verify_v04_durability(
         and int(probe_size.group(1)) == executable_binding["size"],
         "v0.4 durability guest executable identity mismatch",
     )
-    _require("fault probe failed:" not in witness, "v0.4 durability witness contains probe failure")
+    _require(
+        "fault probe failed:" not in witness,
+        "v0.4 durability witness contains probe failure",
+    )
     return _outcome(
         adapter="v04-durability-semantic-v1",
         test_ids=["qualification/v0.4/durability/result-v1"],
@@ -484,7 +602,9 @@ def _verify_v04_enospc(
 ) -> dict[str, Any]:
     _common_primary(primary, envelope)
     _require(primary.get("schema_version") == 1, "v0.4 ENOSPC schema mismatch")
-    _require(primary.get("result") == "success", "v0.4 ENOSPC primary is not successful")
+    _require(
+        primary.get("result") == "success", "v0.4 ENOSPC primary is not successful"
+    )
     _require_base_image_binding(primary, envelope)
     qualification = _text(_bundle_file(bundle, "enospc-qualification.log"))
     _require_markers(
@@ -576,7 +696,10 @@ def _verify_v04_enospc(
         available_after is not None,
         "v0.4 ENOSPC independent witness lacks post-recovery free-space observation",
     )
-    _require("unexpected terminal snapshot" not in witness, "v0.4 ENOSPC witness contains terminal-state failure")
+    _require(
+        "unexpected terminal snapshot" not in witness,
+        "v0.4 ENOSPC witness contains terminal-state failure",
+    )
     return _outcome(
         adapter="v04-enospc-semantic-v1",
         test_ids=["qualification/v0.4/enospc-recovery/result-v1"],
@@ -603,12 +726,20 @@ def _verify_v05(
     root: Path, bundle: Path, primary: dict[str, Any], envelope: dict[str, Any]
 ) -> dict[str, Any]:
     _common_primary(primary, envelope)
-    _require(primary.get("schema_version") == 1 and primary.get("result") == "passed",
-             "v0.5 primary result mismatch")
-    _require(primary.get("claim") == "isolated qualification-only systemd executor and independent verifier",
-             "v0.5 claim drifted")
-    _require(primary.get("managed_mutation_support") == "none" and primary.get("complete_lifecycle") is False,
-             "v0.5 support boundary drifted")
+    _require(
+        primary.get("schema_version") == 1 and primary.get("result") == "passed",
+        "v0.5 primary result mismatch",
+    )
+    _require(
+        primary.get("claim")
+        == "isolated qualification-only systemd executor and independent verifier",
+        "v0.5 claim drifted",
+    )
+    _require(
+        primary.get("managed_mutation_support") == "none"
+        and primary.get("complete_lifecycle") is False,
+        "v0.5 support boundary drifted",
+    )
     _require_base_image_binding(primary, envelope)
     transcript = _text(_bundle_file(bundle, "qualification.log"))
     markers = [
@@ -624,10 +755,15 @@ def _verify_v05(
     _require("guest-error " not in transcript, "v0.5 transcript contains guest error")
     pre = re.search(r"pre-active-enter-timestamp-monotonic=([0-9]+)", transcript)
     post = re.search(r"post-active-enter-timestamp-monotonic=([0-9]+)", transcript)
-    _require(pre is not None and post is not None and int(post.group(1)) > int(pre.group(1)),
-             "v0.5 transcript does not prove a fresh activation")
+    _require(
+        pre is not None and post is not None and int(post.group(1)) > int(pre.group(1)),
+        "v0.5 transcript does not prove a fresh activation",
+    )
     artifacts = primary.get("artifacts")
-    _require(isinstance(artifacts, dict) and artifacts, "v0.5 repository artifact bindings are missing")
+    _require(
+        isinstance(artifacts, dict) and artifacts,
+        "v0.5 repository artifact bindings are missing",
+    )
     for name, record in artifacts.items():
         _artifact_digest_record(root, record, f"v0.5 {name}")
     return _outcome(
@@ -642,7 +778,10 @@ def _verify_v05(
             "native-independent-verifier-satisfied",
         ],
         environment_verified=_machine_environment_verified(primary, envelope),
-        details={"repository_artifacts": len(artifacts), "activation_delta": int(post.group(1)) - int(pre.group(1))},
+        details={
+            "repository_artifacts": len(artifacts),
+            "activation_delta": int(post.group(1)) - int(pre.group(1)),
+        },
     )
 
 
@@ -650,11 +789,18 @@ def _verify_v06(
     root: Path, bundle: Path, primary: dict[str, Any], envelope: dict[str, Any]
 ) -> dict[str, Any]:
     _common_primary(primary, envelope)
-    _require(primary.get("schema_version") == 1 and primary.get("result") == "passed",
-             "v0.6 primary result mismatch")
-    _require(primary.get("complete_lifecycle") is True, "v0.6 complete lifecycle was not proven")
-    _require(primary.get("managed_mutation_support") == "narrow-experimental",
-             "v0.6 managed mutation scope drifted")
+    _require(
+        primary.get("schema_version") == 1 and primary.get("result") == "passed",
+        "v0.6 primary result mismatch",
+    )
+    _require(
+        primary.get("complete_lifecycle") is True,
+        "v0.6 complete lifecycle was not proven",
+    )
+    _require(
+        primary.get("managed_mutation_support") == "narrow-experimental",
+        "v0.6 managed mutation scope drifted",
+    )
     _require_base_image_binding(primary, envelope)
     transcript = _text(_bundle_file(bundle, "qualification.log"))
     matrix = _text(_bundle_file(bundle, "v06-matrix.log"))
@@ -674,13 +820,20 @@ def _verify_v06(
         "v0.6 qualification transcript",
     )
     _require("guest-error " not in transcript, "v0.6 transcript contains guest error")
-    _require("test result: ok. 11 passed" in matrix and "FAILED" not in matrix,
-             "v0.6 retained fault matrix did not independently pass 11 cases")
+    _require(
+        "test result: ok. 11 passed" in matrix and "FAILED" not in matrix,
+        "v0.6 retained fault matrix did not independently pass 11 cases",
+    )
     fault_matrix = primary.get("fault_matrix")
-    _require(isinstance(fault_matrix, dict) and fault_matrix.get("cases") == 11,
-             "v0.6 primary fault-matrix cardinality mismatch")
+    _require(
+        isinstance(fault_matrix, dict) and fault_matrix.get("cases") == 11,
+        "v0.6 primary fault-matrix cardinality mismatch",
+    )
     artifacts = primary.get("artifacts")
-    _require(isinstance(artifacts, dict) and artifacts, "v0.6 repository artifact bindings are missing")
+    _require(
+        isinstance(artifacts, dict) and artifacts,
+        "v0.6 repository artifact bindings are missing",
+    )
     for name, record in artifacts.items():
         _artifact_digest_record(root, record, f"v0.6 {name}")
     return _outcome(
@@ -705,42 +858,76 @@ def _verify_v07(
     root: Path, bundle: Path, primary: dict[str, Any], envelope: dict[str, Any]
 ) -> dict[str, Any]:
     _common_primary(primary, envelope)
-    _require(primary.get("schema_version") == 1 and primary.get("result") == "passed",
-             "v0.7 primary result mismatch")
+    _require(
+        primary.get("schema_version") == 1 and primary.get("result") == "passed",
+        "v0.7 primary result mismatch",
+    )
     unit = _cargo_log(
         _bundle_file(bundle, "library-unit-tests.txt"),
         "v0.7 Library unit log",
-        required_runner_patterns=(r"Running unittests src/lib\.rs \([^\n]*linura_library-",),
+        required_runner_patterns=(
+            r"Running unittests src/lib\.rs \([^\n]*linura_library-",
+        ),
     )
     matrix = _cargo_log(
         _bundle_file(bundle, "v07-qualification-tests.txt"),
         "v0.7 qualification matrix log",
-        required_runner_patterns=(r"Running tests/v07_qualification\.rs \([^\n]*v07_qualification-",),
+        required_runner_patterns=(
+            r"Running tests/v07_qualification\.rs \([^\n]*v07_qualification-",
+        ),
     )
     sdk = _cargo_log(
         _bundle_file(bundle, "sdk-tests.txt"),
         "v0.7 SDK log",
-        required_runner_patterns=(r"Running unittests src/lib\.rs \([^\n]*linura_sdk-",),
+        required_runner_patterns=(
+            r"Running unittests src/lib\.rs \([^\n]*linura_sdk-",
+        ),
     )
     digest = _text(_bundle_file(bundle, "portable-roundtrip.sha256")).strip()
-    _require(HEX64.fullmatch(digest) is not None, "v0.7 portable round-trip digest is invalid")
-    _require(primary.get("portable_roundtrip_sha256") == digest, "v0.7 portable digest disagrees with primary")
+    _require(
+        HEX64.fullmatch(digest) is not None,
+        "v0.7 portable round-trip digest is invalid",
+    )
+    _require(
+        primary.get("portable_roundtrip_sha256") == digest,
+        "v0.7 portable digest disagrees with primary",
+    )
     crash = _text(_bundle_file(bundle, "process-crash-atomicity.txt")).strip()
     expected_crash = (
         "passed: child was SIGKILLed after the uncommitted history write and before "
         "projection/operation commit; reopen exposed only the old complete state, then an "
         "exact retry committed/replayed the new complete state"
     )
-    _require(crash == expected_crash, "v0.7 crash-atomicity witness is not the reviewed proof")
-    _require(primary.get("process_crash_atomicity") == crash, "v0.7 primary crash witness mismatch")
-    _require(primary.get("database_integrity_after_restart_recovery") == "ok",
-             "v0.7 database integrity recovery was not proven")
-    _require(primary.get("imported_approval_or_executor_authority") is False,
-             "v0.7 imported authority boundary drifted")
+    _require(
+        crash == expected_crash,
+        "v0.7 crash-atomicity witness is not the reviewed proof",
+    )
+    _require(
+        primary.get("process_crash_atomicity") == crash,
+        "v0.7 primary crash witness mismatch",
+    )
+    _require(
+        primary.get("database_integrity_after_restart_recovery") == "ok",
+        "v0.7 database integrity recovery was not proven",
+    )
+    _require(
+        primary.get("imported_approval_or_executor_authority") is False,
+        "v0.7 imported authority boundary drifted",
+    )
     scenarios = primary.get("qualified_scenarios")
-    _require(isinstance(scenarios, list) and len(scenarios) == 23, "v0.7 qualified-scenario inventory mismatch")
-    _require(all(isinstance(item, dict) and item.get("result") == "passed" and isinstance(item.get("name"), str)
-                 for item in scenarios), "v0.7 scenario result is not independently acceptable")
+    _require(
+        isinstance(scenarios, list) and len(scenarios) == 23,
+        "v0.7 qualified-scenario inventory mismatch",
+    )
+    _require(
+        all(
+            isinstance(item, dict)
+            and item.get("result") == "passed"
+            and isinstance(item.get("name"), str)
+            for item in scenarios
+        ),
+        "v0.7 scenario result is not independently acceptable",
+    )
     return _outcome(
         adapter="v07-library-semantic-v1",
         test_ids=["qualification/v0.7/library/result-v1"],
@@ -756,7 +943,9 @@ def _verify_v07(
         environment_verified=_host_environment_verified(envelope),
         details={
             "qualified_scenarios": len(scenarios),
-            "cargo_passed_tests": unit["passed_tests"] + matrix["passed_tests"] + sdk["passed_tests"],
+            "cargo_passed_tests": unit["passed_tests"]
+            + matrix["passed_tests"]
+            + sdk["passed_tests"],
         },
     )
 
@@ -765,19 +954,36 @@ def _verify_v08(
     root: Path, bundle: Path, primary: dict[str, Any], envelope: dict[str, Any]
 ) -> dict[str, Any]:
     _common_primary(primary, envelope)
-    _require(primary.get("schema_version") == 2 and primary.get("result") == "passed",
-             "v0.8 primary result mismatch")
+    _require(
+        primary.get("schema_version") == 2 and primary.get("result") == "passed",
+        "v0.8 primary result mismatch",
+    )
     boundary = _text(_bundle_file(bundle, "boundary-check.txt"))
-    _require("v0.8 authority-boundary checks passed" in boundary and "ERROR:" not in boundary,
-             "v0.8 boundary verifier did not pass")
+    _require(
+        "v0.8 authority-boundary checks passed" in boundary
+        and "ERROR:" not in boundary,
+        "v0.8 boundary verifier did not pass",
+    )
     logs = {}
     reviewed_runners = {
-        "linura-intent-tests.txt": (r"Running unittests src/lib\.rs \([^\n]*linura_intent-",),
-        "linura-provider-sdk-tests.txt": (r"Running unittests src/lib\.rs \([^\n]*linura_provider_sdk-",),
-        "linura-agent-runtime-tests.txt": (r"Running unittests src/lib\.rs \([^\n]*linura_agent_runtime-",),
-        "linura-control-unit-tests.txt": (r"Running unittests src/lib\.rs \([^\n]*linura_control-",),
-        "linura-library-unit-tests.txt": (r"Running unittests src/lib\.rs \([^\n]*linura_library-",),
-        "v08-integration-tests.txt": (r"Running tests/v08_qualification\.rs \([^\n]*v08_qualification-",),
+        "linura-intent-tests.txt": (
+            r"Running unittests src/lib\.rs \([^\n]*linura_intent-",
+        ),
+        "linura-provider-sdk-tests.txt": (
+            r"Running unittests src/lib\.rs \([^\n]*linura_provider_sdk-",
+        ),
+        "linura-agent-runtime-tests.txt": (
+            r"Running unittests src/lib\.rs \([^\n]*linura_agent_runtime-",
+        ),
+        "linura-control-unit-tests.txt": (
+            r"Running unittests src/lib\.rs \([^\n]*linura_control-",
+        ),
+        "linura-library-unit-tests.txt": (
+            r"Running unittests src/lib\.rs \([^\n]*linura_library-",
+        ),
+        "v08-integration-tests.txt": (
+            r"Running tests/v08_qualification\.rs \([^\n]*v08_qualification-",
+        ),
     }
     for filename, runner_patterns in reviewed_runners.items():
         logs[filename] = _cargo_log(
@@ -792,19 +998,37 @@ def _verify_v08(
         "library_acceptance_signing_authority_present",
         "retired_control_token_present",
     ):
-        _require(primary.get(key) is False, f"v0.8 forbidden authority claim failed: {key}")
-    _require(primary.get("library_acceptance_requires_provisioned_verifier") is True,
-             "v0.8 Library verifier provisioning boundary drifted")
-    _require(primary.get("control_acceptance_persistent_key_required") is True,
-             "v0.8 Control persistent-key boundary drifted")
+        _require(
+            primary.get(key) is False, f"v0.8 forbidden authority claim failed: {key}"
+        )
+    _require(
+        primary.get("library_acceptance_requires_provisioned_verifier") is True,
+        "v0.8 Library verifier provisioning boundary drifted",
+    )
+    _require(
+        primary.get("control_acceptance_persistent_key_required") is True,
+        "v0.8 Control persistent-key boundary drifted",
+    )
     source_contracts = primary.get("source_contracts")
     rust_tests = primary.get("rust_tests")
-    _require(isinstance(source_contracts, list) and len(source_contracts) == 14
-             and all(isinstance(item, dict) and item.get("result") == "passed" for item in source_contracts),
-             "v0.8 source-contract inventory mismatch")
-    _require(isinstance(rust_tests, list) and len(rust_tests) == 29
-             and all(isinstance(item, dict) and item.get("result") == "passed" for item in rust_tests),
-             "v0.8 reviewed Rust-test inventory mismatch")
+    _require(
+        isinstance(source_contracts, list)
+        and len(source_contracts) == 14
+        and all(
+            isinstance(item, dict) and item.get("result") == "passed"
+            for item in source_contracts
+        ),
+        "v0.8 source-contract inventory mismatch",
+    )
+    _require(
+        isinstance(rust_tests, list)
+        and len(rust_tests) == 29
+        and all(
+            isinstance(item, dict) and item.get("result") == "passed"
+            for item in rust_tests
+        ),
+        "v0.8 reviewed Rust-test inventory mismatch",
+    )
     return _outcome(
         adapter="v08-agent-semantic-v1",
         test_ids=["qualification/v0.8/agent/result-v1"],
@@ -818,7 +1042,10 @@ def _verify_v08(
             "retired-control-token-absent",
         ],
         environment_verified=_host_environment_verified(envelope),
-        details={"source_contracts": len(source_contracts), "reviewed_rust_tests": len(rust_tests)},
+        details={
+            "source_contracts": len(source_contracts),
+            "reviewed_rust_tests": len(rust_tests),
+        },
     )
 
 
@@ -826,36 +1053,59 @@ def _verify_v09(
     root: Path, bundle: Path, primary: dict[str, Any], envelope: dict[str, Any]
 ) -> dict[str, Any]:
     _common_primary(primary, envelope)
-    _require(primary.get("schema_version") == 2 and primary.get("result") == "passed",
-             "v0.9 primary result mismatch")
-    qualification_environment = primary.get("qualification_environment")
-    _require(isinstance(qualification_environment, dict), "v0.9 qualification environment is missing")
     _require(
-        qualification_environment.get("id") == "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless",
+        primary.get("schema_version") == 2 and primary.get("result") == "passed",
+        "v0.9 primary result mismatch",
+    )
+    qualification_environment = primary.get("qualification_environment")
+    _require(
+        isinstance(qualification_environment, dict),
+        "v0.9 qualification environment is missing",
+    )
+    _require(
+        qualification_environment.get("id")
+        == "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless",
         "v0.9 qualification environment id mismatch",
     )
     vm = _json(_bundle_file(bundle, "VM-ACCEPTANCE-EVIDENCE.json"))
-    _require(vm.get("schema_version") == 2 and vm.get("repository") == REPOSITORY
-             and vm.get("source_sha") == envelope["source"]["commit_sha"]
-             and vm.get("result") == "passed", "v0.9 VM evidence is not a valid exact-source pass")
-    _require(vm.get("scenario", {}).get("id") == "firstboot-offline", "v0.9 VM scenario mismatch")
+    _require(
+        vm.get("schema_version") == 2
+        and vm.get("repository") == REPOSITORY
+        and vm.get("source_sha") == envelope["source"]["commit_sha"]
+        and vm.get("result") == "passed",
+        "v0.9 VM evidence is not a valid exact-source pass",
+    )
+    _require(
+        vm.get("scenario", {}).get("id") == "firstboot-offline",
+        "v0.9 VM scenario mismatch",
+    )
     production = vm.get("binaries", {}).get("linura-authorityd")
-    _require(isinstance(production, dict) and production.get("identity_match") is True,
-             "v0.9 authority runtime identity was not proven")
-    _require(production.get("host_build") == production.get("guest_installed"),
-             "v0.9 authority runtime host/guest bytes differ")
+    _require(
+        isinstance(production, dict) and production.get("identity_match") is True,
+        "v0.9 authority runtime identity was not proven",
+    )
+    _require(
+        production.get("host_build") == production.get("guest_installed"),
+        "v0.9 authority runtime host/guest bytes differ",
+    )
     adversarial = _json(_bundle_file(bundle, "V09-ADVERSARIAL-EVIDENCE.json"))
-    _require(adversarial.get("schema_version") == 1 and adversarial.get("repository") == REPOSITORY
-             and adversarial.get("source_sha") == envelope["source"]["commit_sha"]
-             and adversarial.get("result") == "passed", "v0.9 adversarial evidence is not an exact-source pass")
+    _require(
+        adversarial.get("schema_version") == 1
+        and adversarial.get("repository") == REPOSITORY
+        and adversarial.get("source_sha") == envelope["source"]["commit_sha"]
+        and adversarial.get("result") == "passed",
+        "v0.9 adversarial evidence is not an exact-source pass",
+    )
     transcript_path = _bundle_file(bundle, "guest-qualification.txt")
     transcript = _text(transcript_path)
     binding = adversarial.get("transcript")
-    _require(isinstance(binding, dict)
-             and binding.get("path") == transcript_path.name
-             and binding.get("sha256") == _sha256(transcript_path)
-             and binding.get("size") == transcript_path.stat().st_size,
-             "v0.9 adversarial transcript identity mismatch")
+    _require(
+        isinstance(binding, dict)
+        and binding.get("path") == transcript_path.name
+        and binding.get("sha256") == _sha256(transcript_path)
+        and binding.get("size") == transcript_path.stat().st_size,
+        "v0.9 adversarial transcript identity mismatch",
+    )
     required = [
         "bootstrap_effect_started=durable",
         "bootstrap_producer=linura-firstboot",
@@ -878,13 +1128,22 @@ def _verify_v09(
         "q11_indeterminate=recovery-required",
         "native_recovery=available_without_firstboot_network_or_model",
     ]
-    required.extend(f"prepared_restart_boundary_{index:02d}=persistent-qemu-power-cycle" for index in range(1, 14))
-    required.extend(f"restart_boundary_{index:02d}=persistent-qemu-power-cycle" for index in range(1, 14))
+    required.extend(
+        f"prepared_restart_boundary_{index:02d}=persistent-qemu-power-cycle"
+        for index in range(1, 14)
+    )
+    required.extend(
+        f"restart_boundary_{index:02d}=persistent-qemu-power-cycle"
+        for index in range(1, 14)
+    )
     _require_markers(transcript, required, "v0.9 adversarial transcript")
     source_contracts = primary.get("source_contracts")
-    _require(isinstance(source_contracts, list) and len(source_contracts) == 12
-             and all(isinstance(item, str) and item for item in source_contracts),
-             "v0.9 source-contract inventory mismatch")
+    _require(
+        isinstance(source_contracts, list)
+        and len(source_contracts) == 12
+        and all(isinstance(item, str) and item for item in source_contracts),
+        "v0.9 source-contract inventory mismatch",
+    )
     return _outcome(
         adapter="v09-qualification-semantic-v1",
         test_ids=["qualification/v0.9/result-v1"],
@@ -901,7 +1160,10 @@ def _verify_v09(
         environment_verified=_aggregate_environment_verified(
             envelope, "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"
         ),
-        details={"source_contracts": len(source_contracts), "adversarial_markers": len(required)},
+        details={
+            "source_contracts": len(source_contracts),
+            "adversarial_markers": len(required),
+        },
     )
 
 
@@ -909,51 +1171,86 @@ def _verify_v010(
     root: Path, bundle: Path, primary: dict[str, Any], envelope: dict[str, Any]
 ) -> dict[str, Any]:
     _common_primary(primary, envelope)
-    _require(primary.get("schema_version") == 1 and primary.get("result") == "passed",
-             "v0.10 shell primary result mismatch")
+    _require(
+        primary.get("schema_version") == 1 and primary.get("result") == "passed",
+        "v0.10 shell primary result mismatch",
+    )
     contract_path = _repo_file(root, "contracts/v010-shell-runtime-qualification.toml")
     contract = tomllib.loads(_text(contract_path))
     _require(primary.get("claim") == contract["claim"], "v0.10 runtime claim mismatch")
-    _require(primary.get("target_profile") == contract["target_profile"], "v0.10 target profile mismatch")
+    _require(
+        primary.get("target_profile") == contract["target_profile"],
+        "v0.10 target profile mismatch",
+    )
     for field, path_name in (
         ("runtime_contract", "contracts/v010-shell-runtime-qualification.toml"),
         ("substrate_contract", "contracts/v010-shell-runtime-substrate.toml"),
-        ("workstation_acceptance_contract", "contracts/v010-workstation-acceptance.toml"),
+        (
+            "workstation_acceptance_contract",
+            "contracts/v010-workstation-acceptance.toml",
+        ),
     ):
         binding = primary.get(field)
         path = _repo_file(root, path_name)
-        _require(isinstance(binding, dict) and binding.get("path") == path_name
-                 and binding.get("sha256") == _sha256(path),
-                 f"v0.10 {field} identity mismatch")
+        _require(
+            isinstance(binding, dict)
+            and binding.get("path") == path_name
+            and binding.get("sha256") == _sha256(path),
+            f"v0.10 {field} identity mismatch",
+        )
     _require_base_image_binding(primary, envelope)
     cases_text = _text(_bundle_file(bundle, "cases.tsv"))
     observed: dict[str, str] = {}
     for line in cases_text.splitlines():
         parts = line.split("\t", 1)
-        _require(len(parts) == 2 and parts[0] not in observed, "v0.10 case transcript is malformed")
+        _require(
+            len(parts) == 2 and parts[0] not in observed,
+            "v0.10 case transcript is malformed",
+        )
         observed[parts[0]] = parts[1]
-    _require(set(observed) == set(contract["required_cases"]), "v0.10 required case set mismatch")
-    _require(all(value == "passed" for value in observed.values()), "v0.10 runtime case did not pass")
-    _require(primary.get("cases") == observed, "v0.10 primary case map disagrees with retained transcript")
+    _require(
+        set(observed) == set(contract["required_cases"]),
+        "v0.10 required case set mismatch",
+    )
+    _require(
+        all(value == "passed" for value in observed.values()),
+        "v0.10 runtime case did not pass",
+    )
+    _require(
+        primary.get("cases") == observed,
+        "v0.10 primary case map disagrees with retained transcript",
+    )
 
     metadata_path = _bundle_file(bundle, "workstation-runtime.metadata.json")
     recording_path = _bundle_file(bundle, "workstation-runtime.mkv")
     digest_path = _bundle_file(bundle, "workstation-runtime.sha256")
     metadata = _json(metadata_path)
-    _require(metadata.get("source_sha") == envelope["source"]["commit_sha"], "v0.10 recording source mismatch")
-    _require(metadata.get("sha256") == _sha256(recording_path), "v0.10 recording digest mismatch")
-    _require(_text(digest_path).strip() == f"{_sha256(recording_path)}  {recording_path.name}",
-             "v0.10 recording digest sidecar mismatch")
+    _require(
+        metadata.get("source_sha") == envelope["source"]["commit_sha"],
+        "v0.10 recording source mismatch",
+    )
+    _require(
+        metadata.get("sha256") == _sha256(recording_path),
+        "v0.10 recording digest mismatch",
+    )
+    _require(
+        _text(digest_path).strip()
+        == f"{_sha256(recording_path)}  {recording_path.name}",
+        "v0.10 recording digest sidecar mismatch",
+    )
     recording_binding = primary.get("workstation_recording")
-    _require(isinstance(recording_binding, dict)
-             and recording_binding.get("sha256") == _sha256(recording_path)
-             and recording_binding.get("metadata_sha256") == _sha256(metadata_path)
-             and recording_binding.get("scope") == "captured-automated-wayland-session",
-             "v0.10 primary recording identity mismatch")
+    _require(
+        isinstance(recording_binding, dict)
+        and recording_binding.get("sha256") == _sha256(recording_path)
+        and recording_binding.get("metadata_sha256") == _sha256(metadata_path)
+        and recording_binding.get("scope") == "captured-automated-wayland-session",
+        "v0.10 primary recording identity mismatch",
+    )
 
     # Re-run the repository-owned FFV1/Matroska semantic verifier over the
     # retained bytes rather than trusting the workflow-generated metadata.
     from tools import workstation_acceptance
+
     acceptance_contract = workstation_acceptance.load_contract(
         _repo_file(root, "contracts/v010-workstation-acceptance.toml")
     )
@@ -962,19 +1259,31 @@ def _verify_v010(
         contract=acceptance_contract,
         source_sha=envelope["source"]["commit_sha"],
     )
-    _require(verified_recording.get("sha256") == _sha256(recording_path),
-             "v0.10 recording verifier digest mismatch")
+    _require(
+        verified_recording.get("sha256") == _sha256(recording_path),
+        "v0.10 recording verifier digest mismatch",
+    )
 
     artifacts = primary.get("artifacts")
-    _require(isinstance(artifacts, dict) and artifacts, "v0.10 retained artifact bindings are missing")
+    _require(
+        isinstance(artifacts, dict) and artifacts,
+        "v0.10 retained artifact bindings are missing",
+    )
     for name, binding in artifacts.items():
-        _require(isinstance(binding, dict) and set(binding) == {"sha256", "size"},
-                 f"v0.10 artifact binding is malformed: {name}")
+        _require(
+            isinstance(binding, dict) and set(binding) == {"sha256", "size"},
+            f"v0.10 artifact binding is malformed: {name}",
+        )
         path = _bundle_file(bundle, name)
-        _require(binding["sha256"] == _sha256(path) and binding["size"] == path.stat().st_size,
-                 f"v0.10 artifact bytes disagree with primary: {name}")
-    _require(primary.get("release_support_promotion") is False,
-             "v0.10 development evidence attempted release promotion")
+        _require(
+            binding["sha256"] == _sha256(path)
+            and binding["size"] == path.stat().st_size,
+            f"v0.10 artifact bytes disagree with primary: {name}",
+        )
+    _require(
+        primary.get("release_support_promotion") is False,
+        "v0.10 development evidence attempted release promotion",
+    )
     return _outcome(
         adapter="v010-shell-runtime-semantic-v1",
         test_ids=["qualification/v0.10/shell-runtime/result-v1"],
@@ -1016,14 +1325,22 @@ def verify_retained_evidence(
 ) -> dict[str, Any]:
     if lane_id == "vm-acceptance":
         return _verify_vm(
-            root, lane_id, bundle, primary, envelope,
+            root,
+            lane_id,
+            bundle,
+            primary,
+            envelope,
             required_scenario=None,
             test_id="qualification/vm-acceptance/result-v1",
             contract_id="qualification/vm-acceptance/v1",
         )
     if lane_id == "control1-plan-preview-vm":
         return _verify_vm(
-            root, lane_id, bundle, primary, envelope,
+            root,
+            lane_id,
+            bundle,
+            primary,
+            envelope,
             required_scenario="control1-plan-preview",
             test_id="qualification/control1-plan-preview/result-v1",
             contract_id="qualification/control1-plan-preview/v1",
@@ -1044,4 +1361,6 @@ def verify_retained_evidence(
         return _verify_v09(root, bundle, primary, envelope)
     if lane_id == "v010-shell-runtime":
         return _verify_v010(root, bundle, primary, envelope)
-    raise VerificationError(f"no reviewed semantic verifier adapter for lane: {lane_id}")
+    raise VerificationError(
+        f"no reviewed semantic verifier adapter for lane: {lane_id}"
+    )

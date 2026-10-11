@@ -8,14 +8,18 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "tools" / "check_release_publication_stability.py"
-SPEC = importlib.util.spec_from_file_location("check_release_publication_stability", MODULE_PATH)
+SPEC = importlib.util.spec_from_file_location(
+    "check_release_publication_stability", MODULE_PATH
+)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError("unable to load release publication-stability checker")
 checker = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(checker)
 
 
-def contract(tag: str, status: str, publication: str, *, outcome: str = "Stable outcome text.") -> str:
+def contract(
+    tag: str, status: str, publication: str, *, outcome: str = "Stable outcome text."
+) -> str:
     return (
         f"# {tag} — test release\n\n"
         f"**Status:** {status}\n"

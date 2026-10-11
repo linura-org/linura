@@ -20,8 +20,13 @@ class ValidationGateTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         paths = set(gates.MANDATORY.values())
-        paths.update(("tools/xtask/src/main.rs", "tools/codex/versions.env",
-                      ".github/workflows/trusted-release-proof.yml"))
+        paths.update(
+            (
+                "tools/xtask/src/main.rs",
+                "tools/codex/versions.env",
+                ".github/workflows/trusted-release-proof.yml",
+            )
+        )
         for workflow, critical in gates.SPECIALIZED.values():
             paths.add(workflow)
             paths.update(critical)
@@ -52,13 +57,25 @@ class ValidationGateTests(unittest.TestCase):
                 source = (self.root / workflow).read_text(encoding="utf-8")
                 marker = '      - "' + path + '"\n'
                 self.assertIn(marker, source)
-                (self.root / workflow).write_text(source.replace(marker, "", 2),
-                                                  encoding="utf-8")
+                (self.root / workflow).write_text(
+                    source.replace(marker, "", 2), encoding="utf-8"
+                )
                 failures = gates.check(self.root)
-                self.assertTrue(any("evidence-publication: missing critical PR trigger: "
-                                    + path in error for error in failures), failures)
-                self.assertTrue(any("evidence-publication: main-push routing must cover"
-                                    in error for error in failures), failures)
+                self.assertTrue(
+                    any(
+                        "evidence-publication: missing critical PR trigger: " + path
+                        in error
+                        for error in failures
+                    ),
+                    failures,
+                )
+                self.assertTrue(
+                    any(
+                        "evidence-publication: main-push routing must cover" in error
+                        for error in failures
+                    ),
+                    failures,
+                )
                 (self.root / workflow).write_text(source, encoding="utf-8")
 
     def test_evidence_publication_test_execution_cannot_be_removed_or_nooped(self):
@@ -69,11 +86,18 @@ class ValidationGateTests(unittest.TestCase):
         self.assertIn(original, source)
         for replacement in ("run: true", "run: echo 'all tests passed'", "run:"):
             with self.subTest(replacement=replacement):
-                target.write_text(source.replace(original, replacement, 1),
-                                  encoding="utf-8")
+                target.write_text(
+                    source.replace(original, replacement, 1), encoding="utf-8"
+                )
                 failures = gates.check(self.root)
-                self.assertTrue(any("evidence-publication: required test execution missing "
-                                    "or weakened" in error for error in failures), failures)
+                self.assertTrue(
+                    any(
+                        "evidence-publication: required test execution missing "
+                        "or weakened" in error
+                        for error in failures
+                    ),
+                    failures,
+                )
         target.write_text(source, encoding="utf-8")
 
     def test_evidence_publication_checkout_cannot_be_weakened(self):
@@ -82,11 +106,36 @@ class ValidationGateTests(unittest.TestCase):
         source = target.read_text(encoding="utf-8")
         marker = "          persist-credentials: false\n"
         self.assertIn(marker, source)
-        target.write_text(source.replace(marker, "          persist-credentials: true\n", 1),
-                          encoding="utf-8")
+        target.write_text(
+            source.replace(marker, "          persist-credentials: true\n", 1),
+            encoding="utf-8",
+        )
         failures = gates.check(self.root)
-        self.assertTrue(any("evidence-publication: required verified-source checkout missing "
-                            "or weakened" in error for error in failures), failures)
+        self.assertTrue(
+            any(
+                "evidence-publication: required verified-source checkout missing "
+                "or weakened" in error
+                for error in failures
+            ),
+            failures,
+        )
+
+    def test_python_formatting_gate_cannot_be_removed_or_weakened(self):
+        source = '    run("ruff", &["format", "--check", "."])?;'
+        self.assertEqual(gates.check(self.root), [])
+        for replacement in ("", '    run("ruff", &["format", "."])?;'):
+            with self.subTest(replacement=replacement):
+                target = self.root / "tools/xtask/src/main.rs"
+                original = target.read_text(encoding="utf-8")
+                self.assertIn(source, original)
+                target.write_text(
+                    original.replace(source, replacement, 1), encoding="utf-8"
+                )
+                errors = gates.check(self.root)
+                self.assertTrue(
+                    any("canonical xtask" in error for error in errors), errors
+                )
+                target.write_text(original, encoding="utf-8")
 
     def test_checked_in_contract(self):
         self.assertEqual(gates.check(ROOT), [])
@@ -95,87 +144,127 @@ class ValidationGateTests(unittest.TestCase):
         self.assertEqual(gates.check(self.root), [])
 
     def test_quoted_control_keys_cannot_disable_required_jobs(self):
-        for job, workflow in (*gates.MANDATORY.items(),
-                              ("fresh-environment", gates.SPECIALIZED["codex"][0])):
+        for job, workflow in (
+            *gates.MANDATORY.items(),
+            ("fresh-environment", gates.SPECIALIZED["codex"][0]),
+        ):
             target = self.root / workflow
             original = target.read_text(encoding="utf-8")
             marker = "  " + job + ":\n"
             self.assertIn(marker, original)
-            for directive in ('"if": false', "'if': false",
-                              '"continue-on-error": true',
-                              "'needs': impossible-prerequisite"):
+            for directive in (
+                '"if": false',
+                "'if': false",
+                '"continue-on-error": true',
+                "'needs': impossible-prerequisite",
+            ):
                 with self.subTest(job=job, directive=directive):
-                    target.write_text(original.replace(
-                        marker, marker + "    " + directive + "\n", 1
-                    ), encoding="utf-8")
+                    target.write_text(
+                        original.replace(marker, marker + "    " + directive + "\n", 1),
+                        encoding="utf-8",
+                    )
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        ("mandatory job must be unconditional" if job in gates.MANDATORY
-                         else "required qualification job cannot be skipped"
-                              if "needs" not in directive else
-                              "required qualification job has unapproved dependencies")
-                        in error for error in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            (
+                                "mandatory job must be unconditional"
+                                if job in gates.MANDATORY
+                                else "required qualification job cannot be skipped"
+                                if "needs" not in directive
+                                else "required qualification job has unapproved dependencies"
+                            )
+                            in error
+                            for error in errors
+                        ),
+                        errors,
+                    )
             target.write_text(original, encoding="utf-8")
 
     def test_encoded_job_controls_cannot_skip_native_or_codex_gates(self):
-        jobs = [*gates.MANDATORY.items(),
-                ("fresh-environment", gates.SPECIALIZED["codex"][0])]
+        jobs = [
+            *gates.MANDATORY.items(),
+            ("fresh-environment", gates.SPECIALIZED["codex"][0]),
+        ]
         for job, workflow in jobs:
             target = self.root / workflow
             original = target.read_text(encoding="utf-8")
             marker = "  " + job + ":\n"
             self.assertIn(marker, original)
-            for key in ('"\\u0069f"', '"\\x69f"', '"\\U00000069f"',
-                        '"\\u0063ontinue-on-error"'):
+            for key in (
+                '"\\u0069f"',
+                '"\\x69f"',
+                '"\\U00000069f"',
+                '"\\u0063ontinue-on-error"',
+            ):
                 with self.subTest(job=job, key=key):
-                    value = ("true" if "ontinue" in key else "false")
-                    target.write_text(original.replace(
-                        marker, marker + "    " + key + ": " + value + "\n", 1
-                    ), encoding="utf-8")
+                    value = "true" if "ontinue" in key else "false"
+                    target.write_text(
+                        original.replace(
+                            marker, marker + "    " + key + ": " + value + "\n", 1
+                        ),
+                        encoding="utf-8",
+                    )
                     errors = gates.check(self.root)
                     if "\\x" in key or "\\U" in key:
-                        self.assertTrue(any("unsafe workflow mapping syntax" in e
-                                            for e in errors), errors)
+                        self.assertTrue(
+                            any("unsafe workflow mapping syntax" in e for e in errors),
+                            errors,
+                        )
                     else:
-                        expected = ("mandatory job must be unconditional"
-                                    if job in gates.MANDATORY
-                                    else "required qualification job cannot be skipped")
+                        expected = (
+                            "mandatory job must be unconditional"
+                            if job in gates.MANDATORY
+                            else "required qualification job cannot be skipped"
+                        )
                         self.assertTrue(any(expected in e for e in errors), errors)
             target.write_text(original, encoding="utf-8")
 
     def test_unicode_escaped_step_condition_cannot_skip_canonical_checks(self):
-        self.change(".github/workflows/ci.yml",
-                    "      - name: Run canonical Linura checks\n",
-                    '      - name: Run canonical Linura checks\n'
-                    '        "\\u0069f": false\n')
+        self.change(
+            ".github/workflows/ci.yml",
+            "      - name: Run canonical Linura checks\n",
+            '      - name: Run canonical Linura checks\n        "\\u0069f": false\n',
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any("missing unconditional executable step: "
-                            "Run canonical Linura checks" in e for e in errors), errors)
+        self.assertTrue(
+            any(
+                "missing unconditional executable step: "
+                "Run canonical Linura checks" in e
+                for e in errors
+            ),
+            errors,
+        )
 
     def test_unicode_escaped_dependencies_and_event_filters_are_audited(self):
         workflow = ".github/workflows/ci.yml"
         target = self.root / workflow
         original = target.read_text(encoding="utf-8")
         cases = (
-            ("  canonical-check:\n",
-             '  canonical-check:\n    "\\u006eeeds": missing-job\n',
-             "mandatory job must be unconditional"),
-            ("permissions:\n",
-             '"\\u0064efaults": {run: {shell: "bash -c \'exit 0\' {0}"}}\n'
-             "permissions:\n",
-             "run defaults may bypass mandatory"),
-            ("  pull_request:\n",
-             '  pull_request:\n    "\\u0062ranches": [never]\n',
-             "must run on every PR"),
+            (
+                "  canonical-check:\n",
+                '  canonical-check:\n    "\\u006eeeds": missing-job\n',
+                "mandatory job must be unconditional",
+            ),
+            (
+                "permissions:\n",
+                '"\\u0064efaults": {run: {shell: "bash -c \'exit 0\' {0}"}}\n'
+                "permissions:\n",
+                "run defaults may bypass mandatory",
+            ),
+            (
+                "  pull_request:\n",
+                '  pull_request:\n    "\\u0062ranches": [never]\n',
+                "must run on every PR",
+            ),
         )
         for before, after, expected in cases:
             with self.subTest(control=expected):
                 self.assertIn(before, original)
-                target.write_text(original.replace(before, after, 1),
-                                  encoding="utf-8")
-                self.assertTrue(any(expected in e for e in gates.check(self.root)),
-                                gates.check(self.root))
+                target.write_text(original.replace(before, after, 1), encoding="utf-8")
+                self.assertTrue(
+                    any(expected in e for e in gates.check(self.root)),
+                    gates.check(self.root),
+                )
         target.write_text(original, encoding="utf-8")
 
     def test_encoded_quoted_mapping_and_yaml_merges_fail_closed(self):
@@ -183,27 +272,27 @@ class ValidationGateTests(unittest.TestCase):
         target = self.root / path
         original = target.read_text(encoding="utf-8")
         cases = (
-            ('  fresh-environment:\n',
-             '  fresh-environment:\n    "\\x69f": false\n'),
-            ('  fresh-environment:\n',
-             '  fresh-environment:\n    <<: *inherited-skip\n'),
-            ('  fresh-environment:\n',
-             '  fresh-environment:\n    &gate if: false\n'),
-            ('  fresh-environment:\n',
-             '  fresh-environment:\n    *gate: false\n'),
-            ('  fresh-environment:\n',
-             '  fresh-environment:\n    !!str if: false\n'),
-            ('  fresh-environment:\n',
-             '  fresh-environment:\n    ? "\\u0069f"\n    : false\n'),
+            ("  fresh-environment:\n", '  fresh-environment:\n    "\\x69f": false\n'),
+            (
+                "  fresh-environment:\n",
+                "  fresh-environment:\n    <<: *inherited-skip\n",
+            ),
+            ("  fresh-environment:\n", "  fresh-environment:\n    &gate if: false\n"),
+            ("  fresh-environment:\n", "  fresh-environment:\n    *gate: false\n"),
+            ("  fresh-environment:\n", "  fresh-environment:\n    !!str if: false\n"),
+            (
+                "  fresh-environment:\n",
+                '  fresh-environment:\n    ? "\\u0069f"\n    : false\n',
+            ),
         )
         for before, after in cases:
             with self.subTest(injected=after):
                 self.assertIn(before, original)
-                target.write_text(original.replace(before, after, 1),
-                                  encoding="utf-8")
+                target.write_text(original.replace(before, after, 1), encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any("unsafe workflow mapping syntax" in e
-                                    for e in errors), errors)
+                self.assertTrue(
+                    any("unsafe workflow mapping syntax" in e for e in errors), errors
+                )
         target.write_text(original, encoding="utf-8")
 
     def test_encoded_uses_key_cannot_replace_triggering_checkout(self):
@@ -212,25 +301,30 @@ class ValidationGateTests(unittest.TestCase):
         original = target.read_text(encoding="utf-8")
         marker = "      - name: Prepare isolated environment\n"
         self.assertIn(marker, original)
-        injected = ('      - "\\u0075ses": actions/checkout@main\n'
-                    + marker)
-        target.write_text(original.replace(marker, injected, 1),
-                          encoding="utf-8")
+        injected = '      - "\\u0075ses": actions/checkout@main\n' + marker
+        target.write_text(original.replace(marker, injected, 1), encoding="utf-8")
         # An escaped key is valid YAML. It must decode to a real "uses" key,
         # then the exact-source guard must reject the second checkout.
         errors = gates.check(self.root)
-        self.assertTrue(any(
-            "codex: must checkout triggering revision without a ref override" in e
-            for e in errors
-        ), errors)
+        self.assertTrue(
+            any(
+                "codex: must checkout triggering revision without a ref override" in e
+                for e in errors
+            ),
+            errors,
+        )
 
     def test_block_scalar_actions_cannot_hide_a_second_checkout(self):
-        workflows = (*gates.MANDATORY.values(),
-                     gates.SPECIALIZED["codex"][0],
-                     gates.SPECIALIZED["vm"][0],
-                     ".github/workflows/v010-shell-runtime-qualification.yml")
-        checkout = ("      - uses: actions/checkout@"
-                    "3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n")
+        workflows = (
+            *gates.MANDATORY.values(),
+            gates.SPECIALIZED["codex"][0],
+            gates.SPECIALIZED["vm"][0],
+            ".github/workflows/v010-shell-runtime-qualification.yml",
+        )
+        checkout = (
+            "      - uses: actions/checkout@"
+            "3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+        )
         for workflow in workflows:
             target = self.root / workflow
             original = target.read_text(encoding="utf-8")
@@ -239,8 +333,13 @@ class ValidationGateTests(unittest.TestCase):
             # is valid YAML and could otherwise replace the verified source.
             start = original.index(checkout) + len(checkout)
             insertion = original.index("\n      - ", start) + 1
-            for directive in ("uses: >-", "uses: |-", "uses : >2-",
-                              '"uses": |+', '"\\u0075ses": >-'):
+            for directive in (
+                "uses: >-",
+                "uses: |-",
+                "uses : >2-",
+                '"uses": |+',
+                '"\\u0075ses": >-',
+            ):
                 with self.subTest(workflow=workflow, directive=directive):
                     extra = (
                         "      - " + directive + "\n"
@@ -248,16 +347,25 @@ class ValidationGateTests(unittest.TestCase):
                         "3d3c42e5aac5ba805825da76410c181273ba90b1\n"
                         "        with: { ref: main }\n"
                     )
-                    target.write_text(original[:insertion] + extra +
-                                      original[insertion:], encoding="utf-8")
+                    target.write_text(
+                        original[:insertion] + extra + original[insertion:],
+                        encoding="utf-8",
+                    )
                     errors = gates.check(self.root)
-                    self.assertTrue(any("unsafe workflow mapping syntax" in e
-                                        for e in errors), errors)
+                    self.assertTrue(
+                        any("unsafe workflow mapping syntax" in e for e in errors),
+                        errors,
+                    )
             target.write_text(original, encoding="utf-8")
 
     def test_noncanonical_action_value_headers_fail_closed(self):
-        for directive in ("uses: !!str >-", "uses: &checkout >-",
-                          "uses: *checkout", "uses:", '"\\u0075ses": &checkout >-'):
+        for directive in (
+            "uses: !!str >-",
+            "uses: &checkout >-",
+            "uses: *checkout",
+            "uses:",
+            '"\\u0075ses": &checkout >-',
+        ):
             with self.subTest(directive=directive):
                 source = (
                     "jobs:\n  probe:\n    steps:\n      - " + directive + "\n"
@@ -265,20 +373,25 @@ class ValidationGateTests(unittest.TestCase):
                     "3d3c42e5aac5ba805825da76410c181273ba90b1\n"
                 )
                 with self.assertRaisesRegex(
-                        ValueError, "noncanonical action references"):
+                    ValueError, "noncanonical action references"
+                ):
                     gates.normalize_workflow_keys(source)
 
     def test_workflow_literal_block_is_not_interpreted_as_yaml_mapping(self):
-        source = ('jobs:\n  probe:\n    run: |\n'
-                  '      "\\u0069f": false\n'
-                  '      "<<": "\\x69f"\n')
+        source = (
+            "jobs:\n  probe:\n    run: |\n"
+            '      "\\u0069f": false\n'
+            '      "<<": "\\x69f"\n'
+        )
         self.assertEqual(gates.normalize_workflow_keys(source), source)
 
     def test_spaced_yaml_controls_cannot_skip_required_jobs(self):
         required = [*gates.MANDATORY.items()]
-        required.extend((required_job, workflow)
-                        for name, (workflow, _) in gates.SPECIALIZED.items()
-                        for required_job in gates.SPECIALIZED_REQUIRED_JOBS[name])
+        required.extend(
+            (required_job, workflow)
+            for name, (workflow, _) in gates.SPECIALIZED.items()
+            for required_job in gates.SPECIALIZED_REQUIRED_JOBS[name]
+        )
         for job, workflow in required:
             target = self.root / workflow
             original = target.read_text(encoding="utf-8")
@@ -286,13 +399,16 @@ class ValidationGateTests(unittest.TestCase):
             self.assertIn(marker, original)
             for directive in ("if : false", "continue-on-error : true"):
                 with self.subTest(job=job, directive=directive):
-                    target.write_text(original.replace(
-                        marker, marker + "    " + directive + "\n", 1
-                    ), encoding="utf-8")
+                    target.write_text(
+                        original.replace(marker, marker + "    " + directive + "\n", 1),
+                        encoding="utf-8",
+                    )
                     errors = gates.check(self.root)
-                    expected = ("mandatory job must be unconditional"
-                                if job in gates.MANDATORY else
-                                "required qualification job cannot be skipped")
+                    expected = (
+                        "mandatory job must be unconditional"
+                        if job in gates.MANDATORY
+                        else "required qualification job cannot be skipped"
+                    )
                     self.assertTrue(any(expected in e for e in errors), errors)
             target.write_text(original, encoding="utf-8")
 
@@ -304,46 +420,67 @@ class ValidationGateTests(unittest.TestCase):
         self.assertIn(marker, original)
         for directive in ("if : false", "continue-on-error : true"):
             with self.subTest(directive=directive):
-                target.write_text(original.replace(
-                    marker, marker + "        " + directive + "\n", 1
-                ), encoding="utf-8")
+                target.write_text(
+                    original.replace(marker, marker + "        " + directive + "\n", 1),
+                    encoding="utf-8",
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "missing unconditional executable step: Run canonical Linura checks"
-                    in e for e in errors), errors)
+                self.assertTrue(
+                    any(
+                        "missing unconditional executable step: Run canonical Linura checks"
+                        in e
+                        for e in errors
+                    ),
+                    errors,
+                )
         target.write_text(original, encoding="utf-8")
 
     def test_spaced_checkout_and_shell_keys_cannot_bypass_guards(self):
         path = self.root / ".github/workflows/ci.yml"
         original = path.read_text(encoding="utf-8")
-        checkout = ("      - uses: actions/checkout@"
-                    "3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n")
+        checkout = (
+            "      - uses: actions/checkout@"
+            "3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+        )
         self.assertIn(checkout, original)
         for replacement in (
             checkout + "      - uses : actions/checkout@main\n",
             checkout + "        with : { ref: main }\n",
         ):
             with self.subTest(checkout=replacement):
-                path.write_text(original.replace(checkout, replacement, 1),
-                                encoding="utf-8")
+                path.write_text(
+                    original.replace(checkout, replacement, 1), encoding="utf-8"
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any("must checkout triggering revision" in e
-                                    for e in errors), errors)
+                self.assertTrue(
+                    any("must checkout triggering revision" in e for e in errors),
+                    errors,
+                )
         marker = "      - name: Run canonical Linura checks\n"
         self.assertIn(marker, original)
-        path.write_text(original.replace(
-            marker, marker + "        shell : bash -c 'exit 0' {0}\n", 1),
-            encoding="utf-8")
+        path.write_text(
+            original.replace(
+                marker, marker + "        shell : bash -c 'exit 0' {0}\n", 1
+            ),
+            encoding="utf-8",
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any(
-            "missing unconditional executable step: Run canonical Linura checks" in e
-            for e in errors), errors)
+        self.assertTrue(
+            any(
+                "missing unconditional executable step: Run canonical Linura checks"
+                in e
+                for e in errors
+            ),
+            errors,
+        )
         path.write_text(original, encoding="utf-8")
 
     def test_normalization_preserves_literal_shell_and_comment_text(self):
-        source = ("jobs:\n  safe:\n    if   : false # comment\n"
-                  "    run: |\n      if : shell text\n      uses : not an action\n"
-                  "      # needs : preserved\n")
+        source = (
+            "jobs:\n  safe:\n    if   : false # comment\n"
+            "    run: |\n      if : shell text\n      uses : not an action\n"
+            "      # needs : preserved\n"
+        )
         expected = source.replace("    if   : false", "    if: false")
         self.assertEqual(gates.normalize_workflow_keys(source), expected)
 
@@ -356,48 +493,75 @@ class ValidationGateTests(unittest.TestCase):
             original = target.read_text(encoding="utf-8")
             marker = '  schedule:\n    - cron: "' + cron + '"\n'
             self.assertIn(marker, original)
-            for replacement in ('', '  schedule:\n',
-                                '  schedule:\n    - cron: "0 0 * * 0"\n'):
+            for replacement in (
+                "",
+                "  schedule:\n",
+                '  schedule:\n    - cron: "0 0 * * 0"\n',
+            ):
                 with self.subTest(job=job, replacement=replacement):
-                    target.write_text(original.replace(marker, replacement, 1),
-                                      encoding="utf-8")
+                    target.write_text(
+                        original.replace(marker, replacement, 1), encoding="utf-8"
+                    )
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        job + ": must retain reviewed independent weekly scheduled scan"
-                        in e for e in errors), errors)
+                    self.assertTrue(
+                        any(
+                            job
+                            + ": must retain reviewed independent weekly scheduled scan"
+                            in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
             target.write_text(original, encoding="utf-8")
 
     def test_quoted_step_condition_cannot_skip_canonical_checks(self):
-        self.change(".github/workflows/ci.yml",
-                    "      - name: Run canonical Linura checks\n",
-                    '      - name: Run canonical Linura checks\n        "if": false\n')
-        self.assertTrue(any("missing unconditional executable step: Run canonical Linura checks"
-                            in error for error in gates.check(self.root)))
+        self.change(
+            ".github/workflows/ci.yml",
+            "      - name: Run canonical Linura checks\n",
+            '      - name: Run canonical Linura checks\n        "if": false\n',
+        )
+        self.assertTrue(
+            any(
+                "missing unconditional executable step: Run canonical Linura checks"
+                in error
+                for error in gates.check(self.root)
+            )
+        )
 
     def test_quoted_inherited_defaults_cannot_hide_noop_shell(self):
-        for job, workflow in (*gates.MANDATORY.items(),
-                              ("codex", gates.SPECIALIZED["codex"][0])):
+        for job, workflow in (
+            *gates.MANDATORY.items(),
+            ("codex", gates.SPECIALIZED["codex"][0]),
+        ):
             target = self.root / workflow
             original = target.read_text(encoding="utf-8")
             target.write_text(
-                '"defaults": {run: {shell: "bash -c \'exit 0\' {0}"}}\n' +
-                original, encoding="utf-8",
+                '"defaults": {run: {shell: "bash -c \'exit 0\' {0}"}}\n' + original,
+                encoding="utf-8",
             )
             with self.subTest(job=job):
                 errors = gates.check(self.root)
-                self.assertTrue(any("run defaults may bypass mandatory" in e
-                                    if job in gates.MANDATORY else
-                                    "inherited run defaults may bypass required steps" in e
-                                    for e in errors), errors)
+                self.assertTrue(
+                    any(
+                        "run defaults may bypass mandatory" in e
+                        if job in gates.MANDATORY
+                        else "inherited run defaults may bypass required steps" in e
+                        for e in errors
+                    ),
+                    errors,
+                )
             target.write_text(original, encoding="utf-8")
 
     def test_codex_main_push_branch_cannot_be_disabled(self):
-        self.change(".github/workflows/codex-environment.yml",
-                    "  push:\n    branches: [main]\n",
-                    "  push:\n    branches: [never]\n")
+        self.change(
+            ".github/workflows/codex-environment.yml",
+            "  push:\n    branches: [main]\n",
+            "  push:\n    branches: [never]\n",
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any("main-push trigger must target main" in e
-                            for e in errors), errors)
+        self.assertTrue(
+            any("main-push trigger must target main" in e for e in errors), errors
+        )
 
     def test_codex_main_push_must_include_critical_sources(self):
         path = self.root / ".github/workflows/codex-environment.yml"
@@ -406,11 +570,19 @@ class ValidationGateTests(unittest.TestCase):
         push, rest = suffix.split("  workflow_dispatch:\n", 1)
         target = '      - "tools/check_validation_gates.py"\n'
         self.assertIn(target, push)
-        path.write_text(prefix + "  push:\n" + push.replace(target, "", 1) +
-                        "  workflow_dispatch:\n" + rest, encoding="utf-8")
+        path.write_text(
+            prefix
+            + "  push:\n"
+            + push.replace(target, "", 1)
+            + "  workflow_dispatch:\n"
+            + rest,
+            encoding="utf-8",
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any("main-push routing must cover critical sources" in e
-                            for e in errors), errors)
+        self.assertTrue(
+            any("main-push routing must cover critical sources" in e for e in errors),
+            errors,
+        )
 
     def test_codex_required_steps_cannot_be_skipped_or_fail_open(self):
         path = ".github/workflows/codex-environment.yml"
@@ -419,74 +591,112 @@ class ValidationGateTests(unittest.TestCase):
         for label, _ in gates.CODEX_REQUIRED_STEPS:
             marker = "      - name: " + label + "\n"
             self.assertIn(marker, original)
-            for directive in ("if: false", "continue-on-error: true",
-                              "shell: bash -c 'exit 0' {0}"):
+            for directive in (
+                "if: false",
+                "continue-on-error: true",
+                "shell: bash -c 'exit 0' {0}",
+            ):
                 with self.subTest(step=label, directive=directive):
-                    target.write_text(original.replace(
-                        marker, marker + "        " + directive + "\n", 1
-                    ), encoding="utf-8")
+                    target.write_text(
+                        original.replace(
+                            marker, marker + "        " + directive + "\n", 1
+                        ),
+                        encoding="utf-8",
+                    )
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        "Codex required step must execute: " + label in e for e in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            "Codex required step must execute: " + label in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
         target.write_text(original, encoding="utf-8")
 
     def test_codex_inherited_shell_defaults_cannot_bypass_verification(self):
         path = self.root / ".github/workflows/codex-environment.yml"
         original = path.read_text(encoding="utf-8")
         cases = (
-            ("workflow mapping", "permissions:\n",
-             "defaults:\n  run:\n    shell: bash -c 'exit 0' {0}\n\npermissions:\n"),
-            ("workflow inline", "permissions:\n",
-             'defaults: {run: {shell: "bash -c \'exit 0\' {0}"}}\n\npermissions:\n'),
-            ("job mapping", "    runs-on: ubuntu-24.04\n",
-             "    defaults:\n      run:\n        shell: bash -c 'exit 0' {0}\n"
-             "    runs-on: ubuntu-24.04\n"),
-            ("job inline", "    runs-on: ubuntu-24.04\n",
-             '    defaults: {run: {shell: "bash -c \'exit 0\' {0}"}}\n'
-             "    runs-on: ubuntu-24.04\n"),
+            (
+                "workflow mapping",
+                "permissions:\n",
+                "defaults:\n  run:\n    shell: bash -c 'exit 0' {0}\n\npermissions:\n",
+            ),
+            (
+                "workflow inline",
+                "permissions:\n",
+                "defaults: {run: {shell: \"bash -c 'exit 0' {0}\"}}\n\npermissions:\n",
+            ),
+            (
+                "job mapping",
+                "    runs-on: ubuntu-24.04\n",
+                "    defaults:\n      run:\n        shell: bash -c 'exit 0' {0}\n"
+                "    runs-on: ubuntu-24.04\n",
+            ),
+            (
+                "job inline",
+                "    runs-on: ubuntu-24.04\n",
+                "    defaults: {run: {shell: \"bash -c 'exit 0' {0}\"}}\n"
+                "    runs-on: ubuntu-24.04\n",
+            ),
         )
         for case, before, after in cases:
             with self.subTest(case=case):
                 self.assertIn(before, original)
                 path.write_text(original.replace(before, after, 1), encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "codex: inherited run defaults may bypass required steps" in e
-                    for e in errors
-                ), errors)
+                self.assertTrue(
+                    any(
+                        "codex: inherited run defaults may bypass required steps" in e
+                        for e in errors
+                    ),
+                    errors,
+                )
         path.write_text(original, encoding="utf-8")
 
     def test_codex_verification_cannot_exit_before_full_gate(self):
-        self.change(".github/workflows/codex-environment.yml",
-                    "          PATH=/usr/bin:/bin bash scripts/preflight_codex_environment.sh --full",
-                    "          exit 0\n"
-                    "          PATH=/usr/bin:/bin bash scripts/preflight_codex_environment.sh --full")
-        self.assertTrue(any("Codex verification must execute the complete reviewed task-time gate"
-                            in e for e in gates.check(self.root)))
-
+        self.change(
+            ".github/workflows/codex-environment.yml",
+            "          PATH=/usr/bin:/bin bash scripts/preflight_codex_environment.sh --full",
+            "          exit 0\n"
+            "          PATH=/usr/bin:/bin bash scripts/preflight_codex_environment.sh --full",
+        )
+        self.assertTrue(
+            any(
+                "Codex verification must execute the complete reviewed task-time gate"
+                in e
+                for e in gates.check(self.root)
+            )
+        )
 
     def test_codex_checkout_must_use_triggering_revision(self):
         path = self.root / ".github/workflows/codex-environment.yml"
         original = path.read_text(encoding="utf-8")
-        checkout = ("      - uses: actions/checkout@"
-                    "3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n")
+        checkout = (
+            "      - uses: actions/checkout@"
+            "3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+        )
         self.assertIn(checkout, original)
         cases = (
             ("inline ref override", checkout + "        with: { ref: main }\n"),
             ("nested ref override", checkout + "        with:\n          ref: main\n"),
             ("second checkout", checkout + checkout),
             ("skipped checkout", checkout + "        if: false\n"),
-            ("mutable checkout", checkout.replace(
-                "3d3c42e5aac5ba805825da76410c181273ba90b1", "main")),
+            (
+                "mutable checkout",
+                checkout.replace("3d3c42e5aac5ba805825da76410c181273ba90b1", "main"),
+            ),
         )
         for scenario, replacement in cases:
             with self.subTest(scenario=scenario):
-                path.write_text(original.replace(checkout, replacement, 1),
-                                encoding="utf-8")
+                path.write_text(
+                    original.replace(checkout, replacement, 1), encoding="utf-8"
+                )
                 errors = gates.check(self.root)
                 self.assertTrue(
-                    any("codex: must checkout triggering revision" in e for e in errors),
+                    any(
+                        "codex: must checkout triggering revision" in e for e in errors
+                    ),
                     errors,
                 )
         path.write_text(original, encoding="utf-8")
@@ -497,21 +707,36 @@ class ValidationGateTests(unittest.TestCase):
         sha = "3d3c42e5aac5ba805825da76410c181273ba90b1"
         bare_checkout = "      - uses: actions/checkout@" + sha + " # v7.0.1\n"
         replacements = (
-            ("double-quoted", '      - uses: "actions/checkout@' + sha +
-             '"\n        with:\n          ref: main\n'),
-            ("single-quoted", "      - uses: 'actions/checkout@" + sha +
-             "'\n        with:\n          ref: main\n"),
-            ("named checkout", '      - name: Replace triggering source\n'
-             '        uses: "actions/checkout@' + sha +
-             '"\n        with:\n          ref: main\n'),
+            (
+                "double-quoted",
+                '      - uses: "actions/checkout@'
+                + sha
+                + '"\n        with:\n          ref: main\n',
+            ),
+            (
+                "single-quoted",
+                "      - uses: 'actions/checkout@"
+                + sha
+                + "'\n        with:\n          ref: main\n",
+            ),
+            (
+                "named checkout",
+                "      - name: Replace triggering source\n"
+                '        uses: "actions/checkout@'
+                + sha
+                + '"\n        with:\n          ref: main\n',
+            ),
         )
         for job, workflow in workflows.items():
             target = self.root / workflow
             original = target.read_text(encoding="utf-8")
             # Keep the canonical checkout's existing with: block attached
             # to the first checkout before inserting the second step.
-            insertion = ("          fetch-depth: 0\n"
-                         if job == "canonical-check" else bare_checkout)
+            insertion = (
+                "          fetch-depth: 0\n"
+                if job == "canonical-check"
+                else bare_checkout
+            )
             self.assertIn(insertion, original)
             for scenario, second in replacements:
                 with self.subTest(job=job, scenario=scenario):
@@ -520,10 +745,13 @@ class ValidationGateTests(unittest.TestCase):
                         encoding="utf-8",
                     )
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        job + ": must checkout triggering revision" in e
-                        for e in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            job + ": must checkout triggering revision" in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
             target.write_text(original, encoding="utf-8")
 
     def test_escaped_checkout_action_cannot_replace_triggering_revision(self):
@@ -531,7 +759,9 @@ class ValidationGateTests(unittest.TestCase):
         workflows["codex"] = ".github/workflows/codex-environment.yml"
         workflows["vm"] = ".github/workflows/vm-acceptance.yml"
         workflows["v010"] = ".github/workflows/v010-qualification.yml"
-        workflows["reusable-v010"] = ".github/workflows/v010-shell-runtime-qualification.yml"
+        workflows["reusable-v010"] = (
+            ".github/workflows/v010-shell-runtime-qualification.yml"
+        )
         sha = "3d3c42e5aac5ba805825da76410c181273ba90b1"
         for job, workflow in workflows.items():
             target = self.root / workflow
@@ -541,25 +771,36 @@ class ValidationGateTests(unittest.TestCase):
             original = target.read_text(encoding="utf-8")
             checkout = "actions/checkout@" + sha
             self.assertIn(checkout, original)
-            for encoded in ('"actions/check\\u006fut@' + sha + '"',
-                            '"actions\\/checkout@' + sha + '"',
-                            "'actions/checkout@" + sha + "'"):
+            for encoded in (
+                '"actions/check\\u006fut@' + sha + '"',
+                '"actions\\/checkout@' + sha + '"',
+                "'actions/checkout@" + sha + "'",
+            ):
                 with self.subTest(job=job, action=encoded):
                     # Place the overriding checkout *after* the existing one.
                     marker = re.search(
-                        r"(?m)^([ ]+)- uses: actions/checkout@" + sha +
-                        r"[^\n]*\n", original)
+                        r"(?m)^([ ]+)- uses: actions/checkout@" + sha + r"[^\n]*\n",
+                        original,
+                    )
                     self.assertIsNotNone(marker)
                     indent = marker.group(1)
-                    injected = (indent + "- name: Replace checked-out source\n" +
-                                indent + "  uses: " + encoded + "\n" +
-                                indent + "  with:\n" +
-                                indent + "    ref: main\n")
+                    injected = (
+                        indent
+                        + "- name: Replace checked-out source\n"
+                        + indent
+                        + "  uses: "
+                        + encoded
+                        + "\n"
+                        + indent
+                        + "  with:\n"
+                        + indent
+                        + "    ref: main\n"
+                    )
                     # Insert before the next step, keeping the first
                     # checkout's with: block attached to its own action.
                     following = re.search(
                         r"(?m)^" + re.escape(indent) + r"- ",
-                        original[marker.end():],
+                        original[marker.end() :],
                     )
                     self.assertIsNotNone(following)
                     pos = marker.end() + following.start()
@@ -568,22 +809,29 @@ class ValidationGateTests(unittest.TestCase):
                         encoding="utf-8",
                     )
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        "checkout triggering revision" in e or
-                        "exact-source executable binding" in e for e in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            "checkout triggering revision" in e
+                            or "exact-source executable binding" in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
             target.write_text(original, encoding="utf-8")
 
     def test_malformed_quoted_action_is_rejected_without_guessing(self):
-        source = ('jobs:\n  sample:\n    steps:\n'
-                  '      - uses: "actions/check\\x6fut@main"\n')
+        source = (
+            'jobs:\n  sample:\n    steps:\n      - uses: "actions/check\\x6fut@main"\n'
+        )
         with self.assertRaisesRegex(ValueError, "action reference escape"):
             gates.normalize_workflow_keys(source)
 
     def test_decoded_action_scalar_is_canonical_for_checkout_audit(self):
-        source = ('jobs:\n  sample:\n    steps:\n'
-                  '      - uses: "actions/check\\u006fut@abc" # a checkout\n'
-                  "      - uses: 'actions/checkout@def'\n")
+        source = (
+            "jobs:\n  sample:\n    steps:\n"
+            '      - uses: "actions/check\\u006fut@abc" # a checkout\n'
+            "      - uses: 'actions/checkout@def'\n"
+        )
         output = gates.normalize_workflow_keys(source)
         self.assertIn("      - uses: actions/checkout@abc # a checkout\n", output)
         self.assertIn("      - uses: actions/checkout@def\n", output)
@@ -596,20 +844,29 @@ class ValidationGateTests(unittest.TestCase):
         sha = "3d3c42e5aac5ba805825da76410c181273ba90b1"
         bare_checkout = "      - uses: actions/checkout@" + sha + " # v7.0.1\n"
         cases = (
-            ("flow checkout with ref",
-             '      - {uses: "actions/checkout@' + sha +
-             '", with: {ref: main}}\n'),
-            ("flow checkout with name",
-             '      - {name: "Replace source", uses: "actions/checkout@' +
-             sha + '", with: {ref: main}}\n'),
-            ("flow checkout without ref",
-             '      - {uses: "actions/checkout@' + sha + '"}\n'),
+            (
+                "flow checkout with ref",
+                '      - {uses: "actions/checkout@' + sha + '", with: {ref: main}}\n',
+            ),
+            (
+                "flow checkout with name",
+                '      - {name: "Replace source", uses: "actions/checkout@'
+                + sha
+                + '", with: {ref: main}}\n',
+            ),
+            (
+                "flow checkout without ref",
+                '      - {uses: "actions/checkout@' + sha + '"}\n',
+            ),
         )
         for job, workflow in workflows.items():
             target = self.root / workflow
             original = target.read_text(encoding="utf-8")
-            insertion = ("          fetch-depth: 0\n"
-                         if job == "canonical-check" else bare_checkout)
+            insertion = (
+                "          fetch-depth: 0\n"
+                if job == "canonical-check"
+                else bare_checkout
+            )
             self.assertIn(insertion, original)
             for scenario, injected in cases:
                 with self.subTest(job=job, scenario=scenario):
@@ -618,10 +875,13 @@ class ValidationGateTests(unittest.TestCase):
                         encoding="utf-8",
                     )
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        job + ": must checkout triggering revision" in error
-                        for error in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            job + ": must checkout triggering revision" in error
+                            for error in errors
+                        ),
+                        errors,
+                    )
             target.write_text(original, encoding="utf-8")
 
     def test_codeql_preserves_rust_and_covers_trusted_publisher_javascript(self):
@@ -639,16 +899,23 @@ class ValidationGateTests(unittest.TestCase):
                 path.write_text(
                     original.replace(
                         "languages: rust,javascript-typescript", replacement, 1
-                    ), encoding="utf-8",
+                    ),
+                    encoding="utf-8",
                 )
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "CodeQL initialization must configure exactly Rust and JavaScript"
-                    in error for error in errors
-                ), errors)
+                self.assertTrue(
+                    any(
+                        "CodeQL initialization must configure exactly Rust and JavaScript"
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
         path.write_text(original, encoding="utf-8")
 
-    def test_publisher_authority_tests_cannot_be_removed_or_weakened_in_canonical_ci(self):
+    def test_publisher_authority_tests_cannot_be_removed_or_weakened_in_canonical_ci(
+        self,
+    ):
         """Canonical CI itself must preserve the independent App tests.
 
         The publisher-specific workflow is path-filtered, so merely testing
@@ -659,44 +926,83 @@ class ValidationGateTests(unittest.TestCase):
         self.assertEqual(gates.check(self.root), [])
         pin = "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1"
         mutations = (
-            ("remove pinned setup", "      - name: Install pinned Node runtime for trusted publisher tests",
-             "      - name: Publisher runtime disabled"),
+            (
+                "remove pinned setup",
+                "      - name: Install pinned Node runtime for trusted publisher tests",
+                "      - name: Publisher runtime disabled",
+            ),
             ("replace pinned action", pin, "actions/setup-node@main"),
-            ("downgrade reviewed pin", pin, "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020"),
-            ("use unreviewed Node", "          node-version: '22.23.3'",
-             "          node-version: '22.16.0'"),
-            ("skip runtime", "      - name: Install pinned Node runtime for trusted publisher tests\n",
-             "      - name: Install pinned Node runtime for trusted publisher tests\n"
-             "        if: false\n"),
-            ("disable tests", "      - name: Validate trusted qualification publisher in canonical CI\n",
-             "      - name: Validate trusted qualification publisher in canonical CI\n"
-             "        if: false\n"),
-            ("permit false success", "      - name: Validate trusted qualification publisher in canonical CI\n",
-             "      - name: Validate trusted qualification publisher in canonical CI\n"
-             "        continue-on-error: true\n"),
-            ("remove suite", "          /usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --test services/qualification-publisher/test/*.test.mjs",
-             "          echo 'suite not run'"),
-            ("exit early", "          /usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --check services/qualification-publisher/server.mjs",
-             "          exit 0"),
-            ("drop version check", "          test \"$(/usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --version)\" = 'v22.23.3'",
-             "          echo version ignored"),
-            ("bypass syntax checks", "          /usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --check services/qualification-publisher/publisher.mjs",
-             "          true"),
-            ("override shell", "      - name: Validate trusted qualification publisher in canonical CI\n",
-             "      - name: Validate trusted qualification publisher in canonical CI\n"
-             "        shell: custom-shell {0}\n"),
+            (
+                "downgrade reviewed pin",
+                pin,
+                "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+            ),
+            (
+                "use unreviewed Node",
+                "          node-version: '22.23.3'",
+                "          node-version: '22.16.0'",
+            ),
+            (
+                "skip runtime",
+                "      - name: Install pinned Node runtime for trusted publisher tests\n",
+                "      - name: Install pinned Node runtime for trusted publisher tests\n"
+                "        if: false\n",
+            ),
+            (
+                "disable tests",
+                "      - name: Validate trusted qualification publisher in canonical CI\n",
+                "      - name: Validate trusted qualification publisher in canonical CI\n"
+                "        if: false\n",
+            ),
+            (
+                "permit false success",
+                "      - name: Validate trusted qualification publisher in canonical CI\n",
+                "      - name: Validate trusted qualification publisher in canonical CI\n"
+                "        continue-on-error: true\n",
+            ),
+            (
+                "remove suite",
+                '          /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --test services/qualification-publisher/test/*.test.mjs',
+                "          echo 'suite not run'",
+            ),
+            (
+                "exit early",
+                '          /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --check services/qualification-publisher/server.mjs',
+                "          exit 0",
+            ),
+            (
+                "drop version check",
+                '          test "$(/usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --version)" = \'v22.23.3\'',
+                "          echo version ignored",
+            ),
+            (
+                "bypass syntax checks",
+                '          /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --check services/qualification-publisher/publisher.mjs',
+                "          true",
+            ),
+            (
+                "override shell",
+                "      - name: Validate trusted qualification publisher in canonical CI\n",
+                "      - name: Validate trusted qualification publisher in canonical CI\n"
+                "        shell: custom-shell {0}\n",
+            ),
         )
         try:
             for label, before, after in mutations:
                 with self.subTest(label=label):
                     self.assertIn(before, original)
-                    path.write_text(original.replace(before, after, 1),
-                                    encoding="utf-8")
+                    path.write_text(
+                        original.replace(before, after, 1), encoding="utf-8"
+                    )
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        "canonical CI missing mandatory publisher authority step"
-                        in e for e in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            "canonical CI missing mandatory publisher authority step"
+                            in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
         finally:
             path.write_text(original, encoding="utf-8")
         self.assertEqual(gates.check(self.root), [])
@@ -704,23 +1010,31 @@ class ValidationGateTests(unittest.TestCase):
     def test_pinned_node_setup_and_authority_suite_must_be_adjacent(self):
         path = self.root / ".github/workflows/ci.yml"
         original = path.read_text(encoding="utf-8")
-        marker = "      - name: Validate trusted qualification publisher in canonical CI\n"
+        marker = (
+            "      - name: Validate trusted qualification publisher in canonical CI\n"
+        )
         self.assertIn(marker, original)
         attacks = (
-            ("GITHUB_PATH fake Node",
-             "      - name: Shadow pinned Node through GITHUB_PATH\n"
-             "        run: |\n"
-             "          mkdir -p \"$RUNNER_TEMP/fake-bin\"\n"
-             "          printf '#!/bin/sh\\nexit 0\\n' > \"$RUNNER_TEMP/fake-bin/node\"\n"
-             "          chmod +x \"$RUNNER_TEMP/fake-bin/node\"\n"
-             "          echo \"$RUNNER_TEMP/fake-bin\" >> \"$GITHUB_PATH\"\n"),
-            ("unreviewed action", "      - uses: actions/cache@9b0c1e0a101ad007e1859fe7b2f2dbd0b5eeafd3\n"),
+            (
+                "GITHUB_PATH fake Node",
+                "      - name: Shadow pinned Node through GITHUB_PATH\n"
+                "        run: |\n"
+                '          mkdir -p "$RUNNER_TEMP/fake-bin"\n'
+                "          printf '#!/bin/sh\\nexit 0\\n' > \"$RUNNER_TEMP/fake-bin/node\"\n"
+                '          chmod +x "$RUNNER_TEMP/fake-bin/node"\n'
+                '          echo "$RUNNER_TEMP/fake-bin" >> "$GITHUB_PATH"\n',
+            ),
+            (
+                "unreviewed action",
+                "      - uses: actions/cache@9b0c1e0a101ad007e1859fe7b2f2dbd0b5eeafd3\n",
+            ),
             ("additional command", "      - run: echo bypass\n"),
-            ("duplicate protected label",
-             "      - name: Install pinned Node runtime for trusted publisher tests\n"
-             "        run: echo spoof\n"),
-            ("flow mapping",
-             "      - {name: Shadow pinned Node, run: echo shadow}\n"),
+            (
+                "duplicate protected label",
+                "      - name: Install pinned Node runtime for trusted publisher tests\n"
+                "        run: echo spoof\n",
+            ),
+            ("flow mapping", "      - {name: Shadow pinned Node, run: echo shadow}\n"),
         )
         try:
             for label, inserted in attacks:
@@ -731,8 +1045,11 @@ class ValidationGateTests(unittest.TestCase):
                     )
                     errors = gates.check(self.root)
                     self.assertTrue(
-                        any("canonical CI must run publisher tests immediately after"
-                            " pinned Node setup" in error for error in errors),
+                        any(
+                            "canonical CI must run publisher tests immediately after"
+                            " pinned Node setup" in error
+                            for error in errors
+                        ),
                         errors,
                     )
         finally:
@@ -763,15 +1080,28 @@ class ValidationGateTests(unittest.TestCase):
         mutations = (
             ("sudo before checkout", source.replace(checkout, malicious + checkout, 1)),
             ("sudo before setup", source.replace(node, malicious + node, 1)),
-            ("unreviewed action before setup", source.replace(
-                node, "      - uses: attacker/tool@main\n" + node, 1)),
-            ("altered checkout configuration", source.replace(
-                "          fetch-depth: 0\n",
-                "          fetch-depth: 0\n          submodules: true\n", 1)),
-            ("unreviewed checkout environment", source.replace(
-                checkout, checkout + "        env: { UNTRUSTED: 'true' }\n", 1)),
-            ("cache runs before suite", source.replace(cache, "", 1).replace(
-                node, cache + node, 1)),
+            (
+                "unreviewed action before setup",
+                source.replace(node, "      - uses: attacker/tool@main\n" + node, 1),
+            ),
+            (
+                "altered checkout configuration",
+                source.replace(
+                    "          fetch-depth: 0\n",
+                    "          fetch-depth: 0\n          submodules: true\n",
+                    1,
+                ),
+            ),
+            (
+                "unreviewed checkout environment",
+                source.replace(
+                    checkout, checkout + "        env: { UNTRUSTED: 'true' }\n", 1
+                ),
+            ),
+            (
+                "cache runs before suite",
+                source.replace(cache, "", 1).replace(node, cache + node, 1),
+            ),
         )
         try:
             for label, modified in mutations:
@@ -779,11 +1109,17 @@ class ValidationGateTests(unittest.TestCase):
                     self.assertNotEqual(modified, source)
                     path.write_text(modified, encoding="utf-8")
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        "canonical CI must run publisher tests immediately after"
-                        in e or "canonical CI publisher checkout must use exact"
-                        in e or "canonical CI missing mandatory publisher authority step"
-                        in e for e in errors), errors)
+                    self.assertTrue(
+                        any(
+                            "canonical CI must run publisher tests immediately after"
+                            in e
+                            or "canonical CI publisher checkout must use exact" in e
+                            or "canonical CI missing mandatory publisher authority step"
+                            in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
         finally:
             path.write_text(source, encoding="utf-8")
         self.assertEqual(gates.check(self.root), [])
@@ -796,27 +1132,58 @@ class ValidationGateTests(unittest.TestCase):
         self.assertIn(base, source)
         mutants = (
             ("attacker runner", base.replace("ubuntu-24.04", "self-hosted")),
-            ("untrusted container", base.replace(
-                "    steps:\n", "    container: attacker/runner:latest\n    steps:\n")),
-            ("untrusted inline container", base.replace(
-                "    steps:\n", "    container: {image: attacker/runner:latest}\n    steps:\n")),
-            ("job service", base.replace(
-                "    steps:\n", "    services: {unsafe: {image: attacker/runner}}\n    steps:\n")),
-            ("job strategy", base.replace(
-                "    steps:\n", "    strategy: {matrix: {os: [self-hosted]}}\n    steps:\n")),
-            ("job-level permissions", base.replace(
-                "    steps:\n", "    permissions: write-all\n    steps:\n")),
-            ("duplicate runner", base.replace(
-                "    steps:\n", "    runs-on: ubuntu-24.04\n    steps:\n")),
+            (
+                "untrusted container",
+                base.replace(
+                    "    steps:\n",
+                    "    container: attacker/runner:latest\n    steps:\n",
+                ),
+            ),
+            (
+                "untrusted inline container",
+                base.replace(
+                    "    steps:\n",
+                    "    container: {image: attacker/runner:latest}\n    steps:\n",
+                ),
+            ),
+            (
+                "job service",
+                base.replace(
+                    "    steps:\n",
+                    "    services: {unsafe: {image: attacker/runner}}\n    steps:\n",
+                ),
+            ),
+            (
+                "job strategy",
+                base.replace(
+                    "    steps:\n",
+                    "    strategy: {matrix: {os: [self-hosted]}}\n    steps:\n",
+                ),
+            ),
+            (
+                "job-level permissions",
+                base.replace(
+                    "    steps:\n", "    permissions: write-all\n    steps:\n"
+                ),
+            ),
+            (
+                "duplicate runner",
+                base.replace("    steps:\n", "    runs-on: ubuntu-24.04\n    steps:\n"),
+            ),
         )
         try:
             for label, changed in mutants:
                 with self.subTest(attack=label):
                     path.write_text(source.replace(base, changed, 1), encoding="utf-8")
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        "canonical CI publisher job must use exact trusted hosted runner"
-                        in e for e in errors), errors)
+                    self.assertTrue(
+                        any(
+                            "canonical CI publisher job must use exact trusted hosted runner"
+                            in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
         finally:
             path.write_text(source, encoding="utf-8")
         self.assertEqual(gates.check(self.root), [])
@@ -836,21 +1203,36 @@ class ValidationGateTests(unittest.TestCase):
         env["PATH"] = str(executable) + os.pathsep + env.get("PATH", "")
         env["BASH_FUNC_node%%"] = "() { printf 'spoofed-function\\n'; }"
         actual = subprocess.run(
-            ["/usr/bin/bash", "-c",
-             "node --version; /usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --version"],
-            env=env, capture_output=True, text=True, check=True, timeout=15)
-        self.assertEqual(actual.stdout.splitlines(),
-                         ["spoofed-function", "real-executable"])
-        for replacement in ("node --test", "env node --test",
-                            "/usr/bin/env node --test"):
+            [
+                "/usr/bin/bash",
+                "-c",
+                'node --version; /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --version',
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=15,
+        )
+        self.assertEqual(
+            actual.stdout.splitlines(), ["spoofed-function", "real-executable"]
+        )
+        for replacement in (
+            "node --test",
+            "env node --test",
+            "/usr/bin/env node --test",
+        ):
             with self.subTest(replacement=replacement):
-                weakened = source.replace(
-                    guard + " --test", replacement, 1)
+                weakened = source.replace(guard + " --test", replacement, 1)
                 self.assertNotEqual(source, weakened)
                 path.write_text(weakened, encoding="utf-8")
-                self.assertTrue(any(
-                    "canonical CI missing mandatory publisher authority step" in error
-                    for error in gates.check(self.root)))
+                self.assertTrue(
+                    any(
+                        "canonical CI missing mandatory publisher authority step"
+                        in error
+                        for error in gates.check(self.root)
+                    )
+                )
         path.write_text(source, encoding="utf-8")
 
     def test_publisher_provenance_attestation_rejects_stale_and_untracked_code(self):
@@ -863,23 +1245,41 @@ class ValidationGateTests(unittest.TestCase):
         script = "\n".join(line[10:] for line in fragment.splitlines()) + "\n"
         fixture = self.root / "publisher-source-fixture"
         fixture.mkdir()
-        scopes = (".github/workflows/ci.yml", "tools/check_validation_gates.py",
-                  "tests/tooling/test_validation_gates.py")
+        scopes = (
+            ".github/workflows/ci.yml",
+            "tools/check_validation_gates.py",
+            "tests/tooling/test_validation_gates.py",
+        )
         for name in scopes:
             target = fixture / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(self.root / name, target)
-        shutil.copytree(ROOT / "services/qualification-publisher",
-                        fixture / "services/qualification-publisher")
+        shutil.copytree(
+            ROOT / "services/qualification-publisher",
+            fixture / "services/qualification-publisher",
+        )
+
         def git(*args):
-            return subprocess.run(["/usr/bin/git", *args], cwd=fixture,
-                                  capture_output=True, text=True, check=True, timeout=20
-                                  ).stdout.strip()
+            return subprocess.run(
+                ["/usr/bin/git", *args],
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=20,
+            ).stdout.strip()
+
         git("init", "-q")
         git("add", ".")
-        git("-c", "user.name=Linura Test",
-            "-c", "user.email=linura-test@invalid.example",
-            "commit", "-qm", "source fixture")
+        git(
+            "-c",
+            "user.name=Linura Test",
+            "-c",
+            "user.email=linura-test@invalid.example",
+            "commit",
+            "-qm",
+            "source fixture",
+        )
         sha = git("rev-parse", "HEAD")
         env = os.environ.copy()
         env["GITHUB_SHA"] = sha
@@ -891,20 +1291,34 @@ class ValidationGateTests(unittest.TestCase):
         env["GIT_CONFIG_COUNT"] = "1"
         env["GIT_CONFIG_KEY_0"] = "core.fsmonitor"
         env["GIT_CONFIG_VALUE_0"] = "true"
+
         def attest():
-            return subprocess.run(["/usr/bin/python3", "-I", "-S", "-"],
-                                  input=script, env=env, cwd=fixture,
-                                  capture_output=True, text=True, timeout=30,
-                                  check=False)
+            return subprocess.run(
+                ["/usr/bin/python3", "-I", "-S", "-"],
+                input=script,
+                env=env,
+                cwd=fixture,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
         self.assertEqual(attest().returncode, 0, attest().stderr)
         publisher = fixture / "services/qualification-publisher/publisher.mjs"
         original = publisher.read_bytes()
         publisher.write_bytes(b"// stale publisher code\n")
-        git("update-index", "--assume-unchanged",
-            "services/qualification-publisher/publisher.mjs")
+        git(
+            "update-index",
+            "--assume-unchanged",
+            "services/qualification-publisher/publisher.mjs",
+        )
         self.assertNotEqual(attest().returncode, 0)
-        git("update-index", "--no-assume-unchanged",
-            "services/qualification-publisher/publisher.mjs")
+        git(
+            "update-index",
+            "--no-assume-unchanged",
+            "services/qualification-publisher/publisher.mjs",
+        )
         publisher.write_bytes(original)
         self.assertEqual(attest().returncode, 0)
         injected = fixture / "services/qualification-publisher/test/bypass.test.mjs"
@@ -930,7 +1344,10 @@ class ValidationGateTests(unittest.TestCase):
         """
         path = self.root / ".github/workflows/ci.yml"
         original = path.read_text(encoding="utf-8")
-        self.assertIn("          /usr/bin/python3 -I -S tools/check_validation_gates.py\n", original)
+        self.assertIn(
+            "          /usr/bin/python3 -I -S tools/check_validation_gates.py\n",
+            original,
+        )
         # Simulate an earlier step installing a fake Python executable, while
         # also poisoning ordinary CPython startup through inherited variables.
         fake_bin = self.root / "malicious-bin"
@@ -951,24 +1368,40 @@ class ValidationGateTests(unittest.TestCase):
         # A PATH-resolved invocation is defeated by the same fake Python.
         vulnerable = subprocess.run(
             ["python3", "-c", "raise SystemExit(1)"],
-            env=env, capture_output=True, text=True, check=False, timeout=10,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
         )
         self.assertEqual(vulnerable.returncode, 0, vulnerable.stderr)
 
         # Disable the actual Node suite in a CI-only mutation. The pinned,
         # isolated OS interpreter must execute the checker and reject it.
-        target = "          /usr/bin/env -i PATH=\"$PATH\" LANG=C.UTF-8 node --test services/qualification-publisher/test/*.test.mjs"
+        target = '          /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --test services/qualification-publisher/test/*.test.mjs'
         self.assertIn(target, original)
-        path.write_text(original.replace(target, "          echo suite bypassed", 1),
-                        encoding="utf-8")
+        path.write_text(
+            original.replace(target, "          echo suite bypassed", 1),
+            encoding="utf-8",
+        )
         verified = subprocess.run(
-            ["/usr/bin/python3", "-I", "-S",
-             str(ROOT / "tools/check_validation_gates.py"), str(self.root)],
-            env=env, capture_output=True, text=True, check=False, timeout=30,
+            [
+                "/usr/bin/python3",
+                "-I",
+                "-S",
+                str(ROOT / "tools/check_validation_gates.py"),
+                str(self.root),
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
         )
         self.assertNotEqual(verified.returncode, 0, verified.stdout)
-        self.assertIn("canonical CI missing mandatory publisher authority step",
-                      verified.stderr)
+        self.assertIn(
+            "canonical CI missing mandatory publisher authority step", verified.stderr
+        )
 
     def test_canonical_publisher_pins_effective_shell_against_defaults(self):
         """A no-op inherited shell cannot prevent the checker from executing.
@@ -979,18 +1412,26 @@ class ValidationGateTests(unittest.TestCase):
         """
         path = self.root / ".github/workflows/ci.yml"
         original = path.read_text(encoding="utf-8")
-        reviewed_shell = "        shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}\n"
+        reviewed_shell = (
+            "        shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}\n"
+        )
         self.assertEqual(original.count(reviewed_shell), 1)
         attacks = (
             ("remove explicit shell", ""),
             ("use PATH-resolved Bash", "        shell: bash\n"),
             ("use no-op shell", "        shell: /bin/true {0}\n"),
-            ("use unreviewed Bash flags",
-             "        shell: /usr/bin/bash --noprofile --norc -e {0}\n"),
-            ("use environment-resolved interpreter",
-             "        shell: /usr/bin/env bash --noprofile --norc -euo pipefail {0}\n"),
-            ("append duplicate effective shell",
-             reviewed_shell + "        shell: /bin/true {0}\n"),
+            (
+                "use unreviewed Bash flags",
+                "        shell: /usr/bin/bash --noprofile --norc -e {0}\n",
+            ),
+            (
+                "use environment-resolved interpreter",
+                "        shell: /usr/bin/env bash --noprofile --norc -euo pipefail {0}\n",
+            ),
+            (
+                "append duplicate effective shell",
+                reviewed_shell + "        shell: /bin/true {0}\n",
+            ),
         )
         try:
             for label, replacement in attacks:
@@ -999,10 +1440,14 @@ class ValidationGateTests(unittest.TestCase):
                     self.assertNotEqual(modified, original)
                     path.write_text(modified, encoding="utf-8")
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        "canonical CI missing mandatory publisher authority step"
-                        in error for error in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            "canonical CI missing mandatory publisher authority step"
+                            in error
+                            for error in errors
+                        ),
+                        errors,
+                    )
             # Realistic CI-only tampering: change effective job/workflow
             # defaults while removing the protected step-level shell.
             for scope, mutation in (
@@ -1015,14 +1460,18 @@ class ValidationGateTests(unittest.TestCase):
                         modified = mutation + modified
                     else:
                         modified = modified.replace(
-                            "  canonical-check:\n",
-                            "  canonical-check:\n" + mutation, 1)
+                            "  canonical-check:\n", "  canonical-check:\n" + mutation, 1
+                        )
                     path.write_text(modified, encoding="utf-8")
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        "canonical CI missing mandatory publisher authority step"
-                        in error for error in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            "canonical CI missing mandatory publisher authority step"
+                            in error
+                            for error in errors
+                        ),
+                        errors,
+                    )
         finally:
             path.write_text(original, encoding="utf-8")
         self.assertEqual(gates.check(self.root), [])
@@ -1031,34 +1480,47 @@ class ValidationGateTests(unittest.TestCase):
         path = self.root / ".github/workflows/ci.yml"
         target = self.root / path
         original = target.read_text(encoding="utf-8")
-        protected = ("      - name: Validate trusted qualification publisher in canonical CI\n"
-                     "        env:\n"
-                     "          NODE_OPTIONS: ''\n")
+        protected = (
+            "      - name: Validate trusted qualification publisher in canonical CI\n"
+            "        env:\n"
+            "          NODE_OPTIONS: ''\n"
+        )
         self.assertIn(protected, original)
         for replacement in (
             protected.replace("          NODE_OPTIONS: ''\n", ""),
-            protected.replace("          NODE_OPTIONS: ''", "          NODE_OPTIONS: --test-only"),
+            protected.replace(
+                "          NODE_OPTIONS: ''", "          NODE_OPTIONS: --test-only"
+            ),
             protected.replace("        env:\n", ""),
-            protected.replace("          NODE_OPTIONS: ''", "          NODE_OPTIONS: $BAD"),
+            protected.replace(
+                "          NODE_OPTIONS: ''", "          NODE_OPTIONS: $BAD"
+            ),
         ):
             with self.subTest(replacement=replacement):
-                target.write_text(original.replace(protected, replacement, 1), encoding="utf-8")
+                target.write_text(
+                    original.replace(protected, replacement, 1), encoding="utf-8"
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "canonical CI missing mandatory publisher authority step" in e
-                    for e in errors
-                ), errors)
+                self.assertTrue(
+                    any(
+                        "canonical CI missing mandatory publisher authority step" in e
+                        for e in errors
+                    ),
+                    errors,
+                )
         target.write_text(original, encoding="utf-8")
 
     def test_publisher_bash_env_startup_hook_is_blocked_by_canonical_contract(self):
         path = self.root / ".github/workflows/ci.yml"
         target = self.root / path
         original = target.read_text(encoding="utf-8")
-        guarded = ("      - name: Validate trusted qualification publisher in canonical CI\n"
-                   "        env:\n"
-                   "          NODE_OPTIONS: ''\n"
-                   "          BASH_ENV: ''\n"
-                   "          ENV: ''\n")
+        guarded = (
+            "      - name: Validate trusted qualification publisher in canonical CI\n"
+            "        env:\n"
+            "          NODE_OPTIONS: ''\n"
+            "          BASH_ENV: ''\n"
+            "          ENV: ''\n"
+        )
         self.assertIn(guarded, original)
         for token, bad in (
             ("          BASH_ENV: ''\n", ""),
@@ -1069,28 +1531,38 @@ class ValidationGateTests(unittest.TestCase):
             ("          NODE_OPTIONS: ''", "          NODE_OPTIONS: --test-only"),
         ):
             with self.subTest(replacement=bad):
-                target.write_text(original.replace(guarded, guarded.replace(token, bad), 1),
-                                  encoding="utf-8")
+                target.write_text(
+                    original.replace(guarded, guarded.replace(token, bad), 1),
+                    encoding="utf-8",
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "canonical CI missing mandatory publisher authority step" in e
-                    for e in errors), errors)
+                self.assertTrue(
+                    any(
+                        "canonical CI missing mandatory publisher authority step" in e
+                        for e in errors
+                    ),
+                    errors,
+                )
         target.write_text(original, encoding="utf-8")
 
-    def test_canonical_publisher_blocks_inherited_bash_options_and_executes_validator(self):
+    def test_canonical_publisher_blocks_inherited_bash_options_and_executes_validator(
+        self,
+    ):
         path = self.root / ".github/workflows/ci.yml"
         original = path.read_text(encoding="utf-8")
-        guarded = ("      - name: Validate trusted qualification publisher in canonical CI\n"
-                   "        env:\n"
-                   "          NODE_OPTIONS: ''\n"
-                   "          BASH_ENV: ''\n"
-                   "          ENV: ''\n"
-                   "          SHELLOPTS: ''\n"
-                   "          BASHOPTS: ''\n"
-                   "        shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}\n"
-                   "        run: |\n"
-                   "          set -euo pipefail\n"
-                   "          /usr/bin/python3 -I -S - <<'PY'\n")
+        guarded = (
+            "      - name: Validate trusted qualification publisher in canonical CI\n"
+            "        env:\n"
+            "          NODE_OPTIONS: ''\n"
+            "          BASH_ENV: ''\n"
+            "          ENV: ''\n"
+            "          SHELLOPTS: ''\n"
+            "          BASHOPTS: ''\n"
+            "        shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}\n"
+            "        run: |\n"
+            "          set -euo pipefail\n"
+            "          /usr/bin/python3 -I -S - <<'PY'\n"
+        )
         self.assertIn(guarded, original)
         for old, new in (
             ("          SHELLOPTS: ''\n", ""),
@@ -1098,8 +1570,10 @@ class ValidationGateTests(unittest.TestCase):
             ("          BASHOPTS: ''\n", ""),
             ("          BASHOPTS: ''", "          BASHOPTS: extdebug"),
             ("          /usr/bin/python3 -I -S - <<'PY'\n", ""),
-            ("          /usr/bin/python3 -I -S - <<'PY'",
-             "          echo 'qualification source attested'"),
+            (
+                "          /usr/bin/python3 -I -S - <<'PY'",
+                "          echo 'qualification source attested'",
+            ),
             ("          set -euo pipefail\n", ""),
         ):
             with self.subTest(injection=new):
@@ -1107,10 +1581,14 @@ class ValidationGateTests(unittest.TestCase):
                 self.assertNotEqual(modified, original)
                 path.write_text(modified, encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "canonical CI missing mandatory publisher authority step"
-                    in error for error in errors
-                ), errors)
+                self.assertTrue(
+                    any(
+                        "canonical CI missing mandatory publisher authority step"
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
         # The source attestation runs before the policy checker, so these
         # mutations must target its later command without assuming adjacency.
         command = "          /usr/bin/python3 -I -S tools/check_validation_gates.py"
@@ -1124,30 +1602,50 @@ class ValidationGateTests(unittest.TestCase):
             "          /usr/bin/python3 -I tools/check_validation_gates.py",
         ):
             with self.subTest(validator_replacement=replacement):
-                modified = original.replace(command + "\n",
-                                            (replacement + "\n") if replacement else "", 1)
+                modified = original.replace(
+                    command + "\n", (replacement + "\n") if replacement else "", 1
+                )
                 self.assertNotEqual(modified, original)
                 path.write_text(modified, encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "canonical CI missing mandatory publisher authority step"
-                    in error for error in errors
-                ), errors)
+                self.assertTrue(
+                    any(
+                        "canonical CI missing mandatory publisher authority step"
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
         for label, needle, injection in (
-            ("workflow inherited", "permissions:\n",
-             "env:\n  SHELLOPTS: noexec\npermissions:\n"),
-            ("job inherited", "    runs-on: ubuntu-24.04\n",
-             "    env:\n      SHELLOPTS: noexec\n    runs-on: ubuntu-24.04\n"),
-            ("job inherited Bash opts", "    runs-on: ubuntu-24.04\n",
-             "    env: { BASHOPTS: extdebug }\n    runs-on: ubuntu-24.04\n"),
+            (
+                "workflow inherited",
+                "permissions:\n",
+                "env:\n  SHELLOPTS: noexec\npermissions:\n",
+            ),
+            (
+                "job inherited",
+                "    runs-on: ubuntu-24.04\n",
+                "    env:\n      SHELLOPTS: noexec\n    runs-on: ubuntu-24.04\n",
+            ),
+            (
+                "job inherited Bash opts",
+                "    runs-on: ubuntu-24.04\n",
+                "    env: { BASHOPTS: extdebug }\n    runs-on: ubuntu-24.04\n",
+            ),
         ):
             with self.subTest(label=label):
-                path.write_text(original.replace(needle, injection, 1), encoding="utf-8")
+                path.write_text(
+                    original.replace(needle, injection, 1), encoding="utf-8"
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "canonical CI may not inherit workflow/job environment variables"
-                    in error for error in errors
-                ), errors)
+                self.assertTrue(
+                    any(
+                        "canonical CI may not inherit workflow/job environment variables"
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
         path.write_text(original, encoding="utf-8")
         self.assertEqual(gates.check(self.root), [])
 
@@ -1168,34 +1666,47 @@ class ValidationGateTests(unittest.TestCase):
             ):
                 with self.subTest(label=label, injection=injection):
                     modified = original.replace(
-                        before, "      - name: " + label + "\n" + injection + "        run:", 1)
+                        before,
+                        "      - name: " + label + "\n" + injection + "        run:",
+                        1,
+                    )
                     path.write_text(modified, encoding="utf-8")
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        "canonical CI missing unconditional executable step: " + label
-                        in error for error in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            "canonical CI missing unconditional executable step: "
+                            + label
+                            in error
+                            for error in errors
+                        ),
+                        errors,
+                    )
         path.write_text(original, encoding="utf-8")
         self.assertEqual(gates.check(self.root), [])
 
     def test_codeql_actions_must_use_immutable_shas(self):
         path = self.root / ".github/workflows/codeql.yml"
         original = path.read_text(encoding="utf-8")
-        for action in ("github/codeql-action/init@",
-                       "github/codeql-action/analyze@"):
+        for action in ("github/codeql-action/init@", "github/codeql-action/analyze@"):
             with self.subTest(action=action):
                 pin = re.search(
-                    r"(?m)^      - uses: " + re.escape(action) +
-                    r"([0-9a-f]{40})(?:\s+#.*)?$", original,
+                    r"(?m)^      - uses: "
+                    + re.escape(action)
+                    + r"([0-9a-f]{40})(?:\s+#.*)?$",
+                    original,
                 )
                 self.assertIsNotNone(pin, action)
                 old = action + pin.group(1)
-                path.write_text(original.replace(old, action + "main", 1),
-                                encoding="utf-8")
+                path.write_text(
+                    original.replace(old, action + "main", 1), encoding="utf-8"
+                )
                 errors = gates.check(self.root)
                 self.assertTrue(
-                    any("CodeQL missing unconditional SHA-pinned action: " +
-                        action in e for e in errors), errors,
+                    any(
+                        "CodeQL missing unconditional SHA-pinned action: " + action in e
+                        for e in errors
+                    ),
+                    errors,
                 )
         path.write_text(original, encoding="utf-8")
 
@@ -1206,8 +1717,10 @@ class ValidationGateTests(unittest.TestCase):
         pins = {}
         for action in actions:
             match = re.search(
-                r"(?m)^      - uses: " + re.escape(action) +
-                r"([0-9a-f]{40})(?:\s+#.*)?$", original,
+                r"(?m)^      - uses: "
+                + re.escape(action)
+                + r"([0-9a-f]{40})(?:\s+#.*)?$",
+                original,
             )
             self.assertIsNotNone(match, action)
             pins[action] = match.group(1)
@@ -1219,7 +1732,9 @@ class ValidationGateTests(unittest.TestCase):
         upgraded = original
         for action in actions:
             upgraded = upgraded.replace(
-                action + pins[action], action + upgraded_pin, 1,
+                action + pins[action],
+                action + upgraded_pin,
+                1,
             )
         path.write_text(upgraded, encoding="utf-8")
         self.assertEqual(gates.check(self.root), [])
@@ -1227,14 +1742,23 @@ class ValidationGateTests(unittest.TestCase):
         mismatched_pin = "0" * 40 if upgraded_pin != "0" * 40 else "1" * 40
         for action in actions:
             with self.subTest(action=action):
-                path.write_text(upgraded.replace(
-                    action + upgraded_pin, action + mismatched_pin, 1,
-                ), encoding="utf-8")
+                path.write_text(
+                    upgraded.replace(
+                        action + upgraded_pin,
+                        action + mismatched_pin,
+                        1,
+                    ),
+                    encoding="utf-8",
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "CodeQL init/analyze actions must share the same immutable revision"
-                    in err for err in errors
-                ), errors)
+                self.assertTrue(
+                    any(
+                        "CodeQL init/analyze actions must share the same immutable revision"
+                        in err
+                        for err in errors
+                    ),
+                    errors,
+                )
         path.write_text(original, encoding="utf-8")
 
     def test_codex_contamination_injection_cannot_exit_early(self):
@@ -1249,12 +1773,17 @@ class ValidationGateTests(unittest.TestCase):
             ("dead-code injection", block + "          if false; then\n"),
         ):
             with self.subTest(scenario=scenario):
-                path.write_text(original.replace(block, replacement, 1),
-                                encoding="utf-8")
+                path.write_text(
+                    original.replace(block, replacement, 1), encoding="utf-8"
+                )
                 errors = gates.check(self.root)
                 self.assertTrue(
-                    any("Codex contamination injection must execute the complete"
-                        " reviewed shell block" in e for e in errors), errors,
+                    any(
+                        "Codex contamination injection must execute the complete"
+                        " reviewed shell block" in e
+                        for e in errors
+                    ),
+                    errors,
                 )
         path.write_text(original, encoding="utf-8")
 
@@ -1262,18 +1791,26 @@ class ValidationGateTests(unittest.TestCase):
         path = self.root / ".github/workflows/codex-environment.yml"
         original = path.read_text(encoding="utf-8")
         changes = (
-            ("Prepare isolated environment",
-             "          set -euo pipefail\n",
-             "          set -euo pipefail\n          exit 0\n"),
-            ("Bootstrap from host primitives",
-             "        run: PATH=/usr/bin:/bin bash scripts/setup_codex_environment.sh --bindings\n",
-             "        run: exit 0 # run: PATH=/usr/bin:/bin bash scripts/setup_codex_environment.sh --bindings\n"),
-            ("Resume cached environment at selected checkout",
-             "        run: PATH=/usr/bin:/bin bash scripts/maintain_codex_environment.sh --bindings\n",
-             "        run: exit 0 # run: PATH=/usr/bin:/bin bash scripts/maintain_codex_environment.sh --bindings\n"),
-            ("Verify maintenance removed contaminated distributions",
-             "          set -euo pipefail\n",
-             "          set -euo pipefail\n          exit 0\n"),
+            (
+                "Prepare isolated environment",
+                "          set -euo pipefail\n",
+                "          set -euo pipefail\n          exit 0\n",
+            ),
+            (
+                "Bootstrap from host primitives",
+                "        run: PATH=/usr/bin:/bin bash scripts/setup_codex_environment.sh --bindings\n",
+                "        run: exit 0 # run: PATH=/usr/bin:/bin bash scripts/setup_codex_environment.sh --bindings\n",
+            ),
+            (
+                "Resume cached environment at selected checkout",
+                "        run: PATH=/usr/bin:/bin bash scripts/maintain_codex_environment.sh --bindings\n",
+                "        run: exit 0 # run: PATH=/usr/bin:/bin bash scripts/maintain_codex_environment.sh --bindings\n",
+            ),
+            (
+                "Verify maintenance removed contaminated distributions",
+                "          set -euo pipefail\n",
+                "          set -euo pipefail\n          exit 0\n",
+            ),
         )
         for label, before, after in changes:
             with self.subTest(step=label):
@@ -1283,51 +1820,85 @@ class ValidationGateTests(unittest.TestCase):
                     end = len(original)
                 block = original[start:end]
                 self.assertIn(before, block)
-                modified = original[:start] + block.replace(before, after, 1) + original[end:]
+                modified = (
+                    original[:start] + block.replace(before, after, 1) + original[end:]
+                )
                 (self.root / path).write_text(modified, encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "Codex required step must match reviewed executable content: " +
-                    label in e for e in errors
-                ), errors)
+                self.assertTrue(
+                    any(
+                        "Codex required step must match reviewed executable content: "
+                        + label
+                        in e
+                        for e in errors
+                    ),
+                    errors,
+                )
         (self.root / path).write_text(original, encoding="utf-8")
 
     def test_cargo_audit_cannot_be_removed(self):
-        self.change(".github/workflows/security.yml",
-                    '"$HOME/.cargo/bin/cargo-audit" audit', "echo disabled")
-        self.assertTrue(any("security audit missing" in x for x in gates.check(self.root)))
+        self.change(
+            ".github/workflows/security.yml",
+            '"$HOME/.cargo/bin/cargo-audit" audit',
+            "echo disabled",
+        )
+        self.assertTrue(
+            any("security audit missing" in x for x in gates.check(self.root))
+        )
 
     def test_cargo_audit_cannot_be_suppressed(self):
-        self.change(".github/workflows/security.yml",
-                    '"$HOME/.cargo/bin/cargo-audit" audit',
-                    '"$HOME/.cargo/bin/cargo-audit" audit || true')
-        self.assertTrue(any("audit may be bypassed" in x for x in gates.check(self.root)))
+        self.change(
+            ".github/workflows/security.yml",
+            '"$HOME/.cargo/bin/cargo-audit" audit',
+            '"$HOME/.cargo/bin/cargo-audit" audit || true',
+        )
+        self.assertTrue(
+            any("audit may be bypassed" in x for x in gates.check(self.root))
+        )
 
     def test_cargo_audit_cannot_be_hidden_in_dead_shell_branch(self):
-        self.change(".github/workflows/security.yml",
-                    '          "$HOME/.cargo/bin/cargo-audit" audit\n',
-                    '          if false; then\n'
-                    '            "$HOME/.cargo/bin/cargo-audit" audit\n'
-                    '          fi\n')
-        self.assertTrue(any("security audit must run unconditionally" in x
-                            for x in gates.check(self.root)))
+        self.change(
+            ".github/workflows/security.yml",
+            '          "$HOME/.cargo/bin/cargo-audit" audit\n',
+            "          if false; then\n"
+            '            "$HOME/.cargo/bin/cargo-audit" audit\n'
+            "          fi\n",
+        )
+        self.assertTrue(
+            any(
+                "security audit must run unconditionally" in x
+                for x in gates.check(self.root)
+            )
+        )
 
     def test_cargo_audit_cannot_be_preceded_by_successful_exit(self):
-        self.change(".github/workflows/security.yml",
-                    '          "$HOME/.cargo/bin/cargo-audit" audit\n',
-                    '          exit 0\n          "$HOME/.cargo/bin/cargo-audit" audit\n')
-        self.assertTrue(any("security audit must run unconditionally" in x
-                            for x in gates.check(self.root)))
+        self.change(
+            ".github/workflows/security.yml",
+            '          "$HOME/.cargo/bin/cargo-audit" audit\n',
+            '          exit 0\n          "$HOME/.cargo/bin/cargo-audit" audit\n',
+        )
+        self.assertTrue(
+            any(
+                "security audit must run unconditionally" in x
+                for x in gates.check(self.root)
+            )
+        )
 
     def test_cargo_audit_cannot_be_conditional(self):
-        self.change(".github/workflows/security.yml",
-                    "      - name: Audit Rust dependencies\n        run: |",
-                    "      - name: Audit Rust dependencies\n        if: false\n        run: |")
-        self.assertTrue(any("must run unconditionally" in x for x in gates.check(self.root)))
+        self.change(
+            ".github/workflows/security.yml",
+            "      - name: Audit Rust dependencies\n        run: |",
+            "      - name: Audit Rust dependencies\n        if: false\n        run: |",
+        )
+        self.assertTrue(
+            any("must run unconditionally" in x for x in gates.check(self.root))
+        )
 
     def test_mandatory_checkout_cannot_override_triggering_revision(self):
-        checkout_line = ("      - uses: actions/checkout@"
-                         "3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1")
+        checkout_line = (
+            "      - uses: actions/checkout@"
+            "3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1"
+        )
         for job, workflow in gates.MANDATORY.items():
             file = self.root / workflow
             original = file.read_text(encoding="utf-8")
@@ -1335,30 +1906,42 @@ class ValidationGateTests(unittest.TestCase):
             if job == "canonical-check":
                 mutated = original.replace(
                     "          fetch-depth: 0\n",
-                    "          fetch-depth: 0\n          ref: main\n", 1
+                    "          fetch-depth: 0\n          ref: main\n",
+                    1,
                 )
             else:
                 mutated = original.replace(
                     checkout_line + "\n",
-                    checkout_line + "\n        with: { ref: main }\n", 1
+                    checkout_line + "\n        with: { ref: main }\n",
+                    1,
                 )
             for scenario, source in (
                 ("ref override", mutated),
-                ("second checkout", original.replace(
-                    checkout_line + "\n",
-                    checkout_line + "\n" + checkout_line + "\n", 1
-                )),
-                ("skipped checkout", original.replace(
-                    checkout_line + "\n",
-                    checkout_line + "\n        if: false\n", 1
-                )),
+                (
+                    "second checkout",
+                    original.replace(
+                        checkout_line + "\n",
+                        checkout_line + "\n" + checkout_line + "\n",
+                        1,
+                    ),
+                ),
+                (
+                    "skipped checkout",
+                    original.replace(
+                        checkout_line + "\n", checkout_line + "\n        if: false\n", 1
+                    ),
+                ),
             ):
                 with self.subTest(job=job, scenario=scenario):
                     file.write_text(source, encoding="utf-8")
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        job + ": must checkout triggering revision" in e for e in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            job + ": must checkout triggering revision" in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
             file.write_text(original, encoding="utf-8")
 
     def test_mandatory_inherited_shell_defaults_cannot_bypass_gates(self):
@@ -1366,40 +1949,66 @@ class ValidationGateTests(unittest.TestCase):
             target = self.root / workflow
             original = target.read_text(encoding="utf-8")
             for case, before, after in (
-                ("workflow mapping", "permissions:\n",
-                 "defaults:\n  run:\n    shell: bash -c 'exit 0' {0}\n\npermissions:\n"),
-                ("workflow inline", "permissions:\n",
-                 'defaults: {run: {shell: "bash -c \'exit 0\' {0}"}}\n\npermissions:\n'),
-                ("job mapping", "    runs-on:",
-                 "    defaults:\n      run:\n        shell: bash -c 'exit 0' {0}\n"
-                 "    runs-on:"),
-                ("job inline", "    runs-on:",
-                 '    defaults: {run: {shell: "bash -c \'exit 0\' {0}"}}\n'
-                 "    runs-on:"),
+                (
+                    "workflow mapping",
+                    "permissions:\n",
+                    "defaults:\n  run:\n    shell: bash -c 'exit 0' {0}\n\npermissions:\n",
+                ),
+                (
+                    "workflow inline",
+                    "permissions:\n",
+                    "defaults: {run: {shell: \"bash -c 'exit 0' {0}\"}}\n\npermissions:\n",
+                ),
+                (
+                    "job mapping",
+                    "    runs-on:",
+                    "    defaults:\n      run:\n        shell: bash -c 'exit 0' {0}\n"
+                    "    runs-on:",
+                ),
+                (
+                    "job inline",
+                    "    runs-on:",
+                    "    defaults: {run: {shell: \"bash -c 'exit 0' {0}\"}}\n"
+                    "    runs-on:",
+                ),
             ):
                 with self.subTest(job=job, case=case):
                     self.assertIn(before, original)
-                    target.write_text(original.replace(before, after, 1),
-                                      encoding="utf-8")
+                    target.write_text(
+                        original.replace(before, after, 1), encoding="utf-8"
+                    )
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        job + ": run defaults may bypass mandatory executable steps" in e
-                        for e in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            job + ": run defaults may bypass mandatory executable steps"
+                            in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
             target.write_text(original, encoding="utf-8")
 
     def test_mandatory_pr_gate_cannot_filter_target_branches(self):
         for workflow in gates.MANDATORY.values():
             with self.subTest(workflow=workflow):
-                self.change(workflow, "  pull_request:\n",
-                            "  pull_request:\n    branches: [never]\n")
+                self.change(
+                    workflow,
+                    "  pull_request:\n",
+                    "  pull_request:\n    branches: [never]\n",
+                )
                 self.assertTrue(any("every PR" in x for x in gates.check(self.root)))
-                self.change(workflow, "  pull_request:\n    branches: [never]\n",
-                            "  pull_request:\n")
+                self.change(
+                    workflow,
+                    "  pull_request:\n    branches: [never]\n",
+                    "  pull_request:\n",
+                )
 
     def test_mandatory_pr_gate_cannot_filter_event_types(self):
-        self.change(".github/workflows/ci.yml", "  pull_request:\n",
-                    "  pull_request:\n    types: [opened]\n")
+        self.change(
+            ".github/workflows/ci.yml",
+            "  pull_request:\n",
+            "  pull_request:\n    types: [opened]\n",
+        )
         self.assertTrue(any("every PR" in x for x in gates.check(self.root)))
 
     def test_mandatory_pr_filters_at_any_valid_indentation_are_rejected(self):
@@ -1408,10 +2017,14 @@ class ValidationGateTests(unittest.TestCase):
             original = target.read_text(encoding="utf-8")
             for spaces in (4, 6, 8):
                 with self.subTest(workflow=workflow, indent=spaces):
-                    target.write_text(original.replace(
-                        "  pull_request:\n",
-                        "  pull_request:\n" + " " * spaces + "branches: [never]\n",
-                        1), encoding="utf-8")
+                    target.write_text(
+                        original.replace(
+                            "  pull_request:\n",
+                            "  pull_request:\n" + " " * spaces + "branches: [never]\n",
+                            1,
+                        ),
+                        encoding="utf-8",
+                    )
                     errors = gates.check(self.root)
                     self.assertTrue(any("every PR" in e for e in errors), errors)
             target.write_text(original, encoding="utf-8")
@@ -1419,14 +2032,18 @@ class ValidationGateTests(unittest.TestCase):
     def test_mandatory_job_cannot_have_if_condition(self):
         for job, workflow in gates.MANDATORY.items():
             with self.subTest(job=job):
-                self.change(workflow, "  " + job + ":\n",
-                            "  " + job + ":\n    if: false\n")
-                self.assertTrue(
-                    any("mandatory job must be unconditional" in x
-                        for x in gates.check(self.root))
+                self.change(
+                    workflow, "  " + job + ":\n", "  " + job + ":\n    if: false\n"
                 )
-                self.change(workflow, "  " + job + ":\n    if: false\n",
-                            "  " + job + ":\n")
+                self.assertTrue(
+                    any(
+                        "mandatory job must be unconditional" in x
+                        for x in gates.check(self.root)
+                    )
+                )
+                self.change(
+                    workflow, "  " + job + ":\n    if: false\n", "  " + job + ":\n"
+                )
 
     def test_mandatory_job_rejects_alternative_valid_indentation(self):
         for job, workflow in gates.MANDATORY.items():
@@ -1436,62 +2053,108 @@ class ValidationGateTests(unittest.TestCase):
                 before, after = source.split("  " + job + ":\n", 1)
                 # Shift every nonempty direct/descendant job line by two spaces.
                 import re
+
                 next_job = re.search(r"(?m)^  [a-z][a-z0-9-]*:\s*$", after)
-                job_body = after[:next_job.start()] if next_job else after
-                rest = after[next_job.start():] if next_job else ""
-                shifted = "".join("  " + line if line.strip() else line
-                                  for line in job_body.splitlines(keepends=True))
-                file.write_text(before + "  " + job + ":\n" +
-                                shifted.replace("      runs-on:", "      if: false\n      runs-on:", 1)
-                                + rest)
+                job_body = after[: next_job.start()] if next_job else after
+                rest = after[next_job.start() :] if next_job else ""
+                shifted = "".join(
+                    "  " + line if line.strip() else line
+                    for line in job_body.splitlines(keepends=True)
+                )
+                file.write_text(
+                    before
+                    + "  "
+                    + job
+                    + ":\n"
+                    + shifted.replace(
+                        "      runs-on:", "      if: false\n      runs-on:", 1
+                    )
+                    + rest
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any("mandatory job must be unconditional" in e
-                                    for e in errors), errors)
+                self.assertTrue(
+                    any("mandatory job must be unconditional" in e for e in errors),
+                    errors,
+                )
                 file.write_text(source)
 
     def test_canonical_steps_reject_conditional_execution(self):
-        for label in ("Run canonical Linura checks",
-                      "Verify canonical crates.io package",
-                      "Verify canonical PyPI package"):
+        for label in (
+            "Run canonical Linura checks",
+            "Verify canonical crates.io package",
+            "Verify canonical PyPI package",
+        ):
             with self.subTest(step=label):
                 path = ".github/workflows/ci.yml"
                 before = "      - name: " + label + "\n        run:"
-                self.change(path, before,
-                            "      - name: " + label + "\n        if: false\n        run:")
+                self.change(
+                    path,
+                    before,
+                    "      - name: " + label + "\n        if: false\n        run:",
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any("missing unconditional executable step: " + label in e
-                                    for e in errors), errors)
-                self.change(path, "      - name: " + label + "\n        if: false\n        run:", before)
+                self.assertTrue(
+                    any(
+                        "missing unconditional executable step: " + label in e
+                        for e in errors
+                    ),
+                    errors,
+                )
+                self.change(
+                    path,
+                    "      - name: " + label + "\n        if: false\n        run:",
+                    before,
+                )
 
     def test_canonical_checks_cannot_report_success_after_ignored_errors(self):
-        self.change(".github/workflows/ci.yml",
-                    "run: cargo xtask check", "run: cargo xtask check || true")
-        self.assertTrue(any("missing unconditional executable step: Run canonical Linura checks"
-                            in e for e in gates.check(self.root)))
+        self.change(
+            ".github/workflows/ci.yml",
+            "run: cargo xtask check",
+            "run: cargo xtask check || true",
+        )
+        self.assertTrue(
+            any(
+                "missing unconditional executable step: Run canonical Linura checks"
+                in e
+                for e in gates.check(self.root)
+            )
+        )
 
     def test_pypi_verification_cannot_exit_before_package_checks(self):
         workflow = ".github/workflows/ci.yml"
-        self.change(workflow,
-                    "          set -euo pipefail\n"
-                    "          PYTHONPATH=bindings/python/src python3 -m unittest discover",
-                    "          set -euo pipefail\n"
-                    "          exit 0\n"
-                    "          PYTHONPATH=bindings/python/src python3 -m unittest discover")
+        self.change(
+            workflow,
+            "          set -euo pipefail\n"
+            "          PYTHONPATH=bindings/python/src python3 -m unittest discover",
+            "          set -euo pipefail\n"
+            "          exit 0\n"
+            "          PYTHONPATH=bindings/python/src python3 -m unittest discover",
+        )
         errors = gates.check(self.root)
         self.assertTrue(
-            any("missing unconditional executable step: Verify canonical PyPI package" in e
-                for e in errors), errors,
+            any(
+                "missing unconditional executable step: Verify canonical PyPI package"
+                in e
+                for e in errors
+            ),
+            errors,
         )
 
     def test_pypi_verification_cannot_skip_wheel_installation(self):
         workflow = ".github/workflows/ci.yml"
-        self.change(workflow,
-                    "          python3 -m pip install ",
-                    "          true # pip installation removed")
+        self.change(
+            workflow,
+            "          python3 -m pip install ",
+            "          true # pip installation removed",
+        )
         errors = gates.check(self.root)
         self.assertTrue(
-            any("missing unconditional executable step: Verify canonical PyPI package" in e
-                for e in errors), errors,
+            any(
+                "missing unconditional executable step: Verify canonical PyPI package"
+                in e
+                for e in errors
+            ),
+            errors,
         )
 
     def test_codeql_must_analyze_configured_rust_and_javascript(self):
@@ -1505,35 +2168,58 @@ class ValidationGateTests(unittest.TestCase):
         ):
             with self.subTest(setting=replacement.strip()):
                 target.write_text(
-                    original.replace("          languages: rust,javascript-typescript\n", replacement, 1),
+                    original.replace(
+                        "          languages: rust,javascript-typescript\n",
+                        replacement,
+                        1,
+                    ),
                     encoding="utf-8",
                 )
                 errors = gates.check(self.root)
                 self.assertTrue(
-                    any("CodeQL initialization must configure exactly Rust and JavaScript" in e
-                        for e in errors), errors,
+                    any(
+                        "CodeQL initialization must configure exactly Rust and JavaScript"
+                        in e
+                        for e in errors
+                    ),
+                    errors,
                 )
         target.write_text(original, encoding="utf-8")
 
     def test_codeql_actions_cannot_be_conditional(self):
         path = ".github/workflows/codeql.yml"
-        self.change(path, "          languages: rust,javascript-typescript\n",
-                    "          languages: rust,javascript-typescript\n        if: false\n")
-        self.assertTrue(any("CodeQL missing unconditional SHA-pinned action: "
-                            "github/codeql-action/init@" in e
-                            for e in gates.check(self.root)))
+        self.change(
+            path,
+            "          languages: rust,javascript-typescript\n",
+            "          languages: rust,javascript-typescript\n        if: false\n",
+        )
+        self.assertTrue(
+            any(
+                "CodeQL missing unconditional SHA-pinned action: "
+                "github/codeql-action/init@" in e
+                for e in gates.check(self.root)
+            )
+        )
 
     def test_required_job_cannot_be_skipped_by_failed_dependency(self):
-        self.change(".github/workflows/ci.yml", "  canonical-check:\n",
-                    "  canonical-check:\n    needs: optional-job\n")
+        self.change(
+            ".github/workflows/ci.yml",
+            "  canonical-check:\n",
+            "  canonical-check:\n    needs: optional-job\n",
+        )
         self.assertTrue(
-            any("mandatory job must be unconditional" in x
-                for x in gates.check(self.root))
+            any(
+                "mandatory job must be unconditional" in x
+                for x in gates.check(self.root)
+            )
         )
 
     def test_unfiltered_ci_cannot_be_path_filtered(self):
-        self.change(".github/workflows/ci.yml", "  pull_request:\n",
-                    "  pull_request:\n    paths: [\"docs/**\"]\n")
+        self.change(
+            ".github/workflows/ci.yml",
+            "  pull_request:\n",
+            '  pull_request:\n    paths: ["docs/**"]\n',
+        )
         self.assertTrue(any("every PR" in x for x in gates.check(self.root)))
 
     def test_all_codex_entry_points_must_trigger_environment_validation(self):
@@ -1541,35 +2227,50 @@ class ValidationGateTests(unittest.TestCase):
         source = (self.root / path).read_text(encoding="utf-8")
         self.assertIn('      - "scripts/*codex*.sh"\n', source)
         (self.root / path).write_text(
-            source.replace('      - "scripts/*codex*.sh"\n',
-                           '      - "scripts/setup_codex_environment.sh"\n')
+            source.replace(
+                '      - "scripts/*codex*.sh"\n',
+                '      - "scripts/setup_codex_environment.sh"\n',
+            )
         )
         errors = gates.check(self.root)
-        for script in ("scripts/preflight_codex_environment.sh",
-                       "scripts/maintain_codex_environment.sh",
-                       "scripts/run_codex.sh"):
+        for script in (
+            "scripts/preflight_codex_environment.sh",
+            "scripts/maintain_codex_environment.sh",
+            "scripts/run_codex.sh",
+        ):
             with self.subTest(script=script):
-                self.assertTrue(any(script in error and "missing critical PR trigger" in error
-                                    for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        script in error and "missing critical PR trigger" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
 
-    def test_codex_version_and_bindings_lock_changes_must_trigger_fresh_environment(self):
+    def test_codex_version_and_bindings_lock_changes_must_trigger_fresh_environment(
+        self,
+    ):
         path = ".github/workflows/codex-environment.yml"
         source = (self.root / path).read_text(encoding="utf-8")
         self.assertIn('      - "tools/codex/**"\n', source)
         self.assertIn('      - "bindings/python/build-requirements.lock"\n', source)
         (self.root / path).write_text(
-            source.replace('      - "tools/codex/**"\n',
-                           '      - "tools/codex/doctor.py"\n', 1)
-                  .replace('      - "bindings/python/build-requirements.lock"\n',
-                           "", 1)
+            source.replace(
+                '      - "tools/codex/**"\n', '      - "tools/codex/doctor.py"\n', 1
+            ).replace('      - "bindings/python/build-requirements.lock"\n', "", 1)
         )
         errors = gates.check(self.root)
-        for contract in ("tools/codex/versions.env",
-                         "bindings/python/build-requirements.lock"):
+        for contract in (
+            "tools/codex/versions.env",
+            "bindings/python/build-requirements.lock",
+        ):
             with self.subTest(contract=contract):
                 self.assertTrue(
-                    any(contract in e and "missing critical PR trigger" in e
-                        for e in errors), errors
+                    any(
+                        contract in e and "missing critical PR trigger" in e
+                        for e in errors
+                    ),
+                    errors,
                 )
 
     def test_rustup_bootstrap_helper_must_trigger_fresh_environment(self):
@@ -1577,13 +2278,19 @@ class ValidationGateTests(unittest.TestCase):
         source = (self.root / workflow).read_text(encoding="utf-8")
         self.assertIn('      - "scripts/lib/*.sh"\n', source)
         (self.root / workflow).write_text(
-            source.replace('      - "scripts/lib/*.sh"\n',
-                           '      - "scripts/lib/codex_source_state.sh"\n')
+            source.replace(
+                '      - "scripts/lib/*.sh"\n',
+                '      - "scripts/lib/codex_source_state.sh"\n',
+            )
         )
         errors = gates.check(self.root)
         self.assertTrue(
-            any("codex: missing critical PR trigger: scripts/lib/bootstrap_rustup.sh" in e
-                for e in errors), errors,
+            any(
+                "codex: missing critical PR trigger: scripts/lib/bootstrap_rustup.sh"
+                in e
+                for e in errors
+            ),
+            errors,
         )
 
     def test_mandatory_workflow_and_job_cannot_override_run_shell(self):
@@ -1592,39 +2299,63 @@ class ValidationGateTests(unittest.TestCase):
             target = self.root / workflow
             original = target.read_text(encoding="utf-8")
             with self.subTest(job=job, scope="workflow"):
-                target.write_text("defaults:\n  run:\n    shell: " + unsafe_shell +
-                                  "\n" + original, encoding="utf-8")
+                target.write_text(
+                    "defaults:\n  run:\n    shell: " + unsafe_shell + "\n" + original,
+                    encoding="utf-8",
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any("run defaults may bypass mandatory" in e
-                                    for e in errors), errors)
+                self.assertTrue(
+                    any("run defaults may bypass mandatory" in e for e in errors),
+                    errors,
+                )
                 target.write_text(original, encoding="utf-8")
             with self.subTest(job=job, scope="job"):
                 marker = "  " + job + ":\n"
                 self.assertIn(marker, original)
-                target.write_text(original.replace(
-                    marker, marker + "    defaults:\n      run:\n        shell: " +
-                    unsafe_shell + "\n", 1,
-                ), encoding="utf-8")
+                target.write_text(
+                    original.replace(
+                        marker,
+                        marker
+                        + "    defaults:\n      run:\n        shell: "
+                        + unsafe_shell
+                        + "\n",
+                        1,
+                    ),
+                    encoding="utf-8",
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any("run defaults may bypass mandatory" in e
-                                    for e in errors), errors)
+                self.assertTrue(
+                    any("run defaults may bypass mandatory" in e for e in errors),
+                    errors,
+                )
                 target.write_text(original, encoding="utf-8")
 
     def test_mandatory_step_cannot_override_run_shell(self):
         for workflow, label, expected in (
-            (".github/workflows/ci.yml", "Run canonical Linura checks",
-             "missing unconditional executable step: Run canonical Linura checks"),
-            (".github/workflows/security.yml", "Audit Rust dependencies",
-             "security audit must run unconditionally"),
+            (
+                ".github/workflows/ci.yml",
+                "Run canonical Linura checks",
+                "missing unconditional executable step: Run canonical Linura checks",
+            ),
+            (
+                ".github/workflows/security.yml",
+                "Audit Rust dependencies",
+                "security audit must run unconditionally",
+            ),
         ):
             with self.subTest(step=label):
                 target = self.root / workflow
                 original = target.read_text(encoding="utf-8")
                 marker = "      - name: " + label + "\n"
                 self.assertIn(marker, original)
-                target.write_text(original.replace(
-                    marker, marker + "        shell: bash -c 'exit 0' {0}\n", 1,
-                ), encoding="utf-8")
+                target.write_text(
+                    original.replace(
+                        marker,
+                        marker + "        shell: bash -c 'exit 0' {0}\n",
+                        1,
+                    ),
+                    encoding="utf-8",
+                )
                 errors = gates.check(self.root)
                 self.assertTrue(any(expected in e for e in errors), errors)
                 target.write_text(original, encoding="utf-8")
@@ -1635,8 +2366,10 @@ class ValidationGateTests(unittest.TestCase):
             original = target.read_text(encoding="utf-8")
             for scope in ("workflow", "job"):
                 if scope == "workflow":
-                    modified = ("defaults:\n  run:\n"
-                                "    shell: bash -c 'exit 0' {0}\n" + original)
+                    modified = (
+                        "defaults:\n  run:\n"
+                        "    shell: bash -c 'exit 0' {0}\n" + original
+                    )
                 else:
                     job = gates.SPECIALIZED_REQUIRED_JOBS[name][0]
                     marker = "  " + job + ":\n"
@@ -1650,10 +2383,14 @@ class ValidationGateTests(unittest.TestCase):
                 with self.subTest(lane=name, scope=scope):
                     target.write_text(modified, encoding="utf-8")
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        name + ": inherited run defaults may bypass qualification" in e
-                        for e in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            name + ": inherited run defaults may bypass qualification"
+                            in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
             target.write_text(original, encoding="utf-8")
 
     def test_specialized_required_jobs_reject_noop_step_shells(self):
@@ -1668,24 +2405,37 @@ class ValidationGateTests(unittest.TestCase):
             step = re.search(r"(?m)^      - (?:name|uses):[^\n]*\n", rest)
             if step is None:
                 continue  # Caller-only reusable jobs contain no executable steps.
-            injected = rest[:step.end()] + (
-                "        shell: bash -c 'exit 0' {0}\n") + rest[step.end():]
+            injected = (
+                rest[: step.end()]
+                + ("        shell: bash -c 'exit 0' {0}\n")
+                + rest[step.end() :]
+            )
             with self.subTest(lane=name, job=job):
                 target.write_text(before + marker + injected, encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    name + ": unapproved step shell may bypass qualification" in e
-                    for e in errors
-                ), errors)
+                self.assertTrue(
+                    any(
+                        name + ": unapproved step shell may bypass qualification" in e
+                        for e in errors
+                    ),
+                    errors,
+                )
             target.write_text(original, encoding="utf-8")
 
     def test_required_qualification_steps_reject_unreviewed_guards(self):
-        lanes = [(name, workflow, job)
-                 for name, (workflow, _) in gates.SPECIALIZED.items()
-                 for job in gates.SPECIALIZED_REQUIRED_JOBS[name]]
-        lanes.extend(("v010-reusable",
-                      ".github/workflows/v010-shell-runtime-qualification.yml",
-                      job) for job in ("substrate", "runtime"))
+        lanes = [
+            (name, workflow, job)
+            for name, (workflow, _) in gates.SPECIALIZED.items()
+            for job in gates.SPECIALIZED_REQUIRED_JOBS[name]
+        ]
+        lanes.extend(
+            (
+                "v010-reusable",
+                ".github/workflows/v010-shell-runtime-qualification.yml",
+                job,
+            )
+            for job in ("substrate", "runtime")
+        )
         for name, workflow, job in lanes:
             target = self.root / workflow
             original = target.read_text(encoding="utf-8")
@@ -1696,28 +2446,39 @@ class ValidationGateTests(unittest.TestCase):
             self.assertIsNotNone(first, (name, job))
             marker = first.group(0) + "\n"
             self.assertIn(marker, original)
-            for directive in ("if: false", "if: always()",
-                              '"\\u0069f": false',
-                              "continue-on-error: true"):
+            for directive in (
+                "if: false",
+                "if: always()",
+                '"\\u0069f": false',
+                "continue-on-error: true",
+            ):
                 with self.subTest(lane=name, job=job, directive=directive):
                     target.write_text(
                         original.replace(
-                            marker, marker + "        " + directive + "\n", 1),
+                            marker, marker + "        " + directive + "\n", 1
+                        ),
                         encoding="utf-8",
                     )
                     errors = gates.check(self.root)
                     expected = (
-                        name + ": required qualification step guard may bypass execution: " +
-                        job if name != "v010-reusable" else
-                        "v0.10 shell-runtime " + job +
-                        ": required qualification step guard may bypass execution")
+                        name
+                        + ": required qualification step guard may bypass execution: "
+                        + job
+                        if name != "v010-reusable"
+                        else "v0.10 shell-runtime "
+                        + job
+                        + ": required qualification step guard may bypass execution"
+                    )
                     self.assertTrue(any(expected in e for e in errors), errors)
             target.write_text(original, encoding="utf-8")
 
     def test_reviewed_conditional_cleanup_cannot_be_changed_to_skip(self):
         for (name, job), steps in gates.REVIEWED_STEP_CONDITIONS.items():
-            workflow = (".github/workflows/v010-shell-runtime-qualification.yml"
-                        if name == "v010-reusable" else gates.SPECIALIZED[name][0])
+            workflow = (
+                ".github/workflows/v010-shell-runtime-qualification.yml"
+                if name == "v010-reusable"
+                else gates.SPECIALIZED[name][0]
+            )
             target = self.root / workflow
             original = target.read_text(encoding="utf-8")
             label, condition = next(iter(steps.items()))
@@ -1726,31 +2487,40 @@ class ValidationGateTests(unittest.TestCase):
             with self.subTest(lane=name, job=job, step=label):
                 target.write_text(
                     original.replace(
-                        marker, marker.replace("if: " + condition, "if: false"), 1),
+                        marker, marker.replace("if: " + condition, "if: false"), 1
+                    ),
                     encoding="utf-8",
                 )
                 errors = gates.check(self.root)
                 expected = (
-                    name + ": required qualification step guard may bypass execution: " +
-                    job if name != "v010-reusable" else
-                    "v0.10 shell-runtime " + job +
-                    ": required qualification step guard may bypass execution")
+                    name
+                    + ": required qualification step guard may bypass execution: "
+                    + job
+                    if name != "v010-reusable"
+                    else "v0.10 shell-runtime "
+                    + job
+                    + ": required qualification step guard may bypass execution"
+                )
                 self.assertTrue(any(expected in e for e in errors), errors)
             target.write_text(original, encoding="utf-8")
 
     def test_step_guard_reader_preserves_literal_shell_source(self):
-        body = ("    steps:\n"
-                "      - name: Qualify real step\n"
-                "        run: |\n"
-                "          echo 'if: false'\n"
-                "          echo 'continue-on-error: true'\n")
+        body = (
+            "    steps:\n"
+            "      - name: Qualify real step\n"
+            "        run: |\n"
+            "          echo 'if: false'\n"
+            "          echo 'continue-on-error: true'\n"
+        )
         self.assertTrue(gates.protected_step_guards(body, 4, {}))
 
     def test_unknown_step_mapping_cannot_hide_conditional_action(self):
-        body = ("    steps:\n"
-                "      - name: Qualify real step\n"
-                "        run: echo test\n"
-                "      - {name: Replace qualification, if: false, run: true}\n")
+        body = (
+            "    steps:\n"
+            "      - name: Qualify real step\n"
+            "        run: echo test\n"
+            "      - {name: Replace qualification, if: false, run: true}\n"
+        )
         self.assertFalse(gates.protected_step_guards(body, 4, {}))
 
     def test_specialized_required_job_cannot_be_skipped(self):
@@ -1761,14 +2531,25 @@ class ValidationGateTests(unittest.TestCase):
                     original = target.read_text(encoding="utf-8")
                     marker = "  " + required_job + ":\n"
                     self.assertIn(marker, original)
-                    target.write_text(original.replace(
-                        marker, marker + "    if: false\n", 1,
-                    ), encoding="utf-8")
+                    target.write_text(
+                        original.replace(
+                            marker,
+                            marker + "    if: false\n",
+                            1,
+                        ),
+                        encoding="utf-8",
+                    )
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        name + ": required qualification job cannot be skipped: " +
-                        required_job in e for e in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            name
+                            + ": required qualification job cannot be skipped: "
+                            + required_job
+                            in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
                     target.write_text(original, encoding="utf-8")
 
     def test_specialized_entry_jobs_reject_skip_causing_dependencies(self):
@@ -1781,57 +2562,96 @@ class ValidationGateTests(unittest.TestCase):
                         self.assertIn("    needs: scope\n", original)
                         modified = original.replace(
                             "    needs: scope\n",
-                            "    needs: [scope, conditional-helper]\n", 1,
+                            "    needs: [scope, conditional-helper]\n",
+                            1,
                         )
                     else:
                         marker = "  " + required_job + ":\n"
                         self.assertIn(marker, original)
                         modified = original.replace(
-                            marker, marker + "    needs: conditional-helper\n", 1,
+                            marker,
+                            marker + "    needs: conditional-helper\n",
+                            1,
                         )
                     target.write_text(modified, encoding="utf-8")
                     errors = gates.check(self.root)
                     self.assertTrue(
-                        any(name + ": required qualification job has unapproved dependencies: "
-                            + required_job in e for e in errors), errors,
+                        any(
+                            name
+                            + ": required qualification job has unapproved dependencies: "
+                            + required_job
+                            in e
+                            for e in errors
+                        ),
+                        errors,
                     )
                     target.write_text(original, encoding="utf-8")
 
     def test_v09_contract_dependency_is_required(self):
-        self.change(".github/workflows/v09-qualification.yml",
-                    "    needs: scope\n", "")
+        self.change(".github/workflows/v09-qualification.yml", "    needs: scope\n", "")
         errors = gates.check(self.root)
         self.assertTrue(
-            any("v09: required qualification job has unapproved dependencies: contract" in e
-                for e in errors), errors,
+            any(
+                "v09: required qualification job has unapproved dependencies: contract"
+                in e
+                for e in errors
+            ),
+            errors,
         )
 
     def test_specialized_required_job_cannot_ignore_failure(self):
         target = self.root / ".github/workflows/codex-environment.yml"
         original = target.read_text(encoding="utf-8")
-        target.write_text(original.replace(
-            "  fresh-environment:\n",
-            "  fresh-environment:\n    continue-on-error: true\n", 1,
-        ), encoding="utf-8")
+        target.write_text(
+            original.replace(
+                "  fresh-environment:\n",
+                "  fresh-environment:\n    continue-on-error: true\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any("codex: required qualification job cannot be skipped:"
-                            " fresh-environment" in e for e in errors), errors)
+        self.assertTrue(
+            any(
+                "codex: required qualification job cannot be skipped:"
+                " fresh-environment" in e
+                for e in errors
+            ),
+            errors,
+        )
 
     def test_specialized_pr_branch_restrictions_are_rejected(self):
         for name, (workflow, _) in gates.SPECIALIZED.items():
             with self.subTest(name=name):
-                self.change(workflow, "  pull_request:\n",
-                            "  pull_request:\n    branches: [never]\n")
-                self.assertTrue(any(name + ": specialized PR event may contain only paths" in x
-                                    for x in gates.check(self.root)))
-                self.change(workflow, "  pull_request:\n    branches: [never]\n",
-                            "  pull_request:\n")
+                self.change(
+                    workflow,
+                    "  pull_request:\n",
+                    "  pull_request:\n    branches: [never]\n",
+                )
+                self.assertTrue(
+                    any(
+                        name + ": specialized PR event may contain only paths" in x
+                        for x in gates.check(self.root)
+                    )
+                )
+                self.change(
+                    workflow,
+                    "  pull_request:\n    branches: [never]\n",
+                    "  pull_request:\n",
+                )
 
     def test_specialized_pr_event_type_restrictions_are_rejected(self):
-        self.change(".github/workflows/codex-environment.yml",
-                    "  pull_request:\n", "  pull_request:\n    types: [opened]\n")
-        self.assertTrue(any("codex: specialized PR event may contain only paths" in x
-                            for x in gates.check(self.root)))
+        self.change(
+            ".github/workflows/codex-environment.yml",
+            "  pull_request:\n",
+            "  pull_request:\n    types: [opened]\n",
+        )
+        self.assertTrue(
+            any(
+                "codex: specialized PR event may contain only paths" in x
+                for x in gates.check(self.root)
+            )
+        )
 
     def test_v09_duplicate_path_filters_are_rejected(self):
         workflow = ".github/workflows/v09-qualification.yml"
@@ -1839,23 +2659,33 @@ class ValidationGateTests(unittest.TestCase):
         original = target.read_text(encoding="utf-8")
         marker = '      - "crates/linura-provenance/**"\n'
         self.assertEqual(original.count(marker), 1)
-        target.write_text(original.replace(marker, marker + marker, 1),
-                          encoding="utf-8")
+        target.write_text(
+            original.replace(marker, marker + marker, 1), encoding="utf-8"
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any("v09: missing or duplicated path filters"
-                            in error for error in errors), errors)
+        self.assertTrue(
+            any("v09: missing or duplicated path filters" in error for error in errors),
+            errors,
+        )
 
     def test_v09_untriggered_full_route_must_fail_the_canonical_gate(self):
         contract = self.root / "contracts/v09-qualification-routing.toml"
         original = contract.read_text(encoding="utf-8")
         protected = '  "crates/linura-policy/",\n'
         self.assertIn(protected, original)
-        contract.write_text(original.replace(
-            protected, '  "unrouted-v09-authority/",\n', 1), encoding="utf-8")
+        contract.write_text(
+            original.replace(protected, '  "unrouted-v09-authority/",\n', 1),
+            encoding="utf-8",
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any(
-            "v0.9: untriggered full-qualification prefix: unrouted-v09-authority/"
-            in error for error in errors), errors)
+        self.assertTrue(
+            any(
+                "v0.9: untriggered full-qualification prefix: unrouted-v09-authority/"
+                in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_v09_required_full_prefixes_cannot_self_erase(self):
         contract = self.root / "contracts/v09-qualification-routing.toml"
@@ -1864,12 +2694,16 @@ class ValidationGateTests(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 token = '  "' + prefix + '",\n'
                 self.assertIn(token, original)
-                contract.write_text(original.replace(token, "", 1),
-                                    encoding="utf-8")
+                contract.write_text(original.replace(token, "", 1), encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: missing required full-qualification prefix: " + prefix
-                    in error for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: missing required full-qualification prefix: " + prefix
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 contract.write_text(original, encoding="utf-8")
 
     def test_v09_required_full_exact_inputs_cannot_self_erase(self):
@@ -1879,12 +2713,16 @@ class ValidationGateTests(unittest.TestCase):
             with self.subTest(path=path):
                 token = '  "' + path + '",\n'
                 self.assertIn(token, original)
-                contract.write_text(original.replace(token, "", 1),
-                                    encoding="utf-8")
+                contract.write_text(original.replace(token, "", 1), encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: missing required full-qualification exact input: " + path
-                    in error for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: missing required full-qualification exact input: " + path
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 contract.write_text(original, encoding="utf-8")
 
     def test_v09_cargo_config_must_trigger_full_qualification(self):
@@ -1896,18 +2734,32 @@ class ValidationGateTests(unittest.TestCase):
                 workflow_original = workflow.read_text(encoding="utf-8")
                 self.assertIn('  "' + path + '",\n', contract_original)
                 self.assertIn('      - "' + path + '"\n', workflow_original)
-                contract.write_text(contract_original.replace(
-                    '  "' + path + '",\n', "", 1), encoding="utf-8")
+                contract.write_text(
+                    contract_original.replace('  "' + path + '",\n', "", 1),
+                    encoding="utf-8",
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: missing required full-qualification toolchain: " + path
-                    in error for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: missing required full-qualification toolchain: " + path
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 contract.write_text(contract_original, encoding="utf-8")
-                workflow.write_text(workflow_original.replace(
-                    '      - "' + path + '"\n', "", 1), encoding="utf-8")
+                workflow.write_text(
+                    workflow_original.replace('      - "' + path + '"\n', "", 1),
+                    encoding="utf-8",
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any("v0.9: untriggered full-qualification path: " +
-                                    path in error for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: untriggered full-qualification path: " + path in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 workflow.write_text(workflow_original, encoding="utf-8")
 
     def test_v09_embedded_audio_input_cannot_skip_full_lane(self):
@@ -1918,28 +2770,42 @@ class ValidationGateTests(unittest.TestCase):
         old_workflow = workflow.read_text(encoding="utf-8")
         self.assertIn('  "' + path + '",\n', old_contract)
         self.assertIn('      - "' + path + '"\n', old_workflow)
-        contract.write_text(old_contract.replace('  "' + path + '",\n', "", 1),
-                            encoding="utf-8")
+        contract.write_text(
+            old_contract.replace('  "' + path + '",\n', "", 1), encoding="utf-8"
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any(
-            "v0.9: missing embedded audio helper qualification input" in error
-            for error in errors), errors)
+        self.assertTrue(
+            any(
+                "v0.9: missing embedded audio helper qualification input" in error
+                for error in errors
+            ),
+            errors,
+        )
         contract.write_text(old_contract, encoding="utf-8")
-        workflow.write_text(old_workflow.replace(
-            '      - "' + path + '"\n', "", 1), encoding="utf-8")
+        workflow.write_text(
+            old_workflow.replace('      - "' + path + '"\n', "", 1), encoding="utf-8"
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any(
-            "v0.9: untriggered full-qualification path: " + path in error
-            for error in errors), errors)
+        self.assertTrue(
+            any(
+                "v0.9: untriggered full-qualification path: " + path in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_v09_production_authority_vm_qualification_is_not_optional(self):
         vm = ".github/workflows/vm-acceptance.yml"
         mutations = (
-            ("cargo test --locked -p linura-authorityd --bin linura-authorityd",
-             "echo unit-tests-skipped"),
-            ("cargo build --release --locked -p linura-authorityd --bin linura-authorityd",
-             "echo production-build-skipped"),
-            ('binaries+=(linura-authorityd)', 'echo authority-identity-omitted'),
+            (
+                "cargo test --locked -p linura-authorityd --bin linura-authorityd",
+                "echo unit-tests-skipped",
+            ),
+            (
+                "cargo build --release --locked -p linura-authorityd --bin linura-authorityd",
+                "echo production-build-skipped",
+            ),
+            ("binaries+=(linura-authorityd)", "echo authority-identity-omitted"),
             ('required_binaries.add("linura-authorityd")', "pass"),
         )
         for before, after in mutations:
@@ -1948,9 +2814,10 @@ class ValidationGateTests(unittest.TestCase):
                 original = target.read_text(encoding="utf-8")
                 self.change(vm, before, after)
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: production authority " in error for error in errors),
-                    errors)
+                self.assertTrue(
+                    any("v0.9: production authority " in error for error in errors),
+                    errors,
+                )
                 target.write_text(original, encoding="utf-8")
 
     def test_v09_authority_negative_case_and_proof_are_required(self):
@@ -1971,39 +2838,58 @@ class ValidationGateTests(unittest.TestCase):
         for before, after in mutations:
             with self.subTest(mutation=after):
                 self.assertIn(before, original)
-                target.write_text(original.replace(before, after, 1),
-                                  encoding="utf-8")
+                target.write_text(original.replace(before, after, 1), encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: production authority negative VM acceptance step missing"
-                    in error for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: production authority negative VM acceptance step missing"
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 target.write_text(original, encoding="utf-8")
-        self.change(".github/workflows/v09-qualification.yml",
-                    'production = evidence.get("binaries", {}).get("linura-authorityd")',
-                    'production = None')
+        self.change(
+            ".github/workflows/v09-qualification.yml",
+            'production = evidence.get("binaries", {}).get("linura-authorityd")',
+            "production = None",
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any(
-            "v0.9: production authority executable evidence not bound to full proof"
-            in error for error in errors), errors)
+        self.assertTrue(
+            any(
+                "v0.9: production authority executable evidence not bound to full proof"
+                in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_v09_changed_file_provenance_cannot_be_substituted(self):
         workflow = ".github/workflows/v09-qualification.yml"
         mutations = (
-            ('changed_path = pathlib.Path(sys.argv[1])',
-             'changed_path = pathlib.Path("docs/harmless.md")'),
-            ('pathlib.Path("contracts/v09-qualification-routing.toml")',
-             'pathlib.Path("docs/harmless.toml")'),
-            ('          changed = sorted(\n'
-             '              {\n'
-             '                  os.fsdecode(path)\n'
-             '                  for path in changed_path.read_bytes().split(b"\\0")\n'
-             '                  if path\n'
-             '              }\n'
-             '          )',
-             '          changed = ["docs/harmless.md"]'),
-            ('full = requires_full_qualification(changed, contract)',
-             'changed = ["docs/harmless.md"]\n'
-             '          full = requires_full_qualification(changed, contract)'),
+            (
+                "changed_path = pathlib.Path(sys.argv[1])",
+                'changed_path = pathlib.Path("docs/harmless.md")',
+            ),
+            (
+                'pathlib.Path("contracts/v09-qualification-routing.toml")',
+                'pathlib.Path("docs/harmless.toml")',
+            ),
+            (
+                "          changed = sorted(\n"
+                "              {\n"
+                "                  os.fsdecode(path)\n"
+                '                  for path in changed_path.read_bytes().split(b"\\0")\n'
+                "                  if path\n"
+                "              }\n"
+                "          )",
+                '          changed = ["docs/harmless.md"]',
+            ),
+            (
+                "full = requires_full_qualification(changed, contract)",
+                'changed = ["docs/harmless.md"]\n'
+                "          full = requires_full_qualification(changed, contract)",
+            ),
         )
         for before, after in mutations:
             with self.subTest(mutation=after):
@@ -2012,42 +2898,60 @@ class ValidationGateTests(unittest.TestCase):
                 self.assertIn(before, original)
                 target.write_text(original.replace(before, after, 1), encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: shared qualification classifier disconnected" in error
-                    for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: shared qualification classifier disconnected" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 target.write_text(original, encoding="utf-8")
 
     def test_v09_diff_input_must_be_the_exact_source(self):
         workflow = ".github/workflows/v09-qualification.yml"
-        self.change(workflow,
-                    'git diff --no-renames --name-only -z "$merge_base" "$SOURCE_SHA" > "$changed"',
-                    'git diff --no-renames --name-only -z "$merge_base" "$SOURCE_SHA" > /dev/null')
+        self.change(
+            workflow,
+            'git diff --no-renames --name-only -z "$merge_base" "$SOURCE_SHA" > "$changed"',
+            'git diff --no-renames --name-only -z "$merge_base" "$SOURCE_SHA" > /dev/null',
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any(
-            "v0.9: shared qualification classifier disconnected" in error
-            for error in errors), errors)
+        self.assertTrue(
+            any(
+                "v0.9: shared qualification classifier disconnected" in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_v09_diff_execution_order_cannot_be_bypassed(self):
         workflow = ".github/workflows/v09-qualification.yml"
-        diff = ('          git diff --no-renames --name-only -z '
-                '"$merge_base" "$SOURCE_SHA" > "$changed"')
+        diff = (
+            "          git diff --no-renames --name-only -z "
+            '"$merge_base" "$SOURCE_SHA" > "$changed"'
+        )
         mutations = (
-            ('          if false; then\n' + diff + '\n          fi\n'
-             '          printf \'docs/harmless.md\\0\' > "$changed"'),
-            (diff + '\n'
-             '          printf \'docs/harmless.md\\0\' > "$changed"'),
+            (
+                "          if false; then\n" + diff + "\n          fi\n"
+                "          printf 'docs/harmless.md\\0' > \"$changed\""
+            ),
+            (diff + "\n          printf 'docs/harmless.md\\0' > \"$changed\""),
         )
         for replacement in mutations:
             with self.subTest(replacement=replacement):
                 target = self.root / workflow
                 original = target.read_text(encoding="utf-8")
                 self.assertIn(diff, original)
-                target.write_text(original.replace(diff, replacement, 1),
-                                  encoding="utf-8")
+                target.write_text(
+                    original.replace(diff, replacement, 1), encoding="utf-8"
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: shared qualification classifier disconnected" in error
-                    for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: shared qualification classifier disconnected" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 target.write_text(original, encoding="utf-8")
 
     def test_v09_routing_guards_cannot_remove_their_own_full_lane(self):
@@ -2057,16 +2961,24 @@ class ValidationGateTests(unittest.TestCase):
                 original = contract.read_text(encoding="utf-8")
                 token = '  "' + guard + '",\n'
                 self.assertIn(token, original)
-                contract.write_text(original.replace(token, "", 1),
-                                    encoding="utf-8")
+                contract.write_text(original.replace(token, "", 1), encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: missing required routing guard full qualification: " +
-                    guard in error for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: missing required routing guard full qualification: "
+                        + guard
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 contract.write_text(original, encoding="utf-8")
 
     def test_v09_executable_harness_cannot_drop_full_routing(self):
-        for harness in ("tools/acceptance.py", "scripts/qualification/v09-adversarial-guest.sh"):
+        for harness in (
+            "tools/acceptance.py",
+            "scripts/qualification/v09-adversarial-guest.sh",
+        ):
             with self.subTest(harness=harness):
                 contract = self.root / "contracts/v09-qualification-routing.toml"
                 original = contract.read_text(encoding="utf-8")
@@ -2074,13 +2986,21 @@ class ValidationGateTests(unittest.TestCase):
                 self.assertIn(token, original)
                 contract.write_text(original.replace(token, "", 1), encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: missing required full-qualification harness: " + harness
-                    in error for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: missing required full-qualification harness: " + harness
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 contract.write_text(original, encoding="utf-8")
 
     def test_v09_executable_harness_pr_filter_cannot_be_removed(self):
-        for harness in ("tools/acceptance.py", "scripts/qualification/v09-adversarial-guest.sh"):
+        for harness in (
+            "tools/acceptance.py",
+            "scripts/qualification/v09-adversarial-guest.sh",
+        ):
             with self.subTest(harness=harness):
                 workflow = self.root / ".github/workflows/v09-qualification.yml"
                 original = workflow.read_text(encoding="utf-8")
@@ -2088,55 +3008,85 @@ class ValidationGateTests(unittest.TestCase):
                 self.assertIn(token, original)
                 workflow.write_text(original.replace(token, "", 1), encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: untriggered full-qualification path: " + harness
-                    in error for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: untriggered full-qualification path: " + harness in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 workflow.write_text(original, encoding="utf-8")
 
     def test_v09_shared_classifier_must_stay_connected(self):
-        self.change(".github/workflows/v09-qualification.yml",
-                    "full = requires_full_qualification(changed, contract)",
-                    "full = False")
+        self.change(
+            ".github/workflows/v09-qualification.yml",
+            "full = requires_full_qualification(changed, contract)",
+            "full = False",
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any(
-            "v0.9: shared qualification classifier disconnected" in error
-            for error in errors), errors)
+        self.assertTrue(
+            any(
+                "v0.9: shared qualification classifier disconnected" in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_v09_commented_classifier_cannot_fake_live_routing(self):
-        self.change(".github/workflows/v09-qualification.yml",
-                    "          full = requires_full_qualification(changed, contract)",
-                    "          # full = requires_full_qualification(changed, contract)\n"
-                    "          full = False")
+        self.change(
+            ".github/workflows/v09-qualification.yml",
+            "          full = requires_full_qualification(changed, contract)",
+            "          # full = requires_full_qualification(changed, contract)\n"
+            "          full = False",
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any(
-            "v0.9: shared qualification classifier disconnected" in error
-            for error in errors), errors)
+        self.assertTrue(
+            any(
+                "v0.9: shared qualification classifier disconnected" in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_v09_classifier_result_cannot_be_overwritten(self):
-        self.change(".github/workflows/v09-qualification.yml",
-                    "          full = requires_full_qualification(changed, contract)",
-                    "          full = requires_full_qualification(changed, contract)\n"
-                    "          full = False")
+        self.change(
+            ".github/workflows/v09-qualification.yml",
+            "          full = requires_full_qualification(changed, contract)",
+            "          full = requires_full_qualification(changed, contract)\n"
+            "          full = False",
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any(
-            "v0.9: shared qualification classifier disconnected" in error
-            for error in errors), errors)
+        self.assertTrue(
+            any(
+                "v0.9: shared qualification classifier disconnected" in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_v09_classifier_cannot_be_hidden_in_dead_branch(self):
-        self.change(".github/workflows/v09-qualification.yml",
-                    "          full = requires_full_qualification(changed, contract)",
-                    "          if False:\n"
-                    "              full = requires_full_qualification(changed, contract)")
+        self.change(
+            ".github/workflows/v09-qualification.yml",
+            "          full = requires_full_qualification(changed, contract)",
+            "          if False:\n"
+            "              full = requires_full_qualification(changed, contract)",
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any(
-            "v0.9: shared qualification classifier disconnected" in error
-            for error in errors), errors)
+        self.assertTrue(
+            any(
+                "v0.9: shared qualification classifier disconnected" in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_v09_scope_output_must_forward_classifier_result(self):
         workflow = ".github/workflows/v09-qualification.yml"
         mutations = (
-            ("      full_qualification: ${{ steps.route.outputs.full_qualification }}",
-             "      full_qualification: ${{ 'false' }}"),
+            (
+                "      full_qualification: ${{ steps.route.outputs.full_qualification }}",
+                "      full_qualification: ${{ 'false' }}",
+            ),
             ("        id: route", "        id: harmless"),
         )
         for before, after in mutations:
@@ -2144,33 +3094,47 @@ class ValidationGateTests(unittest.TestCase):
                 target = self.root / workflow
                 original = target.read_text(encoding="utf-8")
                 self.assertIn(before, original)
-                target.write_text(original.replace(before, after, 1),
-                                  encoding="utf-8")
+                target.write_text(original.replace(before, after, 1), encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: shared qualification classifier disconnected" in error
-                    for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: shared qualification classifier disconnected" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 target.write_text(original, encoding="utf-8")
 
     def test_v09_scope_output_cannot_be_shadowed(self):
         workflow = ".github/workflows/v09-qualification.yml"
         target = self.root / workflow
         original = target.read_text(encoding="utf-8")
-        marker = "      full_qualification: ${{ steps.route.outputs.full_qualification }}\n"
+        marker = (
+            "      full_qualification: ${{ steps.route.outputs.full_qualification }}\n"
+        )
         self.assertIn(marker, original)
-        target.write_text(original.replace(
-            marker,
-            marker + "      alternate: ${{ 'false' }}\n",
-            1,
-        ), encoding="utf-8")
+        target.write_text(
+            original.replace(
+                marker,
+                marker + "      alternate: ${{ 'false' }}\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any(
-            "v0.9: shared qualification classifier disconnected" in error
-            for error in errors), errors)
+        self.assertTrue(
+            any(
+                "v0.9: shared qualification classifier disconnected" in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_v09_classifier_output_must_reflect_classifier_result(self):
         workflow = ".github/workflows/v09-qualification.yml"
-        original_write = r"""handle.write(f"full_qualification={'true' if full else 'false'}\n")"""
+        original_write = (
+            r"""handle.write(f"full_qualification={'true' if full else 'false'}\n")"""
+        )
         for replacement in (
             r'handle.write("full_qualification=false\n")',
             r'handle.write("full_qualification=true\n")',
@@ -2183,23 +3147,38 @@ class ValidationGateTests(unittest.TestCase):
                 target = self.root / workflow
                 original = target.read_text(encoding="utf-8")
                 self.assertIn(original_write, original)
-                target.write_text(original.replace(original_write, replacement, 1),
-                                  encoding="utf-8")
+                target.write_text(
+                    original.replace(original_write, replacement, 1), encoding="utf-8"
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: shared qualification classifier disconnected" in error
-                    for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: shared qualification classifier disconnected" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 target.write_text(original, encoding="utf-8")
 
     def test_v09_classifier_output_cannot_be_overwritten(self):
         workflow = ".github/workflows/v09-qualification.yml"
-        original_write = r"""handle.write(f"full_qualification={'true' if full else 'false'}\n")"""
-        replacement = original_write + '\n' + '          handle.write("full_qualification=false\\n")'
+        original_write = (
+            r"""handle.write(f"full_qualification={'true' if full else 'false'}\n")"""
+        )
+        replacement = (
+            original_write
+            + "\n"
+            + '          handle.write("full_qualification=false\\n")'
+        )
         self.change(workflow, original_write, replacement)
         errors = gates.check(self.root)
-        self.assertTrue(any(
-            "v0.9: shared qualification classifier disconnected" in error
-            for error in errors), errors)
+        self.assertTrue(
+            any(
+                "v0.9: shared qualification classifier disconnected" in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_v09_offline_vm_clients_must_trigger_full_qualification(self):
         for prefix in ("apps/linurad/", "apps/linuractl/", "crates/linura-sdk/"):
@@ -2212,19 +3191,31 @@ class ValidationGateTests(unittest.TestCase):
                 filter_line = '      - "' + prefix + '**"\n'
                 self.assertIn(declared, contract_original)
                 self.assertIn(filter_line, workflow_original)
-                contract.write_text(contract_original.replace(declared, "", 1),
-                                    encoding="utf-8")
+                contract.write_text(
+                    contract_original.replace(declared, "", 1), encoding="utf-8"
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: missing required full-qualification prefix: " + prefix
-                    in error for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: missing required full-qualification prefix: " + prefix
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 contract.write_text(contract_original, encoding="utf-8")
-                workflow.write_text(workflow_original.replace(filter_line, "", 1),
-                                    encoding="utf-8")
+                workflow.write_text(
+                    workflow_original.replace(filter_line, "", 1), encoding="utf-8"
+                )
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: untriggered full-qualification prefix: " + prefix
-                    in error for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: untriggered full-qualification prefix: " + prefix
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 workflow.write_text(workflow_original, encoding="utf-8")
 
     def test_v09_lane_job_graph_must_follow_classifier_output(self):
@@ -2283,19 +3274,29 @@ class ValidationGateTests(unittest.TestCase):
         for before, after in mutations:
             with self.subTest(replacement=after):
                 self.assertIn(before, original)
-                target.write_text(original.replace(before, after, 1),
-                                  encoding="utf-8")
+                target.write_text(original.replace(before, after, 1), encoding="utf-8")
                 errors = gates.check(self.root)
-                self.assertTrue(any(
-                    "v0.9: qualification lane job graph disconnected" in error
-                    for error in errors), errors)
+                self.assertTrue(
+                    any(
+                        "v0.9: qualification lane job graph disconnected" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
                 target.write_text(original, encoding="utf-8")
 
     def test_v09_routing_guard_must_trigger_v09_regression(self):
-        self.change(".github/workflows/v09-qualification.yml",
-                    '      - "tools/check_validation_gates.py"\n', "")
-        self.assertTrue(any("v09: missing critical PR trigger: tools/check_validation_gates.py" in x
-                            for x in gates.check(self.root)))
+        self.change(
+            ".github/workflows/v09-qualification.yml",
+            '      - "tools/check_validation_gates.py"\n',
+            "",
+        )
+        self.assertTrue(
+            any(
+                "v09: missing critical PR trigger: tools/check_validation_gates.py" in x
+                for x in gates.check(self.root)
+            )
+        )
 
     def test_every_specialized_lane_must_trigger_on_its_own_workflow(self):
         # Includes the two independent v0.4 fault-qualification lanes.
@@ -2305,11 +3306,17 @@ class ValidationGateTests(unittest.TestCase):
                 self.change(workflow, own_path, "")
                 errors = gates.check(self.root)
                 self.assertTrue(
-                    any(name + ": missing critical PR trigger: " + workflow in error
-                        for error in errors), errors
+                    any(
+                        name + ": missing critical PR trigger: " + workflow in error
+                        for error in errors
+                    ),
+                    errors,
                 )
-                self.change(workflow, '  pull_request:\n    paths:\n',
-                            '  pull_request:\n    paths:\n' + own_path)
+                self.change(
+                    workflow,
+                    "  pull_request:\n    paths:\n",
+                    "  pull_request:\n    paths:\n" + own_path,
+                )
 
     def test_guidance_only_does_not_trigger_expensive_v010_runtime(self):
         workflow = ".github/workflows/v010-qualification.yml"
@@ -2318,6 +3325,7 @@ class ValidationGateTests(unittest.TestCase):
         pr = gates.section(events, "pull_request", 2)
         paths = gates.section(pr, "paths", 4)
         import re
+
         patterns = re.findall(r'(?m)^      - "([^"]+)"\s*$', paths)
         for guidance in gates.GUIDANCE_EXCLUSIONS["v010"]:
             with self.subTest(path=guidance):
@@ -2325,8 +3333,12 @@ class ValidationGateTests(unittest.TestCase):
         actual_change = "apps/linura-shell/panel/WorkstationPanel.qml"
         self.assertTrue(gates.path_selected(actual_change, patterns))
         # A mixed documentation+code PR must still qualify the real code.
-        self.assertTrue(any(gates.path_selected(p, patterns)
-                            for p in (*gates.GUIDANCE_EXCLUSIONS["v010"], actual_change)))
+        self.assertTrue(
+            any(
+                gates.path_selected(p, patterns)
+                for p in (*gates.GUIDANCE_EXCLUSIONS["v010"], actual_change)
+            )
+        )
         self.assertTrue(gates.path_selected(workflow, patterns))
 
     def test_guidance_only_exclusion_cannot_be_removed(self):
@@ -2334,41 +3346,66 @@ class ValidationGateTests(unittest.TestCase):
         self.change(workflow, '      - "!apps/linura-shell/AGENTS.md"\n', "")
         errors = gates.check(self.root)
         self.assertTrue(
-            any("guidance-only change triggers machine qualification" in e for e in errors),
+            any(
+                "guidance-only change triggers machine qualification" in e
+                for e in errors
+            ),
             errors,
         )
 
     def test_negative_filter_cannot_hide_a_critical_source(self):
         workflow = ".github/workflows/v010-qualification.yml"
-        self.change(workflow,
-                    '      - "!apps/linura-shell/README.md"\n',
-                    '      - "!apps/linura-shell/README.md"\n'
-                    '      - "!apps/linura-shell/bridge/CMakeLists.txt"\n')
+        self.change(
+            workflow,
+            '      - "!apps/linura-shell/README.md"\n',
+            '      - "!apps/linura-shell/README.md"\n'
+            '      - "!apps/linura-shell/bridge/CMakeLists.txt"\n',
+        )
         errors = gates.check(self.root)
         self.assertTrue(
-            any("v010: missing critical PR trigger: apps/linura-shell/bridge/CMakeLists.txt"
-                in e for e in errors), errors,
+            any(
+                "v010: missing critical PR trigger: apps/linura-shell/bridge/CMakeLists.txt"
+                in e
+                for e in errors
+            ),
+            errors,
         )
 
     def test_later_positive_filter_reincludes_matching_source(self):
-        patterns = ["apps/linura-shell/**", "!apps/linura-shell/**",
-                    "apps/linura-shell/panel/**"]
-        self.assertTrue(gates.path_selected("apps/linura-shell/panel/WorkstationPanel.qml",
-                                            patterns))
+        patterns = [
+            "apps/linura-shell/**",
+            "!apps/linura-shell/**",
+            "apps/linura-shell/panel/**",
+        ]
+        self.assertTrue(
+            gates.path_selected(
+                "apps/linura-shell/panel/WorkstationPanel.qml", patterns
+            )
+        )
         self.assertFalse(gates.path_selected("apps/linura-shell/AGENTS.md", patterns))
-        self.assertFalse(gates.path_selected("apps/linura-shell/tray/SystemTrayView.qml",
-                                             patterns))
+        self.assertFalse(
+            gates.path_selected("apps/linura-shell/tray/SystemTrayView.qml", patterns)
+        )
 
     def test_v09_release_always_uses_full_qualification(self):
         workflow = ".github/workflows/v09-qualification.yml"
         self.change(workflow, "full_qualification=true", "full_qualification=false")
-        self.assertTrue(any("v0.9 must retain full release qualification" in e
-                            for e in gates.check(self.root)))
+        self.assertTrue(
+            any(
+                "v0.9 must retain full release qualification" in e
+                for e in gates.check(self.root)
+            )
+        )
 
     def test_specialized_shell_change_cannot_lose_qualifier(self):
-        self.change(".github/workflows/v010-qualification.yml",
-                    '      - "apps/linura-shell/**"\n', "")
-        self.assertTrue(any("missing critical PR trigger" in x for x in gates.check(self.root)))
+        self.change(
+            ".github/workflows/v010-qualification.yml",
+            '      - "apps/linura-shell/**"\n',
+            "",
+        )
+        self.assertTrue(
+            any("missing critical PR trigger" in x for x in gates.check(self.root))
+        )
 
     def test_inherited_release_qualification_cannot_be_disconnected(self):
         proof = ".github/workflows/trusted-release-proof.yml"
@@ -2380,12 +3417,18 @@ class ValidationGateTests(unittest.TestCase):
                 before, after = source.split(marker, 1)
                 expected = "    uses: ./" + workflow + "\n"
                 self.assertIn(expected, after)
-                target.write_text(before + marker + after.replace(
-                    expected, "    uses: ./missing-workflow.yml\n", 1
-                ))
+                target.write_text(
+                    before
+                    + marker
+                    + after.replace(expected, "    uses: ./missing-workflow.yml\n", 1)
+                )
                 self.assertTrue(
-                    any("release proof missing unconditional inherited qualification: " + job
-                        in x for x in gates.check(self.root))
+                    any(
+                        "release proof missing unconditional inherited qualification: "
+                        + job
+                        in x
+                        for x in gates.check(self.root)
+                    )
                 )
                 target.write_text(source)
 
@@ -2398,8 +3441,11 @@ class ValidationGateTests(unittest.TestCase):
         altered = build.replace("executor-verifier-qualification,", "", 1)
         (self.root / proof).write_text(prefix + marker + altered)
         self.assertTrue(
-            any("release proof build missing inherited dependency: "
-                "executor-verifier-qualification" in x for x in gates.check(self.root))
+            any(
+                "release proof build missing inherited dependency: "
+                "executor-verifier-qualification" in x
+                for x in gates.check(self.root)
+            )
         )
 
     def test_release_promotion_cannot_drop_inherited_dependency(self):
@@ -2411,8 +3457,11 @@ class ValidationGateTests(unittest.TestCase):
         altered = dispatch.replace("executor-verifier-qualification,", "", 1)
         (self.root / proof).write_text(prefix + marker + altered)
         self.assertTrue(
-            any("release proof dispatch-promotion missing inherited dependency: "
-                "executor-verifier-qualification" in x for x in gates.check(self.root))
+            any(
+                "release proof dispatch-promotion missing inherited dependency: "
+                "executor-verifier-qualification" in x
+                for x in gates.check(self.root)
+            )
         )
 
     def test_release_promotion_cannot_ignore_failed_inherited_qualification(self):
@@ -2423,34 +3472,46 @@ class ValidationGateTests(unittest.TestCase):
             "needs.durability-qualification.result == 'failure'",
         )
         self.assertTrue(
-            any("release promotion missing inherited success guard: durability-qualification"
-                in x for x in gates.check(self.root))
+            any(
+                "release promotion missing inherited success guard: durability-qualification"
+                in x
+                for x in gates.check(self.root)
+            )
         )
 
     def test_release_promotion_requires_all_successes_not_an_or(self):
         proof = ".github/workflows/trusted-release-proof.yml"
         target = self.root / proof
         source = target.read_text(encoding="utf-8")
-        good = ("needs.observation-acceptance.result == 'success' && "
-                "needs.plan-preview-acceptance.result == 'success'")
+        good = (
+            "needs.observation-acceptance.result == 'success' && "
+            "needs.plan-preview-acceptance.result == 'success'"
+        )
         self.assertIn(good, source)
         for replacement in (
             good.replace(" && ", " || "),
             good.replace(" && ", " && always() || "),
         ):
             with self.subTest(replacement=replacement):
-                target.write_text(source.replace(good, replacement, 1),
-                                  encoding="utf-8")
+                target.write_text(
+                    source.replace(good, replacement, 1), encoding="utf-8"
+                )
                 errors = gates.check(self.root)
                 self.assertTrue(
-                    any("release promotion success guard must be a reviewed conjunction" in e
-                        for e in errors), errors,
+                    any(
+                        "release promotion success guard must be a reviewed conjunction"
+                        in e
+                        for e in errors
+                    ),
+                    errors,
                 )
         target.write_text(source, encoding="utf-8")
 
     def test_quoted_event_filters_cannot_skip_required_pr_gates(self):
-        workflows = [*gates.MANDATORY.values(),
-                     *(workflow for workflow, _ in gates.SPECIALIZED.values())]
+        workflows = [
+            *gates.MANDATORY.values(),
+            *(workflow for workflow, _ in gates.SPECIALIZED.values()),
+        ]
         for workflow in workflows:
             target = self.root / workflow
             original = target.read_text(encoding="utf-8")
@@ -2458,21 +3519,28 @@ class ValidationGateTests(unittest.TestCase):
                 with self.subTest(workflow=workflow, key=filter_key):
                     mutation = original.replace(
                         "  pull_request:\n",
-                        "  pull_request:\n    " + filter_key + ": [never]\n", 1,
+                        "  pull_request:\n    " + filter_key + ": [never]\n",
+                        1,
                     )
                     self.assertNotEqual(mutation, original)
                     target.write_text(mutation, encoding="utf-8")
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        "every PR" in e if workflow in gates.MANDATORY.values()
-                        else "specialized PR event may contain only paths" in e
-                        for e in errors
-                    ), errors)
+                    self.assertTrue(
+                        any(
+                            "every PR" in e
+                            if workflow in gates.MANDATORY.values()
+                            else "specialized PR event may contain only paths" in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
             target.write_text(original, encoding="utf-8")
 
     def test_specialized_source_binding_is_executable_and_immutable(self):
-        for workflow in (".github/workflows/vm-acceptance.yml",
-                         ".github/workflows/v010-qualification.yml"):
+        for workflow in (
+            ".github/workflows/vm-acceptance.yml",
+            ".github/workflows/v010-qualification.yml",
+        ):
             target = self.root / workflow
             original = target.read_text(encoding="utf-8")
             source_ref = "          ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}\n"
@@ -2481,16 +3549,25 @@ class ValidationGateTests(unittest.TestCase):
             self.assertIn(assert_line, original)
             for scenario, before, after in (
                 ("different checkout", source_ref, "          ref: main\n"),
-                ("commented-out assertion", assert_line,
-                 '          # test "$(git rev-parse HEAD)" = "$SOURCE_SHA"\n'),
+                (
+                    "commented-out assertion",
+                    assert_line,
+                    '          # test "$(git rev-parse HEAD)" = "$SOURCE_SHA"\n',
+                ),
                 ("early exit", assert_line, "          exit 0\n" + assert_line),
             ):
                 with self.subTest(workflow=workflow, scenario=scenario):
-                    target.write_text(original.replace(before, after, 1),
-                                      encoding="utf-8")
+                    target.write_text(
+                        original.replace(before, after, 1), encoding="utf-8"
+                    )
                     errors = gates.check(self.root)
-                    self.assertTrue(any("missing exact-source executable binding" in e
-                                        for e in errors), errors)
+                    self.assertTrue(
+                        any(
+                            "missing exact-source executable binding" in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
             target.write_text(original, encoding="utf-8")
 
     def test_reusable_shell_runtime_jobs_require_exact_source(self):
@@ -2504,61 +3581,100 @@ class ValidationGateTests(unittest.TestCase):
         for job in ("substrate", "runtime"):
             prefix, body = original.split("  " + job + ":\n", 1)
             for scenario, before, after in (
-                    ("changed ref", source_ref, "          ref: main\n"),
-                    ("missing assertion", assert_line,
-                     '          # test "$(git rev-parse HEAD)" = "$SOURCE_SHA"\n'),
-                    ("early success", assert_line, "          exit 0\n" + assert_line),
-                    ("conditional assertion",
-                     "      - name: Assert exact source and " +
-                     ("substrate" if job == "substrate" else "runtime") +
-                     " contract\n",
-                     "      - name: Assert exact source and " +
-                     ("substrate" if job == "substrate" else "runtime") +
-                     " contract\n        if: false\n"),
+                ("changed ref", source_ref, "          ref: main\n"),
+                (
+                    "missing assertion",
+                    assert_line,
+                    '          # test "$(git rev-parse HEAD)" = "$SOURCE_SHA"\n',
+                ),
+                ("early success", assert_line, "          exit 0\n" + assert_line),
+                (
+                    "conditional assertion",
+                    "      - name: Assert exact source and "
+                    + ("substrate" if job == "substrate" else "runtime")
+                    + " contract\n",
+                    "      - name: Assert exact source and "
+                    + ("substrate" if job == "substrate" else "runtime")
+                    + " contract\n        if: false\n",
+                ),
             ):
                 with self.subTest(job=job, scenario=scenario):
                     self.assertIn(before, body)
-                    target.write_text(prefix + "  " + job + ":\n" +
-                                      body.replace(before, after, 1),
-                                      encoding="utf-8")
+                    target.write_text(
+                        prefix + "  " + job + ":\n" + body.replace(before, after, 1),
+                        encoding="utf-8",
+                    )
                     errors = gates.check(self.root)
-                    self.assertTrue(any(
-                        "v0.10 shell-runtime " + job +
-                        ": missing exact-source executable binding" in e
-                        for e in errors), errors)
+                    self.assertTrue(
+                        any(
+                            "v0.10 shell-runtime "
+                            + job
+                            + ": missing exact-source executable binding"
+                            in e
+                            for e in errors
+                        ),
+                        errors,
+                    )
         target.write_text(original, encoding="utf-8")
 
     def test_reusable_shell_runtime_environment_cannot_be_overridden(self):
         workflow = ".github/workflows/v010-shell-runtime-qualification.yml"
         target = self.root / workflow
         original = target.read_text(encoding="utf-8")
-        self.assertIn("  SOURCE_SHA: ${{ inputs.source_sha || github.sha }}\n", original)
-        target.write_text(original.replace(
-            "  SOURCE_SHA: ${{ inputs.source_sha || github.sha }}\n",
-            "  SOURCE_SHA: ${{ github.sha }}\n", 1),
-            encoding="utf-8")
-        self.assertTrue(any("exact-source environment" in e
-                            for e in gates.check(self.root)))
+        self.assertIn(
+            "  SOURCE_SHA: ${{ inputs.source_sha || github.sha }}\n", original
+        )
+        target.write_text(
+            original.replace(
+                "  SOURCE_SHA: ${{ inputs.source_sha || github.sha }}\n",
+                "  SOURCE_SHA: ${{ github.sha }}\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        self.assertTrue(
+            any("exact-source environment" in e for e in gates.check(self.root))
+        )
 
     def test_xtask_tests_cannot_be_replaced_with_a_comment(self):
-        self.change("tools/xtask/src/main.rs",
-                    '    run(\n        "cargo",\n'
-                    '        &["test", "--workspace", "--all-features", "--locked"],\n'
-                    '    )?;\n',
-                    '    // run("cargo", &["test", "--workspace", '
-                    '"--all-features", "--locked"])?;\n')
+        self.change(
+            "tools/xtask/src/main.rs",
+            '    run(\n        "cargo",\n'
+            '        &["test", "--workspace", "--all-features", "--locked"],\n'
+            "    )?;\n",
+            '    // run("cargo", &["test", "--workspace", '
+            '"--all-features", "--locked"])?;\n',
+        )
         errors = gates.check(self.root)
-        self.assertTrue(any("canonical xtask execution sequence changed" in e
-                            for e in errors), errors)
+        self.assertTrue(
+            any("canonical xtask execution sequence changed" in e for e in errors),
+            errors,
+        )
 
     def test_exact_source_assertion_cannot_be_removed(self):
-        self.change(".github/workflows/vm-acceptance.yml",
-                    'test "$(git rev-parse HEAD)" = "$SOURCE_SHA"', "true")
-        self.assertTrue(any("missing exact-source executable binding" in x for x in gates.check(self.root)))
+        self.change(
+            ".github/workflows/vm-acceptance.yml",
+            'test "$(git rev-parse HEAD)" = "$SOURCE_SHA"',
+            "true",
+        )
+        self.assertTrue(
+            any(
+                "missing exact-source executable binding" in x
+                for x in gates.check(self.root)
+            )
+        )
 
     def test_glob_does_not_cross_directories_without_double_star(self):
-        self.assertTrue(gates.path_matches("crates/linura-control/src/lib.rs", "crates/linura-control/**"))
-        self.assertFalse(gates.path_matches("crates/linura-control/src/lib.rs", "crates/linura-control/*"))
+        self.assertTrue(
+            gates.path_matches(
+                "crates/linura-control/src/lib.rs", "crates/linura-control/**"
+            )
+        )
+        self.assertFalse(
+            gates.path_matches(
+                "crates/linura-control/src/lib.rs", "crates/linura-control/*"
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -16,34 +16,141 @@ LEDGER = Path("contracts/v010-workstation-slices.toml")
 # A cited PR must touch at least one path owned by its assigned slice; this
 # mapping lives outside the mutable ledger so evidence cannot self-declare scope.
 SLICE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
-    "S01": ("contracts/v010-workstation-qualification.toml", "docs/adr/0030-v010-first-interactive-platform-profile.md", "docs/qualification/v0.10.0.md", ".github/workflows/v010-qualification.yml"),
-    "S02": ("crates/linura-hardware/", "docs/platform-profiles.md", "profiles/arch-hyprland-v1.toml"),
-    "S03": ("crates/linura-linux-observation/", "crates/linura-control/src/platform_compatibility.rs"),
-    "S04": ("contracts/operation-semantics.toml", "docs/adr/0031-v010-many-interfaces-one-authority-path.md", "docs/adr/0032-classify-operations-before-authority.md", "docs/operation-semantics.md", "docs/control-plane.md", "docs/managed-configuration.md", "docs/capability-composition.md", "docs/derived-surfaces.md", "docs/explainability.md", "docs/provider-model.md", "docs/security-model.md", "docs/threat-model.md"),
-    "S05": ("crates/linura-control/src/operation_semantics.rs", "crates/linura-control/src/operation_registry.rs"),
-    "S06": ("crates/linura-control/src/managed_lifecycle.rs", "crates/linura-control/src/durable_authority.rs", "crates/linura-control/src/operation_registry.rs"),
+    "S01": (
+        "contracts/v010-workstation-qualification.toml",
+        "docs/adr/0030-v010-first-interactive-platform-profile.md",
+        "docs/qualification/v0.10.0.md",
+        ".github/workflows/v010-qualification.yml",
+    ),
+    "S02": (
+        "crates/linura-hardware/",
+        "docs/platform-profiles.md",
+        "profiles/arch-hyprland-v1.toml",
+    ),
+    "S03": (
+        "crates/linura-linux-observation/",
+        "crates/linura-control/src/platform_compatibility.rs",
+    ),
+    "S04": (
+        "contracts/operation-semantics.toml",
+        "docs/adr/0031-v010-many-interfaces-one-authority-path.md",
+        "docs/adr/0032-classify-operations-before-authority.md",
+        "docs/operation-semantics.md",
+        "docs/control-plane.md",
+        "docs/managed-configuration.md",
+        "docs/capability-composition.md",
+        "docs/derived-surfaces.md",
+        "docs/explainability.md",
+        "docs/provider-model.md",
+        "docs/security-model.md",
+        "docs/threat-model.md",
+    ),
+    "S05": (
+        "crates/linura-control/src/operation_semantics.rs",
+        "crates/linura-control/src/operation_registry.rs",
+    ),
+    "S06": (
+        "crates/linura-control/src/managed_lifecycle.rs",
+        "crates/linura-control/src/durable_authority.rs",
+        "crates/linura-control/src/operation_registry.rs",
+    ),
     "S07": ("crates/linura-control/src/transient_effect.rs",),
-    "S08": ("apps/linurad/src/session_audio.rs", "apps/linurad/src/session_audit.rs", "packaging/wireplumber/", "crates/linura-dbus/src/session.rs"),
-    "S09": ("apps/linura-shell/shell.qml", "apps/linura-shell/plugins/control-center/", "apps/linura-shell/bridge/"),
+    "S08": (
+        "apps/linurad/src/session_audio.rs",
+        "apps/linurad/src/session_audit.rs",
+        "packaging/wireplumber/",
+        "crates/linura-dbus/src/session.rs",
+    ),
+    "S09": (
+        "apps/linura-shell/shell.qml",
+        "apps/linura-shell/plugins/control-center/",
+        "apps/linura-shell/bridge/",
+    ),
     "S10": ("apps/linura-shell/ui/", "design/tokens.json"),
-    "S11": ("apps/linura-shell/plugins/command-palette/", "apps/linura-shell/org.linura.CommandPalette.desktop"),
-    "S12": ("apps/linura-shell/integrations/hyprland/", "apps/linura-shell/integrations/xdg/"),
-    "S13": ("apps/linura-shell/plugins/quick-settings/", "apps/linura-shell/org.linura.QuickSettings.desktop"),
-    "S14": ("contracts/v010-shell-runtime-qualification.toml", "contracts/v010-shell-runtime-substrate.toml", "qualification/v010/shell-runtime/", ".github/workflows/v010-shell-runtime-qualification.yml"),
+    "S11": (
+        "apps/linura-shell/plugins/command-palette/",
+        "apps/linura-shell/org.linura.CommandPalette.desktop",
+    ),
+    "S12": (
+        "apps/linura-shell/integrations/hyprland/",
+        "apps/linura-shell/integrations/xdg/",
+    ),
+    "S13": (
+        "apps/linura-shell/plugins/quick-settings/",
+        "apps/linura-shell/org.linura.QuickSettings.desktop",
+    ),
+    "S14": (
+        "contracts/v010-shell-runtime-qualification.toml",
+        "contracts/v010-shell-runtime-substrate.toml",
+        "qualification/v010/shell-runtime/",
+        ".github/workflows/v010-shell-runtime-qualification.yml",
+    ),
     "S15": ("apps/linura-shell/plugins/notifications-osd/",),
-    "S16": ("apps/linura-shell/panel/", "apps/linura-shell/tray/", "apps/linura-shell/status/"),
-    "S17": ("apps/linura-shell/plugins/session/", "apps/linura-shell/integrations/logind/", "apps/linura-shell/plugins/power/"),
-    "S18": ("apps/linura-shell/plugins/network/", "crates/linura-provider-networkmanager/"),
+    "S16": (
+        "apps/linura-shell/panel/",
+        "apps/linura-shell/tray/",
+        "apps/linura-shell/status/",
+    ),
+    "S17": (
+        "apps/linura-shell/plugins/session/",
+        "apps/linura-shell/integrations/logind/",
+        "apps/linura-shell/plugins/power/",
+    ),
+    "S18": (
+        "apps/linura-shell/plugins/network/",
+        "crates/linura-provider-networkmanager/",
+    ),
     "S19": ("apps/linura-shell/plugins/bluetooth/", "crates/linura-provider-bluez/"),
-    "S20": ("apps/linura-shell/plugins/audio/", "apps/linura-shell/plugins/media/", "apps/linurad/src/session_audio.rs"),
-    "S21": ("apps/linura-shell/plugins/display/", "apps/linura-shell/plugins/power/", "apps/linura-shell/plugins/storage/", "crates/linura-provider-udisks2/"),
-    "S22": ("apps/linura-shell/plugins/screenshot/", "apps/linura-shell/plugins/recording/", "apps/linura-shell/plugins/clipboard/"),
-    "S23": ("apps/linura-shell/plugins/applications/", "apps/linura-shell/plugins/packages/", "apps/linura-shell/plugins/default-apps/"),
-    "S24": ("apps/linura-shell/plugins/updates/", "apps/linura-shell/plugins/recovery/", "apps/linura-shell/plugins/snapshots/", "crates/linura-update/"),
-    "S25": ("apps/linura-shell/plugins/personalization/", "apps/linura-shell/theme/", "design/"),
-    "S26": ("apps/linura-shell/plugins/library/", "apps/linura-shell/plugins/setups/", "apps/linura-shell/plugins/machine-profiles/", "crates/linura-library/"),
-    "S27": ("apps/linura-shell/plugins/declarative/", "apps/linura-agent-ui/", "crates/linura-intent/", "crates/linura-planner/"),
-    "S28": ("apps/linura-installer/", "apps/linura-firstboot/", "docs/installer-bootstrap.md", "docs/first-boot.md"),
+    "S20": (
+        "apps/linura-shell/plugins/audio/",
+        "apps/linura-shell/plugins/media/",
+        "apps/linurad/src/session_audio.rs",
+    ),
+    "S21": (
+        "apps/linura-shell/plugins/display/",
+        "apps/linura-shell/plugins/power/",
+        "apps/linura-shell/plugins/storage/",
+        "crates/linura-provider-udisks2/",
+    ),
+    "S22": (
+        "apps/linura-shell/plugins/screenshot/",
+        "apps/linura-shell/plugins/recording/",
+        "apps/linura-shell/plugins/clipboard/",
+    ),
+    "S23": (
+        "apps/linura-shell/plugins/applications/",
+        "apps/linura-shell/plugins/packages/",
+        "apps/linura-shell/plugins/default-apps/",
+    ),
+    "S24": (
+        "apps/linura-shell/plugins/updates/",
+        "apps/linura-shell/plugins/recovery/",
+        "apps/linura-shell/plugins/snapshots/",
+        "crates/linura-update/",
+    ),
+    "S25": (
+        "apps/linura-shell/plugins/personalization/",
+        "apps/linura-shell/theme/",
+        "design/",
+    ),
+    "S26": (
+        "apps/linura-shell/plugins/library/",
+        "apps/linura-shell/plugins/setups/",
+        "apps/linura-shell/plugins/machine-profiles/",
+        "crates/linura-library/",
+    ),
+    "S27": (
+        "apps/linura-shell/plugins/declarative/",
+        "apps/linura-agent-ui/",
+        "crates/linura-intent/",
+        "crates/linura-planner/",
+    ),
+    "S28": (
+        "apps/linura-installer/",
+        "apps/linura-firstboot/",
+        "docs/installer-bootstrap.md",
+        "docs/first-boot.md",
+    ),
     "S29": (
         "visual/baselines/",
         "qualification/v010/experience/",
@@ -61,7 +168,13 @@ SLICE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
         "qualification/v010/security-evidence.json",
         "tools/check_v010_workstation_qualification.py",
     ),
-    "S32": (".github/workflows/release-preparation.yml", ".github/workflows/release-authorization.yml", ".github/workflows/trusted-release-proof.yml", ".github/workflows/post-release-closure.yml", "hardware/support-matrix.json"),
+    "S32": (
+        ".github/workflows/release-preparation.yml",
+        ".github/workflows/release-authorization.yml",
+        ".github/workflows/trusted-release-proof.yml",
+        ".github/workflows/post-release-closure.yml",
+        "hardware/support-matrix.json",
+    ),
 }
 
 EVIDENCE_SEAL_EXACT_PATHS = {
@@ -94,7 +207,9 @@ class EvidenceError(RuntimeError):
 
 def run(*args: str) -> str:
     try:
-        return subprocess.check_output(args, text=True, stderr=subprocess.STDOUT).strip()
+        return subprocess.check_output(
+            args, text=True, stderr=subprocess.STDOUT
+        ).strip()
     except subprocess.CalledProcessError as error:
         raise EvidenceError(
             f"command failed ({' '.join(args)}): {error.output.strip()}"
@@ -117,7 +232,9 @@ def load_completed_evidence(root: Path) -> dict[int, str]:
         slice_id = item.get("id")
         evidence = item.get("evidence_prs")
         if not isinstance(slice_id, str) or slice_id not in SLICE_PATH_PREFIXES:
-            raise EvidenceError(f"completed slice has no canonical path ownership: {slice_id!r}")
+            raise EvidenceError(
+                f"completed slice has no canonical path ownership: {slice_id!r}"
+            )
         if not isinstance(evidence, list) or not evidence:
             raise EvidenceError(f"completed slice {slice_id!r} lacks PR evidence")
         for value in evidence:
@@ -125,7 +242,9 @@ def load_completed_evidence(root: Path) -> dict[int, str]:
                 raise EvidenceError(f"{slice_id}: invalid evidence PR number {value!r}")
             previous = owners.get(value)
             if previous is not None:
-                raise EvidenceError(f"PR #{value} is reused by {previous} and {slice_id}")
+                raise EvidenceError(
+                    f"PR #{value} is reused by {previous} and {slice_id}"
+                )
             owners[value] = slice_id
     return owners
 
@@ -156,11 +275,15 @@ def recursive_tree_entries(
         )
     entries = payload.get("tree")
     if not isinstance(entries, list):
-        raise EvidenceError(f"recursive Git tree response is missing entries for {tree_sha}")
+        raise EvidenceError(
+            f"recursive Git tree response is missing entries for {tree_sha}"
+        )
     result: dict[str, tuple[str, str, str]] = {}
     for item in entries:
         if not isinstance(item, dict):
-            raise EvidenceError(f"recursive Git tree response has an invalid entry for {tree_sha}")
+            raise EvidenceError(
+                f"recursive Git tree response has an invalid entry for {tree_sha}"
+            )
         kind = item.get("type")
         if kind == "tree":
             continue
@@ -176,7 +299,9 @@ def recursive_tree_entries(
             or SHA_RE.fullmatch(sha) is None
             or path in result
         ):
-            raise EvidenceError(f"recursive Git tree response has an invalid leaf entry for {tree_sha}")
+            raise EvidenceError(
+                f"recursive Git tree response has an invalid leaf entry for {tree_sha}"
+            )
         result[path] = (mode, kind, sha)
     return result
 
@@ -189,9 +314,7 @@ def changed_tree_paths(
     base = recursive_tree_entries(repository, base_tree_sha)
     head = recursive_tree_entries(repository, head_tree_sha)
     return sorted(
-        path
-        for path in set(base) | set(head)
-        if base.get(path) != head.get(path)
+        path for path in set(base) | set(head) if base.get(path) != head.get(path)
     )
 
 
@@ -212,14 +335,20 @@ def pr_file_records(repository: str, number: int) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     for page in payload:
         if not isinstance(page, list):
-            raise EvidenceError(f"PR #{number} changed-file response contains an invalid page")
+            raise EvidenceError(
+                f"PR #{number} changed-file response contains an invalid page"
+            )
         for item in page:
             if not isinstance(item, dict):
-                raise EvidenceError(f"PR #{number} changed-file response contains an invalid record")
+                raise EvidenceError(
+                    f"PR #{number} changed-file response contains an invalid record"
+                )
             filename = item.get("filename")
             status = item.get("status")
             if not isinstance(filename, str) or not filename:
-                raise EvidenceError(f"PR #{number} changed-file record is missing filename")
+                raise EvidenceError(
+                    f"PR #{number} changed-file record is missing filename"
+                )
             if status not in {"added", "modified", "removed", "renamed"}:
                 raise EvidenceError(
                     f"PR #{number} changed-file record has unsupported status {status!r}"
@@ -232,7 +361,9 @@ def path_matches_slice(slice_id: str, path: str) -> bool:
     rules = SLICE_PATH_PREFIXES.get(slice_id)
     if not rules:
         return False
-    return any(path == rule or (rule.endswith("/") and path.startswith(rule)) for rule in rules)
+    return any(
+        path == rule or (rule.endswith("/") and path.startswith(rule)) for rule in rules
+    )
 
 
 def require_slice_scope(repository: str, number: int, slice_id: str) -> None:
@@ -272,7 +403,9 @@ def evidence_seal_record_paths(record: dict[str, object]) -> tuple[str, ...]:
     if record.get("status") == "renamed":
         previous = record.get("previous_filename")
         if not isinstance(previous, str) or not previous:
-            raise EvidenceError("renamed evidence-seal record is missing previous_filename")
+            raise EvidenceError(
+                "renamed evidence-seal record is missing previous_filename"
+            )
         return (filename, previous)
     return (filename,)
 
@@ -319,7 +452,9 @@ def verify_evidence_seal(
     if isinstance(comparison_files, list):
         for record in comparison_files:
             if not isinstance(record, dict):
-                raise EvidenceError("evidence-seal compare returned an invalid changed-file record")
+                raise EvidenceError(
+                    "evidence-seal compare returned an invalid changed-file record"
+                )
             for path in evidence_seal_record_paths(record):
                 if not evidence_seal_path_allowed(path):
                     raise EvidenceError(
@@ -327,8 +462,13 @@ def verify_evidence_seal(
                     )
 
     readiness_tree = readiness_commit.get("tree")
-    readiness_tree_sha = readiness_tree.get("sha") if isinstance(readiness_tree, dict) else None
-    if not isinstance(readiness_tree_sha, str) or SHA_RE.fullmatch(readiness_tree_sha) is None:
+    readiness_tree_sha = (
+        readiness_tree.get("sha") if isinstance(readiness_tree, dict) else None
+    )
+    if (
+        not isinstance(readiness_tree_sha, str)
+        or SHA_RE.fullmatch(readiness_tree_sha) is None
+    ):
         raise EvidenceError("readiness evidence-seal tree identity is missing")
 
     # Compare API file lists are capped. Derive the complete changed path set from
@@ -339,14 +479,19 @@ def verify_evidence_seal(
         readiness_tree_sha,
     )
     if not changed:
-        raise EvidenceError("readiness evidence seal must change at least one evidence-owned file")
-    disallowed = sorted(path for path in changed if not evidence_seal_path_allowed(path))
+        raise EvidenceError(
+            "readiness evidence seal must change at least one evidence-owned file"
+        )
+    disallowed = sorted(
+        path for path in changed if not evidence_seal_path_allowed(path)
+    )
     if disallowed:
         raise EvidenceError(
             "readiness evidence seal changed executable or non-evidence paths: "
             + ", ".join(disallowed)
         )
     return readiness_tree_sha
+
 
 def verify(
     root: Path,
@@ -373,7 +518,10 @@ def verify(
         raise EvidenceError("qualification source commit identity mismatch")
     source_tree = source.get("tree")
     source_tree_sha = source_tree.get("sha") if isinstance(source_tree, dict) else None
-    if not isinstance(source_tree_sha, str) or SHA_RE.fullmatch(source_tree_sha) is None:
+    if (
+        not isinstance(source_tree_sha, str)
+        or SHA_RE.fullmatch(source_tree_sha) is None
+    ):
         raise EvidenceError("qualification source tree identity is missing")
 
     readiness_tree_sha = verify_evidence_seal(
@@ -398,10 +546,14 @@ def verify(
             raise EvidenceError(f"{slice_id}: PR #{number} was not merged to main")
         base_repo = base.get("repo")
         if not isinstance(base_repo, dict) or base_repo.get("full_name") != repository:
-            raise EvidenceError(f"{slice_id}: PR #{number} targets a different repository")
+            raise EvidenceError(
+                f"{slice_id}: PR #{number} targets a different repository"
+            )
         merge_sha = payload.get("merge_commit_sha")
         if not isinstance(merge_sha, str) or SHA_RE.fullmatch(merge_sha) is None:
-            raise EvidenceError(f"{slice_id}: PR #{number} has no canonical merge commit")
+            raise EvidenceError(
+                f"{slice_id}: PR #{number} has no canonical merge commit"
+            )
 
         if number == readiness_pr_number:
             if merge_sha != readiness_merge_sha:
@@ -415,11 +567,18 @@ def verify(
                 raise EvidenceError(
                     f"{slice_id}: readiness PR #{number} head is not the reviewed evidence-seal source"
                 )
-            if not isinstance(head_repo, dict) or head_repo.get("full_name") != repository:
-                raise EvidenceError(f"{slice_id}: readiness PR #{number} head is not repository-owned")
+            if (
+                not isinstance(head_repo, dict)
+                or head_repo.get("full_name") != repository
+            ):
+                raise EvidenceError(
+                    f"{slice_id}: readiness PR #{number} head is not repository-owned"
+                )
             merge_commit = api_json(repository, f"git/commits/{merge_sha}")
             merge_tree = merge_commit.get("tree")
-            merge_tree_sha = merge_tree.get("sha") if isinstance(merge_tree, dict) else None
+            merge_tree_sha = (
+                merge_tree.get("sha") if isinstance(merge_tree, dict) else None
+            )
             if merge_tree_sha != readiness_tree_sha:
                 raise EvidenceError(
                     f"{slice_id}: readiness PR #{number} squash tree differs from reviewed evidence-seal tree"
@@ -430,8 +589,13 @@ def verify(
                 f"compare/{merge_sha}...{qualification_source_sha}",
             )
             merge_base = comparison.get("merge_base_commit")
-            merge_base_sha = merge_base.get("sha") if isinstance(merge_base, dict) else None
-            if comparison.get("status") not in {"ahead", "identical"} or merge_base_sha != merge_sha:
+            merge_base_sha = (
+                merge_base.get("sha") if isinstance(merge_base, dict) else None
+            )
+            if (
+                comparison.get("status") not in {"ahead", "identical"}
+                or merge_base_sha != merge_sha
+            ):
                 raise EvidenceError(
                     f"{slice_id}: PR #{number} merge {merge_sha} is not an ancestor of the reviewed qualification source"
                 )

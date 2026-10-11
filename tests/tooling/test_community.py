@@ -67,14 +67,18 @@ class CommunityContractTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("stale hosted-state language", result.stderr)
 
-    def test_rejects_commented_blank_issue_setting_masking_true_effective_setting(self) -> None:
+    def test_rejects_commented_blank_issue_setting_masking_true_effective_setting(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.copy_fixture(root)
             config = root / ".github/ISSUE_TEMPLATE/config.yml"
             text = config.read_text(encoding="utf-8")
             config.write_text(
-                text.replace("blank_issues_enabled: false", "blank_issues_enabled: true", 1)
+                text.replace(
+                    "blank_issues_enabled: false", "blank_issues_enabled: true", 1
+                )
                 + "\n# blank_issues_enabled: false\n",
                 encoding="utf-8",
             )
@@ -201,7 +205,9 @@ class CommunityContractTests(unittest.TestCase):
             result = self.run_checker(root)
             self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
-    def test_accepts_closed_inline_funding_sequence_before_plain_scalar_checks(self) -> None:
+    def test_accepts_closed_inline_funding_sequence_before_plain_scalar_checks(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.copy_fixture(root)
@@ -251,12 +257,13 @@ class CommunityContractTests(unittest.TestCase):
             root = Path(directory)
             self.copy_fixture(root)
             funding = root / ".github/FUNDING.yml"
-            funding.write_text('custom: ["https://example.com/fund"]\n', encoding="utf-8")
+            funding.write_text(
+                'custom: ["https://example.com/fund"]\n', encoding="utf-8"
+            )
 
             result = self.run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("funding.active=false", result.stderr)
-
 
     def test_rejects_indented_funding_activation_when_contract_inactive(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -303,7 +310,6 @@ class CommunityContractTests(unittest.TestCase):
                     result = self.run_checker(root)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("unterminated inline YAML sequence", result.stderr)
-
 
     def test_rejects_unterminated_flow_mapping_in_issue_form_scalar(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -391,8 +397,9 @@ class CommunityContractTests(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn(expected, result.stderr)
 
-
-    def test_rejects_canonical_contact_url_hidden_outside_parsed_url_field(self) -> None:
+    def test_rejects_canonical_contact_url_hidden_outside_parsed_url_field(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.copy_fixture(root)
@@ -444,7 +451,6 @@ class CommunityContractTests(unittest.TestCase):
             result = self.run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("contains an invalid destination", result.stderr)
-
 
     def test_rejects_invalid_double_quoted_yaml_escape(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -515,7 +521,6 @@ class CommunityContractTests(unittest.TestCase):
                 result.stderr,
             )
 
-
     def test_rejects_forbidden_plain_scalar_prefix_in_issue_form(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -534,8 +539,9 @@ class CommunityContractTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("forbidden YAML plain-scalar indicator", result.stderr)
 
-
-    def test_rejects_invalid_double_quoted_escape_inside_inline_yaml_sequence(self) -> None:
+    def test_rejects_invalid_double_quoted_escape_inside_inline_yaml_sequence(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.copy_fixture(root)
@@ -570,7 +576,6 @@ class CommunityContractTests(unittest.TestCase):
             result = self.run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("malformed author entry", result.stderr)
-
 
 
 if __name__ == "__main__":

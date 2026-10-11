@@ -41,7 +41,9 @@ def declared_python_wheel(project_path: Path) -> str:
     name = project.get("name")
     version = project.get("version")
     if name != "linura" or not isinstance(version, str) or not version:
-        raise ValueError("Python package identity must be linura with an explicit version")
+        raise ValueError(
+            "Python package identity must be linura with an explicit version"
+        )
     return f"linura-{wheel_version(version)}-py3-none-any.whl"
 
 
@@ -55,7 +57,10 @@ def declared_release_binaries(contract_path: Path) -> set[str]:
 
     binaries: set[str] = set()
     for component in raw_components:
-        if not isinstance(component, dict) or component.get("release_artifact") is not True:
+        if (
+            not isinstance(component, dict)
+            or component.get("release_artifact") is not True
+        ):
             continue
         binary = component.get("binary")
         if not isinstance(binary, str) or not binary or Path(binary).name != binary:
@@ -84,7 +89,9 @@ def verify_manifest(directory: Path, manifest_name: str) -> tuple[set[str], list
 
     failures: list[str] = []
     declared: dict[str, str] = {}
-    for line_number, raw in enumerate(manifest.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, raw in enumerate(
+        manifest.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         if not raw.strip():
             continue
         parts = raw.split(None, 1)
@@ -97,7 +104,9 @@ def verify_manifest(directory: Path, manifest_name: str) -> tuple[set[str], list
             failures.append(f"invalid SHA-256 digest on line {line_number}: {digest!r}")
             continue
         if not filename or Path(filename).name != filename or filename == manifest_name:
-            failures.append(f"invalid checksum filename on line {line_number}: {filename!r}")
+            failures.append(
+                f"invalid checksum filename on line {line_number}: {filename!r}"
+            )
             continue
         if filename in declared:
             failures.append(f"duplicate checksum entry: {filename}")
@@ -111,7 +120,9 @@ def verify_manifest(directory: Path, manifest_name: str) -> tuple[set[str], list
             continue
         actual = sha256(path)
         if actual != expected:
-            failures.append(f"digest mismatch: {filename}: expected {expected}, got {actual}")
+            failures.append(
+                f"digest mismatch: {filename}: expected {expected}, got {actual}"
+            )
 
     actual_names, entry_failures = regular_flat_files(directory)
     failures.extend(entry_failures)
@@ -129,7 +140,9 @@ def verify_manifest(directory: Path, manifest_name: str) -> tuple[set[str], list
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify Linura release payload integrity and membership")
+    parser = argparse.ArgumentParser(
+        description="Verify Linura release payload integrity and membership"
+    )
     parser.add_argument("directory", type=Path)
     parser.add_argument("--manifest", default="SHA256SUMS")
     parser.add_argument("--component-contract", type=Path)
@@ -152,16 +165,27 @@ def main() -> int:
             expected_names = binaries | FIXED_RELEASE_PAYLOAD_FILES
             if args.python_package is not None:
                 try:
-                    expected_names.add(declared_python_wheel(args.python_package.resolve()))
-                except (OSError, tomllib.TOMLDecodeError, ValueError, Pep440VersionError) as error:
+                    expected_names.add(
+                        declared_python_wheel(args.python_package.resolve())
+                    )
+                except (
+                    OSError,
+                    tomllib.TOMLDecodeError,
+                    ValueError,
+                    Pep440VersionError,
+                ) as error:
                     failures.append(f"cannot load Python package contract: {error}")
             if actual_names != expected_names:
                 unexpected = sorted(actual_names - expected_names)
                 missing = sorted(expected_names - actual_names)
                 if unexpected:
-                    failures.append(f"payload contains undeclared component/artifact files: {unexpected}")
+                    failures.append(
+                        f"payload contains undeclared component/artifact files: {unexpected}"
+                    )
                 if missing:
-                    failures.append(f"payload is missing declared component/artifact files: {missing}")
+                    failures.append(
+                        f"payload is missing declared component/artifact files: {missing}"
+                    )
 
     if failures:
         for failure in failures:
@@ -169,7 +193,11 @@ def main() -> int:
         return 1
 
     checked = len(actual_names - {args.manifest})
-    suffix = " with component-contract membership" if args.component_contract is not None else ""
+    suffix = (
+        " with component-contract membership"
+        if args.component_contract is not None
+        else ""
+    )
     print(f"verified {checked} release assets{suffix}")
     return 0
 

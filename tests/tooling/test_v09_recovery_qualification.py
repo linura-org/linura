@@ -8,7 +8,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class V09RecoveryQualificationTests(unittest.TestCase):
     def test_v09_qualification_cannot_drop_migration_or_update_recovery(self) -> None:
-        workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(
+            encoding="utf-8"
+        )
 
         for path in [
             '"crates/linura-migrations/**"',
@@ -29,7 +31,9 @@ class V09RecoveryQualificationTests(unittest.TestCase):
         ]:
             self.assertIn(contract, workflow)
 
-    def test_v09_recovery_threat_model_keeps_persisted_state_non_authorizing(self) -> None:
+    def test_v09_recovery_threat_model_keeps_persisted_state_non_authorizing(
+        self,
+    ) -> None:
         threat_model = (ROOT / "docs/threat-model-v0.9-update-migration.md").read_text(
             encoding="utf-8"
         )
@@ -38,7 +42,9 @@ class V09RecoveryQualificationTests(unittest.TestCase):
         self.assertIn("must still be exercised end-to-end", threat_model)
 
     def test_v09_update_evidence_is_fixed_producer_and_dispatch_bound(self) -> None:
-        update_source = (ROOT / "crates/linura-update/src/lib.rs").read_text(encoding="utf-8")
+        update_source = (ROOT / "crates/linura-update/src/lib.rs").read_text(
+            encoding="utf-8"
+        )
         threat_model = (ROOT / "docs/threat-model-v0.9-update-migration.md").read_text(
             encoding="utf-8"
         )

@@ -26,7 +26,9 @@ def spdx_id(prefix: str, value: str) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate SPDX 2.3 SBOM for Linura candidate artifacts and Cargo.lock packages")
+    parser = argparse.ArgumentParser(
+        description="Generate SPDX 2.3 SBOM for Linura candidate artifacts and Cargo.lock packages"
+    )
     parser.add_argument("output", type=Path)
     parser.add_argument("artifacts", nargs="+", type=Path)
     parser.add_argument("--version", required=True)
@@ -41,32 +43,48 @@ def main() -> int:
         version = package["version"]
         identifier = spdx_id("Package", f"{name}-{version}")
         package_ids[(name, version)] = identifier
-        packages.append({
-            "SPDXID": identifier,
-            "name": name,
-            "versionInfo": version,
-            "downloadLocation": "NOASSERTION",
-            "filesAnalyzed": False,
-            "licenseConcluded": "NOASSERTION",
-            "licenseDeclared": "NOASSERTION",
-            "copyrightText": "NOASSERTION",
-        })
+        packages.append(
+            {
+                "SPDXID": identifier,
+                "name": name,
+                "versionInfo": version,
+                "downloadLocation": "NOASSERTION",
+                "filesAnalyzed": False,
+                "licenseConcluded": "NOASSERTION",
+                "licenseDeclared": "NOASSERTION",
+                "copyrightText": "NOASSERTION",
+            }
+        )
 
     files = []
     relationships = []
     for index, path in enumerate(args.artifacts, 1):
         file_id = f"SPDXRef-File-{index}"
-        files.append({
-            "SPDXID": file_id,
-            "fileName": path.name,
-            "checksums": [{"algorithm": "SHA256", "checksumValue": digest(path)}],
-            "licenseConcluded": "NOASSERTION",
-            "copyrightText": "NOASSERTION",
-        })
-        relationships.append({"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": file_id})
+        files.append(
+            {
+                "SPDXID": file_id,
+                "fileName": path.name,
+                "checksums": [{"algorithm": "SHA256", "checksumValue": digest(path)}],
+                "licenseConcluded": "NOASSERTION",
+                "copyrightText": "NOASSERTION",
+            }
+        )
+        relationships.append(
+            {
+                "spdxElementId": "SPDXRef-DOCUMENT",
+                "relationshipType": "DESCRIBES",
+                "relatedSpdxElement": file_id,
+            }
+        )
 
     for package in packages:
-        relationships.append({"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": package["SPDXID"]})
+        relationships.append(
+            {
+                "spdxElementId": "SPDXRef-DOCUMENT",
+                "relationshipType": "DESCRIBES",
+                "relatedSpdxElement": package["SPDXID"],
+            }
+        )
 
     # Cargo.lock dependency strings may include only names for path packages. Link unambiguous names.
     ids_by_name: dict[str, list[str]] = {}
@@ -78,7 +96,13 @@ def main() -> int:
             dep_name = dependency.split(" ", 1)[0]
             candidates = ids_by_name.get(dep_name, [])
             if len(candidates) == 1:
-                relationships.append({"spdxElementId": source_id, "relationshipType": "DEPENDS_ON", "relatedSpdxElement": candidates[0]})
+                relationships.append(
+                    {
+                        "spdxElementId": source_id,
+                        "relationshipType": "DEPENDS_ON",
+                        "relatedSpdxElement": candidates[0],
+                    }
+                )
 
     document = {
         "spdxVersion": "SPDX-2.3",
@@ -95,7 +119,9 @@ def main() -> int:
         "files": files,
         "relationships": relationships,
     }
-    args.output.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return 0
 
 

@@ -35,7 +35,9 @@ evidence_ready = false
             self.assertIn("evidence_ready = true", text)
             self.assertIn(f'evidence_manifest_sha256 = "{digest}"', text)
             self.assertEqual(text.count("evidence_ready = true"), 1)
-            self.assertIn("[update_recovery_qualification]\nevidence_ready = false", text)
+            self.assertIn(
+                "[update_recovery_qualification]\nevidence_ready = false", text
+            )
 
     def test_begin_run_enrolls_fixture_and_all_case_requests(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -51,7 +53,10 @@ evidence_ready = false
             fixture_digest = hashlib.sha256(fixture_bytes).hexdigest()
             fixture = {"fixture_id": "linura-workstation-01"}
             requests = [
-                {"case": f"physical-case-{index:02d}", "mechanism": "physical-observation"}
+                {
+                    "case": f"physical-case-{index:02d}",
+                    "mechanism": "physical-observation",
+                }
                 for index in range(9)
             ]
             with (
@@ -94,12 +99,12 @@ evidence_ready = false
             self.assertEqual(enrolled["fixture_contract_sha256"], fixture_digest)
             self.assertEqual(enrolled["required_cases"], [r["case"] for r in requests])
             self.assertEqual(
-                (state_root / "bundle" / workstation_q11_runner.FIXTURE_EVIDENCE).read_bytes(),
+                (
+                    state_root / "bundle" / workstation_q11_runner.FIXTURE_EVIDENCE
+                ).read_bytes(),
                 fixture_bytes,
             )
-            self.assertEqual(
-                workstation_q11_runner._load_state(state_root), enrolled
-            )
+            self.assertEqual(workstation_q11_runner._load_state(state_root), enrolled)
             self.assertEqual(
                 workstation_q11_runner._request_set(state_root, enrolled),
                 {r["case"]: r for r in requests},
@@ -117,7 +122,12 @@ evidence_ready = false
             cases = ("physical-case-a", "physical-case-b")
             attestations = {}
             for case in cases:
-                path = bundle / workstation_q11_runner.Q11_PREFIX / "cases" / f"{case}.json"
+                path = (
+                    bundle
+                    / workstation_q11_runner.Q11_PREFIX
+                    / "cases"
+                    / f"{case}.json"
+                )
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("{}\n", encoding="utf-8")
                 attestations[case] = path
@@ -154,17 +164,25 @@ evidence_ready = false
                     "_request_set",
                     return_value={case: {"case": case} for case in cases},
                 ),
-                mock.patch.object(workstation_q11_runner, "_validate_case", side_effect=validate),
+                mock.patch.object(
+                    workstation_q11_runner, "_validate_case", side_effect=validate
+                ),
                 ThreadPoolExecutor(max_workers=2) as pool,
             ):
                 first = pool.submit(
                     workstation_q11_runner.record_case,
-                    source_root, state_root, cases[0], attestations[cases[0]],
+                    source_root,
+                    state_root,
+                    cases[0],
+                    attestations[cases[0]],
                 )
                 self.assertTrue(first_validating.wait(10))
                 second = pool.submit(
                     workstation_q11_runner.record_case,
-                    source_root, state_root, cases[1], attestations[cases[1]],
+                    source_root,
+                    state_root,
+                    cases[1],
+                    attestations[cases[1]],
                 )
                 # The second caller must never replace the state loaded by the first.
                 time.sleep(0.1)
@@ -258,7 +276,9 @@ evidence_ready = false
             root = Path(temp_dir)
             bundle = root / "bundle"
             case_dir = bundle / "qualification/v010/interactive-workstation/cases"
-            provenance_dir = bundle / "qualification/v010/interactive-workstation/provenance"
+            provenance_dir = (
+                bundle / "qualification/v010/interactive-workstation/provenance"
+            )
             case_dir.mkdir(parents=True)
             provenance_dir.mkdir(parents=True)
 
@@ -339,9 +359,21 @@ evidence_ready = false
                             "shell_bridge_sha256": "e" * 64,
                         },
                         "observations": [
-                            {"name": "physical-hardware-present", "result": "passed", "value": True},
-                            {"name": "wayland-session-active", "result": "passed", "value": True},
-                            {"name": "hyprland-session-active", "result": "passed", "value": True},
+                            {
+                                "name": "physical-hardware-present",
+                                "result": "passed",
+                                "value": True,
+                            },
+                            {
+                                "name": "wayland-session-active",
+                                "result": "passed",
+                                "value": True,
+                            },
+                            {
+                                "name": "hyprland-session-active",
+                                "result": "passed",
+                                "value": True,
+                            },
                         ],
                         "machine_execution": {
                             "scope": "machine",
@@ -382,17 +414,23 @@ evidence_ready = false
             digest = workstation_q11_runner._validate_case(
                 bundle, attestation, request, state
             )
-            self.assertEqual(digest, hashlib.sha256(attestation.read_bytes()).hexdigest())
+            self.assertEqual(
+                digest, hashlib.sha256(attestation.read_bytes()).hexdigest()
+            )
 
             altered_attestation = json.loads(attestation.read_text(encoding="utf-8"))
-            altered_attestation["machine_execution"]["fixture_contract_sha256"] = "a" * 64
+            altered_attestation["machine_execution"]["fixture_contract_sha256"] = (
+                "a" * 64
+            )
             attestation.write_text(
                 json.dumps(altered_attestation, sort_keys=True) + "\n", encoding="utf-8"
             )
             with self.assertRaisesRegex(
                 workstation_q11_runner.RunnerError, "fixture enrollment digest mismatch"
             ):
-                workstation_q11_runner._validate_case(bundle, attestation, request, state)
+                workstation_q11_runner._validate_case(
+                    bundle, attestation, request, state
+                )
 
             altered = dict(request)
             altered["mechanism"] = "physical-input-observation"
@@ -464,18 +502,22 @@ evidence_ready = false
             fixture_digest = hashlib.sha256(fixture_data).hexdigest()
             manifest = bundle / workstation_q11_runner.MANIFEST
             manifest.parent.mkdir(parents=True, exist_ok=True)
-            manifest.write_bytes(workstation_q11_runner._canonical_json({
-                "run_id": "q11-finalization-race",
-                "source": {"commit_sha": "a" * 40},
-                "fixture": {
-                    "fixture_id": "fixture-01",
-                    "contract": {
-                        "path": workstation_q11_runner.FIXTURE_EVIDENCE.as_posix(),
-                        "sha256": fixture_digest,
-                    },
-                },
-                "cases": [],
-            }))
+            manifest.write_bytes(
+                workstation_q11_runner._canonical_json(
+                    {
+                        "run_id": "q11-finalization-race",
+                        "source": {"commit_sha": "a" * 40},
+                        "fixture": {
+                            "fixture_id": "fixture-01",
+                            "contract": {
+                                "path": workstation_q11_runner.FIXTURE_EVIDENCE.as_posix(),
+                                "sha256": fixture_digest,
+                            },
+                        },
+                        "cases": [],
+                    }
+                )
+            )
             state = {
                 "schema_version": 1,
                 "artifact_type": workstation_q11_runner.STATE_ARTIFACT_TYPE,
@@ -498,9 +540,11 @@ evidence_ready = false
             def mutate_during_publication(path, document):
                 nonlocal injected
                 real_atomic_json(path, document)
-                if (path == state_root / "run-state.json" and
-                        document["status"] == "validated-candidate" and
-                        not injected):
+                if (
+                    path == state_root / "run-state.json"
+                    and document["status"] == "validated-candidate"
+                    and not injected
+                ):
                     injected = True
                     manifest.write_bytes(b'{"tampered": true}\n')
 
@@ -512,13 +556,22 @@ evidence_ready = false
                 mock.patch.object(
                     workstation_q11_runner, "_request_set", return_value={}
                 ),
-                mock.patch.object(workstation_q11_runner, "_extract_source",
-                                  side_effect=lambda _src, _sha, dest: dest.mkdir()),
+                mock.patch.object(
+                    workstation_q11_runner,
+                    "_extract_source",
+                    side_effect=lambda _src, _sha, dest: dest.mkdir(),
+                ),
                 mock.patch.object(workstation_q11_runner, "_patch_contract"),
-                mock.patch.object(workstation_q11_runner.subprocess, "run",
-                                  return_value=mock.Mock(returncode=0)),
-                mock.patch.object(workstation_q11_runner, "_atomic_json",
-                                  side_effect=mutate_during_publication),
+                mock.patch.object(
+                    workstation_q11_runner.subprocess,
+                    "run",
+                    return_value=mock.Mock(returncode=0),
+                ),
+                mock.patch.object(
+                    workstation_q11_runner,
+                    "_atomic_json",
+                    side_effect=mutate_during_publication,
+                ),
             ):
                 with self.assertRaisesRegex(
                     workstation_q11_runner.RunnerError,

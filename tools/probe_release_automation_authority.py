@@ -26,7 +26,9 @@ def _credential_name(credential_source: str) -> str:
     try:
         return names[credential_source]
     except KeyError as error:
-        raise AuthorityProbeError(f"unsupported credential source: {credential_source!r}") from error
+        raise AuthorityProbeError(
+            f"unsupported credential source: {credential_source!r}"
+        ) from error
 
 
 def _missing_permission_guidance(credential_source: str, permission: str) -> str:
@@ -45,7 +47,9 @@ def _decode_json(body: str, label: str) -> dict[str, object]:
     try:
         payload = json.loads(body)
     except json.JSONDecodeError as error:
-        raise AuthorityProbeError(f"{label} returned a non-JSON GitHub response") from error
+        raise AuthorityProbeError(
+            f"{label} returned a non-JSON GitHub response"
+        ) from error
     if not isinstance(payload, dict):
         raise AuthorityProbeError(f"{label} returned a non-object GitHub response")
     return payload
@@ -88,7 +92,11 @@ def validate_pr_probe_response(
             "message": _validation_message(base, head),
         }
         errors = payload.get("errors")
-        if payload.get("message") == "Validation Failed" and isinstance(errors, list) and errors == [expected]:
+        if (
+            payload.get("message") == "Validation Failed"
+            and isinstance(errors, list)
+            and errors == [expected]
+        ):
             return _credential_name(credential_source)
         raise AuthorityProbeError(
             "PR-create endpoint returned an unexpected HTTP 422 response; refusing to treat ambiguous validation, abuse, or spam responses as PR authority"
@@ -108,7 +116,9 @@ def validate_pr_probe_response(
             "the intentionally invalid same-head/base pull request unexpectedly succeeded; refusing to continue release automation"
         )
 
-    raise AuthorityProbeError(f"PR-create authority probe returned unexpected HTTP status {status}")
+    raise AuthorityProbeError(
+        f"PR-create authority probe returned unexpected HTTP status {status}"
+    )
 
 
 def validate_actions_probe_response(
@@ -117,7 +127,11 @@ def validate_actions_probe_response(
     if status == 422:
         payload = _decode_json(body, "Actions-dispatch endpoint")
         message = payload.get("message")
-        if isinstance(message, str) and missing_ref in message and "ref" in message.casefold():
+        if (
+            isinstance(message, str)
+            and missing_ref in message
+            and "ref" in message.casefold()
+        ):
             return _credential_name(credential_source)
         raise AuthorityProbeError(
             "Actions-dispatch endpoint returned an unexpected HTTP 422 response; refusing to treat ambiguous validation as Actions write authority"
@@ -161,7 +175,9 @@ def _request(
         return error.code, error.read().decode("utf-8", errors="replace")
 
 
-def probe(*, repository: str, token: str, base: str, head: str, credential_source: str) -> str:
+def probe(
+    *, repository: str, token: str, base: str, head: str, credential_source: str
+) -> str:
     if not repository or repository.count("/") != 1:
         raise AuthorityProbeError("repository must be in owner/name form")
     if not token:

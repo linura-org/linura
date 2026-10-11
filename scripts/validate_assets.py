@@ -16,7 +16,9 @@ def load_json(path: Path):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception as error:
-        raise ValidationError(f"{path.relative_to(ROOT)}: invalid JSON: {error}") from error
+        raise ValidationError(
+            f"{path.relative_to(ROOT)}: invalid JSON: {error}"
+        ) from error
 
 
 def validate(value, schema, where: str) -> None:
@@ -31,7 +33,9 @@ def validate(value, schema, where: str) -> None:
             valid = True
             break
         if not valid:
-            raise ValidationError(f"{where}: value does not match any allowed type {expected}")
+            raise ValidationError(
+                f"{where}: value does not match any allowed type {expected}"
+            )
         return
     if expected == "object":
         if not isinstance(value, dict):
@@ -50,7 +54,9 @@ def validate(value, schema, where: str) -> None:
             raise ValidationError(f"{where}: expected array")
         if len(value) < schema.get("minItems", 0):
             raise ValidationError(f"{where}: too few items")
-        if schema.get("uniqueItems") and len({json.dumps(item, sort_keys=True) for item in value}) != len(value):
+        if schema.get("uniqueItems") and len(
+            {json.dumps(item, sort_keys=True) for item in value}
+        ) != len(value):
             raise ValidationError(f"{where}: expected unique items")
         item_schema = schema.get("items")
         if item_schema:
@@ -86,12 +92,28 @@ def validate_against(asset: str, schema: str) -> None:
 def main() -> int:
     failures: list[str] = []
     mappings: list[tuple[str, str]] = []
-    mappings.extend((str(path.relative_to(ROOT)), "schemas/hardware-fixture.v1.schema.json") for path in sorted((ROOT / "hardware/fixtures").glob("*.json")))
-    mappings.extend((str(path.relative_to(ROOT)), "schemas/acceptance-scenario.v1.schema.json") for path in sorted((ROOT / "tests/acceptance").glob("*.json")))
-    mappings.extend((str(path.relative_to(ROOT)), "schemas/migration.v1.schema.json") for path in sorted((ROOT / "migrations").glob("*/*.json")))
-    mappings.append(("visual/baselines/manifest.json", "schemas/visual-baseline.v1.schema.json"))
-    mappings.append(("supervision/default-desktop.json", "schemas/app-supervision.v1.schema.json"))
-    mappings.extend((str(path.relative_to(ROOT)), "schemas/lifecycle-workflow.v1.schema.json") for path in sorted((ROOT / "lifecycle/examples").glob("*.json")))
+    mappings.extend(
+        (str(path.relative_to(ROOT)), "schemas/hardware-fixture.v1.schema.json")
+        for path in sorted((ROOT / "hardware/fixtures").glob("*.json"))
+    )
+    mappings.extend(
+        (str(path.relative_to(ROOT)), "schemas/acceptance-scenario.v1.schema.json")
+        for path in sorted((ROOT / "tests/acceptance").glob("*.json"))
+    )
+    mappings.extend(
+        (str(path.relative_to(ROOT)), "schemas/migration.v1.schema.json")
+        for path in sorted((ROOT / "migrations").glob("*/*.json"))
+    )
+    mappings.append(
+        ("visual/baselines/manifest.json", "schemas/visual-baseline.v1.schema.json")
+    )
+    mappings.append(
+        ("supervision/default-desktop.json", "schemas/app-supervision.v1.schema.json")
+    )
+    mappings.extend(
+        (str(path.relative_to(ROOT)), "schemas/lifecycle-workflow.v1.schema.json")
+        for path in sorted((ROOT / "lifecycle/examples").glob("*.json"))
+    )
 
     seen_schema_ids: set[str] = set()
     for schema_path in sorted((ROOT / "schemas").glob("*.schema.json")):
@@ -99,9 +121,13 @@ def main() -> int:
             schema = load_json(schema_path)
             schema_id = schema.get("$id")
             if not isinstance(schema_id, str) or not schema_id:
-                raise ValidationError(f"{schema_path.relative_to(ROOT)}: schema must define non-empty $id")
+                raise ValidationError(
+                    f"{schema_path.relative_to(ROOT)}: schema must define non-empty $id"
+                )
             if schema_id in seen_schema_ids:
-                raise ValidationError(f"{schema_path.relative_to(ROOT)}: duplicate schema $id {schema_id}")
+                raise ValidationError(
+                    f"{schema_path.relative_to(ROOT)}: duplicate schema $id {schema_id}"
+                )
             seen_schema_ids.add(schema_id)
         except ValidationError as error:
             failures.append(str(error))
@@ -116,11 +142,17 @@ def main() -> int:
     allowed_tiers = set(support.get("evidence_tiers", []))
     for domain, tier in support.get("domains", {}).items():
         if tier not in allowed_tiers:
-            failures.append(f"hardware/support-matrix.json: {domain} uses unknown evidence tier {tier!r}")
+            failures.append(
+                f"hardware/support-matrix.json: {domain} uses unknown evidence tier {tier!r}"
+            )
 
-    install_policy = load_json(ROOT / "packaging/arch/archiso/airootfs/etc/linura/install-policy.json")
+    install_policy = load_json(
+        ROOT / "packaging/arch/archiso/airootfs/etc/linura/install-policy.json"
+    )
     if install_policy.get("disk_encryption") != "required_for_supported_install":
-        failures.append("install policy must require disk encryption for supported installs")
+        failures.append(
+            "install policy must require disk encryption for supported installs"
+        )
     if install_policy.get("firewall_inbound") != "deny_by_default":
         failures.append("install policy must use deny-by-default inbound firewall")
     if install_policy.get("ssh_initial_state") != "disabled":
@@ -130,7 +162,9 @@ def main() -> int:
         for failure in failures:
             print(f"ERROR: {failure}", file=sys.stderr)
         return 1
-    print(f"asset checks passed ({len(mappings)} schema-validated assets, {len(seen_schema_ids)} schemas)")
+    print(
+        f"asset checks passed ({len(mappings)} schema-validated assets, {len(seen_schema_ids)} schemas)"
+    )
     return 0
 
 

@@ -6,7 +6,9 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "tools" / "verify_v010_slice_pr_evidence.py"
-SPEC = importlib.util.spec_from_file_location("verify_v010_slice_pr_evidence", MODULE_PATH)
+SPEC = importlib.util.spec_from_file_location(
+    "verify_v010_slice_pr_evidence", MODULE_PATH
+)
 assert SPEC is not None and SPEC.loader is not None
 verifier = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(verifier)
@@ -23,7 +25,11 @@ class V010SlicePREvidenceTests(unittest.TestCase):
     def test_current_completed_ledger_evidence_has_canonical_owners(self) -> None:
         owners = verifier.load_completed_evidence(ROOT)
         self.assertTrue(owners)
-        self.assertTrue(all(slice_id in verifier.SLICE_PATH_PREFIXES for slice_id in owners.values()))
+        self.assertTrue(
+            all(
+                slice_id in verifier.SLICE_PATH_PREFIXES for slice_id in owners.values()
+            )
+        )
 
     def test_scope_matching_accepts_owned_implementation_paths(self) -> None:
         cases = {
@@ -85,7 +91,9 @@ class V010SlicePREvidenceTests(unittest.TestCase):
             "qualification/v010/release-matrix/security_qualification/machine/os-release.txt",
         ):
             with self.subTest(path=release_matrix_artifact):
-                self.assertTrue(verifier.evidence_seal_path_allowed(release_matrix_artifact))
+                self.assertTrue(
+                    verifier.evidence_seal_path_allowed(release_matrix_artifact)
+                )
         for executable_harness in (
             "qualification/v010/shell-runtime/run-shell-runtime.sh",
             "qualification/v010/shell-runtime/prepare-substrate.sh",
@@ -96,8 +104,12 @@ class V010SlicePREvidenceTests(unittest.TestCase):
             "qualification/v010/release-matrix/helper.rs",
         ):
             with self.subTest(path=executable_harness):
-                self.assertFalse(verifier.evidence_seal_path_allowed(executable_harness))
-        self.assertFalse(verifier.evidence_seal_path_allowed("apps/linurad/src/main.rs"))
+                self.assertFalse(
+                    verifier.evidence_seal_path_allowed(executable_harness)
+                )
+        self.assertFalse(
+            verifier.evidence_seal_path_allowed("apps/linurad/src/main.rs")
+        )
         self.assertFalse(verifier.evidence_seal_path_allowed("Cargo.lock"))
 
     def test_evidence_seal_rename_checks_source_and_destination(self) -> None:
@@ -110,7 +122,10 @@ class V010SlicePREvidenceTests(unittest.TestCase):
         )
         self.assertEqual(
             paths,
-            ("qualification/v010/interactive-workstation/moved-evidence.json", "apps/linurad/src/main.rs"),
+            (
+                "qualification/v010/interactive-workstation/moved-evidence.json",
+                "apps/linurad/src/main.rs",
+            ),
         )
         self.assertTrue(verifier.evidence_seal_path_allowed(paths[0]))
         self.assertFalse(verifier.evidence_seal_path_allowed(paths[1]))
@@ -120,12 +135,14 @@ class V010SlicePREvidenceTests(unittest.TestCase):
         try:
             for status in ("added", "modified"):
                 with self.subTest(status=status):
-                    verifier.pr_file_records = lambda repository, number, status=status: [
-                        {
-                            "filename": "apps/linurad/src/session_audio.rs",
-                            "status": status,
-                        }
-                    ]
+                    verifier.pr_file_records = (
+                        lambda repository, number, status=status: [
+                            {
+                                "filename": "apps/linurad/src/session_audio.rs",
+                                "status": status,
+                            }
+                        ]
+                    )
                     verifier.require_slice_scope("linura-org/linura", 154, "S08")
         finally:
             verifier.pr_file_records = original

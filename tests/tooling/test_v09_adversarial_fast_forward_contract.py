@@ -19,7 +19,9 @@ class V09AdversarialFastForwardContractTests(unittest.TestCase):
         self.assertIn("--property=StandardOutput=journal", helper)
         self.assertIn("--property=StandardError=journal", helper)
         self.assertIn("</dev/null >/dev/null 2>&1", helper)
-        systemd_run = next(line for line in helper.splitlines() if "systemd-run" in line)
+        systemd_run = next(
+            line for line in helper.splitlines() if "systemd-run" in line
+        )
         self.assertIn("'$Q8_OBSERVER'", systemd_run)
         self.assertNotIn("/bin/bash -c", systemd_run)
         self.assertNotIn("ssh.service", systemd_run)
@@ -39,12 +41,14 @@ class V09AdversarialFastForwardContractTests(unittest.TestCase):
             "systemctl enable --now linura-qualification-transport.service",
             source,
         )
-        self.assertIn("systemctl is-active --quiet linura-qualification-transport.service", source)
-        self.assertIn("install_text_file \"$Q8_OBSERVER\" 0755", source)
+        self.assertIn(
+            "systemctl is-active --quiet linura-qualification-transport.service", source
+        )
+        self.assertIn('install_text_file "$Q8_OBSERVER" 0755', source)
         self.assertIn("ssh_candidate_units()", source)
         self.assertIn("ssh_serving_properties()", source)
         self.assertIn('pkill -KILL -x "$daemon"', source)
-        self.assertIn('printf \'%s\\n\' "$output" >&2', helper)
+        self.assertIn("printf '%s\\n' \"$output\" >&2", helper)
         self.assertIn("KillMode=control-group", source)
         self.assertNotIn("KillMode=process", source)
         self.assertIn("stable=", source)
@@ -53,7 +57,10 @@ class V09AdversarialFastForwardContractTests(unittest.TestCase):
 
     def test_fast_forward_and_real_boundary_four_use_the_isolated_helper(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
-        start = source.index("if (( V09_BOUNDARY_START > 1 )); then", source.index("durable-bootstrap-init"))
+        start = source.index(
+            "if (( V09_BOUNDARY_START > 1 )); then",
+            source.index("durable-bootstrap-init"),
+        )
         end = source.index("printf 'qualification_fast_forwarded_through=", start)
         fast_forward = source[start:end]
 

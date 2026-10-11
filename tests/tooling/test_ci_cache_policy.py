@@ -36,11 +36,15 @@ class CiCachePolicyTests(unittest.TestCase):
         path = root / ".github/actions/dependency-input-cache-policy.toml"
         source = path.read_text(encoding="utf-8")
         path.write_text(
-            source.replace("linura_build_outputs = false", "linura_build_outputs = true", 1),
+            source.replace(
+                "linura_build_outputs = false", "linura_build_outputs = true", 1
+            ),
             encoding="utf-8",
         )
         failures = policy.check(root)
-        self.assertTrue(any("contract drifted" in failure for failure in failures), failures)
+        self.assertTrue(
+            any("contract drifted" in failure for failure in failures), failures
+        )
 
     def test_contract_cannot_treat_cache_hit_as_evidence(self) -> None:
         root = self.copy_root()
@@ -55,7 +59,9 @@ class CiCachePolicyTests(unittest.TestCase):
             encoding="utf-8",
         )
         failures = policy.check(root)
-        self.assertTrue(any("contract drifted" in failure for failure in failures), failures)
+        self.assertTrue(
+            any("contract drifted" in failure for failure in failures), failures
+        )
 
     def test_cargo_cache_cannot_include_build_outputs(self) -> None:
         root = self.copy_root()
@@ -81,7 +87,9 @@ class CiCachePolicyTests(unittest.TestCase):
         source = path.read_text(encoding="utf-8")
         path.write_text(source.replace(policy.CACHE_SHA, "main", 1), encoding="utf-8")
         failures = policy.check(root)
-        self.assertTrue(any("pinned actions/cache" in failure for failure in failures), failures)
+        self.assertTrue(
+            any("pinned actions/cache" in failure for failure in failures), failures
+        )
 
     def test_mutable_cache_ref_cannot_hide_behind_pinned_comment(self) -> None:
         root = self.copy_root()
@@ -89,8 +97,7 @@ class CiCachePolicyTests(unittest.TestCase):
         source = path.read_text(encoding="utf-8")
         source = source.replace(
             f"uses: actions/cache@{policy.CACHE_SHA} # v6.1.0",
-            "uses: actions/cache@main\n"
-            f"      # uses: actions/cache@{policy.CACHE_SHA}",
+            f"uses: actions/cache@main\n      # uses: actions/cache@{policy.CACHE_SHA}",
             1,
         )
         path.write_text(source, encoding="utf-8")
@@ -100,7 +107,9 @@ class CiCachePolicyTests(unittest.TestCase):
             failures,
         )
 
-    def test_folded_mutable_cache_ref_cannot_hide_behind_block_scalar_decoy(self) -> None:
+    def test_folded_mutable_cache_ref_cannot_hide_behind_block_scalar_decoy(
+        self,
+    ) -> None:
         root = self.copy_root()
         path = root / ".github/actions/cargo-input-cache/action.yml"
         source = path.read_text(encoding="utf-8")
@@ -193,7 +202,7 @@ class CiCachePolicyTests(unittest.TestCase):
         source = path.read_text(encoding="utf-8")
         path.write_text(
             source + '\n"runs" :\n  using: composite\n  steps:\n'
-            '    - uses: actions/cache@main\n',
+            "    - uses: actions/cache@main\n",
             encoding="utf-8",
         )
         failures = policy.check(root)
@@ -207,7 +216,8 @@ class CiCachePolicyTests(unittest.TestCase):
         path = root / ".github/actions/cargo-input-cache/action.yml"
         source = path.read_text(encoding="utf-8")
         path.write_text(
-            source + "\nruns:\n  using: composite\n  steps:\n    - uses: actions/cache@main\n",
+            source
+            + "\nruns:\n  using: composite\n  steps:\n    - uses: actions/cache@main\n",
             encoding="utf-8",
         )
         failures = policy.check(root)
@@ -246,9 +256,7 @@ class CiCachePolicyTests(unittest.TestCase):
         path.write_text(
             source.replace(
                 assertion,
-                "          cat <<'INVARIANT'\n"
-                + assertion
-                + "          INVARIANT\n",
+                "          cat <<'INVARIANT'\n" + assertion + "          INVARIANT\n",
                 1,
             ),
             encoding="utf-8",
@@ -267,9 +275,7 @@ class CiCachePolicyTests(unittest.TestCase):
         path.write_text(
             source.replace(
                 "        sudo apt-get update\n",
-                "        if false; then\n"
-                "          sudo apt-get update\n"
-                "        fi\n",
+                "        if false; then\n          sudo apt-get update\n        fi\n",
                 1,
             ),
             encoding="utf-8",
@@ -323,7 +329,10 @@ class CiCachePolicyTests(unittest.TestCase):
             encoding="utf-8",
         )
         failures = policy.check(root)
-        self.assertTrue(any("installed_universe_sha256" in failure for failure in failures), failures)
+        self.assertTrue(
+            any("installed_universe_sha256" in failure for failure in failures),
+            failures,
+        )
 
     def test_apt_install_must_verify_exact_candidate_versions(self) -> None:
         root = self.copy_root()
@@ -345,8 +354,9 @@ class CiCachePolicyTests(unittest.TestCase):
         source = path.read_text(encoding="utf-8")
         path.write_text(source + "\n# restore-keys: linura-cargo-\n", encoding="utf-8")
         failures = policy.check(root)
-        self.assertTrue(any("broad restore keys" in failure for failure in failures), failures)
-
+        self.assertTrue(
+            any("broad restore keys" in failure for failure in failures), failures
+        )
 
     def mutate_ci(self, before: str, after: str) -> list[str]:
         root = self.copy_root()
@@ -367,8 +377,7 @@ class CiCachePolicyTests(unittest.TestCase):
     def test_xtask_if_false_cannot_bypass_canonical_gate(self) -> None:
         failures = self.mutate_ci(
             "      - name: Run canonical Linura checks\n",
-            "      - name: Run canonical Linura checks\n"
-            "        if: false\n",
+            "      - name: Run canonical Linura checks\n        if: false\n",
         )
         self.assertTrue(any("unsafe step key" in x for x in failures), failures)
 
@@ -385,21 +394,21 @@ class CiCachePolicyTests(unittest.TestCase):
             "    runs-on: ubuntu-24.04\n",
             "    if: false\n    runs-on: ubuntu-24.04\n",
         )
-        self.assertTrue(any("job must run unconditionally" in x for x in failures), failures)
+        self.assertTrue(
+            any("job must run unconditionally" in x for x in failures), failures
+        )
 
     def test_quoted_step_if_false_is_rejected(self) -> None:
         failures = self.mutate_ci(
             "      - name: Run canonical Linura checks\n",
-            "      - name: Run canonical Linura checks\n"
-            '        "if": false\n',
+            '      - name: Run canonical Linura checks\n        "if": false\n',
         )
         self.assertTrue(any("noncanonical step key" in x for x in failures), failures)
 
     def test_disabled_qml_commands_cannot_hide_as_heredoc(self) -> None:
         failures = self.mutate_ci(
             "          cmake -S apps/linura-shell/bridge",
-            "          cat <<'FAKE_BUILD'\n"
-            "          cmake -S apps/linura-shell/bridge",
+            "          cat <<'FAKE_BUILD'\n          cmake -S apps/linura-shell/bridge",
         )
         self.assertTrue(any("QML build differs" in x for x in failures), failures)
 
@@ -415,23 +424,25 @@ class CiCachePolicyTests(unittest.TestCase):
             "          namespace: canonical-ci-shell\n",
             "          namespace: alternate\n",
         )
-        self.assertTrue(any("APT cache input step drifted" in x for x in failures), failures)
+        self.assertTrue(
+            any("APT cache input step drifted" in x for x in failures), failures
+        )
 
     def test_shadow_jobs_mapping_cannot_bypass_ci(self) -> None:
         failures = self.mutate_ci(
             "jobs:\n  canonical-check:\n",
             '"jobs":\n  canonical-check:\n',
         )
-        self.assertTrue(any("noncanonical root mappings" in x for x in failures), failures)
+        self.assertTrue(
+            any("noncanonical root mappings" in x for x in failures), failures
+        )
 
     def test_extra_cargo_cache_step_cannot_shadow_reviewed_step(self) -> None:
         failures = self.mutate_ci(
             "      - name: Restore Cargo dependency inputs\n",
-            "      - name: Restore Cargo dependency inputs\n"
-            "        if: false\n",
+            "      - name: Restore Cargo dependency inputs\n        if: false\n",
         )
         self.assertTrue(any("unsafe step key" in x for x in failures), failures)
-
 
     def test_early_policy_step_must_remain_unconditional(self) -> None:
         failures = self.mutate_ci(
@@ -448,26 +459,35 @@ class CiCachePolicyTests(unittest.TestCase):
             "        env:\n"
             "          BASH_ENV: /tmp/bypass\n",
         )
-        self.assertTrue(any("critical step structure drifted" in x for x in failures), failures)
+        self.assertTrue(
+            any("critical step structure drifted" in x for x in failures), failures
+        )
 
     def test_missing_early_policy_check_is_rejected(self) -> None:
         failures = self.mutate_ci(
             "        run: python3 tools/check_ci_cache_policy.py\n",
             "        run: echo skip-policy\n",
         )
-        self.assertTrue(any("must validate cache policy before builds" in x for x in failures), failures)
+        self.assertTrue(
+            any("must validate cache policy before builds" in x for x in failures),
+            failures,
+        )
 
     def test_exact_source_qml_builds_cannot_be_replaced_by_cache(self) -> None:
         root = self.copy_root()
         path = root / ".github/workflows/ci.yml"
         source = path.read_text(encoding="utf-8")
         path.write_text(
-            source.replace("cmake -S apps/linura-shell/bridge", "echo cached-bridge", 1),
+            source.replace(
+                "cmake -S apps/linura-shell/bridge", "echo cached-bridge", 1
+            ),
             encoding="utf-8",
         )
         failures = policy.check(root)
         self.assertTrue(
-            any("cache integration missing invariant" in failure for failure in failures),
+            any(
+                "cache integration missing invariant" in failure for failure in failures
+            ),
             failures,
         )
 

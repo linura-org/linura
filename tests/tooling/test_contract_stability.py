@@ -24,7 +24,9 @@ _STABLE_XML = """<node>
 
 
 class ContractStabilityTests(unittest.TestCase):
-    def _run_checker(self, root: Path, baseline: Path | None = None) -> subprocess.CompletedProcess[str]:
+    def _run_checker(
+        self, root: Path, baseline: Path | None = None
+    ) -> subprocess.CompletedProcess[str]:
         command = [
             sys.executable,
             str(ROOT / "tools/check_contract_stability.py"),
@@ -59,7 +61,9 @@ class ContractStabilityTests(unittest.TestCase):
             f"{stable_metadata}",
             encoding="utf-8",
         )
-        (root / "interfaces/dbus/org.example.Control1.xml").write_text(xml, encoding="utf-8")
+        (root / "interfaces/dbus/org.example.Control1.xml").write_text(
+            xml, encoding="utf-8"
+        )
         (root / "docs/api-versioning.md").write_text(
             "contract version contract stability Experimental Preview Stable "
             "Stability is never inferred Durable state is different\n",
@@ -75,7 +79,9 @@ class ContractStabilityTests(unittest.TestCase):
         self.assertIn("fetch-depth: 0", workflow)
 
     def test_version_one_does_not_imply_stable(self) -> None:
-        registry = tomllib.loads((ROOT / "contracts/stability.toml").read_text(encoding="utf-8"))
+        registry = tomllib.loads(
+            (ROOT / "contracts/stability.toml").read_text(encoding="utf-8")
+        )
         by_path = {entry["path"]: entry for entry in registry["contract"]}
         control = by_path["interfaces/dbus/org.linura.Control1.xml"]
         self.assertEqual(control["version"], "1")
@@ -86,11 +92,16 @@ class ContractStabilityTests(unittest.TestCase):
             self.assertEqual(data["x-linura-stability"], "experimental")
 
     def test_stable_contract_cannot_be_downgraded(self) -> None:
-        with tempfile.TemporaryDirectory() as current_dir, tempfile.TemporaryDirectory() as baseline_dir:
+        with (
+            tempfile.TemporaryDirectory() as current_dir,
+            tempfile.TemporaryDirectory() as baseline_dir,
+        ):
             current = Path(current_dir)
             baseline = Path(baseline_dir)
             self._write_fixture(baseline, stability="stable", xml=_STABLE_XML)
-            experimental_xml = _STABLE_XML.replace('value="stable"', 'value="experimental"')
+            experimental_xml = _STABLE_XML.replace(
+                'value="stable"', 'value="experimental"'
+            )
             self._write_fixture(current, stability="experimental", xml=experimental_xml)
 
             result = self._run_checker(current, baseline)
@@ -98,7 +109,10 @@ class ContractStabilityTests(unittest.TestCase):
             self.assertIn("stability downgrade is forbidden", result.stderr)
 
     def test_stable_contract_cannot_be_removed_from_registry(self) -> None:
-        with tempfile.TemporaryDirectory() as current_dir, tempfile.TemporaryDirectory() as baseline_dir:
+        with (
+            tempfile.TemporaryDirectory() as current_dir,
+            tempfile.TemporaryDirectory() as baseline_dir,
+        ):
             current = Path(current_dir)
             baseline = Path(baseline_dir)
             self._write_fixture(baseline, stability="stable", xml=_STABLE_XML)
@@ -116,13 +130,16 @@ class ContractStabilityTests(unittest.TestCase):
             self.assertIn("Stable contract removed from registry", result.stderr)
 
     def test_stable_dbus_contract_allows_additive_members(self) -> None:
-        with tempfile.TemporaryDirectory() as current_dir, tempfile.TemporaryDirectory() as baseline_dir:
+        with (
+            tempfile.TemporaryDirectory() as current_dir,
+            tempfile.TemporaryDirectory() as baseline_dir,
+        ):
             current = Path(current_dir)
             baseline = Path(baseline_dir)
             self._write_fixture(baseline, stability="stable", xml=_STABLE_XML)
             additive = _STABLE_XML.replace(
                 "  </interface>",
-                "    <method name=\"Pong\"><arg name=\"value\" type=\"s\" direction=\"out\"/></method>\n"
+                '    <method name="Pong"><arg name="value" type="s" direction="out"/></method>\n'
                 "  </interface>",
             )
             self._write_fixture(current, stability="stable", xml=additive)
@@ -131,7 +148,10 @@ class ContractStabilityTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_stable_dbus_contract_rejects_same_generation_breakage(self) -> None:
-        with tempfile.TemporaryDirectory() as current_dir, tempfile.TemporaryDirectory() as baseline_dir:
+        with (
+            tempfile.TemporaryDirectory() as current_dir,
+            tempfile.TemporaryDirectory() as baseline_dir,
+        ):
             current = Path(current_dir)
             baseline = Path(baseline_dir)
             self._write_fixture(baseline, stability="stable", xml=_STABLE_XML)

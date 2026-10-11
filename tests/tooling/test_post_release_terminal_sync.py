@@ -83,10 +83,14 @@ complete
 | --- | --- | --- | --- |
 | external manual task | operator | unrelated external ceremony | pending |
 """
-        with self.assertRaisesRegex(sync_tool.TerminalSyncError, "unrecognized pending terminal row"):
+        with self.assertRaisesRegex(
+            sync_tool.TerminalSyncError, "unrecognized pending terminal row"
+        ):
             sync_tool.normalize_qualification_terminal_state(text, "v9.9.9")
 
-    def test_completed_milestone_cannot_claim_remaining_unchecked_criteria(self) -> None:
+    def test_completed_milestone_cannot_claim_remaining_unchecked_criteria(
+        self,
+    ) -> None:
         text = """# milestone
 
 ## Release gate
@@ -113,10 +117,14 @@ none
 - [x] tag-last publication succeeds;
 - [ ] independent published-release verification succeeds;
 """
-        with self.assertRaisesRegex(sync_tool.TerminalSyncError, "unchecked release-gate criteria"):
+        with self.assertRaisesRegex(
+            sync_tool.TerminalSyncError, "unchecked release-gate criteria"
+        ):
             sync_tool.normalize_milestone_terminal_prose(text, "v9.9.9")
 
-    def test_docs_index_moves_old_current_links_without_concatenating_entries(self) -> None:
+    def test_docs_index_moves_old_current_links_without_concatenating_entries(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             for relative in (
@@ -146,7 +154,9 @@ none
             )
             self.assertNotIn("v0.6.0.md)- [v0.5.0", updated)
 
-    def test_reference_release_advances_explicit_qualification_environment_support(self) -> None:
+    def test_reference_release_advances_explicit_qualification_environment_support(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             matrix = root / "hardware/support-matrix.json"
@@ -240,23 +250,36 @@ none
                 updated["machine_classes"]["workstation"]["release_qualified_profiles"],
                 ["arch-hyprland-v1"],
             )
-            self.assertIn('status = "release-qualified"', profile.read_text(encoding="utf-8"))
+            self.assertIn(
+                'status = "release-qualified"', profile.read_text(encoding="utf-8")
+            )
             self.assertIn("profiles/arch-hyprland-v1.toml", changed)
             self.assertIn("hardware/support-matrix.json", changed)
 
-    def test_release_workflows_require_release_app_native_gates_and_deterministic_closure(self) -> None:
-        closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
-        cleanup = (ROOT / ".github/workflows/post-release-cleanup.yml").read_text(encoding="utf-8")
-        promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
+    def test_release_workflows_require_release_app_native_gates_and_deterministic_closure(
+        self,
+    ) -> None:
+        closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(
+            encoding="utf-8"
+        )
+        cleanup = (ROOT / ".github/workflows/post-release-cleanup.yml").read_text(
+            encoding="utf-8"
+        )
+        promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("tools/post_release_terminal_sync.py", closure)
         self.assertIn("--credential-source github-app", closure)
-        self.assertIn("actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1", closure)
+        self.assertIn(
+            "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+            closure,
+        )
         self.assertIn("tools/release_native_gates.py", closure)
         self.assertNotIn("@codex review", closure)
         self.assertNotIn("chatgpt-codex-connector", closure)
         self.assertNotIn("release_workflow_dispatch.py", closure)
-        self.assertIn('pulls/$PR_NUMBER/merge', closure)
+        self.assertIn("pulls/$PR_NUMBER/merge", closure)
         self.assertNotIn('gh pr merge "$PR_NUMBER"', closure)
         self.assertIn("post-release-cleanup.yml", closure)
 
@@ -266,9 +289,14 @@ none
         self.assertIn("permission-contents: write", cleanup)
         self.assertIn("permission-pull-requests: read", cleanup)
 
-        self.assertIn("actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1", promotion)
+        self.assertIn(
+            "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+            promotion,
+        )
         self.assertIn("--credential-source github-app", promotion)
-        self.assertIn("prove Release App closure authority before publication", promotion)
+        self.assertIn(
+            "prove Release App closure authority before publication", promotion
+        )
 
 
 if __name__ == "__main__":

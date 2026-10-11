@@ -145,12 +145,15 @@ def visible_state_field(line: str) -> bool:
     metadata = r"(?:Status|State|Classification):\s*\S"
     if re.match(prefix + r"(?:#{1,6}\s+)?" + metadata, rendered, re.IGNORECASE):
         return True
-    return re.match(
-        r"^\s*\|\s*(?:(?:\*\*|__|\*|_|\x60)?(?:Status|State|Classification):?"
-        r"(?:\*\*|__|\*|_|\x60)?)\s*\|",
-        rendered,
-        re.IGNORECASE,
-    ) is not None
+    return (
+        re.match(
+            r"^\s*\|\s*(?:(?:\*\*|__|\*|_|\x60)?(?:Status|State|Classification):?"
+            r"(?:\*\*|__|\*|_|\x60)?)\s*\|",
+            rendered,
+            re.IGNORECASE,
+        )
+        is not None
+    )
 
 
 def visible_markdown_lines(body: str) -> list[str | None]:
@@ -161,7 +164,13 @@ def visible_markdown_lines(body: str) -> list[str | None]:
     in_comment = False
     for raw in body.splitlines():
         if fence_char is not None:
-            closing = r" {0,3}" + re.escape(fence_char) + "{" + str(fence_length) + r",}[ \t]*"
+            closing = (
+                r" {0,3}"
+                + re.escape(fence_char)
+                + "{"
+                + str(fence_length)
+                + r",}[ \t]*"
+            )
             if re.fullmatch(closing, raw):
                 fence_char = None
             visible_lines.append(None)
@@ -201,7 +210,8 @@ def visible_markdown_lines(body: str) -> list[str | None]:
 def visible_markdown_headings(body: str) -> list[str]:
     """Count only actual, rendered, top-level level-two headings."""
     return [
-        line for line in visible_markdown_lines(body)
+        line
+        for line in visible_markdown_lines(body)
         if line is not None and line.startswith("## ")
     ]
 
@@ -215,8 +225,10 @@ def validate(root: Path, *, as_of: date | None = None) -> list[str]:
         return ["research sources must not traverse symlinks"]
     radar = radar_path.read_text(encoding="utf-8")
     lines = visible_markdown_lines(radar)
-    if any(line is not None and line.strip()
-           and line.startswith(("    ", "\t")) for line in lines):
+    if any(
+        line is not None and line.strip() and line.startswith(("    ", "\t"))
+        for line in lines
+    ):
         failures.append("unsupported indented Markdown in radar")
     if any(line is not None and has_unclosed_inline_code_span(line) for line in lines):
         failures.append("unsupported multiline inline code in radar")
@@ -233,7 +245,7 @@ def validate(root: Path, *, as_of: date | None = None) -> list[str]:
         if start >= len(lines) or separator.fullmatch(lines[start]) is None:
             failures.append("invalid radar table separator")
         else:
-            for line in lines[start + 1:]:
+            for line in lines[start + 1 :]:
                 if line is None:
                     failures.append("non-rendered content interrupts radar table")
                     break
@@ -264,19 +276,27 @@ def validate(root: Path, *, as_of: date | None = None) -> list[str]:
             failures.append(f"duplicate radar record: {target}")
         found.add(target)
         try:
-            last_date, next_date = date.fromisoformat(assessed), date.fromisoformat(review)
+            last_date, next_date = (
+                date.fromisoformat(assessed),
+                date.fromisoformat(review),
+            )
             interval = (next_date - last_date).days
             if last_date > as_of:
                 failures.append(f"assessment date is in the future: {target}")
             if interval <= 0:
                 failures.append(f"review must follow assessment: {target}")
-            if state in {"Watch", "Assess"} and interval > {"Watch": 90, "Assess": 30}[state]:
+            if (
+                state in {"Watch", "Assess"}
+                and interval > {"Watch": 90, "Assess": 30}[state]
+            ):
                 failures.append(f"review interval exceeds {state} cadence: {target}")
         except ValueError:
             failures.append(f"invalid ISO date: {target}")
-        record = (radar_path.parent / target)
-        if (symlink_in_source_path(root, Path("docs/research") / target)
-                or not record.is_file()):
+        record = radar_path.parent / target
+        if (
+            symlink_in_source_path(root, Path("docs/research") / target)
+            or not record.is_file()
+        ):
             failures.append(f"missing or unsafe research record: {target}")
             continue
         body = record.read_text(encoding="utf-8")
@@ -284,35 +304,46 @@ def validate(root: Path, *, as_of: date | None = None) -> list[str]:
             failures.append(f"research title mismatch: {target}")
         expected_id = Path(target).stem
         rendered_lines = visible_markdown_lines(body)
-        if any(line is not None and line.strip()
-               and line.startswith(("    ", "\t")) for line in rendered_lines):
-            failures.append(f"unsupported indented Markdown in research record: {target}")
+        if any(
+            line is not None and line.strip() and line.startswith(("    ", "\t"))
+            for line in rendered_lines
+        ):
+            failures.append(
+                f"unsupported indented Markdown in research record: {target}"
+            )
         if any(
             line is not None and has_unclosed_inline_code_span(line)
             for line in rendered_lines
         ):
-            failures.append(f"unsupported multiline inline code in research record: {target}")
+            failures.append(
+                f"unsupported multiline inline code in research record: {target}"
+            )
         if any(
-            line is not None and RAW_HTML_BLOCK.search(line)
-            for line in rendered_lines
+            line is not None and RAW_HTML_BLOCK.search(line) for line in rendered_lines
         ):
-            failures.append(f"raw HTML container is not allowed in research record: {target}")
+            failures.append(
+                f"raw HTML container is not allowed in research record: {target}"
+            )
         expected_id_line = f"**Record ID:** {chr(96)}{expected_id}{chr(96)}"
-        if sum(
-            line is not None and line.strip() == expected_id_line
-            for line in rendered_lines
-        ) != 1:
+        if (
+            sum(
+                line is not None and line.strip() == expected_id_line
+                for line in rendered_lines
+            )
+            != 1
+        ):
             failures.append(f"research identity mismatch: {target}")
         rendered_headings = visible_markdown_headings(body)
         for heading in REQUIRED_SECTIONS:
             if rendered_headings.count(heading) != 1:
                 failures.append(f"missing or duplicate rendered {heading}: {target}")
-        present = [heading for heading in rendered_headings if heading in REQUIRED_SECTIONS]
+        present = [
+            heading for heading in rendered_headings if heading in REQUIRED_SECTIONS
+        ]
         if present != list(REQUIRED_SECTIONS):
             failures.append(f"research sections out of order: {target}")
         if any(
-            line is not None and visible_state_field(line)
-            for line in rendered_lines
+            line is not None and visible_state_field(line) for line in rendered_lines
         ):
             failures.append(f"entry duplicates canonical radar state: {target}")
     entry_root = root / ENTRY_ROOT
@@ -355,28 +386,31 @@ class TechnologyRadarTests(unittest.TestCase):
                 )
                 failures = self._validate_fixture(changed_radar, changed_record)
                 self.assertTrue(
-                    any("technology name must be plain text" in failure
-                        for failure in failures),
+                    any(
+                        "technology name must be plain text" in failure
+                        for failure in failures
+                    ),
                     failures,
                 )
         for duplicate in (
-            "MULTIKERNEL LINUX", "Multikernel  Linux",
-            "Multikernel&nbsp;Linux", "Multikernel　Linux",
+            "MULTIKERNEL LINUX",
+            "Multikernel  Linux",
+            "Multikernel&nbsp;Linux",
+            "Multikernel　Linux",
         ):
             with self.subTest(duplicate=duplicate):
                 self.assertEqual(
                     canonical_technology_name(duplicate),
                     canonical_technology_name("Multikernel Linux"),
                 )
-                another = row.replace(
-                    "Multikernel Linux", duplicate, 1
-                ).replace("multikernel-linux.md", "another-record.md", 1)
+                another = row.replace("Multikernel Linux", duplicate, 1).replace(
+                    "multikernel-linux.md", "another-record.md", 1
+                )
                 failures = self._validate_fixture(
                     radar.replace(row, row + "\n" + another, 1), record
                 )
                 self.assertTrue(
-                    any("duplicate technology name" in failure
-                        for failure in failures),
+                    any("duplicate technology name" in failure for failure in failures),
                     failures,
                 )
 
@@ -404,12 +438,16 @@ class TechnologyRadarTests(unittest.TestCase):
             with self.subTest(field=field):
                 failures = self._validate_fixture(radar, record + "\n" + field + "\n")
                 self.assertTrue(
-                    any("entry duplicates canonical radar state" in failure
-                        for failure in failures),
+                    any(
+                        "entry duplicates canonical radar state" in failure
+                        for failure in failures
+                    ),
                     failures,
                 )
-        for hidden in ("<!-- ## State: Adopt -->",
-                       chr(96) * 3 + "md\n## State: Adopt\n" + chr(96) * 3):
+        for hidden in (
+            "<!-- ## State: Adopt -->",
+            chr(96) * 3 + "md\n## State: Adopt\n" + chr(96) * 3,
+        ):
             with self.subTest(hidden=hidden):
                 self.assertEqual(
                     self._validate_fixture(radar, record + "\n" + hidden + "\n"), []
@@ -430,15 +468,20 @@ class TechnologyRadarTests(unittest.TestCase):
                     radar, record + "\n" + indented + "\n"
                 )
                 self.assertTrue(
-                    any("unsupported indented Markdown" in failure for failure in failures),
+                    any(
+                        "unsupported indented Markdown" in failure
+                        for failure in failures
+                    ),
                     failures,
                 )
         table = "| Technology | State | Review owner | Last assessed | Next review |"
         changed = radar.replace(table, "    " + table, 1)
         failures = self._validate_fixture(changed, record)
         self.assertTrue(
-            any("unsupported indented Markdown in radar" in failure
-                for failure in failures),
+            any(
+                "unsupported indented Markdown in radar" in failure
+                for failure in failures
+            ),
             failures,
         )
 
@@ -451,9 +494,7 @@ class TechnologyRadarTests(unittest.TestCase):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 if directory:
                     (root / RADAR).write_text(radar, encoding="utf-8")
-                destination.symlink_to(
-                    ROOT / path, target_is_directory=directory
-                )
+                destination.symlink_to(ROOT / path, target_is_directory=directory)
                 self.assertIn(
                     "research sources must not traverse symlinks", validate(root)
                 )
@@ -465,9 +506,14 @@ class TechnologyRadarTests(unittest.TestCase):
             root = Path(folder)
             dest = root / RADAR
             dest.parent.mkdir(parents=True)
-            dest.write_text(source.replace("2027-01-08", "2026-10-10"), encoding="utf-8")
+            dest.write_text(
+                source.replace("2027-01-08", "2026-10-10"), encoding="utf-8"
+            )
             errors = validate(root)
-            self.assertTrue(any("review must follow assessment" in error for error in errors), errors)
+            self.assertTrue(
+                any("review must follow assessment" in error for error in errors),
+                errors,
+            )
 
     def test_required_sections_are_rendered_complete_and_ordered(self) -> None:
         original = (ROOT / RADAR).read_text(encoding="utf-8")
@@ -483,16 +529,24 @@ class TechnologyRadarTests(unittest.TestCase):
             heading.replace("##", "## ", 1),
             "",
         ):
-            with self.subTest(replacement=replacement), tempfile.TemporaryDirectory() as tmp:
+            with (
+                self.subTest(replacement=replacement),
+                tempfile.TemporaryDirectory() as tmp,
+            ):
                 root = Path(tmp)
                 (root / RADAR).parent.mkdir(parents=True)
                 (root / RADAR).write_text(original, encoding="utf-8")
                 target = root / ENTRY_ROOT / "multikernel-linux.md"
                 target.parent.mkdir(parents=True)
-                target.write_text(record.replace(heading, replacement, 1), encoding="utf-8")
+                target.write_text(
+                    record.replace(heading, replacement, 1), encoding="utf-8"
+                )
                 errors = validate(root)
                 self.assertTrue(
-                    any("missing or duplicate rendered " + heading in error for error in errors),
+                    any(
+                        "missing or duplicate rendered " + heading in error
+                        for error in errors
+                    ),
                     errors,
                 )
         with tempfile.TemporaryDirectory() as tmp:
@@ -501,11 +555,17 @@ class TechnologyRadarTests(unittest.TestCase):
             (root / RADAR).write_text(original, encoding="utf-8")
             target = root / ENTRY_ROOT / "multikernel-linux.md"
             target.parent.mkdir(parents=True)
-            target.write_text(record.replace(heading, heading + "\n" + heading, 1),
-                              encoding="utf-8")
+            target.write_text(
+                record.replace(heading, heading + "\n" + heading, 1), encoding="utf-8"
+            )
             errors = validate(root)
-            self.assertTrue(any("missing or duplicate rendered " + heading in error
-                                for error in errors), errors)
+            self.assertTrue(
+                any(
+                    "missing or duplicate rendered " + heading in error
+                    for error in errors
+                ),
+                errors,
+            )
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / RADAR).parent.mkdir(parents=True)
@@ -518,8 +578,10 @@ class TechnologyRadarTests(unittest.TestCase):
             swapped = swapped.replace("__FIRST_SECTION__", second, 1)
             target.write_text(swapped, encoding="utf-8")
             errors = validate(root)
-            self.assertTrue(any("research sections out of order" in error for error in errors),
-                            errors)
+            self.assertTrue(
+                any("research sections out of order" in error for error in errors),
+                errors,
+            )
 
     def test_markdown_lookalikes_do_not_count_as_sections(self) -> None:
         heading = REQUIRED_SECTIONS[0]
@@ -539,65 +601,121 @@ class TechnologyRadarTests(unittest.TestCase):
         source = (ROOT / RADAR).read_text(encoding="utf-8")
         original = next(line for line in source.splitlines() if line.startswith("| ["))
         for change, reason in (
-            (source.replace(original, original + "\n" + original, 1),
-             "duplicate radar record"),
-            (source.replace("| Watch |", "| Unknown |"),
-             "invalid radar row"),
-            (source.replace(
-                original, original.replace("Multikernel Linux", "   "), 1),
-             "blank technology name"),
-            (source.replace(
-                original, original.replace("Multikernel Linux", "\t "), 1),
-             "blank technology name"),
-            (source.replace(
-                original, original.replace("Multikernel Linux", "Multi|kernel Linux"), 1),
-             "invalid radar row"),
-            (source.replace(
-                original, original.replace("Multikernel Linux", r"Multi\|kernel Linux"), 1),
-             "invalid radar row"),
-            (source.replace(
-                original, original.replace("Multikernel Linux", "Multi[ker]nel Linux"), 1),
-             "invalid radar row"),
-            (source.replace("entries/multikernel-linux.md", "entries/absent.md"),
-             "missing or unsafe research record"),
-            (source.replace(
-                original, original + "\n" + original.replace(
-                    "multikernel-linux.md", "multikernel-linux-duplicate.md"), 1),
-             "duplicate technology name"),
-            (source.replace("2027-01-08", "2027-01-09"),
-             "review interval exceeds Watch cadence"),
-            (source.replace(
-                original,
-                original + "\n" +
-                "| Multikernel Linux | Watch | Linura maintainers | 2026-10-10 | 2027-01-08 |",
-                1),
-             "invalid radar row"),
-            (source.replace(
-                original,
-                original + "\n" +
-                "Multikernel Linux | Watch | Linura maintainers | 2026-10-10 | 2027-01-08",
-                1),
-             "invalid radar row"),
-            (source.replace(
-                original,
-                original + "\n" +
-                "  | [Invalid](entries/invalid.md) | Watch | Linura maintainers | 2026-10-10 | 2027-01-08 |",
-                1),
-             "invalid radar row"),
-            (source.replace(
-                original,
-                original + "\n" +
-                "|  [Invalid](entries/invalid.md) | Watch | Linura maintainers | 2026-10-10 | 2027-01-08 |",
-                1),
-             "invalid radar row"),
-            (source.replace(
-                "| --- | --- | --- | --- | --- |",
-                "| --- | --- | --- | --- | invalid |"),
-             "invalid radar table separator"),
-            (source.replace(
-                "| Technology | State | Review owner | Last assessed | Next review |",
-                "| Technology | State | Owner | Last assessed | Next review |"),
-             "canonical table header"),
+            (
+                source.replace(original, original + "\n" + original, 1),
+                "duplicate radar record",
+            ),
+            (source.replace("| Watch |", "| Unknown |"), "invalid radar row"),
+            (
+                source.replace(
+                    original, original.replace("Multikernel Linux", "   "), 1
+                ),
+                "blank technology name",
+            ),
+            (
+                source.replace(
+                    original, original.replace("Multikernel Linux", "\t "), 1
+                ),
+                "blank technology name",
+            ),
+            (
+                source.replace(
+                    original,
+                    original.replace("Multikernel Linux", "Multi|kernel Linux"),
+                    1,
+                ),
+                "invalid radar row",
+            ),
+            (
+                source.replace(
+                    original,
+                    original.replace("Multikernel Linux", r"Multi\|kernel Linux"),
+                    1,
+                ),
+                "invalid radar row",
+            ),
+            (
+                source.replace(
+                    original,
+                    original.replace("Multikernel Linux", "Multi[ker]nel Linux"),
+                    1,
+                ),
+                "invalid radar row",
+            ),
+            (
+                source.replace("entries/multikernel-linux.md", "entries/absent.md"),
+                "missing or unsafe research record",
+            ),
+            (
+                source.replace(
+                    original,
+                    original
+                    + "\n"
+                    + original.replace(
+                        "multikernel-linux.md", "multikernel-linux-duplicate.md"
+                    ),
+                    1,
+                ),
+                "duplicate technology name",
+            ),
+            (
+                source.replace("2027-01-08", "2027-01-09"),
+                "review interval exceeds Watch cadence",
+            ),
+            (
+                source.replace(
+                    original,
+                    original
+                    + "\n"
+                    + "| Multikernel Linux | Watch | Linura maintainers | 2026-10-10 | 2027-01-08 |",
+                    1,
+                ),
+                "invalid radar row",
+            ),
+            (
+                source.replace(
+                    original,
+                    original
+                    + "\n"
+                    + "Multikernel Linux | Watch | Linura maintainers | 2026-10-10 | 2027-01-08",
+                    1,
+                ),
+                "invalid radar row",
+            ),
+            (
+                source.replace(
+                    original,
+                    original
+                    + "\n"
+                    + "  | [Invalid](entries/invalid.md) | Watch | Linura maintainers | 2026-10-10 | 2027-01-08 |",
+                    1,
+                ),
+                "invalid radar row",
+            ),
+            (
+                source.replace(
+                    original,
+                    original
+                    + "\n"
+                    + "|  [Invalid](entries/invalid.md) | Watch | Linura maintainers | 2026-10-10 | 2027-01-08 |",
+                    1,
+                ),
+                "invalid radar row",
+            ),
+            (
+                source.replace(
+                    "| --- | --- | --- | --- | --- |",
+                    "| --- | --- | --- | --- | invalid |",
+                ),
+                "invalid radar table separator",
+            ),
+            (
+                source.replace(
+                    "| Technology | State | Review owner | Last assessed | Next review |",
+                    "| Technology | State | Owner | Last assessed | Next review |",
+                ),
+                "canonical table header",
+            ),
         ):
             with self.subTest(reason=reason), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)
@@ -623,7 +741,9 @@ class TechnologyRadarTests(unittest.TestCase):
 
     def test_radar_table_must_be_rendered_not_in_comments_or_fences(self) -> None:
         radar = (ROOT / RADAR).read_text(encoding="utf-8")
-        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(encoding="utf-8")
+        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(
+            encoding="utf-8"
+        )
         header = "| Technology | State | Review owner | Last assessed | Next review |"
         start = radar.index(header)
         end = radar.index("\n\n", start)
@@ -645,11 +765,15 @@ class TechnologyRadarTests(unittest.TestCase):
             f"<!--\n{table}\n-->\n",
         ):
             with self.subTest(decoy=hidden[:30]):
-                self.assertEqual(self._validate_fixture(hidden + "\n" + radar, record), [])
+                self.assertEqual(
+                    self._validate_fixture(hidden + "\n" + radar, record), []
+                )
 
     def test_prefixed_duplicate_state_rejected_and_hidden_state_ignored(self) -> None:
         radar = (ROOT / RADAR).read_text(encoding="utf-8")
-        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(encoding="utf-8")
+        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(
+            encoding="utf-8"
+        )
         for state in (
             "> **State:** Adopt",
             "- **Status:** Hold",
@@ -660,7 +784,10 @@ class TechnologyRadarTests(unittest.TestCase):
             with self.subTest(state=state):
                 errors = self._validate_fixture(radar, record + "\n" + state + "\n")
                 self.assertTrue(
-                    any("entry duplicates canonical radar state" in error for error in errors),
+                    any(
+                        "entry duplicates canonical radar state" in error
+                        for error in errors
+                    ),
                     errors,
                 )
         fence = chr(96) * 3
@@ -672,13 +799,23 @@ class TechnologyRadarTests(unittest.TestCase):
 
     def test_record_identity_requires_a_visible_unique_field(self) -> None:
         radar = (ROOT / RADAR).read_text(encoding="utf-8")
-        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(encoding="utf-8")
+        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(
+            encoding="utf-8"
+        )
         identity = f"**Record ID:** {chr(96)}multikernel-linux{chr(96)}"
         for altered in (
             record.replace(identity, "Record identity withheld", 1)
-            + "\n<!-- " + identity + " -->\n",
+            + "\n<!-- "
+            + identity
+            + " -->\n",
             record.replace(identity, "Record identity withheld", 1)
-            + "\n" + chr(96) * 3 + "\n" + identity + "\n" + chr(96) * 3 + "\n",
+            + "\n"
+            + chr(96) * 3
+            + "\n"
+            + identity
+            + "\n"
+            + chr(96) * 3
+            + "\n",
             record + "\n" + identity + "\n",
         ):
             errors = self._validate_fixture(radar, altered)
@@ -688,41 +825,68 @@ class TechnologyRadarTests(unittest.TestCase):
 
     def test_comment_markers_within_fences_do_not_hide_visible_table(self) -> None:
         radar = (ROOT / RADAR).read_text(encoding="utf-8")
-        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(encoding="utf-8")
+        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(
+            encoding="utf-8"
+        )
         prefix = "~~~markdown\n<!--\n~~~\n"
         self.assertEqual(self._validate_fixture(prefix + radar, record), [])
 
     def test_raw_html_containers_cannot_hide_governed_markup(self) -> None:
         radar = (ROOT / RADAR).read_text(encoding="utf-8")
-        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(encoding="utf-8")
-        start = radar.index("| Technology | State | Review owner | Last assessed | Next review |")
+        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(
+            encoding="utf-8"
+        )
+        start = radar.index(
+            "| Technology | State | Review owner | Last assessed | Next review |"
+        )
         end = radar.index("\n\n", start)
         table = radar[start:end]
         for tag in (
-            "pre", "div", "details", "blockquote", "form", "fieldset",
-            "svg", "x-custom-element", "x:custom", "table", "section",
-            "style", "textarea", "script",
+            "pre",
+            "div",
+            "details",
+            "blockquote",
+            "form",
+            "fieldset",
+            "svg",
+            "x-custom-element",
+            "x:custom",
+            "table",
+            "section",
+            "style",
+            "textarea",
+            "script",
         ):
             with self.subTest(tag=tag):
                 wrapper = f"<{tag}>\n{table}\n\n</{tag}>"
-                errors = self._validate_fixture(radar.replace(table, wrapper, 1), record)
+                errors = self._validate_fixture(
+                    radar.replace(table, wrapper, 1), record
+                )
                 self.assertTrue(
-                    any("raw HTML container is not allowed in radar" in error for error in errors),
+                    any(
+                        "raw HTML container is not allowed in radar" in error
+                        for error in errors
+                    ),
                     errors,
                 )
                 record_errors = self._validate_fixture(
                     radar, record + f"\n<{tag}>\n## Hidden section\n</{tag}>\n"
                 )
                 self.assertTrue(
-                    any("raw HTML container is not allowed in research record" in error
-                        for error in record_errors),
+                    any(
+                        "raw HTML container is not allowed in research record" in error
+                        for error in record_errors
+                    ),
                     record_errors,
                 )
         for syntax in ("<!DOCTYPE html>", "<?xml version='1.0'?>", "<![CDATA["):
             with self.subTest(syntax=syntax):
                 errors = self._validate_fixture(syntax + "\n" + radar, record)
                 self.assertTrue(
-                    any("raw HTML container is not allowed in radar" in e for e in errors),
+                    any(
+                        "raw HTML container is not allowed in radar" in e
+                        for e in errors
+                    ),
                     errors,
                 )
         self.assertEqual(
@@ -732,13 +896,17 @@ class TechnologyRadarTests(unittest.TestCase):
 
     def test_encoded_invisible_metadata_is_rejected(self) -> None:
         radar = (ROOT / RADAR).read_text(encoding="utf-8")
-        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(encoding="utf-8")
+        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(
+            encoding="utf-8"
+        )
         for encoded in ("&#8203;", "&#x200B;", "&ZeroWidthSpace;", "&#32;", "&nbsp;"):
             with self.subTest(encoded=encoded):
                 errors = self._validate_fixture(
                     radar.replace("Multikernel Linux", encoded, 1), record
                 )
-                self.assertTrue(any("blank technology name" in e for e in errors), errors)
+                self.assertTrue(
+                    any("blank technology name" in e for e in errors), errors
+                )
                 errors = self._validate_fixture(
                     radar.replace("| Linura maintainers |", f"| {encoded} |", 1),
                     record,
@@ -762,16 +930,15 @@ class TechnologyRadarTests(unittest.TestCase):
             failures,
         )
         heading = REQUIRED_SECTIONS[0]
-        hidden_heading = record.replace(
-            heading, tick + "\n" + heading + "\n" + tick, 1
-        )
+        hidden_heading = record.replace(heading, tick + "\n" + heading + "\n" + tick, 1)
         failures = self._validate_fixture(radar, hidden_heading)
         self.assertTrue(
-            any("unsupported multiline inline code in research record" in e
-                for e in failures),
+            any(
+                "unsupported multiline inline code in research record" in e
+                for e in failures
+            ),
             failures,
         )
-
 
     def test_escaped_comments_and_inline_code_cannot_hide_visible_state(self) -> None:
         radar = (ROOT / RADAR).read_text(encoding="utf-8")
@@ -796,13 +963,14 @@ class TechnologyRadarTests(unittest.TestCase):
             with self.subTest(visible=visible):
                 failures = self._validate_fixture(radar, record + "\n" + visible + "\n")
                 self.assertTrue(
-                    any("entry duplicates canonical radar state" in item for item in failures),
+                    any(
+                        "entry duplicates canonical radar state" in item
+                        for item in failures
+                    ),
                     failures,
                 )
         self.assertEqual(
-            self._validate_fixture(
-                radar, record + "\n<!-- **State:** Adopt -->\n"
-            ),
+            self._validate_fixture(radar, record + "\n<!-- **State:** Adopt -->\n"),
             [],
         )
         self.assertEqual(
@@ -844,7 +1012,9 @@ class TechnologyRadarTests(unittest.TestCase):
 
     def test_invisible_unicode_labels_cannot_supply_accountable_metadata(self) -> None:
         radar = (ROOT / RADAR).read_text(encoding="utf-8")
-        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(encoding="utf-8")
+        record = (ROOT / ENTRY_ROOT / "multikernel-linux.md").read_text(
+            encoding="utf-8"
+        )
         for label in ("\u200b", "\u2060", "\x00"):
             with self.subTest(label=repr(label)):
                 changed = radar.replace("Multikernel Linux", label, 1)
@@ -853,7 +1023,9 @@ class TechnologyRadarTests(unittest.TestCase):
                     any("blank technology name" in error for error in errors),
                     errors,
                 )
-                changed_owner = radar.replace("| Linura maintainers |", f"| {label} |", 1)
+                changed_owner = radar.replace(
+                    "| Linura maintainers |", f"| {label} |", 1
+                )
                 errors = self._validate_fixture(changed_owner, record)
                 self.assertTrue(
                     any("missing owner" in error for error in errors),
@@ -906,6 +1078,8 @@ class TechnologyRadarTests(unittest.TestCase):
             )
             failures = validate(root)
             self.assertTrue(
-                any("unsafe symlink in research entries" in error for error in failures),
+                any(
+                    "unsafe symlink in research entries" in error for error in failures
+                ),
                 failures,
             )

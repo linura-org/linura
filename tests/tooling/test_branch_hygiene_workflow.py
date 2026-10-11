@@ -33,7 +33,9 @@ class BranchHygieneWorkflowTests(unittest.TestCase):
         gates = workflow.index(
             "- name: Require all native protected-main gates on authority commit"
         )
-        freeze = workflow.index("- name: Freeze reviewed cleanup ledger to authority commit")
+        freeze = workflow.index(
+            "- name: Freeze reviewed cleanup ledger to authority commit"
+        )
         discovery = workflow.index(
             "- name: Discover broad release-adjacent branch residue without mutation authority"
         )
@@ -74,7 +76,9 @@ class BranchHygieneWorkflowTests(unittest.TestCase):
         self.assertIn("permission-pull-requests: read", write_block)
         self.assertNotIn("permission-actions: write", write_block)
 
-    def test_mutation_reuses_exact_lease_cleanup_tool_and_fails_if_residue_remains(self) -> None:
+    def test_mutation_reuses_exact_lease_cleanup_tool_and_fails_if_residue_remains(
+        self,
+    ) -> None:
         workflow = self._workflow()
         delete = workflow.index(
             "- name: Delete only reviewed exact release-owned branches under ref leases"

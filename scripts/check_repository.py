@@ -12,87 +12,269 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED = [
-    "README.md", "SECURITY.md", "SUPPORT.md", "GOVERNANCE.md", "CODE_OF_CONDUCT.md", "CITATION.cff", "AGENTS.md", "CONTRIBUTING.md", "Cargo.toml", "rust-toolchain.toml",
-    "docs/product-vision.md", "docs/vision-coverage.md", "docs/architecture.md", "docs/naming.md", "docs/ecosystem-registry.md", "docs/sdk.md", "docs/intent-model.md",
-    "docs/concepts/landscape.md", "docs/concepts/landscape/agent-runtimes.md", "docs/concepts/landscape/configuration-management.md", "docs/concepts/landscape/linux-desktops.md",
-    "docs/system-graph.md", "docs/capability-composition.md", "docs/semantic-provenance.md", "docs/reusable-setups.md",
-    "docs/agent-architecture.md", "docs/provider-model.md", "docs/state-model.md", "docs/terminology.md",
-    "docs/first-boot.md", "docs/machine-profiles.md", "docs/workflow-model.md",
-    "docs/derived-surfaces.md", "docs/design-system.md", "docs/bootstrap-recovery.md", "docs/security-model.md", "docs/threat-model.md",
-    "docs/development-plan.md", "docs/development-infrastructure.md", "docs/installer-bootstrap.md",
-    "docs/migrations.md", "docs/managed-configuration.md", "docs/hardware-validation.md", "docs/vm-acceptance.md",
-    "docs/visual-testing.md", "docs/application-supervision.md", "docs/lifecycle-workflows.md",
-    "docs/release-engineering.md", "docs/api-versioning.md", "docs/omarchy-development-lessons.md",
-    "docs/roadmap.md", "docs/system-domains.md", "docs/operation-semantics.md", "docs/adr/README.md", "docs/adr/0017-bounded-probes-context-query.md", "docs/adr/0032-classify-operations-before-authority.md", "docs/adr/0033-v010-complete-workstation-product-boundary.md",
-    "docs/community/labels.md", "docs/community/repository-settings.md", "docs/community/sponsorship.md",
-    "docs/rfcs/README.md", ".github/FUNDING.yml",
-    ".github/ISSUE_TEMPLATE/config.yml", ".github/ISSUE_TEMPLATE/bug.yml", ".github/ISSUE_TEMPLATE/feature.yml",
-    ".github/ISSUE_TEMPLATE/compatibility.yml", ".github/ISSUE_TEMPLATE/rfc.yml",
-    "contracts/community.toml", "tools/check_community.py", "tests/tooling/test_community.py",
-    "tools/check_adrs.py", "tests/tooling/test_adrs.py",
-    "contracts/stability.toml", "tools/check_contract_stability.py", "tests/tooling/test_contract_stability.py",
-    "contracts/roadmap.toml", "contracts/v010-workstation-slices.toml", "tools/check_roadmap.py", "tools/v010_slice_graph.py", "tests/tooling/test_roadmap.py",
-    "tools/check_validation_gates.py", "tests/tooling/test_validation_gates.py", ".github/workflows/codex-environment.yml",
-    ".gitignore", ".vscode/extensions.json", ".vscode/settings.json", "ruff.toml", "tools/python/ruff-requirements.lock", "tests/tooling/test_editor_tooling.py",
-    "contracts/qualification-gate-matrix.toml", "contracts/qualification-activation.toml", "tools/applicable_qualification.py", "tests/tooling/test_applicable_qualification.py", "docs/qualification/applicable-gates.md", ".github/workflows/applicable-qualification.yml", "scripts/lint_github_workflows.sh",
-    ".github/actions/dependency-input-cache-policy.toml", "tools/check_ci_cache_policy.py", "tests/tooling/test_ci_cache_policy.py", ".github/actions/cargo-input-cache/action.yml", ".github/actions/ubuntu-apt-input-cache/action.yml",
-    "contracts/qualification-execution-envelopes.toml", "tools/qualification_envelope.py", "tests/tooling/test_qualification_envelope.py", "docs/qualification/execution-envelopes.md",
-    "contracts/qualification-evidence-binding.toml", "tools/qualification_evidence.py", "tests/tooling/test_qualification_evidence.py", "docs/qualification/evidence-binding.md", ".github/actions/qualification-evidence/action.yml",
-    "tools/check_development_workflow.py", "tests/tooling/test_development_workflow.py", ".github/PULL_REQUEST_TEMPLATE.md", ".github/actions/qualification-envelope/action.yml",
-    "contracts/layering.toml", "tools/check_layering.py", "tests/tooling/test_layering.py",
-    "contracts/operation-semantics.toml", "tools/check_operation_semantics.py", "tests/tooling/test_operation_semantics.py",
-    "contracts/components.toml", "tools/check_component_maturity.py", "tests/tooling/test_component_maturity.py",
-    "contracts/namespaces.toml", "tools/check_namespaces.py", "tests/tooling/test_namespaces.py",
-    "tools/check_linura_shell.py", "tests/tooling/test_linura_shell.py",
-    "tools/check_v010_shell_runtime_qualification.py", "tests/tooling/test_v010_shell_runtime_qualification.py",
-    "contracts/v010-shell-runtime-qualification.toml", ".github/workflows/v010-shell-runtime-qualification.yml",
-    "qualification/v010/shell-runtime/provision-shell-runtime.sh", "qualification/v010/shell-runtime/run-shell-runtime.sh",
+    "README.md",
+    "SECURITY.md",
+    "SUPPORT.md",
+    "GOVERNANCE.md",
+    "CODE_OF_CONDUCT.md",
+    "CITATION.cff",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "Cargo.toml",
+    "rust-toolchain.toml",
+    "docs/product-vision.md",
+    "docs/vision-coverage.md",
+    "docs/architecture.md",
+    "docs/naming.md",
+    "docs/ecosystem-registry.md",
+    "docs/sdk.md",
+    "docs/intent-model.md",
+    "docs/concepts/landscape.md",
+    "docs/concepts/landscape/agent-runtimes.md",
+    "docs/concepts/landscape/configuration-management.md",
+    "docs/concepts/landscape/linux-desktops.md",
+    "docs/system-graph.md",
+    "docs/capability-composition.md",
+    "docs/semantic-provenance.md",
+    "docs/reusable-setups.md",
+    "docs/agent-architecture.md",
+    "docs/provider-model.md",
+    "docs/state-model.md",
+    "docs/terminology.md",
+    "docs/first-boot.md",
+    "docs/machine-profiles.md",
+    "docs/workflow-model.md",
+    "docs/derived-surfaces.md",
+    "docs/design-system.md",
+    "docs/bootstrap-recovery.md",
+    "docs/security-model.md",
+    "docs/threat-model.md",
+    "docs/development-plan.md",
+    "docs/development-infrastructure.md",
+    "docs/installer-bootstrap.md",
+    "docs/migrations.md",
+    "docs/managed-configuration.md",
+    "docs/hardware-validation.md",
+    "docs/vm-acceptance.md",
+    "docs/visual-testing.md",
+    "docs/application-supervision.md",
+    "docs/lifecycle-workflows.md",
+    "docs/release-engineering.md",
+    "docs/api-versioning.md",
+    "docs/omarchy-development-lessons.md",
+    "docs/roadmap.md",
+    "docs/system-domains.md",
+    "docs/operation-semantics.md",
+    "docs/adr/README.md",
+    "docs/adr/0017-bounded-probes-context-query.md",
+    "docs/adr/0032-classify-operations-before-authority.md",
+    "docs/adr/0033-v010-complete-workstation-product-boundary.md",
+    "docs/community/labels.md",
+    "docs/community/repository-settings.md",
+    "docs/community/sponsorship.md",
+    "docs/rfcs/README.md",
+    ".github/FUNDING.yml",
+    ".github/ISSUE_TEMPLATE/config.yml",
+    ".github/ISSUE_TEMPLATE/bug.yml",
+    ".github/ISSUE_TEMPLATE/feature.yml",
+    ".github/ISSUE_TEMPLATE/compatibility.yml",
+    ".github/ISSUE_TEMPLATE/rfc.yml",
+    "contracts/community.toml",
+    "tools/check_community.py",
+    "tests/tooling/test_community.py",
+    "tools/check_adrs.py",
+    "tests/tooling/test_adrs.py",
+    "contracts/stability.toml",
+    "tools/check_contract_stability.py",
+    "tests/tooling/test_contract_stability.py",
+    "contracts/roadmap.toml",
+    "contracts/v010-workstation-slices.toml",
+    "tools/check_roadmap.py",
+    "tools/v010_slice_graph.py",
+    "tests/tooling/test_roadmap.py",
+    "tools/check_validation_gates.py",
+    "tests/tooling/test_validation_gates.py",
+    ".github/workflows/codex-environment.yml",
+    ".gitignore",
+    ".vscode/extensions.json",
+    ".vscode/settings.json",
+    "ruff.toml",
+    "tools/python/ruff-requirements.lock",
+    "tests/tooling/test_editor_tooling.py",
+    "contracts/qualification-gate-matrix.toml",
+    "contracts/qualification-activation.toml",
+    "tools/applicable_qualification.py",
+    "tests/tooling/test_applicable_qualification.py",
+    "docs/qualification/applicable-gates.md",
+    ".github/workflows/applicable-qualification.yml",
+    "scripts/lint_github_workflows.sh",
+    ".github/actions/dependency-input-cache-policy.toml",
+    "tools/check_ci_cache_policy.py",
+    "tests/tooling/test_ci_cache_policy.py",
+    ".github/actions/cargo-input-cache/action.yml",
+    ".github/actions/ubuntu-apt-input-cache/action.yml",
+    "contracts/qualification-execution-envelopes.toml",
+    "tools/qualification_envelope.py",
+    "tests/tooling/test_qualification_envelope.py",
+    "docs/qualification/execution-envelopes.md",
+    "contracts/qualification-evidence-binding.toml",
+    "tools/qualification_evidence.py",
+    "tests/tooling/test_qualification_evidence.py",
+    "docs/qualification/evidence-binding.md",
+    ".github/actions/qualification-evidence/action.yml",
+    "tools/check_development_workflow.py",
+    "tests/tooling/test_development_workflow.py",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    ".github/actions/qualification-envelope/action.yml",
+    "contracts/layering.toml",
+    "tools/check_layering.py",
+    "tests/tooling/test_layering.py",
+    "contracts/operation-semantics.toml",
+    "tools/check_operation_semantics.py",
+    "tests/tooling/test_operation_semantics.py",
+    "contracts/components.toml",
+    "tools/check_component_maturity.py",
+    "tests/tooling/test_component_maturity.py",
+    "contracts/namespaces.toml",
+    "tools/check_namespaces.py",
+    "tests/tooling/test_namespaces.py",
+    "tools/check_linura_shell.py",
+    "tests/tooling/test_linura_shell.py",
+    "tools/check_v010_shell_runtime_qualification.py",
+    "tests/tooling/test_v010_shell_runtime_qualification.py",
+    "contracts/v010-shell-runtime-qualification.toml",
+    ".github/workflows/v010-shell-runtime-qualification.yml",
+    "qualification/v010/shell-runtime/provision-shell-runtime.sh",
+    "qualification/v010/shell-runtime/run-shell-runtime.sh",
     "qualification/v010/shell-runtime/start-vm.sh",
     "docs/plugin-model.md",
-    "bindings/python/pyproject.toml", "bindings/python/build-requirements.lock", "bindings/python/README.md", "bindings/python/LICENSE",
-    "bindings/python/src/linura/__init__.py", "bindings/python/tests/test_package.py",
-    "tests/tooling/test_python_package_contract.py", "tools/python_package_version.py", "tests/tooling/test_python_package_version.py", "tools/pypi_verify.py", "tests/tooling/test_pypi_verify.py",
+    "bindings/python/pyproject.toml",
+    "bindings/python/build-requirements.lock",
+    "bindings/python/README.md",
+    "bindings/python/LICENSE",
+    "bindings/python/src/linura/__init__.py",
+    "bindings/python/tests/test_package.py",
+    "tests/tooling/test_python_package_contract.py",
+    "tools/python_package_version.py",
+    "tests/tooling/test_python_package_version.py",
+    "tools/pypi_verify.py",
+    "tests/tooling/test_pypi_verify.py",
     "profiles/arch-hyprland-v1.toml",
-    "crates/linura-intent/Cargo.toml", "crates/linura-graph/Cargo.toml", "crates/linura-capability-sdk/Cargo.toml",
-    "crates/linura-planner/Cargo.toml", "crates/linura-provenance/Cargo.toml", "crates/linura-library/Cargo.toml", "crates/linura-agent-runtime/Cargo.toml",
-    "crates/linura-control/Cargo.toml", "crates/linura-sdk/Cargo.toml",
-    "crates/linura-bootstrap/Cargo.toml", "crates/linura-migrations/Cargo.toml", "crates/linura-update/Cargo.toml",
-    "crates/linura-config/Cargo.toml", "crates/linura-hardware/Cargo.toml", "crates/linura-testkit/Cargo.toml",
-    "crates/linura-lifecycle/Cargo.toml", "apps/linura-update-guard/Cargo.toml", "tools/xtask/Cargo.toml",
-    "apps/linura-firstboot/Cargo.toml", "apps/linura-control-center/README.md", "apps/linura-agent-ui/README.md", "apps/linura-shell/README.md",
-    "apps/linura-shell/shell.qml", "apps/linura-shell/ui/CMakeLists.txt",
-    "apps/linura-shell/ui/README.md", "apps/linura-shell/ui/LinuraTheme.qml",
-    "apps/linura-shell/ui/LinuraSurface.qml", "apps/linura-shell/ui/LinuraText.qml",
-    "apps/linura-shell/ui/LinuraButton.qml", "apps/linura-shell/ui/LinuraSlider.qml",
-    "apps/linura-shell/ui/LinuraIconButton.qml", "apps/linura-shell/ui/LinuraSwitch.qml",
-    "apps/linura-shell/ui/LinuraTextField.qml", "apps/linura-shell/ui/LinuraActionRow.qml",
-    "apps/linura-shell/ui/LinuraCard.qml", "apps/linura-shell/ui/LinuraStatus.qml",
-    "apps/linura-shell/ui/LinuraDivider.qml", "apps/linura-shell/ui/LinuraPopover.qml",
+    "crates/linura-intent/Cargo.toml",
+    "crates/linura-graph/Cargo.toml",
+    "crates/linura-capability-sdk/Cargo.toml",
+    "crates/linura-planner/Cargo.toml",
+    "crates/linura-provenance/Cargo.toml",
+    "crates/linura-library/Cargo.toml",
+    "crates/linura-agent-runtime/Cargo.toml",
+    "crates/linura-control/Cargo.toml",
+    "crates/linura-sdk/Cargo.toml",
+    "crates/linura-bootstrap/Cargo.toml",
+    "crates/linura-migrations/Cargo.toml",
+    "crates/linura-update/Cargo.toml",
+    "crates/linura-config/Cargo.toml",
+    "crates/linura-hardware/Cargo.toml",
+    "crates/linura-testkit/Cargo.toml",
+    "crates/linura-lifecycle/Cargo.toml",
+    "apps/linura-update-guard/Cargo.toml",
+    "tools/xtask/Cargo.toml",
+    "apps/linura-firstboot/Cargo.toml",
+    "apps/linura-control-center/README.md",
+    "apps/linura-agent-ui/README.md",
+    "apps/linura-shell/README.md",
+    "apps/linura-shell/shell.qml",
+    "apps/linura-shell/ui/CMakeLists.txt",
+    "apps/linura-shell/ui/README.md",
+    "apps/linura-shell/ui/LinuraTheme.qml",
+    "apps/linura-shell/ui/LinuraSurface.qml",
+    "apps/linura-shell/ui/LinuraText.qml",
+    "apps/linura-shell/ui/LinuraButton.qml",
+    "apps/linura-shell/ui/LinuraSlider.qml",
+    "apps/linura-shell/ui/LinuraIconButton.qml",
+    "apps/linura-shell/ui/LinuraSwitch.qml",
+    "apps/linura-shell/ui/LinuraTextField.qml",
+    "apps/linura-shell/ui/LinuraActionRow.qml",
+    "apps/linura-shell/ui/LinuraCard.qml",
+    "apps/linura-shell/ui/LinuraStatus.qml",
+    "apps/linura-shell/ui/LinuraDivider.qml",
+    "apps/linura-shell/ui/LinuraPopover.qml",
     "apps/linura-shell/ui/LinuraDialog.qml",
-    "apps/linura-shell/plugins/control-center/manifest.json", "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml",
-    "apps/linura-shell/plugins/command-palette/manifest.json", "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
+    "apps/linura-shell/plugins/control-center/manifest.json",
+    "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml",
+    "apps/linura-shell/plugins/command-palette/manifest.json",
+    "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
     "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml",
     "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml",
-    "apps/linura-shell/bridge/CMakeLists.txt", "apps/linura-shell/bridge/audio_session_controller.h",
-    "apps/linura-shell/bridge/audio_session_controller.cpp", "apps/linura-shell/org.linura.ControlCenter.desktop",
+    "apps/linura-shell/bridge/CMakeLists.txt",
+    "apps/linura-shell/bridge/audio_session_controller.h",
+    "apps/linura-shell/bridge/audio_session_controller.cpp",
+    "apps/linura-shell/org.linura.ControlCenter.desktop",
     "apps/linura-shell/org.linura.CommandPalette.desktop",
     "packaging/systemd/user/linura-shell.service",
-    "interfaces/dbus/org.linura.Control1.xml", "interfaces/dbus/org.linura.Session1.xml", "interfaces/dbus/org.linura.Authority1.xml", ".cargo/config.toml",
-    "scripts/validate_assets.py", "tools/acceptance.py", "tools/vm.py", "tools/image.py", "tools/visual.py",
-    "hardware/support-matrix.json", "packaging/arch/archiso/profiledef.sh", "packaging/arch/hooks/95-linura-update-guard.hook",
+    "interfaces/dbus/org.linura.Control1.xml",
+    "interfaces/dbus/org.linura.Session1.xml",
+    "interfaces/dbus/org.linura.Authority1.xml",
+    ".cargo/config.toml",
+    "scripts/validate_assets.py",
+    "tools/acceptance.py",
+    "tools/vm.py",
+    "tools/image.py",
+    "tools/visual.py",
+    "hardware/support-matrix.json",
+    "packaging/arch/archiso/profiledef.sh",
+    "packaging/arch/hooks/95-linura-update-guard.hook",
     "packaging/wireplumber/linura-session-audio.lua",
-    "schemas/intent.v1.schema.json", "schemas/intent-proposal.v1.schema.json", "schemas/setup.v1.schema.json", "schemas/portable-profile.v1.schema.json",
-    "schemas/desired-state.v1.schema.json", "schemas/system-graph.v1.schema.json", "schemas/capability-blueprint.v1.schema.json",
-    "schemas/bootstrap.v1.schema.json", "schemas/migration.v1.schema.json", "schemas/update-plan.v1.schema.json",
-    "schemas/managed-resource.v1.schema.json", "schemas/hardware-fixture.v1.schema.json", "schemas/acceptance-scenario.v1.schema.json",
-    "schemas/visual-baseline.v1.schema.json", "schemas/lifecycle-workflow.v1.schema.json", "schemas/app-supervision.v1.schema.json",
+    "schemas/intent.v1.schema.json",
+    "schemas/intent-proposal.v1.schema.json",
+    "schemas/setup.v1.schema.json",
+    "schemas/portable-profile.v1.schema.json",
+    "schemas/desired-state.v1.schema.json",
+    "schemas/system-graph.v1.schema.json",
+    "schemas/capability-blueprint.v1.schema.json",
+    "schemas/bootstrap.v1.schema.json",
+    "schemas/migration.v1.schema.json",
+    "schemas/update-plan.v1.schema.json",
+    "schemas/managed-resource.v1.schema.json",
+    "schemas/hardware-fixture.v1.schema.json",
+    "schemas/acceptance-scenario.v1.schema.json",
+    "schemas/visual-baseline.v1.schema.json",
+    "schemas/lifecycle-workflow.v1.schema.json",
+    "schemas/app-supervision.v1.schema.json",
     "schemas/v010-maintained-workstation-fixture.v1.schema.json",
 ]
 
 FORBIDDEN_SNIPPETS = ["sudo bash -c", "chmod 777"]
 LEGACY_BRANDS = ["sys" + "plane", "luna" + "rchy"]
-LEGACY_COMPONENTS = ["linura-runtime", "linura_runtime", "apps/control-center", "apps/agent-ui", "apps/shell"]
-TEXT_SUFFIXES = {".md", ".cff", ".rs", ".toml", ".py", ".yml", ".yaml", ".xml", ".json", ".service", ".policy", ".hook", ".sh", ".conf", ".lua", ".cpp", ".h", ".hpp", ".qml", ".cmake", ".desktop"}
+LEGACY_COMPONENTS = [
+    "linura-runtime",
+    "linura_runtime",
+    "apps/control-center",
+    "apps/agent-ui",
+    "apps/shell",
+]
+TEXT_SUFFIXES = {
+    ".md",
+    ".cff",
+    ".rs",
+    ".toml",
+    ".py",
+    ".yml",
+    ".yaml",
+    ".xml",
+    ".json",
+    ".service",
+    ".policy",
+    ".hook",
+    ".sh",
+    ".conf",
+    ".lua",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".qml",
+    ".cmake",
+    ".desktop",
+}
 GENERATED_DIRS = {
     ".cache",
     ".direnv",
@@ -152,7 +334,10 @@ def main() -> int:
     for path in owned_files:
         if path == Path(__file__).resolve():
             continue
-        if path.suffix not in TEXT_SUFFIXES and path.name not in {"Makefile", "Cargo.lock"}:
+        if path.suffix not in TEXT_SUFFIXES and path.name not in {
+            "Makefile",
+            "Cargo.lock",
+        }:
             continue
         text = path.read_text(encoding="utf-8")
         rel = path.relative_to(ROOT)
@@ -178,7 +363,9 @@ def main() -> int:
                 json.loads(text)
             elif path.suffix == ".xml":
                 ET.fromstring(text)
-        except Exception as error:  # repository validation should report parser failures compactly
+        except (
+            Exception
+        ) as error:  # repository validation should report parser failures compactly
             failures.append(f"invalid structured file {rel}: {error}")
 
     # Validate workspace member and local dependency paths without requiring Cargo in the bootstrap environment.
@@ -198,7 +385,9 @@ def main() -> int:
                 if isinstance(spec, dict) and "path" in spec:
                     target = (manifest.parent / spec["path"] / "Cargo.toml").resolve()
                     if not target.is_file():
-                        failures.append(f"broken local dependency {name}: {manifest.relative_to(ROOT)} -> {spec['path']}")
+                        failures.append(
+                            f"broken local dependency {name}: {manifest.relative_to(ROOT)} -> {spec['path']}"
+                        )
 
     # Lock the public client boundary: ordinary clients use linura-sdk, while the SDK
     # must never expose authority/provider/executor internals.
@@ -213,13 +402,22 @@ def main() -> int:
 
     cli_deps = local_dependency_names(ROOT / "apps/linuractl/Cargo.toml")
     if cli_deps != {"linura-sdk"}:
-        failures.append(f"linuractl must depend only on linura-sdk among local crates, found: {sorted(cli_deps)}")
+        failures.append(
+            f"linuractl must depend only on linura-sdk among local crates, found: {sorted(cli_deps)}"
+        )
 
     sdk_deps = local_dependency_names(ROOT / "crates/linura-sdk/Cargo.toml")
-    forbidden_sdk_deps = {"linura-control", "linura-provider-sdk", "linura-policy", "linura-agent-runtime"}
+    forbidden_sdk_deps = {
+        "linura-control",
+        "linura-provider-sdk",
+        "linura-policy",
+        "linura-agent-runtime",
+    }
     leaked = sorted(sdk_deps & forbidden_sdk_deps)
     if leaked:
-        failures.append(f"linura-sdk exposes internal authority/provider/agent dependencies: {leaked}")
+        failures.append(
+            f"linura-sdk exposes internal authority/provider/agent dependencies: {leaked}"
+        )
 
     # Cargo.lock must include every workspace package so --locked candidate builds cannot fail
     # merely because the workspace gained a new local crate.
@@ -227,7 +425,9 @@ def main() -> int:
     locked_names = {package.get("name") for package in lock.get("package", [])}
     workspace_names: set[str] = set()
     for member in workspace.get("workspace", {}).get("members", []):
-        manifest_data = tomllib.loads((ROOT / member / "Cargo.toml").read_text(encoding="utf-8"))
+        manifest_data = tomllib.loads(
+            (ROOT / member / "Cargo.toml").read_text(encoding="utf-8")
+        )
         name = manifest_data.get("package", {}).get("name")
         if isinstance(name, str):
             workspace_names.add(name)
@@ -235,7 +435,11 @@ def main() -> int:
     if missing_locked:
         failures.append(f"Cargo.lock missing workspace packages: {missing_locked}")
 
-    locked_packages = {package.get("name"): package for package in lock.get("package", []) if isinstance(package.get("name"), str)}
+    locked_packages = {
+        package.get("name"): package
+        for package in lock.get("package", [])
+        if isinstance(package.get("name"), str)
+    }
     for member in workspace.get("workspace", {}).get("members", []):
         manifest_path = ROOT / member / "Cargo.toml"
         manifest_data = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
@@ -247,7 +451,11 @@ def main() -> int:
             for dep_name, spec in manifest_data.get(section, {}).items():
                 if isinstance(spec, dict) and "path" in spec:
                     expected_local.add(dep_name)
-        actual_local = {str(dep).split(" ", 1)[0] for dep in locked_packages[package_name].get("dependencies", []) if str(dep).split(" ", 1)[0] in workspace_names}
+        actual_local = {
+            str(dep).split(" ", 1)[0]
+            for dep in locked_packages[package_name].get("dependencies", [])
+            if str(dep).split(" ", 1)[0] in workspace_names
+        }
         if expected_local != actual_local:
             failures.append(
                 f"Cargo.lock local dependencies stale for {package_name}: expected {sorted(expected_local)}, found {sorted(actual_local)}"
@@ -256,7 +464,9 @@ def main() -> int:
     # Task-specific agent guides are an intentional part of the development contract.
     skill_files = sorted((ROOT / "agents/skills").glob("*.md"))
     if len(skill_files) < 10:
-        failures.append(f"expected at least 10 task-specific agent skill guides, found {len(skill_files)}")
+        failures.append(
+            f"expected at least 10 task-specific agent skill guides, found {len(skill_files)}"
+        )
 
     # GitHub Actions are supply-chain inputs: require immutable 40-hex action refs.
     uses_pattern = re.compile(r"^\s*-?\s*uses:\s*[^@\s]+@([^\s#]+)", re.MULTILINE)
@@ -265,7 +475,9 @@ def main() -> int:
         workflow_text = workflow.read_text(encoding="utf-8")
         for ref in uses_pattern.findall(workflow_text):
             if not sha_pattern.fullmatch(ref):
-                failures.append(f"GitHub Action is not pinned to immutable SHA: {workflow.relative_to(ROOT)} -> {ref}")
+                failures.append(
+                    f"GitHub Action is not pinned to immutable SHA: {workflow.relative_to(ROOT)} -> {ref}"
+                )
 
     # Check ordinary relative Markdown links. Fragments and external links are excluded.
     link_pattern = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
@@ -277,11 +489,15 @@ def main() -> int:
                 continue
             candidate = (markdown.parent / target).resolve()
             if not candidate.exists():
-                failures.append(f"broken Markdown link: {markdown.relative_to(ROOT)} -> {target}")
+                failures.append(
+                    f"broken Markdown link: {markdown.relative_to(ROOT)} -> {target}"
+                )
 
     development_result = subprocess.run(
         [sys.executable, str(ROOT / "tools/check_development_workflow.py"), str(ROOT)],
-        check=False, capture_output=True, text=True,
+        check=False,
+        capture_output=True,
+        text=True,
     )
     if development_result.returncode != 0:
         details = development_result.stderr.strip() or development_result.stdout.strip()
@@ -301,7 +517,9 @@ def main() -> int:
     )
     if envelope_result.returncode != 0:
         details = envelope_result.stderr.strip() or envelope_result.stdout.strip()
-        failures.append(f"qualification execution-envelope validation failed: {details}")
+        failures.append(
+            f"qualification execution-envelope validation failed: {details}"
+        )
 
     evidence_result = subprocess.run(
         [
@@ -321,7 +539,9 @@ def main() -> int:
 
     validation_result = subprocess.run(
         [sys.executable, str(ROOT / "tools/check_validation_gates.py"), str(ROOT)],
-        check=False, capture_output=True, text=True,
+        check=False,
+        capture_output=True,
+        text=True,
     )
     if validation_result.returncode != 0:
         details = validation_result.stderr.strip() or validation_result.stdout.strip()
@@ -350,7 +570,9 @@ def main() -> int:
         text=True,
     )
     if cache_policy_result.returncode != 0:
-        details = cache_policy_result.stderr.strip() or cache_policy_result.stdout.strip()
+        details = (
+            cache_policy_result.stderr.strip() or cache_policy_result.stdout.strip()
+        )
         failures.append(f"CI dependency-input cache policy failed: {details}")
 
     adr_result = subprocess.run(
@@ -374,7 +596,12 @@ def main() -> int:
         failures.append(f"community contract validation failed: {details}")
 
     contract_result = subprocess.run(
-        [sys.executable, str(ROOT / "tools/check_contract_stability.py"), "--root", str(ROOT)],
+        [
+            sys.executable,
+            str(ROOT / "tools/check_contract_stability.py"),
+            "--root",
+            str(ROOT),
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -400,7 +627,10 @@ def main() -> int:
         text=True,
     )
     if operation_semantics_result.returncode != 0:
-        details = operation_semantics_result.stderr.strip() or operation_semantics_result.stdout.strip()
+        details = (
+            operation_semantics_result.stderr.strip()
+            or operation_semantics_result.stdout.strip()
+        )
         failures.append(f"operation semantics validation failed: {details}")
 
     layering_result = subprocess.run(
@@ -444,14 +674,22 @@ def main() -> int:
         failures.append(f"Linura Shell validation failed: {details}")
 
     shell_runtime_result = subprocess.run(
-        [sys.executable, str(ROOT / "tools/check_v010_shell_runtime_qualification.py"), str(ROOT)],
+        [
+            sys.executable,
+            str(ROOT / "tools/check_v010_shell_runtime_qualification.py"),
+            str(ROOT),
+        ],
         check=False,
         capture_output=True,
         text=True,
     )
     if shell_runtime_result.returncode != 0:
-        details = shell_runtime_result.stderr.strip() or shell_runtime_result.stdout.strip()
-        failures.append(f"v0.10 shell runtime qualification validation failed: {details}")
+        details = (
+            shell_runtime_result.stderr.strip() or shell_runtime_result.stdout.strip()
+        )
+        failures.append(
+            f"v0.10 shell runtime qualification validation failed: {details}"
+        )
 
     if failures:
         for failure in failures:

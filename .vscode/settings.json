@@ -4,21 +4,77 @@
   "[rust]": {
     "editor.defaultFormatter": "rust-lang.rust-analyzer",
     "editor.formatOnSave": true,
-    "editor.rulers": [100, 120, 140]
+    "editor.rulers": [
+      100,
+      120,
+      140
+    ]
   },
   "rust-analyzer.check.command": "clippy",
   "rust-analyzer.check.extraArgs": [
-    "--workspace",
-    "--all-targets",
     "--all-features",
     "--locked"
   ],
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
-    "editor.formatOnSave": false,
-    "editor.rulers": [88, 100, 120]
+    "editor.formatOnSave": true,
+    "editor.rulers": [
+      88,
+      100,
+      120
+    ]
   },
+  "ruff.path": [
+    "${userHome}/.local/bin/ruff"
+  ],
   "python.analysis.typeCheckingMode": "basic",
   "python.analysis.diagnosticMode": "workspace",
-  "python.analysis.autoImportCompletions": true
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.extraPaths": [
+    "./tools",
+    "./bindings/python/src"
+  ],
+  "cSpell.words": [
+    "airootfs",
+    "appstream",
+    "archiso",
+    "bluez",
+    "clippy",
+    "cloudflare",
+    "cmake",
+    "codeql",
+    "codex",
+    "dbus",
+    "enospc",
+    "ffv1",
+    "flathub",
+    "glibc",
+    "hyprland",
+    "libvirt",
+    "linura",
+    "linuractl",
+    "linurad",
+    "logind",
+    "mkarchiso",
+    "nixos",
+    "nocloud",
+    "pipewire",
+    "polkit",
+    "pylance",
+    "pypi",
+    "qemu",
+    "qml",
+    "qtquick",
+    "quickshell",
+    "ruff",
+    "rustfmt",
+    "rustsec",
+    "rustup",
+    "shellcheck",
+    "shfmt",
+    "wayland",
+    "wireplumber",
+    "wlroots",
+    "xwayland"
+  ]
 }

@@ -118,7 +118,9 @@ def load_workspace(root: Path) -> tuple[set[str], dict[str, Path], dict[str, str
     workspace_path = root / "Cargo.toml"
     workspace = tomllib.loads(workspace_path.read_text(encoding="utf-8"))
     workspace_table = workspace.get("workspace", {})
-    members = workspace_table.get("members", []) if isinstance(workspace_table, dict) else []
+    members = (
+        workspace_table.get("members", []) if isinstance(workspace_table, dict) else []
+    )
     if not isinstance(members, list):
         raise ValueError("workspace.members must be a list")
 
@@ -181,7 +183,9 @@ def validate(root: Path) -> list[str]:
         all_dependencies[package] = dependency_names(manifest, workspace_dependencies)
 
     policy_consumers = {
-        package for package, dependencies in all_dependencies.items() if POLICY_PACKAGE in dependencies
+        package
+        for package, dependencies in all_dependencies.items()
+        if POLICY_PACKAGE in dependencies
     }
     if policy_consumers != {POLICY_ORCHESTRATOR}:
         failures.append(
@@ -233,11 +237,15 @@ def validate(root: Path) -> list[str]:
             continue
         seen_packages.add(package)
         if package in RETIRED_RULE_PACKAGES:
-            failures.append(f"layering contract reintroduces retired package rule {package}")
+            failures.append(
+                f"layering contract reintroduces retired package rule {package}"
+            )
             continue
         manifest_path = manifests.get(package)
         if manifest_path is None:
-            failures.append(f"layering rule references unknown workspace package {package}")
+            failures.append(
+                f"layering rule references unknown workspace package {package}"
+            )
             continue
 
         dependencies = all_dependencies[package]
@@ -246,8 +254,12 @@ def validate(root: Path) -> list[str]:
 
         def string_list(field: str) -> list[str]:
             value = rule.get(field, [])
-            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-                failures.append(f"layering rule {package} field {field} must be a string list")
+            if not isinstance(value, list) or any(
+                not isinstance(item, str) for item in value
+            ):
+                failures.append(
+                    f"layering rule {package} field {field} must be a string list"
+                )
                 return []
             return value
 
@@ -284,7 +296,9 @@ def validate(root: Path) -> list[str]:
         seen_packages - EXPECTED_RULE_PACKAGES - RETIRED_RULE_PACKAGES
     )
     if missing_rules:
-        failures.append(f"layering contract missing required package rules: {missing_rules}")
+        failures.append(
+            f"layering contract missing required package rules: {missing_rules}"
+        )
     if unexpected_rules:
         failures.append(
             "layering contract package set changed; explicitly update checker expectations for: "
@@ -301,8 +315,15 @@ def validate(root: Path) -> list[str]:
             continue
         path = marker.get("path")
         required = marker.get("contains")
-        if not isinstance(path, str) or not isinstance(required, str) or not path or not required:
-            failures.append(f"layering marker {index} requires non-empty path and contains strings")
+        if (
+            not isinstance(path, str)
+            or not isinstance(required, str)
+            or not path
+            or not required
+        ):
+            failures.append(
+                f"layering marker {index} requires non-empty path and contains strings"
+            )
             continue
         target = root / path
         if not target.is_file():
@@ -316,7 +337,11 @@ def validate(root: Path) -> list[str]:
 
 
 def main() -> int:
-    root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(__file__).resolve().parents[1]
+    root = (
+        Path(sys.argv[1]).resolve()
+        if len(sys.argv) > 1
+        else Path(__file__).resolve().parents[1]
+    )
     failures = validate(root)
     if failures:
         for failure in failures:

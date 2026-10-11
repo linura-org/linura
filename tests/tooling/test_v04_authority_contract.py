@@ -42,7 +42,11 @@ class V04AuthorityContractTests(unittest.TestCase):
         self.assertIn("pub fn verify_commit", text)
         self.assertIn("authorized_at_unix_ms", text)
         self.assertIn("expires_at_unix_ms", text)
-        commit = text[text.index("pub struct CommitRequest") : text.index("pub struct AbortRequest")]
+        commit = text[
+            text.index("pub struct CommitRequest") : text.index(
+                "pub struct AbortRequest"
+            )
+        ]
         self.assertNotIn("pub transaction_id:", commit)
         self.assertIn("authority_tag:", commit)
 
@@ -71,7 +75,9 @@ class V04AuthorityContractTests(unittest.TestCase):
         self.assertIn("validate_integrity_key_bytes(&mut bytes)?", text)
         self.assertNotIn("self.bytes.fill(0)", text)
 
-    def test_authority_store_migration_chain_is_registered_and_ledger_verified(self) -> None:
+    def test_authority_store_migration_chain_is_registered_and_ledger_verified(
+        self,
+    ) -> None:
         v1 = json.loads(MIGRATION_V1_DESCRIPTOR.read_text(encoding="utf-8"))
         v2 = json.loads(MIGRATION_V2_DESCRIPTOR.read_text(encoding="utf-8"))
         schema = SQLITE_SCHEMA.read_text(encoding="utf-8")

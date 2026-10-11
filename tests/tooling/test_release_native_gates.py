@@ -16,7 +16,9 @@ SPEC.loader.exec_module(gates)
 
 
 class NativeReleaseGateTests(unittest.TestCase):
-    def _run(self, *, path: str, run_id: int, conclusion: str = "success") -> dict[str, object]:
+    def _run(
+        self, *, path: str, run_id: int, conclusion: str = "success"
+    ) -> dict[str, object]:
         return {
             "id": run_id,
             "path": path,
@@ -59,7 +61,9 @@ class NativeReleaseGateTests(unittest.TestCase):
             ]
         }
         with mock.patch.object(gates, "_request", return_value=(200, payload)):
-            with self.assertRaisesRegex(gates.NativeGateError, "refuses to substitute workflow_dispatch"):
+            with self.assertRaisesRegex(
+                gates.NativeGateError, "refuses to substitute workflow_dispatch"
+            ):
                 gates._runs(
                     "linura-org/linura",
                     head_sha="a" * 40,
@@ -129,10 +133,14 @@ class NativeReleaseGateTests(unittest.TestCase):
         }
         with (
             mock.patch.object(gates, "_request", return_value=(200, pr)),
-            mock.patch.object(gates, "_runs", return_value=gates.GateState(True, "green")),
+            mock.patch.object(
+                gates, "_runs", return_value=gates.GateState(True, "green")
+            ),
             mock.patch.object(gates, "_unresolved_threads", return_value=1),
         ):
-            with self.assertRaisesRegex(gates.NativeGateError, "unresolved review thread"):
+            with self.assertRaisesRegex(
+                gates.NativeGateError, "unresolved review thread"
+            ):
                 gates._pr_state(
                     "linura-org/linura",
                     pr_number=17,

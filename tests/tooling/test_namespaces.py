@@ -63,7 +63,10 @@ class NamespaceContractTests(unittest.TestCase):
             )
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("undeclared repository dbus-interface: org.linura.Future1", result.stderr)
+            self.assertIn(
+                "undeclared repository dbus-interface: org.linura.Future1",
+                result.stderr,
+            )
 
     def test_dbus_policy_uses_deployed_names_not_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -91,7 +94,7 @@ class NamespaceContractTests(unittest.TestCase):
             policy = root / "packaging/dbus-1/system.d/org.linura.Authority1.conf"
             text = policy.read_text(encoding="utf-8")
             text = text.replace(
-                "<policy context=\"default\">",
+                '<policy context="default">',
                 '<policy context="default">\n    <allow send_destination="org.freedesktop.systemd1"/>',
                 1,
             )
@@ -128,9 +131,9 @@ class NamespaceContractTests(unittest.TestCase):
                 'pub const SERVICE_NAME: &str = "com.example.ControlBus1";\n'
                 'pub const INTERFACE_NAME: &str = "org.linura.Control1";\n'
                 'pub const OBJECT_PATH: &str = "/org/linura/Control1";\n'
-                'fn register(builder: zbus::connection::Builder, service: ()) {\n'
-                '    let _ = builder.name(SERVICE_NAME).serve_at(OBJECT_PATH, service);\n'
-                '}\n',
+                "fn register(builder: zbus::connection::Builder, service: ()) {\n"
+                "    let _ = builder.name(SERVICE_NAME).serve_at(OBJECT_PATH, service);\n"
+                "}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -140,7 +143,9 @@ class NamespaceContractTests(unittest.TestCase):
                 result.stderr,
             )
 
-    def test_runtime_dbus_service_name_is_discovered_without_same_file_serve_at(self) -> None:
+    def test_runtime_dbus_service_name_is_discovered_without_same_file_serve_at(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -148,9 +153,9 @@ class NamespaceContractTests(unittest.TestCase):
             runtime.parent.mkdir(parents=True, exist_ok=True)
             runtime.write_text(
                 'pub const SERVICE_NAME: &str = "com.example.SplitBus1";\n'
-                'fn register(builder: zbus::connection::Builder) {\n'
-                '    let _ = builder.name(SERVICE_NAME);\n'
-                '}\n',
+                "fn register(builder: zbus::connection::Builder) {\n"
+                "    let _ = builder.name(SERVICE_NAME);\n"
+                "}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -170,9 +175,9 @@ class NamespaceContractTests(unittest.TestCase):
                 'pub const SERVICE_NAME: &str = "org.linura.Control1";\n'
                 'pub const INTERFACE_NAME: &str = "org.linura.Session1";\n'
                 'pub const OBJECT_PATH: &str = "/org/linura/Session1";\n'
-                'fn register(builder: zbus::connection::Builder, service: ()) {\n'
-                '    let _ = builder.name(SERVICE_NAME).serve_at(OBJECT_PATH, service);\n'
-                '}\n',
+                "fn register(builder: zbus::connection::Builder, service: ()) {\n"
+                "    let _ = builder.name(SERVICE_NAME).serve_at(OBJECT_PATH, service);\n"
+                "}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -186,7 +191,9 @@ class NamespaceContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            activation = root / "packaging/dbus-1/system-services/com.example.Future1.service"
+            activation = (
+                root / "packaging/dbus-1/system-services/com.example.Future1.service"
+            )
             activation.parent.mkdir(parents=True, exist_ok=True)
             activation.write_text(
                 "[D-BUS Service]\nName=com.example.Future1\nExec=/usr/bin/true\n",
@@ -274,7 +281,7 @@ class NamespaceContractTests(unittest.TestCase):
             policy = root / "packaging/dbus-1/system.d/org.linura.Authority1.conf"
             text = policy.read_text(encoding="utf-8")
             text = text.replace(
-                "<policy context=\"default\">",
+                '<policy context="default">',
                 '<policy context="default">\n    <allow own_prefix="com.example"/>',
                 1,
             )
@@ -293,10 +300,10 @@ class NamespaceContractTests(unittest.TestCase):
             runtime = root / "crates/linura-dbus/src/imported_interface_fixture.rs"
             runtime.parent.mkdir(parents=True, exist_ok=True)
             runtime.write_text(
-                'use zbus::interface;\n'
+                "use zbus::interface;\n"
                 'pub const INTERFACE_NAME: &str = "org.linura.Control1";\n'
                 '#[interface(name = "com.example.Control1")]\n'
-                'impl Control1Service {}\n',
+                "impl Control1Service {}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -318,7 +325,9 @@ class NamespaceContractTests(unittest.TestCase):
             )
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("undeclared repository qml-uri: com.example.Future", result.stderr)
+            self.assertIn(
+                "undeclared repository qml-uri: com.example.Future", result.stderr
+            )
 
     def test_slice_and_swap_units_are_discovered(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -328,7 +337,9 @@ class NamespaceContractTests(unittest.TestCase):
             for suffix in (".slice", ".swap"):
                 with self.subTest(suffix=suffix):
                     unit = systemd / f"foreign{suffix}"
-                    unit.write_text("[Unit]\nDescription=foreign fixture\n", encoding="utf-8")
+                    unit.write_text(
+                        "[Unit]\nDescription=foreign fixture\n", encoding="utf-8"
+                    )
                     result = self._run_checker(root)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn(
@@ -344,12 +355,12 @@ class NamespaceContractTests(unittest.TestCase):
             runtime = root / "crates/linura-dbus/src/runtime_path_fixture.rs"
             runtime.parent.mkdir(parents=True, exist_ok=True)
             runtime.write_text(
-                'use zbus::Connection;\n'
+                "use zbus::Connection;\n"
                 'pub const INTERFACE_NAME: &str = "org.linura.Control1";\n'
                 'pub const OBJECT_PATH: &str = "/org/linura/Control1Wrong";\n'
-                'fn register(builder: zbus::connection::Builder, service: ()) {\n'
-                '    let _ = builder.serve_at(OBJECT_PATH, service);\n'
-                '}\n',
+                "fn register(builder: zbus::connection::Builder, service: ()) {\n"
+                "    let _ = builder.serve_at(OBJECT_PATH, service);\n"
+                "}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -369,7 +380,7 @@ class NamespaceContractTests(unittest.TestCase):
             runtime.write_text(
                 'pub const INTERFACE_NAME: &str = "org.linura.Control1";\n'
                 '#[zbus::interface(name = "com.example.Control1")]\n'
-                'impl Control1Service {}\n',
+                "impl Control1Service {}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -387,14 +398,14 @@ class NamespaceContractTests(unittest.TestCase):
             runtime.parent.mkdir(parents=True, exist_ok=True)
             runtime.write_text(
                 'pub const ACTION_ID: &str = "com.example.manage-system";\n'
-                'fn arguments(sender: &str) {\n'
-                '    let _ = vec![\n'
+                "fn arguments(sender: &str) {\n"
+                "    let _ = vec![\n"
                 '        "--action-id".to_owned(),\n'
-                '        ACTION_ID.to_owned(),\n'
+                "        ACTION_ID.to_owned(),\n"
                 '        "--system-bus-name".to_owned(),\n'
-                '        sender.to_owned(),\n'
-                '    ];\n'
-                '}\n',
+                "        sender.to_owned(),\n"
+                "    ];\n"
+                "}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -408,13 +419,15 @@ class NamespaceContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            runtime = root / "executors/linura-executor-systemd/src/runtime_polkit_fixture.rs"
+            runtime = (
+                root / "executors/linura-executor-systemd/src/runtime_polkit_fixture.rs"
+            )
             runtime.parent.mkdir(parents=True, exist_ok=True)
             runtime.write_text(
                 'pub const ACTION_ID: &str = "com.example.executor-action";\n'
-                'fn run(sender: &str) {\n'
+                "fn run(sender: &str) {\n"
                 '    let _ = authorize_caller(sender, ACTION_ID, "fixture");\n'
-                '}\n',
+                "}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -434,10 +447,10 @@ class NamespaceContractTests(unittest.TestCase):
                 'pub const INTERFACE_NAME: &str = "org.linura.Control1";\n'
                 'pub const OBJECT_PATH: &str = "/org/linura/Control1";\n'
                 '#[zbus::interface(name = "org.linura.Session1")]\n'
-                'impl Control1Service {}\n'
-                'fn register(builder: zbus::connection::Builder, service: Control1Service) {\n'
-                '    let _ = builder.serve_at(OBJECT_PATH, service);\n'
-                '}\n',
+                "impl Control1Service {}\n"
+                "fn register(builder: zbus::connection::Builder, service: Control1Service) {\n"
+                "    let _ = builder.serve_at(OBJECT_PATH, service);\n"
+                "}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -460,7 +473,7 @@ class NamespaceContractTests(unittest.TestCase):
             runtime.write_text(
                 'pub const INTERFACE_NAME: &str = "com.example.Globbed1";\n'
                 '#[zbus::interface(name = "com.example.Globbed1")]\n'
-                'impl GlobbedService {}\n',
+                "impl GlobbedService {}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -474,12 +487,14 @@ class NamespaceContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            runtime = root / "verifiers/linura-verifier-systemd/src/namespace_fixture.rs"
+            runtime = (
+                root / "verifiers/linura-verifier-systemd/src/namespace_fixture.rs"
+            )
             runtime.parent.mkdir(parents=True, exist_ok=True)
             runtime.write_text(
                 'pub const INTERFACE_NAME: &str = "com.example.Verifier1";\n'
                 '#[zbus::interface(name = "com.example.Verifier1")]\n'
-                'impl VerifierService {}\n',
+                "impl VerifierService {}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -499,7 +514,7 @@ class NamespaceContractTests(unittest.TestCase):
                 'pub const SERVICE_NAME: &str = "org.freedesktop.NetworkManager";\n'
                 'pub const OBJECT_PATH: &str = "/org/freedesktop/NetworkManager";\n'
                 'pub const INTERFACE_NAME: &str = "org.freedesktop.NetworkManager";\n'
-                'fn client() { let _ = (SERVICE_NAME, OBJECT_PATH, INTERFACE_NAME); }\n',
+                "fn client() { let _ = (SERVICE_NAME, OBJECT_PATH, INTERFACE_NAME); }\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -600,7 +615,7 @@ class NamespaceContractTests(unittest.TestCase):
             policy = root / "packaging/dbus-1/system.d/org.linura.Authority1.conf"
             text = policy.read_text(encoding="utf-8")
             text = text.replace(
-                "<policy context=\"default\">",
+                '<policy context="default">',
                 '<policy context="default">\n    <allow own_prefix="org.linura.Unallocated"/>',
                 1,
             )
@@ -638,12 +653,12 @@ class NamespaceContractTests(unittest.TestCase):
             self._copy_fixture(root)
             runtime = root / "crates/linura-dbus/src/test_only_mock.rs"
             runtime.write_text(
-                '#[cfg(test)]\n'
-                'mod mocks {\n'
+                "#[cfg(test)]\n"
+                "mod mocks {\n"
                 '    pub const INTERFACE_NAME: &str = "com.example.Mock1";\n'
                 '    #[zbus::interface(name = "com.example.Mock1")]\n'
-                '    impl MockService {}\n'
-                '}\n',
+                "    impl MockService {}\n"
+                "}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -658,7 +673,7 @@ class NamespaceContractTests(unittest.TestCase):
             runtime.write_text(
                 'pub const INTERFACE_NAME: &str = "com.example.IntegrationMock1";\n'
                 '#[zbus::interface(name = "com.example.IntegrationMock1")]\n'
-                'impl MockService {}\n',
+                "impl MockService {}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -671,11 +686,11 @@ class NamespaceContractTests(unittest.TestCase):
             contract = root / "contracts/namespaces.toml"
             contract.write_text(
                 contract.read_text(encoding="utf-8")
-                + '\n[[identifier]]\n'
+                + "\n[[identifier]]\n"
                 + 'id = "org.linura.FutureApp"\n'
                 + 'kind = "application-id"\n'
                 + 'status = "reserved"\n'
-                + '\n[[identifier]]\n'
+                + "\n[[identifier]]\n"
                 + 'id = "org.linura.FutureApp"\n'
                 + 'kind = "desktop-id"\n'
                 + 'status = "reserved"\n',
@@ -706,7 +721,7 @@ class NamespaceContractTests(unittest.TestCase):
             contract = root / "contracts/namespaces.toml"
             contract.write_text(
                 contract.read_text(encoding="utf-8")
-                + '\n[[identifier]]\n'
+                + "\n[[identifier]]\n"
                 + 'id = "com.linura.Future1"\n'
                 + 'kind = "dbus-interface"\n'
                 + 'status = "active"\n'
@@ -728,7 +743,6 @@ class NamespaceContractTests(unittest.TestCase):
                 "active desktop-id is not present in repository surfaces: org.linura.CommandPalette",
                 result.stderr,
             )
-
 
     def test_active_dbus_service_requires_runtime_name_acquisition(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -772,7 +786,11 @@ class NamespaceContractTests(unittest.TestCase):
 
     def test_system_bus_service_requires_exact_systemd_dbus_contract(self) -> None:
         mutations = (
-            ("BusName=org.linura.Authority1", "BusName=org.linura.Executor.Systemd1", "must declare exactly BusName=org.linura.Authority1"),
+            (
+                "BusName=org.linura.Authority1",
+                "BusName=org.linura.Executor.Systemd1",
+                "must declare exactly BusName=org.linura.Authority1",
+            ),
             ("Type=dbus", "Type=simple", "must declare exactly Type=dbus"),
         )
         for old, new, expected in mutations:
@@ -796,9 +814,9 @@ class NamespaceContractTests(unittest.TestCase):
             runtime = root / "crates/linura-dbus/src/name_binding_fixture.rs"
             runtime.write_text(
                 'pub const EXTRA_SERVICE_NAME: &str = "org.linura.Control1";\n'
-                'fn acquire(builder: zbus::connection::Builder) {\n'
-                '    let _ = builder.name(EXTRA_SERVICE_NAME);\n'
-                '}\n',
+                "fn acquire(builder: zbus::connection::Builder) {\n"
+                "    let _ = builder.name(EXTRA_SERVICE_NAME);\n"
+                "}\n",
                 encoding="utf-8",
             )
             result = self._run_checker(root)
@@ -828,8 +846,6 @@ class NamespaceContractTests(unittest.TestCase):
                 result.stderr,
             )
 
-
-
     def test_systemd_dropin_cannot_override_bound_bus_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -854,7 +870,9 @@ class NamespaceContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            duplicate = root / "packaging/dbus-1/system.d/org.linura.Authority1-extra.conf"
+            duplicate = (
+                root / "packaging/dbus-1/system.d/org.linura.Authority1-extra.conf"
+            )
             duplicate.write_text(
                 '<busconfig><policy user="root">'
                 '<allow own="org.linura.Authority1"/>'
@@ -874,7 +892,7 @@ class NamespaceContractTests(unittest.TestCase):
             self._copy_fixture(root)
             duplicate = root / "packaging/polkit-1/actions/org.linura.duplicate.policy"
             duplicate.write_text(
-                '<policyconfig>'
+                "<policyconfig>"
                 '<action id="org.linura.authority.manage-systemd-active-state">'
                 "<description>duplicate</description>"
                 "</action>"
@@ -887,7 +905,6 @@ class NamespaceContractTests(unittest.TestCase):
                 "must be defined only by packaging/polkit-1/actions/org.linura.authority.policy",
                 result.stderr,
             )
-
 
 
 if __name__ == "__main__":

@@ -46,7 +46,9 @@ def _api(method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
             return None if not raw else json.loads(raw.decode("utf-8"))
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"GitHub API {method} {path} failed: HTTP {exc.code}: {body}") from exc
+        raise RuntimeError(
+            f"GitHub API {method} {path} failed: HTTP {exc.code}: {body}"
+        ) from exc
 
 
 def _workflow_path(workflow: str) -> str:
@@ -55,7 +57,10 @@ def _workflow_path(workflow: str) -> str:
 
 def _list_runs(repository: str, workflow: str, ref: str) -> list[dict[str, Any]]:
     query = urlencode({"event": "workflow_dispatch", "branch": ref, "per_page": 100})
-    payload = _api("GET", f"/repos/{repository}/actions/workflows/{quote(workflow, safe='')}/runs?{query}")
+    payload = _api(
+        "GET",
+        f"/repos/{repository}/actions/workflows/{quote(workflow, safe='')}/runs?{query}",
+    )
     runs = payload.get("workflow_runs") if isinstance(payload, dict) else None
     if not isinstance(runs, list):
         raise RuntimeError("workflow-runs response is malformed")
@@ -63,7 +68,9 @@ def _list_runs(repository: str, workflow: str, ref: str) -> list[dict[str, Any]]
 
 
 def _workflow_name(repository: str, workflow: str) -> str:
-    payload = _api("GET", f"/repos/{repository}/actions/workflows/{quote(workflow, safe='')}")
+    payload = _api(
+        "GET", f"/repos/{repository}/actions/workflows/{quote(workflow, safe='')}"
+    )
     name = payload.get("name") if isinstance(payload, dict) else None
     if not isinstance(name, str) or not name:
         raise RuntimeError(f"workflow metadata has no name: {workflow}")
@@ -71,7 +78,13 @@ def _workflow_name(repository: str, workflow: str) -> str:
 
 
 def matching_runs(
-    runs: list[dict[str, Any]], *, boundary: int, head_sha: str, ref: str, title: str, workflow: str
+    runs: list[dict[str, Any]],
+    *,
+    boundary: int,
+    head_sha: str,
+    ref: str,
+    title: str,
+    workflow: str,
 ) -> list[dict[str, Any]]:
     expected_path = _workflow_path(workflow)
     return [
@@ -107,9 +120,15 @@ def validate_run(run: dict[str, Any], evidence: dict[str, Any]) -> None:
 def _load_evidence(path: Path, expected_count: int) -> list[dict[str, Any]]:
     if not path.is_file():
         raise RuntimeError(f"evidence file is missing: {path}")
-    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    records = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     if len(records) != expected_count:
-        raise RuntimeError(f"expected {expected_count} dispatched runs, found {len(records)}")
+        raise RuntimeError(
+            f"expected {expected_count} dispatched runs, found {len(records)}"
+        )
     run_ids = [record.get("run_id") for record in records]
     if len(set(run_ids)) != len(run_ids):
         raise RuntimeError("duplicate run IDs in dispatch evidence")
@@ -125,7 +144,9 @@ def dispatch(args: argparse.Namespace) -> int:
     evidence_path = Path(args.evidence_file)
     workflow_name = _workflow_name(args.repository, args.workflow)
     existing = _list_runs(args.repository, args.workflow, args.ref)
-    boundary = max((run["id"] for run in existing if isinstance(run.get("id"), int)), default=0)
+    boundary = max(
+        (run["id"] for run in existing if isinstance(run.get("id"), int)), default=0
+    )
     run_id = os.environ.get("GITHUB_RUN_ID", "local")
     run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "0")
     nonce = f"{args.phase}-{run_id}-{run_attempt}-{secrets.token_hex(16)}"
@@ -158,7 +179,9 @@ def dispatch(args: argparse.Namespace) -> int:
             break
         time.sleep(args.poll_seconds)
     if selected is None:
-        raise RuntimeError(f"timed out resolving nonce-correlated run for {args.workflow}")
+        raise RuntimeError(
+            f"timed out resolving nonce-correlated run for {args.workflow}"
+        )
 
     record = {
         "repository": args.repository,
@@ -179,7 +202,9 @@ def dispatch(args: argparse.Namespace) -> int:
 
 
 def _get_exact_run(record: dict[str, Any]) -> dict[str, Any]:
-    payload = _api("GET", f"/repos/{record['repository']}/actions/runs/{record['run_id']}")
+    payload = _api(
+        "GET", f"/repos/{record['repository']}/actions/runs/{record['run_id']}"
+    )
     if not isinstance(payload, dict):
         raise RuntimeError(f"run response is malformed: {record['run_id']}")
     validate_run(payload, record)
@@ -217,11 +242,15 @@ def wait(args: argparse.Namespace) -> int:
                     )
                 del pending[run_id]
             elif status not in ACTIVE:
-                raise RuntimeError(f"unexpected run status: {record['workflow']}#{run_id} status={status}")
+                raise RuntimeError(
+                    f"unexpected run status: {record['workflow']}#{run_id} status={status}"
+                )
         if pending:
             time.sleep(args.poll_seconds)
     if pending:
-        raise RuntimeError(f"timed out waiting for exact dispatched runs: {sorted(pending)}")
+        raise RuntimeError(
+            f"timed out waiting for exact dispatched runs: {sorted(pending)}"
+        )
     return 0
 
 

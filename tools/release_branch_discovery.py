@@ -156,7 +156,9 @@ def inspect_discoveries(
 def render_text(items: list[Discovery]) -> str:
     if not items:
         return "no release-adjacent branch residue discovered"
-    lines = [f"discovered {len(items)} release-adjacent branch(es); discovery is read-only"]
+    lines = [
+        f"discovered {len(items)} release-adjacent branch(es); discovery is read-only"
+    ]
     for item in items:
         lines.append(
             "branch "

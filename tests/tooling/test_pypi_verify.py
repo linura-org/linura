@@ -5,11 +5,18 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from tools.pypi_verify import VerificationError, load_project, local_artifacts, verify_metadata
+from tools.pypi_verify import (
+    VerificationError,
+    load_project,
+    local_artifacts,
+    verify_metadata,
+)
 
 
 class PyPIVerificationTests(unittest.TestCase):
-    def _artifact(self, root: Path, name: str = "linura-0.0.1-py3-none-any.whl") -> Path:
+    def _artifact(
+        self, root: Path, name: str = "linura-0.0.1-py3-none-any.whl"
+    ) -> Path:
         path = root / name
         path.write_bytes(b"sealed-wheel")
         return path

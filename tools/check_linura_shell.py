@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 import re
@@ -180,28 +181,28 @@ REQUIRED_CI = (
     'grep -Fq "liblinura-ui.so => $ui_backing" <<<"$ui_linkage"',
 )
 
+REQUIRED_IMAGE_ASSETS = {
+    "packaging/systemd/user/linura-shell.service": "usr/lib/systemd/user/linura-shell.service",
+    "apps/linura-shell/shell.qml": "usr/share/linura/shell/shell.qml",
+    "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml": "usr/share/linura/shell/plugins/control-center/ControlCenterPanel.qml",
+    "apps/linura-shell/plugins/control-center/manifest.json": "usr/share/linura/shell/plugins/control-center/manifest.json",
+    "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml": "usr/share/linura/shell/plugins/quick-settings/QuickSettingsPanel.qml",
+    "apps/linura-shell/plugins/quick-settings/manifest.json": "usr/share/linura/shell/plugins/quick-settings/manifest.json",
+    "apps/linura-shell/plugins/command-palette/CommandPalette.qml": "usr/share/linura/shell/plugins/command-palette/CommandPalette.qml",
+    "apps/linura-shell/plugins/command-palette/manifest.json": "usr/share/linura/shell/plugins/command-palette/manifest.json",
+    "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml": "usr/share/linura/shell/plugins/notifications-osd/LifecycleFeedback.qml",
+    "apps/linura-shell/plugins/notifications-osd/manifest.json": "usr/share/linura/shell/plugins/notifications-osd/manifest.json",
+    "apps/linura-shell/panel/WorkstationPanel.qml": "usr/share/linura/shell/panel/WorkstationPanel.qml",
+    "apps/linura-shell/tray/SystemTrayView.qml": "usr/share/linura/shell/tray/SystemTrayView.qml",
+    "apps/linura-shell/status/WorkstationStatus.qml": "usr/share/linura/shell/status/WorkstationStatus.qml",
+    "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml": "usr/share/linura/shell/integrations/hyprland/WorkspaceNavigationController.qml",
+    "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml": "usr/share/linura/shell/integrations/xdg/ApplicationLauncherController.qml",
+    "apps/linura-shell/org.linura.ControlCenter.desktop": "usr/share/applications/org.linura.ControlCenter.desktop",
+    "apps/linura-shell/org.linura.QuickSettings.desktop": "usr/share/applications/org.linura.QuickSettings.desktop",
+    "apps/linura-shell/org.linura.CommandPalette.desktop": "usr/share/applications/org.linura.CommandPalette.desktop",
+}
+
 REQUIRED_IMAGE = (
-    'ROOT / "apps/linura-shell/shell.qml"',
-    'ROOT / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"',
-    'ROOT / "apps/linura-shell/plugins/control-center/manifest.json"',
-    'ROOT / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"',
-    'ROOT / "apps/linura-shell/plugins/quick-settings/manifest.json"',
-    'ROOT / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"',
-    'ROOT / "apps/linura-shell/plugins/command-palette/manifest.json"',
-    'ROOT / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"',
-    'ROOT / "apps/linura-shell/plugins/notifications-osd/manifest.json"',
-    'ROOT / "apps/linura-shell/panel/WorkstationPanel.qml"',
-    'ROOT / "apps/linura-shell/tray/SystemTrayView.qml"',
-    'ROOT / "apps/linura-shell/status/WorkstationStatus.qml"',
-    'ROOT / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"',
-    'ROOT / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"',
-    'ROOT / "apps/linura-shell/org.linura.ControlCenter.desktop"',
-    '"usr/share/applications/org.linura.ControlCenter.desktop"',
-    'ROOT / "apps/linura-shell/org.linura.QuickSettings.desktop"',
-    '"usr/share/applications/org.linura.QuickSettings.desktop"',
-    'ROOT / "apps/linura-shell/org.linura.CommandPalette.desktop"',
-    '"usr/share/applications/org.linura.CommandPalette.desktop"',
-    'ROOT / "packaging/systemd/user/linura-shell.service"',
     "build_shell_bridge(STAGED)",
     'UI_SDK_SOURCE = ROOT / "apps/linura-shell/ui"',
     'UI_SDK_BUILD = ROOT / ".artifacts/linura-ui-build"',
@@ -273,7 +274,10 @@ def validate(root: Path) -> list[str]:
         (root / "profiles/arch-hyprland-v1.toml").read_text(encoding="utf-8")
     )
     requirements = profile.get("requirements", {})
-    if not isinstance(requirements, dict) or requirements.get("quickshell") != ">=0.3.1":
+    if (
+        not isinstance(requirements, dict)
+        or requirements.get("quickshell") != ">=0.3.1"
+    ):
         failures.append(
             "arch-hyprland-v1 must require quickshell >=0.3.1 for typed named/special workspace activation"
         )
@@ -298,17 +302,18 @@ def validate(root: Path) -> list[str]:
     workstation_panel_qml = (
         root / "apps/linura-shell/panel/WorkstationPanel.qml"
     ).read_text(encoding="utf-8")
-    system_tray_qml = (
-        root / "apps/linura-shell/tray/SystemTrayView.qml"
-    ).read_text(encoding="utf-8")
+    system_tray_qml = (root / "apps/linura-shell/tray/SystemTrayView.qml").read_text(
+        encoding="utf-8"
+    )
     workstation_status_qml = (
         root / "apps/linura-shell/status/WorkstationStatus.qml"
     ).read_text(encoding="utf-8")
-    linura_text_qml = (
-        root / "apps/linura-shell/ui/LinuraText.qml"
-    ).read_text(encoding="utf-8")
+    linura_text_qml = (root / "apps/linura-shell/ui/LinuraText.qml").read_text(
+        encoding="utf-8"
+    )
     workspace_controller_qml = (
-        root / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"
+        root
+        / "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml"
     ).read_text(encoding="utf-8")
     application_controller_qml = (
         root / "apps/linura-shell/integrations/xdg/ApplicationLauncherController.qml"
@@ -589,11 +594,19 @@ def validate(root: Path) -> list[str]:
         failures.append(
             "Workstation workspace overflow must not combine native popup grabbing with a separate Hyprland focus grab"
         )
-    if workstation_panel_qml.count('sequence: "Escape"') != 1 or workstation_panel_qml.count("Keys.onEscapePressed: event =>") != 1:
+    if (
+        workstation_panel_qml.count('sequence: "Escape"') != 1
+        or workstation_panel_qml.count("Keys.onEscapePressed: event =>") != 1
+    ):
         failures.append(
             "Workstation panel must provide Escape for keyboard entry and workspace overflow"
         )
-    if workstation_panel_qml.count("workspaceOverflowFlickable.ensureVisible(workspaceOverflowEntry)") != 1:
+    if (
+        workstation_panel_qml.count(
+            "workspaceOverflowFlickable.ensureVisible(workspaceOverflowEntry)"
+        )
+        != 1
+    ):
         failures.append(
             "Workstation workspace overflow must scroll the focused action into view"
         )
@@ -612,7 +625,12 @@ def validate(root: Path) -> list[str]:
             "Workstation workspace overflow restoration must remain unconditional when its opener disappears"
         )
 
-    if workstation_panel_qml.count("Qt.callLater(panel.focusFirstWorkspaceOverflowEntry)") != 2:
+    if (
+        workstation_panel_qml.count(
+            "Qt.callLater(panel.focusFirstWorkspaceOverflowEntry)"
+        )
+        != 2
+    ):
         failures.append(
             "Workstation workspace focus must follow native popup visibility and backing-window mapping"
         )
@@ -663,7 +681,10 @@ def validate(root: Path) -> list[str]:
             "Workstation panel keyboard restoration must fall back to a stable visible control when an opener disappears"
         )
 
-    if "Layout.preferredWidth: Math.max(leftGroup.implicitWidth, rightGroup.implicitWidth)" in workstation_panel_qml:
+    if (
+        "Layout.preferredWidth: Math.max(leftGroup.implicitWidth, rightGroup.implicitWidth)"
+        in workstation_panel_qml
+    ):
         failures.append(
             "Workstation panel side groups must not mirror unbounded implicit widths"
         )
@@ -672,11 +693,14 @@ def validate(root: Path) -> list[str]:
         "function releaseKeyboardEntryForPopup() {\n"
         "                keyboardReleaseTimer.stop()\n"
     )
-    popup_release_start = workstation_panel_qml.find("function releaseKeyboardEntryForPopup()")
+    popup_release_start = workstation_panel_qml.find(
+        "function releaseKeyboardEntryForPopup()"
+    )
     popup_release_end = workstation_panel_qml.find("function keyboardEntryFocused()")
     popup_release_body = (
         workstation_panel_qml[popup_release_start:popup_release_end]
-        if 0 <= popup_release_start < popup_release_end else ""
+        if 0 <= popup_release_start < popup_release_end
+        else ""
     )
     if (
         popup_keyboard_release not in workstation_panel_qml
@@ -846,8 +870,7 @@ def validate(root: Path) -> list[str]:
         "            root.openMenu(item, anchorItem, hostWindow)\n"
         "            return false",
         "const shouldDismiss = root.primaryAction(",
-        "if (shouldDismiss)\n"
-        "                                root.dismissOverflow()",
+        "if (shouldDismiss)\n                                root.dismissOverflow()",
     ):
         if fragment not in system_tray_qml:
             failures.append(
@@ -867,43 +890,67 @@ def validate(root: Path) -> list[str]:
             "System tray overflow must retain every item excluded from the inline budget"
         )
     if system_tray_qml.count("PopupWindow {") != 1:
-        failures.append(
-            "System tray overflow must use one screen-adjusted PopupWindow"
-        )
+        failures.append("System tray overflow must use one screen-adjusted PopupWindow")
     if "HyprlandFocusGrab {" in system_tray_qml:
         failures.append(
             "System tray overflow must not combine native popup grabbing with a separate Hyprland focus grab"
         )
-    if system_tray_qml.count("Keys.onEscapePressed: event =>") != 1 or 'sequence: "Escape"' in system_tray_qml:
+    if (
+        system_tray_qml.count("Keys.onEscapePressed: event =>") != 1
+        or 'sequence: "Escape"' in system_tray_qml
+    ):
         failures.append(
             "System tray overflow must provide exactly one Escape cancellation path"
         )
     # Qt's WindowShortcut matcher walks QObject parents until a QQuickItem
     # supplies its native window. Quickshell window proxies do not supply it.
     shortcut_hosts = (
-        (workstation_panel_qml, "spacing: theme.spacingSm", "id: leftGroup",
-         "onActivated: panel.releaseKeyboardEntry()"),
+        (
+            workstation_panel_qml,
+            "spacing: theme.spacingSm",
+            "id: leftGroup",
+            "onActivated: panel.releaseKeyboardEntry()",
+        ),
     )
     for text, start, end, activation in shortcut_hosts:
         host = text.split(start, 1)[-1].split(end, 1)[0] if start in text else ""
         if 'sequence: "Escape"' not in host or activation not in host:
-            failures.append("Workstation Escape shortcut must bind to its native window content item")
+            failures.append(
+                "Workstation Escape shortcut must bind to its native window content item"
+            )
     for text, entry, cancellation in (
         (system_tray_qml, "id: overflowEntry", "root.dismissOverflow(true)"),
-        (workstation_panel_qml, "id: workspaceOverflowEntry", "panel.dismissWorkspaceOverflow()"),
+        (
+            workstation_panel_qml,
+            "id: workspaceOverflowEntry",
+            "panel.dismissWorkspaceOverflow()",
+        ),
     ):
         control = text.split(entry, 1)[-1] if entry in text else ""
-        handler = ("Keys.onEscapePressed: event => {\n"
-                   + ("                            " if entry == "id: overflowEntry" else "                                    ")
-                   + "if (!event.isAutoRepeat)\n"
-                   + ("                                " if entry == "id: overflowEntry" else "                                        ")
-                   + cancellation)
-        if handler not in control or "event.accepted = event.key === Qt.Key_Escape" not in control:
-            failures.append("Popup Escape must be handled once by its focused native action row")
-    if system_tray_qml.count("overflowFlickable.ensureVisible(overflowEntry)") != 1:
-        failures.append(
-            "System tray overflow must scroll the focused action into view"
+        handler = (
+            "Keys.onEscapePressed: event => {\n"
+            + (
+                "                            "
+                if entry == "id: overflowEntry"
+                else "                                    "
+            )
+            + "if (!event.isAutoRepeat)\n"
+            + (
+                "                                "
+                if entry == "id: overflowEntry"
+                else "                                        "
+            )
+            + cancellation
         )
+        if (
+            handler not in control
+            or "event.accepted = event.key === Qt.Key_Escape" not in control
+        ):
+            failures.append(
+                "Popup Escape must be handled once by its focused native action row"
+            )
+    if system_tray_qml.count("overflowFlickable.ensureVisible(overflowEntry)") != 1:
+        failures.append("System tray overflow must scroll the focused action into view")
     if system_tray_qml.count("root.keyboardReturnRequested(overflowButton)") != 1:
         failures.append(
             "System tray overflow cancellation must request compositor keyboard-mode restoration for its opener"
@@ -1010,7 +1057,10 @@ def validate(root: Path) -> list[str]:
                 failures.append(
                     f"{overlay_name} must keep keyboard focus visible in bounded-height scrolling"
                 )
-        if overlay_text.count("onActiveFocusChanged: root.ensureVisible(") < minimum_focus_hooks:
+        if (
+            overlay_text.count("onActiveFocusChanged: root.ensureVisible(")
+            < minimum_focus_hooks
+        ):
             failures.append(
                 f"{overlay_name} must scroll every keyboard-focusable bounded control into view"
             )
@@ -1038,15 +1088,17 @@ def validate(root: Path) -> list[str]:
         if "property var targetScreen:" not in overlay_text:
             failures.append(f"{overlay_name} must expose an explicit target screen")
         if "screen: root.targetScreen" not in overlay_text:
-            failures.append(f"{overlay_name} must bind its PanelWindow to the requested screen")
+            failures.append(
+                f"{overlay_name} must bind its PanelWindow to the requested screen"
+            )
         if "property int topInset: 0" not in overlay_text:
-            failures.append(f"{overlay_name} must expose the workstation-panel top inset")
+            failures.append(
+                f"{overlay_name} must expose the workstation-panel top inset"
+            )
         if "top: root.topInset + theme.spacingLg" not in overlay_text:
             failures.append(f"{overlay_name} must render below the workstation panel")
 
-    overlay_screen_binding = (
-        "targetScreen: shell.overlayScreen ? shell.overlayScreen : shell.defaultOverlayScreen()"
-    )
+    overlay_screen_binding = "targetScreen: shell.overlayScreen ? shell.overlayScreen : shell.defaultOverlayScreen()"
     if shell_qml.count(overlay_screen_binding) != 3:
         failures.append(
             "Linura Shell must bind Control Center, Quick Settings and Command Palette to one selected overlay screen"
@@ -1060,15 +1112,21 @@ def validate(root: Path) -> list[str]:
         failures.append(
             "Lifecycle feedback must remain pinned to its initiating screen"
         )
-    if shell_qml.count(
-        "onControlCenterRequested: shell.showControlCenterOnScreen(shell.overlayScreen)"
-    ) != 2:
+    if (
+        shell_qml.count(
+            "onControlCenterRequested: shell.showControlCenterOnScreen(shell.overlayScreen)"
+        )
+        != 2
+    ):
         failures.append(
             "Linura Shell overlay-to-Control-Center navigation must preserve the selected screen"
         )
-    if shell_qml.count(
-        "onQuickSettingsRequested: shell.showQuickSettingsOnScreen(shell.overlayScreen)"
-    ) != 1:
+    if (
+        shell_qml.count(
+            "onQuickSettingsRequested: shell.showQuickSettingsOnScreen(shell.overlayScreen)"
+        )
+        != 1
+    ):
         failures.append(
             "Linura Shell overlay-to-Quick-Settings navigation must preserve the selected screen"
         )
@@ -1149,13 +1207,13 @@ def validate(root: Path) -> list[str]:
         "}",
     )
     if transition_start < 0 or transition_end < 0:
-        failures.append("Lifecycle feedback transition state-machine contract is missing")
+        failures.append(
+            "Lifecycle feedback transition state-machine contract is missing"
+        )
     else:
         transition_block = lifecycle_feedback_qml[transition_start:transition_end]
         transition_lines = tuple(
-            line.strip()
-            for line in transition_block.splitlines()
-            if line.strip()
+            line.strip() for line in transition_block.splitlines() if line.strip()
         )
         if transition_lines != expected_transition_lines:
             failures.append(
@@ -1226,9 +1284,10 @@ def validate(root: Path) -> list[str]:
         failures.append(
             "Quick Settings panel must not own shared audio-controller activation"
         )
-    if shell_qml.count(
-        "active: shell.controlCenterOpen || shell.quickSettingsOpen"
-    ) != 1:
+    if (
+        shell_qml.count("active: shell.controlCenterOpen || shell.quickSettingsOpen")
+        != 1
+    ):
         failures.append(
             "Linura Shell root must exclusively own shared audio-controller activation"
         )
@@ -1251,7 +1310,7 @@ def validate(root: Path) -> list[str]:
         "function transitionIsValid(currentPhase, nextPhase, nextOutcome)",
         "function boundedValueIsValid(",
         "function accessibilityName(",
-        'property int presentationGeneration: 0',
+        "property int presentationGeneration: 0",
         'property string operationKey: ""',
         'property string phase: ""',
         'property string outcome: "none"',
@@ -1351,7 +1410,10 @@ def validate(root: Path) -> list[str]:
             failures.append(
                 f"trusted shell QML contains forbidden authority/process/provider surface: {fragment}"
             )
-    if "import Quickshell.Io" not in broker_exempt_qml or "Process {" not in broker_exempt_qml:
+    if (
+        "import Quickshell.Io" not in broker_exempt_qml
+        or "Process {" not in broker_exempt_qml
+    ):
         failures.append(
             "Application launcher controller must exclusively own the bounded Quickshell.Io Process broker"
         )
@@ -1382,7 +1444,7 @@ def validate(root: Path) -> list[str]:
         'targetId: "navigation:workspace:" + workspace.id',
         "workspaceId: workspace.id",
         "if (workspace.focused)",
-        "workspace.focused ? qsTr(\"Current\") : qsTr(\"Enter\")",
+        'workspace.focused ? qsTr("Current") : qsTr("Enter")',
         "for (let i = 0; i < workspaceCatalog.length; i++)",
         "workspaceRequested(entry.workspaceId)",
         'targetId: "application:desktop-entry:" + application.id',
@@ -1465,14 +1527,14 @@ def validate(root: Path) -> list[str]:
         "Number.isInteger(requestGeneration)",
         "launchRequestGeneration = requestGeneration",
         "const requestGeneration = root.launchRequestGeneration",
-        'applicationId.length > 512',
+        "applicationId.length > 512",
         '"org.linura.QuickSettings"',
         '"org.linura.QuickSettings.desktop"',
         "if (application.id !== applicationId)",
         'return "terminal-unsupported"',
         "function brokerCommand(application)",
         "const command = application.command",
-        "const workingDirectory = application.workingDirectory || \"\"",
+        'const workingDirectory = application.workingDirectory || ""',
         '"/usr/bin/systemd-run"',
         '"--user"',
         '"--collect"',
@@ -1554,9 +1616,7 @@ def validate(root: Path) -> list[str]:
             "Command palette product surface must consume Linura UI primitives instead of raw Qt visual controls"
         )
 
-    root_navigation_scope = (
-        shell_qml[:ipc_index] if ipc_index >= 0 else shell_qml
-    )
+    root_navigation_scope = shell_qml[:ipc_index] if ipc_index >= 0 else shell_qml
     show_control_center_is_exclusive = re.search(
         r"function\s+showControlCenter\(\)\s*\{"
         r"\s*shell\.quickSettingsOpen\s*=\s*false"
@@ -1586,10 +1646,14 @@ def validate(root: Path) -> list[str]:
         or show_quick_settings_is_exclusive is None
         or show_command_palette_is_exclusive is None
     ):
-        failures.append("Linura Shell transient surfaces must remain mutually exclusive")
+        failures.append(
+            "Linura Shell transient surfaces must remain mutually exclusive"
+        )
 
     if "volumeSlider.value =" in panel_qml:
-        failures.append("Control Center keyboard handling must preserve the slider value binding")
+        failures.append(
+            "Control Center keyboard handling must preserve the slider value binding"
+        )
     raw_quick_settings_control = re.search(
         r"(?m)^\s*(?:Rectangle|Label|Button|Slider|Switch|TextField|AbstractButton|Popup|Dialog)\s*\{",
         quick_settings_qml,
@@ -1693,9 +1757,9 @@ def validate(root: Path) -> list[str]:
                 )
 
     manifest = json.loads(
-        (
-            root / "apps/linura-shell/plugins/control-center/manifest.json"
-        ).read_text(encoding="utf-8")
+        (root / "apps/linura-shell/plugins/control-center/manifest.json").read_text(
+            encoding="utf-8"
+        )
     )
     if manifest.get("schema_version") != 1:
         failures.append("Control Center shell manifest schema_version must be 1")
@@ -1710,7 +1774,9 @@ def validate(root: Path) -> list[str]:
     if manifest.get("authority") != "none":
         failures.append("Control Center shell manifest must carry no authority")
     if "capabilities" in manifest:
-        failures.append("Control Center shell manifest must not become a capability grant")
+        failures.append(
+            "Control Center shell manifest must not become a capability grant"
+        )
     expected_protocols = {
         "org.linura.Control1.Observe",
         "org.linura.Session1.SetAudioOutputVolume",
@@ -1720,9 +1786,9 @@ def validate(root: Path) -> list[str]:
         failures.append("Control Center shell manifest protocol requirements drifted")
 
     quick_settings_manifest = json.loads(
-        (
-            root / "apps/linura-shell/plugins/quick-settings/manifest.json"
-        ).read_text(encoding="utf-8")
+        (root / "apps/linura-shell/plugins/quick-settings/manifest.json").read_text(
+            encoding="utf-8"
+        )
     )
     expected_quick_settings_manifest = {
         "schema_version": 1,
@@ -1749,9 +1815,9 @@ def validate(root: Path) -> list[str]:
         failures.append("Quick Settings manifest must not become a capability grant")
 
     lifecycle_manifest = json.loads(
-        (
-            root / "apps/linura-shell/plugins/notifications-osd/manifest.json"
-        ).read_text(encoding="utf-8")
+        (root / "apps/linura-shell/plugins/notifications-osd/manifest.json").read_text(
+            encoding="utf-8"
+        )
     )
     expected_lifecycle_manifest = {
         "schema_version": 1,
@@ -1775,12 +1841,14 @@ def validate(root: Path) -> list[str]:
             "Lifecycle feedback manifest must remain exact, first-party, presentation-only and authority-free"
         )
     if "capabilities" in lifecycle_manifest:
-        failures.append("Lifecycle feedback manifest must not become a capability grant")
+        failures.append(
+            "Lifecycle feedback manifest must not become a capability grant"
+        )
 
     palette_manifest = json.loads(
-        (
-            root / "apps/linura-shell/plugins/command-palette/manifest.json"
-        ).read_text(encoding="utf-8")
+        (root / "apps/linura-shell/plugins/command-palette/manifest.json").read_text(
+            encoding="utf-8"
+        )
     )
     expected_palette_manifest = {
         "schema_version": 1,
@@ -1817,42 +1885,60 @@ def validate(root: Path) -> list[str]:
     bridge = bridge_header + "\n" + bridge_source
     for fragment in REQUIRED_BRIDGE:
         if fragment not in bridge:
-            failures.append(f"Linura Shell bridge authority contract missing: {fragment}")
+            failures.append(
+                f"Linura Shell bridge authority contract missing: {fragment}"
+            )
     for fragment in FORBIDDEN_BRIDGE:
         if fragment in bridge:
             failures.append(
                 f"Linura Shell bridge contains forbidden authority/process surface: {fragment}"
             )
     if bridge.count("generation != observationGeneration_") != 1:
-        failures.append("Linura Shell bridge must discard superseded observations exactly once")
+        failures.append(
+            "Linura Shell bridge must discard superseded observations exactly once"
+        )
     if bridge.count("samePrecondition(pending_->displayed, snapshot)") != 1:
         failures.append("Linura Shell bridge must retain one pre-dispatch state check")
     if bridge.count("sameIdentity(pending.displayed, snapshot)") != 1:
-        failures.append("Linura Shell bridge must retain one post-effect identity check")
+        failures.append(
+            "Linura Shell bridge must retain one post-effect identity check"
+        )
     if bridge.count("observe(ObservePurpose::PostApply)") != 1:
-        failures.append("Linura Shell bridge must independently re-observe after receipt")
+        failures.append(
+            "Linura Shell bridge must independently re-observe after receipt"
+        )
     if bridge.count("isServiceUnavailableError(reply.errorName())") != 2:
         failures.append(
             "Linura Shell bridge must classify Control1 and Session1 service disappearance"
         )
     if "refreshTimer_" in bridge:
-        failures.append("Linura Shell bridge must not poll while audio controls are inactive")
+        failures.append(
+            "Linura Shell bridge must not poll while audio controls are inactive"
+        )
     if bridge.count('QStringLiteral("org.freedesktop.DBus.Error.NoReply")') != 1:
-        failures.append("Linura Shell bridge must classify D-Bus NoReply as service unavailable")
+        failures.append(
+            "Linura Shell bridge must classify D-Bus NoReply as service unavailable"
+        )
     if "retryTimer_.start(delay)" not in bridge or "kRetryMaximumMs" not in bridge:
-        failures.append("Linura Shell bridge must retain active-only bounded observation recovery")
+        failures.append(
+            "Linura Shell bridge must retain active-only bounded observation recovery"
+        )
     close_inactive_contract = re.search(
-        r'if \(!active_\) \{.*?setState\(\s*'
+        r"if \(!active_\) \{.*?setState\(\s*"
         r'QStringLiteral\("inactive"\),\s*'
         r'QStringLiteral\("Audio controls are inactive\."\)\s*\);'
-        r'.*?return;\s*\}',
+        r".*?return;\s*\}",
         bridge_source,
         re.DOTALL,
     )
     if close_inactive_contract is None:
-        failures.append("Linura Shell bridge must reset canceled audio observations to inactive")
+        failures.append(
+            "Linura Shell bridge must reset canceled audio observations to inactive"
+        )
     if bridge.count("pending_->dispatched = true;") != 1:
-        failures.append("Linura Shell bridge must distinguish pre-dispatch from dispatched effects")
+        failures.append(
+            "Linura Shell bridge must distinguish pre-dispatch from dispatched effects"
+        )
     verified_feedback_calls = list(
         re.finditer(
             r"publishLifecycleFeedback\(\s*[^,]+,\s*FeedbackPhase::Verified,",
@@ -1860,9 +1946,7 @@ def validate(root: Path) -> list[str]:
         )
     )
     verified_feedback = (
-        verified_feedback_calls[0].start()
-        if len(verified_feedback_calls) == 1
-        else -1
+        verified_feedback_calls[0].start() if len(verified_feedback_calls) == 1 else -1
     )
     post_identity = bridge_source.find("sameIdentity(pending.displayed, snapshot)")
     post_value = bridge_source.find("snapshot.volumePercent != pending.requestedVolume")
@@ -1907,7 +1991,9 @@ def validate(root: Path) -> list[str]:
         "presentationVolumePercent(snapshot.volumePercent)",
     ):
         if fragment not in bridge:
-            failures.append(f"Linura Shell typed lifecycle feedback contract missing: {fragment}")
+            failures.append(
+                f"Linura Shell typed lifecycle feedback contract missing: {fragment}"
+            )
 
     if "std::min(snapshot.volumePercent, 100)" in bridge_source:
         failures.append(
@@ -1963,9 +2049,7 @@ def validate(root: Path) -> list[str]:
             failures.append(f"Linura Shell bridge CMake contract missing: {fragment}")
 
     tokens = json.loads((root / "design/tokens.json").read_text(encoding="utf-8"))
-    theme = (root / "apps/linura-shell/ui/LinuraTheme.qml").read_text(
-        encoding="utf-8"
-    )
+    theme = (root / "apps/linura-shell/ui/LinuraTheme.qml").read_text(encoding="utf-8")
     token_bindings = {
         "spacing": {
             "xs": "spacingXs",
@@ -2030,9 +2114,9 @@ def validate(root: Path) -> list[str]:
 
     packages = {
         line.strip()
-        for line in (
-            root / "packaging/arch/archiso/packages.linura"
-        ).read_text(encoding="utf-8").splitlines()
+        for line in (root / "packaging/arch/archiso/packages.linura")
+        .read_text(encoding="utf-8")
+        .splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     }
     if "quickshell" not in packages:
@@ -2051,15 +2135,21 @@ def validate(root: Path) -> list[str]:
             failures.append(
                 f"Arch workstation Hyprland profile shortcut contract missing or duplicated: {fragment}"
             )
-    for forbidden in ("hl.dsp.exec_cmd(", "os.execute(", "io.popen(", "loadfile(", "dofile("):
+    for forbidden in (
+        "hl.dsp.exec_cmd(",
+        "os.execute(",
+        "io.popen(",
+        "loadfile(",
+        "dofile(",
+    ):
         if forbidden in hyprland_profile:
             failures.append(
                 f"Arch workstation Hyprland shortcut profile must not introduce process/code execution: {forbidden}"
             )
 
-    service = (
-        root / "packaging/systemd/user/linura-shell.service"
-    ).read_text(encoding="utf-8")
+    service = (root / "packaging/systemd/user/linura-shell.service").read_text(
+        encoding="utf-8"
+    )
     for fragment in (
         "ExecStart=/usr/bin/quickshell -n -p /usr/share/linura/shell",
         "After=graphical-session.target linurad.service",
@@ -2075,11 +2165,13 @@ def validate(root: Path) -> list[str]:
             failures.append(f"Linura Shell user-service contract missing: {fragment}")
     for fragment in ("/bin/sh", "/bin/bash", "sudo", "pkexec"):
         if fragment in service:
-            failures.append(f"Linura Shell service contains forbidden surface: {fragment}")
+            failures.append(
+                f"Linura Shell service contains forbidden surface: {fragment}"
+            )
 
-    launcher = (
-        root / "apps/linura-shell/org.linura.ControlCenter.desktop"
-    ).read_text(encoding="utf-8")
+    launcher = (root / "apps/linura-shell/org.linura.ControlCenter.desktop").read_text(
+        encoding="utf-8"
+    )
     for fragment in (
         "[Desktop Entry]",
         "Name=Linura Control Center",
@@ -2087,7 +2179,9 @@ def validate(root: Path) -> list[str]:
         "Terminal=false",
     ):
         if fragment not in launcher:
-            failures.append(f"Control Center packaged launcher contract missing: {fragment}")
+            failures.append(
+                f"Control Center packaged launcher contract missing: {fragment}"
+            )
 
     quick_settings_launcher = (
         root / "apps/linura-shell/org.linura.QuickSettings.desktop"
@@ -2099,7 +2193,9 @@ def validate(root: Path) -> list[str]:
         "Terminal=false",
     ):
         if fragment not in quick_settings_launcher:
-            failures.append(f"Quick Settings packaged launcher contract missing: {fragment}")
+            failures.append(
+                f"Quick Settings packaged launcher contract missing: {fragment}"
+            )
 
     palette_launcher = (
         root / "apps/linura-shell/org.linura.CommandPalette.desktop"
@@ -2111,12 +2207,66 @@ def validate(root: Path) -> list[str]:
         "Terminal=false",
     ):
         if fragment not in palette_launcher:
-            failures.append(f"Command palette packaged launcher contract missing: {fragment}")
+            failures.append(
+                f"Command palette packaged launcher contract missing: {fragment}"
+            )
 
     image = (root / "tools/image.py").read_text(encoding="utf-8")
-    for fragment in REQUIRED_IMAGE:
-        if fragment not in image:
-            failures.append(f"Arch image shell integration missing: {fragment}")
+    try:
+        image_tree = ast.parse(image, filename="tools/image.py")
+    except SyntaxError as error:
+        failures.append(
+            f"Arch image shell integration invalid Python syntax: {error.msg}"
+        )
+    else:
+        assignments = [
+            node
+            for node in image_tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "RUNTIME_ASSETS"
+                for target in node.targets
+            )
+        ]
+        runtime_assets: dict[str, str] = {}
+        runtime_asset_expression: ast.Dict | None = None
+        if len(assignments) == 1 and len(assignments[0].targets) == 1:
+            expression = assignments[0].value
+            if isinstance(expression, ast.Dict):
+                runtime_asset_expression = expression
+        valid_assets = runtime_asset_expression is not None
+        if runtime_asset_expression is not None:
+            for source, destination in zip(
+                runtime_asset_expression.keys, runtime_asset_expression.values
+            ):
+                if not (
+                    isinstance(source, ast.BinOp)
+                    and isinstance(source.op, ast.Div)
+                    and isinstance(source.left, ast.Name)
+                    and source.left.id == "ROOT"
+                    and isinstance(source.right, ast.Constant)
+                    and isinstance(source.right.value, str)
+                    and isinstance(destination, ast.Constant)
+                    and isinstance(destination.value, str)
+                    and source.right.value not in runtime_assets
+                ):
+                    valid_assets = False
+                    break
+                runtime_assets[source.right.value] = destination.value
+        if not valid_assets:
+            failures.append(
+                "Arch image shell integration invalid RUNTIME_ASSETS mapping"
+            )
+        for source, destination in REQUIRED_IMAGE_ASSETS.items():
+            if runtime_assets.get(source) != destination:
+                failures.append(
+                    f"Arch image shell integration missing: ROOT / {source!r} -> {destination!r}"
+                )
+
+        canonical_image = ast.unparse(image_tree)
+        for fragment in REQUIRED_IMAGE:
+            if fragment.replace('"', "'") not in canonical_image:
+                failures.append(f"Arch image shell integration missing: {fragment}")
 
     ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     for fragment in REQUIRED_CI:
@@ -2148,7 +2298,9 @@ def validate(root: Path) -> list[str]:
         "does **not** promote",
     ):
         if fragment not in readme:
-            failures.append(f"Linura Shell authority/support documentation missing: {fragment}")
+            failures.append(
+                f"Linura Shell authority/support documentation missing: {fragment}"
+            )
 
     ui_readme = (root / "apps/linura-shell/ui/README.md").read_text(encoding="utf-8")
     for fragment in (
@@ -2181,7 +2333,9 @@ def validate(root: Path) -> list[str]:
         "HYPRLAND_NO_SD_TARGET",
     ):
         if fragment not in qualification:
-            failures.append(f"v0.10 workstation session qualification missing: {fragment}")
+            failures.append(
+                f"v0.10 workstation session qualification missing: {fragment}"
+            )
 
     architecture = (root / "docs/architecture.md").read_text(encoding="utf-8")
     for fragment in (

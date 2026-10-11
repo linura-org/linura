@@ -15,12 +15,10 @@ class LinuraShellContractTests(unittest.TestCase):
         observation = (ROOT / "crates/linura-observation/src/lib.rs").read_text(
             encoding="utf-8"
         )
-        transport = (ROOT / "crates/linura-dbus/src/lib.rs").read_text(
-            encoding="utf-8"
-        )
-        client = (ROOT / "apps/linura-shell/bridge/audio_session_controller.cpp").read_text(
-            encoding="utf-8"
-        )
+        transport = (ROOT / "crates/linura-dbus/src/lib.rs").read_text(encoding="utf-8")
+        client = (
+            ROOT / "apps/linura-shell/bridge/audio_session_controller.cpp"
+        ).read_text(encoding="utf-8")
         self.assertIn('Self::Current => "current"', observation)
         self.assertIn("response.freshness.as_str().into()", transport)
         self.assertIn('if (freshness != QStringLiteral("current"))', client)
@@ -40,15 +38,23 @@ class LinuraShellContractTests(unittest.TestCase):
         relative = "apps/linura-shell/panel/WorkstationPanel.qml"
         for original, weakened in (
             ("return item.Window.active", "return true"),
-            ("return item.activeFocus && item.Window.active", "return item.activeFocus"),
+            (
+                "return item.activeFocus && item.Window.active",
+                "return item.activeFocus",
+            ),
         ):
-            with self.subTest(original=original), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(original=original),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 root = Path(directory)
                 self._copy_fixture(root)
                 panel = root / relative
                 source = panel.read_text(encoding="utf-8")
                 self.assertIn(original, source)
-                panel.write_text(source.replace(original, weakened, 1), encoding="utf-8")
+                panel.write_text(
+                    source.replace(original, weakened, 1), encoding="utf-8"
+                )
                 self.assertIn(
                     f"Workstation panel contract missing: {original}",
                     check_linura_shell.validate(root),
@@ -56,47 +62,78 @@ class LinuraShellContractTests(unittest.TestCase):
 
     def test_escape_shortcuts_cannot_move_to_quickshell_window_proxies(self) -> None:
         import re
+
         for relative, activation in (
-            ("apps/linura-shell/panel/WorkstationPanel.qml", "panel.releaseKeyboardEntry()"),
+            (
+                "apps/linura-shell/panel/WorkstationPanel.qml",
+                "panel.releaseKeyboardEntry()",
+            ),
         ):
-            with self.subTest(activation=activation), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(activation=activation),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 root = Path(directory)
                 self._copy_fixture(root)
                 path = root / relative
                 text = path.read_text(encoding="utf-8")
-                match = re.search(r'Shortcut \{\s*sequence: "Escape"\s*context: Qt.WindowShortcut\s*enabled: [^\n]+\s*onActivated: '
-                                  + re.escape(activation) + r'\s*\}', text)
+                match = re.search(
+                    r'Shortcut \{\s*sequence: "Escape"\s*context: Qt.WindowShortcut\s*enabled: [^\n]+\s*onActivated: '
+                    + re.escape(activation)
+                    + r"\s*\}",
+                    text,
+                )
                 self.assertIsNotNone(match)
+                assert match is not None
                 shortcut = match.group()
-                text = text[:match.start()] + text[match.end():]
-                marker = "PopupWindow {" if activation != "panel.releaseKeyboardEntry()" else "PanelWindow {"
+                text = text[: match.start()] + text[match.end() :]
+                marker = (
+                    "PopupWindow {"
+                    if activation != "panel.releaseKeyboardEntry()"
+                    else "PanelWindow {"
+                )
                 self.assertIn(marker, text)
-                path.write_text(text.replace(marker, marker + "\n" + shortcut, 1), encoding="utf-8")
-                self.assertIn("Workstation Escape shortcut must bind to its native window content item",
-                              check_linura_shell.validate(root))
+                path.write_text(
+                    text.replace(marker, marker + "\n" + shortcut, 1), encoding="utf-8"
+                )
+                self.assertIn(
+                    "Workstation Escape shortcut must bind to its native window content item",
+                    check_linura_shell.validate(root),
+                )
 
     def test_popup_escape_requires_native_focused_control_handler(self) -> None:
-        for relative in ("apps/linura-shell/tray/SystemTrayView.qml",
-                         "apps/linura-shell/panel/WorkstationPanel.qml"):
-            for marker in ("Keys.onEscapePressed: event =>",
-                           "event.accepted = event.key === Qt.Key_Escape"):
-                with self.subTest(relative=relative, marker=marker), tempfile.TemporaryDirectory() as directory:
+        for relative in (
+            "apps/linura-shell/tray/SystemTrayView.qml",
+            "apps/linura-shell/panel/WorkstationPanel.qml",
+        ):
+            for marker in (
+                "Keys.onEscapePressed: event =>",
+                "event.accepted = event.key === Qt.Key_Escape",
+            ):
+                with (
+                    self.subTest(relative=relative, marker=marker),
+                    tempfile.TemporaryDirectory() as directory,
+                ):
                     root = Path(directory)
                     self._copy_fixture(root)
                     path = root / relative
                     text = path.read_text()
                     self.assertIn(marker, text)
                     path.write_text(text.replace(marker, "escape-handler-omitted", 1))
-                    self.assertIn("Popup Escape must be handled once by its focused native action row",
-                                  check_linura_shell.validate(root))
+                    self.assertIn(
+                        "Popup Escape must be handled once by its focused native action row",
+                        check_linura_shell.validate(root),
+                    )
 
-    def test_expired_pre_dispatch_observation_retries_without_ever_dispatching(self) -> None:
-        client = (ROOT / "apps/linura-shell/bridge/audio_session_controller.cpp").read_text(
-            encoding="utf-8"
-        )
-        header = (ROOT / "apps/linura-shell/bridge/audio_session_controller.h").read_text(
-            encoding="utf-8"
-        )
+    def test_expired_pre_dispatch_observation_retries_without_ever_dispatching(
+        self,
+    ) -> None:
+        client = (
+            ROOT / "apps/linura-shell/bridge/audio_session_controller.cpp"
+        ).read_text(encoding="utf-8")
+        header = (
+            ROOT / "apps/linura-shell/bridge/audio_session_controller.h"
+        ).read_text(encoding="utf-8")
         self.assertIn("constexpr int kPreApplyExpiredObservationRetries = 3;", client)
         self.assertIn("int expiredObservationRetries = 0;", header)
         self.assertIn("&& !pending_->dispatched", client)
@@ -130,19 +167,28 @@ class LinuraShellContractTests(unittest.TestCase):
                 client = root / "apps/linura-shell/bridge/audio_session_controller.cpp"
                 before = client.read_text(encoding="utf-8")
                 self.assertIn(marker, before)
-                client.write_text(before.replace(marker, replacement, 1), encoding="utf-8")
+                client.write_text(
+                    before.replace(marker, replacement, 1), encoding="utf-8"
+                )
                 failures = check_linura_shell.validate(root)
                 self.assertTrue(
-                    any("Linura Shell bridge authority contract missing:" in message
-                        for message in failures),
+                    any(
+                        "Linura Shell bridge authority contract missing:" in message
+                        for message in failures
+                    ),
                     failures,
                 )
 
-    def test_workstation_global_shortcuts_must_remain_bound_in_shipped_profile(self) -> None:
+    def test_workstation_global_shortcuts_must_remain_bound_in_shipped_profile(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            profile = root / "packaging/arch/archiso/airootfs/etc/skel/.config/hypr/hyprland.lua"
+            profile = (
+                root
+                / "packaging/arch/archiso/airootfs/etc/skel/.config/hypr/hyprland.lua"
+            )
             text = profile.read_text(encoding="utf-8")
             marker = 'hl.dsp.global("linura:workstationPanel")'
             self.assertEqual(text.count(marker), 1)
@@ -159,7 +205,10 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            profile = root / "packaging/arch/archiso/airootfs/etc/skel/.config/hypr/hyprland.lua"
+            profile = (
+                root
+                / "packaging/arch/archiso/airootfs/etc/skel/.config/hypr/hyprland.lua"
+            )
             profile.write_text(
                 profile.read_text(encoding="utf-8")
                 + '\nhl.bind("SUPER + CTRL + X", hl.dsp.exec_cmd("sh -c id"))\n',
@@ -167,21 +216,31 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("must not introduce process/code execution" in item for item in failures)
+                any(
+                    "must not introduce process/code execution" in item
+                    for item in failures
+                )
             )
 
     def test_qml_cannot_gain_process_or_provider_authority(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            panel = root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
+            panel = (
+                root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
+            )
             panel.write_text(
                 panel.read_text(encoding="utf-8")
-                + "\n// Process { command: [\"wpctl\"] }\n",
+                + '\n// Process { command: ["wpctl"] }\n',
                 encoding="utf-8",
             )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("forbidden authority/process/provider surface" in item for item in failures))
+            self.assertTrue(
+                any(
+                    "forbidden authority/process/provider surface" in item
+                    for item in failures
+                )
+            )
 
     def test_manifest_cannot_become_capability_grant(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -221,7 +280,12 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             contract.write_text(text[:start] + changed + text[end:], encoding="utf-8")
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("standalone linura-control-center maturity" in item for item in failures))
+            self.assertTrue(
+                any(
+                    "standalone linura-control-center maturity" in item
+                    for item in failures
+                )
+            )
 
     def test_pre_dispatch_state_binding_cannot_be_removed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -233,7 +297,9 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertEqual(text.count(marker), 1)
             source.write_text(text.replace(marker, "true", 1), encoding="utf-8")
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("pre-dispatch state check" in item for item in failures))
+            self.assertTrue(
+                any("pre-dispatch state check" in item for item in failures)
+            )
 
     def test_post_receipt_reobservation_cannot_be_removed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -243,9 +309,13 @@ class LinuraShellContractTests(unittest.TestCase):
             text = source.read_text(encoding="utf-8")
             marker = "observe(ObservePurpose::PostApply)"
             self.assertEqual(text.count(marker), 1)
-            source.write_text(text.replace(marker, "pending_.reset()", 1), encoding="utf-8")
+            source.write_text(
+                text.replace(marker, "pending_.reset()", 1), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("re-observe after receipt" in item for item in failures))
+            self.assertTrue(
+                any("re-observe after receipt" in item for item in failures)
+            )
 
     def test_shell_bridge_transport_must_remain_timeout_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -257,7 +327,12 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertEqual(text.count(marker), 1)
             source.write_text(text.replace(marker, "", 1), encoding="utf-8")
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("authority contract missing" in item and marker in item for item in failures))
+            self.assertTrue(
+                any(
+                    "authority contract missing" in item and marker in item
+                    for item in failures
+                )
+            )
 
     def test_control_center_must_have_a_packaged_launcher(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -270,9 +345,13 @@ class LinuraShellContractTests(unittest.TestCase):
                 "ipc call -- linura.shell toggleControlCenter"
             )
             self.assertIn(marker, text)
-            launcher.write_text(text.replace(marker, "Exec=/bin/false", 1), encoding="utf-8")
+            launcher.write_text(
+                text.replace(marker, "Exec=/bin/false", 1), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("packaged launcher contract missing" in item for item in failures))
+            self.assertTrue(
+                any("packaged launcher contract missing" in item for item in failures)
+            )
 
     def test_audio_observation_must_be_inactive_without_audio_surface(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -281,10 +360,15 @@ class LinuraShellContractTests(unittest.TestCase):
             source = root / "apps/linura-shell/bridge/audio_session_controller.cpp"
             text = source.read_text(encoding="utf-8")
             self.assertNotIn("refreshTimer_", text)
-            source.write_text(text + "\n// refreshTimer_ regression\n", encoding="utf-8")
+            source.write_text(
+                text + "\n// refreshTimer_ regression\n", encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("must not poll while audio controls are inactive" in item for item in failures)
+                any(
+                    "must not poll while audio controls are inactive" in item
+                    for item in failures
+                )
             )
 
     def test_shell_root_must_own_shared_audio_controller_activity(self) -> None:
@@ -301,14 +385,19 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("exclusively own shared audio-controller activation" in item for item in failures)
+                any(
+                    "exclusively own shared audio-controller activation" in item
+                    for item in failures
+                )
             )
 
     def test_audio_panels_cannot_own_shared_controller_activity(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            panel = root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            panel = (
+                root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            )
             panel.write_text(
                 panel.read_text(encoding="utf-8")
                 + "\n// forbidden lifecycle ownership\nConnections { target: controller; Component.onCompleted: controller.setActive(opened) }\n",
@@ -316,7 +405,10 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("must not own shared audio-controller activation" in item for item in failures)
+                any(
+                    "must not own shared audio-controller activation" in item
+                    for item in failures
+                )
             )
 
     def test_workstation_panel_must_cover_all_live_screens(self) -> None:
@@ -330,10 +422,15 @@ class LinuraShellContractTests(unittest.TestCase):
             panel.write_text(text.replace(marker, "model: []", 1), encoding="utf-8")
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("Workstation panel contract missing" in item and marker in item for item in failures)
+                any(
+                    "Workstation panel contract missing" in item and marker in item
+                    for item in failures
+                )
             )
 
-    def test_workstation_panel_overlay_requests_must_carry_originating_screen(self) -> None:
+    def test_workstation_panel_overlay_requests_must_carry_originating_screen(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -348,8 +445,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Workstation panel contract missing" in item
-                    and marker in item
+                    "Workstation panel contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -369,8 +465,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura Shell root contract missing" in item
-                    and marker in item
+                    "Linura Shell root contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -434,8 +529,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura Shell root contract missing" in item
-                    and marker in item
+                    "Linura Shell root contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -449,7 +543,9 @@ class LinuraShellContractTests(unittest.TestCase):
             marker = "onControlCenterRequested: shell.showControlCenterOnScreen(shell.overlayScreen)"
             self.assertEqual(text.count(marker), 2)
             shell.write_text(
-                text.replace(marker, "onControlCenterRequested: shell.showControlCenter()", 1),
+                text.replace(
+                    marker, "onControlCenterRequested: shell.showControlCenter()", 1
+                ),
                 encoding="utf-8",
             )
             failures = check_linura_shell.validate(root)
@@ -464,17 +560,22 @@ class LinuraShellContractTests(unittest.TestCase):
             self._copy_fixture(root)
             panel = root / "apps/linura-shell/panel/WorkstationPanel.qml"
             text = panel.read_text(encoding="utf-8")
-            marker = "readonly property int instantiatedPanelCount: panels.instances.length"
+            marker = (
+                "readonly property int instantiatedPanelCount: panels.instances.length"
+            )
             self.assertIn(marker, text)
             panel.write_text(
-                text.replace(marker, "readonly property int instantiatedPanelCount: screenCount", 1),
+                text.replace(
+                    marker,
+                    "readonly property int instantiatedPanelCount: screenCount",
+                    1,
+                ),
                 encoding="utf-8",
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Workstation panel contract missing" in item
-                    and marker in item
+                    "Workstation panel contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -494,13 +595,14 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura Shell root contract missing" in item
-                    and marker in item
+                    "Linura Shell root contract missing" in item and marker in item
                     for item in failures
                 )
             )
 
-    def test_workstation_panel_cross_screen_focus_releases_non_target_panels(self) -> None:
+    def test_workstation_panel_cross_screen_focus_releases_non_target_panels(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -515,8 +617,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Workstation panel contract missing" in item
-                    and marker in item
+                    "Workstation panel contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -540,8 +641,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Workstation panel contract missing" in item
-                    and marker in item
+                    "Workstation panel contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -561,8 +661,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Workstation panel contract missing" in item
-                    and marker in item
+                    "Workstation panel contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -582,8 +681,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Workstation panel contract missing" in item
-                    and marker in item
+                    "Workstation panel contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -632,8 +730,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Workstation panel contract missing" in item
-                    and marker in item
+                    "Workstation panel contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -683,7 +780,9 @@ class LinuraShellContractTests(unittest.TestCase):
                 failures,
             )
 
-    def test_workstation_workspace_overflow_uses_screen_adjusted_popup_window(self) -> None:
+    def test_workstation_workspace_overflow_uses_screen_adjusted_popup_window(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -698,8 +797,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Workstation panel contract missing" in item
-                    and marker in item
+                    "Workstation panel contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -719,8 +817,10 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("Workstation panel contract missing" in issue
-                    and marker in issue for issue in failures)
+                any(
+                    "Workstation panel contract missing" in issue and marker in issue
+                    for issue in failures
+                )
             )
 
     def test_workspace_overflow_escape_restores_focus_to_opener(self) -> None:
@@ -776,7 +876,9 @@ class LinuraShellContractTests(unittest.TestCase):
                 failures,
             )
 
-    def test_workstation_keyboard_restore_falls_back_when_opener_disappears(self) -> None:
+    def test_workstation_keyboard_restore_falls_back_when_opener_disappears(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -834,10 +936,15 @@ class LinuraShellContractTests(unittest.TestCase):
             text = panel.read_text(encoding="utf-8")
             marker = "exclusiveZone: root.panelHeight"
             self.assertIn(marker, text)
-            panel.write_text(text.replace(marker, "exclusiveZone: 0", 1), encoding="utf-8")
+            panel.write_text(
+                text.replace(marker, "exclusiveZone: 0", 1), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("Workstation panel contract missing" in item and marker in item for item in failures)
+                any(
+                    "Workstation panel contract missing" in item and marker in item
+                    for item in failures
+                )
             )
 
     def test_workstation_panel_cannot_gain_process_authority(self) -> None:
@@ -853,7 +960,8 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "workstation panel contains forbidden process/authority surface" in item
+                    "workstation panel contains forbidden process/authority surface"
+                    in item
                     for item in failures
                 )
             )
@@ -909,8 +1017,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "System tray contract missing" in item
-                    and marker in item
+                    "System tray contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -930,8 +1037,10 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("System tray contract missing" in issue
-                    and marker in issue for issue in failures)
+                any(
+                    "System tray contract missing" in issue and marker in issue
+                    for issue in failures
+                )
             )
 
     def test_system_tray_focus_acquisition_follows_native_popup_mapping(self) -> None:
@@ -941,15 +1050,28 @@ class LinuraShellContractTests(unittest.TestCase):
             tray = root / "apps/linura-shell/tray/SystemTrayView.qml"
             text = tray.read_text(encoding="utf-8")
             marker = "Qt.callLater(root.focusFirstOverflowEntry)"
-            self.assertIn("if (!overflowWindow.visible || !overflowWindow.backingWindowVisible", text)
-            self.assertIn("&& entry.visible && entry.enabled && entry.activeFocus", text)
+            self.assertIn(
+                "if (!overflowWindow.visible || !overflowWindow.backingWindowVisible",
+                text,
+            )
+            self.assertIn(
+                "&& entry.visible && entry.enabled && entry.activeFocus", text
+            )
             self.assertEqual(text.count(marker), 2)
-            tray.write_text(text.replace(marker, "Qt.callLater(function() {})"), encoding="utf-8")
+            tray.write_text(
+                text.replace(marker, "Qt.callLater(function() {})"), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("System tray contract missing" in item and marker in item
-                                for item in failures))
+            self.assertTrue(
+                any(
+                    "System tray contract missing" in item and marker in item
+                    for item in failures
+                )
+            )
 
-    def test_workstation_tray_readiness_is_exported_across_component_boundaries(self) -> None:
+    def test_workstation_tray_readiness_is_exported_across_component_boundaries(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -957,11 +1079,19 @@ class LinuraShellContractTests(unittest.TestCase):
             text = panel.read_text(encoding="utf-8")
             marker = "function trayOverflowReadinessState(index, itemIndex)"
             self.assertIn(marker, text)
-            panel.write_text(text.replace(marker, "function deletedReadinessMethod(index, itemIndex)", 1),
-                             encoding="utf-8")
+            panel.write_text(
+                text.replace(
+                    marker, "function deletedReadinessMethod(index, itemIndex)", 1
+                ),
+                encoding="utf-8",
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("Workstation panel contract missing" in issue
-                                and marker in issue for issue in failures))
+            self.assertTrue(
+                any(
+                    "Workstation panel contract missing" in issue and marker in issue
+                    for issue in failures
+                )
+            )
 
     def test_tray_popup_must_preserve_parent_seat_focus_until_native_grab(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -974,28 +1104,49 @@ class LinuraShellContractTests(unittest.TestCase):
             block = text[start:end]
             self.assertNotIn("panel.keyboardNavigationActive =", block)
             self.assertIn("panel.keyboardReleasePending = false", block)
-            panel.write_text(text[:start]
-                             + block.replace("panel.keyboardReleasePending = false",
-                                             "panel.keyboardReleasePending = true", 1)
-                             + text[end:], encoding="utf-8")
+            panel.write_text(
+                text[:start]
+                + block.replace(
+                    "panel.keyboardReleasePending = false",
+                    "panel.keyboardReleasePending = true",
+                    1,
+                )
+                + text[end:],
+                encoding="utf-8",
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("native popup handoff must preserve" in issue
-                                for issue in failures))
+            self.assertTrue(
+                any("native popup handoff must preserve" in issue for issue in failures)
+            )
 
     def test_popup_handoff_cannot_change_parent_keyboard_mode(self) -> None:
         for navigation_active in ("true", "false"):
-            with self.subTest(navigation_active=navigation_active), tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                self.subTest(navigation_active=navigation_active),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
                 root = Path(temp_dir)
                 self._copy_fixture(root)
                 panel = root / "apps/linura-shell/panel/WorkstationPanel.qml"
                 text = panel.read_text(encoding="utf-8")
                 marker = "function releaseKeyboardEntryForPopup() {"
-                panel.write_text(text.replace(
-                    marker, marker + "\n                panel.keyboardNavigationActive = " + navigation_active,
-                    1), encoding="utf-8")
+                panel.write_text(
+                    text.replace(
+                        marker,
+                        marker
+                        + "\n                panel.keyboardNavigationActive = "
+                        + navigation_active,
+                        1,
+                    ),
+                    encoding="utf-8",
+                )
                 failures = check_linura_shell.validate(root)
-                self.assertTrue(any("native popup handoff must preserve" in issue
-                                    for issue in failures))
+                self.assertTrue(
+                    any(
+                        "native popup handoff must preserve" in issue
+                        for issue in failures
+                    )
+                )
 
     def test_panel_keyboard_entry_requires_native_window_activation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1007,9 +1158,13 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertIn(marker, text)
             panel.write_text(text.replace(marker, "", 1), encoding="utf-8")
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("Workstation panel contract missing" in issue
-                                and "commandPaletteButton.Window.active" in issue
-                                for issue in failures))
+            self.assertTrue(
+                any(
+                    "Workstation panel contract missing" in issue
+                    and "commandPaletteButton.Window.active" in issue
+                    for issue in failures
+                )
+            )
 
     def test_tray_readiness_requires_native_window_activation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1021,8 +1176,12 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertIn(marker, text)
             tray.write_text(text.replace(marker, "", 1), encoding="utf-8")
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("System tray contract missing" in issue and marker in issue
-                                for issue in failures))
+            self.assertTrue(
+                any(
+                    "System tray contract missing" in issue and marker in issue
+                    for issue in failures
+                )
+            )
 
     def test_tray_cancellation_preserves_mode_until_native_focus_returns(self) -> None:
         markers = (
@@ -1041,8 +1200,12 @@ class LinuraShellContractTests(unittest.TestCase):
                 self.assertIn(marker, text)
                 tray.write_text(text.replace(marker, "", 1), encoding="utf-8")
                 failures = check_linura_shell.validate(root)
-                self.assertTrue(any("System tray contract missing" in issue and marker in issue
-                                    for issue in failures))
+                self.assertTrue(
+                    any(
+                        "System tray contract missing" in issue and marker in issue
+                        for issue in failures
+                    )
+                )
 
     def test_workspace_popup_external_dismissal_exits_no_keyboard_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1052,11 +1215,17 @@ class LinuraShellContractTests(unittest.TestCase):
             content = panel.read_text(encoding="utf-8")
             marker = "workspaceFocusRetry.stop()\n                        panel.releaseKeyboardEntry()"
             self.assertIn(marker, content)
-            panel.write_text(content.replace(marker, "workspaceOverflowWindow.visible = false", 1),
-                             encoding="utf-8")
+            panel.write_text(
+                content.replace(marker, "workspaceOverflowWindow.visible = false", 1),
+                encoding="utf-8",
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("workspace popup must release temporary" in issue
-                                for issue in failures))
+            self.assertTrue(
+                any(
+                    "workspace popup must release temporary" in issue
+                    for issue in failures
+                )
+            )
 
     def test_workspace_popup_focus_waits_for_native_popup_mapping(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1066,11 +1235,17 @@ class LinuraShellContractTests(unittest.TestCase):
             text = panel.read_text(encoding="utf-8")
             marker = "Qt.callLater(panel.focusFirstWorkspaceOverflowEntry)"
             self.assertEqual(text.count(marker), 2)
-            panel.write_text(text.replace(marker, "Qt.callLater(function() {})"), encoding="utf-8")
+            panel.write_text(
+                text.replace(marker, "Qt.callLater(function() {})"), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("Workstation panel contract missing" in issue
-                                or "workspace focus must follow" in issue
-                                for issue in failures))
+            self.assertTrue(
+                any(
+                    "Workstation panel contract missing" in issue
+                    or "workspace focus must follow" in issue
+                    for issue in failures
+                )
+            )
 
     def test_native_popup_focus_acquisition_remains_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1109,13 +1284,17 @@ class LinuraShellContractTests(unittest.TestCase):
                 failures,
             )
 
-    def test_system_tray_native_menu_maps_anchor_through_host_content_item(self) -> None:
+    def test_system_tray_native_menu_maps_anchor_through_host_content_item(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
             tray = root / "apps/linura-shell/tray/SystemTrayView.qml"
             text = tray.read_text(encoding="utf-8")
-            marker = "hostWindow.contentItem.mapFromItem(anchorItem, 0, anchorItem.height)"
+            marker = (
+                "hostWindow.contentItem.mapFromItem(anchorItem, 0, anchorItem.height)"
+            )
             self.assertIn(marker, text)
             tray.write_text(
                 text.replace(
@@ -1128,8 +1307,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "System tray contract missing" in item
-                    and marker in item
+                    "System tray contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -1153,8 +1331,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "System tray contract missing" in item
-                    and marker in item
+                    "System tray contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -1177,7 +1354,9 @@ class LinuraShellContractTests(unittest.TestCase):
                 failures,
             )
 
-    def test_system_tray_model_driven_overflow_closure_restores_keyboard_session(self) -> None:
+    def test_system_tray_model_driven_overflow_closure_restores_keyboard_session(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -1236,7 +1415,8 @@ class LinuraShellContractTests(unittest.TestCase):
             tray.write_text(
                 text.replace(
                     marker,
-                    marker + "\n                                overflowWindow.visible = false",
+                    marker
+                    + "\n                                overflowWindow.visible = false",
                     1,
                 ),
                 encoding="utf-8",
@@ -1283,8 +1463,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "System tray contract missing" in item
-                    and marker in item
+                    "System tray contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -1297,12 +1476,14 @@ class LinuraShellContractTests(unittest.TestCase):
             text = tray.read_text(encoding="utf-8")
             marker = "Keys.onEnterPressed: event =>"
             self.assertIn(marker, text)
-            tray.write_text(text.replace(marker, "Keys.onEscapePressed: event =>", 1), encoding="utf-8")
+            tray.write_text(
+                text.replace(marker, "Keys.onEscapePressed: event =>", 1),
+                encoding="utf-8",
+            )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "System tray contract missing" in item
-                    and marker in item
+                    "System tray contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -1422,7 +1603,10 @@ class LinuraShellContractTests(unittest.TestCase):
             tray.write_text(text.replace(marker, "true", 1), encoding="utf-8")
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("System tray contract missing" in item and marker in item for item in failures)
+                any(
+                    "System tray contract missing" in item and marker in item
+                    for item in failures
+                )
             )
 
     def test_status_clock_must_not_spawn_a_process(self) -> None:
@@ -1440,7 +1624,8 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "workstation status contains forbidden process/authority surface" in item
+                    "workstation status contains forbidden process/authority surface"
+                    in item
                     for item in failures
                 )
             )
@@ -1449,19 +1634,28 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            quick = root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            quick = (
+                root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            )
             text = quick.read_text(encoding="utf-8")
             marker = "top: root.topInset + theme.spacingLg"
             self.assertIn(marker, text)
-            quick.write_text(text.replace(marker, "top: theme.spacingLg", 1), encoding="utf-8")
+            quick.write_text(
+                text.replace(marker, "top: theme.spacingLg", 1), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
-            self.assertIn("Quick Settings must render below the workstation panel", failures)
+            self.assertIn(
+                "Quick Settings must render below the workstation panel", failures
+            )
 
     def test_lifecycle_feedback_cannot_gain_process_or_provider_authority(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            surface = root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            surface = (
+                root
+                / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            )
             surface.write_text(
                 surface.read_text(encoding="utf-8")
                 + '\nimport Quickshell.Io\nProcess { command: ["wpctl"] }\n',
@@ -1480,10 +1674,15 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            surface = root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            surface = (
+                root
+                / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            )
             text = surface.read_text(encoding="utf-8")
             self.assertIn("mask: Region {}", text)
-            surface.write_text(text.replace("    mask: Region {}\n", "", 1), encoding="utf-8")
+            surface.write_text(
+                text.replace("    mask: Region {}\n", "", 1), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
@@ -1492,11 +1691,16 @@ class LinuraShellContractTests(unittest.TestCase):
                 )
             )
 
-    def test_lifecycle_feedback_must_expose_single_alert_accessibility_node(self) -> None:
+    def test_lifecycle_feedback_must_expose_single_alert_accessibility_node(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            surface = root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            surface = (
+                root
+                / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            )
             text = surface.read_text(encoding="utf-8")
             marker = "Accessible.role: Accessible.AlertMessage"
             self.assertIn(marker, text)
@@ -1514,11 +1718,16 @@ class LinuraShellContractTests(unittest.TestCase):
                 )
             )
 
-    def test_lifecycle_feedback_must_preserve_exact_phase_outcome_ordering(self) -> None:
+    def test_lifecycle_feedback_must_preserve_exact_phase_outcome_ordering(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            surface = root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            surface = (
+                root
+                / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            )
             text = surface.read_text(encoding="utf-8")
             marker = 'return nextOutcome === "target-changed"'
             self.assertIn(marker, text)
@@ -1536,11 +1745,16 @@ class LinuraShellContractTests(unittest.TestCase):
                 failures,
             )
 
-    def test_lifecycle_feedback_new_generation_requires_finished_predecessor(self) -> None:
+    def test_lifecycle_feedback_new_generation_requires_finished_predecessor(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            surface = root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            surface = (
+                root
+                / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            )
             text = surface.read_text(encoding="utf-8")
             marker = "!finalOutcome"
             self.assertIn(marker, text)
@@ -1556,11 +1770,16 @@ class LinuraShellContractTests(unittest.TestCase):
                 )
             )
 
-    def test_lifecycle_feedback_must_stay_clear_of_top_right_settings_panels(self) -> None:
+    def test_lifecycle_feedback_must_stay_clear_of_top_right_settings_panels(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            surface = root / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            surface = (
+                root
+                / "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml"
+            )
             text = surface.read_text(encoding="utf-8")
             self.assertIn("anchors { bottom: true; right: true }", text)
             surface.write_text(
@@ -1580,7 +1799,9 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            manifest = root / "apps/linura-shell/plugins/notifications-osd/manifest.json"
+            manifest = (
+                root / "apps/linura-shell/plugins/notifications-osd/manifest.json"
+            )
             text = manifest.read_text(encoding="utf-8").replace(
                 '"authority": "none",',
                 '"authority": "none",\n  "capabilities": ["system.audio.control"],',
@@ -1592,7 +1813,9 @@ class LinuraShellContractTests(unittest.TestCase):
                 any("Lifecycle feedback manifest" in item for item in failures)
             )
 
-    def test_verified_lifecycle_feedback_must_follow_post_effect_verification(self) -> None:
+    def test_verified_lifecycle_feedback_must_follow_post_effect_verification(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -1600,12 +1823,12 @@ class LinuraShellContractTests(unittest.TestCase):
             text = source.read_text(encoding="utf-8")
             marker = "observe(ObservePurpose::PostApply);"
             injected = (
-                'publishLifecycleFeedback(\n'
-                '                1,\n'
-                '                FeedbackPhase::Verified,\n'
-                '                FeedbackOutcome::Changed,\n'
-                '                50,\n'
-                '                true);\n'
+                "publishLifecycleFeedback(\n"
+                "                1,\n"
+                "                FeedbackPhase::Verified,\n"
+                "                FeedbackOutcome::Changed,\n"
+                "                50,\n"
+                "                true);\n"
             )
             source.write_text(
                 text.replace(marker, injected + "            " + marker, 1),
@@ -1619,7 +1842,9 @@ class LinuraShellContractTests(unittest.TestCase):
                 )
             )
 
-    def test_lifecycle_feedback_must_not_clip_amplified_authoritative_volume(self) -> None:
+    def test_lifecycle_feedback_must_not_clip_amplified_authoritative_volume(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -1633,7 +1858,10 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("must never clip authoritative amplified volume" in item for item in failures)
+                any(
+                    "must never clip authoritative amplified volume" in item
+                    for item in failures
+                )
             )
 
     def test_lifecycle_feedback_signal_cannot_expose_free_form_copy(self) -> None:
@@ -1667,25 +1895,42 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertEqual(text.count(marker), 2)
             source.write_text(text.replace(marker, "false", 1), encoding="utf-8")
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("classify Control1 and Session1 service disappearance" in item for item in failures))
+            self.assertTrue(
+                any(
+                    "classify Control1 and Session1 service disappearance" in item
+                    for item in failures
+                )
+            )
 
     def test_ipc_open_must_request_initial_keyboard_focus(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            panel = root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
+            panel = (
+                root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
+            )
             text = panel.read_text(encoding="utf-8")
             marker = "closeButton.forceActiveFocus(Qt.TabFocusReason)"
             self.assertEqual(text.count(marker), 1)
-            panel.write_text(text.replace(marker, "controller.refresh()", 1), encoding="utf-8")
+            panel.write_text(
+                text.replace(marker, "controller.refresh()", 1), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("Control Center shell panel contract missing" in item and marker in item for item in failures))
+            self.assertTrue(
+                any(
+                    "Control Center shell panel contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
+            )
 
     def test_keyboard_changes_must_preserve_slider_binding(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            panel = root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
+            panel = (
+                root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
+            )
             text = panel.read_text(encoding="utf-8")
             self.assertNotIn("volumeSlider.value =", text)
             panel.write_text(
@@ -1698,7 +1943,9 @@ class LinuraShellContractTests(unittest.TestCase):
                 encoding="utf-8",
             )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("preserve the slider value binding" in item for item in failures))
+            self.assertTrue(
+                any("preserve the slider value binding" in item for item in failures)
+            )
 
     def test_closed_initial_observation_must_reset_to_inactive(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1708,9 +1955,17 @@ class LinuraShellContractTests(unittest.TestCase):
             text = source.read_text(encoding="utf-8")
             marker = 'QStringLiteral("Audio controls are inactive.")'
             self.assertIn(marker, text)
-            source.write_text(text.replace(marker, 'QStringLiteral("still loading")', 1), encoding="utf-8")
+            source.write_text(
+                text.replace(marker, 'QStringLiteral("still loading")', 1),
+                encoding="utf-8",
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("reset canceled audio observations to inactive" in item for item in failures))
+            self.assertTrue(
+                any(
+                    "reset canceled audio observations to inactive" in item
+                    for item in failures
+                )
+            )
 
     def test_closing_panel_must_cancel_undispatched_effect(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1722,7 +1977,12 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertIn(marker, text)
             source.write_text(text.replace(marker, "false", 1), encoding="utf-8")
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("authority contract missing" in item and marker in item for item in failures))
+            self.assertTrue(
+                any(
+                    "authority contract missing" in item and marker in item
+                    for item in failures
+                )
+            )
 
     def test_active_observation_failure_must_recover_with_bounded_retry(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1734,7 +1994,9 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertIn(marker, text)
             source.write_text(text.replace(marker, "return", 1), encoding="utf-8")
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("bounded observation recovery" in item for item in failures))
+            self.assertTrue(
+                any("bounded observation recovery" in item for item in failures)
+            )
 
     def test_no_reply_must_be_classified_as_service_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1744,7 +2006,10 @@ class LinuraShellContractTests(unittest.TestCase):
             text = source.read_text(encoding="utf-8")
             marker = 'QStringLiteral("org.freedesktop.DBus.Error.NoReply")'
             self.assertEqual(text.count(marker), 1)
-            source.write_text(text.replace(marker, 'QStringLiteral("org.example.Missing")', 1), encoding="utf-8")
+            source.write_text(
+                text.replace(marker, 'QStringLiteral("org.example.Missing")', 1),
+                encoding="utf-8",
+            )
             failures = check_linura_shell.validate(root)
             self.assertTrue(any("NoReply" in item for item in failures))
 
@@ -1752,12 +2017,18 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            panel = root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
+            panel = (
+                root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
+            )
             text = panel.read_text(encoding="utf-8")
             self.assertIn("LinuraButton {", text)
-            panel.write_text(text.replace("LinuraButton {", "Button {", 1), encoding="utf-8")
+            panel.write_text(
+                text.replace("LinuraButton {", "Button {", 1), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("consume Linura UI primitives" in item for item in failures))
+            self.assertTrue(
+                any("consume Linura UI primitives" in item for item in failures)
+            )
 
     def test_ui_sdk_focus_contract_cannot_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1773,6 +2044,68 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(any("Linura UI SDK component" in item for item in failures))
+
+    def test_image_asset_validation_is_format_invariant(self) -> None:
+        import ast
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_fixture(root)
+            image = root / "tools/image.py"
+            image.write_text(
+                ast.unparse(ast.parse(image.read_text(encoding="utf-8"))) + "\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(check_linura_shell.validate(root), [])
+
+    def test_image_asset_remap_is_not_satisfied_by_comment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_fixture(root)
+            image = root / "tools/image.py"
+            content = image.read_text(encoding="utf-8")
+            old_target = "usr/share/linura/shell/plugins/control-center/manifest.json"
+            self.assertIn(old_target, content)
+            image.write_text(
+                content.replace(
+                    f'": "{old_target}",',
+                    '": "usr/share/linura/shell/incorrect.json",',
+                    1,
+                )
+                + f"\n# the old string {old_target} is not a runtime asset\n",
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Arch image shell integration missing" in failure
+                    and old_target in failure
+                    for failure in failures
+                ),
+                failures,
+            )
+
+    def test_image_asset_must_use_literal_root_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_fixture(root)
+            image = root / "tools/image.py"
+            content = image.read_text(encoding="utf-8")
+            source = 'ROOT / "apps/linura-shell/shell.qml"'
+            self.assertIn(source, content)
+            image.write_text(
+                content.replace(source, 'Path("apps/linura-shell/shell.qml")', 1),
+                encoding="utf-8",
+            )
+            failures = check_linura_shell.validate(root)
+            self.assertTrue(
+                any(
+                    "Arch image shell integration invalid RUNTIME_ASSETS mapping"
+                    in failure
+                    for failure in failures
+                ),
+                failures,
+            )
 
     def test_ui_sdk_runtime_module_is_staged(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1816,9 +2149,13 @@ class LinuraShellContractTests(unittest.TestCase):
             text = image.read_text(encoding="utf-8")
             marker = "graphical-session.target.wants/linura-shell.service"
             self.assertIn(marker, text)
-            image.write_text(text.replace(marker, "missing-shell.service", 1), encoding="utf-8")
+            image.write_text(
+                text.replace(marker, "missing-shell.service", 1), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("Arch image shell integration missing" in item for item in failures))
+            self.assertTrue(
+                any("Arch image shell integration missing" in item for item in failures)
+            )
 
     def test_canonical_ci_must_compile_and_install_bridge(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1828,10 +2165,13 @@ class LinuraShellContractTests(unittest.TestCase):
             text = workflow.read_text(encoding="utf-8")
             marker = "cmake -S apps/linura-shell/bridge"
             self.assertIn(marker, text)
-            workflow.write_text(text.replace(marker, "cmake -S unrelated", 1), encoding="utf-8")
+            workflow.write_text(
+                text.replace(marker, "cmake -S unrelated", 1), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("Linura Shell CI contract missing" in item for item in failures))
-
+            self.assertTrue(
+                any("Linura Shell CI contract missing" in item for item in failures)
+            )
 
     def test_canonical_ci_must_compile_and_install_ui_sdk(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1850,7 +2190,6 @@ class LinuraShellContractTests(unittest.TestCase):
                 any("Linura Shell CI contract missing" in item for item in failures)
             )
 
-
     def test_shell_service_is_bound_to_graphical_session_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1862,10 +2201,16 @@ class LinuraShellContractTests(unittest.TestCase):
             service.write_text(text.replace(marker, "", 1), encoding="utf-8")
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("Linura Shell user-service contract missing" in item and marker in item for item in failures)
+                any(
+                    "Linura Shell user-service contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
             )
 
-    def test_workstation_qualification_requires_graphical_session_activation(self) -> None:
+    def test_workstation_qualification_requires_graphical_session_activation(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -1879,15 +2224,20 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("v0.10 workstation session qualification missing" in item and marker in item for item in failures)
+                any(
+                    "v0.10 workstation session qualification missing" in item
+                    and marker in item
+                    for item in failures
+                )
             )
-
 
     def test_ui_sdk_module_is_required_for_product_imports(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            panel = root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
+            panel = (
+                root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
+            )
             text = panel.read_text(encoding="utf-8")
             marker = "import org.linura.UI 1.0"
             self.assertIn(marker, text)
@@ -1936,8 +2286,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura UI SDK CMake contract missing" in item
-                    and marker in item
+                    "Linura UI SDK CMake contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -1957,8 +2306,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura UI SDK component" in item
-                    and marker in item
+                    "Linura UI SDK component" in item and marker in item
                     for item in failures
                 )
             )
@@ -1978,8 +2326,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura UI SDK component" in item
-                    and marker in item
+                    "Linura UI SDK component" in item and marker in item
                     for item in failures
                 )
             )
@@ -1999,8 +2346,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura UI SDK component" in item
-                    and marker in item
+                    "Linura UI SDK component" in item and marker in item
                     for item in failures
                 )
             )
@@ -2037,7 +2383,9 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             palette.write_text(
                 palette.read_text(encoding="utf-8") + "\nProcess { }\n",
                 encoding="utf-8",
@@ -2073,7 +2421,9 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             text = palette.read_text(encoding="utf-8")
             marker = "LinuraActionRow {"
             self.assertIn(marker, text)
@@ -2084,8 +2434,12 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Command palette product surface must consume Linura UI primitives" in item
-                    or ("Command palette shell contract missing" in item and marker in item)
+                    "Command palette product surface must consume Linura UI primitives"
+                    in item
+                    or (
+                        "Command palette shell contract missing" in item
+                        and marker in item
+                    )
                     for item in failures
                 )
             )
@@ -2340,9 +2694,7 @@ class LinuraShellContractTests(unittest.TestCase):
             self._copy_fixture(root)
             shell = root / "apps/linura-shell/shell.qml"
             text = shell.read_text(encoding="utf-8")
-            marker = (
-                "onLaunchCompleted: (status, requestGeneration) =>"
-            )
+            marker = "onLaunchCompleted: (status, requestGeneration) =>"
             self.assertIn(marker, text)
             shell.write_text(
                 text.replace(marker, "onLaunchCompleted: status => {}", 1),
@@ -2351,8 +2703,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura Shell root contract missing" in item
-                    and marker in item
+                    "Linura Shell root contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -2361,7 +2712,9 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             text = palette.read_text(encoding="utf-8")
             marker = "if (!opened || requestGeneration !== sessionGeneration)"
             self.assertIn(marker, text)
@@ -2372,8 +2725,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Command palette shell contract missing" in item
-                    and marker in item
+                    "Command palette shell contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -2382,7 +2734,9 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             text = palette.read_text(encoding="utf-8")
             marker = "applicationRequested(entry.applicationId, sessionGeneration)"
             self.assertIn(marker, text)
@@ -2393,8 +2747,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Command palette shell contract missing" in item
-                    and marker in item
+                    "Command palette shell contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -2403,7 +2756,9 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             palette.write_text(
                 palette.read_text(encoding="utf-8")
                 + "\nimport Quickshell.Io\nProcess { }\n",
@@ -2417,14 +2772,18 @@ class LinuraShellContractTests(unittest.TestCase):
                 )
             )
 
-    def test_command_palette_cannot_retain_desktop_entry_provider_material(self) -> None:
+    def test_command_palette_cannot_retain_desktop_entry_provider_material(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             palette.write_text(
                 palette.read_text(encoding="utf-8")
-                + "\n// forbidden regression\nDesktopEntries.byId(\"org.example.App\")\n",
+                + '\n// forbidden regression\nDesktopEntries.byId("org.example.App")\n',
                 encoding="utf-8",
             )
             failures = check_linura_shell.validate(root)
@@ -2451,8 +2810,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura Shell root contract missing" in item
-                    and marker in item
+                    "Linura Shell root contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -2491,10 +2849,7 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any(
-                    "must require systemd >=255" in item
-                    for item in failures
-                )
+                any("must require systemd >=255" in item for item in failures)
             )
 
     def test_workspace_navigation_requires_quickshell_031(self) -> None:
@@ -2511,10 +2866,7 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any(
-                    "must require quickshell >=0.3.1" in item
-                    for item in failures
-                )
+                any("must require quickshell >=0.3.1" in item for item in failures)
             )
 
     def test_workspace_controller_owns_typed_hyprland_workspace_model(self) -> None:
@@ -2545,10 +2897,11 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             palette.write_text(
-                palette.read_text(encoding="utf-8")
-                + "\nimport Quickshell.Hyprland\n",
+                palette.read_text(encoding="utf-8") + "\nimport Quickshell.Hyprland\n",
                 encoding="utf-8",
             )
             failures = check_linura_shell.validate(root)
@@ -2574,17 +2927,20 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura Shell root contract missing" in item
-                    and marker in item
+                    "Linura Shell root contract missing" in item and marker in item
                     for item in failures
                 )
             )
 
-    def test_command_palette_workspace_target_uses_stable_numeric_identity(self) -> None:
+    def test_command_palette_workspace_target_uses_stable_numeric_identity(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             text = palette.read_text(encoding="utf-8")
             marker = 'targetId: "navigation:workspace:" + workspace.id'
             self.assertIn(marker, text)
@@ -2599,8 +2955,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Command palette shell contract missing" in item
-                    and marker in item
+                    "Command palette shell contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -2609,7 +2964,9 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             text = palette.read_text(encoding="utf-8")
             self.assertNotIn("resultList.currentIndex =", text)
 
@@ -2637,7 +2994,9 @@ class LinuraShellContractTests(unittest.TestCase):
                 )
             )
 
-    def test_workspace_controller_matches_exact_numeric_identity_before_activation(self) -> None:
+    def test_workspace_controller_matches_exact_numeric_identity_before_activation(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -2711,7 +3070,9 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             text = palette.read_text(encoding="utf-8")
             marker = "onWorkspaceCatalogChanged:"
             self.assertIn(marker, text)
@@ -2722,13 +3083,14 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Command palette shell contract missing" in item
-                    and marker in item
+                    "Command palette shell contract missing" in item and marker in item
                     for item in failures
                 )
             )
 
-    def test_command_palette_manifest_declares_workspace_navigation_source(self) -> None:
+    def test_command_palette_manifest_declares_workspace_navigation_source(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -2752,9 +3114,13 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             text = palette.read_text(encoding="utf-8")
-            marker = "resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)"
+            marker = (
+                "resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)"
+            )
             self.assertIn(marker, text)
             palette.write_text(
                 text.replace(marker, "// selection visibility removed", 1),
@@ -2763,8 +3129,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Command palette shell contract missing" in item
-                    and marker in item
+                    "Command palette shell contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -2773,7 +3138,9 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             text = palette.read_text(encoding="utf-8")
             marker = "currentIndex: root.selectedIndex"
             self.assertIn(marker, text)
@@ -2784,17 +3151,20 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Command palette shell contract missing" in item
-                    and marker in item
+                    "Command palette shell contract missing" in item and marker in item
                     for item in failures
                 )
             )
 
-    def test_command_palette_exposes_keyboard_selection_to_search_accessibility(self) -> None:
+    def test_command_palette_exposes_keyboard_selection_to_search_accessibility(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             text = palette.read_text(encoding="utf-8")
             marker = "accessibleDescription: root.selectedAccessibilityDescription()"
             self.assertIn(marker, text)
@@ -2805,8 +3175,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Command palette shell contract missing" in item
-                    and marker in item
+                    "Command palette shell contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -2826,8 +3195,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura UI SDK component" in item
-                    and marker in item
+                    "Linura UI SDK component" in item and marker in item
                     for item in failures
                 )
             )
@@ -2838,7 +3206,9 @@ class LinuraShellContractTests(unittest.TestCase):
             self._copy_fixture(root)
             component = root / "apps/linura-shell/ui/LinuraTextField.qml"
             text = component.read_text(encoding="utf-8")
-            marker = "Accessible.description: invalid ? errorText : accessibleDescription"
+            marker = (
+                "Accessible.description: invalid ? errorText : accessibleDescription"
+            )
             self.assertIn(marker, text)
             component.write_text(
                 text.replace(
@@ -2851,8 +3221,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura UI SDK component" in item
-                    and marker in item
+                    "Linura UI SDK component" in item and marker in item
                     for item in failures
                 )
             )
@@ -2871,7 +3240,7 @@ class LinuraShellContractTests(unittest.TestCase):
             text = (
                 text[:root_method_index]
                 + "function brokenToggleCommandPalette()"
-                + text[root_method_index + len(marker):]
+                + text[root_method_index + len(marker) :]
             )
             shell.write_text(text, encoding="utf-8")
             failures = check_linura_shell.validate(root)
@@ -2923,8 +3292,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura Shell root contract missing" in item
-                    and marker in item
+                    "Linura Shell root contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -2987,13 +3355,17 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            panel = root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            panel = (
+                root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            )
             text = panel.read_text(encoding="utf-8")
             marker = "closeButton.forceActiveFocus(Qt.TabFocusReason)"
             self.assertEqual(text.count(marker), 1)
             self.assertNotIn("volumeSlider.forceActiveFocus(Qt.TabFocusReason)", text)
             panel.write_text(
-                text.replace(marker, "volumeSlider.forceActiveFocus(Qt.TabFocusReason)", 1),
+                text.replace(
+                    marker, "volumeSlider.forceActiveFocus(Qt.TabFocusReason)", 1
+                ),
                 encoding="utf-8",
             )
             failures = check_linura_shell.validate(root)
@@ -3022,26 +3394,31 @@ class LinuraShellContractTests(unittest.TestCase):
                 encoding="utf-8",
             )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(
-                any("Quick Settings manifest" in item for item in failures)
-            )
+            self.assertTrue(any("Quick Settings manifest" in item for item in failures))
 
     def test_quick_settings_cannot_gain_provider_or_process_authority(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            panel = root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            panel = (
+                root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            )
             panel.write_text(
                 panel.read_text(encoding="utf-8")
-                + '\n// forbidden provider bypass: wpctl\n',
+                + "\n// forbidden provider bypass: wpctl\n",
                 encoding="utf-8",
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("forbidden authority/process/provider surface" in item for item in failures)
+                any(
+                    "forbidden authority/process/provider surface" in item
+                    for item in failures
+                )
             )
 
-    def test_quick_settings_manifest_must_bind_registered_volume_operation(self) -> None:
+    def test_quick_settings_manifest_must_bind_registered_volume_operation(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -3055,7 +3432,10 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("bound to the registered session-volume operation" in item for item in failures)
+                any(
+                    "bound to the registered session-volume operation" in item
+                    for item in failures
+                )
             )
 
     def test_quick_settings_must_have_a_packaged_launcher(self) -> None:
@@ -3075,14 +3455,19 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("Quick Settings packaged launcher contract missing" in item for item in failures)
+                any(
+                    "Quick Settings packaged launcher contract missing" in item
+                    for item in failures
+                )
             )
 
     def test_command_palette_must_retain_quick_settings_navigation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             text = palette.read_text(encoding="utf-8")
             marker = 'targetId: "navigation:quick-settings"'
             self.assertIn(marker, text)
@@ -3093,8 +3478,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Command palette shell contract missing" in item
-                    and marker in item
+                    "Command palette shell contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -3139,8 +3523,6 @@ class LinuraShellContractTests(unittest.TestCase):
             self.assertTrue(
                 any("design token control_size.md" in item for item in failures)
             )
-
-
 
     def test_shell_bridge_qml_plugin_must_keep_origin_rpath(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3199,8 +3581,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura Shell CI contract missing" in item
-                    and marker in item
+                    "Linura Shell CI contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -3220,8 +3601,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura UI SDK CMake contract missing" in item
-                    and marker in item
+                    "Linura UI SDK CMake contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -3241,8 +3621,7 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura UI SDK CMake contract missing" in item
-                    and marker in item
+                    "Linura UI SDK CMake contract missing" in item and marker in item
                     for item in failures
                 )
             )
@@ -3262,12 +3641,10 @@ class LinuraShellContractTests(unittest.TestCase):
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
-                    "Linura Shell CI contract missing" in item
-                    and marker in item
+                    "Linura Shell CI contract missing" in item and marker in item
                     for item in failures
                 )
             )
-
 
     def test_audio_bridge_dbus_demarshalling_must_use_read_side_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3275,15 +3652,25 @@ class LinuraShellContractTests(unittest.TestCase):
             self._copy_fixture(root)
             bridge = root / "apps/linura-shell/bridge/audio_session_controller.cpp"
             text = bridge.read_text(encoding="utf-8")
-            marker = "const QDBusArgument argument = qvariant_cast<QDBusArgument>(value);"
+            marker = (
+                "const QDBusArgument argument = qvariant_cast<QDBusArgument>(value);"
+            )
             self.assertIn(marker, text)
             bridge.write_text(
-                text.replace(marker, "QDBusArgument argument = qvariant_cast<QDBusArgument>(value);", 1),
+                text.replace(
+                    marker,
+                    "QDBusArgument argument = qvariant_cast<QDBusArgument>(value);",
+                    1,
+                ),
                 encoding="utf-8",
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("Linura Shell bridge authority contract missing" in item and marker in item for item in failures)
+                any(
+                    "Linura Shell bridge authority contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
             )
 
     def test_audio_receipt_demarshalling_must_use_read_side_argument(self) -> None:
@@ -3292,17 +3679,26 @@ class LinuraShellContractTests(unittest.TestCase):
             self._copy_fixture(root)
             bridge = root / "apps/linura-shell/bridge/audio_session_controller.cpp"
             text = bridge.read_text(encoding="utf-8")
-            marker = "const QDBusArgument wire = arguments.at(0).value<QDBusArgument>();"
+            marker = (
+                "const QDBusArgument wire = arguments.at(0).value<QDBusArgument>();"
+            )
             self.assertIn(marker, text)
             bridge.write_text(
-                text.replace(marker, "QDBusArgument wire = arguments.at(0).value<QDBusArgument>();", 1),
+                text.replace(
+                    marker,
+                    "QDBusArgument wire = arguments.at(0).value<QDBusArgument>();",
+                    1,
+                ),
                 encoding="utf-8",
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("Linura Shell bridge authority contract missing" in item and marker in item for item in failures)
+                any(
+                    "Linura Shell bridge authority contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
             )
-
 
     def test_audio_receipt_must_validate_dbus_structure_shape(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3315,7 +3711,11 @@ class LinuraShellContractTests(unittest.TestCase):
             bridge.write_text(text.replace(marker, "false", 1), encoding="utf-8")
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("Linura Shell bridge authority contract missing" in item and marker in item for item in failures)
+                any(
+                    "Linura Shell bridge authority contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
             )
 
     def test_session1_client_deadline_covers_bounded_authority_lifecycle(self) -> None:
@@ -3332,9 +3732,12 @@ class LinuraShellContractTests(unittest.TestCase):
             )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
-                any("Linura Shell bridge authority contract missing" in item and marker in item for item in failures)
+                any(
+                    "Linura Shell bridge authority contract missing" in item
+                    and marker in item
+                    for item in failures
+                )
             )
-
 
     def test_bound_audio_draft_can_enter_fresh_pre_dispatch_revalidation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3344,33 +3747,54 @@ class LinuraShellContractTests(unittest.TestCase):
             text = source.read_text(encoding="utf-8")
             contract = "(!canApply() && !canCommitDraft())"
             self.assertIn(contract, text)
-            source.write_text(text.replace(contract, "!canApply()", 1), encoding="utf-8")
+            source.write_text(
+                text.replace(contract, "!canApply()", 1), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("authority contract missing" in item and contract in item for item in failures))
+            self.assertTrue(
+                any(
+                    "authority contract missing" in item and contract in item
+                    for item in failures
+                )
+            )
 
     def test_quick_settings_apply_uses_bound_draft_capability(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            panel = root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            panel = (
+                root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            )
             text = panel.read_text(encoding="utf-8")
             contract = "enabled: controller.canCommitDraft"
             self.assertIn(contract, text)
-            panel.write_text(text.replace(contract, "enabled: controller.canApply", 1), encoding="utf-8")
+            panel.write_text(
+                text.replace(contract, "enabled: controller.canApply", 1),
+                encoding="utf-8",
+            )
             failures = check_linura_shell.validate(root)
-            self.assertTrue(any("Quick Settings shell panel contract missing" in item for item in failures))
+            self.assertTrue(
+                any(
+                    "Quick Settings shell panel contract missing" in item
+                    for item in failures
+                )
+            )
 
-
-
-    def test_control_center_is_bounded_and_scrollable_below_workstation_panel(self) -> None:
+    def test_control_center_is_bounded_and_scrollable_below_workstation_panel(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            panel = root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
+            panel = (
+                root / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml"
+            )
             text = panel.read_text(encoding="utf-8")
             marker = "contentHeight: controlColumn.implicitHeight + theme.spacingXl * 2"
             self.assertIn(marker, text)
-            panel.write_text(text.replace(marker, "contentHeight: height", 1), encoding="utf-8")
+            panel.write_text(
+                text.replace(marker, "contentHeight: height", 1), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
@@ -3380,15 +3804,21 @@ class LinuraShellContractTests(unittest.TestCase):
                 )
             )
 
-    def test_quick_settings_is_bounded_and_scrollable_below_workstation_panel(self) -> None:
+    def test_quick_settings_is_bounded_and_scrollable_below_workstation_panel(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            panel = root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            panel = (
+                root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
+            )
             text = panel.read_text(encoding="utf-8")
             marker = "contentHeight: quickColumn.implicitHeight + theme.spacingXl * 2"
             self.assertIn(marker, text)
-            panel.write_text(text.replace(marker, "contentHeight: height", 1), encoding="utf-8")
+            panel.write_text(
+                text.replace(marker, "contentHeight: height", 1), encoding="utf-8"
+            )
             failures = check_linura_shell.validate(root)
             self.assertTrue(
                 any(
@@ -3402,7 +3832,9 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             text = palette.read_text(encoding="utf-8")
             marker = (
                 "Layout.fillHeight: true\n"
@@ -3434,7 +3866,11 @@ class LinuraShellContractTests(unittest.TestCase):
                 text = panel.read_text(encoding="utf-8")
                 self.assertIn("function ensureVisible(item)", text)
                 panel.write_text(
-                    text.replace("function ensureVisible(item)", "function lostEnsureVisible(item)", 1),
+                    text.replace(
+                        "function ensureVisible(item)",
+                        "function lostEnsureVisible(item)",
+                        1,
+                    ),
                     encoding="utf-8",
                 )
                 failures = check_linura_shell.validate(root)
@@ -3448,7 +3884,9 @@ class LinuraShellContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            palette = root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            palette = (
+                root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
+            )
             text = palette.read_text(encoding="utf-8")
             marker = "Layout.minimumHeight: theme.controlLg * 2"
             self.assertIn(marker, text)
@@ -3461,8 +3899,9 @@ class LinuraShellContractTests(unittest.TestCase):
                 any("compact-height result budget drifted" in item for item in failures)
             )
 
-
-    def test_workspace_overflow_model_closure_cannot_skip_keyboard_fallback(self) -> None:
+    def test_workspace_overflow_model_closure_cannot_skip_keyboard_fallback(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -3489,7 +3928,6 @@ class LinuraShellContractTests(unittest.TestCase):
                 "Workstation workspace overflow restoration must remain unconditional when its opener disappears",
                 failures,
             )
-
 
     def test_workspace_overflow_uses_popup_specific_keyboard_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3520,7 +3958,6 @@ class LinuraShellContractTests(unittest.TestCase):
                 )
             )
 
-
     def test_tray_popup_opening_uses_popup_specific_keyboard_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -3546,7 +3983,6 @@ class LinuraShellContractTests(unittest.TestCase):
                     for item in failures
                 )
             )
-
 
     def test_system_tray_opening_emits_popup_specific_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

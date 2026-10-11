@@ -43,11 +43,7 @@ class PythonPackageContractTests(unittest.TestCase):
         )
         expected = {"pip==25.0.1", *metadata["build-system"]["requires"]}
         lock = (PACKAGE_ROOT / "build-requirements.lock").read_text(encoding="utf-8")
-        locked = {
-            line[:-2]
-            for line in lock.splitlines()
-            if line.endswith(" \\")
-        }
+        locked = {line[:-2] for line in lock.splitlines() if line.endswith(" \\")}
         self.assertEqual(locked, expected)
         hashes = [
             line.removeprefix("    --hash=sha256:")
@@ -57,7 +53,9 @@ class PythonPackageContractTests(unittest.TestCase):
         self.assertEqual(len(hashes), len(expected))
         self.assertEqual(len(set(hashes)), len(hashes))
         self.assertTrue(all(len(digest) == 64 for digest in hashes))
-        self.assertTrue(all(set(digest) <= set("0123456789abcdef") for digest in hashes))
+        self.assertTrue(
+            all(set(digest) <= set("0123456789abcdef") for digest in hashes)
+        )
 
     def test_control1_metadata_tracks_checked_contract(self) -> None:
         root = ET.parse(ROOT / "interfaces/dbus/org.linura.Control1.xml").getroot()

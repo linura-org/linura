@@ -84,41 +84,47 @@ REQUIRED_MARKERS = {
 
 STALE_HOSTING_LANGUAGE = ("once hosted", "when hosted")
 
-SUPPORTED_FUNDING_KEYS = frozenset({
-    "github",
-    "patreon",
-    "open_collective",
-    "ko_fi",
-    "tidelift",
-    "community_bridge",
-    "liberapay",
-    "issuehunt",
-    "lfx_crowdfunding",
-    "polar",
-    "buy_me_a_coffee",
-    "thanks_dev",
-    "custom",
-})
-_PLACEHOLDER_FUNDING_VALUES = frozenset({
-    "placeholder",
-    "example",
-    "tbd",
-    "todo",
-    "replace-me",
-    "changeme",
-})
+SUPPORTED_FUNDING_KEYS = frozenset(
+    {
+        "github",
+        "patreon",
+        "open_collective",
+        "ko_fi",
+        "tidelift",
+        "community_bridge",
+        "liberapay",
+        "issuehunt",
+        "lfx_crowdfunding",
+        "polar",
+        "buy_me_a_coffee",
+        "thanks_dev",
+        "custom",
+    }
+)
+_PLACEHOLDER_FUNDING_VALUES = frozenset(
+    {
+        "placeholder",
+        "example",
+        "tbd",
+        "todo",
+        "replace-me",
+        "changeme",
+    }
+)
 _PLACEHOLDER_HOSTS = frozenset({"example.com", "example.org", "example.net"})
 INACTIVE_SPONSORSHIP_STATUS = "Status: inactive pending a verified funding destination."
 ACTIVE_SPONSORSHIP_STATUS = "Status: active with a verified funding destination."
 
-_TIDELIFT_PLATFORMS = frozenset({
-    "npm",
-    "pypi",
-    "rubygems",
-    "maven",
-    "packagist",
-    "nuget",
-})
+_TIDELIFT_PLATFORMS = frozenset(
+    {
+        "npm",
+        "pypi",
+        "rubygems",
+        "maven",
+        "packagist",
+        "nuget",
+    }
+)
 _SINGLE_DESTINATION_FUNDING_KEYS = SUPPORTED_FUNDING_KEYS - {"github", "custom"}
 
 
@@ -250,7 +256,9 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
             continue
         prefix = raw[: len(raw) - len(raw.lstrip())]
         if "\t" in prefix:
-            failures.append(f"{label} line {line_number} must use spaces for indentation")
+            failures.append(
+                f"{label} line {line_number} must use spaces for indentation"
+            )
             continue
 
         indent = len(raw) - len(raw.lstrip(" "))
@@ -312,7 +320,9 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
                     width = hex_escape_widths.get(escape)
                     if width is not None:
                         digits = inner[index + 2 : index + 2 + width]
-                        if len(digits) == width and re.fullmatch(r"[0-9A-Fa-f]+", digits):
+                        if len(digits) == width and re.fullmatch(
+                            r"[0-9A-Fa-f]+", digits
+                        ):
                             index += 2 + width
                             continue
                     failures.append(
@@ -339,7 +349,8 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
         if candidate[0] not in {"'", '"'}:
             forbidden_plain_prefixes = frozenset(",[]{}#&*!|>%@") | {chr(96)}
             if candidate[0] in forbidden_plain_prefixes or (
-                candidate[0] in "-?:" and (len(candidate) == 1 or candidate[1].isspace())
+                candidate[0] in "-?:"
+                and (len(candidate) == 1 or candidate[1].isspace())
             ):
                 failures.append(
                     f"{label} line {line_number} starts with a forbidden YAML plain-scalar indicator"
@@ -371,7 +382,10 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
                 width = hex_escape_widths.get(escape)
                 if width is not None:
                     digits = candidate[index + 2 : index + 2 + width]
-                    if len(digits) != width or re.fullmatch(r"[0-9A-Fa-f]+", digits) is None:
+                    if (
+                        len(digits) != width
+                        or re.fullmatch(r"[0-9A-Fa-f]+", digits) is None
+                    ):
                         failures.append(
                             f"{label} line {line_number} has an invalid double-quoted YAML escape"
                         )
@@ -385,7 +399,11 @@ def _yaml_scalar_syntax_failures(text: str, *, label: str) -> list[str]:
                 invalid_escape = True
                 break
             if char == quote:
-                if quote == "'" and index + 1 < len(candidate) and candidate[index + 1] == "'":
+                if (
+                    quote == "'"
+                    and index + 1 < len(candidate)
+                    and candidate[index + 1] == "'"
+                ):
                     index += 2
                     continue
                 closed_at = index
@@ -432,9 +450,7 @@ def _funding_yaml_structure_failures(text: str) -> list[str]:
         if indent == 0:
             match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", active)
             if match is None:
-                failures.append(
-                    f"FUNDING.yml line {line_number} is malformed"
-                )
+                failures.append(f"FUNDING.yml line {line_number} is malformed")
                 current_key = None
                 child_indent = None
                 continue
@@ -516,9 +532,7 @@ def _validate_citation_cff_yaml(text: str) -> list[str]:
         if indent == 0:
             match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", active)
             if match is None:
-                failures.append(
-                    f"CITATION.cff line {line_number} is malformed YAML"
-                )
+                failures.append(f"CITATION.cff line {line_number} is malformed YAML")
                 section = None
                 current_author = None
                 continue
@@ -569,9 +583,7 @@ def _validate_citation_cff_yaml(text: str) -> list[str]:
                 continue
             key = match.group(1)
             if key in current_author:
-                failures.append(
-                    f"CITATION.cff author contains duplicate field: {key}"
-                )
+                failures.append(f"CITATION.cff author contains duplicate field: {key}")
             current_author.add(key)
             continue
 
@@ -591,6 +603,7 @@ def _validate_citation_cff_yaml(text: str) -> list[str]:
             )
 
     return failures
+
 
 def _validate_issue_form_yaml(text: str, rel: str) -> list[str]:
     failures = _yaml_scalar_syntax_failures(text, label=f"issue form {rel}")
@@ -634,15 +647,21 @@ def _validate_issue_form_yaml(text: str, rel: str) -> list[str]:
         if indent == 0:
             match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", active)
             if match is None:
-                failures.append(f"issue form {rel} line {line_number} is malformed YAML")
+                failures.append(
+                    f"issue form {rel} line {line_number} is malformed YAML"
+                )
                 section = None
                 current = None
                 continue
             key, scalar = match.group(1), match.group(2).strip()
             if key not in allowed_root:
-                failures.append(f"issue form {rel} has unsupported top-level key: {key}")
+                failures.append(
+                    f"issue form {rel} has unsupported top-level key: {key}"
+                )
             if key in seen_root:
-                failures.append(f"issue form {rel} contains duplicate top-level key: {key}")
+                failures.append(
+                    f"issue form {rel} contains duplicate top-level key: {key}"
+                )
             seen_root.add(key)
             current = None
             nested = None
@@ -691,7 +710,12 @@ def _validate_issue_form_yaml(text: str, rel: str) -> list[str]:
                 failures.append(
                     f"issue form {rel} line {line_number} has unsupported body type: {item_type!r}"
                 )
-            current = {"type": item_type, "id": None, "attributes": set(), "required": None}
+            current = {
+                "type": item_type,
+                "id": None,
+                "attributes": set(),
+                "required": None,
+            }
             body_items.append(current)
             nested = None
             continue
@@ -705,7 +729,9 @@ def _validate_issue_form_yaml(text: str, rel: str) -> list[str]:
         if indent == 4:
             match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", active)
             if match is None:
-                failures.append(f"issue form {rel} line {line_number} is malformed YAML")
+                failures.append(
+                    f"issue form {rel} line {line_number} is malformed YAML"
+                )
                 continue
             key, scalar = match.group(1), match.group(2).strip()
             if key == "id":
@@ -730,7 +756,9 @@ def _validate_issue_form_yaml(text: str, rel: str) -> list[str]:
         if indent == 6 and nested in {"attributes", "validations"}:
             match = re.fullmatch(r"([A-Za-z0-9_-]+)\s*:\s*(.*)", active)
             if match is None:
-                failures.append(f"issue form {rel} line {line_number} is malformed YAML")
+                failures.append(
+                    f"issue form {rel} line {line_number} is malformed YAML"
+                )
                 continue
             key, scalar = match.group(1), match.group(2).strip()
             if nested == "attributes":
@@ -764,7 +792,9 @@ def _validate_issue_form_yaml(text: str, rel: str) -> list[str]:
 
     for key in ("name", "description", "body"):
         if key not in seen_root:
-            failures.append(f"issue form {rel} is missing required top-level key: {key}")
+            failures.append(
+                f"issue form {rel} is missing required top-level key: {key}"
+            )
     if not body_items:
         failures.append(f"issue form {rel} requires at least one body item")
 
@@ -781,7 +811,10 @@ def _validate_issue_form_yaml(text: str, rel: str) -> list[str]:
             continue
 
         item_id = item["id"]
-        if not isinstance(item_id, str) or re.fullmatch(r"[A-Za-z0-9_-]+", item_id) is None:
+        if (
+            not isinstance(item_id, str)
+            or re.fullmatch(r"[A-Za-z0-9_-]+", item_id) is None
+        ):
             failures.append(f"issue form {rel} body item {index} requires a stable id")
         elif item_id in seen_ids:
             failures.append(f"issue form {rel} contains duplicate body id: {item_id}")
@@ -794,14 +827,13 @@ def _validate_issue_form_yaml(text: str, rel: str) -> list[str]:
 
     return failures
 
+
 def _validate_issue_config_yaml(
     text: str,
     *,
     required_urls: dict[str, str] | None = None,
 ) -> list[str]:
-    failures: list[str] = _yaml_scalar_syntax_failures(
-        text, label="issue routing YAML"
-    )
+    failures: list[str] = _yaml_scalar_syntax_failures(text, label="issue routing YAML")
     if failures:
         return failures
     seen_top_level: set[str] = set()
@@ -922,9 +954,7 @@ def _validate_issue_config_yaml(
 
     if required_urls:
         parsed_urls = {
-            link["url"]
-            for link in contact_links
-            if isinstance(link.get("url"), str)
+            link["url"] for link in contact_links if isinstance(link.get("url"), str)
         }
         for key, expected in required_urls.items():
             if expected not in parsed_urls:
@@ -991,10 +1021,9 @@ def _valid_funding_destination(key: str, destination: str) -> bool:
         prefix = "u/gh/"
         return value.startswith(prefix) and _github_login_is_valid(value[len(prefix) :])
 
-    return (
-        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", value) is not None
-        and not value.startswith(("http://", "https://"))
-    )
+    return re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}", value
+    ) is not None and not value.startswith(("http://", "https://"))
 
 
 def _funding_cardinality_is_valid(key: str, destinations: list[str]) -> bool:
@@ -1003,6 +1032,7 @@ def _funding_cardinality_is_valid(key: str, destinations: list[str]) -> bool:
     if key in _SINGLE_DESTINATION_FUNDING_KEYS:
         return len(destinations) == 1
     return False
+
 
 def read_text(root: Path, rel: str) -> str:
     path = root / rel
@@ -1047,7 +1077,14 @@ def validate(root: Path) -> list[str]:
     settings = read_text(root, "docs/community/repository-settings.md")
     labels_doc = read_text(root, "docs/community/labels.md")
 
-    for key in ("website", "repository", "discussions", "issues", "security_policy", "releases"):
+    for key in (
+        "website",
+        "repository",
+        "discussions",
+        "issues",
+        "security_policy",
+        "releases",
+    ):
         value = channels.get(key)
         if not isinstance(value, str) or not value:
             failures.append(f"community channel missing from contract: {key}")
@@ -1063,16 +1100,22 @@ def validate(root: Path) -> list[str]:
 
     conduct_email = channels.get("conduct_email")
     if isinstance(conduct_email, str) and conduct_email not in conduct:
-        failures.append("CODE_OF_CONDUCT.md does not contain the canonical conduct email")
+        failures.append(
+            "CODE_OF_CONDUCT.md does not contain the canonical conduct email"
+        )
 
     governance = contract.get("governance", {})
     governance_text = read_text(root, "GOVERNANCE.md")
     for maintainer in governance.get("current_maintainers", []):
         if maintainer not in governance_text:
-            failures.append(f"current maintainer missing from GOVERNANCE.md: {maintainer}")
+            failures.append(
+                f"current maintainer missing from GOVERNANCE.md: {maintainer}"
+            )
 
     if governance.get("inbound_license") != "Apache-2.0":
-        failures.append("community contract inbound license must remain Apache-2.0 unless governance is deliberately changed")
+        failures.append(
+            "community contract inbound license must remain Apache-2.0 unless governance is deliberately changed"
+        )
     if "Apache-2.0" not in read_text(root, "CONTRIBUTING.md"):
         failures.append("CONTRIBUTING.md must state the inbound Apache-2.0 policy")
 
@@ -1094,19 +1137,25 @@ def validate(root: Path) -> list[str]:
         ".github/ISSUE_TEMPLATE/compatibility.yml",
         ".github/ISSUE_TEMPLATE/rfc.yml",
     ):
-        failures.extend(_validate_issue_form_yaml(read_text(root, issue_form), issue_form))
+        failures.extend(
+            _validate_issue_form_yaml(read_text(root, issue_form), issue_form)
+        )
     issue_entries = [
         (key, scalar)
         for key, scalar, _children in _top_level_yaml_entries(issue_config)
         if key == "blank_issues_enabled"
     ]
     if len(issue_entries) != 1 or issue_entries[0][1].strip().lower() != "false":
-        failures.append("issue routing must keep blank issues disabled as the effective YAML setting")
+        failures.append(
+            "issue routing must keep blank issues disabled as the effective YAML setting"
+        )
 
     required_categories = contract.get("discussion_categories", {}).get("required", [])
     for category in required_categories:
         if category not in settings:
-            failures.append(f"repository settings missing Discussion category: {category}")
+            failures.append(
+                f"repository settings missing Discussion category: {category}"
+            )
 
     required_labels = contract.get("labels", {}).get("required", [])
     for label in required_labels:
@@ -1124,7 +1173,9 @@ def validate(root: Path) -> list[str]:
     }
     for key, expected in expected_settings.items():
         if repository_settings.get(key) is not expected:
-            failures.append(f"community contract repository setting {key} must be {expected!r}")
+            failures.append(
+                f"community contract repository setting {key} must be {expected!r}"
+            )
 
     funding = contract.get("funding", {})
     funding_active = funding.get("active")
@@ -1140,19 +1191,25 @@ def validate(root: Path) -> list[str]:
     ]
     if funding_active is False:
         if funding_entries:
-            failures.append("FUNDING.yml activates a destination while community contract funding.active=false")
+            failures.append(
+                "FUNDING.yml activates a destination while community contract funding.active=false"
+            )
         if sponsorship_statuses != [INACTIVE_SPONSORSHIP_STATUS]:
             failures.append(
                 "inactive funding contract requires exactly the canonical inactive sponsorship status"
             )
     elif funding_active is True:
         if not funding_entries:
-            failures.append("funding.active=true requires an active FUNDING.yml destination")
+            failures.append(
+                "funding.active=true requires an active FUNDING.yml destination"
+            )
         valid_destinations = 0
         seen_funding_keys: set[str] = set()
         for key, scalar, children in funding_entries:
             if not key or key not in SUPPORTED_FUNDING_KEYS:
-                failures.append(f"FUNDING.yml contains unsupported funding key: {key or scalar!r}")
+                failures.append(
+                    f"FUNDING.yml contains unsupported funding key: {key or scalar!r}"
+                )
                 continue
             if key in seen_funding_keys:
                 failures.append(f"FUNDING.yml contains duplicate funding key: {key}")
@@ -1160,7 +1217,9 @@ def validate(root: Path) -> list[str]:
             seen_funding_keys.add(key)
             destinations = _funding_destinations(scalar, children)
             if not destinations:
-                failures.append(f"FUNDING.yml funding key {key} requires a nonempty destination")
+                failures.append(
+                    f"FUNDING.yml funding key {key} requires a nonempty destination"
+                )
                 continue
             if not _funding_cardinality_is_valid(key, destinations):
                 if key in {"github", "custom"}:
@@ -1172,13 +1231,21 @@ def validate(root: Path) -> list[str]:
                         f"FUNDING.yml funding key {key} requires exactly one destination"
                     )
                 continue
-            invalid = [value for value in destinations if not _valid_funding_destination(key, value)]
+            invalid = [
+                value
+                for value in destinations
+                if not _valid_funding_destination(key, value)
+            ]
             if invalid:
-                failures.append(f"FUNDING.yml funding key {key} contains an invalid destination")
+                failures.append(
+                    f"FUNDING.yml funding key {key} contains an invalid destination"
+                )
                 continue
             valid_destinations += len(destinations)
         if valid_destinations == 0:
-            failures.append("funding.active=true requires at least one supported usable FUNDING.yml destination")
+            failures.append(
+                "funding.active=true requires at least one supported usable FUNDING.yml destination"
+            )
         if sponsorship_statuses != [ACTIVE_SPONSORSHIP_STATUS]:
             failures.append(
                 "active funding contract requires exactly the canonical active sponsorship status"

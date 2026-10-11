@@ -7,7 +7,9 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE_TEST_PATH = ROOT / "tests/tooling/test_post_release_close.py"
-SPEC = importlib.util.spec_from_file_location("post_release_close_base_tests", BASE_TEST_PATH)
+SPEC = importlib.util.spec_from_file_location(
+    "post_release_close_base_tests", BASE_TEST_PATH
+)
 assert SPEC is not None and SPEC.loader is not None
 base_tests = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(base_tests)
@@ -29,7 +31,8 @@ class PostReleaseCloseWhitespaceTests(unittest.TestCase):
             self.assertNotIn("**Status:** released  \n", v05)
             self.assertFalse(
                 any(
-                    line.startswith("**Status:** released") and line.endswith((" ", "\t"))
+                    line.startswith("**Status:** released")
+                    and line.endswith((" ", "\t"))
                     for line in v05.splitlines()
                 ),
                 v05,

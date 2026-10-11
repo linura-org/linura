@@ -17,7 +17,9 @@ SPEC.loader.exec_module(discovery)
 
 
 class ReleaseBranchDiscoveryTests(unittest.TestCase):
-    def test_discovers_broad_release_adjacent_namespaces_without_user_branches(self) -> None:
+    def test_discovers_broad_release_adjacent_namespaces_without_user_branches(
+        self,
+    ) -> None:
         branches = [
             discovery.BranchRef("main", "0" * 40, True),
             discovery.BranchRef("tmp/pr129-precompact-safety", "1" * 40, False),
@@ -42,7 +44,9 @@ class ReleaseBranchDiscoveryTests(unittest.TestCase):
             [item.name for item in discovery.select_discoveries(branches)],
         )
 
-    def test_inspection_is_observational_and_retains_protection_and_open_pr_state(self) -> None:
+    def test_inspection_is_observational_and_retains_protection_and_open_pr_state(
+        self,
+    ) -> None:
         branches = [
             discovery.BranchRef("tmp/closed", "a" * 40, False),
             discovery.BranchRef("release/protected", "b" * 40, True),

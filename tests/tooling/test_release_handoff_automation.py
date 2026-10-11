@@ -25,7 +25,7 @@ class ReleaseHandoffAutomationTests(unittest.TestCase):
         (root / "crates" / "linura").mkdir(parents=True)
 
         (root / "contracts" / "roadmap.toml").write_text(
-            '''next_release = "v0.8.0"
+            """next_release = "v0.8.0"
 
 [[milestone]]
 version = "v0.8.0"
@@ -34,7 +34,7 @@ status = "planned"
 milestone_contract = "docs/milestones/v0.8.0.md"
 release_contract = "docs/releases/v0.8.0.md"
 qualification = "docs/qualification/v0.8.0.md"
-''',
+""",
             encoding="utf-8",
         )
         for relative in (
@@ -100,11 +100,15 @@ version = "9.9.9"
             self.assertIn('version = "9.9.9"', lock)
 
     def test_canonical_crate_inherits_workspace_release_version(self) -> None:
-        canonical = (ROOT / "crates" / "linura" / "Cargo.toml").read_text(encoding="utf-8")
+        canonical = (ROOT / "crates" / "linura" / "Cargo.toml").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("version.workspace = true", canonical)
         self.assertNotIn('version = "0.0.1"', canonical)
 
-    def test_prepare_release_is_idempotent_at_target_and_rejects_regression(self) -> None:
+    def test_prepare_release_is_idempotent_at_target_and_rejects_regression(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._fixture(root, workspace_version="0.8.0")
@@ -118,7 +122,9 @@ version = "9.9.9"
             with self.assertRaises(prepare_release.PreparationError):
                 prepare_release.prepare(root, "v0.7.0")
 
-    def test_idempotent_prepare_rejects_incoherent_workspace_lock_versions(self) -> None:
+    def test_idempotent_prepare_rejects_incoherent_workspace_lock_versions(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._fixture(root, workspace_version="0.8.0")
@@ -134,10 +140,18 @@ version = "9.9.9"
             with self.assertRaises(prepare_release.PreparationError):
                 prepare_release.prepare(root, "v0.8.0")
 
-    def test_machine_prs_use_release_app_native_ruleset_gates_and_full_sha_names(self) -> None:
-        preparation = (ROOT / ".github/workflows/release-preparation.yml").read_text(encoding="utf-8")
-        authorization = (ROOT / ".github/workflows/release-authorization.yml").read_text(encoding="utf-8")
-        closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
+    def test_machine_prs_use_release_app_native_ruleset_gates_and_full_sha_names(
+        self,
+    ) -> None:
+        preparation = (ROOT / ".github/workflows/release-preparation.yml").read_text(
+            encoding="utf-8"
+        )
+        authorization = (
+            ROOT / ".github/workflows/release-authorization.yml"
+        ).read_text(encoding="utf-8")
+        closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(
+            encoding="utf-8"
+        )
         for workflow in (preparation, authorization, closure):
             self.assertIn(
                 "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
@@ -153,51 +167,91 @@ version = "9.9.9"
         self.assertIn("release: ready v", preparation)
         self.assertIn("python3 tools/prepare_release.py --tag", preparation)
         self.assertIn("automation/release-prep-${RELEASE_TAG}-${head_sha}", preparation)
-        self.assertIn('test "$candidate_branch" = "automation/release-prep-${RELEASE_TAG}-${candidate_sha}"', preparation)
+        self.assertIn(
+            'test "$candidate_branch" = "automation/release-prep-${RELEASE_TAG}-${candidate_sha}"',
+            preparation,
+        )
         self.assertIn("expected_changed_files=0", preparation)
         self.assertIn("expected_changed_files=2", preparation)
         self.assertIn("git commit --allow-empty -F -", preparation)
-        self.assertIn('readiness_head_sha="$(jq -r .head.sha <<<"$selected_pr")"', preparation)
-        self.assertIn('qualification_source_sha="$(jq -r \'.parents[0].sha\' <<<"$readiness_commit")"', preparation)
+        self.assertIn(
+            'readiness_head_sha="$(jq -r .head.sha <<<"$selected_pr")"', preparation
+        )
+        self.assertIn(
+            'qualification_source_sha="$(jq -r \'.parents[0].sha\' <<<"$readiness_commit")"',
+            preparation,
+        )
         self.assertIn('test "$readiness_tree_sha" = "$source_tree_sha"', preparation)
-        self.assertIn('test "$qualification_tree_sha" != "$readiness_tree_sha"', preparation)
+        self.assertIn(
+            'test "$qualification_tree_sha" != "$readiness_tree_sha"', preparation
+        )
         self.assertIn('--expected-changed-files "$EXPECTED_CHANGED_FILES"', preparation)
-        self.assertIn('pulls/$PR_NUMBER/merge', preparation)
+        self.assertIn("pulls/$PR_NUMBER/merge", preparation)
         self.assertIn("event-driven authorization handoff", preparation)
-        self.assertIn("Native PR CI/Security/CodeQL are the ruleset-authoritative gates", preparation)
+        self.assertIn(
+            "Native PR CI/Security/CodeQL are the ruleset-authoritative gates",
+            preparation,
+        )
 
         self.assertIn("release: prepare v", authorization)
         self.assertIn("zero-diff", authorization)
         self.assertIn("Reviewed-Source:", authorization)
         self.assertIn("Reviewed-Tree:", authorization)
-        self.assertIn("automation/release-authorization-${RELEASE_TAG}-${head_sha}", authorization)
-        self.assertIn('test "$candidate_branch" = "automation/release-authorization-${RELEASE_TAG}-${candidate_sha}"', authorization)
+        self.assertIn(
+            "automation/release-authorization-${RELEASE_TAG}-${head_sha}", authorization
+        )
+        self.assertIn(
+            'test "$candidate_branch" = "automation/release-authorization-${RELEASE_TAG}-${candidate_sha}"',
+            authorization,
+        )
         self.assertIn("--expected-changed-files 0", authorization)
-        self.assertIn('pulls/$PR_NUMBER/merge', authorization)
+        self.assertIn("pulls/$PR_NUMBER/merge", authorization)
         self.assertIn("release-proof-dispatch.yml", authorization)
-        self.assertIn("workflow_dispatch checks are not used as substitutes", authorization)
-        self.assertNotIn('PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/main"', authorization)
+        self.assertIn(
+            "workflow_dispatch checks are not used as substitutes", authorization
+        )
+        self.assertNotIn(
+            'PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/main"', authorization
+        )
 
     def test_main_transitions_are_event_driven_and_retryable(self) -> None:
-        authorization = (ROOT / ".github/workflows/release-authorization.yml").read_text(encoding="utf-8")
-        proof_dispatch = (ROOT / ".github/workflows/release-proof-dispatch.yml").read_text(encoding="utf-8")
-        cleanup = (ROOT / ".github/workflows/post-release-cleanup.yml").read_text(encoding="utf-8")
+        authorization = (
+            ROOT / ".github/workflows/release-authorization.yml"
+        ).read_text(encoding="utf-8")
+        proof_dispatch = (
+            ROOT / ".github/workflows/release-proof-dispatch.yml"
+        ).read_text(encoding="utf-8")
+        cleanup = (ROOT / ".github/workflows/post-release-cleanup.yml").read_text(
+            encoding="utf-8"
+        )
         ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 
         self.assertIn("push:", authorization)
         self.assertIn("branches: [main]", authorization)
         self.assertIn("workflow_run:", proof_dispatch)
-        self.assertIn('startsWith(github.event.workflow_run.head_commit.message, \'release: v\')', proof_dispatch)
+        self.assertIn(
+            "startsWith(github.event.workflow_run.head_commit.message, 'release: v')",
+            proof_dispatch,
+        )
         self.assertIn("workflow_run:", cleanup)
-        self.assertIn('startsWith(github.event.workflow_run.head_commit.message, \'chore: close v\')', cleanup)
+        self.assertIn(
+            "startsWith(github.event.workflow_run.head_commit.message, 'chore: close v')",
+            cleanup,
+        )
         self.assertIn("tools/release_native_gates.py", cleanup)
         self.assertIn("tools/release_branch_cleanup.py", cleanup)
         self.assertIn("cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}", ci)
 
     def test_semantic_review_stops_at_release_ready_boundary(self) -> None:
-        preparation = (ROOT / ".github/workflows/release-preparation.yml").read_text(encoding="utf-8")
-        authorization = (ROOT / ".github/workflows/release-authorization.yml").read_text(encoding="utf-8")
-        closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
+        preparation = (ROOT / ".github/workflows/release-preparation.yml").read_text(
+            encoding="utf-8"
+        )
+        authorization = (
+            ROOT / ".github/workflows/release-authorization.yml"
+        ).read_text(encoding="utf-8")
+        closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(
+            encoding="utf-8"
+        )
         guide = (ROOT / "agents/skills/release.md").read_text(encoding="utf-8")
         self.assertIn("release: ready vX.Y.Z — <implementation theme>", guide)
         self.assertIn("last semantic/manual review boundary", guide)
@@ -205,10 +259,16 @@ version = "9.9.9"
             self.assertNotIn("@codex review", workflow)
             self.assertNotIn("chatgpt-codex-connector", workflow)
 
-    def test_release_chain_has_only_noninteractive_pypi_identity_environment(self) -> None:
-        promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
+    def test_release_chain_has_only_noninteractive_pypi_identity_environment(
+        self,
+    ) -> None:
+        promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(
+            encoding="utf-8"
+        )
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        self.assertIn("prove Release App closure authority before publication", promotion)
+        self.assertIn(
+            "prove Release App closure authority before publication", promotion
+        )
         environments = [
             line.strip()
             for line in release.splitlines()
@@ -227,19 +287,35 @@ version = "9.9.9"
         self.assertNotIn("bootstrap-pypi", release)
         self.assertNotIn("@codex review", release)
 
-    def test_release_chain_preserves_proof_publication_and_verification_handoffs(self) -> None:
-        proof = (ROOT / ".github/workflows/release-proof-dispatch.yml").read_text(encoding="utf-8")
-        trusted = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(encoding="utf-8")
-        promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
+    def test_release_chain_preserves_proof_publication_and_verification_handoffs(
+        self,
+    ) -> None:
+        proof = (ROOT / ".github/workflows/release-proof-dispatch.yml").read_text(
+            encoding="utf-8"
+        )
+        trusted = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(
+            encoding="utf-8"
+        )
+        promotion = (ROOT / ".github/workflows/release-promotion.yml").read_text(
+            encoding="utf-8"
+        )
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        verification = (ROOT / ".github/workflows/release-verification.yml").read_text(encoding="utf-8")
-        crates_io = (ROOT / ".github/workflows/crates-io-publish.yml").read_text(encoding="utf-8")
-        handoff = (ROOT / ".github/workflows/release-closure-handoff.yml").read_text(encoding="utf-8")
+        verification = (ROOT / ".github/workflows/release-verification.yml").read_text(
+            encoding="utf-8"
+        )
+        crates_io = (ROOT / ".github/workflows/crates-io-publish.yml").read_text(
+            encoding="utf-8"
+        )
+        handoff = (ROOT / ".github/workflows/release-closure-handoff.yml").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("trusted-release-proof.yml", proof)
         self.assertIn("dispatch release promotion", trusted)
         self.assertIn("release-promotion.yml", trusted)
-        self.assertIn("prove Release App closure authority before publication", promotion)
+        self.assertIn(
+            "prove Release App closure authority before publication", promotion
+        )
         self.assertIn("gh workflow run release.yml", promotion)
         self.assertIn("Create or verify immutable version tag", release)
         self.assertIn("verification-dispatch:", release)
@@ -251,22 +327,35 @@ version = "9.9.9"
         self.assertIn("Dispatch terminal closure handoff", crates_io)
         self.assertIn("release-closure-handoff.yml", crates_io)
         self.assertIn("Persist verified crates.io publication evidence", crates_io)
-        self.assertIn('["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"]', crates_io)
-        publish_job = crates_io.split("\n  publish:\n", 1)[1].split("\n  dispatch-closure:\n", 1)[0]
+        self.assertIn(
+            '["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"]',
+            crates_io,
+        )
+        publish_job = crates_io.split("\n  publish:\n", 1)[1].split(
+            "\n  dispatch-closure:\n", 1
+        )[0]
         self.assertNotIn("source tools/codex/versions.env", publish_job)
-        self.assertIn("RUST_VERSION: ${{ needs.qualify.outputs.rust_version }}", publish_job)
+        self.assertIn(
+            "RUST_VERSION: ${{ needs.qualify.outputs.rust_version }}", publish_job
+        )
         self.assertIn('test "$published_yanked" = "false"', crates_io)
         self.assertIn("crates_io_run_id", handoff)
         self.assertIn("linura-crates-io-publication-", handoff)
         self.assertIn("post-release-closure.yml", handoff)
-        closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
+        closure = (ROOT / ".github/workflows/post-release-closure.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("crates_io_run_id", closure)
         self.assertIn("linura-crates-io-publication-", closure)
         self.assertIn(".version.yanked", closure)
 
     def test_release_automation_has_architecture_and_threat_contracts(self) -> None:
-        adr = (ROOT / "docs/adr/0027-protected-release-handoff-automation.md").read_text(encoding="utf-8")
-        threat = (ROOT / "docs/threat-model-release-automation.md").read_text(encoding="utf-8")
+        adr = (
+            ROOT / "docs/adr/0027-protected-release-handoff-automation.md"
+        ).read_text(encoding="utf-8")
+        threat = (ROOT / "docs/threat-model-release-automation.md").read_text(
+            encoding="utf-8"
+        )
         for marker in (
             "Repository-scoped operator",
             "protected `main`",

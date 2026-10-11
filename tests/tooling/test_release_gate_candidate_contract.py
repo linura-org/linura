@@ -7,7 +7,9 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "tools/post_release_close.py"
-SPEC = importlib.util.spec_from_file_location("post_release_close_gate_contract", MODULE_PATH)
+SPEC = importlib.util.spec_from_file_location(
+    "post_release_close_gate_contract", MODULE_PATH
+)
 assert SPEC is not None and SPEC.loader is not None
 post_release_close = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(post_release_close)
@@ -21,13 +23,23 @@ CANONICAL_TERMINAL_CRITERIA = (
 
 class ReleaseGateCandidateContractTests(unittest.TestCase):
     def _active_release_candidate_milestone(self) -> tuple[str, Path]:
-        roadmap = tomllib.loads((ROOT / "contracts/roadmap.toml").read_text(encoding="utf-8"))
+        roadmap = tomllib.loads(
+            (ROOT / "contracts/roadmap.toml").read_text(encoding="utf-8")
+        )
         tag = roadmap["next_release"]
-        milestone = next(item for item in roadmap["milestone"] if item["version"] == tag)
+        milestone = next(
+            item for item in roadmap["milestone"] if item["version"] == tag
+        )
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        status_lines = [line for line in readme.splitlines() if line.startswith("Status:")]
-        self.assertEqual(1, len(status_lines), "README must contain exactly one canonical Status line")
+        status_lines = [
+            line for line in readme.splitlines() if line.startswith("Status:")
+        ]
+        self.assertEqual(
+            1,
+            len(status_lines),
+            "README must contain exactly one canonical Status line",
+        )
         status = status_lines[0]
 
         # Future roadmap milestones intentionally may not have a frozen milestone
@@ -45,7 +57,10 @@ class ReleaseGateCandidateContractTests(unittest.TestCase):
         )
         assert isinstance(milestone_contract, str)
         path = ROOT / milestone_contract
-        self.assertTrue(path.is_file(), f"active release candidate milestone contract is missing: {path}")
+        self.assertTrue(
+            path.is_file(),
+            f"active release candidate milestone contract is missing: {path}",
+        )
         return tag, path
 
     def test_next_release_uses_canonical_terminal_closure_criteria(self) -> None:
@@ -53,7 +68,11 @@ class ReleaseGateCandidateContractTests(unittest.TestCase):
         text = milestone_path.read_text(encoding="utf-8")
 
         for criterion in CANONICAL_TERMINAL_CRITERIA:
-            self.assertIn(criterion, text, f"{tag} must preserve the canonical terminal closure criterion: {criterion}")
+            self.assertIn(
+                criterion,
+                text,
+                f"{tag} must preserve the canonical terminal closure criterion: {criterion}",
+            )
 
     def test_release_candidate_gate_is_fully_closure_mappable(self) -> None:
         tag, milestone_path = self._active_release_candidate_milestone()
@@ -63,7 +82,9 @@ class ReleaseGateCandidateContractTests(unittest.TestCase):
 
         self.assertNotIn("- [ ]", gate)
         self.assertIn("- [x] tag-last publication succeeds;", gate)
-        self.assertIn("- [x] independent published-release verification succeeds;", gate)
+        self.assertIn(
+            "- [x] independent published-release verification succeeds;", gate
+        )
         self.assertIn(
             "- [x] post-release closure advances machine roadmap state only after immutable publication evidence exists.",
             gate,

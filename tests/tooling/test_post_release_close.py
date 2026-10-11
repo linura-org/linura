@@ -33,7 +33,7 @@ class Args:
 class PostReleaseCloseTests(unittest.TestCase):
     def _fixture(self, root: Path) -> None:
         files = {
-            "contracts/roadmap.toml": '''schema_version = 1
+            "contracts/roadmap.toml": """schema_version = 1
 current_release = "v0.4.0"
 next_release = "v0.5.0"
 
@@ -79,8 +79,8 @@ complete_lifecycle = true
 managed_mutation_support = "narrow-experimental"
 agent_role = "none"
 platform_support = "none"
-''',
-            "docs/roadmap.md": '''# Roadmap
+""",
+            "docs/roadmap.md": """# Roadmap
 
 ## v0.4.0 — durable foundation
 
@@ -98,8 +98,8 @@ Qualification-only scope.
 
 **Status:** planned  
 **Target claim class:** Experimental
-''',
-            "docs/milestones/v0.5.0.md": '''# v0.5.0
+""",
+            "docs/milestones/v0.5.0.md": """# v0.5.0
 
 **Status:** release candidate; publication pending
 
@@ -107,12 +107,12 @@ Qualification-only scope.
 
 - [x] implementation complete
 - [ ] Protected proof-first/tag-last publication and independent Release Verification complete before roadmap bookkeeping advances to v0.6.
-''',
-            "README.md": '''# Linura
+""",
+            "README.md": """# Linura
 
 Status: `v0.5.0` release candidate — pending.
-''',
-            "docs/qualification/v0.5.0.md": '''# qualification
+""",
+            "docs/qualification/v0.5.0.md": """# qualification
 
 **Status:** implementation qualified; release-authorization and terminal publication evidence pending.
 **Claim class:** Experimental
@@ -132,8 +132,8 @@ The following remain mandatory before publication and must be recorded only afte
 ## Exit criterion
 
 This dossier is complete only when the final release source has immutable exact-SHA evidence for every required gate and the frozen release contract accurately records that evidence. Until then, v0.5 remains an implementation candidate, not a published qualified release.
-''',
-            "docs/qualification/v0.5.0-release-review.md": '''# review
+""",
+            "docs/qualification/v0.5.0-release-review.md": """# review
 
 **Status:** implementation qualified; release-preparation candidate; protected publication evidence pending.
 **Claim class:** Experimental
@@ -161,8 +161,8 @@ Publication remains fail-closed behind the release-preparation exact-head gates,
 ## Terminal publication evidence
 
 Pending.
-''',
-            "docs/qualification/v0.5.0-security.md": '''# security
+""",
+            "docs/qualification/v0.5.0-security.md": """# security
 
 **Status:** implementation security qualified; release-authorization and terminal publication evidence pending.
 **Claim class:** Experimental
@@ -174,7 +174,7 @@ These results close implementation security review only. The release authorizati
 ## Release-blocking security conditions
 
 Terminal security evidence must be recorded only after final exact-head and release-authorization runs actually succeed.
-''',
+""",
             "docs/releases/v0.4.0.md": "# v0.4.0\n",
             "docs/releases/v0.5.0.md": "# immutable v0.5.0 contract\n",
         }
@@ -183,7 +183,9 @@ Terminal security evidence must be recorded only after final exact-head and rele
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
 
-    def test_closure_advances_bookkeeping_preserves_frozen_contract_and_reconciles_terminal_state(self) -> None:
+    def test_closure_advances_bookkeeping_preserves_frozen_contract_and_reconciles_terminal_state(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._fixture(root)
@@ -193,7 +195,9 @@ Terminal security evidence must be recorded only after final exact-head and rele
             contract = (root / "contracts/roadmap.toml").read_text(encoding="utf-8")
             self.assertIn('current_release = "v0.5.0"', contract)
             self.assertIn('next_release = "v0.6.0"', contract)
-            v05 = contract.split('version = "v0.5.0"', 1)[1].split('[[milestone]]', 1)[0]
+            v05 = contract.split('version = "v0.5.0"', 1)[1].split("[[milestone]]", 1)[
+                0
+            ]
             self.assertIn('status = "released"', v05)
             self.assertIn("docs/qualification/v0.5.0-publication.md", changed)
             self.assertIn("docs/qualification/v0.5.0-security.md", changed)
@@ -201,42 +205,74 @@ Terminal security evidence must be recorded only after final exact-head and rele
 
             exact_url = f"https://github.com/linura-org/linura/commit/{'a' * 40}"
 
-            qualification = (root / "docs/qualification/v0.5.0.md").read_text(encoding="utf-8")
-            self.assertIn("**Status:** released; terminal publication and independent verification complete.", qualification)
+            qualification = (root / "docs/qualification/v0.5.0.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn(
+                "**Status:** released; terminal publication and independent verification complete.",
+                qualification,
+            )
             self.assertIn("**Terminal state note:**", qualification)
-            self.assertIn("## Historical evidence state at release preparation", qualification)
+            self.assertIn(
+                "## Historical evidence state at release preparation", qualification
+            )
             self.assertIn("## Historical pre-publication exit criterion", qualification)
             self.assertNotIn("not a published qualified release", qualification)
             self.assertIn(exact_url, qualification)
 
-            review = (root / "docs/qualification/v0.5.0-release-review.md").read_text(encoding="utf-8")
-            self.assertIn("Trusted Release Proof: GitHub Actions run `101` — success", review)
-            self.assertIn("Independent Release Verification: run `105` — success", review)
-            self.assertIn("## Trusted Release Proof review — historical pre-publication checklist", review)
-            self.assertIn("## Publication review — historical pre-publication checklist", review)
+            review = (root / "docs/qualification/v0.5.0-release-review.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn(
+                "Trusted Release Proof: GitHub Actions run `101` — success", review
+            )
+            self.assertIn(
+                "Independent Release Verification: run `105` — success", review
+            )
+            self.assertIn(
+                "## Trusted Release Proof review — historical pre-publication checklist",
+                review,
+            )
+            self.assertIn(
+                "## Publication review — historical pre-publication checklist", review
+            )
             self.assertIn("## Historical pre-publication decision", review)
             self.assertIn("**Decision at release preparation:", review)
             self.assertNotIn("**Current decision:", review)
             self.assertNotIn("Pending.", review)
             self.assertIn(exact_url, review)
 
-            security = (root / "docs/qualification/v0.5.0-security.md").read_text(encoding="utf-8")
-            self.assertIn("**Status:** released; terminal release-security evidence complete.", security)
+            security = (root / "docs/qualification/v0.5.0-security.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn(
+                "**Status:** released; terminal release-security evidence complete.",
+                security,
+            )
             self.assertIn("subsequently passed fresh protected-main gates", security)
-            self.assertIn("Terminal security evidence was recorded only after", security)
+            self.assertIn(
+                "Terminal security evidence was recorded only after", security
+            )
             self.assertIn("## Terminal publication evidence", security)
             self.assertNotIn("evidence pending", security)
             self.assertIn(exact_url, security)
 
-            publication = (root / "docs/qualification/v0.5.0-publication.md").read_text(encoding="utf-8")
-            self.assertIn(f"- Metadata-only release-authorization commit: {exact_url}.", publication)
+            publication = (root / "docs/qualification/v0.5.0-publication.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn(
+                f"- Metadata-only release-authorization commit: {exact_url}.",
+                publication,
+            )
             self.assertIn(f"- Immutable tag: `v0.5.0` → {exact_url}.", publication)
 
             milestone = (root / "docs/milestones/v0.5.0.md").read_text(encoding="utf-8")
             self.assertIn("**Status:** released", milestone)
             self.assertIn("- [x] Protected proof-first/tag-last publication", milestone)
 
-    def test_closure_normalizes_evolved_pre_release_milestone_status_projection(self) -> None:
+    def test_closure_normalizes_evolved_pre_release_milestone_status_projection(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._fixture(root)
@@ -264,7 +300,9 @@ Terminal security evidence must be recorded only after final exact-head and rele
             milestone = root / "docs/milestones/v0.5.0.md"
             text = milestone.read_text(encoding="utf-8")
             status = "**Status:** release candidate; publication pending"
-            milestone.write_text(text.replace(status, f"{status}\n{status}", 1), encoding="utf-8")
+            milestone.write_text(
+                text.replace(status, f"{status}\n{status}", 1), encoding="utf-8"
+            )
 
             with self.assertRaisesRegex(
                 post_release_close.ClosureError,
@@ -272,7 +310,9 @@ Terminal security evidence must be recorded only after final exact-head and rele
             ):
                 post_release_close.close_release(Args(root))
 
-    def test_closure_rejects_released_milestone_projection_when_machine_state_is_pending(self) -> None:
+    def test_closure_rejects_released_milestone_projection_when_machine_state_is_pending(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._fixture(root)
@@ -299,13 +339,18 @@ Terminal security evidence must be recorded only after final exact-head and rele
         gate = updated.split("## Release gate", 1)[1].split("## ", 1)[0]
 
         self.assertNotIn("- [ ]", gate)
-        self.assertIn("- [x] Trusted Release Proof includes v0.8 qualification and succeeds;", gate)
+        self.assertIn(
+            "- [x] Trusted Release Proof includes v0.8 qualification and succeeds;",
+            gate,
+        )
         self.assertIn(
             "- [x] metadata-only release authorization preserves the reviewed implementation tree;",
             gate,
         )
         self.assertIn("- [x] tag-last publication succeeds;", gate)
-        self.assertIn("- [x] independent published-release verification succeeds;", gate)
+        self.assertIn(
+            "- [x] independent published-release verification succeeds;", gate
+        )
         self.assertIn("- [x] post-release closure advances machine roadmap state", gate)
 
     def test_terminal_provenance_uses_full_canonical_commit_url(self) -> None:
@@ -326,14 +371,18 @@ Terminal security evidence must be recorded only after final exact-head and rele
         self.assertGreaterEqual(terminal.count(url), 2)
         self.assertGreaterEqual(publication.count(url), 2)
         self.assertNotIn(f"release authorization: `{args.source_sha}`", terminal)
-        self.assertNotIn(f"release-authorization commit: `{args.source_sha}`", publication)
-        self.assertIn("crates.io publication workflow: run `106` — success.", publication)
+        self.assertNotIn(
+            f"release-authorization commit: `{args.source_sha}`", publication
+        )
+        self.assertIn(
+            "crates.io publication workflow: run `106` — success.", publication
+        )
         self.assertIn("crates.io canonical package: `linura 0.5.0`", publication)
         self.assertIn(args.crate_package_sha256, publication)
         self.assertIn("crates.io publication: workflow run `106`", terminal)
 
     def test_split_release_gate_closes_each_evidenced_control_criterion(self) -> None:
-        milestone = '''# v0.6.0
+        milestone = """# v0.6.0
 
 ## Release gate
 
@@ -350,24 +399,28 @@ v0.6.0 is not releaseable until:
 ## Explicit non-claims
 
 No widened claim.
-'''
+"""
         updated = post_release_close.close_release_control_criteria(milestone, "v0.6.0")
 
         self.assertNotIn("- [ ]", updated.split("## Explicit non-claims", 1)[0])
         self.assertEqual(7, updated.count("- [x]"))
         self.assertIn("- [x] tag-last publication succeeds;", updated)
-        self.assertIn("- [x] independent published-release verification succeeds;", updated)
-        self.assertIn("- [x] post-release closure advances machine roadmap state", updated)
+        self.assertIn(
+            "- [x] independent published-release verification succeeds;", updated
+        )
+        self.assertIn(
+            "- [x] post-release closure advances machine roadmap state", updated
+        )
 
     def test_release_gate_rejects_unmapped_unchecked_criterion(self) -> None:
-        milestone = '''# future
+        milestone = """# future
 
 ## Release gate
 
 - [ ] tag-last publication succeeds;
 - [ ] independent published-release verification succeeds;
 - [ ] manually rotate an unrelated external credential.
-'''
+"""
         with self.assertRaisesRegex(
             post_release_close.ClosureError,
             "unchecked release-gate criteria are not exactly mapped to terminal release evidence",
@@ -375,28 +428,32 @@ No widened claim.
             post_release_close.close_release_control_criteria(milestone, "v9.9.9")
 
     def test_release_gate_rejects_misleading_keyword_collision(self) -> None:
-        milestone = '''# future
+        milestone = """# future
 
 ## Release gate
 
 - [ ] tag-last publication succeeds;
 - [ ] independent published-release verification succeeds;
 - [ ] Security tabletop exercise with external responders is complete.
-'''
+"""
         with self.assertRaisesRegex(
             post_release_close.ClosureError,
             "Security tabletop exercise with external responders is complete",
         ):
             post_release_close.close_release_control_criteria(milestone, "v9.9.9")
 
-    def test_release_gate_requires_exact_publication_and_verification_mappings(self) -> None:
-        milestone = '''# future
+    def test_release_gate_requires_exact_publication_and_verification_mappings(
+        self,
+    ) -> None:
+        milestone = """# future
 
 ## Release gate
 
 - [ ] Trusted Release Proof succeeds.
-'''
-        with self.assertRaisesRegex(post_release_close.ClosureError, "exactly mapped publication criterion"):
+"""
+        with self.assertRaisesRegex(
+            post_release_close.ClosureError, "exactly mapped publication criterion"
+        ):
             post_release_close.close_release_control_criteria(milestone, "v9.9.9")
 
     def test_closure_rejects_non_next_release(self) -> None:
@@ -423,8 +480,12 @@ No widened claim.
                 post_release_close.close_release(Args(root))
 
     def test_workflow_pins_protected_deterministic_closure_sequence(self) -> None:
-        workflow = (ROOT / ".github/workflows/post-release-closure.yml").read_text(encoding="utf-8")
-        cleanup = (ROOT / ".github/workflows/post-release-cleanup.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/post-release-closure.yml").read_text(
+            encoding="utf-8"
+        )
+        cleanup = (ROOT / ".github/workflows/post-release-cleanup.yml").read_text(
+            encoding="utf-8"
+        )
         for marker in (
             "workflow_dispatch:",
             "INPUT_VERIFICATION_RUN_ID",
@@ -438,7 +499,7 @@ No widened claim.
             "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
             "--credential-source github-app",
             "tools/release_native_gates.py",
-            'pulls/$PR_NUMBER/merge',
+            "pulls/$PR_NUMBER/merge",
             "post-release-cleanup.yml",
         ):
             self.assertIn(marker, workflow)
@@ -455,7 +516,10 @@ No widened claim.
         self.assertIn("workflow_run:", cleanup)
         self.assertIn("tools/release_native_gates.py", cleanup)
         self.assertIn("tools/release_branch_cleanup.py", cleanup)
-        self.assertIn('git merge-base --is-ancestor "$CLOSURE_SHA" refs/remotes/origin/main', cleanup)
+        self.assertIn(
+            'git merge-base --is-ancestor "$CLOSURE_SHA" refs/remotes/origin/main',
+            cleanup,
+        )
 
         for path in ("ci.yml", "security.yml", "codeql.yml"):
             text = (ROOT / ".github/workflows" / path).read_text(encoding="utf-8")

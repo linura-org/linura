@@ -144,7 +144,7 @@ or production credentials to make an unavailable control appear functional.
 
 ## Required validation gates
 
-`cargo xtask check` is canonical, but `cargo-audit` and Rust CodeQL are
+`cargo xtask check` is canonical and enforces pinned `ruff check .` and `ruff format --check .` in addition to Rust formatting, but `cargo-audit` and Rust CodeQL are
 separate native checks and must also succeed on the exact PR. Inspect
 `python3 tools/check_validation_gates.py --json` for the machine-readable
 critical-path routing inventory; readiness is not qualification evidence.
