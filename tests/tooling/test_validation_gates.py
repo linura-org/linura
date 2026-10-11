@@ -657,11 +657,12 @@ class ValidationGateTests(unittest.TestCase):
         path = self.root / ".github/workflows/ci.yml"
         original = path.read_text(encoding="utf-8")
         self.assertEqual(gates.check(self.root), [])
-        pin = "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020"
+        pin = "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1"
         mutations = (
             ("remove pinned setup", "      - name: Install pinned Node runtime for trusted publisher tests",
              "      - name: Publisher runtime disabled"),
             ("replace pinned action", pin, "actions/setup-node@main"),
+            ("downgrade reviewed pin", pin, "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020"),
             ("use unreviewed Node", "          node-version: '22.23.3'",
              "          node-version: '22.16.0'"),
             ("skip runtime", "      - name: Install pinned Node runtime for trusted publisher tests\n",
