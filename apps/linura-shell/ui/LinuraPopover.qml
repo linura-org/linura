@@ -3,7 +3,9 @@ import QtQuick.Controls
 
 Popup {
     id: control
-    LinuraTheme { id: theme }
+    LinuraTheme {
+        id: theme
+    }
 
     modal: false
     focus: true

@@ -1,7 +1,26 @@
-BasedOnStyle: Qt
+# clang-format 18.1.8; Qt-compatible braces, conservative include ordering.
+BasedOnStyle: LLVM
 Language: Cpp
+Standard: Latest
 ColumnLimit: 100
 IndentWidth: 4
+ContinuationIndentWidth: 4
 TabWidth: 4
 UseTab: Never
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterClass: true
+  AfterStruct: true
+  AfterNamespace: false
+  AfterControlStatement: Never
+  BeforeElse: false
+  BeforeCatch: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+PointerAlignment: Right
+ReferenceAlignment: Pointer
 SortIncludes: Never
+DerivePointerAlignment: false

@@ -36,28 +36,28 @@ cc -std=c11 -O2 -Wall -Wextra -Werror -I "$input_build_dir" \
     $(pkg-config --libs wayland-client) -o "$input_build_dir/native-keyboard"
 install -o root -g root -m 0755 "$input_build_dir/native-keyboard" \
     /usr/local/lib/linura-qualification/native-keyboard
-install -o root -g root -m 0755     "$source_root/qualification/v010/shell-runtime/fixtures/linger-app"     /usr/local/lib/linura-qualification/linger-app
-install -o root -g root -m 0755     "$source_root/qualification/v010/shell-runtime/fixtures/forking-app"     /usr/local/lib/linura-qualification/forking-app
+install -o root -g root -m 0755 "$source_root/qualification/v010/shell-runtime/fixtures/linger-app" /usr/local/lib/linura-qualification/linger-app
+install -o root -g root -m 0755 "$source_root/qualification/v010/shell-runtime/fixtures/forking-app" /usr/local/lib/linura-qualification/forking-app
 
 install -d -o "$user_name" -g "$user_name" -m 0755 "$user_home/.local/share/applications"
 for desktop in "$source_root"/qualification/v010/shell-runtime/fixtures/*.desktop; do
-    install -o "$user_name" -g "$user_name" -m 0644         "$desktop" "$user_home/.local/share/applications/$(basename "$desktop")"
+    install -o "$user_name" -g "$user_name" -m 0644 "$desktop" "$user_home/.local/share/applications/$(basename "$desktop")"
 done
 
 install -d -o "$user_name" -g "$user_name" -m 0755 "$user_home/.config/systemd/user"
-install -o "$user_name" -g "$user_name" -m 0644     "$source_root/qualification/v010/shell-runtime/fixtures/linura-shell-qualification.service"     "$user_home/.config/systemd/user/linura-shell-qualification.service"
-install -o "$user_name" -g "$user_name" -m 0644     "$source_root/qualification/v010/shell-runtime/fixtures/linura-palette-qualification.service"     "$user_home/.config/systemd/user/linura-palette-qualification.service"
-install -o "$user_name" -g "$user_name" -m 0644     "$source_root/qualification/v010/shell-runtime/fixtures/linura-quick-settings-qualification.service"     "$user_home/.config/systemd/user/linura-quick-settings-qualification.service"
-install -o "$user_name" -g "$user_name" -m 0644     "$source_root/qualification/v010/shell-runtime/fixtures/linura-panel-qualification.service"     "$user_home/.config/systemd/user/linura-panel-qualification.service"
-install -o "$user_name" -g "$user_name" -m 0644     "$source_root/packaging/systemd/user/linurad.service"     "$user_home/.config/systemd/user/linurad.service"
+install -o "$user_name" -g "$user_name" -m 0644 "$source_root/qualification/v010/shell-runtime/fixtures/linura-shell-qualification.service" "$user_home/.config/systemd/user/linura-shell-qualification.service"
+install -o "$user_name" -g "$user_name" -m 0644 "$source_root/qualification/v010/shell-runtime/fixtures/linura-palette-qualification.service" "$user_home/.config/systemd/user/linura-palette-qualification.service"
+install -o "$user_name" -g "$user_name" -m 0644 "$source_root/qualification/v010/shell-runtime/fixtures/linura-quick-settings-qualification.service" "$user_home/.config/systemd/user/linura-quick-settings-qualification.service"
+install -o "$user_name" -g "$user_name" -m 0644 "$source_root/qualification/v010/shell-runtime/fixtures/linura-panel-qualification.service" "$user_home/.config/systemd/user/linura-panel-qualification.service"
+install -o "$user_name" -g "$user_name" -m 0644 "$source_root/packaging/systemd/user/linurad.service" "$user_home/.config/systemd/user/linurad.service"
 
 install -o root -g root -m 0755 "$linurad_binary" /usr/bin/linurad
 install -d -o root -g root -m 0755 /usr/lib/linura
-install -o root -g root -m 0644     "$source_root/packaging/wireplumber/linura-session-audio.lua"     /usr/lib/linura/linura-session-audio.lua
+install -o root -g root -m 0644 "$source_root/packaging/wireplumber/linura-session-audio.lua" /usr/lib/linura/linura-session-audio.lua
 
 bridge_build_dir=/tmp/linura-shell-bridge-qualification-build
 rm -rf "$bridge_build_dir"
-cmake     -S "$source_root/apps/linura-shell/bridge"     -B "$bridge_build_dir"     -G Ninja     -DCMAKE_BUILD_TYPE=Release     -DCMAKE_INSTALL_PREFIX=/usr/local
+cmake -S "$source_root/apps/linura-shell/bridge" -B "$bridge_build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
 cmake --build "$bridge_build_dir" --parallel 2
 cmake --install "$bridge_build_dir"
 
@@ -82,7 +82,7 @@ grep -Fq "liblinura-shell-bridge.so => $bridge_backing" <<<"$bridge_linkage" || 
 
 build_dir=/tmp/linura-ui-qualification-build
 rm -rf "$build_dir"
-cmake     -S "$source_root/apps/linura-shell/ui"     -B "$build_dir"     -G Ninja     -DCMAKE_BUILD_TYPE=Release     -DCMAKE_INSTALL_PREFIX=/usr/local
+cmake -S "$source_root/apps/linura-shell/ui" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
 cmake --build "$build_dir" --parallel 2
 cmake --install "$build_dir"
 

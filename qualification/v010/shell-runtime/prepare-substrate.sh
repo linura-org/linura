@@ -21,7 +21,7 @@ for command_name in cloud-localds qemu-img qemu-system-x86_64 ssh ssh-keygen pyt
 done
 
 eval "$(
-python3 - "$contract_path" <<'PY'
+    python3 - "$contract_path" <<'PY'
 import pathlib
 import shlex
 import sys
@@ -75,7 +75,7 @@ qemu-img resize "$guest_image" "${QUALIFICATION_DISK_GIB_CONTRACT}G"
 ssh-keygen -q -t ed25519 -N '' -f "$ssh_key"
 public_key="$(cat "$ssh_key.pub")"
 
-cat > "$user_data" <<EOF
+cat >"$user_data" <<EOF
 #cloud-config
 users:
   - default
@@ -96,12 +96,12 @@ growpart:
 resize_rootfs: true
 EOF
 
-cat > "$meta_data" <<EOF
+cat >"$meta_data" <<EOF
 instance-id: linura-v010-substrate-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}
 local-hostname: linura-v010-substrate
 EOF
 
-cat > "$network_config" <<EOF
+cat >"$network_config" <<EOF
 version: 2
 renderer: networkd
 ethernets:
@@ -149,7 +149,7 @@ ssh_common=(
 
 ready=0
 deadline=$((SECONDS + 420))
-while (( SECONDS < deadline )); do
+while ((SECONDS < deadline)); do
     if ! kill -0 "$vm_pid" 2>/dev/null; then
         cat "$vm_log" >&2
         fail "substrate VM exited before SSH readiness"
@@ -186,7 +186,7 @@ done
 [[ "$install_succeeded" -eq 1 ]] || fail "prepared substrate package installation failed after 3 bounded attempts"
 
 ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
-    'pacman -Q' | LC_ALL=C sort > "$package_manifest"
+    'pacman -Q' | LC_ALL=C sort >"$package_manifest"
 
 ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
     'set -euo pipefail
@@ -203,7 +203,7 @@ ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
      sudo -n systemctl poweroff' || true
 
 shutdown_deadline=$((SECONDS + 120))
-while kill -0 "$vm_pid" 2>/dev/null && (( SECONDS < shutdown_deadline )); do
+while kill -0 "$vm_pid" 2>/dev/null && ((SECONDS < shutdown_deadline)); do
     sleep 1
 done
 if kill -0 "$vm_pid" 2>/dev/null; then
@@ -231,7 +231,7 @@ builder_sha256="$(sha256sum qualification/v010/shell-runtime/prepare-substrate.s
     printf 'prepared_image_sha256=%s\n' "$prepared_sha256"
     printf 'contract_sha256=%s\n' "$contract_sha256"
     printf 'builder_sha256=%s\n' "$builder_sha256"
-} > "$builder_evidence"
+} >"$builder_evidence"
 
 python3 - "$output_manifest" "$contract_path" "$package_manifest" "$prepared_sha256" "$contract_sha256" "$builder_sha256" <<'PY'
 import json
@@ -274,5 +274,5 @@ evidence = {
 output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 
-printf '%s  %s\n' "$prepared_sha256" "$(basename "$output_image")" > "${output_image}.sha256"
+printf '%s  %s\n' "$prepared_sha256" "$(basename "$output_image")" >"${output_image}.sha256"
 echo "prepared v0.10 shell runtime substrate: $output_image"

@@ -239,6 +239,24 @@ jobs:
             pkg-config
             qt6-base-dev
             qt6-declarative-dev
+      - name: Verify pinned multilingual formatting
+        shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}
+        run: |
+          set -euo pipefail
+          format_root="${RUNNER_TEMP:?}/linura-multilanguage-formatters"
+          mkdir -p "$format_root/npm" "$format_root/bin"
+          cp tools/source-format/package.json tools/source-format/package-lock.json "$format_root/npm/"
+          npm ci --prefix "$format_root/npm" --ignore-scripts --no-audit --no-fund
+          python3 -m venv "$format_root/clang"
+          "$format_root/clang/bin/python3" -m pip install --disable-pip-version-check \
+            --no-cache-dir --require-hashes --only-binary=:all: --no-deps \
+            -r tools/source-format/clang-requirements.lock
+          GOBIN="$format_root/bin" go install mvdan.cc/sh/v3/cmd/shfmt@v3.11.0
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            qt6-declarative-dev-tools=6.4.2+dfsg-4build3
+          export PATH="$format_root/clang/bin:$format_root/bin:$format_root/npm/node_modules/.bin:/usr/lib/qt6/bin:$PATH"
+          python3 tools/check_multilanguage_formatting.py
       - name: Build and install Linura Shell QML modules
         run: |
           set -euo pipefail

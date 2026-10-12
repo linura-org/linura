@@ -13,8 +13,8 @@ Scope {
     Xdg.ApplicationLauncherController {
         id: launcher
         onLaunchCompleted: (status, requestGeneration) => {
-            root.completedStatus = status
-            root.completedGeneration = requestGeneration
+            root.completedStatus = status;
+            root.completedGeneration = requestGeneration;
         }
     }
 
@@ -24,39 +24,39 @@ Scope {
         function hasApplication(applicationId: string): bool {
             for (let i = 0; i < launcher.applicationEntries.length; i++) {
                 if (launcher.applicationEntries[i].id === applicationId)
-                    return true
+                    return true;
             }
-            return false
+            return false;
         }
 
         function applicationIsTerminal(applicationId: string): bool {
             for (let i = 0; i < launcher.applicationEntries.length; i++) {
-                const entry = launcher.applicationEntries[i]
+                const entry = launcher.applicationEntries[i];
                 if (entry.id === applicationId)
-                    return entry.terminal === true
+                    return entry.terminal === true;
             }
-            return false
+            return false;
         }
 
         function launch(applicationId: string, requestGeneration: int): string {
-            return launcher.launchApplication(applicationId, requestGeneration)
+            return launcher.launchApplication(applicationId, requestGeneration);
         }
 
         function launchInFlight(): bool {
-            return launcher.launchInFlight
+            return launcher.launchInFlight;
         }
 
         function lastStatus(): string {
-            return root.completedStatus
+            return root.completedStatus;
         }
 
         function lastGeneration(): int {
-            return root.completedGeneration
+            return root.completedGeneration;
         }
 
         function resetCompletion(): void {
-            root.completedStatus = ""
-            root.completedGeneration = -1
+            root.completedStatus = "";
+            root.completedGeneration = -1;
         }
     }
 }

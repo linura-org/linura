@@ -9,7 +9,9 @@ AbstractButton {
     property string shortcut: ""
     property bool selected: false
     property string accessibleName: ""
-    LinuraTheme { id: theme }
+    LinuraTheme {
+        id: theme
+    }
 
     activeFocusOnTab: true
     hoverEnabled: true
