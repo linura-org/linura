@@ -13,7 +13,10 @@ from tools import v09_qualification_scope as routing  # noqa: E402
 class QualificationScopeTests(unittest.TestCase):
     def setUp(self):
         self.contract = tomllib.loads(
-            (ROOT / "contracts/v09-qualification-routing.toml").read_text(encoding="utf-8"))
+            (ROOT / "contracts/v09-qualification-routing.toml").read_text(
+                encoding="utf-8"
+            )
+        )
 
     def test_shared_authority_and_qualification_dependencies_are_full(self):
         protected = (
@@ -41,17 +44,21 @@ class QualificationScopeTests(unittest.TestCase):
             "interfaces/dbus/org.linura.Authority1.xml",
             "crates/linura-bootstrap/src/lib.rs",
             "crates/linura-update/src/lib.rs",
-            "Cargo.lock", ".cargo/config", ".cargo/config.toml",
+            "Cargo.lock",
+            ".cargo/config",
+            ".cargo/config.toml",
             "packaging/wireplumber/linura-session-audio.lua",
-            "tools/image.py", "contracts/stability.toml",
+            "tools/image.py",
+            "contracts/stability.toml",
             "tools/acceptance.py",
             "scripts/qualification/v09-adversarial-guest.sh",
             "tests/acceptance/008-control1-plan-preview.json",
         )
         for path in protected:
             with self.subTest(path=path):
-                self.assertTrue(routing.requires_full_qualification(
-                    [path], self.contract))
+                self.assertTrue(
+                    routing.requires_full_qualification([path], self.contract)
+                )
 
     def test_authority_and_firstboot_manifest_dependencies_are_full(self):
         # A new direct runtime or test dependency must update the routing contract.
@@ -74,9 +81,12 @@ class QualificationScopeTests(unittest.TestCase):
                         self.assertTrue(dependency_root.is_relative_to(ROOT))
                         prefix = dependency_root.relative_to(ROOT).as_posix() + "/"
                         self.assertTrue(
-                            any(prefix.startswith(route)
-                                for route in self.contract["full_prefixes"]),
-                            f"unqualified direct dependency: {prefix}")
+                            any(
+                                prefix.startswith(route)
+                                for route in self.contract["full_prefixes"]
+                            ),
+                            f"unqualified direct dependency: {prefix}",
+                        )
 
     def test_routing_governance_inputs_are_always_full(self):
         protected = (
@@ -90,17 +100,25 @@ class QualificationScopeTests(unittest.TestCase):
         for path in protected:
             with self.subTest(path=path):
                 self.assertIn(path, self.contract["full_exact"])
-                self.assertTrue(routing.requires_full_qualification(
-                    [path], self.contract))
+                self.assertTrue(
+                    routing.requires_full_qualification([path], self.contract)
+                )
 
     def test_qualification_harness_changes_cannot_use_fast_regression(self):
-        for path in ("tools/acceptance.py", "scripts/qualification/v09-adversarial-guest.sh"):
+        for path in (
+            "tools/acceptance.py",
+            "scripts/qualification/v09-adversarial-guest.sh",
+        ):
             with self.subTest(path=path):
                 self.assertIn(path, self.contract["full_exact"])
-                self.assertTrue(routing.requires_full_qualification(
-                    [path], self.contract))
-                self.assertTrue(routing.requires_full_qualification(
-                    ["docs/development-infrastructure.md", path], self.contract))
+                self.assertTrue(
+                    routing.requires_full_qualification([path], self.contract)
+                )
+                self.assertTrue(
+                    routing.requires_full_qualification(
+                        ["docs/development-infrastructure.md", path], self.contract
+                    )
+                )
 
     def test_guidance_only_remains_fast_without_hiding_mixed_code(self):
         guidance = [
@@ -112,18 +130,27 @@ class QualificationScopeTests(unittest.TestCase):
         ]
         for path in guidance:
             with self.subTest(path=path):
-                self.assertFalse(routing.requires_full_qualification(
-                    [path], self.contract))
-        self.assertTrue(routing.requires_full_qualification(
-            guidance + ["crates/linura-control/src/lib.rs"], self.contract))
-        self.assertTrue(routing.requires_full_qualification(
-            ["apps/linura-authorityd/AGENTS.md",
-             "apps/linura-authorityd/build.rs"], self.contract))
+                self.assertFalse(
+                    routing.requires_full_qualification([path], self.contract)
+                )
+        self.assertTrue(
+            routing.requires_full_qualification(
+                guidance + ["crates/linura-control/src/lib.rs"], self.contract
+            )
+        )
+        self.assertTrue(
+            routing.requires_full_qualification(
+                ["apps/linura-authorityd/AGENTS.md", "apps/linura-authorityd/build.rs"],
+                self.contract,
+            )
+        )
 
     def test_rename_cannot_hide_original_protected_path(self):
-        self.assertTrue(routing.requires_full_qualification(
-            ["crates/linura-control/src/lib.rs", "docs/retired.rs"],
-            self.contract))
+        self.assertTrue(
+            routing.requires_full_qualification(
+                ["crates/linura-control/src/lib.rs", "docs/retired.rs"], self.contract
+            )
+        )
 
     def test_ambiguous_impact_and_mutated_exemptions_fail_closed(self):
         self.assertTrue(routing.requires_full_qualification([], self.contract))
@@ -131,20 +158,22 @@ class QualificationScopeTests(unittest.TestCase):
             with self.subTest(path=path):
                 with self.assertRaises(routing.RoutingError):
                     routing.requires_full_qualification([path], self.contract)
-        for broken in (dict(self.contract, full_exact=[]),
-                       dict(self.contract, guidance_only_basenames=["lib.rs"])):
+        for broken in (
+            dict(self.contract, full_exact=[]),
+            dict(self.contract, guidance_only_basenames=["lib.rs"]),
+        ):
             with self.assertRaises(routing.RoutingError):
                 routing.requires_full_qualification(
-                    ["docs/development-infrastructure.md"], broken)
+                    ["docs/development-infrastructure.md"], broken
+                )
 
     def test_reusable_and_manual_runs_remain_forced_full(self):
         workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(
-            encoding="utf-8")
-        self.assertIn('if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then',
-                      workflow)
+            encoding="utf-8"
+        )
+        self.assertIn('if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then', workflow)
         self.assertIn("full_qualification=true", workflow)
-        self.assertIn("full = requires_full_qualification(changed, contract)",
-                      workflow)
+        self.assertIn("full = requires_full_qualification(changed, contract)", workflow)
 
 
 if __name__ == "__main__":

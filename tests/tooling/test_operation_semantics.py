@@ -7,7 +7,9 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location("check_operation_semantics", ROOT / "tools/check_operation_semantics.py")
+SPEC = importlib.util.spec_from_file_location(
+    "check_operation_semantics", ROOT / "tools/check_operation_semantics.py"
+)
 assert SPEC is not None and SPEC.loader is not None
 check_operation_semantics = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(check_operation_semantics)
@@ -63,7 +65,9 @@ class OperationSemanticsContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            (root / "contracts/operation-semantics.toml").write_text("", encoding="utf-8")
+            (root / "contracts/operation-semantics.toml").write_text(
+                "", encoding="utf-8"
+            )
             failures = check_operation_semantics.validate(root)
             self.assertIn("operation-semantics contract must not be empty", failures)
 
@@ -72,7 +76,12 @@ class OperationSemanticsContractTests(unittest.TestCase):
             root = Path(temp_dir)
             self._copy_fixture(root)
             (root / "docs/adr/0032-classify-operations-before-authority.md").unlink()
-            self.assertTrue(any("ADR 0032" in failure for failure in check_operation_semantics.validate(root)))
+            self.assertTrue(
+                any(
+                    "ADR 0032" in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
 
     def test_registered_authority_adr_cannot_drop_risk_floor_binding(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -110,8 +119,7 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "docs/threat-model.md missing operation-semantics marker"
-                    in failure
+                    "docs/threat-model.md missing operation-semantics marker" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
@@ -120,23 +128,50 @@ class OperationSemanticsContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            self._rewrite_contract(root, "privileged_executor_allowed = false\ncanonical_managed_lifecycle = false\npath = \"bounded-transient-effect\"", "privileged_executor_allowed = true\ncanonical_managed_lifecycle = false\npath = \"bounded-transient-effect\"")
-            self.assertTrue(any("classes drifted" in failure for failure in check_operation_semantics.validate(root)))
+            self._rewrite_contract(
+                root,
+                'privileged_executor_allowed = false\ncanonical_managed_lifecycle = false\npath = "bounded-transient-effect"',
+                'privileged_executor_allowed = true\ncanonical_managed_lifecycle = false\npath = "bounded-transient-effect"',
+            )
+            self.assertTrue(
+                any(
+                    "classes drifted" in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
 
     def test_managed_external_effect_cannot_drop_canonical_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            self._rewrite_contract(root, 'path = "canonical-managed-mutation"', 'path = "bounded-transient-effect"')
-            self.assertTrue(any("classes drifted" in failure for failure in check_operation_semantics.validate(root)))
+            self._rewrite_contract(
+                root,
+                'path = "canonical-managed-mutation"',
+                'path = "bounded-transient-effect"',
+            )
+            self.assertTrue(
+                any(
+                    "classes drifted" in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
 
     def test_unknown_extra_operation_class_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
             contract = root / "contracts/operation-semantics.toml"
-            contract.write_text(contract.read_text(encoding="utf-8") + '\n[classes.unclassified-fast-path]\nrust_variant = "UnclassifiedFastPath"\n', encoding="utf-8")
-            self.assertTrue(any("classes drifted" in failure for failure in check_operation_semantics.validate(root)))
+            contract.write_text(
+                contract.read_text(encoding="utf-8")
+                + '\n[classes.unclassified-fast-path]\nrust_variant = "UnclassifiedFastPath"\n',
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "classes drifted" in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
 
     def test_transient_authorization_cannot_skip_canonical_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -161,13 +196,13 @@ class OperationSemanticsContractTests(unittest.TestCase):
             contract = root / "contracts/operation-semantics.toml"
             text = contract.read_text(encoding="utf-8")
             marker = (
-                '[classes.transient-external-effect]\n'
+                "[classes.transient-external-effect]\n"
                 'rust_variant = "TransientExternalEffect"\n'
-                'changes_external_state = true\n'
-                'changes_linura_durable_state = false\n'
-                'control_mediated = true\n'
-                'risk_classification_required = true\n'
-                'plan_bound_authorization = true\n'
+                "changes_external_state = true\n"
+                "changes_linura_durable_state = false\n"
+                "control_mediated = true\n"
+                "risk_classification_required = true\n"
+                "plan_bound_authorization = true\n"
             )
             self.assertIn(marker, text)
             contract.write_text(
@@ -194,7 +229,9 @@ class OperationSemanticsContractTests(unittest.TestCase):
             self._copy_fixture(root)
             qualification = root / "docs/qualification/v0.10.0.md"
             text = qualification.read_text(encoding="utf-8")
-            self.assertIn("It has no durable prepare/commit/reconcile transaction", text)
+            self.assertIn(
+                "It has no durable prepare/commit/reconcile transaction", text
+            )
             qualification.write_text(
                 text.replace(
                     "It has no durable prepare/commit/reconcile transaction",
@@ -205,7 +242,9 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertEqual(check_operation_semantics.validate(root), [])
 
-    def test_transient_prepare_exemption_cannot_drift_from_security_policy(self) -> None:
+    def test_transient_prepare_exemption_cannot_drift_from_security_policy(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -238,8 +277,7 @@ class OperationSemanticsContractTests(unittest.TestCase):
             failures = check_operation_semantics.validate(root)
             self.assertTrue(
                 any(
-                    "README.md contains forbidden operation-semantics marker"
-                    in failure
+                    "README.md contains forbidden operation-semantics marker" in failure
                     for failure in failures
                 )
             )
@@ -265,7 +303,8 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "docs/ui-architecture.md missing operation-semantics marker" in failure
+                    "docs/ui-architecture.md missing operation-semantics marker"
+                    in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
@@ -275,8 +314,18 @@ class OperationSemanticsContractTests(unittest.TestCase):
             root = Path(temp_dir)
             self._copy_fixture(root)
             core = root / "crates/linura-core/src/lib.rs"
-            core.write_text(core.read_text(encoding="utf-8").replace("    TransientExternalEffect,\n", "", 1), encoding="utf-8")
-            self.assertTrue(any("OperationClass variants drifted" in failure for failure in check_operation_semantics.validate(root)))
+            core.write_text(
+                core.read_text(encoding="utf-8").replace(
+                    "    TransientExternalEffect,\n", "", 1
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "OperationClass variants drifted" in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
 
     def test_trusted_operation_registry_and_control_resolver_are_required(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -397,8 +446,7 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "registered_risk_floor_authority_binding drifted"
-                    in failure
+                    "registered_risk_floor_authority_binding drifted" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
@@ -443,7 +491,9 @@ class OperationSemanticsContractTests(unittest.TestCase):
                 )
             )
 
-    def test_transient_substrate_cannot_be_misrepresented_as_supported_effect(self) -> None:
+    def test_transient_substrate_cannot_be_misrepresented_as_supported_effect(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -475,8 +525,7 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "transient_post_effect_reobserve_required drifted"
-                    in failure
+                    "transient_post_effect_reobserve_required drifted" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
@@ -492,8 +541,7 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "transient_requested_postcondition_binding drifted"
-                    in failure
+                    "transient_requested_postcondition_binding drifted" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
@@ -509,13 +557,14 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "transient_audit_material_binding drifted"
-                    in failure
+                    "transient_audit_material_binding drifted" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
 
-    def test_transient_contract_cannot_drop_audit_authorization_provenance(self) -> None:
+    def test_transient_contract_cannot_drop_audit_authorization_provenance(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -526,13 +575,14 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "transient_audit_authorization_binding drifted"
-                    in failure
+                    "transient_audit_authorization_binding drifted" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
 
-    def test_transient_contract_cannot_drop_complete_risk_material_binding(self) -> None:
+    def test_transient_contract_cannot_drop_complete_risk_material_binding(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -543,13 +593,14 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "transient_risk_refinement_material_binding drifted"
-                    in failure
+                    "transient_risk_refinement_material_binding drifted" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
 
-    def test_transient_contract_cannot_drop_pre_dispatch_audit_reservation(self) -> None:
+    def test_transient_contract_cannot_drop_pre_dispatch_audit_reservation(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -560,8 +611,7 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "transient_audit_dispatch_binding drifted"
-                    in failure
+                    "transient_audit_dispatch_binding drifted" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
@@ -602,8 +652,7 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "transient_audit_diagnostic_binding drifted"
-                    in failure
+                    "transient_audit_diagnostic_binding drifted" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
@@ -686,8 +735,7 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "docs/threat-model.md missing operation-semantics marker"
-                    in failure
+                    "docs/threat-model.md missing operation-semantics marker" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
@@ -721,7 +769,12 @@ class OperationSemanticsContractTests(unittest.TestCase):
             marker = "self.handoff_registered_managed_systemd(&principal, prepared.as_mut())?"
             text = managed.read_text(encoding="utf-8")
             self.assertEqual(text.count(marker), 1)
-            managed.write_text(text.replace(marker, "self.authority.handoff(&principal, prepared.as_mut())?", 1), encoding="utf-8")
+            managed.write_text(
+                text.replace(
+                    marker, "self.authority.handoff(&principal, prepared.as_mut())?", 1
+                ),
+                encoding="utf-8",
+            )
             self.assertTrue(
                 any(
                     "managed lifecycle missing trusted operation-registry integration"
@@ -730,7 +783,9 @@ class OperationSemanticsContractTests(unittest.TestCase):
                 )
             )
 
-    def test_durable_handoff_stays_internal_and_exposes_plan_for_semantic_validation(self) -> None:
+    def test_durable_handoff_stays_internal_and_exposes_plan_for_semantic_validation(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -777,9 +832,18 @@ class OperationSemanticsContractTests(unittest.TestCase):
             root = Path(temp_dir)
             self._copy_fixture(root)
             descriptor = root / "crates/linura-capability-sdk/src/lib.rs"
-            descriptor.write_text(descriptor.read_text(encoding="utf-8").replace("pub struct OperationDescriptor", "struct OperationDescriptor", 1), encoding="utf-8")
-            self.assertTrue(any("OperationDescriptor missing" in failure for failure in check_operation_semantics.validate(root)))
-
+            descriptor.write_text(
+                descriptor.read_text(encoding="utf-8").replace(
+                    "pub struct OperationDescriptor", "struct OperationDescriptor", 1
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "OperationDescriptor missing" in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
 
     def test_session1_cannot_drop_same_uid_principal_boundary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -847,7 +911,9 @@ class OperationSemanticsContractTests(unittest.TestCase):
                 )
             )
 
-    def test_wireplumber_helper_must_parse_wpexec_spa_json_without_evaluation(self) -> None:
+    def test_wireplumber_helper_must_parse_wpexec_spa_json_without_evaluation(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -875,7 +941,8 @@ class OperationSemanticsContractTests(unittest.TestCase):
             self._copy_fixture(root)
             helper = root / "packaging/wireplumber/linura-session-audio.lua"
             helper.write_text(
-                helper.read_text(encoding="utf-8") + "\nlocal unsafe = load(\"return {}\")\n",
+                helper.read_text(encoding="utf-8")
+                + '\nlocal unsafe = load("return {}")\n',
                 encoding="utf-8",
             )
             failures = check_operation_semantics.validate(root)
@@ -902,21 +969,24 @@ class OperationSemanticsContractTests(unittest.TestCase):
             failures = check_operation_semantics.validate(root)
             self.assertTrue(
                 any(
-                    "must bind identity from immutable PipeWire global properties" in failure
+                    "must bind identity from immutable PipeWire global properties"
+                    in failure
                     for failure in failures
                 ),
                 failures,
             )
 
-    def test_wireplumber_helper_cannot_move_mutation_before_identity_match(self) -> None:
+    def test_wireplumber_helper_cannot_move_mutation_before_identity_match(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
             helper = root / "packaging/wireplumber/linura-session-audio.lua"
             text = helper.read_text(encoding="utf-8")
             text = text.replace(
-                'bound_id == args.node_id',
-                'bound_id ~= args.node_id',
+                "bound_id == args.node_id",
+                "bound_id ~= args.node_id",
                 1,
             )
             helper.write_text(text, encoding="utf-8")
@@ -943,8 +1013,7 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "transient session audit missing durability fragment"
-                    in failure
+                    "transient session audit missing durability fragment" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
@@ -967,13 +1036,14 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "must not expose raw WirePlumber stderr"
-                    in failure
+                    "must not expose raw WirePlumber stderr" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
 
-    def test_transient_session_audit_cannot_skip_effective_sqlite_mode_verification(self) -> None:
+    def test_transient_session_audit_cannot_skip_effective_sqlite_mode_verification(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -984,13 +1054,14 @@ class OperationSemanticsContractTests(unittest.TestCase):
             audit.write_text(text.replace(marker, "", 1), encoding="utf-8")
             self.assertTrue(
                 any(
-                    "transient session audit missing durability fragment"
-                    in failure
+                    "transient session audit missing durability fragment" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
 
-    def test_pipewire_runtime_cannot_drop_post_effect_identity_verification(self) -> None:
+    def test_pipewire_runtime_cannot_drop_post_effect_identity_verification(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -1021,7 +1092,9 @@ class OperationSemanticsContractTests(unittest.TestCase):
                 )
             )
 
-    def test_transient_session_audit_cannot_drop_wal_autocheckpoint_byte_derivation(self) -> None:
+    def test_transient_session_audit_cannot_drop_wal_autocheckpoint_byte_derivation(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -1039,13 +1112,14 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "transient session audit missing durability fragment"
-                    in failure
+                    "transient session audit missing durability fragment" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
 
-    def test_transient_session_audit_cannot_drop_enforced_wal_sidecar_bound(self) -> None:
+    def test_transient_session_audit_cannot_drop_enforced_wal_sidecar_bound(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -1059,8 +1133,7 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "transient session audit missing durability fragment"
-                    in failure
+                    "transient session audit missing durability fragment" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
@@ -1080,13 +1153,10 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    "transient session audit missing durability fragment"
-                    in failure
+                    "transient session audit missing durability fragment" in failure
                     for failure in check_operation_semantics.validate(root)
                 )
             )
-
-
 
     def test_pipewire_mutation_helper_cannot_reopen_installed_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1102,9 +1172,10 @@ class OperationSemanticsContractTests(unittest.TestCase):
             )
             failures = check_operation_semantics.validate(root)
             self.assertTrue(
-                any("PipeWire session-volume runtime" in failure for failure in failures)
+                any(
+                    "PipeWire session-volume runtime" in failure for failure in failures
+                )
             )
-
 
     def test_packaged_audio_helper_open_must_be_nonblocking_and_nofollow(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1112,7 +1183,9 @@ class OperationSemanticsContractTests(unittest.TestCase):
             self._copy_fixture(root)
             observer = root / "crates/linura-linux-observation/src/lib.rs"
             text = observer.read_text(encoding="utf-8")
-            marker = "OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK"
+            marker = (
+                "OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK"
+            )
             self.assertIn(marker, text)
             observer.write_text(
                 text.replace(marker, "OFlags::RDONLY | OFlags::CLOEXEC", 1),
@@ -1121,7 +1194,8 @@ class OperationSemanticsContractTests(unittest.TestCase):
             failures = check_operation_semantics.validate(root)
             self.assertTrue(
                 any(
-                    "PipeWire observer missing trusted WirePlumber helper fragment" in failure
+                    "PipeWire observer missing trusted WirePlumber helper fragment"
+                    in failure
                     and "OFlags::RDONLY" in failure
                     for failure in failures
                 )

@@ -61,7 +61,7 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
         self.assertEqual(covered, list(range(1, 14)))
         self.assertEqual(sum(primary for _, _, _, primary, _ in parsed), 1)
         self.assertEqual(sum(final for _, _, _, _, final in parsed), 1)
-        self.assertIn("fail-fast: false", source[source.index("strategy:"):start])
+        self.assertIn("fail-fast: false", source[source.index("strategy:") : start])
 
     def test_assembler_binds_every_parallel_shard(self) -> None:
         source = WORKFLOW.read_text(encoding="utf-8")
@@ -84,7 +84,7 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
             '"/usr/bin/python3", "-I", "tools/qualification_envelope.py"',
             source,
         )
-        self.assertIn('component_envelopes.append({', source)
+        self.assertIn("component_envelopes.append({", source)
         self.assertIn('"sha256": envelope["envelope_sha256"]', source)
         self.assertIn("COMPONENT_ENVELOPE_SET_SHA256=", source)
         self.assertIn('component_envelopes.sort(key=lambda item: item["id"])', source)
@@ -109,7 +109,9 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
         self.assertIn("GUEST_IDENTITY=", source)
         self.assertIn("--package-manager dpkg", source)
 
-    def test_final_shard_qualifies_production_owned_boundary_twelve_revocation(self) -> None:
+    def test_final_shard_qualifies_production_owned_boundary_twelve_revocation(
+        self,
+    ) -> None:
         final = next(row for row in EXPECTED if row[4])
         self.assertLessEqual(final[1], 12)
         self.assertGreaterEqual(final[2], 12)
@@ -118,7 +120,7 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
         self.assertIn('install_text_file "$PREPARER_SUDOERS" 0440', source)
         self.assertNotIn("revoke_preparer_authority()", source)
         self.assertIn("verify_preparer_authority_revoked()", source)
-        boundary = source[source.index('if [[ "$boundary" -eq 12 ]]'):]
+        boundary = source[source.index('if [[ "$boundary" -eq 12 ]]') :]
         self.assertLess(
             boundary.index("/usr/local/bin/linura-firstboot --durable-bootstrap-step"),
             boundary.index('verify_preparer_authority_revoked "$PRODUCTION_ROOT"'),
@@ -129,7 +131,9 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
             source,
         )
         verifier_start = source.index("verify_preparer_authority_revoked() {")
-        verifier_end = source.index("\n}\n\nprovision_preparer_authority_fixture", verifier_start)
+        verifier_end = source.index(
+            "\n}\n\nprovision_preparer_authority_fixture", verifier_start
+        )
         verifier = source[verifier_start:verifier_end]
         for mutator in (
             "pkill -KILL",
@@ -140,7 +144,9 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
         ):
             self.assertNotIn(mutator, verifier)
         preparer = source[
-            source.index("  - name: linura-preparer") : source.index("ssh_pwauth: false")
+            source.index("  - name: linura-preparer") : source.index(
+                "ssh_pwauth: false"
+            )
         ]
         self.assertNotIn("    sudo:", preparer)
         self.assertIn(

@@ -59,7 +59,9 @@ class PolicyOrchestrationBoundaryTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-policy must be consumed only by linura-control", result.stderr)
+            self.assertIn(
+                "linura-policy must be consumed only by linura-control", result.stderr
+            )
             self.assertIn("linura-planner", result.stderr)
 
     def test_control_policy_dependency_is_required(self) -> None:
@@ -77,7 +79,9 @@ class PolicyOrchestrationBoundaryTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-policy must be consumed only by linura-control", result.stderr)
+            self.assertIn(
+                "linura-policy must be consumed only by linura-control", result.stderr
+            )
             self.assertIn("found policy consumers: []", result.stderr)
 
 

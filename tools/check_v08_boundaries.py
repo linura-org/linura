@@ -38,7 +38,10 @@ def validate_schema(root: Path, failures: list[str]) -> None:
 
     if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
         fail("intent proposal schema must use JSON Schema draft 2020-12", failures)
-    if schema.get("type") != "object" or schema.get("additionalProperties") is not False:
+    if (
+        schema.get("type") != "object"
+        or schema.get("additionalProperties") is not False
+    ):
         fail("intent proposal schema root must be a closed object", failures)
     properties = schema.get("properties")
     if not isinstance(properties, dict):
@@ -92,12 +95,21 @@ def validate_schema(root: Path, failures: list[str]) -> None:
     if schema.get("x-linura-authority") != "proposal-only":
         fail("intent proposal schema must declare proposal-only authority", failures)
     if schema.get("x-linura-aggregate-byte-limit") != 512 * 1024:
-        fail("intent proposal schema must document the Rust aggregate byte limit", failures)
+        fail(
+            "intent proposal schema must document the Rust aggregate byte limit",
+            failures,
+        )
 
     for object_field in ("actor", "context", "attribution"):
         child = properties.get(object_field)
-        if not isinstance(child, dict) or child.get("additionalProperties") is not False:
-            fail(f"intent proposal {object_field} schema must be a closed object", failures)
+        if (
+            not isinstance(child, dict)
+            or child.get("additionalProperties") is not False
+        ):
+            fail(
+                f"intent proposal {object_field} schema must be a closed object",
+                failures,
+            )
 
     defs = schema.get("$defs")
     if not isinstance(defs, dict):
@@ -120,10 +132,10 @@ def validate_schema(root: Path, failures: list[str]) -> None:
         "$ref": "#/$defs/coreId"
     }:
         fail("proposal actor id must use the core-ID wire contract", failures)
-    requirement_items = requirements.get("items", {}) if isinstance(requirements, dict) else {}
-    if requirement_items.get("properties", {}).get("id") != {
-        "$ref": "#/$defs/coreId"
-    }:
+    requirement_items = (
+        requirements.get("items", {}) if isinstance(requirements, dict) else {}
+    )
+    if requirement_items.get("properties", {}).get("id") != {"$ref": "#/$defs/coreId"}:
         fail("proposal requirement id must use the core-ID wire contract", failures)
     if not isinstance(capability_refs, dict) or capability_refs.get("items") != {
         "$ref": "#/$defs/coreId"
@@ -131,7 +143,11 @@ def validate_schema(root: Path, failures: list[str]) -> None:
         fail("proposal capability refs must use the core-ID wire contract", failures)
 
     token = defs.get("token")
-    if not isinstance(token, dict) or token.get("type") != "string" or token.get("maxLength") != 256:
+    if (
+        not isinstance(token, dict)
+        or token.get("type") != "string"
+        or token.get("maxLength") != 256
+    ):
         fail("intent proposal token character bound drifted from Rust", failures)
     else:
         patterns = {
@@ -140,7 +156,10 @@ def validate_schema(root: Path, failures: list[str]) -> None:
             if isinstance(item, dict) and isinstance(item.get("pattern"), str)
         }
         if patterns != {r"\S", r"^[^\u0000-\u001f\u007f-\u009f]+$"}:
-            fail("intent proposal token whitespace/control semantics drifted from Rust", failures)
+            fail(
+                "intent proposal token whitespace/control semantics drifted from Rust",
+                failures,
+            )
     text = defs.get("text")
     if text != {
         "type": "string",
@@ -154,10 +173,18 @@ def validate_schema(root: Path, failures: list[str]) -> None:
     else:
         all_of = non_empty_text.get("allOf")
         if all_of != [{"$ref": "#/$defs/text"}, {"pattern": r"\S"}]:
-            fail("intent proposal required-text whitespace contract drifted from Rust", failures)
+            fail(
+                "intent proposal required-text whitespace contract drifted from Rust",
+                failures,
+            )
     text_list = defs.get("textList")
-    if not isinstance(text_list, dict) or text_list.get("items") != {"$ref": "#/$defs/text"}:
-        fail("intent proposal text-list items must share the canonical text contract", failures)
+    if not isinstance(text_list, dict) or text_list.get("items") != {
+        "$ref": "#/$defs/text"
+    }:
+        fail(
+            "intent proposal text-list items must share the canonical text contract",
+            failures,
+        )
 
 
 def validate(root: Path) -> list[str]:
@@ -167,21 +194,23 @@ def validate(root: Path) -> list[str]:
     cargo_lock = (root / "Cargo.lock").read_text(encoding="utf-8")
     layering = (root / "contracts/layering.toml").read_text(encoding="utf-8")
     components = (root / "contracts/components.toml").read_text(encoding="utf-8")
-    control_lib = (root / "crates/linura-control/src/lib.rs").read_text(encoding="utf-8")
-    internal_engine = (root / "crates/linura-control/src/agent_interpretation.rs").read_text(
+    control_lib = (root / "crates/linura-control/src/lib.rs").read_text(
         encoding="utf-8"
     )
-    secure_engine = (root / "crates/linura-control/src/secure_agent_interpretation.rs").read_text(
-        encoding="utf-8"
-    )
+    internal_engine = (
+        root / "crates/linura-control/src/agent_interpretation.rs"
+    ).read_text(encoding="utf-8")
+    secure_engine = (
+        root / "crates/linura-control/src/secure_agent_interpretation.rs"
+    ).read_text(encoding="utf-8")
     secure_engine_code = rust_code_without_line_comments(secure_engine)
     control_acceptance = (
         root / "crates/linura-control/src/proposal_acceptance_secure.rs"
     ).read_text(encoding="utf-8")
     control_acceptance_code = rust_code_without_line_comments(control_acceptance)
-    proposal_authority = (root / "crates/linura-control/src/proposal_authority.rs").read_text(
-        encoding="utf-8"
-    )
+    proposal_authority = (
+        root / "crates/linura-control/src/proposal_authority.rs"
+    ).read_text(encoding="utf-8")
     secure_acceptance = (
         root / "crates/linura-control/src/secure_proposal_acceptance.rs"
     ).read_text(encoding="utf-8")
@@ -195,7 +224,9 @@ def validate(root: Path) -> list[str]:
     intent_proposal = (root / "crates/linura-intent/src/proposal_v1.rs").read_text(
         encoding="utf-8"
     )
-    library_lib = (root / "crates/linura-library/src/lib.rs").read_text(encoding="utf-8")
+    library_lib = (root / "crates/linura-library/src/lib.rs").read_text(
+        encoding="utf-8"
+    )
     library_acceptance = (
         root / "crates/linura-library/src/proposal_acceptance_secure.rs"
     ).read_text(encoding="utf-8")
@@ -203,9 +234,15 @@ def validate(root: Path) -> list[str]:
         encoding="utf-8"
     )
     library_acceptance_code = rust_code_without_line_comments(library_acceptance)
-    transaction = (root / "crates/linura-transaction/src/lib.rs").read_text(encoding="utf-8")
-    control_toml = (root / "crates/linura-control/Cargo.toml").read_text(encoding="utf-8")
-    library_toml = (root / "crates/linura-library/Cargo.toml").read_text(encoding="utf-8")
+    transaction = (root / "crates/linura-transaction/src/lib.rs").read_text(
+        encoding="utf-8"
+    )
+    control_toml = (root / "crates/linura-control/Cargo.toml").read_text(
+        encoding="utf-8"
+    )
+    library_toml = (root / "crates/linura-library/Cargo.toml").read_text(
+        encoding="utf-8"
+    )
 
     require(
         control_lib,
@@ -231,7 +268,10 @@ def validate(root: Path) -> list[str]:
         re.DOTALL,
     ):
         fail("generic interpretation engine is publicly re-exported", failures)
-    for marker in ("ProposalAcceptanceAuthoritySource", "ProposalAcceptanceAuthorityGuard"):
+    for marker in (
+        "ProposalAcceptanceAuthoritySource",
+        "ProposalAcceptanceAuthorityGuard",
+    ):
         forbid(control_lib, marker, "Control public API", failures)
 
     require(
@@ -262,7 +302,9 @@ def validate(root: Path) -> list[str]:
         "unsafe {",
         'extern "C"',
     ):
-        forbid(capabilityless, marker, "capabilityless adapter implementation", failures)
+        forbid(
+            capabilityless, marker, "capabilityless adapter implementation", failures
+        )
     require(
         capabilityless,
         "pub struct CapabilitylessInterpretationAdapter",
@@ -330,9 +372,14 @@ def validate(root: Path) -> list[str]:
     for marker in gate_markers:
         require(internal_engine, marker, "provider invocation gate", failures)
     consume_at = internal_engine.find("self.consumed_permits.insert(permit.nonce);")
-    transport_at = internal_engine.find(".invoke_once(prepared, deadline, response_budget)")
+    transport_at = internal_engine.find(
+        ".invoke_once(prepared, deadline, response_budget)"
+    )
     if consume_at < 0 or transport_at < 0 or consume_at >= transport_at:
-        fail("provider invocation permit must be consumed before bounded transport invocation", failures)
+        fail(
+            "provider invocation permit must be consumed before bounded transport invocation",
+            failures,
+        )
 
     for marker in (
         "struct AttemptDeadline",
@@ -346,7 +393,9 @@ def validate(root: Path) -> list[str]:
         "self.remaining_deadline_ms(now_unix_ms)?",
         "effective_now_unix_ms",
     ):
-        require(internal_engine, marker, "cumulative provider/session deadline", failures)
+        require(
+            internal_engine, marker, "cumulative provider/session deadline", failures
+        )
     if internal_engine.count("deadline.ensure_live()?;") < 3:
         fail(
             "provider attempt deadline must be rechecked across preparation, transport, and decode",
@@ -356,9 +405,15 @@ def validate(root: Path) -> list[str]:
     for marker, label in (
         ("pub struct ProviderInvocationDeadline", "provider deadline contract"),
         ("pub struct ProviderResponseBudget", "provider response budget contract"),
-        ("response_budget: ProviderResponseBudget", "provider transport response budget"),
+        (
+            "response_budget: ProviderResponseBudget",
+            "provider transport response budget",
+        ),
         ("deadline: ProviderInvocationDeadline", "provider transport deadline"),
-        ("response_budget.max_bytes()", "provider transport response budget documentation"),
+        (
+            "response_budget.max_bytes()",
+            "provider transport response budget documentation",
+        ),
     ):
         require(provider_interpretation, marker, label, failures)
     transport_match = re.search(
@@ -371,7 +426,10 @@ def validate(root: Path) -> list[str]:
     else:
         body = transport_match.group("body")
         if re.findall(r"\bfn\s+([A-Za-z0-9_]+)\s*\(", body) != ["invoke_once"]:
-            fail("trusted provider transport must expose exactly one invocation method", failures)
+            fail(
+                "trusted provider transport must expose exactly one invocation method",
+                failures,
+            )
         for forbidden_name in ("retry", "resume", "reconnect", "redirect", "reissue"):
             if forbidden_name in body.lower():
                 fail(
@@ -395,7 +453,12 @@ def validate(root: Path) -> list[str]:
         ".authorize_handoff(",
         ".bind_signed_handoff(&self.library_authority, challenge, handoff)",
     ):
-        require(control_acceptance_code, marker, "Control acceptance signing/binding authority", failures)
+        require(
+            control_acceptance_code,
+            marker,
+            "Control acceptance signing/binding authority",
+            failures,
+        )
 
     for marker in (
         "LibraryProposalAcceptanceAuthority::validate_supersession_lineage(",
@@ -405,7 +468,9 @@ def validate(root: Path) -> list[str]:
         "request.clock_continuity_generation",
         "linura_library::digest_intent(&resulting_intent)",
     ):
-        require(proposal_authority, marker, "Control decision issuance binding", failures)
+        require(
+            proposal_authority, marker, "Control decision issuance binding", failures
+        )
 
     for marker in (
         "MAX_TOKEN_CHARS",
@@ -416,7 +481,9 @@ def validate(root: Path) -> list[str]:
         "value.chars().count() > MAX_TEXT_CHARS",
         "self.estimated_size() > MAX_PROPOSAL_BYTES",
     ):
-        require(intent_proposal, marker, "Rust proposal string/aggregate contract", failures)
+        require(
+            intent_proposal, marker, "Rust proposal string/aggregate contract", failures
+        )
 
     for marker in (
         "authority: &mut ControlProposalAuthority",
@@ -424,7 +491,12 @@ def validate(root: Path) -> list[str]:
         "from_authority_key(key: TransactionAuthorityKey)",
         "pub fn provision_library(",
     ):
-        require(secure_acceptance_code, marker, "secure proposal acceptance facade", failures)
+        require(
+            secure_acceptance_code,
+            marker,
+            "secure proposal acceptance facade",
+            failures,
+        )
     forbid(
         secure_acceptance_code,
         "ProposalAcceptanceAuthoritySource",
@@ -438,13 +510,20 @@ def validate(root: Path) -> list[str]:
         failures,
     )
     if re.search(r"pub\s+fn\s+new\s*\(\s*\)", secure_acceptance_code):
-        fail("production proposal acceptance must not mint ephemeral authority", failures)
+        fail(
+            "production proposal acceptance must not mint ephemeral authority", failures
+        )
 
     for marker in (
         ".revalidate_context_sources(&proposal.context)",
         "ProposalAcceptanceAuthority::validate_supersession_lineage(",
     ):
-        require(control_acceptance_code, marker, "Control durable final revalidation", failures)
+        require(
+            control_acceptance_code,
+            marker,
+            "Control durable final revalidation",
+            failures,
+        )
 
     for marker in (
         "pub fn revalidate_context_sources(",
@@ -454,7 +533,9 @@ def validate(root: Path) -> list[str]:
         "validate_durable_record",
         "pub(crate) fn require_library_binding(",
     ):
-        require(library_acceptance, marker, "Library durable acceptance hardening", failures)
+        require(
+            library_acceptance, marker, "Library durable acceptance hardening", failures
+        )
     for marker in (
         "self.require_library_binding(library)?;",
         "validate_durable_record(&record, &record_digest, material_digest)?;",
@@ -479,7 +560,9 @@ def validate(root: Path) -> list[str]:
         "handoff.authorized_at_unix_ms() == challenge.time_seal.time_floor_unix_ms",
         "handoff.expires_at_unix_ms() == challenge.time_seal.exclusive_deadline_unix_ms",
     ):
-        require(library_acceptance_code, marker, "Library acceptance verifier", failures)
+        require(
+            library_acceptance_code, marker, "Library acceptance verifier", failures
+        )
     for forbidden in (
         "TransactionAuthoritySigner",
         "TransactionAuthorityKey",
@@ -487,7 +570,9 @@ def validate(root: Path) -> list[str]:
         "ProposalAcceptanceControlToken",
         "from_control_token",
     ):
-        forbid(library_acceptance_code, forbidden, "Library acceptance verifier", failures)
+        forbid(
+            library_acceptance_code, forbidden, "Library acceptance verifier", failures
+        )
 
     begin_at = library_acceptance_code.find("pub fn begin<'a>(")
     binding_at = library_acceptance_code.find(
@@ -495,11 +580,23 @@ def validate(root: Path) -> list[str]:
         begin_at,
     )
     transaction_at = library_acceptance_code.find("transaction_with_behavior", begin_at)
-    if begin_at < 0 or binding_at < 0 or transaction_at < 0 or binding_at >= transaction_at:
-        fail("Library begin must verify provisioned authority before opening acceptance transaction", failures)
+    if (
+        begin_at < 0
+        or binding_at < 0
+        or transaction_at < 0
+        or binding_at >= transaction_at
+    ):
+        fail(
+            "Library begin must verify provisioned authority before opening acceptance transaction",
+            failures,
+        )
 
-    validate_target_at = control_acceptance_code.find("validate_target_under_library_guard")
-    challenge_at = control_acceptance_code.find(".signing_challenge(&material, time_seal)")
+    validate_target_at = control_acceptance_code.find(
+        "validate_target_under_library_guard"
+    )
+    challenge_at = control_acceptance_code.find(
+        ".signing_challenge(&material, time_seal)"
+    )
     sign_at = control_acceptance_code.find(".authorize_handoff(", challenge_at)
     bind_at = control_acceptance_code.find(
         ".bind_signed_handoff(&self.library_authority, challenge, handoff)", sign_at
@@ -562,7 +659,10 @@ def validate(root: Path) -> list[str]:
 
     for manifest in root.rglob("Cargo.toml"):
         manifest_text = manifest.read_text(encoding="utf-8")
-        if "linura-control-token" in manifest_text or "control-internal" in manifest_text:
+        if (
+            "linura-control-token" in manifest_text
+            or "control-internal" in manifest_text
+        ):
             fail(
                 f"obsolete v0.8 authority mechanism remains in {manifest.relative_to(root)}",
                 failures,
@@ -574,16 +674,29 @@ def validate(root: Path) -> list[str]:
     agent_runtime_toml = (root / "crates/linura-agent-runtime/Cargo.toml").read_text(
         encoding="utf-8"
     )
-    forbid(agent_runtime_toml, "linura-provider-sdk", "agent runtime dependency graph", failures)
-    forbid(agent_runtime_toml, "linura-library", "agent runtime dependency graph", failures)
-    require(provider_sdk_toml, "linura-intent", "provider SDK proposal contract", failures)
+    forbid(
+        agent_runtime_toml,
+        "linura-provider-sdk",
+        "agent runtime dependency graph",
+        failures,
+    )
+    forbid(
+        agent_runtime_toml, "linura-library", "agent runtime dependency graph", failures
+    )
+    require(
+        provider_sdk_toml, "linura-intent", "provider SDK proposal contract", failures
+    )
 
     validate_schema(root, failures)
     return failures
 
 
 def main(argv: list[str]) -> int:
-    root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[1]
+    root = (
+        Path(argv[1]).resolve()
+        if len(argv) > 1
+        else Path(__file__).resolve().parents[1]
+    )
     failures = validate(root)
     if failures:
         for failure in failures:

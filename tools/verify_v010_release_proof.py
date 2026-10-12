@@ -146,9 +146,13 @@ def verify(
             raise ProofError("invalid v0.10 qualification file declaration")
         name = safe_relative_file(item.get("name"), "v0.10 qualification file name")
         size = item.get("size")
-        digest = valid_digest(item.get("sha256"), f"v0.10 qualification digest for {name}")
+        digest = valid_digest(
+            item.get("sha256"), f"v0.10 qualification digest for {name}"
+        )
         if type(size) is not int or size < 0 or name in expected_files:
-            raise ProofError(f"invalid or duplicate v0.10 qualification file declaration: {name}")
+            raise ProofError(
+                f"invalid or duplicate v0.10 qualification file declaration: {name}"
+            )
         expected_files[name] = (size, digest)
 
     actual_files: dict[str, tuple[int, str]] = {}
@@ -158,7 +162,9 @@ def verify(
         if path.is_dir():
             continue
         if not path.is_file():
-            raise ProofError(f"v0.10 qualification contains a non-regular entry: {path}")
+            raise ProofError(
+                f"v0.10 qualification contains a non-regular entry: {path}"
+            )
         relative = path.relative_to(qualification_root).as_posix()
         actual_files[relative] = (path.stat().st_size, sha256(path))
     if actual_files != expected_files:
@@ -193,7 +199,10 @@ def verify(
         qualification_root / PREPARED_RUNTIME_PATH,
         "v0.10 prepared runtime evidence",
     )
-    if pre_seal.get("repository") != repository or prepared.get("repository") != repository:
+    if (
+        pre_seal.get("repository") != repository
+        or prepared.get("repository") != repository
+    ):
         raise ProofError("v0.10 runtime evidence repository mismatch")
     if pre_seal.get("source_sha") != qualification_source_sha:
         raise ProofError("v0.10 pre-seal runtime source mismatch")
@@ -215,7 +224,9 @@ def verify(
     if not payload_linurad.is_file() or payload_linurad.is_symlink():
         raise ProofError("release payload linurad is missing or unsafe")
     if sha256(payload_linurad) != prepared_linurad:
-        raise ProofError("release payload linurad does not match prepared runtime proof")
+        raise ProofError(
+            "release payload linurad does not match prepared runtime proof"
+        )
 
     print(
         "v0.10 release proof verified: "

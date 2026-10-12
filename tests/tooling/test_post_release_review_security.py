@@ -27,11 +27,13 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
         self.assertNotIn("issues/$PR_NUMBER/comments", workflow)
         self.assertNotIn("issues: write", workflow)
 
-    def test_native_pr_gate_is_ruleset_authoritative_and_dispatch_is_not_a_substitute(self) -> None:
+    def test_native_pr_gate_is_ruleset_authoritative_and_dispatch_is_not_a_substitute(
+        self,
+    ) -> None:
         workflow = self._closure()
-        gate = workflow.split("- name: Require GitHub-native closure PR gates", 1)[1].split(
-            "- name: Re-prove and squash merge exact deterministic closure", 1
-        )[0]
+        gate = workflow.split("- name: Require GitHub-native closure PR gates", 1)[
+            1
+        ].split("- name: Re-prove and squash merge exact deterministic closure", 1)[0]
         self.assertIn("tools/release_native_gates.py", gate)
         self.assertIn("--pr-number", gate)
         self.assertIn("--base-sha", gate)
@@ -46,29 +48,46 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
         self.assertIn("_unresolved_threads", native_tool)
         self.assertIn("reviewThreads(first:100, after:$cursor)", native_tool)
 
-    def test_merge_boundary_reproves_native_gate_branch_parent_and_message(self) -> None:
-        merge = self._closure().split(
-            "- name: Re-prove and squash merge exact deterministic closure", 1
-        )[1].split("- name: Confirm event-driven terminal cleanup handoff", 1)[0]
+    def test_merge_boundary_reproves_native_gate_branch_parent_and_message(
+        self,
+    ) -> None:
+        merge = (
+            self._closure()
+            .split("- name: Re-prove and squash merge exact deterministic closure", 1)[
+                1
+            ]
+            .split("- name: Confirm event-driven terminal cleanup handoff", 1)[0]
+        )
         self.assertIn("tools/release_native_gates.py", merge)
         self.assertIn("--timeout-seconds 0", merge)
-        self.assertIn('test "$BRANCH" = "automation/post-release-${RELEASE_TAG}-${HEAD_SHA}"', merge)
-        self.assertIn('test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)" = "$HEAD_SHA"', merge)
+        self.assertIn(
+            'test "$BRANCH" = "automation/post-release-${RELEASE_TAG}-${HEAD_SHA}"',
+            merge,
+        )
+        self.assertIn(
+            'test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq .object.sha)" = "$HEAD_SHA"',
+            merge,
+        )
         self.assertIn("'.parents | length'", merge)
         self.assertIn("'.parents[0].sha'", merge)
         self.assertIn('= "$BASE_SHA"', merge)
-        self.assertIn('chore: close $RELEASE_TAG release state', merge)
-        self.assertIn('pulls/$PR_NUMBER/merge', merge)
+        self.assertIn("chore: close $RELEASE_TAG release state", merge)
+        self.assertIn("pulls/$PR_NUMBER/merge", merge)
 
     def test_cleanup_runs_only_after_native_main_push_gates(self) -> None:
         cleanup = self._cleanup()
         self.assertIn("workflow_run:", cleanup)
-        self.assertIn("workflows: [\"CI\", \"Security\", \"CodeQL\"]", cleanup)
+        self.assertIn('workflows: ["CI", "Security", "CodeQL"]', cleanup)
         self.assertIn("types: [completed]", cleanup)
         self.assertIn("branches: [main]", cleanup)
-        self.assertIn('github.event.workflow_run.event == \'push\'', cleanup)
-        self.assertIn('startsWith(github.event.workflow_run.head_commit.message, \'chore: close v\')', cleanup)
-        self.assertIn("Require all native protected-main gates on closure commit", cleanup)
+        self.assertIn("github.event.workflow_run.event == 'push'", cleanup)
+        self.assertIn(
+            "startsWith(github.event.workflow_run.head_commit.message, 'chore: close v')",
+            cleanup,
+        )
+        self.assertIn(
+            "Require all native protected-main gates on closure commit", cleanup
+        )
         self.assertIn("tools/release_native_gates.py", cleanup)
         self.assertIn("commit --event push", cleanup)
 
@@ -79,19 +98,33 @@ class PostReleaseMachineHandoffSecurityTests(unittest.TestCase):
 
     def test_cleanup_authority_is_immutable_closure_commit_and_ancestry(self) -> None:
         cleanup = self._cleanup()
-        self.assertIn('CLOSURE_SHA: ${{ github.event.workflow_run.head_sha }}', cleanup)
-        self.assertIn('git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main" --force', cleanup)
+        self.assertIn("CLOSURE_SHA: ${{ github.event.workflow_run.head_sha }}", cleanup)
+        self.assertIn(
+            'git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main" --force',
+            cleanup,
+        )
         self.assertIn('git cat-file -e "$CLOSURE_SHA^{commit}"', cleanup)
-        self.assertIn('git merge-base --is-ancestor "$CLOSURE_SHA" refs/remotes/origin/main', cleanup)
-        self.assertIn('git show "$CLOSURE_SHA:contracts/release-branch-cleanup.toml"', cleanup)
-        self.assertNotIn('test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$CLOSURE_SHA"', cleanup)
+        self.assertIn(
+            'git merge-base --is-ancestor "$CLOSURE_SHA" refs/remotes/origin/main',
+            cleanup,
+        )
+        self.assertIn(
+            'git show "$CLOSURE_SHA:contracts/release-branch-cleanup.toml"', cleanup
+        )
+        self.assertNotIn(
+            'test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$CLOSURE_SHA"',
+            cleanup,
+        )
 
     def test_cleanup_uses_narrow_app_token_and_atomic_exact_ref_leases(self) -> None:
         workflow = self._cleanup()
         self.assertIn("Mint cleanup-scoped Release App token", workflow)
         self.assertIn("permission-contents: write", workflow)
         self.assertIn("permission-pull-requests: read", workflow)
-        self.assertNotIn("permission-actions: write", workflow.split("Mint cleanup-scoped Release App token", 1)[1])
+        self.assertNotIn(
+            "permission-actions: write",
+            workflow.split("Mint cleanup-scoped Release App token", 1)[1],
+        )
         self.assertIn("tools/release_branch_cleanup.py", workflow)
 
         tool = CLEANUP_TOOL.read_text(encoding="utf-8")

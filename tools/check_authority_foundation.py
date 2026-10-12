@@ -19,7 +19,12 @@ EXPECTED_AUTHORITY_STATES = {
     "v0.10.0": "lifecycle-integrated",
     "v1.0.0": "lifecycle-integrated",
 }
-VALID_AUTHORITY_STATES = {"none", "review-only", "durable-reviewed", "lifecycle-integrated"}
+VALID_AUTHORITY_STATES = {
+    "none",
+    "review-only",
+    "durable-reviewed",
+    "lifecycle-integrated",
+}
 
 REMOVED_BOOTSTRAP_MARKERS = {
     "crates/linura-core/src/lib.rs": (
@@ -77,9 +82,9 @@ PRESERVED_SCAFFOLD_MARKERS = {
     ),
     "crates/linura-control/src/policy_review.rs": (
         "classify_plan_risk(plan)",
-        "code: \"authority-risk-classified\".into()",
-        "code: \"authority-risk-unclassified\".into()",
-        "code: \"authority-risk-downgrade-rejected\".into()",
+        'code: "authority-risk-classified".into()',
+        'code: "authority-risk-unclassified".into()',
+        'code: "authority-risk-downgrade-rejected".into()',
     ),
 }
 
@@ -165,7 +170,9 @@ def validate(root: Path) -> list[str]:
         by_version[version] = milestone
         authority_state = milestone.get("authority_state")
         if authority_state not in VALID_AUTHORITY_STATES:
-            failures.append(f"{version}: unsupported authority_state {authority_state!r}")
+            failures.append(
+                f"{version}: unsupported authority_state {authority_state!r}"
+            )
 
     if set(by_version) != set(EXPECTED_AUTHORITY_STATES):
         failures.append(
@@ -184,20 +191,28 @@ def validate(root: Path) -> list[str]:
     v03 = by_version.get("v0.3.0")
     if v03 is not None:
         if v03.get("durable_recovery") is not False:
-            failures.append("v0.3.0 review-only authority must not claim durable recovery")
+            failures.append(
+                "v0.3.0 review-only authority must not claim durable recovery"
+            )
         if v03.get("executor_state") != "none":
             failures.append("v0.3.0 review-only authority must not carry an executor")
         if v03.get("complete_lifecycle") is not False:
-            failures.append("v0.3.0 review-only authority must not claim complete lifecycle")
+            failures.append(
+                "v0.3.0 review-only authority must not claim complete lifecycle"
+            )
         if v03.get("managed_mutation_support") != "none":
-            failures.append("v0.3.0 review-only authority must not support managed mutation")
+            failures.append(
+                "v0.3.0 review-only authority must not support managed mutation"
+            )
         if v03.get("milestone_contract") != "docs/milestones/v0.3.0.md":
             failures.append("v0.3.0 must bind docs/milestones/v0.3.0.md")
 
     for version in ("v0.4.0", "v0.5.0"):
         milestone = by_version.get(version)
         if milestone is not None and milestone.get("durable_recovery") is not True:
-            failures.append(f"{version}: durable-reviewed authority requires durable recovery")
+            failures.append(
+                f"{version}: durable-reviewed authority requires durable recovery"
+            )
 
     for version in (
         "v0.6.0",
@@ -211,7 +226,9 @@ def validate(root: Path) -> list[str]:
         if milestone is None:
             continue
         if milestone.get("complete_lifecycle") is not True:
-            failures.append(f"{version}: lifecycle-integrated authority requires complete lifecycle")
+            failures.append(
+                f"{version}: lifecycle-integrated authority requires complete lifecycle"
+            )
         if milestone.get("executor_state") != "integrated-narrow":
             failures.append(
                 f"{version}: lifecycle-integrated authority requires integrated narrow executor"
@@ -229,7 +246,9 @@ def validate(root: Path) -> list[str]:
         text = read_text(root, relative, failures)
         for marker in markers:
             if marker not in text:
-                failures.append(f"future authority scaffold missing from {relative}: {marker}")
+                failures.append(
+                    f"future authority scaffold missing from {relative}: {marker}"
+                )
 
     semantic_test_path = "crates/linura-policy/tests/approval_strength.rs"
     semantic_test = read_text(root, semantic_test_path, failures)
@@ -251,7 +270,11 @@ def validate(root: Path) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[1]
+    root = (
+        Path(argv[1]).resolve()
+        if len(argv) > 1
+        else Path(__file__).resolve().parents[1]
+    )
     failures = validate(root)
     if failures:
         for failure in failures:

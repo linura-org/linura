@@ -21,7 +21,9 @@ VERSION_FILE_RE = re.compile(
     r"(?:\+(?P<build>[0-9A-Za-z.-]+))?\.md$"
 )
 STATUS_RE = re.compile(r"^\*\*Status:\*\*\s*(?P<value>.+?)\s*$", re.MULTILINE)
-PUBLICATION_SECTION_RE = re.compile(r"(?ms)^## Publication evidence\n(?P<body>.*?)(?=^## |\Z)")
+PUBLICATION_SECTION_RE = re.compile(
+    r"(?ms)^## Publication evidence\n(?P<body>.*?)(?=^## |\Z)"
+)
 
 # These are live lifecycle assertions, not timeless release-contract language.
 # They are forbidden anywhere in a v0.7+ frozen contract because the exact
@@ -92,7 +94,9 @@ def validate_contract(path: Path) -> None:
         raise PublicationStabilityError(f"{path}: missing **Status:** metadata")
 
     if PUBLICATION_SECTION_RE.search(text) is None:
-        raise PublicationStabilityError(f"{path}: missing ## Publication evidence section")
+        raise PublicationStabilityError(
+            f"{path}: missing ## Publication evidence section"
+        )
 
     temporary = _find_temporary_lifecycle_assertion(text)
     if temporary is not None:
@@ -105,7 +109,9 @@ def validate_contract(path: Path) -> None:
 
 def validate_tree(releases_dir: Path = RELEASES_DIR) -> None:
     if not releases_dir.is_dir():
-        raise PublicationStabilityError(f"release directory does not exist: {releases_dir}")
+        raise PublicationStabilityError(
+            f"release directory does not exist: {releases_dir}"
+        )
     for path in sorted(releases_dir.iterdir()):
         if path.is_file():
             validate_contract(path)
@@ -114,7 +120,10 @@ def validate_tree(releases_dir: Path = RELEASES_DIR) -> None:
 def main() -> int:
     directory = Path(sys.argv[1]) if len(sys.argv) > 1 else RELEASES_DIR
     if len(sys.argv) > 2:
-        print("usage: check_release_publication_stability.py [releases-dir]", file=sys.stderr)
+        print(
+            "usage: check_release_publication_stability.py [releases-dir]",
+            file=sys.stderr,
+        )
         return 2
     try:
         validate_tree(directory)

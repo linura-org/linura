@@ -32,14 +32,10 @@ SYSTEMD_SUFFIXES = {
 RUST_CONST_PATTERN = re.compile(
     r'\b(?:pub\s+)?const\s+([A-Z][A-Z0-9_]*)\s*:\s*&str\s*=\s*"([^"]+)"\s*;'
 )
-RUST_SERVE_AT_PATTERN = re.compile(
-    r'\.serve_at\s*\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*,'
-)
-RUST_BUS_NAME_PATTERN = re.compile(
-    r'\.name\s*\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*\)'
-)
+RUST_SERVE_AT_PATTERN = re.compile(r'\.serve_at\s*\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*,')
+RUST_BUS_NAME_PATTERN = re.compile(r'\.name\s*\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*\)')
 RUST_ZBUS_INTERFACE_PATTERN = re.compile(
-    r'#\s*\[\s*(?:zbus::)?interface\s*\((.*?)\)\s*\]',
+    r"#\s*\[\s*(?:zbus::)?interface\s*\((.*?)\)\s*\]",
     re.DOTALL,
 )
 RUST_ZBUS_NAME_PATTERN = re.compile(r'\bname\s*=\s*"([^"]+)"')
@@ -55,15 +51,11 @@ CMAKE_URI_PATTERN = re.compile(r"(?:^|\s)URI\s+([A-Za-z0-9_.]+)(?=\s|$)")
 SYSTEMD_BUS_NAME_PATTERN = re.compile(
     r"(?m)^\s*BusName\s*=\s*([A-Za-z0-9_.-]+)\s*(?:#.*)?$"
 )
-SYSTEMD_TYPE_PATTERN = re.compile(
-    r"(?m)^\s*Type\s*=\s*([A-Za-z0-9_-]+)\s*(?:#.*)?$"
-)
+SYSTEMD_TYPE_PATTERN = re.compile(r"(?m)^\s*Type\s*=\s*([A-Za-z0-9_-]+)\s*(?:#.*)?$")
 DBUS_ACTIVATION_NAME_PATTERN = re.compile(
     r"(?m)^\s*Name\s*=\s*([A-Za-z0-9_.-]+)\s*(?:#.*)?$"
 )
-SYSTEMD_ALIAS_PATTERN = re.compile(
-    r"(?m)^\s*Alias\s*=\s*([^#\n]*)"
-)
+SYSTEMD_ALIAS_PATTERN = re.compile(r"(?m)^\s*Alias\s*=\s*([^#\n]*)")
 RUST_SERVE_AT_BINDING_PATTERN = re.compile(
     r'\.serve_at\s*\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*,\s*([A-Za-z_][A-Za-z0-9_:]*)\s*\)'
 )
@@ -100,7 +92,7 @@ def _xml_attribute_values(path: Path, attributes: tuple[str, ...]) -> set[str]:
 
 
 CFG_TEST_PATTERN = re.compile(
-    r'#\s*\[\s*cfg\s*\([^\]]*\btest\b[^\]]*\)\s*\]',
+    r"#\s*\[\s*cfg\s*\([^\]]*\btest\b[^\]]*\)\s*\]",
     re.DOTALL,
 )
 
@@ -236,7 +228,9 @@ def _rust_sources(root: Path) -> list[Path]:
         return []
 
     try:
-        workspace = tomllib.loads(workspace_manifest.read_text(encoding="utf-8")).get("workspace", {})
+        workspace = tomllib.loads(workspace_manifest.read_text(encoding="utf-8")).get(
+            "workspace", {}
+        )
     except (OSError, tomllib.TOMLDecodeError):
         return []
 
@@ -265,7 +259,9 @@ def _rust_sources(root: Path) -> list[Path]:
                 continue
             source_root = resolved_member / "src"
             if source_root.is_dir():
-                paths.update(path for path in source_root.rglob("*.rs") if path.is_file())
+                paths.update(
+                    path for path in source_root.rglob("*.rs") if path.is_file()
+                )
     return sorted(paths)
 
 
@@ -362,7 +358,9 @@ def _rust_dbus_surfaces(
                     if token == "SERVICE_NAME":
                         interface_token = "INTERFACE_NAME"
                     elif token.endswith("_SERVICE_NAME"):
-                        interface_token = f"{token[:-len('_SERVICE_NAME')]}_INTERFACE_NAME"
+                        interface_token = (
+                            f"{token[: -len('_SERVICE_NAME')]}_INTERFACE_NAME"
+                        )
                     else:
                         interface_token = ""
                     if interface_token:
@@ -374,7 +372,9 @@ def _rust_dbus_surfaces(
 
                 services.add(service_name)
                 if interface_name is not None:
-                    runtime_service_interfaces.setdefault(service_name, set()).add(interface_name)
+                    runtime_service_interfaces.setdefault(service_name, set()).add(
+                        interface_name
+                    )
 
         if ".serve_at" not in text:
             continue
@@ -403,7 +403,7 @@ def _rust_dbus_surfaces(
                 if token == "OBJECT_PATH":
                     interface_token = "INTERFACE_NAME"
                 elif token.endswith("_OBJECT_PATH"):
-                    interface_token = f"{token[:-len('_OBJECT_PATH')]}_INTERFACE_NAME"
+                    interface_token = f"{token[: -len('_OBJECT_PATH')]}_INTERFACE_NAME"
                 else:
                     failures.append(
                         f"cannot derive D-Bus interface constant for serve_at({token}, ...) in {path.relative_to(root)}"
@@ -548,7 +548,9 @@ def _discover(
             try:
                 names = _xml_values(path, "interface", "name")
             except (OSError, ET.ParseError) as error:
-                failures.append(f"cannot inspect D-Bus interface {path.relative_to(root)}: {error}")
+                failures.append(
+                    f"cannot inspect D-Bus interface {path.relative_to(root)}: {error}"
+                )
                 continue
             if len(names) != 1:
                 failures.append(
@@ -571,7 +573,9 @@ def _discover(
                 owned_names = _xml_attribute_values(path, ("own",))
                 owned_prefixes = _xml_attribute_values(path, ("own_prefix",))
             except (OSError, ET.ParseError) as error:
-                failures.append(f"cannot inspect D-Bus policy {path.relative_to(root)}: {error}")
+                failures.append(
+                    f"cannot inspect D-Bus policy {path.relative_to(root)}: {error}"
+                )
                 continue
             discovered["dbus-service"].update(owned_names)
             for prefix in sorted(owned_prefixes):
@@ -580,7 +584,10 @@ def _discover(
                     "declare exact first-party names with own= instead"
                 )
 
-    for relative_dir in ("packaging/dbus-1/system-services", "packaging/dbus-1/services"):
+    for relative_dir in (
+        "packaging/dbus-1/system-services",
+        "packaging/dbus-1/services",
+    ):
         activation_dir = root / relative_dir
         if not activation_dir.is_dir():
             continue
@@ -616,11 +623,15 @@ def _discover(
             try:
                 document = ET.fromstring(path.read_text(encoding="utf-8"))
             except (OSError, ET.ParseError) as error:
-                failures.append(f"cannot inspect AppStream metadata {path.relative_to(root)}: {error}")
+                failures.append(
+                    f"cannot inspect AppStream metadata {path.relative_to(root)}: {error}"
+                )
                 continue
             component_id = document.find("id")
             if component_id is None or not (component_id.text or "").strip():
-                failures.append(f"{path.relative_to(root)} must declare a non-empty AppStream <id>")
+                failures.append(
+                    f"{path.relative_to(root)} must declare a non-empty AppStream <id>"
+                )
                 continue
             discovered["application-id"].add((component_id.text or "").strip())
 
@@ -630,7 +641,9 @@ def _discover(
             try:
                 discovered["polkit-action"].update(_xml_values(path, "action", "id"))
             except (OSError, ET.ParseError) as error:
-                failures.append(f"cannot inspect Polkit policy {path.relative_to(root)}: {error}")
+                failures.append(
+                    f"cannot inspect Polkit policy {path.relative_to(root)}: {error}"
+                )
 
     systemd_dir = root / "packaging/systemd"
     if systemd_dir.is_dir():
@@ -651,9 +664,13 @@ def _discover(
             for alias_value in SYSTEMD_ALIAS_PATTERN.findall(text):
                 discovered["systemd-unit"].update(alias_value.split())
 
-    rust_names, rust_services, runtime_paths, runtime_service_interfaces, rust_failures = (
-        _rust_dbus_surfaces(root)
-    )
+    (
+        rust_names,
+        rust_services,
+        runtime_paths,
+        runtime_service_interfaces,
+        rust_failures,
+    ) = _rust_dbus_surfaces(root)
     discovered["dbus-interface"].update(rust_names)
     discovered["dbus-service"].update(rust_services)
     failures.extend(rust_failures)
@@ -683,7 +700,9 @@ def check(root: Path) -> list[str]:
         failures.append("namespace authority domain must remain linura.org")
     if reverse_dns != "org.linura":
         failures.append("reverse-DNS root must remain org.linura")
-    reverse_prefix = f"{reverse_dns}." if isinstance(reverse_dns, str) else "org.linura."
+    reverse_prefix = (
+        f"{reverse_dns}." if isinstance(reverse_dns, str) else "org.linura."
+    )
 
     local = contract.get("local")
     if not isinstance(local, dict):
@@ -742,38 +761,65 @@ def check(root: Path) -> list[str]:
             failures.append(f"duplicate namespace identifier: {kind} {identifier}")
         declared[key] = status
 
-        if kind in {"application-id", "dbus-interface", "dbus-service", "desktop-id", "polkit-action", "qml-uri"}:
+        if kind in {
+            "application-id",
+            "dbus-interface",
+            "dbus-service",
+            "desktop-id",
+            "polkit-action",
+            "qml-uri",
+        }:
             if not identifier.startswith(reverse_prefix):
                 failures.append(f"{kind} {identifier!r} must use {reverse_prefix}*")
         if kind == "systemd-unit":
-            if not (identifier.startswith("linura-") or identifier.startswith("linurad.")):
-                failures.append(f"systemd unit {identifier!r} must use the Linura unit namespace")
+            if not (
+                identifier.startswith("linura-") or identifier.startswith("linurad.")
+            ):
+                failures.append(
+                    f"systemd unit {identifier!r} must use the Linura unit namespace"
+                )
 
         if kind == "dbus-interface":
             object_path = item.get("object_path")
-            if not isinstance(object_path, str) or not object_path.startswith("/org/linura/"):
-                failures.append(f"{identifier}: D-Bus interface must declare /org/linura/* object_path")
+            if not isinstance(object_path, str) or not object_path.startswith(
+                "/org/linura/"
+            ):
+                failures.append(
+                    f"{identifier}: D-Bus interface must declare /org/linura/* object_path"
+                )
             else:
                 declared_dbus_paths[identifier] = object_path
             if "primary_interface" in item:
-                failures.append(f"{identifier}: primary_interface is valid only for dbus-service entries")
+                failures.append(
+                    f"{identifier}: primary_interface is valid only for dbus-service entries"
+                )
         elif kind == "dbus-service":
             primary_interface = item.get("primary_interface")
-            if not isinstance(primary_interface, str) or not primary_interface.startswith(reverse_prefix):
+            if not isinstance(
+                primary_interface, str
+            ) or not primary_interface.startswith(reverse_prefix):
                 failures.append(
                     f"{identifier}: D-Bus service must declare an {reverse_prefix}* primary_interface"
                 )
             else:
                 declared_dbus_service_interfaces[identifier] = primary_interface
             if "object_path" in item:
-                failures.append(f"{identifier}: object_path is valid only for dbus-interface entries")
+                failures.append(
+                    f"{identifier}: object_path is valid only for dbus-interface entries"
+                )
         else:
             if "object_path" in item:
-                failures.append(f"{identifier}: object_path is valid only for dbus-interface entries")
+                failures.append(
+                    f"{identifier}: object_path is valid only for dbus-interface entries"
+                )
             if "primary_interface" in item:
-                failures.append(f"{identifier}: primary_interface is valid only for dbus-service entries")
+                failures.append(
+                    f"{identifier}: primary_interface is valid only for dbus-service entries"
+                )
 
-    for service_name, primary_interface in sorted(declared_dbus_service_interfaces.items()):
+    for service_name, primary_interface in sorted(
+        declared_dbus_service_interfaces.items()
+    ):
         if ("dbus-interface", primary_interface) not in declared:
             failures.append(
                 f"D-Bus service {service_name} references undeclared primary interface "
@@ -784,10 +830,14 @@ def check(root: Path) -> list[str]:
     dbus_name_binding_items = contract.get("dbus_name_binding", [])
     polkit_binding_items = contract.get("polkit_binding", [])
     if not isinstance(dbus_registration_items, list):
-        failures.append("namespace contract dbus_registration must be an array of tables")
+        failures.append(
+            "namespace contract dbus_registration must be an array of tables"
+        )
         dbus_registration_items = []
     if not isinstance(dbus_name_binding_items, list):
-        failures.append("namespace contract dbus_name_binding must be an array of tables")
+        failures.append(
+            "namespace contract dbus_name_binding must be an array of tables"
+        )
         dbus_name_binding_items = []
     if not isinstance(polkit_binding_items, list):
         failures.append("namespace contract polkit_binding must be an array of tables")
@@ -811,7 +861,9 @@ def check(root: Path) -> list[str]:
         token = item.get("token")
         service = item.get("service")
         bus = item.get("bus")
-        if not all(isinstance(value, str) and value for value in (source, token, service, bus)):
+        if not all(
+            isinstance(value, str) and value for value in (source, token, service, bus)
+        ):
             failures.append(f"dbus_name_binding #{index} has invalid fields")
             continue
         if bus not in {"session", "system"}:
@@ -950,7 +1002,11 @@ def check(root: Path) -> list[str]:
             )
 
     for (kind, identifier), status in sorted(declared.items()):
-        if kind == "dbus-service" and status == "active" and identifier not in bound_active_services:
+        if (
+            kind == "dbus-service"
+            and status == "active"
+            and identifier not in bound_active_services
+        ):
             failures.append(
                 f"active D-Bus service lacks an exact runtime name binding: {identifier}"
             )
@@ -964,12 +1020,17 @@ def check(root: Path) -> list[str]:
         path_token = item.get("path_token")
         object_token = item.get("object_token")
         interface = item.get("interface")
-        if not all(isinstance(value, str) and value for value in (source, path_token, object_token, interface)):
+        if not all(
+            isinstance(value, str) and value
+            for value in (source, path_token, object_token, interface)
+        ):
             failures.append(f"dbus_registration #{index} has invalid fields")
             continue
         key = (source, path_token, object_token)
         if key in declared_runtime_dbus:
-            failures.append(f"duplicate dbus_registration: {source}:{path_token}:{object_token}")
+            failures.append(
+                f"duplicate dbus_registration: {source}:{path_token}:{object_token}"
+            )
         declared_runtime_dbus.add(key)
         if ("dbus-interface", interface) not in declared:
             failures.append(
@@ -1063,7 +1124,9 @@ def check(root: Path) -> list[str]:
                 if policy_dir.is_dir():
                     for candidate in sorted(policy_dir.glob("*.policy")):
                         try:
-                            candidate_actions = set(_xml_values(candidate, "action", "id"))
+                            candidate_actions = set(
+                                _xml_values(candidate, "action", "id")
+                            )
                         except (OSError, ET.ParseError):
                             continue
                         if action in candidate_actions:
@@ -1074,9 +1137,7 @@ def check(root: Path) -> list[str]:
                         f"found {sorted(definition_files)!r}"
                     )
         if key not in runtime_polkit_calls:
-            failures.append(
-                f"missing Polkit runtime binding {source}:{usage}:{token}"
-            )
+            failures.append(f"missing Polkit runtime binding {source}:{usage}:{token}")
         resolved_action = _resolve_runtime_binding_constant(
             source,
             token,
@@ -1107,7 +1168,9 @@ def check(root: Path) -> list[str]:
                 f"active Polkit action lacks an exact runtime/policy binding: {identifier}"
             )
 
-    discovered, runtime_paths, runtime_service_interfaces, discovery_failures = _discover(root)
+    discovered, runtime_paths, runtime_service_interfaces, discovery_failures = (
+        _discover(root)
+    )
     failures.extend(discovery_failures)
     for kind, values in discovered.items():
         for identifier in sorted(values):
@@ -1137,8 +1200,14 @@ def check(root: Path) -> list[str]:
                 )
 
     for (kind, identifier), status in sorted(declared.items()):
-        if kind in discovered and status == "active" and identifier not in discovered[kind]:
-            failures.append(f"active {kind} is not present in repository surfaces: {identifier}")
+        if (
+            kind in discovered
+            and status == "active"
+            and identifier not in discovered[kind]
+        ):
+            failures.append(
+                f"active {kind} is not present in repository surfaces: {identifier}"
+            )
 
     return failures
 

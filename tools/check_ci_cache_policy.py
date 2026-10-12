@@ -47,7 +47,6 @@ def _read(root: Path, relative: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-
 def _canonical_composite_steps(source: str, label: str) -> list[dict[str, object]]:
     """Accept only unambiguous, canonical composite-action YAML step syntax.
 
@@ -82,7 +81,8 @@ def _canonical_composite_steps(source: str, label: str) -> list[dict[str, object
             root_field = re.fullmatch(r"([a-z][a-z0-9-]*):(?:\s*(.*))?", stripped)
             if (
                 root_field is None
-                or root_field.group(1) not in {"name", "description", "inputs", "outputs", "runs"}
+                or root_field.group(1)
+                not in {"name", "description", "inputs", "outputs", "runs"}
                 or root_field.group(1) in seen_root
             ):
                 raise ValueError(
@@ -179,7 +179,6 @@ def _effective_shell_lines(steps: list[dict[str, object]]) -> list[str]:
     ]
 
 
-
 # The QML and bridge build recipe is reviewed independently of unrelated CI
 # steps, which may evolve without changing this execution-critical script.
 REVIEWED_QML_BUILD_SHA256 = (
@@ -195,24 +194,26 @@ def _canonical_ci_steps(source: str) -> list[dict[str, object]]:
         for line in lines
         if line and not line.startswith((" ", "\t", "#"))
     ]
-    if root_keys != [
-        "name", "run-name", "on", "permissions", "concurrency", "jobs"
-    ]:
+    if root_keys != ["name", "run-name", "on", "permissions", "concurrency", "jobs"]:
         raise ValueError("canonical CI has duplicate or noncanonical root mappings")
-    job_lines = lines[lines.index("jobs:") + 1:]
+    job_lines = lines[lines.index("jobs:") + 1 :]
     named_jobs = [
         line.strip()
         for line in job_lines
-        if line.startswith("  ") and not line.startswith("   ")
-        and line.strip() and not line.lstrip().startswith("#")
+        if line.startswith("  ")
+        and not line.startswith("   ")
+        and line.strip()
+        and not line.lstrip().startswith("#")
     ]
     if named_jobs != ["canonical-check:"]:
         raise ValueError("canonical CI must have one unambiguous canonical-check job")
     job_fields = [
         line.strip()
         for line in job_lines
-        if line.startswith("    ") and not line.startswith("     ")
-        and line.strip() and not line.lstrip().startswith("#")
+        if line.startswith("    ")
+        and not line.startswith("     ")
+        and line.strip()
+        and not line.lstrip().startswith("#")
     ]
     if job_fields != ["runs-on: ubuntu-24.04", "steps:"]:
         raise ValueError(
@@ -244,11 +245,13 @@ def _canonical_ci_steps(source: str) -> list[dict[str, object]]:
                 raise ValueError(
                     f"canonical CI has noncanonical step boundary at line {number}"
                 )
-            steps.append({
-                "fields": {match.group(1): match.group(2)},
-                "run_lines": [],
-                "with_lines": [],
-            })
+            steps.append(
+                {
+                    "fields": {match.group(1): match.group(2)},
+                    "run_lines": [],
+                    "with_lines": [],
+                }
+            )
             mode = None
         elif indent == 8:
             match = re.fullmatch(r"([a-z][a-z0-9-]*):(?:\s*(.*))?", stripped)
@@ -321,35 +324,35 @@ def _verify_ci_execution_steps(source: str) -> None:
     if early_policy["fields"].get("run") != "python3 tools/check_ci_cache_policy.py":
         raise ValueError("canonical CI must validate cache policy before builds")
     cargo = required("Restore Cargo dependency inputs")
-    if (
-        cargo["fields"].get("uses") != "./.github/actions/cargo-input-cache"
-        or cargo["with_lines"] != [
-            "namespace: canonical-ci",
-            "rust-version: ${{ env.RUST_VERSION }}",
-        ]
-    ):
+    if cargo["fields"].get("uses") != "./.github/actions/cargo-input-cache" or cargo[
+        "with_lines"
+    ] != [
+        "namespace: canonical-ci",
+        "rust-version: ${{ env.RUST_VERSION }}",
+    ]:
         raise ValueError("canonical CI Cargo cache input step drifted")
     apt = required("Install Linura Shell bridge build dependencies")
-    if (
-        apt["fields"].get("uses")
-        != "./.github/actions/ubuntu-apt-input-cache"
-        or apt["with_lines"] != [
-            "namespace: canonical-ci-shell",
-            "packages: |",
-            "  cmake",
-            "  ninja-build",
-            "  pkg-config",
-            "  qt6-base-dev",
-            "  qt6-declarative-dev",
-        ]
-    ):
+    if apt["fields"].get("uses") != "./.github/actions/ubuntu-apt-input-cache" or apt[
+        "with_lines"
+    ] != [
+        "namespace: canonical-ci-shell",
+        "packages: |",
+        "  cmake",
+        "  ninja-build",
+        "  pkg-config",
+        "  qt6-base-dev",
+        "  qt6-declarative-dev",
+    ]:
         raise ValueError("canonical CI APT cache input step drifted")
 
     build = required("Build and install Linura Shell QML modules")
     if build["fields"].get("run") != "|":
         raise ValueError("canonical CI requires an executable literal QML build")
     build_source = "\n".join(build["run_lines"]) + "\n"
-    if hashlib.sha256(build_source.encode("utf-8")).hexdigest() != REVIEWED_QML_BUILD_SHA256:
+    if (
+        hashlib.sha256(build_source.encode("utf-8")).hexdigest()
+        != REVIEWED_QML_BUILD_SHA256
+    ):
         raise ValueError(
             "canonical CI QML build differs from reviewed SHA-256; "
             "re-audit executable source-build commands before updating"
@@ -418,18 +421,22 @@ def check(root: Path = ROOT) -> list[str]:
         or contract.get("cache_policy") != expected_policy
         or contract.get("identity", {}).get("cargo") != expected_cargo_identity
         or contract.get("identity", {}).get("ubuntu_apt") != expected_apt_identity
-        or contract.get("storage") != {
+        or contract.get("storage")
+        != {
             "ubuntu_apt_root": "runner.temp",
             "broad_restore_keys": False,
         }
-        or contract.get("verification") != {
+        or contract.get("verification")
+        != {
             "apt_signed_index_resolution": True,
             "apt_requested_candidate_match_after_install": True,
             "exact_source_builds_remain_required": True,
             "cache_hit_is_qualification_evidence": False,
         }
     ):
-        failures.append("dependency-input cache contract drifted from reviewed authority boundary")
+        failures.append(
+            "dependency-input cache contract drifted from reviewed authority boundary"
+        )
 
     try:
         cargo_steps = _canonical_composite_steps(cargo, "Cargo")
@@ -474,8 +481,13 @@ def check(root: Path = ROOT) -> list[str]:
     cargo_paths = re.findall(r"(?m)^          (~/.cargo/[^\n]+)$", cargo)
     if tuple(cargo_paths) != CARGO_ALLOWED_PATHS:
         failures.append("Cargo cache path set must remain dependency-input-only")
-    if "hashFiles('rust-toolchain.toml', 'Cargo.lock', '.github/actions/cargo-input-cache/action.yml')" not in cargo:
-        failures.append("Cargo cache key must bind toolchain, lockfile, and cache implementation")
+    if (
+        "hashFiles('rust-toolchain.toml', 'Cargo.lock', '.github/actions/cargo-input-cache/action.yml')"
+        not in cargo
+    ):
+        failures.append(
+            "Cargo cache key must bind toolchain, lockfile, and cache implementation"
+        )
     if "${{ inputs.rust-version }}" not in cargo:
         failures.append("Cargo cache key must bind the reviewed Rust version")
 
@@ -489,7 +501,7 @@ def check(root: Path = ROOT) -> list[str]:
         "apt-get --simulate install --no-install-recommends",
         "APT::Keep-Downloaded-Packages=true",
         "Dir::Cache::archives=$LINURA_APT_CACHE_DIR",
-        "installed=\"$(dpkg-query -W -f='${Version}' \"$package\")\"",
+        'installed="$(dpkg-query -W -f=\'${Version}\' "$package")"',
         'test "$installed" = "$candidate"',
     )
     apt_script_lines = _effective_shell_lines(apt_steps)
@@ -500,24 +512,26 @@ def check(root: Path = ROOT) -> list[str]:
             present = any(fragment in line for line in apt_script_lines)
         if not present:
             failures.append(f"APT cache missing fail-closed invariant: {fragment}")
-    if (
-        len(apt_steps) == 3
-        and (
-            "sudo apt-get update" not in _effective_shell_lines(apt_steps[:1])
-            or 'test "$installed" = "$candidate"' not in _effective_shell_lines(
-                apt_steps[2:3]
-            )
-        )
+    if len(apt_steps) == 3 and (
+        "sudo apt-get update" not in _effective_shell_lines(apt_steps[:1])
+        or 'test "$installed" = "$candidate"'
+        not in _effective_shell_lines(apt_steps[2:3])
     ):
-        failures.append("APT cache safety commands must execute in their expected steps")
+        failures.append(
+            "APT cache safety commands must execute in their expected steps"
+        )
 
     if "$HOME/.cache" in apt or "~/.cache" in apt:
-        failures.append("APT cache must remain under runner.temp, never shared HOME cache state")
+        failures.append(
+            "APT cache must remain under runner.temp, never shared HOME cache state"
+        )
 
     for source, label in ((cargo, "Cargo"), (apt, "APT")):
         for fragment in FORBIDDEN_CACHE_FRAGMENTS:
             if fragment in source:
-                failures.append(f"{label} cache policy contains forbidden cached output: {fragment}")
+                failures.append(
+                    f"{label} cache policy contains forbidden cached output: {fragment}"
+                )
 
     try:
         _verify_ci_execution_steps(ci)
@@ -537,11 +551,17 @@ def check(root: Path = ROOT) -> list[str]:
     )
     for fragment in required_ci:
         if fragment not in ci:
-            failures.append(f"canonical CI cache integration missing invariant: {fragment}")
+            failures.append(
+                f"canonical CI cache integration missing invariant: {fragment}"
+            )
     if "uses: actions/cache@" in ci:
-        failures.append("canonical CI must consume repository-owned cache primitives, not duplicate cache logic")
+        failures.append(
+            "canonical CI must consume repository-owned cache primitives, not duplicate cache logic"
+        )
     if "sudo apt-get install --yes --no-install-recommends" in ci:
-        failures.append("canonical CI must not duplicate inline APT cache/install logic")
+        failures.append(
+            "canonical CI must not duplicate inline APT cache/install logic"
+        )
 
     return failures
 

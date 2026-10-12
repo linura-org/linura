@@ -25,9 +25,7 @@ def step_block(workflow: str, step_name: str) -> str:
 
 class ReleaseGateWorkflowIdentityTests(unittest.TestCase):
     def assert_state_gate_contract(self, block: str, event_predicate: str) -> None:
-        selector = (
-            f"[.workflow_runs[] | select({STABLE_PATH} and {EXACT_SHA} and {event_predicate})]"
-        )
+        selector = f"[.workflow_runs[] | select({STABLE_PATH} and {EXACT_SHA} and {event_predicate})]"
         self.assertIn(selector, block)
         self.assertIn(
             f'if any(.[]; {TERMINAL_SUCCESS}) then "success"',
@@ -38,7 +36,7 @@ class ReleaseGateWorkflowIdentityTests(unittest.TestCase):
     def assert_count_gate_contract(self, block: str, event_predicate: str) -> None:
         selector = (
             f"[.workflow_runs[] | select({STABLE_PATH} and {EXACT_SHA} and "
-            f'{event_predicate} and {TERMINAL_SUCCESS})] | length'
+            f"{event_predicate} and {TERMINAL_SUCCESS})] | length"
         )
         self.assertIn(selector, block)
         self.assertNotIn(".name == $workflow", block)
@@ -49,7 +47,7 @@ class ReleaseGateWorkflowIdentityTests(unittest.TestCase):
             "Verify exact-main release intent and dispatch proof",
         )
         self.assertIn(
-            'actions/runs?head_sha=$SOURCE_SHA&event=push&per_page=100',
+            "actions/runs?head_sha=$SOURCE_SHA&event=push&per_page=100",
             block,
         )
         self.assert_state_gate_contract(block, PUSH_ONLY)

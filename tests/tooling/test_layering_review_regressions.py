@@ -50,14 +50,19 @@ class LayeringReviewRegressionTests(unittest.TestCase):
         if "[dependencies]\n" in text:
             text = text.replace("[dependencies]\n", "[dependencies]\n" + dependency, 1)
         elif "[lints]" in text:
-            text = text.replace("[lints]", "[dependencies]\n" + dependency + "\n[lints]", 1)
+            text = text.replace(
+                "[lints]", "[dependencies]\n" + dependency + "\n[lints]", 1
+            )
         else:
             text += "\n[dependencies]\n" + dependency
         manifest.write_text(text, encoding="utf-8")
 
     def test_semantic_crates_block_alternative_dbus_transports(self) -> None:
         for package in ("dbus", "dbus-tokio", "dbus-crossroads"):
-            with self.subTest(package=package), tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                self.subTest(package=package),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
                 root = Path(temp_dir)
                 self._copy_fixture(root)
                 manifest = root / "crates/linura-planner/Cargo.toml"
@@ -65,10 +70,14 @@ class LayeringReviewRegressionTests(unittest.TestCase):
 
                 result = self._run_checker(root)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("linura-planner violates transport-neutral boundary", result.stderr)
+                self.assertIn(
+                    "linura-planner violates transport-neutral boundary", result.stderr
+                )
                 self.assertIn(package, result.stderr)
 
-    def test_policy_and_lifecycle_cannot_depend_on_provider_or_control_plane(self) -> None:
+    def test_policy_and_lifecycle_cannot_depend_on_provider_or_control_plane(
+        self,
+    ) -> None:
         cases = (
             ("linura-policy", "linura-provider-sdk"),
             ("linura-policy", "linura-control"),
@@ -76,15 +85,22 @@ class LayeringReviewRegressionTests(unittest.TestCase):
             ("linura-lifecycle", "linura-control"),
         )
         for package, dependency in cases:
-            with self.subTest(package=package, dependency=dependency), tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                self.subTest(package=package, dependency=dependency),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
                 root = Path(temp_dir)
                 self._copy_fixture(root)
                 manifest = root / f"crates/{package}/Cargo.toml"
-                self._add_dependency(manifest, dependency, f'{{ path = "../{dependency}" }}')
+                self._add_dependency(
+                    manifest, dependency, f'{{ path = "../{dependency}" }}'
+                )
 
                 result = self._run_checker(root)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn(f"{package} violates inward dependency boundary", result.stderr)
+                self.assertIn(
+                    f"{package} violates inward dependency boundary", result.stderr
+                )
                 self.assertIn(dependency, result.stderr)
 
 

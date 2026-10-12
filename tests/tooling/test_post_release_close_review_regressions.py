@@ -14,7 +14,7 @@ SPEC.loader.exec_module(post_release_close)
 
 class ReviewRegressionTests(unittest.TestCase):
     def test_release_review_normalizes_live_prepublication_assertions(self) -> None:
-        text = '''# review
+        text = """# review
 
 **Status:** implementation qualified; release-preparation candidate; protected publication evidence pending.
 
@@ -27,7 +27,7 @@ Trusted Release Proof must still rerun it on the later exact release authorizati
 **Current decision: READY FOR RELEASE PREPARATION; PUBLICATION PENDING.**
 
 Publication remains fail-closed behind the release-preparation exact-head gates, proof and publication. Unchecked publication items remain intentionally pending until those artifacts actually exist.
-'''
+"""
         updated = post_release_close.normalize_terminal_review(text, "v0.6.0")
         self.assertIn("terminal publication subsequently completed", updated)
         self.assertIn("terminal release proof subsequently succeeded", updated)
@@ -37,25 +37,27 @@ Publication remains fail-closed behind the release-preparation exact-head gates,
         self.assertNotIn("Publication remains fail-closed", updated)
 
     def test_qualification_uses_milestone_claim_class(self) -> None:
-        text = '''# qualification
+        text = """# qualification
 
 **Status:** implementation qualified; release-authorization and terminal publication evidence pending.
 
 ## Exit criterion
 
 This dossier is complete only when the final release source has immutable exact-SHA evidence for every required gate and the frozen release contract accurately records that evidence. Until then, v1.0 remains an implementation candidate, not a published qualified release.
-'''
-        updated = post_release_close.normalize_terminal_qualification(text, "v1.0.0", "Stable")
+"""
+        updated = post_release_close.normalize_terminal_qualification(
+            text, "v1.0.0", "Stable"
+        )
         self.assertIn("published, independently verified Stable release", updated)
         self.assertNotIn("independently verified Experimental release", updated)
 
     def test_review_normalizer_removes_known_live_marker(self) -> None:
-        text = '''# review
+        text = """# review
 
 **Status:** released; terminal publication and independent verification complete.
 
 Release-preparation changes now advance version/lockfile and freeze candidate-facing evidence without marking v0.6.0 published.
-'''
+"""
         updated = post_release_close.normalize_terminal_review(text, "v0.6.0")
         self.assertNotIn("Release-preparation changes now advance", updated)
 

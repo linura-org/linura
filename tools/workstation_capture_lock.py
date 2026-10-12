@@ -4,6 +4,7 @@
 The parent Bash process keeps this helper's stdin pipe open throughout capture.
 The helper releases its flock only after that pipe closes (or the process dies).
 """
+
 from __future__ import annotations
 
 import fcntl
@@ -33,7 +34,9 @@ def main() -> int:
             or directory.st_uid != os.geteuid()
             or stat.S_IMODE(directory.st_mode) != 0o700
         ):
-            raise ValueError("capture state directory must be owned by this user and mode 0700")
+            raise ValueError(
+                "capture state directory must be owned by this user and mode 0700"
+            )
 
         lock_fd = os.open(
             lock_path.name,
@@ -48,7 +51,9 @@ def main() -> int:
             or lock.st_nlink != 1
             or stat.S_IMODE(lock.st_mode) != 0o600
         ):
-            raise ValueError("capture lock must be a user-owned single-link regular file, mode 0600")
+            raise ValueError(
+                "capture lock must be a user-owned single-link regular file, mode 0600"
+            )
 
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)

@@ -44,7 +44,9 @@ if manifest.get("prepared_image_sha256") != image_sha256:
     fail("prepared substrate image digest mismatch")
 
 base_image = manifest.get("base_image")
-if not isinstance(base_image, dict) or base_image.get("url") != contract.get("base_image_url"):
+if not isinstance(base_image, dict) or base_image.get("url") != contract.get(
+    "base_image_url"
+):
     fail("prepared substrate base-image identity mismatch")
 base_image_sha256 = base_image.get("sha256")
 if not isinstance(base_image_sha256, str) or len(base_image_sha256) != 64:
@@ -68,7 +70,9 @@ for record in package_versions:
         fail(f"invalid prepared substrate package-version record: {record!r}")
     name, version = record.split(" ", 1)
     if not name or not version or name in names:
-        fail(f"invalid or duplicate prepared substrate package-version record: {record!r}")
+        fail(
+            f"invalid or duplicate prepared substrate package-version record: {record!r}"
+        )
     names.add(name)
 
 for key, expected in (

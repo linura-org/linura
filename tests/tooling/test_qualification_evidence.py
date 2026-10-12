@@ -73,9 +73,7 @@ class QualificationEvidenceTests(unittest.TestCase):
             "finished in 0.00s\n"
         )
         for filename, runner in cargo_logs.items():
-            (directory / filename).write_text(
-                runner + cargo_result, encoding="utf-8"
-            )
+            (directory / filename).write_text(runner + cargo_result, encoding="utf-8")
         scenarios = [
             {"name": f"reviewed-v07-scenario-{index:02d}", "result": "passed"}
             for index in range(1, 24)
@@ -115,9 +113,7 @@ class QualificationEvidenceTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertEqual(
-            completed.returncode, 0, completed.stderr or completed.stdout
-        )
+        self.assertEqual(completed.returncode, 0, completed.stderr or completed.stdout)
         payload = json.loads(completed.stdout)
         self.assertTrue(payload["ready"])
         self.assertEqual(payload["schema_version"], 3)
@@ -153,9 +149,7 @@ class QualificationEvidenceTests(unittest.TestCase):
             verified = evidence.verify_binding(
                 ROOT, directory / "evidence-binding.json"
             )
-            self.assertEqual(
-                binding["binding_sha256"], verified["binding_sha256"]
-            )
+            self.assertEqual(binding["binding_sha256"], verified["binding_sha256"])
             self.assertEqual(
                 verifier["artifact_set_sha256"],
                 binding["artifact_set_sha256"],
@@ -172,11 +166,7 @@ class QualificationEvidenceTests(unittest.TestCase):
             )
             self.assertTrue(verifier["verification"]["verified_claims"])
             self.assertEqual(
-                {
-                    item["role"]
-                    for item in binding["artifacts"]
-                    if item["required"]
-                },
+                {item["role"] for item in binding["artifacts"] if item["required"]},
                 {
                     "result",
                     "portable_roundtrip_digest",
@@ -231,25 +221,22 @@ class QualificationEvidenceTests(unittest.TestCase):
                 output=directory / "evidence-binding.json",
             )
             entry = next(
-                item for item in binding["artifacts"]
+                item
+                for item in binding["artifacts"]
                 if item["path"] == "diagnostic.log"
             )
             self.assertEqual(entry["role"], "retained-auxiliary")
             self.assertFalse(entry["required"])
             auxiliary.write_text("substituted\n", encoding="utf-8")
             with self.assertRaises(evidence.EvidenceError):
-                evidence.verify_binding(
-                    ROOT, directory / "evidence-binding.json"
-                )
+                evidence.verify_binding(ROOT, directory / "evidence-binding.json")
 
     def test_missing_required_artifact_fails_closed(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
             self._v07_bundle(directory)
             (directory / "portable-roundtrip.sha256").unlink()
-            with self.assertRaisesRegex(
-                evidence.EvidenceError, "missing or unsafe"
-            ):
+            with self.assertRaisesRegex(evidence.EvidenceError, "missing or unsafe"):
                 evidence.attest(
                     root=ROOT,
                     lane_id="v07-library",
@@ -301,9 +288,7 @@ class QualificationEvidenceTests(unittest.TestCase):
             provenance["semantic_verifier"]["path"],
             "tools/qualification_evidence_verifiers.py",
         )
-        self.assertRegex(
-            provenance["semantic_verifier"]["sha256"], r"^[0-9a-f]{64}$"
-        )
+        self.assertRegex(provenance["semantic_verifier"]["sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(
             provenance["binder"]["path"], "tools/qualification_evidence.py"
         )
@@ -313,11 +298,11 @@ class QualificationEvidenceTests(unittest.TestCase):
             provenance["admission_action"],
             ".github/actions/qualification-evidence/action.yml",
         )
-        self.assertRegex(
-            provenance["admission_action_sha256"], r"^[0-9a-f]{64}$"
-        )
+        self.assertRegex(provenance["admission_action_sha256"], r"^[0-9a-f]{64}$")
 
-    def test_repository_artifact_digest_accepts_cargo_hardlinks_but_binds_exact_bytes(self):
+    def test_repository_artifact_digest_accepts_cargo_hardlinks_but_binds_exact_bytes(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             release = root / "target" / "release"
@@ -348,12 +333,10 @@ class QualificationEvidenceTests(unittest.TestCase):
                 )
 
     def test_trusted_release_separates_preseal_and_prepared_v010_source_roots(self):
-        workflow = (
-            ROOT / ".github/workflows/trusted-release-proof.yml"
-        ).read_text(encoding="utf-8")
-        self.assertTrue(
-            evidence._trusted_release_has_split_v010_source_roots(workflow)
+        workflow = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(
+            encoding="utf-8"
         )
+        self.assertTrue(evidence._trusted_release_has_split_v010_source_roots(workflow))
         self.assertFalse(
             evidence._trusted_release_has_split_v010_source_roots(
                 workflow.replace(
@@ -375,7 +358,7 @@ class QualificationEvidenceTests(unittest.TestCase):
         self.assertFalse(
             evidence._trusted_release_has_split_v010_source_roots(
                 workflow.replace(
-                    'git -C "$V010_QUALIFICATION_SOURCE_ROOT" rev-parse \'HEAD^{tree}\'',
+                    "git -C \"$V010_QUALIFICATION_SOURCE_ROOT\" rev-parse 'HEAD^{tree}'",
                     'git -C "$V010_QUALIFICATION_SOURCE_ROOT" rev-parse HEAD',
                     1,
                 )
@@ -440,9 +423,7 @@ class QualificationEvidenceTests(unittest.TestCase):
             self.assertEqual(unsealed_archive_sha, archive_sha)
             self.assertEqual(unsealed_binding_sha, binding_sha)
             self.assertEqual(
-                (unsealed / "process-crash-atomicity.txt").read_text(
-                    encoding="utf-8"
-                ),
+                (unsealed / "process-crash-atomicity.txt").read_text(encoding="utf-8"),
                 (
                     "passed: child was SIGKILLed after the uncommitted history write and "
                     "before projection/operation commit; reopen exposed only the old complete "
@@ -511,20 +492,14 @@ jobs:
             1,
         )
         self.assertFalse(
-            evidence._ordered_evidence_admission(
-                conditional_envelope, "v07-library"
-            )
+            evidence._ordered_evidence_admission(conditional_envelope, "v07-library")
         )
         cross_job = valid.replace(
             "      - name: Admit and upload sealed evidence",
-            "  other:\n"
-            "    steps:\n"
-            "      - name: Admit and upload sealed evidence",
+            "  other:\n    steps:\n      - name: Admit and upload sealed evidence",
             1,
         )
-        self.assertFalse(
-            evidence._ordered_evidence_admission(cross_job, "v07-library")
-        )
+        self.assertFalse(evidence._ordered_evidence_admission(cross_job, "v07-library"))
         accepted_before = valid.replace(
             "      - name: Bind execution\n",
             "      - name: Upload accepted mutable evidence\n"
@@ -536,9 +511,7 @@ jobs:
             1,
         )
         self.assertFalse(
-            evidence._ordered_evidence_admission(
-                accepted_before, "v07-library"
-            )
+            evidence._ordered_evidence_admission(accepted_before, "v07-library")
         )
         disguised_failure = valid.replace(
             "name: linura-v07-library-example-unqualified-diagnostics",
@@ -546,15 +519,13 @@ jobs:
             1,
         )
         self.assertFalse(
-            evidence._ordered_evidence_admission(
-                disguised_failure, "v07-library"
-            )
+            evidence._ordered_evidence_admission(disguised_failure, "v07-library")
         )
 
     def test_composite_admission_upload_is_structurally_sealed_and_success_gated(self):
-        action = (
-            ROOT / ".github/actions/qualification-evidence/action.yml"
-        ).read_text(encoding="utf-8")
+        action = (ROOT / ".github/actions/qualification-evidence/action.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertTrue(evidence._admission_action_has_sealed_upload(action))
         self.assertFalse(
             evidence._admission_action_has_sealed_upload(
@@ -572,7 +543,7 @@ jobs:
                     "      name: Upload exact sealed qualification evidence\n",
                     "    - name: Mutate sealed object after verification\n"
                     "      shell: bash\n"
-                    "      run: echo drift >> \"$RUNNER_TEMP/qualification-evidence.tar\"\n\n"
+                    '      run: echo drift >> "$RUNNER_TEMP/qualification-evidence.tar"\n\n'
                     "    - id: upload\n"
                     "      name: Upload exact sealed qualification evidence\n",
                     1,
@@ -594,8 +565,7 @@ jobs:
         self.assertFalse(
             evidence._admission_action_has_sealed_upload(
                 action.replace(
-                    "      with:\n"
-                    "        name: ${{ inputs.artifact-name }}",
+                    "      with:\n        name: ${{ inputs.artifact-name }}",
                     "      if: always()\n"
                     "      with:\n"
                     "        name: ${{ inputs.artifact-name }}",
@@ -639,8 +609,7 @@ jobs:
             evidence._admission_action_has_sealed_upload(
                 action.replace(
                     "    - id: readback-3\n",
-                    "    - id: readback-3\n"
-                    "      continue-on-error: true\n",
+                    "    - id: readback-3\n      continue-on-error: true\n",
                     1,
                 )
             )
@@ -676,7 +645,9 @@ jobs:
             nested = directory / "nested"
             nested.mkdir()
             (nested / "verifier-result.json").write_text("{}\n", encoding="utf-8")
-            with self.assertRaisesRegex(evidence.EvidenceError, "reserved control filename"):
+            with self.assertRaisesRegex(
+                evidence.EvidenceError, "reserved control filename"
+            ):
                 evidence.attest(
                     root=ROOT,
                     lane_id="v07-library",
@@ -692,9 +663,7 @@ jobs:
             alias = directory.parent / f"{directory.name}-evidence-alias.txt"
             try:
                 os.link(artifact, alias)
-                with self.assertRaisesRegex(
-                    evidence.EvidenceError, "single link"
-                ):
+                with self.assertRaisesRegex(evidence.EvidenceError, "single link"):
                     evidence.attest(
                         root=ROOT,
                         lane_id="v07-library",
@@ -704,12 +673,18 @@ jobs:
             finally:
                 alias.unlink(missing_ok=True)
 
-    def test_visual_profile_binds_reviewed_observation_identity_and_full_core_inventory(self):
+    def test_visual_profile_binds_reviewed_observation_identity_and_full_core_inventory(
+        self,
+    ):
         contract = evidence.load_contract(ROOT)
         profile = evidence.profile_for_lane(contract, "v010-shell-runtime")
         self.assertTrue(profile["require_observation_identity"])
-        self.assertIn("workstation_recording.sha256", profile["observation_identity_fields"])
-        self.assertIn("release_support_promotion=false", profile["required_json_values"])
+        self.assertIn(
+            "workstation_recording.sha256", profile["observation_identity_fields"]
+        )
+        self.assertIn(
+            "release_support_promotion=false", profile["required_json_values"]
+        )
         filenames = {item["filename"] for item in profile["artifact"]}
         for required in (
             "cases.tsv",
@@ -724,9 +699,7 @@ jobs:
     def test_v04_machine_profiles_require_semantic_witness_bytes(self):
         contract = evidence.load_contract(ROOT)
         durability = evidence.profile_for_lane(contract, "v04-durability")
-        durability_files = {
-            item["filename"] for item in durability["artifact"]
-        }
+        durability_files = {item["filename"] for item in durability["artifact"]}
         self.assertIn("v04-fault-probe.bin", durability_files)
         self.assertIn("durability-verifier.log", durability_files)
 

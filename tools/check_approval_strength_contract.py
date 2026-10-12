@@ -102,7 +102,16 @@ def validate(root: Path) -> list[str]:
     with tempfile.TemporaryDirectory(prefix="linura-approval-mutation-") as temp_dir:
         worktree = Path(temp_dir) / "worktree"
         add = subprocess.run(
-            ["git", "-C", str(root), "worktree", "add", "--detach", str(worktree), "HEAD"],
+            [
+                "git",
+                "-C",
+                str(root),
+                "worktree",
+                "add",
+                "--detach",
+                str(worktree),
+                "HEAD",
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -140,7 +149,15 @@ def validate(root: Path) -> list[str]:
                     )
         finally:
             subprocess.run(
-                ["git", "-C", str(root), "worktree", "remove", "--force", str(worktree)],
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "worktree",
+                    "remove",
+                    "--force",
+                    str(worktree),
+                ],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -150,7 +167,11 @@ def validate(root: Path) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[1]
+    root = (
+        Path(argv[1]).resolve()
+        if len(argv) > 1
+        else Path(__file__).resolve().parents[1]
+    )
     failures = validate(root)
     if failures:
         for failure in failures:

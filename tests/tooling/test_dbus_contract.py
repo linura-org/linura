@@ -39,24 +39,39 @@ PLAN_REVIEW_OUTPUTS = (
 EXPECTED_METHODS = {
     "GetProtocolVersion": (("major", "q", "out"), ("product_version", "s", "out")),
     "WhoAmI": (
-        ("actor_id", "s", "out"), ("actor_kind", "s", "out"),
-        ("interactive", "b", "out"), ("uid", "u", "out"),
-        ("pid", "u", "out"), ("dbus_sender", "s", "out"),
+        ("actor_id", "s", "out"),
+        ("actor_kind", "s", "out"),
+        ("interactive", "b", "out"),
+        ("uid", "u", "out"),
+        ("pid", "u", "out"),
+        ("dbus_sender", "s", "out"),
     ),
-    "Capabilities": (("providers", "a(sss)", "out"), ("capabilities", "a(ssss)", "out")),
+    "Capabilities": (
+        ("providers", "a(sss)", "out"),
+        ("capabilities", "a(ssss)", "out"),
+    ),
     "Observe": (
-        ("provider", "s", "in"), ("resource", "s", "in"), ("capability", "s", "in"),
-        ("observed_provider", "s", "out"), ("observed_resource", "s", "out"),
-        ("observed_capability", "s", "out"), ("authority", "s", "out"),
-        ("freshness", "s", "out"), ("observed_at_unix_ms", "t", "out"),
-        ("valid_for_ms", "t", "out"), ("sequence", "t", "out"),
+        ("provider", "s", "in"),
+        ("resource", "s", "in"),
+        ("capability", "s", "in"),
+        ("observed_provider", "s", "out"),
+        ("observed_resource", "s", "out"),
+        ("observed_capability", "s", "out"),
+        ("authority", "s", "out"),
+        ("freshness", "s", "out"),
+        ("observed_at_unix_ms", "t", "out"),
+        ("valid_for_ms", "t", "out"),
+        ("sequence", "t", "out"),
         ("attributes", "a(ss)", "out"),
     ),
     "Graph": (("nodes", "a(sa(ss))", "out"), ("edges", "a(ssss)", "out")),
     "ExplainObservation": (
-        ("resource", "s", "in"), ("explained_resource", "s", "out"),
-        ("provider", "s", "out"), ("capability", "s", "out"),
-        ("freshness", "s", "out"), ("evidence_id", "s", "out"),
+        ("resource", "s", "in"),
+        ("explained_resource", "s", "out"),
+        ("provider", "s", "out"),
+        ("capability", "s", "out"),
+        ("freshness", "s", "out"),
+        ("evidence_id", "s", "out"),
         ("authority", "s", "out"),
     ),
     "PlanDesiredState": (
@@ -103,13 +118,19 @@ class Control1ContractTests(unittest.TestCase):
             annotation.attrib["name"]: annotation.attrib["value"]
             for annotation in interface.findall("annotation")
         }
-        self.assertEqual(annotations["org.linura.ContractId"], "dbus.org.linura.Control1")
+        self.assertEqual(
+            annotations["org.linura.ContractId"], "dbus.org.linura.Control1"
+        )
         self.assertEqual(annotations["org.linura.ContractVersion"], "1")
         self.assertEqual(annotations["org.linura.Stability"], "experimental")
         actual = {}
         for method in interface.findall("method"):
             actual[method.attrib["name"]] = tuple(
-                (arg.attrib["name"], arg.attrib["type"], arg.attrib.get("direction", "in"))
+                (
+                    arg.attrib["name"],
+                    arg.attrib["type"],
+                    arg.attrib.get("direction", "in"),
+                )
                 for arg in method.findall("arg")
             )
         self.assertEqual(actual, EXPECTED_METHODS)
@@ -138,7 +159,13 @@ class Control1ContractTests(unittest.TestCase):
             }
             <= method_names
         )
-        for forbidden in {"Apply", "Execute", "CommitPlan", "AuthorizePlan", "PreparePlan"}:
+        for forbidden in {
+            "Apply",
+            "Execute",
+            "CommitPlan",
+            "AuthorizePlan",
+            "PreparePlan",
+        }:
             self.assertNotIn(forbidden, method_names)
 
 
@@ -152,11 +179,15 @@ class Session1ContractTests(unittest.TestCase):
             annotation.attrib["name"]: annotation.attrib["value"]
             for annotation in interface.findall("annotation")
         }
-        self.assertEqual(annotations["org.linura.ContractId"], "dbus.org.linura.Session1")
+        self.assertEqual(
+            annotations["org.linura.ContractId"], "dbus.org.linura.Session1"
+        )
         self.assertEqual(annotations["org.linura.ContractVersion"], "1")
         self.assertEqual(annotations["org.linura.Stability"], "experimental")
         methods = interface.findall("method")
-        self.assertEqual([method.attrib["name"] for method in methods], ["SetAudioOutputVolume"])
+        self.assertEqual(
+            [method.attrib["name"] for method in methods], ["SetAudioOutputVolume"]
+        )
         args = tuple(
             (arg.attrib["name"], arg.attrib["type"], arg.attrib.get("direction", "in"))
             for arg in methods[0].findall("arg")

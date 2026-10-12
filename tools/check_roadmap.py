@@ -22,12 +22,15 @@ VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 VALID_STATUS = {"released", "planned"}
 VALID_CLAIM_CLASS = {"Experimental", "Preview", "Stable"}
 VALID_EXECUTOR_STATE = {"none", "isolated-qualified", "integrated-narrow"}
-VALID_MUTATION_SUPPORT = {"none", "narrow-experimental", "reference-experimental", "reference-stable"}
+VALID_MUTATION_SUPPORT = {
+    "none",
+    "narrow-experimental",
+    "reference-experimental",
+    "reference-stable",
+}
 VALID_AGENT_ROLE = {"none", "proposal-only"}
 VALID_PLATFORM_SUPPORT = {"none", "reference-experimental", "reference-stable"}
-CANONICAL_LIFECYCLE = (
-    "request/intent → observe → plan → validate → authorize → prepare → execute → verify → commit → audit → reconcile"
-)
+CANONICAL_LIFECYCLE = "request/intent → observe → plan → validate → authorize → prepare → execute → verify → commit → audit → reconcile"
 V010_SLICE_CONTRACT = "contracts/v010-workstation-slices.toml"
 V010_PRODUCT_SCOPE_ADR = "docs/adr/0033-v010-complete-workstation-product-boundary.md"
 V010_QUALIFICATION_CONTRACT = "contracts/v010-workstation-qualification.toml"
@@ -36,8 +39,22 @@ GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 V010_SLICE_COUNT = 32
 V010_MIN_COMPLETED_SLICE_COUNT = 16
 V010_EXPECTED_COMPLETED_SLICE_IDS = (
-    "S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08",
-    "S09", "S10", "S11", "S12", "S13", "S14", "S15", "S16",
+    "S01",
+    "S02",
+    "S03",
+    "S04",
+    "S05",
+    "S06",
+    "S07",
+    "S08",
+    "S09",
+    "S10",
+    "S11",
+    "S12",
+    "S13",
+    "S14",
+    "S15",
+    "S16",
 )
 V010_SLICE_TITLES = (
     "v0.10 workstation contract and qualification foundation",
@@ -116,7 +133,6 @@ def version_key(value: str) -> tuple[int, int, int]:
     return tuple(int(part) for part in match.groups())
 
 
-
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -140,10 +156,14 @@ def _validate_v010_release_artifact(
         return
     artifact = root / candidate
     if not artifact.is_file() or artifact.is_symlink():
-        failures.append(f"released v0.10 qualification artifact missing or unsafe: {relative_path}")
+        failures.append(
+            f"released v0.10 qualification artifact missing or unsafe: {relative_path}"
+        )
         return
     if _sha256(artifact) != expected_digest:
-        failures.append(f"released v0.10 qualification artifact digest mismatch: {relative_path}")
+        failures.append(
+            f"released v0.10 qualification artifact digest mismatch: {relative_path}"
+        )
 
 
 def validate_v010_release_readiness(root: Path) -> list[str]:
@@ -157,7 +177,9 @@ def validate_v010_release_readiness(root: Path) -> list[str]:
         return [f"invalid {V010_QUALIFICATION_CONTRACT}: {error}"]
 
     if contract.get("milestone") != "v0.10.0":
-        failures.append("released v0.10 qualification contract must bind milestone v0.10.0")
+        failures.append(
+            "released v0.10 qualification contract must bind milestone v0.10.0"
+        )
 
     substrate = contract.get("substrate")
     if not isinstance(substrate, dict):
@@ -166,7 +188,9 @@ def validate_v010_release_readiness(root: Path) -> list[str]:
         if substrate.get("state") != "frozen":
             failures.append("released v0.10 requires frozen immutable Arch substrate")
         if substrate.get("release_qualification_ready") is not True:
-            failures.append("released v0.10 requires substrate.release_qualification_ready=true")
+            failures.append(
+                "released v0.10 requires substrate.release_qualification_ready=true"
+            )
         _validate_v010_release_artifact(
             root,
             substrate.get("package_manifest"),
@@ -177,10 +201,14 @@ def validate_v010_release_readiness(root: Path) -> list[str]:
 
     interactive = contract.get("interactive_workstation")
     if not isinstance(interactive, dict):
-        failures.append("released v0.10 requires interactive workstation qualification readiness")
+        failures.append(
+            "released v0.10 requires interactive workstation qualification readiness"
+        )
     else:
         if interactive.get("evidence_ready") is not True:
-            failures.append("released v0.10 requires interactive_workstation.evidence_ready=true")
+            failures.append(
+                "released v0.10 requires interactive_workstation.evidence_ready=true"
+            )
         _validate_v010_release_artifact(
             root,
             interactive.get("evidence_manifest"),
@@ -198,7 +226,9 @@ def validate_v010_release_readiness(root: Path) -> list[str]:
             failures.append(f"released v0.10 requires {section_name} readiness")
         else:
             if section.get("evidence_ready") is not True:
-                failures.append(f"released v0.10 requires {section_name}.evidence_ready=true")
+                failures.append(
+                    f"released v0.10 requires {section_name}.evidence_ready=true"
+                )
             _validate_v010_release_artifact(
                 root,
                 section.get("evidence_manifest"),
@@ -212,7 +242,9 @@ def validate_v010_release_readiness(root: Path) -> list[str]:
         failures.append("released v0.10 requires experience qualification readiness")
     else:
         if experience.get("experience_evidence_ready") is not True:
-            failures.append("released v0.10 requires experience.experience_evidence_ready=true")
+            failures.append(
+                "released v0.10 requires experience.experience_evidence_ready=true"
+            )
         _validate_v010_release_artifact(
             root,
             experience.get("visual_baseline_manifest"),
@@ -251,7 +283,9 @@ def validate_v010_slice_contract(
     if contract.get("milestone") != "v0.10.0":
         failures.append("v0.10 slice contract milestone must remain v0.10.0")
     if contract.get("target") != "complete-experimental-workstation":
-        failures.append("v0.10 slice contract target must remain complete-experimental-workstation")
+        failures.append(
+            "v0.10 slice contract target must remain complete-experimental-workstation"
+        )
     if contract.get("completion_policy") != "dependency-closed-with-merged-pr-evidence":
         failures.append("v0.10 slice completion policy drifted")
     if contract.get("scheduling_policy") != "dependency-dag":
@@ -261,13 +295,20 @@ def validate_v010_slice_contract(
     if "next_slice" in contract:
         failures.append("v0.10 slice DAG must not encode a linear next_slice")
     if contract.get("scope_change_policy") != "explicit-roadmap-rebaseline":
-        failures.append("v0.10 slice scope changes must require explicit roadmap rebaseline")
+        failures.append(
+            "v0.10 slice scope changes must require explicit roadmap rebaseline"
+        )
 
     slices = contract.get("slice")
     if not isinstance(slices, list):
         return failures + ["v0.10 slice contract must define [[slice]] entries"]
-    if len(slices) != V010_SLICE_COUNT or contract.get("slice_count") != V010_SLICE_COUNT:
-        failures.append(f"v0.10 slice contract must remain exactly {V010_SLICE_COUNT} slices")
+    if (
+        len(slices) != V010_SLICE_COUNT
+        or contract.get("slice_count") != V010_SLICE_COUNT
+    ):
+        failures.append(
+            f"v0.10 slice contract must remain exactly {V010_SLICE_COUNT} slices"
+        )
 
     graph_failures = validate_v010_slice_graph(contract)
     failures.extend(f"v0.10 slice graph: {failure}" for failure in graph_failures)
@@ -289,7 +330,9 @@ def validate_v010_slice_contract(
         status = item.get("status")
         dependencies = item.get("depends_on")
         evidence = item.get("evidence_prs")
-        expected_title = V010_SLICE_TITLES[index] if index < len(V010_SLICE_TITLES) else None
+        expected_title = (
+            V010_SLICE_TITLES[index] if index < len(V010_SLICE_TITLES) else None
+        )
         expected_dependencies = (
             list(V010_SLICE_DEPENDENCIES[index])
             if index < len(V010_SLICE_DEPENDENCIES)
@@ -302,9 +345,13 @@ def validate_v010_slice_contract(
                 f"expected {expected_title!r}, found {title!r}"
             )
         if not isinstance(status, str) or status not in {"complete", "planned"}:
-            failures.append(f"{slice_id or index + 1}: slice status must be complete or planned")
+            failures.append(
+                f"{slice_id or index + 1}: slice status must be complete or planned"
+            )
         if item.get("required_for_release") is not True:
-            failures.append(f"{slice_id or index + 1}: every v0.10 slice must remain required_for_release")
+            failures.append(
+                f"{slice_id or index + 1}: every v0.10 slice must remain required_for_release"
+            )
         if dependencies != expected_dependencies:
             failures.append(
                 f"{slice_id or index + 1}: slice dependency graph drifted; "
@@ -314,7 +361,9 @@ def validate_v010_slice_contract(
         if not isinstance(evidence, list) or not all(
             type(value) is int and value > 0 for value in evidence
         ):
-            failures.append(f"{slice_id or index + 1}: evidence_prs must be positive PR numbers")
+            failures.append(
+                f"{slice_id or index + 1}: evidence_prs must be positive PR numbers"
+            )
             evidence = []
         for pr_number in evidence:
             previous_slice = seen_evidence_prs.get(pr_number)
@@ -330,9 +379,13 @@ def validate_v010_slice_contract(
             if isinstance(slice_id, str):
                 completed_ids.append(slice_id)
             if not evidence:
-                failures.append(f"{slice_id or index + 1}: completed slice requires merged-PR evidence")
+                failures.append(
+                    f"{slice_id or index + 1}: completed slice requires merged-PR evidence"
+                )
         elif status == "planned" and evidence:
-            failures.append(f"{slice_id or index + 1}: planned slice must not carry completion evidence")
+            failures.append(
+                f"{slice_id or index + 1}: planned slice must not carry completion evidence"
+            )
 
     if actual_ids != expected_ids:
         failures.append("v0.10 slice IDs/order drifted from S01..S32")
@@ -365,7 +418,9 @@ def validate_v010_slice_contract(
             failures.append(
                 f"{release_label} requires all release-required slices complete: "
                 + ", ".join(
-                    value for value in incomplete_release_slices if isinstance(value, str)
+                    value
+                    for value in incomplete_release_slices
+                    if isinstance(value, str)
                 )
             )
         if completed != V010_SLICE_COUNT:
@@ -459,8 +514,12 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
             failures.append(f"{version}: unsupported status {status!r}")
         if claim_class not in VALID_CLAIM_CLASS:
             failures.append(f"{version}: unsupported claim_class {claim_class!r}")
-        if not isinstance(depends_on, list) or not all(isinstance(item, str) for item in depends_on):
-            failures.append(f"{version}: depends_on must be an array of milestone versions")
+        if not isinstance(depends_on, list) or not all(
+            isinstance(item, str) for item in depends_on
+        ):
+            failures.append(
+                f"{version}: depends_on must be an array of milestone versions"
+            )
         if not isinstance(durable_recovery, bool):
             failures.append(f"{version}: durable_recovery must be boolean")
         if executor_state not in VALID_EXECUTOR_STATE:
@@ -468,7 +527,9 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
         if not isinstance(complete_lifecycle, bool):
             failures.append(f"{version}: complete_lifecycle must be boolean")
         if mutation_support not in VALID_MUTATION_SUPPORT:
-            failures.append(f"{version}: unsupported managed_mutation_support {mutation_support!r}")
+            failures.append(
+                f"{version}: unsupported managed_mutation_support {mutation_support!r}"
+            )
         if agent_role not in VALID_AGENT_ROLE:
             failures.append(f"{version}: unsupported agent_role {agent_role!r}")
         if platform not in VALID_PLATFORM_SUPPORT:
@@ -477,15 +538,21 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
         if status == "planned":
             seen_planned = True
         elif status == "released" and seen_planned:
-            failures.append(f"{version}: released milestones must form a contiguous prefix")
+            failures.append(
+                f"{version}: released milestones must form a contiguous prefix"
+            )
 
         by_version[version] = milestone
         ordered_versions.append(version)
 
     try:
         ordered_keys = [version_key(version) for version in ordered_versions]
-        if ordered_keys != sorted(ordered_keys) or len(set(ordered_keys)) != len(ordered_keys):
-            failures.append("roadmap milestones must be strictly increasing by semantic version")
+        if ordered_keys != sorted(ordered_keys) or len(set(ordered_keys)) != len(
+            ordered_keys
+        ):
+            failures.append(
+                "roadmap milestones must be strictly increasing by semantic version"
+            )
     except ValueError:
         pass
 
@@ -499,7 +566,9 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
                 continue
             try:
                 if version_key(dependency) >= version_key(version):
-                    failures.append(f"{version}: dependency {dependency} must precede the milestone")
+                    failures.append(
+                        f"{version}: dependency {dependency} must precede the milestone"
+                    )
             except ValueError:
                 continue
 
@@ -532,10 +601,14 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
     if release_candidate is not None:
         candidate = by_version.get(release_candidate)
         if candidate is None:
-            failures.append(f"release candidate is not a roadmap milestone: {release_candidate}")
+            failures.append(
+                f"release candidate is not a roadmap milestone: {release_candidate}"
+            )
         else:
             if candidate.get("status") != "planned":
-                failures.append(f"release candidate must remain planned before publication: {release_candidate}")
+                failures.append(
+                    f"release candidate must remain planned before publication: {release_candidate}"
+                )
             if next_release != release_candidate:
                 failures.append(
                     f"release candidate must equal roadmap next_release {next_release!r}, found {release_candidate!r}"
@@ -558,7 +631,9 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
 
     roadmap_text = read_contract_document(canonical_document, "canonical_document")
     domain_text = read_contract_document(domain_document, "domain_document")
-    development_text = read_contract_document(development_document, "development_document")
+    development_text = read_contract_document(
+        development_document, "development_document"
+    )
     versioning_text = read_contract_document(versioning_document, "versioning_document")
 
     for version, milestone in by_version.items():
@@ -571,14 +646,23 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
         if milestone.get("status") == "released":
             release_contract = milestone.get("release_contract")
             if not isinstance(release_contract, str):
-                failures.append(f"{version}: released milestone must name release_contract")
+                failures.append(
+                    f"{version}: released milestone must name release_contract"
+                )
             elif not (root / release_contract).is_file():
-                failures.append(f"{version}: release contract does not exist: {release_contract}")
+                failures.append(
+                    f"{version}: release contract does not exist: {release_contract}"
+                )
 
         qualification = milestone.get("qualification")
         if qualification is not None:
-            if not isinstance(qualification, str) or not (root / qualification).is_file():
-                failures.append(f"{version}: qualification document does not exist: {qualification!r}")
+            if (
+                not isinstance(qualification, str)
+                or not (root / qualification).is_file()
+            ):
+                failures.append(
+                    f"{version}: qualification document does not exist: {qualification!r}"
+                )
 
     def dependency_closure(version: str) -> set[str]:
         visited: set[str] = set()
@@ -602,9 +686,30 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
         "v0.3.0": (False, "none", False, "none", "none", "none"),
         "v0.4.0": (True, "none", False, "none", "none", "none"),
         "v0.5.0": (True, "isolated-qualified", False, "none", "none", "none"),
-        "v0.6.0": (True, "integrated-narrow", True, "narrow-experimental", "none", "none"),
-        "v0.7.0": (True, "integrated-narrow", True, "narrow-experimental", "none", "none"),
-        "v0.8.0": (True, "integrated-narrow", True, "narrow-experimental", "proposal-only", "none"),
+        "v0.6.0": (
+            True,
+            "integrated-narrow",
+            True,
+            "narrow-experimental",
+            "none",
+            "none",
+        ),
+        "v0.7.0": (
+            True,
+            "integrated-narrow",
+            True,
+            "narrow-experimental",
+            "none",
+            "none",
+        ),
+        "v0.8.0": (
+            True,
+            "integrated-narrow",
+            True,
+            "narrow-experimental",
+            "proposal-only",
+            "none",
+        ),
         "v0.9.0": (
             True,
             "integrated-narrow",
@@ -647,7 +752,9 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
             milestone.get("platform_support"),
         )
         if actual != expected:
-            failures.append(f"{version}: architectural gate changed from {expected} to {actual}")
+            failures.append(
+                f"{version}: architectural gate changed from {expected} to {actual}"
+            )
 
     for version, milestone in by_version.items():
         closure = dependency_closure(version)
@@ -659,54 +766,102 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
         claim_class = milestone.get("claim_class")
 
         if durable_recovery and version != "v0.4.0" and "v0.4.0" not in closure:
-            failures.append(f"{version}: durable recovery requires the v0.4.0 foundation")
-        if executor_state in {"isolated-qualified", "integrated-narrow"} and not durable_recovery:
-            failures.append(f"{version}: executor qualification requires durable recovery semantics")
+            failures.append(
+                f"{version}: durable recovery requires the v0.4.0 foundation"
+            )
+        if (
+            executor_state in {"isolated-qualified", "integrated-narrow"}
+            and not durable_recovery
+        ):
+            failures.append(
+                f"{version}: executor qualification requires durable recovery semantics"
+            )
         if executor_state == "integrated-narrow" and "v0.5.0" not in closure:
-            failures.append(f"{version}: integrated executor requires v0.5.0 isolated executor/verifier qualification")
+            failures.append(
+                f"{version}: integrated executor requires v0.5.0 isolated executor/verifier qualification"
+            )
         if complete_lifecycle:
             if not durable_recovery or executor_state != "integrated-narrow":
-                failures.append(f"{version}: complete lifecycle requires durable recovery and integrated narrow executor")
+                failures.append(
+                    f"{version}: complete lifecycle requires durable recovery and integrated narrow executor"
+                )
             if version != "v0.6.0" and "v0.6.0" not in closure:
-                failures.append(f"{version}: complete lifecycle requires the v0.6.0 integration milestone")
+                failures.append(
+                    f"{version}: complete lifecycle requires the v0.6.0 integration milestone"
+                )
         if mutation_support != "none":
             if not complete_lifecycle:
-                failures.append(f"{version}: supported managed mutation requires complete lifecycle proof")
+                failures.append(
+                    f"{version}: supported managed mutation requires complete lifecycle proof"
+                )
             if executor_state != "integrated-narrow":
-                failures.append(f"{version}: supported managed mutation requires an integrated narrow executor")
+                failures.append(
+                    f"{version}: supported managed mutation requires an integrated narrow executor"
+                )
             if not durable_recovery:
-                failures.append(f"{version}: supported managed mutation requires durable recovery")
+                failures.append(
+                    f"{version}: supported managed mutation requires durable recovery"
+                )
             if version != "v0.6.0" and "v0.6.0" not in closure:
-                failures.append(f"{version}: supported managed mutation cannot precede v0.6.0")
-        if mutation_support == "reference-experimental" and claim_class != "Experimental":
-            failures.append(f"{version}: Experimental reference mutation support requires an Experimental milestone claim")
+                failures.append(
+                    f"{version}: supported managed mutation cannot precede v0.6.0"
+                )
+        if (
+            mutation_support == "reference-experimental"
+            and claim_class != "Experimental"
+        ):
+            failures.append(
+                f"{version}: Experimental reference mutation support requires an Experimental milestone claim"
+            )
         if mutation_support == "reference-stable":
             if claim_class != "Stable":
-                failures.append(f"{version}: Stable mutation support requires a Stable milestone claim")
+                failures.append(
+                    f"{version}: Stable mutation support requires a Stable milestone claim"
+                )
             if platform_support != "reference-stable":
-                failures.append(f"{version}: Stable mutation support requires a Stable reference platform")
+                failures.append(
+                    f"{version}: Stable mutation support requires a Stable reference platform"
+                )
             if "v0.10.0" not in closure:
-                failures.append(f"{version}: Stable mutation support requires the v0.10.0 Experimental end-user milestone")
+                failures.append(
+                    f"{version}: Stable mutation support requires the v0.10.0 Experimental end-user milestone"
+                )
         if milestone.get("agent_role") == "proposal-only" and "v0.7.0" not in closure:
-            failures.append(f"{version}: agent interpretation requires the persistent trusted core through v0.7.0")
+            failures.append(
+                f"{version}: agent interpretation requires the persistent trusted core through v0.7.0"
+            )
         if platform_support == "reference-experimental" and "v0.8.0" not in closure:
-            failures.append(f"{version}: Experimental reference platform support requires the v0.8.0 proposal boundary")
+            failures.append(
+                f"{version}: Experimental reference platform support requires the v0.8.0 proposal boundary"
+            )
         if platform_support == "reference-stable":
             if claim_class != "Stable":
-                failures.append(f"{version}: Stable reference platform support requires a Stable milestone claim")
+                failures.append(
+                    f"{version}: Stable reference platform support requires a Stable milestone claim"
+                )
             if "v0.10.0" not in closure:
-                failures.append(f"{version}: Stable reference platform support requires v0.10.0 experience evidence")
+                failures.append(
+                    f"{version}: Stable reference platform support requires v0.10.0 experience evidence"
+                )
 
     v010 = by_version.get("v0.10.0")
     if v010 is not None:
         if v010.get("claim_class") != "Experimental":
-            failures.append("v0.10.0 must remain the explicitly Experimental end-user milestone")
+            failures.append(
+                "v0.10.0 must remain the explicitly Experimental end-user milestone"
+            )
         if v010.get("experience_scope") != "complete-daily-usable-workstation":
-            failures.append("v0.10.0 experience_scope must remain complete-daily-usable-workstation")
+            failures.append(
+                "v0.10.0 experience_scope must remain complete-daily-usable-workstation"
+            )
         if v010.get("desktop_shell_scope") != "complete-first-party-workstation-shell":
-            failures.append("v0.10.0 desktop_shell_scope must remain complete-first-party-workstation-shell")
+            failures.append(
+                "v0.10.0 desktop_shell_scope must remain complete-first-party-workstation-shell"
+            )
         if v010.get("installation_scope") != "bounded-qualified-install-plus-adoption":
-            failures.append("v0.10.0 installation_scope must remain bounded-qualified-install-plus-adoption")
+            failures.append(
+                "v0.10.0 installation_scope must remain bounded-qualified-install-plus-adoption"
+            )
         if v010.get("daily_use_target") is not True:
             failures.append("v0.10.0 daily_use_target must remain true")
         if v010.get("product_scope_adr") != V010_PRODUCT_SCOPE_ADR:
@@ -714,7 +869,9 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
         elif not (root / V010_PRODUCT_SCOPE_ADR).is_file():
             failures.append("v0.10 product-scope ADR 0033 is missing")
         if v010.get("slice_contract") != V010_SLICE_CONTRACT:
-            failures.append("v0.10.0 slice_contract must bind the canonical 32-slice ledger")
+            failures.append(
+                "v0.10.0 slice_contract must bind the canonical 32-slice ledger"
+            )
         if v010.get("release_qualified_qualification_environments") != [
             "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless"
         ]:
@@ -741,7 +898,10 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
             failures.extend(validate_v010_release_readiness(root))
             if v010_is_release_candidate:
                 expected_source_sha = os.environ.get("LINURA_EXPECTED_SOURCE_SHA")
-                if expected_source_sha is None or GIT_SHA_RE.fullmatch(expected_source_sha) is None:
+                if (
+                    expected_source_sha is None
+                    or GIT_SHA_RE.fullmatch(expected_source_sha) is None
+                ):
                     failures.append(
                         "v0.10 release semantic qualification requires LINURA_EXPECTED_SOURCE_SHA as a lowercase 40-hex qualification source"
                     )
@@ -749,17 +909,26 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
                 release_intent_source_sha = v010.get("release_intent_source_sha")
                 expected_source_sha = v010.get("qualification_source_sha")
                 qualification_tree_sha = v010.get("qualification_tree_sha")
-                if not isinstance(release_intent_source_sha, str) or GIT_SHA_RE.fullmatch(release_intent_source_sha) is None:
+                if (
+                    not isinstance(release_intent_source_sha, str)
+                    or GIT_SHA_RE.fullmatch(release_intent_source_sha) is None
+                ):
                     failures.append(
                         "released v0.10 requires a persisted lowercase 40-hex release_intent_source_sha"
                     )
                     release_intent_source_sha = None
-                if not isinstance(expected_source_sha, str) or GIT_SHA_RE.fullmatch(expected_source_sha) is None:
+                if (
+                    not isinstance(expected_source_sha, str)
+                    or GIT_SHA_RE.fullmatch(expected_source_sha) is None
+                ):
                     failures.append(
                         "released v0.10 requires a persisted lowercase 40-hex qualification_source_sha"
                     )
                     expected_source_sha = None
-                if not isinstance(qualification_tree_sha, str) or GIT_SHA_RE.fullmatch(qualification_tree_sha) is None:
+                if (
+                    not isinstance(qualification_tree_sha, str)
+                    or GIT_SHA_RE.fullmatch(qualification_tree_sha) is None
+                ):
                     failures.append(
                         "released v0.10 requires a persisted lowercase 40-hex qualification_tree_sha"
                     )
@@ -770,7 +939,9 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
                     and qualification_tree_sha is not None
                 ):
                     try:
-                        intent = validate_release_intent(release_intent_source_sha, root)
+                        intent = validate_release_intent(
+                            release_intent_source_sha, root
+                        )
                     except ReleaseContractError as error:
                         failures.append(
                             f"released v0.10 persisted release intent is invalid: {error}"
@@ -794,7 +965,11 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
             )
         elif any(
             key in v010
-            for key in ("release_intent_source_sha", "qualification_source_sha", "qualification_tree_sha")
+            for key in (
+                "release_intent_source_sha",
+                "qualification_source_sha",
+                "qualification_tree_sha",
+            )
         ):
             failures.append(
                 "planned v0.10 must not persist release qualification source/tree before protected post-release closure"
@@ -803,9 +978,13 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
     v1 = by_version.get("v1.0.0")
     if v1 is not None:
         if v1.get("claim_class") != "Stable":
-            failures.append("v1.0.0 is reserved for the first Stable supported end-user contract")
+            failures.append(
+                "v1.0.0 is reserved for the first Stable supported end-user contract"
+            )
         if v1.get("depends_on") != ["v0.10.0"]:
-            failures.append("v1.0.0 must follow the v0.10.0 Experimental end-user milestone")
+            failures.append(
+                "v1.0.0 must follow the v0.10.0 Experimental end-user milestone"
+            )
 
     required_versioning_markers = (
         "`v1.0.0` is the first stable end-user contract.",
@@ -827,7 +1006,9 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
     )
     for marker in required_development_markers:
         if development_text and marker not in development_text:
-            failures.append(f"development plan missing roadmap alignment marker: {marker}")
+            failures.append(
+                f"development plan missing roadmap alignment marker: {marker}"
+            )
 
     required_roadmap_markers = (
         "## v0.10.0 — complete Experimental Linura workstation",
@@ -864,7 +1045,9 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
     )
     for marker in required_domain_markers:
         if domain_text and marker not in domain_text:
-            failures.append(f"system domain map missing virtualization boundary marker: {marker}")
+            failures.append(
+                f"system domain map missing virtualization boundary marker: {marker}"
+            )
 
     return failures
 

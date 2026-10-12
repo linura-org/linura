@@ -12,7 +12,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def version_contract() -> dict[str, str]:
     result: dict[str, str] = {}
-    for line in (ROOT / "tools/codex/versions.env").read_text(encoding="utf-8").splitlines():
+    for line in (
+        (ROOT / "tools/codex/versions.env").read_text(encoding="utf-8").splitlines()
+    ):
         if line and not line.startswith("#"):
             key, value = line.split("=", 1)
             result[key] = value
@@ -34,12 +36,15 @@ class EditorToolingTests(unittest.TestCase):
                 )
 
     def test_vscode_recommends_the_reviewed_language_tools(self) -> None:
-        data = json.loads((ROOT / ".vscode/extensions.json").read_text(encoding="utf-8"))
+        data = json.loads(
+            (ROOT / ".vscode/extensions.json").read_text(encoding="utf-8")
+        )
         required = {
             "rust-lang.rust-analyzer",
             "ms-python.python",
             "ms-python.vscode-pylance",
             "charliermarsh.ruff",
+            "streetsidesoftware.code-spell-checker",
         }
         self.assertTrue(required.issubset(set(data["recommendations"])))
 
@@ -49,7 +54,20 @@ class EditorToolingTests(unittest.TestCase):
         self.assertEqual(data["[python]"]["editor.rulers"], [88, 100, 120])
         self.assertEqual(data["python.analysis.typeCheckingMode"], "basic")
         self.assertTrue(data["[rust]"]["editor.formatOnSave"])
-        self.assertFalse(data["[python]"]["editor.formatOnSave"])
+        self.assertTrue(data["[python]"]["editor.formatOnSave"])
+        self.assertEqual(data["ruff.path"], ["${userHome}/.local/bin/ruff"])
+        self.assertEqual(
+            data["python.analysis.extraPaths"], ["./tools", "./bindings/python/src"]
+        )
+        self.assertNotIn("python.defaultInterpreterPath", data)
+        words = data["cSpell.words"]
+        self.assertEqual(words, sorted(set(words)))
+        self.assertTrue(
+            {"linura", "hyprland", "quickshell", "wireplumber"}.issubset(words)
+        )
+        self.assertEqual(
+            data["rust-analyzer.check.extraArgs"], ["--all-features", "--locked"]
+        )
 
     def test_ruff_rule_baseline_is_explicit_and_version_aligned(self) -> None:
         config = tomllib.loads((ROOT / "ruff.toml").read_text(encoding="utf-8"))
@@ -61,7 +79,9 @@ class EditorToolingTests(unittest.TestCase):
         )
         self.assertEqual(config["lint"]["select"], ["E4", "E7", "E9", "F"])
 
-        lock = (ROOT / "tools/python/ruff-requirements.lock").read_text(encoding="utf-8")
+        lock = (ROOT / "tools/python/ruff-requirements.lock").read_text(
+            encoding="utf-8"
+        )
         match = re.search(r"(?m)^ruff==([^ \\]+)", lock)
         self.assertIsNotNone(match)
         assert match is not None
@@ -70,13 +90,18 @@ class EditorToolingTests(unittest.TestCase):
     def test_ruff_is_wired_into_canonical_development_paths(self) -> None:
         xtask = (ROOT / "tools/xtask/src/main.rs").read_text(encoding="utf-8")
         self.assertIn('run("ruff", &["check", "."])?;', xtask)
-        self.assertIn('verify_ruff_version()?;', xtask)
+        self.assertIn('run("ruff", &["format", "--check", "."])?;', xtask)
+        self.assertLess(
+            xtask.index('run("ruff", &["check", "."])?;'),
+            xtask.index('run("ruff", &["format", "--check", "."])?;'),
+        )
+        self.assertIn("verify_ruff_version()?;", xtask)
         self.assertIn('Command::new("ruff")', xtask)
         self.assertIn('.arg("--version")', xtask)
-        self.assertIn('pinned_ruff_version(&contract)?', xtask)
-        self.assertIn('Ruff version mismatch', xtask)
+        self.assertIn("pinned_ruff_version(&contract)?", xtask)
+        self.assertIn("Ruff version mismatch", xtask)
         self.assertLess(
-            xtask.index('verify_ruff_version()?;'),
+            xtask.index("verify_ruff_version()?;"),
             xtask.index('run("ruff", &["check", "."])?;'),
         )
         for path in (

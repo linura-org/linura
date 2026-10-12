@@ -64,7 +64,9 @@ def validate(root: Path) -> list[str]:
         heading = first_nonempty_line(text)
         heading_match = HEADING_RE.fullmatch(heading)
         if heading_match is None:
-            failures.append(f"invalid ADR heading: {path.relative_to(root)} -> {heading!r}")
+            failures.append(
+                f"invalid ADR heading: {path.relative_to(root)} -> {heading!r}"
+            )
         elif int(heading_match.group("number")) != number:
             failures.append(
                 f"ADR heading/filename mismatch: {path.relative_to(root)} -> {heading_match.group('number')}"
@@ -101,12 +103,18 @@ def validate(root: Path) -> list[str]:
         if supersedes_match:
             refs = parse_refs(supersedes_match.group("value"))
             if not refs:
-                failures.append(f"ADR Supersedes field has no ADR identifier: {path.relative_to(root)}")
+                failures.append(
+                    f"ADR Supersedes field has no ADR identifier: {path.relative_to(root)}"
+                )
             for ref in refs:
                 if ref not in known_numbers:
-                    failures.append(f"ADR {number:04d} supersedes missing ADR {ref:04d}")
+                    failures.append(
+                        f"ADR {number:04d} supersedes missing ADR {ref:04d}"
+                    )
                 elif ref >= number:
-                    failures.append(f"ADR {number:04d} must supersede an earlier ADR, not {ref:04d}")
+                    failures.append(
+                        f"ADR {number:04d} must supersede an earlier ADR, not {ref:04d}"
+                    )
 
         superseded_by_match = SUPERSEDED_BY_RE.search(text)
         if status == "superseded" and superseded_by_match is None:
@@ -114,12 +122,18 @@ def validate(root: Path) -> list[str]:
         if superseded_by_match:
             refs = parse_refs(superseded_by_match.group("value"))
             if not refs:
-                failures.append(f"ADR Superseded by field has no ADR identifier: {path.relative_to(root)}")
+                failures.append(
+                    f"ADR Superseded by field has no ADR identifier: {path.relative_to(root)}"
+                )
             for ref in refs:
                 if ref not in known_numbers:
-                    failures.append(f"ADR {number:04d} references missing superseding ADR {ref:04d}")
+                    failures.append(
+                        f"ADR {number:04d} references missing superseding ADR {ref:04d}"
+                    )
                 elif ref <= number:
-                    failures.append(f"ADR {number:04d} must be superseded by a later ADR, not {ref:04d}")
+                    failures.append(
+                        f"ADR {number:04d} must be superseded by a later ADR, not {ref:04d}"
+                    )
 
     index_text = index_path.read_text(encoding="utf-8")
     entries = list(INDEX_RE.finditer(index_text))
@@ -166,7 +180,9 @@ def validate(root: Path) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate Linura ADR ledger governance")
+    parser = argparse.ArgumentParser(
+        description="Validate Linura ADR ledger governance"
+    )
     parser.add_argument(
         "root_arg",
         nargs="?",
@@ -182,7 +198,9 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.root_arg is not None and args.root_option is not None:
-        parser.error("specify repository root either positionally or with --root, not both")
+        parser.error(
+            "specify repository root either positionally or with --root, not both"
+        )
     root = args.root_option or args.root_arg or Path(__file__).resolve().parents[1]
 
     failures = validate(root.resolve())

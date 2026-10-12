@@ -5,6 +5,7 @@ An execution envelope identifies the exact source/tree, repository-controlled
 configuration, runner image identity, explicit dynamic digests, and verified
 cache content that a qualification lane actually used. It is not a pass receipt.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -49,23 +50,91 @@ REQUIRED_LANE_BINDINGS = {
     "canonical-ci": ("github-hosted", "workflow", ".github/workflows/ci.yml"),
     "security-rustsec": ("github-hosted", "workflow", ".github/workflows/security.yml"),
     "codeql": ("github-hosted", "workflow", ".github/workflows/codeql.yml"),
-    "codex-environment": ("github-hosted", "workflow", ".github/workflows/codex-environment.yml"),
-    "evidence-publication": ("github-hosted", "workflow", ".github/workflows/evidence-publication-checks.yml"),
-    "vm-acceptance": ("github-hosted", "workflow", ".github/workflows/vm-acceptance.yml"),
-    "control1-plan-preview-vm": ("github-hosted", "workflow", ".github/workflows/control1-plan-preview-vm.yml"),
-    "v04-durability": ("github-hosted", "workflow", ".github/workflows/v04-durability-vm.yml"),
-    "v04-enospc": ("github-hosted", "workflow", ".github/workflows/v04-enospc-recovery-vm.yml"),
-    "v05-executor-verifier": ("github-hosted", "workflow", ".github/workflows/v05-executor-verifier-vm.yml"),
-    "v06-managed-lifecycle": ("github-hosted", "workflow", ".github/workflows/v06-managed-lifecycle-vm.yml"),
-    "v07-library": ("github-hosted", "workflow", ".github/workflows/v07-library-qualification.yml"),
-    "v08-agent": ("github-hosted", "workflow", ".github/workflows/v08-agent-qualification.yml"),
-    "v09-qualification-contract": ("github-hosted", "workflow", ".github/workflows/v09-qualification.yml"),
-    "v09-qualification": ("github-hosted", "workflow", ".github/workflows/v09-qualification.yml"),
-    "v09-adversarial-security": ("github-hosted", "workflow", ".github/workflows/v09-adversarial-security.yml"),
-    "v09-adversarial-security-shard": ("github-hosted", "workflow", ".github/workflows/v09-adversarial-security.yml"),
-    "v010-workstation-contract": ("github-hosted", "workflow", ".github/workflows/v010-qualification.yml"),
-    "v010-shell-runtime": ("github-hosted", "workflow", ".github/workflows/v010-shell-runtime-qualification.yml"),
-    "trusted-release-proof": ("github-hosted", "workflow", ".github/workflows/trusted-release-proof.yml"),
+    "codex-environment": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/codex-environment.yml",
+    ),
+    "evidence-publication": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/evidence-publication-checks.yml",
+    ),
+    "vm-acceptance": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/vm-acceptance.yml",
+    ),
+    "control1-plan-preview-vm": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/control1-plan-preview-vm.yml",
+    ),
+    "v04-durability": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/v04-durability-vm.yml",
+    ),
+    "v04-enospc": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/v04-enospc-recovery-vm.yml",
+    ),
+    "v05-executor-verifier": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/v05-executor-verifier-vm.yml",
+    ),
+    "v06-managed-lifecycle": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/v06-managed-lifecycle-vm.yml",
+    ),
+    "v07-library": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/v07-library-qualification.yml",
+    ),
+    "v08-agent": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/v08-agent-qualification.yml",
+    ),
+    "v09-qualification-contract": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/v09-qualification.yml",
+    ),
+    "v09-qualification": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/v09-qualification.yml",
+    ),
+    "v09-adversarial-security": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/v09-adversarial-security.yml",
+    ),
+    "v09-adversarial-security-shard": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/v09-adversarial-security.yml",
+    ),
+    "v010-workstation-contract": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/v010-qualification.yml",
+    ),
+    "v010-shell-runtime": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/v010-shell-runtime-qualification.yml",
+    ),
+    "trusted-release-proof": (
+        "github-hosted",
+        "workflow",
+        ".github/workflows/trusted-release-proof.yml",
+    ),
     "v010-maintained-hardware": (
         "physical",
         "entrypoint",
@@ -75,16 +144,18 @@ REQUIRED_LANE_BINDINGS = {
 RUNNER_ARCHITECTURES = {"X64": "x86_64", "ARM64": "aarch64"}
 PACKAGE_MANAGERS = ("dpkg", "pacman", "rpm")
 EXECUTION_SUBJECTS = frozenset({"runner", "guest", "aggregate"})
-GUEST_EXECUTION_LANES = frozenset({
-    "vm-acceptance",
-    "control1-plan-preview-vm",
-    "v04-durability",
-    "v04-enospc",
-    "v05-executor-verifier",
-    "v06-managed-lifecycle",
-    "v09-adversarial-security-shard",
-    "v010-shell-runtime",
-})
+GUEST_EXECUTION_LANES = frozenset(
+    {
+        "vm-acceptance",
+        "control1-plan-preview-vm",
+        "v04-durability",
+        "v04-enospc",
+        "v05-executor-verifier",
+        "v06-managed-lifecycle",
+        "v09-adversarial-security-shard",
+        "v010-shell-runtime",
+    }
+)
 GUEST_CAPTURE_FIELDS = {
     "schema_version",
     "kind",
@@ -111,16 +182,21 @@ V09_ADVERSARIAL_SHARDS = (
     ("owner-final", 12, 13, False, True),
 )
 V09_ADVERSARIAL_SHARD_IDS = frozenset(row[0] for row in V09_ADVERSARIAL_SHARDS)
-QUALIFICATION_ENVIRONMENT_IDS = frozenset({
-    "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless",
-})
+QUALIFICATION_ENVIRONMENT_IDS = frozenset(
+    {
+        "qualification/ubuntu-24.04-lts/amd64/qemu-tcg-headless",
+    }
+)
 TRUSTED_COMMAND_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 TRUSTED_EXECUTABLES = {
     "git": (Path("/usr/bin/git"), Path("/bin/git")),
     "dpkg-query": (Path("/usr/bin/dpkg-query"),),
     "pacman": (Path("/usr/bin/pacman"),),
     "rpm": (Path("/usr/bin/rpm"),),
-    "systemd-detect-virt": (Path("/usr/bin/systemd-detect-virt"), Path("/bin/systemd-detect-virt")),
+    "systemd-detect-virt": (
+        Path("/usr/bin/systemd-detect-virt"),
+        Path("/bin/systemd-detect-virt"),
+    ),
     "NetworkManager": (Path("/usr/bin/NetworkManager"),),
     "bluetoothd": (Path("/usr/lib/bluetooth/bluetoothd"), Path("/usr/bin/bluetoothd")),
     "pipewire": (Path("/usr/bin/pipewire"),),
@@ -128,40 +204,46 @@ TRUSTED_EXECUTABLES = {
     "udisksctl": (Path("/usr/bin/udisksctl"),),
     "pkcheck": (Path("/usr/bin/pkcheck"),),
 }
-ALLOWED_UNTRACKED_ROOTS = frozenset({
-    "target",
-    "coverage",
-    "dist",
-    "artifacts",
-    ".artifacts",
-})
-ALLOWED_UNTRACKED_COMPONENTS = frozenset({
-    "__pycache__",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".mypy_cache",
-})
-REPOSITORY_REDIRECTING_GIT_ENVIRONMENT = frozenset({
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_CEILING_DIRECTORIES",
-    "GIT_COMMON_DIR",
-    "GIT_CONFIG",
-    "GIT_CONFIG_COUNT",
-    "GIT_CONFIG_GLOBAL",
-    "GIT_CONFIG_NOSYSTEM",
-    "GIT_CONFIG_PARAMETERS",
-    "GIT_CONFIG_SYSTEM",
-    "GIT_DIR",
-    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-    "GIT_GRAFT_FILE",
-    "GIT_INDEX_FILE",
-    "GIT_NAMESPACE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_QUARANTINE_PATH",
-    "GIT_REPLACE_REF_BASE",
-    "GIT_SHALLOW_FILE",
-    "GIT_WORK_TREE",
-})
+ALLOWED_UNTRACKED_ROOTS = frozenset(
+    {
+        "target",
+        "coverage",
+        "dist",
+        "artifacts",
+        ".artifacts",
+    }
+)
+ALLOWED_UNTRACKED_COMPONENTS = frozenset(
+    {
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+    }
+)
+REPOSITORY_REDIRECTING_GIT_ENVIRONMENT = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_DIR",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_GRAFT_FILE",
+        "GIT_INDEX_FILE",
+        "GIT_NAMESPACE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_QUARANTINE_PATH",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_SHALLOW_FILE",
+        "GIT_WORK_TREE",
+    }
+)
 REPOSITORY_REDIRECTING_GIT_ENVIRONMENT_PREFIXES = (
     "GIT_CONFIG_KEY_",
     "GIT_CONFIG_VALUE_",
@@ -191,22 +273,29 @@ def _canonical_json(value: object) -> bytes:
 
 
 def _safe_file(root: Path, relative: str) -> Path:
-    _require(isinstance(relative, str) and relative and not relative.startswith("/"),
-             "repository input path must be non-empty and relative")
+    _require(
+        isinstance(relative, str) and relative and not relative.startswith("/"),
+        "repository input path must be non-empty and relative",
+    )
     parts = Path(relative).parts
     _require(".." not in parts, "repository input path may not traverse parents")
     path = root / relative
-    _require(path.is_file() and not path.is_symlink(),
-             f"missing or unsafe repository input: {relative}")
+    _require(
+        path.is_file() and not path.is_symlink(),
+        f"missing or unsafe repository input: {relative}",
+    )
     resolved = path.resolve()
-    _require(resolved.is_relative_to(root.resolve()),
-             f"repository input escapes root: {relative}")
+    _require(
+        resolved.is_relative_to(root.resolve()),
+        f"repository input escapes root: {relative}",
+    )
     return path
 
 
 def _sha256_file(path: Path) -> str:
-    _require(path.is_file() and not path.is_symlink(),
-             f"missing or unsafe file: {path}")
+    _require(
+        path.is_file() and not path.is_symlink(), f"missing or unsafe file: {path}"
+    )
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -218,10 +307,7 @@ def _sha256_resolved_identity_file(
     path: Path, *, allowed_targets: tuple[Path, ...]
 ) -> str:
     _require(path.is_absolute(), f"identity file path must be absolute: {path}")
-    allowed = {
-        Path(os.path.abspath(candidate))
-        for candidate in allowed_targets
-    }
+    allowed = {Path(os.path.abspath(candidate)) for candidate in allowed_targets}
     try:
         resolved = path.resolve(strict=True)
     except (OSError, RuntimeError) as exc:
@@ -260,7 +346,9 @@ def _trusted_executable(name: str, *, required: bool = True) -> str | None:
             continue
         info = resolved.stat()
         if info.st_uid != 0 or info.st_mode & 0o022:
-            rejected.append(f"{candidate}: executable is not root-owned and non-writable")
+            rejected.append(
+                f"{candidate}: executable is not root-owned and non-writable"
+            )
             continue
         return str(resolved)
     if required:
@@ -274,9 +362,8 @@ def _untracked_path_allowed(path_bytes: bytes) -> bool:
     parts = relative.parts
     if not parts:
         return False
-    return (
-        parts[0] in ALLOWED_UNTRACKED_ROOTS
-        or any(part in ALLOWED_UNTRACKED_COMPONENTS for part in parts)
+    return parts[0] in ALLOWED_UNTRACKED_ROOTS or any(
+        part in ALLOWED_UNTRACKED_COMPONENTS for part in parts
     )
 
 
@@ -301,13 +388,17 @@ def _require_no_untracked_source_inputs(root: Path) -> None:
 def _repository_git_context(root: Path) -> tuple[Path, Path, Path]:
     resolved_root = root.resolve()
     marker = resolved_root / ".git"
-    _require(marker.exists() and not marker.is_symlink(),
-             "repository .git metadata is missing or unsafe")
+    _require(
+        marker.exists() and not marker.is_symlink(),
+        "repository .git metadata is missing or unsafe",
+    )
 
     if marker.is_dir():
         git_dir = marker.resolve()
     else:
-        _require(marker.is_file(), "repository .git metadata is not a file or directory")
+        _require(
+            marker.is_file(), "repository .git metadata is not a file or directory"
+        )
         try:
             metadata = marker.read_text(encoding="utf-8").strip()
         except (OSError, UnicodeError) as exc:
@@ -320,7 +411,7 @@ def _repository_git_context(root: Path) -> tuple[Path, Path, Path]:
             and len(metadata) > len(prefix),
             "repository .git file is malformed",
         )
-        git_dir_text = metadata[len(prefix):]
+        git_dir_text = metadata[len(prefix) :]
         git_dir_path = Path(git_dir_text)
         if not git_dir_path.is_absolute():
             git_dir_path = resolved_root / git_dir_path
@@ -328,8 +419,10 @@ def _repository_git_context(root: Path) -> tuple[Path, Path, Path]:
 
     _require(git_dir.is_dir(), "repository Git directory is missing")
     index = git_dir / "index"
-    _require(index.is_file() and not index.is_symlink(),
-             "repository Git index is missing or unsafe")
+    _require(
+        index.is_file() and not index.is_symlink(),
+        "repository Git index is missing or unsafe",
+    )
     return resolved_root, git_dir, index
 
 
@@ -352,15 +445,18 @@ def _git_environment(root: Path, git_dir: Path, index: Path) -> dict[str, str]:
     )
 
     environment = _trusted_command_environment()
-    environment.update({
-        "GIT_DIR": str(git_dir),
-        "GIT_WORK_TREE": str(root),
-        "GIT_INDEX_FILE": str(index),
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": os.devnull,
-        "GIT_CONFIG_SYSTEM": os.devnull,
-    })
+    environment.update(
+        {
+            "GIT_DIR": str(git_dir),
+            "GIT_WORK_TREE": str(root),
+            "GIT_INDEX_FILE": str(index),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+        }
+    )
     return environment
+
 
 def _run_git(root: Path, *args: str, text: bool = False) -> subprocess.CompletedProcess:
     resolved_root, git_dir, index = _repository_git_context(root)
@@ -399,7 +495,9 @@ def _string_list(value: object, field: str, *, allow_empty: bool = True) -> list
     _require(isinstance(value, list), f"{field} must be an array")
     result: list[str] = []
     for item in value:
-        _require(isinstance(item, str) and item, f"{field} entries must be non-empty strings")
+        _require(
+            isinstance(item, str) and item, f"{field} entries must be non-empty strings"
+        )
         result.append(item)
     _require(len(result) == len(set(result)), f"{field} contains duplicates")
     if not allow_empty:
@@ -408,13 +506,17 @@ def _string_list(value: object, field: str, *, allow_empty: bool = True) -> list
 
 
 def _require_exact_keys(value: dict, expected: set[str], field: str) -> None:
-    _require(set(value) == expected,
-             f"{field} fields mismatch: expected {sorted(expected)}, got {sorted(value)}")
+    _require(
+        set(value) == expected,
+        f"{field} fields mismatch: expected {sorted(expected)}, got {sorted(value)}",
+    )
 
 
 def _single_line(value: object, field: str) -> str:
-    _require(isinstance(value, str) and value and "\n" not in value and "\r" not in value,
-             f"{field} must be a single-line non-empty string")
+    _require(
+        isinstance(value, str) and value and "\n" not in value and "\r" not in value,
+        f"{field} must be a single-line non-empty string",
+    )
     return value
 
 
@@ -438,8 +540,9 @@ def load_contract(root: Path = ROOT) -> dict:
     }
     _require_exact_keys(contract, expected_top, "execution-envelope contract")
     for field, expected in CONTRACT_IDENTITIES.items():
-        _require(contract.get(field) == expected,
-                 f"unexpected execution-envelope {field}")
+        _require(
+            contract.get(field) == expected, f"unexpected execution-envelope {field}"
+        )
 
     implementation = _string_list(
         contract.get("implementation_files"), "implementation_files", allow_empty=False
@@ -488,16 +591,20 @@ def load_contract(root: Path = ROOT) -> dict:
         "qualification_evidence_cache_allowed": False,
         "build_output_cache_allowed": False,
     }
-    _require(cache_policy == expected_cache_policy,
-             "cache policy changed without schema review")
+    _require(
+        cache_policy == expected_cache_policy,
+        "cache policy changed without schema review",
+    )
 
     runners = contract.get("runner")
     _require(isinstance(runners, dict), "runner profiles are missing")
     _require_exact_keys(runners, {"github_hosted", "physical"}, "runner")
     hosted = runners["github_hosted"]
     physical = runners["physical"]
-    _require(isinstance(hosted, dict) and isinstance(physical, dict),
-             "runner profiles must be tables")
+    _require(
+        isinstance(hosted, dict) and isinstance(physical, dict),
+        "runner profiles must be tables",
+    )
     _require_exact_keys(
         hosted,
         {
@@ -522,24 +629,37 @@ def load_contract(root: Path = ROOT) -> dict:
         "runner.physical",
     )
     for name, profile in (("github_hosted", hosted), ("physical", physical)):
-        _string_list(profile["required_environment"],
-                     f"runner.{name}.required_environment")
+        _string_list(
+            profile["required_environment"], f"runner.{name}.required_environment"
+        )
         _require(
             profile["package_manager"] in PACKAGE_MANAGERS,
             f"runner.{name} package manager is unsupported",
         )
-        _require(profile["require_kernel_release"] is True,
-                 f"runner.{name} must bind kernel release")
-        _require(profile["require_os_release_digest"] is True,
-                 f"runner.{name} must bind /etc/os-release")
-        _require(profile["require_package_manifest"] is True,
-                 f"runner.{name} must bind an installed-package manifest")
-    _require(physical["require_no_virtualization"] is True,
-             "physical runner must reject virtualization")
-    _require(hosted["package_manager"] == "dpkg",
-             "GitHub-hosted runner package identity must use dpkg")
-    _require(physical["package_manager"] == "pacman",
-             "maintained Arch runner package identity must use pacman")
+        _require(
+            profile["require_kernel_release"] is True,
+            f"runner.{name} must bind kernel release",
+        )
+        _require(
+            profile["require_os_release_digest"] is True,
+            f"runner.{name} must bind /etc/os-release",
+        )
+        _require(
+            profile["require_package_manifest"] is True,
+            f"runner.{name} must bind an installed-package manifest",
+        )
+    _require(
+        physical["require_no_virtualization"] is True,
+        "physical runner must reject virtualization",
+    )
+    _require(
+        hosted["package_manager"] == "dpkg",
+        "GitHub-hosted runner package identity must use dpkg",
+    )
+    _require(
+        physical["package_manager"] == "pacman",
+        "maintained Arch runner package identity must use pacman",
+    )
 
     guest_profiles = contract.get("guest_profile")
     expected_guest_profiles = {
@@ -573,8 +693,7 @@ def load_contract(root: Path = ROOT) -> dict:
             "primary": primary,
             "final": final,
         }
-        for shard_id, boundary_start, boundary_end, primary, final
-        in V09_ADVERSARIAL_SHARDS
+        for shard_id, boundary_start, boundary_end, primary, final in V09_ADVERSARIAL_SHARDS
     ]
     _require(
         contract.get("v09_adversarial_shard") == expected_v09_shards,
@@ -585,10 +704,12 @@ def load_contract(root: Path = ROOT) -> dict:
     _require(isinstance(lanes, list) and lanes, "lane inventory must be non-empty")
     seen: set[str] = set()
     targets: dict[str, str] = {}
-    shared_target_pairs = frozenset({
-        frozenset({"v09-qualification", "v09-qualification-contract"}),
-        frozenset({"v09-adversarial-security", "v09-adversarial-security-shard"}),
-    })
+    shared_target_pairs = frozenset(
+        {
+            frozenset({"v09-qualification", "v09-qualification-contract"}),
+            frozenset({"v09-adversarial-security", "v09-adversarial-security-shard"}),
+        }
+    )
     for lane in lanes:
         _require(isinstance(lane, dict), "lane entry must be a table")
         required_lane_fields = {
@@ -608,25 +729,31 @@ def load_contract(root: Path = ROOT) -> dict:
             "freshness_is_nondeterministic",
             "guest_profile",
         }
-        _require(required_lane_fields.issubset(lane) and
-                 set(lane).issubset(allowed_lane_fields),
-                 "lane fields changed without schema review")
+        _require(
+            required_lane_fields.issubset(lane)
+            and set(lane).issubset(allowed_lane_fields),
+            "lane fields changed without schema review",
+        )
 
         lane_id = lane.get("id")
-        _require(isinstance(lane_id, str) and NAME.fullmatch(lane_id) is not None,
-                 f"invalid lane id: {lane_id!r}")
+        _require(
+            isinstance(lane_id, str) and NAME.fullmatch(lane_id) is not None,
+            f"invalid lane id: {lane_id!r}",
+        )
         _require(lane_id not in seen, f"duplicate lane id: {lane_id}")
         seen.add(lane_id)
         binding = REQUIRED_LANE_BINDINGS.get(lane_id)
         _require(binding is not None, f"unreviewed qualification lane: {lane_id}")
         expected_kind, target_field, target = binding
-        _require(lane.get("kind") == expected_kind,
-                 f"runner kind drift for {lane_id}")
-        _require(lane.get(target_field) == target,
-                 f"execution target drift for {lane_id}")
+        _require(lane.get("kind") == expected_kind, f"runner kind drift for {lane_id}")
+        _require(
+            lane.get(target_field) == target, f"execution target drift for {lane_id}"
+        )
         other_field = "entrypoint" if target_field == "workflow" else "workflow"
-        _require(lane.get(other_field) is None,
-                 f"{lane_id} may not mix workflow and physical entrypoint")
+        _require(
+            lane.get(other_field) is None,
+            f"{lane_id} may not mix workflow and physical entrypoint",
+        )
         _safe_file(root, target)
         existing_lane = targets.get(target)
         if existing_lane is None:
@@ -636,10 +763,12 @@ def load_contract(root: Path = ROOT) -> dict:
                 frozenset({existing_lane, lane_id}) in shared_target_pairs,
                 f"duplicate qualification execution target: {target}",
             )
-        _require(isinstance(lane.get("profile_version"), int) and
-                 not isinstance(lane["profile_version"], bool) and
-                 lane["profile_version"] >= 1,
-                 f"invalid profile_version for {lane_id}")
+        _require(
+            isinstance(lane.get("profile_version"), int)
+            and not isinstance(lane["profile_version"], bool)
+            and lane["profile_version"] >= 1,
+            f"invalid profile_version for {lane_id}",
+        )
         execution_subject = lane.get("execution_subject")
         _require(
             execution_subject in EXECUTION_SUBJECTS,
@@ -678,8 +807,10 @@ def load_contract(root: Path = ROOT) -> dict:
             ("required_observations", observations),
         ):
             for name in items:
-                _require(NAME.fullmatch(name) is not None,
-                         f"invalid {field} name for {lane_id}: {name!r}")
+                _require(
+                    NAME.fullmatch(name) is not None,
+                    f"invalid {field} name for {lane_id}: {name!r}",
+                )
         _require(
             len(set(dynamic) | set(caches) | set(observations))
             == len(dynamic) + len(caches) + len(observations),
@@ -702,22 +833,23 @@ def load_contract(root: Path = ROOT) -> dict:
             )
 
         freshness = lane.get("freshness_is_nondeterministic", False)
-        _require(isinstance(freshness, bool),
-                 f"invalid freshness flag for {lane_id}")
+        _require(isinstance(freshness, bool), f"invalid freshness flag for {lane_id}")
         if lane_id == "security-rustsec":
-            _require(freshness is True,
-                     "RustSec freshness must stay nondeterministic")
+            _require(freshness is True, "RustSec freshness must stay nondeterministic")
             _require(
-                set(observations)
-                == {"advisory_db_identity", "advisory_retrieved_at"},
+                set(observations) == {"advisory_db_identity", "advisory_retrieved_at"},
                 "RustSec must record advisory identity and retrieval time",
             )
         else:
-            _require(freshness is False,
-                     f"only RustSec may declare nondeterministic freshness: {lane_id}")
+            _require(
+                freshness is False,
+                f"only RustSec may declare nondeterministic freshness: {lane_id}",
+            )
 
-    _require(seen == set(REQUIRED_LANE_BINDINGS),
-             "qualification lane inventory does not match reviewed bindings")
+    _require(
+        seen == set(REQUIRED_LANE_BINDINGS),
+        "qualification lane inventory does not match reviewed bindings",
+    )
     return contract
 
 
@@ -732,8 +864,10 @@ def _parse_named(values: list[str], option: str) -> dict[str, str]:
     result: dict[str, str] = {}
     for raw in values:
         name, separator, value = raw.partition("=")
-        _require(separator == "=" and NAME.fullmatch(name) is not None and value,
-                 f"invalid {option}: {raw!r}")
+        _require(
+            separator == "=" and NAME.fullmatch(name) is not None and value,
+            f"invalid {option}: {raw!r}",
+        )
         _require(name not in result, f"duplicate {option} name: {name}")
         result[name] = value
     return result
@@ -742,8 +876,10 @@ def _parse_named(values: list[str], option: str) -> dict[str, str]:
 def _parse_digests(values: list[str], option: str) -> dict[str, str]:
     result = _parse_named(values, option)
     for name, digest in result.items():
-        _require(HEX64.fullmatch(digest) is not None,
-                 f"{option} {name} must be a lowercase sha256 digest")
+        _require(
+            HEX64.fullmatch(digest) is not None,
+            f"{option} {name} must be a lowercase sha256 digest",
+        )
     return dict(sorted(result.items()))
 
 
@@ -752,11 +888,15 @@ def _verified_caches(values: list[str]) -> dict[str, dict]:
     result: dict[str, dict] = {}
     for name, specification in parsed.items():
         path_text, separator, expected = specification.rpartition("@")
-        _require(separator == "@" and path_text and HEX64.fullmatch(expected) is not None,
-                 f"verified cache {name} must use NAME=PATH@SHA256")
+        _require(
+            separator == "@" and path_text and HEX64.fullmatch(expected) is not None,
+            f"verified cache {name} must use NAME=PATH@SHA256",
+        )
         path = Path(path_text)
-        _require(path.is_file() and not path.is_symlink(),
-                 f"verified cache {name} is missing or unsafe")
+        _require(
+            path.is_file() and not path.is_symlink(),
+            f"verified cache {name} is missing or unsafe",
+        )
         actual = _sha256_file(path)
         _require(actual == expected, f"verified cache {name} digest mismatch")
         result[name] = {
@@ -804,7 +944,9 @@ def _require_no_suppressed_worktree_checks(root: Path) -> None:
     )
 
 
-def _parse_source_tree(root: Path, source_sha: str) -> dict[bytes, tuple[str, str, str]]:
+def _parse_source_tree(
+    root: Path, source_sha: str
+) -> dict[bytes, tuple[str, str, str]]:
     entries: dict[bytes, tuple[str, str, str]] = {}
     for record in _git_bytes(root, "ls-tree", "-r", "-z", source_sha).split(b"\0"):
         if not record:
@@ -850,8 +992,10 @@ def _raw_worktree_blob(root: Path, path_bytes: bytes, mode: str) -> bytes:
         mode in {"100644", "100755"},
         f"unsupported tracked blob mode in execution envelope: {mode} {relative}",
     )
-    _require(path.is_file() and not path.is_symlink(),
-             f"tracked worktree file is missing or changed type: {relative}")
+    _require(
+        path.is_file() and not path.is_symlink(),
+        f"tracked worktree file is missing or changed type: {relative}",
+    )
     expected_executable = mode == "100755"
     actual_executable = bool(path.stat().st_mode & 0o100)
     _require(
@@ -890,8 +1034,10 @@ def _require_clean_tracked_checkout(root: Path, source_sha: str) -> None:
                 f"tracked submodule differs from declared source commit: {relative}",
             )
             continue
-        _require(object_type == "blob",
-                 f"unsupported tracked tree object: {object_type} {relative}")
+        _require(
+            object_type == "blob",
+            f"unsupported tracked tree object: {object_type} {relative}",
+        )
         raw = _raw_worktree_blob(root, path_bytes, mode)
         _require(
             _git_blob_object_id(raw) == object_id,
@@ -973,8 +1119,10 @@ def _detect_virtualization() -> str:
 
 
 def _runner_identity(contract: dict, lane: dict, environment: dict[str, str]) -> dict:
-    _require(platform.system() == "Linux",
-             "qualification execution envelopes currently require Linux")
+    _require(
+        platform.system() == "Linux",
+        "qualification execution envelopes currently require Linux",
+    )
     kind = lane["kind"]
     profile_name = "github_hosted" if kind == "github-hosted" else "physical"
     profile = contract["runner"][profile_name]
@@ -987,12 +1135,17 @@ def _runner_identity(contract: dict, lane: dict, environment: dict[str, str]) ->
     if runner_arch:
         runner_arch = _single_line(runner_arch, "RUNNER_ARCH")
         expected_machine = RUNNER_ARCHITECTURES.get(runner_arch)
-        _require(expected_machine == machine_arch,
-                 "runner architecture does not match executing machine")
+        _require(
+            expected_machine == machine_arch,
+            "runner architecture does not match executing machine",
+        )
     else:
         runner_arch = next(
-            (name for name, machine in RUNNER_ARCHITECTURES.items()
-             if machine == machine_arch),
+            (
+                name
+                for name, machine in RUNNER_ARCHITECTURES.items()
+                if machine == machine_arch
+            ),
             machine_arch,
         )
 
@@ -1026,8 +1179,10 @@ def _runner_identity(contract: dict, lane: dict, environment: dict[str, str]) ->
             not environment.get("ImageOS") and not environment.get("ImageVersion"),
             "physical lane cannot use a GitHub-hosted runner image identity",
         )
-        _require(identity["virtualization"] == "none",
-                 "physical lane must execute on non-virtualized maintained hardware")
+        _require(
+            identity["virtualization"] == "none",
+            "physical lane must execute on non-virtualized maintained hardware",
+        )
     return identity
 
 
@@ -1052,8 +1207,10 @@ def _validate_runner_binding(contract: dict, lane: dict, runner: object) -> dict
     )
     _require_exact_keys(runner, expected_fields, "execution envelope runner")
     _require(runner["kind"] == lane["kind"], "execution envelope runner kind mismatch")
-    _require(_single_line(runner["runner_os"], "runner_os") == "Linux",
-             "execution envelope runner OS mismatch")
+    _require(
+        _single_line(runner["runner_os"], "runner_os") == "Linux",
+        "execution envelope runner OS mismatch",
+    )
     architecture = _single_line(runner["architecture"], "architecture")
     runner_arch = _single_line(runner["runner_architecture"], "runner_architecture")
     if lane["kind"] == "github-hosted":
@@ -1076,33 +1233,45 @@ def _validate_runner_binding(contract: dict, lane: dict, runner: object) -> dict
             "execution envelope physical runner architecture mismatch",
         )
     _single_line(runner["kernel_release"], "kernel_release")
-    _require(isinstance(runner["os_release_sha256"], str) and
-             HEX64.fullmatch(runner["os_release_sha256"]) is not None,
-             "execution envelope os-release digest is invalid")
-    _require(runner["package_manager"] in PACKAGE_MANAGERS,
-             "execution envelope package manager is unsupported")
+    _require(
+        isinstance(runner["os_release_sha256"], str)
+        and HEX64.fullmatch(runner["os_release_sha256"]) is not None,
+        "execution envelope os-release digest is invalid",
+    )
+    _require(
+        runner["package_manager"] in PACKAGE_MANAGERS,
+        "execution envelope package manager is unsupported",
+    )
     runner_profile_name = (
         "github_hosted" if lane["kind"] == "github-hosted" else "physical"
     )
-    expected_package_manager = contract["runner"][runner_profile_name]["package_manager"]
+    expected_package_manager = contract["runner"][runner_profile_name][
+        "package_manager"
+    ]
     _require(
         runner["package_manager"] == expected_package_manager,
         "execution envelope package manager does not match runner profile",
     )
-    _require(isinstance(runner["package_manifest_sha256"], str) and
-             HEX64.fullmatch(runner["package_manifest_sha256"]) is not None,
-             "execution envelope package manifest digest is invalid")
-    _require(isinstance(runner["package_count"], int) and
-             not isinstance(runner["package_count"], bool) and
-             runner["package_count"] > 0,
-             "execution envelope package count is invalid")
+    _require(
+        isinstance(runner["package_manifest_sha256"], str)
+        and HEX64.fullmatch(runner["package_manifest_sha256"]) is not None,
+        "execution envelope package manifest digest is invalid",
+    )
+    _require(
+        isinstance(runner["package_count"], int)
+        and not isinstance(runner["package_count"], bool)
+        and runner["package_count"] > 0,
+        "execution envelope package count is invalid",
+    )
     virtualization = _single_line(runner["virtualization"], "virtualization")
     if lane["kind"] == "github-hosted":
         _single_line(runner["image_os"], "image_os")
         _single_line(runner["image_version"], "image_version")
     else:
-        _require(virtualization == "none",
-                 "physical execution envelope may not claim virtualization")
+        _require(
+            virtualization == "none",
+            "physical execution envelope may not claim virtualization",
+        )
     return runner
 
 
@@ -1133,7 +1302,9 @@ def _validate_observations(
             try:
                 datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
             except ValueError as exc:
-                raise EnvelopeError("RustSec advisory retrieval time is invalid") from exc
+                raise EnvelopeError(
+                    "RustSec advisory retrieval time is invalid"
+                ) from exc
         elif name == "qualification_environment_id":
             _require(
                 value in QUALIFICATION_ENVIRONMENT_IDS,
@@ -1159,10 +1330,13 @@ def _validate_observations(
 def _load_execution_subject_file(path: Path | None) -> dict | None:
     if path is None:
         return None
-    _require(path.is_file() and not path.is_symlink(),
-             "execution-subject file is missing or unsafe")
-    _require(path.stat().st_size <= 64 * 1024,
-             "execution-subject file exceeds size bound")
+    _require(
+        path.is_file() and not path.is_symlink(),
+        "execution-subject file is missing or unsafe",
+    )
+    _require(
+        path.stat().st_size <= 64 * 1024, "execution-subject file exceeds size bound"
+    )
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -1198,7 +1372,9 @@ def _validate_execution_subject(
             {"kind", "component_envelope_set_sha256"},
             "aggregate execution subject",
         )
-        _require(subject["kind"] == "aggregate", "aggregate execution subject kind mismatch")
+        _require(
+            subject["kind"] == "aggregate", "aggregate execution subject kind mismatch"
+        )
         expected = observations["component_envelope_set_sha256"]
         _require(
             subject["component_envelope_set_sha256"] == expected
@@ -1211,7 +1387,9 @@ def _validate_execution_subject(
     expected_fields = GUEST_CAPTURE_FIELDS | {"acceleration", "image_digests"}
     _require_exact_keys(subject, expected_fields, "guest execution subject")
     _require(subject["schema_version"] == 1, "guest execution subject schema mismatch")
-    _require(subject["kind"] == "virtual-machine", "guest execution subject kind mismatch")
+    _require(
+        subject["kind"] == "virtual-machine", "guest execution subject kind mismatch"
+    )
     profile = contract["guest_profile"][lane["guest_profile"]]
     for name in (
         "architecture",
@@ -1246,12 +1424,11 @@ def _validate_execution_subject(
         "guest execution acceleration does not match reviewed profile",
     )
     expected_images = {
-        name: value
-        for name, value in digests.items()
-        if name.endswith("_image_sha256")
+        name: value for name, value in digests.items() if name.endswith("_image_sha256")
     }
     _require(
-        bool(expected_images) and subject["image_digests"] == dict(sorted(expected_images.items())),
+        bool(expected_images)
+        and subject["image_digests"] == dict(sorted(expected_images.items())),
         "guest execution image chain does not match lane bindings",
     )
     for name in ("guest_package_manifest_sha256", "runtime_package_manifest_sha256"):
@@ -1279,30 +1456,44 @@ def _execution_subject_binding(
 ) -> dict:
     mode = lane["execution_subject"]
     if mode == "runner":
-        _require(captured is None, "runner lane may not supply a guest execution subject")
+        _require(
+            captured is None, "runner lane may not supply a guest execution subject"
+        )
         return _runner_subject(runner)
     if mode == "aggregate":
-        _require(captured is None, "aggregate lane may not supply a guest execution subject")
+        _require(
+            captured is None, "aggregate lane may not supply a guest execution subject"
+        )
         return {
             "kind": "aggregate",
-            "component_envelope_set_sha256": observations["component_envelope_set_sha256"],
+            "component_envelope_set_sha256": observations[
+                "component_envelope_set_sha256"
+            ],
         }
     _require(captured is not None, "guest lane requires a captured execution subject")
-    _require_exact_keys(captured, GUEST_CAPTURE_FIELDS, "captured guest execution subject")
-    acceleration = _single_line(
-        environment.get("VM_ACCELERATION"), "VM_ACCELERATION"
+    _require_exact_keys(
+        captured, GUEST_CAPTURE_FIELDS, "captured guest execution subject"
     )
+    acceleration = _single_line(environment.get("VM_ACCELERATION"), "VM_ACCELERATION")
     subject = dict(captured)
     subject["acceleration"] = acceleration
-    subject["image_digests"] = dict(sorted(
-        (name, value) for name, value in digests.items() if name.endswith("_image_sha256")
-    ))
-    return _validate_execution_subject(contract, lane, runner, subject, digests, observations)
+    subject["image_digests"] = dict(
+        sorted(
+            (name, value)
+            for name, value in digests.items()
+            if name.endswith("_image_sha256")
+        )
+    )
+    return _validate_execution_subject(
+        contract, lane, runner, subject, digests, observations
+    )
 
 
 def _validate_cache_bindings(caches: object, expected_names: set[str]) -> dict:
-    _require(isinstance(caches, dict) and set(caches) == expected_names,
-             "execution envelope verified-cache set mismatch")
+    _require(
+        isinstance(caches, dict) and set(caches) == expected_names,
+        "execution envelope verified-cache set mismatch",
+    )
     for name, entry in caches.items():
         _require(isinstance(entry, dict), f"invalid verified-cache binding: {name}")
         _require_exact_keys(
@@ -1321,6 +1512,7 @@ def _validate_cache_bindings(caches: object, expected_names: set[str]) -> dict:
             f"invalid verified-cache binding: {name}",
         )
     return caches
+
 
 def _action_mapping_entry_block(
     source: str, mapping_name: str, entry_name: str
@@ -1342,7 +1534,7 @@ def _action_mapping_entry_block(
         end += 1
     child_indents = [
         len(line) - len(line.lstrip())
-        for line in lines[start + 1:end]
+        for line in lines[start + 1 : end]
         if line.strip() and not line.lstrip().startswith("#")
     ]
     if not child_indents:
@@ -1400,7 +1592,7 @@ def _block_mapping_value(block: str, mapping_name: str, key: str) -> str | None:
     mapping_index = mapping_indexes[0]
     nested = [
         len(line) - len(line.lstrip())
-        for line in lines[mapping_index + 1:]
+        for line in lines[mapping_index + 1 :]
         if line.strip()
         and not line.lstrip().startswith("#")
         and len(line) - len(line.lstrip()) > direct_indent
@@ -1410,7 +1602,7 @@ def _block_mapping_value(block: str, mapping_name: str, key: str) -> str | None:
     value_indent = min(nested)
     prefix = f"{key}:"
     matches: list[str] = []
-    for line in lines[mapping_index + 1:]:
+    for line in lines[mapping_index + 1 :]:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         indent = len(line) - len(line.lstrip())
@@ -1422,7 +1614,7 @@ def _block_mapping_value(block: str, mapping_name: str, key: str) -> str | None:
         if normalized == key + ":":
             matches.append("")
         elif normalized.startswith(prefix):
-            matches.append(normalized[len(prefix):].strip())
+            matches.append(normalized[len(prefix) :].strip())
     return matches[0] if len(matches) == 1 else None
 
 
@@ -1457,7 +1649,7 @@ def _block_literal_scalar(block: str, key: str) -> str | None:
     marker = markers[0]
     scalar_lines: list[str] = []
     scalar_indent: int | None = None
-    for line in lines[marker + 1:]:
+    for line in lines[marker + 1 :]:
         if line.strip():
             indent = len(line) - len(line.lstrip())
             if indent <= direct_indent:
@@ -1468,9 +1660,7 @@ def _block_literal_scalar(block: str, key: str) -> str | None:
                 return None
         if scalar_indent is None:
             continue
-        scalar_lines.append(
-            line[scalar_indent:] if len(line) >= scalar_indent else ""
-        )
+        scalar_lines.append(line[scalar_indent:] if len(line) >= scalar_indent else "")
     return "\n".join(scalar_lines) if scalar_indent is not None else None
 
 
@@ -1494,7 +1684,7 @@ def composite_action_step_blocks(source: str) -> list[tuple[int, str]]:
 
     child_indents = [
         len(line) - len(line.lstrip())
-        for line in lines[runs_start + 1:runs_end]
+        for line in lines[runs_start + 1 : runs_end]
         if line.strip() and not line.lstrip().startswith("#")
     ]
     if not child_indents:
@@ -1578,9 +1768,7 @@ def _hosted_action_has_integration(source: str) -> bool:
         or workflow_block_is_error_tolerant(envelope_step)
         or _block_mapping_value(envelope_step, "env", "LINURA_ENVELOPE_LANE")
         != "${{ inputs.lane }}"
-        or _block_mapping_value(
-            envelope_step, "env", "LINURA_ENVELOPE_SOURCE_SHA"
-        )
+        or _block_mapping_value(envelope_step, "env", "LINURA_ENVELOPE_SOURCE_SHA")
         != "${{ inputs.source-sha }}"
         or _block_mapping_value(
             envelope_step, "env", "LINURA_ENVELOPE_EXECUTION_SUBJECT_FILE"
@@ -1708,6 +1896,7 @@ def workflow_step_blocks(source: str) -> list[tuple[int, str]]:
                 index = end_index
     return blocks
 
+
 def _normalized_step_line(line: str) -> str:
     value = line.strip()
     if value.startswith("- "):
@@ -1725,7 +1914,7 @@ def _block_direct_value(block: str, key: str) -> str | None:
     if first == key + ":":
         return ""
     if first.startswith(prefix):
-        return first[len(prefix):].strip()
+        return first[len(prefix) :].strip()
 
     root_indent = len(lines[0]) - len(lines[0].lstrip())
     child_indents = [
@@ -1747,7 +1936,7 @@ def _block_direct_value(block: str, key: str) -> str | None:
         if normalized == key + ":":
             return ""
         if normalized.startswith(prefix):
-            return normalized[len(prefix):].strip()
+            return normalized[len(prefix) :].strip()
     return None
 
 
@@ -1782,7 +1971,7 @@ def _block_with_value(block: str, key: str) -> str | None:
 
     nested = [
         len(line) - len(line.lstrip())
-        for line in lines[with_index + 1:]
+        for line in lines[with_index + 1 :]
         if line.strip()
         and not line.lstrip().startswith("#")
         and len(line) - len(line.lstrip()) > direct_indent
@@ -1791,7 +1980,7 @@ def _block_with_value(block: str, key: str) -> str | None:
         return None
     input_indent = min(nested)
     prefix = f"{key}:"
-    for line in lines[with_index + 1:]:
+    for line in lines[with_index + 1 :]:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         indent = len(line) - len(line.lstrip())
@@ -1803,7 +1992,7 @@ def _block_with_value(block: str, key: str) -> str | None:
         if normalized == key + ":":
             return ""
         if normalized.startswith(prefix):
-            return normalized[len(prefix):].strip()
+            return normalized[len(prefix) :].strip()
     return None
 
 
@@ -1860,9 +2049,7 @@ def workflow_job_blocks(source: str) -> list[tuple[int, str]]:
     """Return top-level job blocks from the workflow jobs mapping."""
     lines = source.splitlines()
     try:
-        jobs_line = next(
-            index for index, line in enumerate(lines) if line == "jobs:"
-        )
+        jobs_line = next(index for index, line in enumerate(lines) if line == "jobs:")
     except StopIteration:
         return []
     blocks: list[tuple[int, str]] = []
@@ -1930,10 +2117,7 @@ def _shell_case_branch(source: str, label: str) -> str | None:
     start = starts[0] + 1
     for end in range(start, len(lines)):
         line = lines[end]
-        if (
-            line.strip() == ";;"
-            and len(line) - len(line.lstrip()) == closing_indent
-        ):
+        if line.strip() == ";;" and len(line) - len(line.lstrip()) == closing_indent:
             return "\n".join(lines[start:end])
     return None
 
@@ -1992,9 +2176,9 @@ def _physical_envelope_command_matches(command: str, subcommand: str) -> bool:
         )
     except ValueError:
         return False
-    if "-I" not in tokens[python_index + 1:script_index]:
+    if "-I" not in tokens[python_index + 1 : script_index]:
         return False
-    if subcommand not in tokens[script_index + 1:]:
+    if subcommand not in tokens[script_index + 1 :]:
         return False
 
     def has_pair(option: str, value: str) -> bool:
@@ -2008,14 +2192,12 @@ def _physical_envelope_command_matches(command: str, subcommand: str) -> bool:
     if not has_pair("--root", "$source_root"):
         return False
     if subcommand == "create-physical":
-        return (
-            has_pair("--state-root", "$state_root")
-            and has_pair("--output", "$envelope")
+        return has_pair("--state-root", "$state_root") and has_pair(
+            "--output", "$envelope"
         )
     if subcommand == "verify":
-        return (
-            has_pair("--envelope", "$envelope")
-            and has_pair("--source-sha", "$source_sha")
+        return has_pair("--envelope", "$envelope") and has_pair(
+            "--source-sha", "$source_sha"
         )
     return False
 
@@ -2035,15 +2217,11 @@ def _physical_target_has_integration(source: str) -> bool:
     if direct_indent is None:
         return False
     commands = _shell_logical_commands(branch, required_indent=direct_indent)
-    return (
-        any(
-            _physical_envelope_command_matches(command, "create-physical")
-            for command in commands
-        )
-        and any(
-            _physical_envelope_command_matches(command, "verify")
-            for command in commands
-        )
+    return any(
+        _physical_envelope_command_matches(command, "create-physical")
+        for command in commands
+    ) and any(
+        _physical_envelope_command_matches(command, "verify") for command in commands
     )
 
 
@@ -2070,10 +2248,9 @@ def _hosted_target_has_integration(lane_id: str, source: str) -> bool:
     ):
         # Envelope production is part of the lane's authority path. A step-level
         # condition can silently disconnect it from an otherwise successful job.
-        if (
-            workflow_step_direct_value(block, "if") is not None
-            or workflow_block_is_error_tolerant(block)
-        ):
+        if workflow_step_direct_value(
+            block, "if"
+        ) is not None or workflow_block_is_error_tolerant(block):
             continue
         job_block = workflow_job_block_for_line(source, start_line)
         if (
@@ -2125,21 +2302,25 @@ def _environment_key(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "_", name).upper()
 
 
-def _inputs_from_environment(lane: dict, environment: dict[str, str]) -> tuple[
-    dict[str, str], dict[str, str], list[str]
-]:
+def _inputs_from_environment(
+    lane: dict, environment: dict[str, str]
+) -> tuple[dict[str, str], dict[str, str], list[str]]:
     digests: dict[str, str] = {}
     observations: dict[str, str] = {}
     caches: list[str] = []
     for name in lane["required_digests"]:
         key = _environment_key(name)
         value = environment.get(key)
-        _require(value is not None and value != "", f"missing envelope environment: {key}")
+        _require(
+            value is not None and value != "", f"missing envelope environment: {key}"
+        )
         digests[name] = value
     for name in lane["required_observations"]:
         key = _environment_key(name)
         value = environment.get(key)
-        _require(value is not None and value != "", f"missing envelope environment: {key}")
+        _require(
+            value is not None and value != "", f"missing envelope environment: {key}"
+        )
         observations[name] = value
     for name in lane["required_cache_digests"]:
         prefix = _environment_key(name)
@@ -2168,12 +2349,13 @@ def create_envelope(
         "source SHA must be lowercase full-length git SHA",
     )
     head = _git(root, "rev-parse", "HEAD")
-    _require(head == source_sha,
-             "execution envelope must be created from exact checked-out source")
+    _require(
+        head == source_sha,
+        "execution envelope must be created from exact checked-out source",
+    )
     _require_clean_tracked_checkout(root, source_sha)
     tree_sha = _git(root, "rev-parse", source_sha + "^{tree}")
-    _require(HEX40.fullmatch(tree_sha) is not None,
-             "invalid source tree identity")
+    _require(HEX40.fullmatch(tree_sha) is not None, "invalid source tree identity")
 
     required_digests = set(lane["required_digests"])
     required_observations = set(lane["required_observations"])
@@ -2184,8 +2366,10 @@ def create_envelope(
         f"got {sorted(digests)}",
     )
     _require(
-        all(isinstance(value, str) and HEX64.fullmatch(value) is not None
-            for value in digests.values()),
+        all(
+            isinstance(value, str) and HEX64.fullmatch(value) is not None
+            for value in digests.values()
+        ),
         "dynamic digests must be lowercase sha256 values",
     )
     _require(
@@ -2225,9 +2409,7 @@ def create_envelope(
         "schema_version": 2,
         "contract": {
             "id": contract["id"],
-            "sha256": _sha256_file(
-                _safe_file(root, CONTRACT_PATH.as_posix())
-            ),
+            "sha256": _sha256_file(_safe_file(root, CONTRACT_PATH.as_posix())),
         },
         "lane": {
             "id": lane_id,
@@ -2242,9 +2424,7 @@ def create_envelope(
         },
         "runner": runner,
         "execution_subject": subject,
-        "repository_inputs": _repository_digests(
-            root, contract, lane, source_sha
-        ),
+        "repository_inputs": _repository_digests(root, contract, lane, source_sha),
         "dynamic_digests": dict(sorted(digests.items())),
         "verified_caches": caches,
         "observations": dict(sorted(observations.items())),
@@ -2272,28 +2452,30 @@ def _atomic_write_text(path: Path, content: str) -> None:
 
 
 def write_envelope(path: Path, envelope: dict) -> None:
-    _require(not path.exists() or not path.is_symlink(),
-             "execution envelope output may not be a symlink")
-    checksum = path.with_name(path.name + ".sha256")
-    _require(not checksum.exists() or not checksum.is_symlink(),
-             "execution envelope checksum output may not be a symlink")
-    _atomic_write_text(
-        path, json.dumps(envelope, indent=2, sort_keys=True) + "\n"
+    _require(
+        not path.exists() or not path.is_symlink(),
+        "execution envelope output may not be a symlink",
     )
+    checksum = path.with_name(path.name + ".sha256")
+    _require(
+        not checksum.exists() or not checksum.is_symlink(),
+        "execution envelope checksum output may not be a symlink",
+    )
+    _atomic_write_text(path, json.dumps(envelope, indent=2, sort_keys=True) + "\n")
     digest = envelope["envelope_sha256"]
     _atomic_write_text(checksum, f"{digest}  {path.name}\n")
 
-def verify_envelope(
-    root: Path, path: Path, *, source_sha: str | None = None
-) -> dict:
-    _require(path.is_file() and not path.is_symlink(),
-             "execution envelope is missing or unsafe")
+
+def verify_envelope(root: Path, path: Path, *, source_sha: str | None = None) -> dict:
+    _require(
+        path.is_file() and not path.is_symlink(),
+        "execution envelope is missing or unsafe",
+    )
     try:
         envelope = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise EnvelopeError(f"invalid execution envelope: {exc}") from exc
-    _require(isinstance(envelope, dict),
-             "execution envelope root must be an object")
+    _require(isinstance(envelope, dict), "execution envelope root must be an object")
     _require_exact_keys(
         envelope,
         {
@@ -2330,18 +2512,15 @@ def verify_envelope(
         "execution envelope checksum is missing",
     )
     _require(
-        checksum.read_text(encoding="utf-8").strip()
-        == f"{digest}  {path.name}",
+        checksum.read_text(encoding="utf-8").strip() == f"{digest}  {path.name}",
         "execution envelope checksum binding mismatch",
     )
 
     contract = load_contract(root)
-    _require(envelope["schema_version"] == 2,
-             "execution envelope schema mismatch")
+    _require(envelope["schema_version"] == 2, "execution envelope schema mismatch")
 
     lane = envelope["lane"]
-    _require(isinstance(lane, dict),
-             "execution envelope lane is missing")
+    _require(isinstance(lane, dict), "execution envelope lane is missing")
     _require_exact_keys(
         lane,
         {"id", "profile_version", "freshness_is_nondeterministic"},
@@ -2362,18 +2541,14 @@ def verify_envelope(
         envelope["contract"]
         == {
             "id": contract["id"],
-            "sha256": _sha256_file(
-                _safe_file(root, CONTRACT_PATH.as_posix())
-            ),
+            "sha256": _sha256_file(_safe_file(root, CONTRACT_PATH.as_posix())),
         },
         "execution envelope contract binding mismatch",
     )
 
     source = envelope["source"]
-    _require(isinstance(source, dict),
-             "execution envelope source binding is missing")
-    _require_exact_keys(source, {"commit_sha", "tree_sha"},
-                        "execution envelope source")
+    _require(isinstance(source, dict), "execution envelope source binding is missing")
+    _require_exact_keys(source, {"commit_sha", "tree_sha"}, "execution envelope source")
     commit_sha = source["commit_sha"]
     tree_sha = source["tree_sha"]
     _require(
@@ -2399,9 +2574,7 @@ def verify_envelope(
             "execution envelope source SHA mismatch",
         )
 
-    expected_inputs = _repository_digests(
-        root, contract, lane_contract, commit_sha
-    )
+    expected_inputs = _repository_digests(root, contract, lane_contract, commit_sha)
     _require(
         envelope["repository_inputs"] == expected_inputs,
         "execution envelope repository input digest mismatch",
@@ -2451,9 +2624,7 @@ def verify_envelope(
         dynamic,
         observations,
     )
-    _validate_cache_bindings(
-        caches, set(lane_contract["required_cache_digests"])
-    )
+    _validate_cache_bindings(caches, set(lane_contract["required_cache_digests"]))
     return envelope
 
 
@@ -2493,14 +2664,18 @@ def _physical_state_inputs(state_root: Path) -> tuple[str, Path, str, str]:
     state_path = state_root / "run-state.json"
     if not state_path.is_file():
         state_path = state_root / "state.json"
-    _require(state_path.is_file() and not state_path.is_symlink(),
-             "physical Q11 state is missing or unsafe")
+    _require(
+        state_path.is_file() and not state_path.is_symlink(),
+        "physical Q11 state is missing or unsafe",
+    )
     state = json.loads(state_path.read_text(encoding="utf-8"))
     _require(isinstance(state, dict), "physical Q11 state must be an object")
     source_sha = _single_line(state.get("source_commit_sha"), "physical source commit")
-    fixture_path = Path(_single_line(
-        state.get("fixture_contract_path"), "physical fixture contract path"
-    ))
+    fixture_path = Path(
+        _single_line(
+            state.get("fixture_contract_path"), "physical fixture contract path"
+        )
+    )
     fixture_sha = _single_line(
         state.get("fixture_contract_sha256"), "physical fixture contract digest"
     )
@@ -2532,7 +2707,8 @@ def _physical_provider_manifest_sha256() -> str:
         )
         _require(
             completed.returncode == 0,
-            f"cannot capture physical provider identity {name}: " + completed.stderr.strip(),
+            f"cannot capture physical provider identity {name}: "
+            + completed.stderr.strip(),
         )
         output = completed.stdout.strip() or completed.stderr.strip()
         _require(output, f"physical provider identity is empty: {name}")
@@ -2540,12 +2716,15 @@ def _physical_provider_manifest_sha256() -> str:
         lines.append(f"{name}={value}")
     return _sha256_bytes(("\n".join(lines) + "\n").encode("utf-8"))
 
+
 def _command_create_physical(args: argparse.Namespace) -> int:
     source_sha, fixture_path, fixture_sha, machine_class = _physical_state_inputs(
         args.state_root
     )
-    _require(_sha256_file(fixture_path) == fixture_sha,
-             "physical fixture contract changed before envelope finalization")
+    _require(
+        _sha256_file(fixture_path) == fixture_sha,
+        "physical fixture contract changed before envelope finalization",
+    )
     envelope = create_envelope(
         root=args.root,
         lane_id="v010-maintained-hardware",
@@ -2577,7 +2756,9 @@ def _command_create(args: argparse.Namespace) -> int:
         lane_id=args.lane,
         source_sha=args.source_sha,
         digests=_parse_digests(args.digest, "digest"),
-        observations=dict(sorted(_parse_named(args.observation, "observation").items())),
+        observations=dict(
+            sorted(_parse_named(args.observation, "observation").items())
+        ),
         verified_cache_specs=args.verified_cache,
         environment=dict(os.environ),
         execution_subject=_load_execution_subject_file(args.execution_subject_file),

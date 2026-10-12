@@ -52,7 +52,9 @@ class LayeringContractTests(unittest.TestCase):
         if "[dependencies]\n" in text:
             text = text.replace("[dependencies]\n", "[dependencies]\n" + dependency, 1)
         elif "[lints]" in text:
-            text = text.replace("[lints]", "[dependencies]\n" + dependency + "\n[lints]", 1)
+            text = text.replace(
+                "[lints]", "[dependencies]\n" + dependency + "\n[lints]", 1
+            )
         else:
             text += "\n[dependencies]\n" + dependency
         manifest.write_text(text, encoding="utf-8")
@@ -81,7 +83,9 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-planner violates transport-neutral boundary", result.stderr)
+            self.assertIn(
+                "linura-planner violates transport-neutral boundary", result.stderr
+            )
 
     def test_aliased_transport_dependency_is_resolved_to_package_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -92,7 +96,9 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-planner violates transport-neutral boundary", result.stderr)
+            self.assertIn(
+                "linura-planner violates transport-neutral boundary", result.stderr
+            )
 
     def test_target_specific_transport_dependency_is_checked(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -107,7 +113,9 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-planner violates transport-neutral boundary", result.stderr)
+            self.assertIn(
+                "linura-planner violates transport-neutral boundary", result.stderr
+            )
 
     def test_workspace_aliased_transport_dependency_is_resolved(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -123,7 +131,9 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-planner violates transport-neutral boundary", result.stderr)
+            self.assertIn(
+                "linura-planner violates transport-neutral boundary", result.stderr
+            )
 
     def test_dbus_transport_cannot_own_planner_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -138,7 +148,9 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-dbus violates inward dependency boundary", result.stderr)
+            self.assertIn(
+                "linura-dbus violates inward dependency boundary", result.stderr
+            )
 
     def test_semantic_crate_cannot_depend_on_concrete_executor(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -153,7 +165,10 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-core violates concrete executor/provider boundary", result.stderr)
+            self.assertIn(
+                "linura-core violates concrete executor/provider boundary",
+                result.stderr,
+            )
 
     def test_provenance_is_a_required_protected_semantic_crate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -164,7 +179,9 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-provenance violates transport-neutral boundary", result.stderr)
+            self.assertIn(
+                "linura-provenance violates transport-neutral boundary", result.stderr
+            )
 
     def test_required_package_rule_cannot_be_deleted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -183,7 +200,9 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("layering contract missing required package rules", result.stderr)
+            self.assertIn(
+                "layering contract missing required package rules", result.stderr
+            )
             self.assertIn("linura-provenance", result.stderr)
 
     def test_observation_control_cannot_gain_concrete_linux_adapter(self) -> None:
@@ -204,7 +223,9 @@ class LayeringContractTests(unittest.TestCase):
                 result.stderr,
             )
 
-    def test_concrete_observer_cannot_gain_hardware_aggregation_dependency(self) -> None:
+    def test_concrete_observer_cannot_gain_hardware_aggregation_dependency(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -217,7 +238,10 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-linux-observation violates inward dependency boundary", result.stderr)
+            self.assertIn(
+                "linura-linux-observation violates inward dependency boundary",
+                result.stderr,
+            )
 
     def test_hardware_contract_cannot_gain_concrete_linux_observer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -232,7 +256,9 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-hardware violates inward dependency boundary", result.stderr)
+            self.assertIn(
+                "linura-hardware violates inward dependency boundary", result.stderr
+            )
 
     def test_concrete_observer_cannot_gain_control_plane_orchestration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -247,7 +273,10 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-linux-observation violates inward dependency boundary", result.stderr)
+            self.assertIn(
+                "linura-linux-observation violates inward dependency boundary",
+                result.stderr,
+            )
 
     def test_public_sdk_cannot_gain_provider_authority_internals(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -262,7 +291,9 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-sdk violates inward dependency boundary", result.stderr)
+            self.assertIn(
+                "linura-sdk violates inward dependency boundary", result.stderr
+            )
 
     def test_narrow_executor_cannot_gain_control_plane_orchestration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -277,7 +308,10 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("linura-executor-systemd violates inward dependency boundary", result.stderr)
+            self.assertIn(
+                "linura-executor-systemd violates inward dependency boundary",
+                result.stderr,
+            )
 
     def test_principal_terminology_cannot_be_downgraded_to_client_claim(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -295,7 +329,9 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("layering marker missing from docs/terminology.md", result.stderr)
+            self.assertIn(
+                "layering marker missing from docs/terminology.md", result.stderr
+            )
 
     def test_actor_terminology_cannot_be_repurposed_as_authority_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -313,7 +349,9 @@ class LayeringContractTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("layering marker missing from docs/terminology.md", result.stderr)
+            self.assertIn(
+                "layering marker missing from docs/terminology.md", result.stderr
+            )
 
     def test_canonical_observation_marker_cannot_silently_disappear(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

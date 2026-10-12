@@ -96,7 +96,9 @@ def _runs(
         token=token,
     )
     payload = _expect(status, {200}, payload, "workflow-run lookup")
-    if not isinstance(payload, dict) or not isinstance(payload.get("workflow_runs"), list):
+    if not isinstance(payload, dict) or not isinstance(
+        payload.get("workflow_runs"), list
+    ):
         raise NativeGateError("workflow-run lookup returned an invalid payload")
 
     runs = payload["workflow_runs"]
@@ -187,7 +189,9 @@ def _unresolved_threads(repository: str, pr_number: int, token: str) -> int:
             nodes = threads["nodes"]
             page_info = threads["pageInfo"]
         except (KeyError, TypeError) as error:
-            raise NativeGateError("review-thread lookup returned an invalid payload") from error
+            raise NativeGateError(
+                "review-thread lookup returned an invalid payload"
+            ) from error
         unresolved += sum(
             1
             for node in nodes
@@ -311,14 +315,24 @@ def main() -> int:
     try:
         if not args.repository or args.repository.count("/") != 1:
             raise NativeGateError("repository must be in owner/name form")
-        if len(args.head_sha) != 40 or any(c not in "0123456789abcdef" for c in args.head_sha):
-            raise NativeGateError("head SHA must be 40 lowercase hexadecimal characters")
+        if len(args.head_sha) != 40 or any(
+            c not in "0123456789abcdef" for c in args.head_sha
+        ):
+            raise NativeGateError(
+                "head SHA must be 40 lowercase hexadecimal characters"
+            )
         if args.timeout_seconds < 0 or args.interval_seconds <= 0:
-            raise NativeGateError("timeout must be non-negative and interval must be positive")
+            raise NativeGateError(
+                "timeout must be non-negative and interval must be positive"
+            )
         token = _token()
         if args.mode == "pr":
-            if len(args.base_sha) != 40 or any(c not in "0123456789abcdef" for c in args.base_sha):
-                raise NativeGateError("base SHA must be 40 lowercase hexadecimal characters")
+            if len(args.base_sha) != 40 or any(
+                c not in "0123456789abcdef" for c in args.base_sha
+            ):
+                raise NativeGateError(
+                    "base SHA must be 40 lowercase hexadecimal characters"
+                )
             wait_for_state(
                 lambda: _pr_state(
                     args.repository,

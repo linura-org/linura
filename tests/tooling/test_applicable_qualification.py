@@ -15,9 +15,13 @@ class ApplicableQualificationTests(unittest.TestCase):
     def setUp(self):
         # Legacy routing tests isolate gate selection from merge-provenance I/O.
         # Dedicated immutable-merge tests below exercise the live commit proof.
-        self.enterContext(mock.patch.object(
-            aq, "_reviewed_test_merge", return_value="e" * 40,
-        ))
+        self.enterContext(
+            mock.patch.object(
+                aq,
+                "_reviewed_test_merge",
+                return_value="e" * 40,
+            )
+        )
 
     def test_module_is_single_structurally_complete_entrypoint(self):
         import ast
@@ -27,7 +31,8 @@ class ApplicableQualificationTests(unittest.TestCase):
         )
         module = ast.parse(source)
         functions = [
-            node.name for node in module.body
+            node.name
+            for node in module.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         ]
         self.assertEqual(len(functions), len(set(functions)))
@@ -46,9 +51,7 @@ class ApplicableQualificationTests(unittest.TestCase):
 
     def test_guidance_only_and_mixed_shell_changes_route_safely(self):
         contract = aq.load_contract(ROOT)
-        guidance = aq.required_gate_ids(
-            contract, ["apps/linura-shell/AGENTS.md"]
-        )
+        guidance = aq.required_gate_ids(contract, ["apps/linura-shell/AGENTS.md"])
         self.assertIn("codex-environment", guidance)
         self.assertNotIn("v010-workstation", guidance)
 
@@ -77,13 +80,9 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_registered_stability_contracts_are_explicitly_routed(self):
         contract = aq.load_contract(ROOT)
         matrix = {item["path"]: item["gates"] for item in contract["contract"]}
-        registry = aq._load_toml(
-            ROOT, Path("contracts/stability.toml")
-        )["contract"]
+        registry = aq._load_toml(ROOT, Path("contracts/stability.toml"))["contract"]
         schema_paths = {
-            item["path"]
-            for item in registry
-            if item.get("kind") == "json-schema"
+            item["path"] for item in registry if item.get("kind") == "json-schema"
         }
         self.assertTrue(schema_paths)
         for path in schema_paths:
@@ -94,25 +93,32 @@ class ApplicableQualificationTests(unittest.TestCase):
         expected = {
             "schemas/migration.v1.schema.json": {"v09-qualification"},
             "schemas/intent.v1.schema.json": {
-                "v07-library", "v08-agent", "v09-qualification",
+                "v07-library",
+                "v08-agent",
+                "v09-qualification",
                 "v010-workstation",
             },
             "schemas/desired-state.v1.schema.json": {
-                "control1-plan-preview", "v09-qualification",
+                "control1-plan-preview",
+                "v09-qualification",
                 "v010-workstation",
             },
             "schemas/bootstrap.v1.schema.json": {
-                "vm-acceptance", "v09-qualification",
+                "vm-acceptance",
+                "v09-qualification",
             },
             "schemas/update-plan.v1.schema.json": {
-                "v09-qualification", "v010-workstation",
+                "v09-qualification",
+                "v010-workstation",
             },
             "schemas/acceptance-scenario.v1.schema.json": {
-                "vm-acceptance", "control1-plan-preview",
+                "vm-acceptance",
+                "control1-plan-preview",
                 "v09-qualification",
             },
             "schemas/workflow.v1.schema.json": {
-                "v06-managed-lifecycle", "v09-qualification",
+                "v06-managed-lifecycle",
+                "v09-qualification",
                 "v010-workstation",
             },
         }
@@ -120,9 +126,7 @@ class ApplicableQualificationTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(gates.issubset(set(matrix[path])))
                 self.assertTrue(
-                    gates.issubset(
-                        set(aq.required_gate_ids(contract, [path]))
-                    )
+                    gates.issubset(set(aq.required_gate_ids(contract, [path])))
                 )
 
     def test_every_specialized_gate_binds_required_job_identity(self):
@@ -133,8 +137,7 @@ class ApplicableQualificationTests(unittest.TestCase):
             with self.subTest(gate=gate["id"]):
                 self.assertTrue(gate["required_jobs"])
         v09 = next(
-            gate for gate in contract["gate"]
-            if gate["id"] == "v09-qualification"
+            gate for gate in contract["gate"] if gate["id"] == "v09-qualification"
         )
         self.assertEqual(v09["job_policy"], "v09-full-vs-regression")
         self.assertTrue(v09["full_required_jobs"])
@@ -143,14 +146,11 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_v09_full_route_cannot_be_satisfied_by_regression_job(self):
         contract = aq.load_contract(ROOT)
         gate = next(
-            item for item in contract["gate"]
-            if item["id"] == "v09-qualification"
+            item for item in contract["gate"] if item["id"] == "v09-qualification"
         )
         jobs = [
             {"name": name, "status": "completed", "conclusion": "success"}
-            for name in (
-                gate["required_jobs"] + gate["regression_required_jobs"]
-            )
+            for name in (gate["required_jobs"] + gate["regression_required_jobs"])
         ]
         with mock.patch.object(aq, "_paged", return_value=jobs):
             with self.assertRaisesRegex(
@@ -168,8 +168,7 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_v09_regression_route_requires_regression_job(self):
         contract = aq.load_contract(ROOT)
         gate = next(
-            item for item in contract["gate"]
-            if item["id"] == "v09-qualification"
+            item for item in contract["gate"] if item["id"] == "v09-qualification"
         )
         jobs = [
             {"name": name, "status": "completed", "conclusion": "success"}
@@ -191,10 +190,7 @@ class ApplicableQualificationTests(unittest.TestCase):
 
     def test_specialized_successful_workflow_cannot_hide_skipped_job(self):
         contract = aq.load_contract(ROOT)
-        gate = next(
-            item for item in contract["gate"]
-            if item["id"] == "v07-library"
-        )
+        gate = next(item for item in contract["gate"] if item["id"] == "v07-library")
         jobs = [
             {
                 "name": gate["required_jobs"][0],
@@ -203,9 +199,7 @@ class ApplicableQualificationTests(unittest.TestCase):
             }
         ]
         with mock.patch.object(aq, "_paged", return_value=jobs):
-            with self.assertRaisesRegex(
-                aq.QualificationError, "is completed/skipped"
-            ):
+            with self.assertRaisesRegex(aq.QualificationError, "is completed/skipped"):
                 aq._verify_required_jobs(
                     "linura-org/linura",
                     gate,
@@ -252,11 +246,17 @@ class ApplicableQualificationTests(unittest.TestCase):
                 with self.assertRaises(aq.QualificationError):
                     aq._validate_shadow_workflow(summary + attack)
         for mutation in (
-            summary.replace("  workflow_dispatch:", "  pull_request: {}\n  workflow_dispatch:"),
-            summary.replace("  workflow_dispatch:", "  workflow_dispatch: {}\n  pull_request: {}"),
+            summary.replace(
+                "  workflow_dispatch:", "  pull_request: {}\n  workflow_dispatch:"
+            ),
+            summary.replace(
+                "  workflow_dispatch:", "  workflow_dispatch: {}\n  pull_request: {}"
+            ),
             summary.replace("      contents: read", "      contents: write", 1),
-            summary.replace("python3 tools/applicable_qualification.py validate",
-                            "python3 tools/applicable_qualification.py reconcile-heads"),
+            summary.replace(
+                "python3 tools/applicable_qualification.py validate",
+                "python3 tools/applicable_qualification.py reconcile-heads",
+            ),
             summary + "  pull_request: {}\n",
         ):
             with self.subTest(mutation=mutation[:95]):
@@ -277,11 +277,15 @@ class ApplicableQualificationTests(unittest.TestCase):
             for mutant in (
                 original.replace('mode = "off"', 'mode = "invalid"'),
                 original.replace('mode = "off"', 'mode = "enforced"'),
-                original + 'unreviewed = true\n',
-                original.replace('publisher = "independent-github-app"',
-                                 'publisher = "github-actions"'),
-                original.replace('required_app_check = "linura/applicable-qualification"',
-                                 'required_app_check = "applicable-qualification"'),
+                original + "unreviewed = true\n",
+                original.replace(
+                    'publisher = "independent-github-app"',
+                    'publisher = "github-actions"',
+                ),
+                original.replace(
+                    'required_app_check = "linura/applicable-qualification"',
+                    'required_app_check = "applicable-qualification"',
+                ),
             ):
                 path.write_text(mutant)
                 with self.assertRaises(aq.QualificationError):
@@ -289,7 +293,7 @@ class ApplicableQualificationTests(unittest.TestCase):
             path.write_text(
                 original.replace('mode = "off"', 'mode = "enforced"').replace(
                     'acceptance_evidence = ""',
-                    'acceptance_evidence = "https://github.com/linura-org/linura/issues/196"'
+                    'acceptance_evidence = "https://github.com/linura-org/linura/issues/196"',
                 )
             )
             self.assertEqual(aq.activation_mode(root), "enforced")
@@ -298,9 +302,13 @@ class ApplicableQualificationTests(unittest.TestCase):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         preflight = (ROOT / "scripts/preflight_codex_environment.sh").read_text()
         helper = (ROOT / "scripts/lint_github_workflows.sh").read_text()
-        self.assertIn('bash scripts/lint_github_workflows.sh "$install_dir/actionlint"', ci)
-        self.assertIn('bash scripts/lint_github_workflows.sh "$actionlint_bin"', preflight)
-        self.assertIn('python3 tools/applicable_qualification.py validate', helper)
+        self.assertIn(
+            'bash scripts/lint_github_workflows.sh "$install_dir/actionlint"', ci
+        )
+        self.assertIn(
+            'bash scripts/lint_github_workflows.sh "$actionlint_bin"', preflight
+        )
+        self.assertIn("python3 tools/applicable_qualification.py validate", helper)
         self.assertIn('"$actionlint_bin" -color "${workflow_files[@]}"', helper)
         self.assertIn("-name '*.yml' -o -name '*.yaml'", helper)
         self.assertNotIn("sed '/^      queue: max$/d'", helper)
@@ -309,15 +317,18 @@ class ApplicableQualificationTests(unittest.TestCase):
         sha_a, sha_b = "a" * 40, "b" * 40
         candidates = [
             {
-                "state": "open", "head": {"sha": sha_a},
+                "state": "open",
+                "head": {"sha": sha_a},
                 "base": {"ref": "main", "repo": {"full_name": "linura-org/linura"}},
             },
             {
-                "state": "open", "head": {"sha": sha_b},
+                "state": "open",
+                "head": {"sha": sha_b},
                 "base": {"ref": "main", "repo": {"full_name": "linura-org/linura"}},
             },
             {
-                "state": "open", "head": {"sha": sha_a},
+                "state": "open",
+                "head": {"sha": sha_a},
                 "base": {"ref": "main", "repo": {"full_name": "linura-org/linura"}},
             },
             {"state": "closed"},
@@ -344,7 +355,9 @@ class ApplicableQualificationTests(unittest.TestCase):
                     with self.assertRaises(aq.QualificationError):
                         aq.resolve_event_heads(
                             repository="linura-org/linura",
-                            event_name="push", event=event, token="token"
+                            event_name="push",
+                            event=event,
+                            token="token",
                         )
             query.assert_not_called()
 
@@ -363,13 +376,17 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_synchronize_reconciles_both_previous_and_current_head(self):
         before, after = "1" * 40, "2" * 40
         event = {
-            "action": "synchronize", "before": before, "after": after,
+            "action": "synchronize",
+            "before": before,
+            "after": after,
             "pull_request": {"head": {"sha": after}},
         }
         self.assertEqual(
             aq.resolve_event_heads(
-                repository="linura-org/linura", event_name="pull_request_target",
-                event=event, token="token",
+                repository="linura-org/linura",
+                event_name="pull_request_target",
+                event=event,
+                token="token",
             ),
             [before, after],
         )
@@ -377,8 +394,10 @@ class ApplicableQualificationTests(unittest.TestCase):
         event["before"] = after
         self.assertEqual(
             aq.resolve_event_heads(
-                repository="linura-org/linura", event_name="pull_request_target",
-                event=event, token="token",
+                repository="linura-org/linura",
+                event_name="pull_request_target",
+                event=event,
+                token="token",
             ),
             [after],
         )
@@ -386,12 +405,16 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_malformed_synchronize_identity_is_rejected(self):
         before, after = "a" * 40, "b" * 40
         valid = {
-            "action": "synchronize", "before": before, "after": after,
+            "action": "synchronize",
+            "before": before,
+            "after": after,
             "pull_request": {"head": {"sha": after}},
         }
         for changed in (
-            {"before": None}, {"before": "invalid"},
-            {"after": "c" * 40}, {"after": None},
+            {"before": None},
+            {"before": "invalid"},
+            {"after": "c" * 40},
+            {"after": None},
         ):
             with self.subTest(change=changed):
                 with self.assertRaisesRegex(
@@ -401,62 +424,79 @@ class ApplicableQualificationTests(unittest.TestCase):
                     aq.resolve_event_heads(
                         repository="linura-org/linura",
                         event_name="pull_request_target",
-                        event={**valid, **changed}, token="token",
+                        event={**valid, **changed},
+                        token="token",
                     )
-
 
     def test_workflow_run_discovery_requires_native_event(self):
         sha = "c" * 40
         self.assertEqual(
             aq.resolve_event_heads(
-                repository="linura-org/linura", event_name="workflow_run",
+                repository="linura-org/linura",
+                event_name="workflow_run",
                 event={"workflow_run": {"event": "pull_request", "head_sha": sha}},
                 token="token",
-            ), [sha]
+            ),
+            [sha],
         )
         self.assertEqual(
             aq.resolve_event_heads(
-                repository="linura-org/linura", event_name="workflow_run",
+                repository="linura-org/linura",
+                event_name="workflow_run",
                 event={"workflow_run": {"event": "workflow_dispatch", "head_sha": sha}},
                 token="token",
-            ), []
+            ),
+            [],
         )
         with self.assertRaises(aq.QualificationError):
             aq.resolve_event_heads(
-                repository="linura-org/linura", event_name="workflow_run",
-                event={"workflow_run": {"event": "pull_request", "head_sha": "invalid"}},
+                repository="linura-org/linura",
+                event_name="workflow_run",
+                event={
+                    "workflow_run": {"event": "pull_request", "head_sha": "invalid"}
+                },
                 token="token",
             )
 
     def test_base_push_discovery_fails_closed_on_unrelated_pr(self):
         foreign = {
-            "state": "open", "head": {"sha": "a" * 40},
+            "state": "open",
+            "head": {"sha": "a" * 40},
             "base": {"ref": "main", "repo": {"full_name": "not-linura/other"}},
         }
         with mock.patch.object(aq, "_paged", return_value=[foreign]):
-            with self.assertRaisesRegex(aq.QualificationError, "outside protected main"):
+            with self.assertRaisesRegex(
+                aq.QualificationError, "outside protected main"
+            ):
                 aq.resolve_event_heads(
                     repository="linura-org/linura",
                     event_name="push",
-                    event={"ref": "refs/heads/main"}, token="token",
+                    event={"ref": "refs/heads/main"},
+                    token="token",
                 )
 
     def test_more_than_256_heads_are_grouped_without_dropping_invalidation(self):
         records = [
-            {"state": "open", "head": {"sha": f"{i:040x}"},
-             "base": {"ref": "main", "repo": {"full_name": "linura-org/linura"}}}
+            {
+                "state": "open",
+                "head": {"sha": f"{i:040x}"},
+                "base": {"ref": "main", "repo": {"full_name": "linura-org/linura"}},
+            }
             for i in range(513)
         ]
         with mock.patch.object(aq, "_paged", return_value=records):
             heads = aq.resolve_event_heads(
                 repository="linura-org/linura",
-                event_name="push", event={"ref": "refs/heads/main"}, token="token",
+                event_name="push",
+                event={"ref": "refs/heads/main"},
+                token="token",
             )
         self.assertEqual(len(heads), 513)
         groups = aq.group_head_shas(heads)
         self.assertLessEqual(len(groups), 16)
         self.assertEqual(
-            sorted(sha for group in groups for sha in group["heads"]), heads,
+            sorted(sha for group in groups for sha in group["heads"]),
+            heads,
         )
         self.assertEqual(len(set(group["shard"] for group in groups)), len(groups))
         self.assertEqual(groups[0]["shard"], "0")
@@ -476,25 +516,36 @@ class ApplicableQualificationTests(unittest.TestCase):
         first, second = "a" * 39 + "1", "a" * 39 + "2"
         events = []
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
             mock.patch.object(
-                aq, "_post_json",
-                side_effect=lambda url, token, status:
-                    events.append(("pending", url, status["state"])),
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
             ),
             mock.patch.object(
-                aq, "reconcile_head",
-                side_effect=lambda **kw:
-                    (events.append(("check", kw["head_sha"], "evaluated"))
-                     or {"head_sha": kw["head_sha"], "state": "success"}),
+                aq,
+                "_post_json",
+                side_effect=lambda url, token, status: events.append(
+                    ("pending", url, status["state"])
+                ),
+            ),
+            mock.patch.object(
+                aq,
+                "reconcile_head",
+                side_effect=lambda **kw: (
+                    events.append(("check", kw["head_sha"], "evaluated"))
+                    or {"head_sha": kw["head_sha"], "state": "success"}
+                ),
             ),
         ):
             result = aq.reconcile_heads(
-                root=ROOT, repository="linura-org/linura",
-                head_shas=[first, second], shard="a", token="token",
+                root=ROOT,
+                repository="linura-org/linura",
+                head_shas=[first, second],
+                shard="a",
+                token="token",
                 hour_slot=0,
             )
         self.assertEqual(result["head_count"], 2)
@@ -502,31 +553,40 @@ class ApplicableQualificationTests(unittest.TestCase):
         self.assertEqual(result["reconciled_count"], 1)
         self.assertEqual(result["deferred_count"], 1)
         self.assertEqual(result["failures"], [])
-        self.assertEqual([item[0] for item in events],
-                         ["pending", "pending", "check"])
+        self.assertEqual([item[0] for item in events], ["pending", "pending", "check"])
         self.assertEqual(events[-1][1], first)
 
     def test_shard_reconciliation_isolates_discovery_and_publish_failures(self):
         first, second, third = ("b" * 39 + value for value in "123")
         writes, checked = [], []
+
         def fake_write(url, token, status):
             writes.append(url.rsplit("/", 1)[-1])
             if url.endswith(second):
                 raise aq.QualificationError("GitHub status API failure")
+
         def fake_check(**kw):
             checked.append(kw["head_sha"])
             raise aq.QualificationError("PR identity temporarily incomplete")
+
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
+            mock.patch.object(
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
+            ),
             mock.patch.object(aq, "_post_json", side_effect=fake_write),
             mock.patch.object(aq, "reconcile_head", side_effect=fake_check),
         ):
             result = aq.reconcile_heads(
-                root=ROOT, repository="linura-org/linura",
-                head_shas=[third, second, first], shard="b", token="token",
+                root=ROOT,
+                repository="linura-org/linura",
+                head_shas=[third, second, first],
+                shard="b",
+                token="token",
                 hour_slot=0,
             )
         self.assertEqual(writes, [first, second, third])
@@ -539,22 +599,38 @@ class ApplicableQualificationTests(unittest.TestCase):
         for slot, expected in ((0, first), (1, second), (2, third), (3, first)):
             writes, checks = [], []
             with (
-                mock.patch.object(aq, "load_contract", return_value={
-                    "repository": "linura-org/linura",
-                    "branch_required_check": "applicable-qualification",
-                }),
-                mock.patch.object(aq, "_post_json",
-                                  side_effect=lambda url, token, payload:
-                                      writes.append(url.rsplit("/", 1)[-1])),
-                mock.patch.object(aq, "reconcile_head",
-                                  side_effect=lambda **kw:
-                                      checks.append(kw["head_sha"]) or
-                                      {"head_sha": kw["head_sha"], "state": "success"}),
+                mock.patch.object(
+                    aq,
+                    "load_contract",
+                    return_value={
+                        "repository": "linura-org/linura",
+                        "branch_required_check": "applicable-qualification",
+                    },
+                ),
+                mock.patch.object(
+                    aq,
+                    "_post_json",
+                    side_effect=lambda url, token, payload: writes.append(
+                        url.rsplit("/", 1)[-1]
+                    ),
+                ),
+                mock.patch.object(
+                    aq,
+                    "reconcile_head",
+                    side_effect=lambda **kw: (
+                        checks.append(kw["head_sha"])
+                        or {"head_sha": kw["head_sha"], "state": "success"}
+                    ),
+                ),
             ):
                 result = aq.reconcile_heads(
-                    root=ROOT, repository="linura-org/linura",
-                    head_shas=[first, second, third], shard="c", token="token",
-                    retry_only=True, hour_slot=slot,
+                    root=ROOT,
+                    repository="linura-org/linura",
+                    head_shas=[first, second, third],
+                    shard="c",
+                    token="token",
+                    retry_only=True,
+                    hour_slot=slot,
                 )
             self.assertEqual(writes, [expected])
             self.assertEqual(checks, [expected])
@@ -565,17 +641,25 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_workflow_run_start_only_revokes_stale_status_without_rest_reads(self):
         heads = ["d" * 39 + str(i) for i in range(1, 4)]
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
+            mock.patch.object(
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
+            ),
             mock.patch.object(aq, "_post_json") as post,
             mock.patch.object(aq, "reconcile_head") as check,
         ):
             result = aq.reconcile_heads(
-                root=ROOT, repository="linura-org/linura",
-                head_shas=heads, shard="d", token="token",
-                invalidate_only=True, hour_slot=0,
+                root=ROOT,
+                repository="linura-org/linura",
+                head_shas=heads,
+                shard="d",
+                token="token",
+                invalidate_only=True,
+                hour_slot=0,
             )
         self.assertEqual(post.call_count, 3)
         self.assertEqual(result["invalidated_count"], 3)
@@ -585,59 +669,86 @@ class ApplicableQualificationTests(unittest.TestCase):
 
     def test_retry_and_invalidate_only_modes_must_not_mix(self):
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
+            mock.patch.object(
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
+            ),
             mock.patch.object(aq, "_post_json") as post,
         ):
             with self.assertRaisesRegex(aq.QualificationError, "conflict"):
                 aq.reconcile_heads(
-                    root=ROOT, repository="linura-org/linura",
-                    head_shas=["e" * 40], shard="e", token="token",
-                    retry_only=True, invalidate_only=True,
+                    root=ROOT,
+                    repository="linura-org/linura",
+                    head_shas=["e" * 40],
+                    shard="e",
+                    token="token",
+                    retry_only=True,
+                    invalidate_only=True,
                 )
         post.assert_not_called()
 
     def test_schedule_recovers_open_main_prs_and_rejects_unknown_cron(self):
         head = "f" * 40
-        records = [{
-            "state": "open", "head": {"sha": head},
-            "base": {"ref": "main", "repo": {"full_name": "linura-org/linura"}},
-        }]
+        records = [
+            {
+                "state": "open",
+                "head": {"sha": head},
+                "base": {"ref": "main", "repo": {"full_name": "linura-org/linura"}},
+            }
+        ]
         with mock.patch.object(aq, "_paged", return_value=records):
-            self.assertEqual(aq.resolve_event_heads(
-                repository="linura-org/linura", event_name="schedule",
-                event={"schedule": "17 * * * *"}, token="token",
-            ), [head])
+            self.assertEqual(
+                aq.resolve_event_heads(
+                    repository="linura-org/linura",
+                    event_name="schedule",
+                    event={"schedule": "17 * * * *"},
+                    token="token",
+                ),
+                [head],
+            )
         with mock.patch.object(aq, "_paged") as query:
             with self.assertRaisesRegex(aq.QualificationError, "unknown .*schedule"):
                 aq.resolve_event_heads(
-                    repository="linura-org/linura", event_name="schedule",
-                    event={"schedule": "0 * * * *"}, token="token",
+                    repository="linura-org/linura",
+                    event_name="schedule",
+                    event={"schedule": "0 * * * *"},
+                    token="token",
                 )
             query.assert_not_called()
 
     def test_shared_head_api_budget_fails_closed_without_any_pr_evaluation(self):
         head = "e" * 40
-        identities = {n: ("main", "1" * 40, 1350812666,
-                          "shared", 1350812666, "2" * 40)
-                      for n in range(1, 10)}
+        identities = {
+            n: ("main", "1" * 40, 1350812666, "shared", 1350812666, "2" * 40)
+            for n in range(1, 10)
+        }
         writes = []
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
+            mock.patch.object(
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
+            ),
             mock.patch.object(aq, "_open_head_prs", return_value=identities),
-            mock.patch.object(aq, "_post_json",
-                              side_effect=lambda url, token, payload:
-                                  writes.append(payload)),
+            mock.patch.object(
+                aq,
+                "_post_json",
+                side_effect=lambda url, token, payload: writes.append(payload),
+            ),
             mock.patch.object(aq, "evaluate_pr") as evaluate,
         ):
             result = aq.reconcile_head(
-                root=ROOT, repository="linura-org/linura",
-                head_sha=head, token="token",
+                root=ROOT,
+                repository="linura-org/linura",
+                head_sha=head,
+                token="token",
             )
         self.assertEqual(result["state"], "failure")
         self.assertEqual(result["pr_count"], 9)
@@ -648,11 +759,13 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_transient_status_write_retries_are_bounded_and_idempotent(self):
         import io
         from urllib.error import HTTPError
+
         url = "https://api.github.com/repos/linura-org/linura/statuses/" + "a" * 40
         error = HTTPError(url, 503, "temporary", {}, io.BytesIO(b"temporary"))
         with (
-            mock.patch.object(aq, "urlopen",
-                              side_effect=[error, io.BytesIO(b'{"ok":true}')]) as call,
+            mock.patch.object(
+                aq, "urlopen", side_effect=[error, io.BytesIO(b'{"ok":true}')]
+            ) as call,
             mock.patch.object(aq.time, "sleep") as sleep,
         ):
             result = aq._post_json(url, "token", {"state": "pending"})
@@ -664,9 +777,12 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_exhausted_github_token_cannot_spin_or_claim_status(self):
         import io
         from urllib.error import HTTPError
+
         url = "https://api.github.com/repos/linura-org/linura/statuses/" + "b" * 40
         error = HTTPError(
-            url, 403, "rate limit",
+            url,
+            403,
+            "rate limit",
             {"X-RateLimit-Remaining": "0", "Retry-After": "60"},
             io.BytesIO(b"rate limited"),
         )
@@ -681,12 +797,13 @@ class ApplicableQualificationTests(unittest.TestCase):
 
     def test_wrong_shard_never_publishes_statuses(self):
         with mock.patch.object(aq, "_post_json") as post:
-            with self.assertRaisesRegex(aq.QualificationError,
-                                        "match writer shard"):
+            with self.assertRaisesRegex(aq.QualificationError, "match writer shard"):
                 aq.reconcile_heads(
-                    root=ROOT, repository="linura-org/linura",
+                    root=ROOT,
+                    repository="linura-org/linura",
                     head_shas=["a" * 40, "b" * 40],
-                    shard="a", token="token",
+                    shard="a",
+                    token="token",
                 )
             post.assert_not_called()
 
@@ -701,7 +818,8 @@ class ApplicableQualificationTests(unittest.TestCase):
             if push is not None and push:
                 mirrored.add(gate["id"])
                 self.assertEqual(
-                    push, aq._pull_request_paths(workflow),
+                    push,
+                    aq._pull_request_paths(workflow),
                     f"push/PR route drift for {gate['id']}",
                 )
         self.assertIn("evidence-publication", mirrored)
@@ -709,31 +827,33 @@ class ApplicableQualificationTests(unittest.TestCase):
 
     def test_push_routing_shadow_keys_and_aliases_fail_closed(self):
         source = (
-            'name: example\n'
-            'on:\n'
-            '  pull_request:\n'
-            '    paths:\n'
+            "name: example\n"
+            "on:\n"
+            "  pull_request:\n"
+            "    paths:\n"
             '      - "schemas/release-evidence.v1.schema.json"\n'
-            '  push:\n'
-            '    branches: [main]\n'
-            '    paths:\n'
+            "  push:\n"
+            "    branches: [main]\n"
+            "    paths:\n"
             '      - "schemas/release-evidence.v1.schema.json"\n'
-            'jobs:\n'
-            '  verify:\n'
-            '    runs-on: ubuntu-24.04\n'
+            "jobs:\n"
+            "  verify:\n"
+            "    runs-on: ubuntu-24.04\n"
         )
         self.assertEqual(
             aq._push_paths(source), ["schemas/release-evidence.v1.schema.json"]
         )
         for mutant in (
-            source.replace('jobs:\n', '  push:\n    paths:\n      - "docs/**"\njobs:\n'),
-            source.replace('  push:\n', '  "push":\n'),
+            source.replace(
+                "jobs:\n", '  push:\n    paths:\n      - "docs/**"\njobs:\n'
+            ),
+            source.replace("  push:\n", '  "push":\n'),
             source.replace(
                 '      - "schemas/release-evidence.v1.schema.json"\njobs:\n',
                 '      - "schemas/release-evidence.v1.schema.json"\n'
                 '    "paths":\n      - "docs/**"\njobs:\n',
             ),
-            source.replace('    paths:\n', '    <<: *routes\n    paths:\n'),
+            source.replace("    paths:\n", "    <<: *routes\n    paths:\n"),
         ):
             with self.subTest(mutant=mutant):
                 with self.assertRaises(aq.QualificationError):
@@ -741,9 +861,10 @@ class ApplicableQualificationTests(unittest.TestCase):
 
     def test_changed_file_count_must_prove_exact_complete_inventory(self):
         head = "a" * 40
-        basic = {"head": {"sha": head},
-                 "base": {"ref": "main", "sha": "b" * 40,
-                          "repo": {"id": 1350812666}}}
+        basic = {
+            "head": {"sha": head},
+            "base": {"ref": "main", "sha": "b" * 40, "repo": {"id": 1350812666}},
+        }
         cases = [
             (None, [], "unavailable or malformed"),
             (True, ["docs/README.md"], "unavailable or malformed"),
@@ -767,8 +888,11 @@ class ApplicableQualificationTests(unittest.TestCase):
                 ):
                     with self.assertRaisesRegex(aq.QualificationError, message):
                         aq.evaluate_pr(
-                            root=ROOT, repository="linura-org/linura",
-                            pr_number=9, head_sha=head, token="token",
+                            root=ROOT,
+                            repository="linura-org/linura",
+                            pr_number=9,
+                            head_sha=head,
+                            token="token",
                         )
                     runs.assert_not_called()
                     writes.assert_not_called()
@@ -782,8 +906,11 @@ class ApplicableQualificationTests(unittest.TestCase):
             mock.patch.object(aq, "_head_runs") as runs,
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=12, head_sha=sha, token="token",
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=12,
+                head_sha=sha,
+                token="token",
             )
         self.assertEqual(result["state"], "failure")
         self.assertEqual(result["waiting"], [])
@@ -798,15 +925,19 @@ class ApplicableQualificationTests(unittest.TestCase):
         runs.assert_not_called()
 
     def test_exactly_3000_changed_files_pages_without_truncation(self):
-        entries = [{"filename": f"docs/item-{i}.md", "status": "modified"}
-                   for i in range(3000)]
+        entries = [
+            {"filename": f"docs/item-{i}.md", "status": "modified"} for i in range(3000)
+        ]
         pages: list[int] = []
+
         def page_api(url, token):
             from urllib.parse import urlparse, parse_qs
+
             query = parse_qs(urlparse(url).query)
             page = int(query["page"][0])
             pages.append(page)
-            return entries[(page - 1) * 100:page * 100]
+            return entries[(page - 1) * 100 : page * 100]
+
         with mock.patch.object(aq, "_api_json", side_effect=page_api):
             paths = aq._pr_changed_paths("linura-org/linura", 12, "token")
         self.assertEqual(len(paths), 3000)
@@ -815,11 +946,14 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_non_file_pagination_continues_beyond_3000_records(self):
         page = [{"id": number} for number in range(100)]
         pages = []
+
         def fetch(url, token):
             from urllib.parse import parse_qs, urlparse
+
             index = int(parse_qs(urlparse(url).query)["page"][0])
             pages.append(index)
             return page if index <= 30 else []
+
         with mock.patch.object(aq, "_api_json", side_effect=fetch):
             items = aq._paged(
                 "https://api.github.com/repos/linura-org/linura/pulls",
@@ -830,23 +964,23 @@ class ApplicableQualificationTests(unittest.TestCase):
 
     def test_path_routing_rejects_yaml_shadowed_event_keys(self):
         safe = (
-            'name: probe\n'
-            'on:\n'
-            '  pull_request:\n'
-            '    paths:\n'
+            "name: probe\n"
+            "on:\n"
+            "  pull_request:\n"
+            "    paths:\n"
             '      - "apps/**"\n'
-            'jobs:\n'
-            '  probe:\n'
-            '    runs-on: ubuntu-24.04\n'
+            "jobs:\n"
+            "  probe:\n"
+            "    runs-on: ubuntu-24.04\n"
         )
         self.assertEqual(aq._pull_request_paths(safe), ["apps/**"])
         for source in (
             safe.replace(
-                'jobs:\n',
+                "jobs:\n",
                 'on:\n  pull_request:\n    paths:\n      - "docs/**"\njobs:\n',
             ),
             safe.replace(
-                'jobs:\n',
+                "jobs:\n",
                 '  "pull_request":\n    paths:\n      - "docs/**"\njobs:\n',
             ),
             safe.replace(
@@ -857,9 +991,9 @@ class ApplicableQualificationTests(unittest.TestCase):
                 '      - "apps/**"\n',
                 '      - "apps/**"\n    "paths":\n      - "docs/**"\n',
             ),
-            safe.replace('    paths:\n', '    <<: *routes\n    paths:\n'),
-            safe.replace('jobs:\n', '"on":\n  pull_request: []\njobs:\n'),
-            safe.replace('  pull_request:\n', '  <<: *events\n  pull_request:\n'),
+            safe.replace("    paths:\n", "    <<: *routes\n    paths:\n"),
+            safe.replace("jobs:\n", '"on":\n  pull_request: []\njobs:\n'),
+            safe.replace("  pull_request:\n", "  <<: *events\n  pull_request:\n"),
         ):
             with self.subTest(source=source):
                 with self.assertRaises(aq.QualificationError):
@@ -871,31 +1005,29 @@ class ApplicableQualificationTests(unittest.TestCase):
             "!apps/linura-shell/AGENTS.md",
             "!apps/linura-shell/README.md",
         ]
-        self.assertFalse(
-            aq.path_selected("apps/linura-shell/AGENTS.md", patterns)
-        )
+        self.assertFalse(aq.path_selected("apps/linura-shell/AGENTS.md", patterns))
         self.assertTrue(
-            aq.path_selected(
-                "apps/linura-shell/ui/StatusPanel.qml", patterns
-            )
+            aq.path_selected("apps/linura-shell/ui/StatusPanel.qml", patterns)
         )
 
     def test_rename_routing_matches_changed_filename_not_previous_filename(self):
         contract = aq.load_contract(ROOT)
         source = "apps/linura-shell/ui/StatusPanel.qml"
         destination = "docs/renamed-panel.md"
-        payload = [{
-            "filename": destination,
-            "previous_filename": source,
-            "status": "renamed",
-        }]
+        payload = [
+            {
+                "filename": destination,
+                "previous_filename": source,
+                "status": "renamed",
+            }
+        ]
         with mock.patch.object(aq, "_paged", return_value=payload):
             paths = aq._pr_changed_paths("linura-org/linura", 1, "token")
         self.assertEqual(paths, [destination])
-        self.assertEqual(aq.required_gate_ids(contract, paths),
-                         contract["mandatory_gate_ids"])
-        self.assertIn("v010-workstation",
-                      aq.required_gate_ids(contract, [source]))
+        self.assertEqual(
+            aq.required_gate_ids(contract, paths), contract["mandatory_gate_ids"]
+        )
+        self.assertIn("v010-workstation", aq.required_gate_ids(contract, [source]))
 
     def test_untrusted_workflow_action_and_verifier_edits_fail_closed(self):
         contract = aq.load_contract(ROOT)
@@ -916,16 +1048,23 @@ class ApplicableQualificationTests(unittest.TestCase):
             "tools/check_ci_cache_policy.py",
             "tools/xtask/Cargo.toml",
             "tools/xtask/src/main.rs",
-            ".cargo/config", ".cargo/config.toml", "Cargo.toml",
-            "Cargo.lock", "rust-toolchain.toml", "tools/codex/versions.env",
+            ".cargo/config",
+            ".cargo/config.toml",
+            "Cargo.toml",
+            "Cargo.lock",
+            "rust-toolchain.toml",
+            "tools/codex/versions.env",
         ]
         self.assertEqual(
             aq._untrusted_gate_definition_edits(contract, sensitive),
             sorted(sensitive),
         )
-        self.assertEqual(aq._untrusted_gate_definition_edits(
-            contract, ["crates/linura-control/src/lib.rs", "docs/README.md"]
-        ), [])
+        self.assertEqual(
+            aq._untrusted_gate_definition_edits(
+                contract, ["crates/linura-control/src/lib.rs", "docs/README.md"]
+            ),
+            [],
+        )
 
     def test_local_reusable_workflows_and_qualification_harnesses_are_protected(self):
         contract = aq.load_contract(ROOT)
@@ -963,9 +1102,9 @@ class ApplicableQualificationTests(unittest.TestCase):
         head = "a" * 40
         harness_path = "qualification/v010/shell-runtime/run-shell-runtime.sh"
         pr = {
-            "head": {"sha": head}, "changed_files": 2,
-            "base": {"ref": "main", "sha": "1" * 40,
-                     "repo": {"id": 1350812666}},
+            "head": {"sha": head},
+            "changed_files": 2,
+            "base": {"ref": "main", "sha": "1" * 40, "repo": {"id": 1350812666}},
         }
         changed = [
             "apps/linura-shell/ui/StatusPanel.qml",
@@ -978,8 +1117,11 @@ class ApplicableQualificationTests(unittest.TestCase):
             mock.patch.object(aq, "_head_runs") as runs,
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=99, head_sha=head, token="token",
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=99,
+                head_sha=head,
+                token="token",
             )
         self.assertEqual(result["state"], "failure")
         self.assertIn(harness_path, result["failures"][0])
@@ -988,18 +1130,25 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_implicit_python_startup_and_acceptance_fixtures_require_approval(self):
         contract = aq.load_contract(ROOT)
         protected = [
-            "sitecustomize.py", "usercustomize.py",
-            "tools/__init__.py", "tools/sitecustomize.py",
-            "tools/json.py", "tools/json.pyc",
+            "sitecustomize.py",
+            "usercustomize.py",
+            "tools/__init__.py",
+            "tools/sitecustomize.py",
+            "tools/json.py",
+            "tools/json.pyc",
             "tools/json.cpython-312-x86_64-linux-gnu.so",
             "tools/new_package/__init__.py",
             "tools/new_package/__init__.abi3.so",
-            "scripts/__init__.py", "scripts/urllib.py",
+            "scripts/__init__.py",
+            "scripts/urllib.py",
             "scripts/urllib.pyc",
-            "json.cpython-312-x86_64-linux-gnu.so", "json.pyc",
-            "json/__init__.py", "urllib/__init__.pyc",
+            "json.cpython-312-x86_64-linux-gnu.so",
+            "json.pyc",
+            "json/__init__.py",
+            "urllib/__init__.pyc",
             "email/__init__.abi3.so",
-            "tests/__init__.py", "tests/integration/__init__.py",
+            "tests/__init__.py",
+            "tests/integration/__init__.py",
             "tests/integration/__init__.abi3.so",
             "tests/integration/__init__.pyc",
             "qualification/v011/sitecustomize.py",
@@ -1018,12 +1167,14 @@ class ApplicableQualificationTests(unittest.TestCase):
                     [path],
                 )
         unprotected = [
-            "docs/README.md", "xtask/src/main.rs",
+            "docs/README.md",
+            "xtask/src/main.rs",
             "crates/linura-core/src/lib.rs",
             "apps/linura-shell/AGENTS.md",
         ]
         self.assertEqual(
-            aq._untrusted_gate_definition_edits(contract, unprotected), [],
+            aq._untrusted_gate_definition_edits(contract, unprotected),
+            [],
         )
 
     def test_acceptance_fixture_cannot_self_certify_a_green_vm_run(self):
@@ -1031,9 +1182,9 @@ class ApplicableQualificationTests(unittest.TestCase):
         fixture = "tests/acceptance/007-authoritative-observation.json"
         head = "a" * 40
         pr = {
-            "head": {"sha": head}, "changed_files": 1,
-            "base": {"ref": "main", "sha": "1" * 40,
-                     "repo": {"id": 1350812666}},
+            "head": {"sha": head},
+            "changed_files": 1,
+            "base": {"ref": "main", "sha": "1" * 40, "repo": {"id": 1350812666}},
         }
         with (
             mock.patch.object(aq, "_approved_gate_bundles", return_value={}),
@@ -1042,8 +1193,11 @@ class ApplicableQualificationTests(unittest.TestCase):
             mock.patch.object(aq, "_head_runs") as runs,
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=99, head_sha=head, token="token",
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=99,
+                head_sha=head,
+                token="token",
                 validated_contract=contract,
             )
         self.assertEqual(result["state"], "failure")
@@ -1073,7 +1227,8 @@ class ApplicableQualificationTests(unittest.TestCase):
             "head": {"sha": head},
             "changed_files": 2,
             "base": {
-                "ref": "main", "sha": "1" * 40,
+                "ref": "main",
+                "sha": "1" * 40,
                 "repo": {"id": 1350812666},
             },
         }
@@ -1081,7 +1236,8 @@ class ApplicableQualificationTests(unittest.TestCase):
             mock.patch.object(aq, "_approved_gate_bundles", return_value={}),
             mock.patch.object(aq, "_api_json", return_value=pr),
             mock.patch.object(
-                aq, "_pr_changed_paths",
+                aq,
+                "_pr_changed_paths",
                 return_value=[
                     "contracts/evidence-publication.toml",
                     "tests/tooling/test_evidence_publication.py",
@@ -1090,8 +1246,11 @@ class ApplicableQualificationTests(unittest.TestCase):
             mock.patch.object(aq, "_head_runs") as runs,
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=99, head_sha=head, token="token",
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=99,
+                head_sha=head,
+                token="token",
             )
         self.assertEqual(result["state"], "failure")
         self.assertIn(
@@ -1138,7 +1297,9 @@ class ApplicableQualificationTests(unittest.TestCase):
             "scripts/lint_github_workflows.sh",
             "tools/xtask/Cargo.toml",
             "tools/xtask/src/main.rs",
-            ".cargo/config", ".cargo/config.toml", "Cargo.toml",
+            ".cargo/config",
+            ".cargo/config.toml",
+            "Cargo.toml",
             "Cargo.lock",
         ]
         self.assertEqual(
@@ -1183,8 +1344,12 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_cargo_alias_and_workspace_authority_cannot_self_authorize(self):
         contract = aq.load_contract(ROOT)
         inputs = [
-            ".cargo/config", ".cargo/config.toml", ".cargo/local.toml",
-            "Cargo.toml", "Cargo.lock", "rust-toolchain.toml",
+            ".cargo/config",
+            ".cargo/config.toml",
+            ".cargo/local.toml",
+            "Cargo.toml",
+            "Cargo.lock",
+            "rust-toolchain.toml",
             "tools/codex/versions.env",
         ]
         self.assertEqual(
@@ -1197,8 +1362,11 @@ class ApplicableQualificationTests(unittest.TestCase):
                 pr = {
                     "head": {"sha": head},
                     "changed_files": 1,
-                    "base": {"ref": "main", "sha": "1" * 40,
-                             "repo": {"id": 1350812666}},
+                    "base": {
+                        "ref": "main",
+                        "sha": "1" * 40,
+                        "repo": {"id": 1350812666},
+                    },
                 }
                 with (
                     mock.patch.object(aq, "_approved_gate_bundles", return_value={}),
@@ -1207,8 +1375,11 @@ class ApplicableQualificationTests(unittest.TestCase):
                     mock.patch.object(aq, "_head_runs") as runs,
                 ):
                     result = aq.evaluate_pr(
-                        root=ROOT, repository="linura-org/linura",
-                        pr_number=99, head_sha=head, token="token",
+                        root=ROOT,
+                        repository="linura-org/linura",
+                        pr_number=99,
+                        head_sha=head,
+                        token="token",
                     )
                 self.assertEqual(result["state"], "failure")
                 self.assertIn(path, result["failures"][0])
@@ -1229,8 +1400,11 @@ class ApplicableQualificationTests(unittest.TestCase):
             mock.patch.object(aq, "_head_runs") as runs,
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=99, head_sha=head, token="token",
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=99,
+                head_sha=head,
+                token="token",
             )
         self.assertEqual(result["state"], "failure")
         self.assertIn(path, result["failures"][0])
@@ -1243,28 +1417,33 @@ class ApplicableQualificationTests(unittest.TestCase):
         pr = {
             "head": {"sha": head},
             "changed_files": 1,
-            "base": {"ref": "main", "sha": "1" * 40,
-                     "repo": {"id": 1350812666}},
+            "base": {"ref": "main", "sha": "1" * 40, "repo": {"id": 1350812666}},
         }
         with (
             mock.patch.object(aq, "_api_json", return_value=pr),
             mock.patch.object(aq, "_pr_changed_paths", return_value=[path]),
             mock.patch.object(
-                aq, "_approved_gate_bundles",
+                aq,
+                "_approved_gate_bundles",
                 return_value={"sha256:" + "d" * 64: (213, "solo-operator")},
             ),
             mock.patch.object(
-                aq, "_authority_bundle_digest",
+                aq,
+                "_authority_bundle_digest",
                 return_value="sha256:" + "e" * 64,
             ) as digest,
             mock.patch.object(
-                aq, "_independently_reviewed_authority_upgrade",
+                aq,
+                "_independently_reviewed_authority_upgrade",
             ) as approve,
             mock.patch.object(aq, "_head_runs") as runs,
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=99, head_sha=head, token="token",
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=99,
+                head_sha=head,
+                token="token",
             )
         self.assertEqual(result["state"], "failure")
         self.assertIn("executable qualification authority", result["failures"][0])
@@ -1281,39 +1460,58 @@ class ApplicableQualificationTests(unittest.TestCase):
             "number": 99,
             "head": {"sha": "a" * 40},
             "base": {
-                "ref": "main", "sha": "c" * 40,
+                "ref": "main",
+                "sha": "c" * 40,
                 "repo": {"full_name": "linura-org/linura", "id": 1350812666},
             },
         }
         original = {
-            "path": path, "type": "blob",
-            "mode": "100644", "sha": "1" * 40,
+            "path": path,
+            "type": "blob",
+            "mode": "100644",
+            "sha": "1" * 40,
         }
         tree = {
-            "sha": "d" * 40, "truncated": False, "tree": [original],
+            "sha": "d" * 40,
+            "truncated": False,
+            "tree": [original],
         }
 
         def digest_for(changed=files, pr=identity, base_tree=tree, number=99):
             with (
                 mock.patch.object(aq, "_paged", return_value=changed),
-                mock.patch.object(aq, "_api_json", side_effect=[
-                    {"sha": pr["base"]["sha"], "tree": {"sha": base_tree["sha"]}},
-                    base_tree,
-                ]) as api,
+                mock.patch.object(
+                    aq,
+                    "_api_json",
+                    side_effect=[
+                        {"sha": pr["base"]["sha"], "tree": {"sha": base_tree["sha"]}},
+                        base_tree,
+                    ],
+                ) as api,
             ):
                 digest = aq._authority_bundle_digest(
-                    "linura-org/linura", number, "token", [path], pr=pr,
+                    "linura-org/linura",
+                    number,
+                    "token",
+                    [path],
+                    pr=pr,
                 )
-                self.assertEqual(api.call_args_list, [
-                    mock.call(
-                        "https://api.github.com/repos/linura-org/linura/git/commits/"
-                        + pr["base"]["sha"], "token",
-                    ),
-                    mock.call(
-                        "https://api.github.com/repos/linura-org/linura/git/trees/"
-                        + base_tree["sha"] + "?recursive=1", "token",
-                    ),
-                ])
+                self.assertEqual(
+                    api.call_args_list,
+                    [
+                        mock.call(
+                            "https://api.github.com/repos/linura-org/linura/git/commits/"
+                            + pr["base"]["sha"],
+                            "token",
+                        ),
+                        mock.call(
+                            "https://api.github.com/repos/linura-org/linura/git/trees/"
+                            + base_tree["sha"]
+                            + "?recursive=1",
+                            "token",
+                        ),
+                    ],
+                )
                 return digest
 
         digest = digest_for()
@@ -1325,8 +1523,7 @@ class ApplicableQualificationTests(unittest.TestCase):
             ledger = root / ".github/qualification-authority-approvals.toml"
             ledger.parent.mkdir(parents=True)
             ledger.write_text(
-                "schema_version = 1\n"
-                'solo_operator = "Ehsan-Azari"\n',
+                'schema_version = 1\nsolo_operator = "Ehsan-Azari"\n',
                 encoding="utf-8",
             )
             self.assertEqual(aq._approved_gate_bundles(root), {})
@@ -1360,36 +1557,53 @@ class ApplicableQualificationTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(
-                aq.QualificationError, "duplicate or malformed",
+                aq.QualificationError,
+                "duplicate or malformed",
             ):
                 aq._approved_gate_bundles(root)
 
         self.assertNotEqual(
-            digest, digest_for([{**files[0], "sha": "d" * 40}]),
+            digest,
+            digest_for([{**files[0], "sha": "d" * 40}]),
         )
         self.assertNotEqual(
-            digest, digest_for([
-                *files,
-                {"filename": "tools/new-indirect-dependency.py",
-                 "status": "added", "sha": "d" * 40},
-            ]),
+            digest,
+            digest_for(
+                [
+                    *files,
+                    {
+                        "filename": "tools/new-indirect-dependency.py",
+                        "status": "added",
+                        "sha": "d" * 40,
+                    },
+                ]
+            ),
         )
         with (
             mock.patch.object(aq, "_paged", return_value=[]),
-            mock.patch.object(aq, "_api_json", side_effect=[
-                {"sha": identity["base"]["sha"], "tree": {"sha": tree["sha"]}},
-                tree,
-            ]),
+            mock.patch.object(
+                aq,
+                "_api_json",
+                side_effect=[
+                    {"sha": identity["base"]["sha"], "tree": {"sha": tree["sha"]}},
+                    tree,
+                ],
+            ),
         ):
             with self.assertRaisesRegex(aq.QualificationError, "does not cover"):
                 aq._authority_bundle_digest(
-                    "linura-org/linura", 99, "token", [path], pr=identity,
+                    "linura-org/linura",
+                    99,
+                    "token",
+                    [path],
+                    pr=identity,
                 )
 
         # Approvals must be stable across unrelated main commits but cannot
         # authorize a reversion of a subsequently security-fixed source.
         advanced = {
-            **identity, "base": {**identity["base"], "sha": "e" * 40},
+            **identity,
+            "base": {**identity["base"], "sha": "e" * 40},
             "head": {"sha": "f" * 40},
         }
         advanced_tree = {**tree, "sha": "e" * 40}
@@ -1399,17 +1613,20 @@ class ApplicableQualificationTests(unittest.TestCase):
             "tree": [{**original, "sha": "2" * 40}],
         }
         self.assertNotEqual(
-            digest, digest_for(pr=advanced, base_tree=repaired_tree),
+            digest,
+            digest_for(pr=advanced, base_tree=repaired_tree),
         )
         # An up-to-date-branch merge/rebase after the ledger PR merges
         # changes the code head even if the reviewed diff stays the same.
         # Requiring a new ledger approval here would deadlock forever.
         self.assertEqual(
-            digest, digest_for(pr={**identity, "head": {"sha": "f" * 40}}),
+            digest,
+            digest_for(pr={**identity, "head": {"sha": "f" * 40}}),
         )
         different_pr = {**identity, "number": 100}
         self.assertNotEqual(
-            digest, digest_for(pr=different_pr, number=100),
+            digest,
+            digest_for(pr=different_pr, number=100),
         )
 
         # A new/removed/renamed authority file is bound to both absence and
@@ -1417,91 +1634,140 @@ class ApplicableQualificationTests(unittest.TestCase):
         addition = [{"filename": "tools/new.py", "status": "added", "sha": "3" * 40}]
         with (
             mock.patch.object(aq, "_paged", return_value=addition),
-            mock.patch.object(aq, "_api_json", side_effect=[
-                {"sha": identity["base"]["sha"], "tree": {"sha": tree["sha"]}},
-                tree,
-            ]),
+            mock.patch.object(
+                aq,
+                "_api_json",
+                side_effect=[
+                    {"sha": identity["base"]["sha"], "tree": {"sha": tree["sha"]}},
+                    tree,
+                ],
+            ),
         ):
             added = aq._authority_bundle_digest(
-                "linura-org/linura", 99, "token", ["tools/new.py"], pr=identity,
+                "linura-org/linura",
+                99,
+                "token",
+                ["tools/new.py"],
+                pr=identity,
             )
         self.assertTrue(added.startswith("sha256:"))
-        renamed = [{
-            "filename": "tools/renamed.py",
-            "previous_filename": path,
-            "status": "renamed", "sha": "b" * 40,
-        }]
+        renamed = [
+            {
+                "filename": "tools/renamed.py",
+                "previous_filename": path,
+                "status": "renamed",
+                "sha": "b" * 40,
+            }
+        ]
         with (
             mock.patch.object(aq, "_paged", return_value=renamed),
-            mock.patch.object(aq, "_api_json", side_effect=[
-                {"sha": identity["base"]["sha"], "tree": {"sha": tree["sha"]}},
-                tree,
-            ]),
+            mock.patch.object(
+                aq,
+                "_api_json",
+                side_effect=[
+                    {"sha": identity["base"]["sha"], "tree": {"sha": tree["sha"]}},
+                    tree,
+                ],
+            ),
         ):
             rename_digest = aq._authority_bundle_digest(
-                "linura-org/linura", 99, "token", [path], pr=identity,
+                "linura-org/linura",
+                99,
+                "token",
+                [path],
+                pr=identity,
             )
         self.assertNotEqual(added, rename_digest)
 
-        copied = [{
-            "filename": "tools/copied.py",
-            "previous_filename": path,
-            "status": "copied", "sha": "b" * 40,
-        }]
+        copied = [
+            {
+                "filename": "tools/copied.py",
+                "previous_filename": path,
+                "status": "copied",
+                "sha": "b" * 40,
+            }
+        ]
         with (
             mock.patch.object(aq, "_paged", return_value=copied),
-            mock.patch.object(aq, "_api_json", side_effect=[
-                {"sha": identity["base"]["sha"], "tree": {"sha": tree["sha"]}},
-                tree,
-            ]),
+            mock.patch.object(
+                aq,
+                "_api_json",
+                side_effect=[
+                    {"sha": identity["base"]["sha"], "tree": {"sha": tree["sha"]}},
+                    tree,
+                ],
+            ),
         ):
             copy_digest = aq._authority_bundle_digest(
-                "linura-org/linura", 99, "token", ["tools/copied.py"],
+                "linura-org/linura",
+                99,
+                "token",
+                ["tools/copied.py"],
                 pr=identity,
             )
         fixed = {**tree, "tree": [{**original, "sha": "2" * 40}]}
         with (
             mock.patch.object(aq, "_paged", return_value=copied),
-            mock.patch.object(aq, "_api_json", side_effect=[
-                {"sha": identity["base"]["sha"], "tree": {"sha": fixed["sha"]}},
-                fixed,
-            ]),
+            mock.patch.object(
+                aq,
+                "_api_json",
+                side_effect=[
+                    {"sha": identity["base"]["sha"], "tree": {"sha": fixed["sha"]}},
+                    fixed,
+                ],
+            ),
         ):
             self.assertNotEqual(
                 copy_digest,
                 aq._authority_bundle_digest(
-                    "linura-org/linura", 99, "token", ["tools/copied.py"],
+                    "linura-org/linura",
+                    99,
+                    "token",
+                    ["tools/copied.py"],
                     pr=identity,
                 ),
             )
         with (
-            mock.patch.object(aq, "_paged",
-                              return_value=[{**copied[0], "previous_filename": None}]),
-            mock.patch.object(aq, "_api_json", side_effect=[
-                {"sha": identity["base"]["sha"], "tree": {"sha": tree["sha"]}},
-                tree,
-            ]),
+            mock.patch.object(
+                aq, "_paged", return_value=[{**copied[0], "previous_filename": None}]
+            ),
+            mock.patch.object(
+                aq,
+                "_api_json",
+                side_effect=[
+                    {"sha": identity["base"]["sha"], "tree": {"sha": tree["sha"]}},
+                    tree,
+                ],
+            ),
         ):
             with self.assertRaisesRegex(
-                aq.QualificationError, "rename/copy source identity",
+                aq.QualificationError,
+                "rename/copy source identity",
             ):
                 aq._authority_bundle_digest(
-                    "linura-org/linura", 99, "token", ["tools/copied.py"],
+                    "linura-org/linura",
+                    99,
+                    "token",
+                    ["tools/copied.py"],
                     pr=identity,
                 )
 
     def test_authority_bundle_denies_incomplete_or_ambiguous_old_source(self):
         path = "tools/check_ci_cache_policy.py"
         identity = {
-            "number": 99, "head": {"sha": "a" * 40},
-            "base": {"ref": "main", "sha": "c" * 40,
-                     "repo": {"full_name": "linura-org/linura"}},
+            "number": 99,
+            "head": {"sha": "a" * 40},
+            "base": {
+                "ref": "main",
+                "sha": "c" * 40,
+                "repo": {"full_name": "linura-org/linura"},
+            },
         }
         changed = [{"filename": path, "status": "modified", "sha": "b" * 40}]
         base_tree = {
-            "sha": "d" * 40, "truncated": False,
-            "tree": [{"path": path, "sha": "1" * 40,
-                      "mode": "100644", "type": "blob"}],
+            "sha": "d" * 40,
+            "truncated": False,
+            "tree": [{"path": path, "sha": "1" * 40, "mode": "100644", "type": "blob"}],
         }
         for invalid, reason in (
             ({**base_tree, "truncated": True}, "incomplete"),
@@ -1512,25 +1778,39 @@ class ApplicableQualificationTests(unittest.TestCase):
             with (
                 self.subTest(reason=reason),
                 mock.patch.object(aq, "_paged", return_value=changed),
-                mock.patch.object(aq, "_api_json", side_effect=[
-                    {"sha": identity["base"]["sha"],
-                     "tree": {"sha": base_tree["sha"]}},
-                    invalid,
-                ]),
+                mock.patch.object(
+                    aq,
+                    "_api_json",
+                    side_effect=[
+                        {
+                            "sha": identity["base"]["sha"],
+                            "tree": {"sha": base_tree["sha"]},
+                        },
+                        invalid,
+                    ],
+                ),
             ):
                 with self.assertRaisesRegex(aq.QualificationError, reason):
                     aq._authority_bundle_digest(
-                        "linura-org/linura", 99, "token", [path], pr=identity,
+                        "linura-org/linura",
+                        99,
+                        "token",
+                        [path],
+                        pr=identity,
                     )
         with (
             mock.patch.object(aq, "_paged", return_value=changed),
             mock.patch.object(aq, "_api_json") as api,
         ):
             with self.assertRaisesRegex(
-                aq.QualificationError, "exact code PR/head identity",
+                aq.QualificationError,
+                "exact code PR/head identity",
             ):
                 aq._authority_bundle_digest(
-                    "linura-org/linura", 99, "token", [path],
+                    "linura-org/linura",
+                    99,
+                    "token",
+                    [path],
                     pr={**identity, "head": {"sha": "invalid"}},
                 )
             api.assert_not_called()
@@ -1539,9 +1819,13 @@ class ApplicableQualificationTests(unittest.TestCase):
         path = "tools/check_ci_cache_policy.py"
         base_sha, tree_sha = "c" * 40, "d" * 40
         identity = {
-            "number": 99, "head": {"sha": "a" * 40},
-            "base": {"ref": "main", "sha": base_sha,
-                     "repo": {"full_name": "linura-org/linura"}},
+            "number": 99,
+            "head": {"sha": "a" * 40},
+            "base": {
+                "ref": "main",
+                "sha": base_sha,
+                "repo": {"full_name": "linura-org/linura"},
+            },
         }
         changed = [{"filename": path, "status": "modified", "sha": "b" * 40}]
         for invalid_commit in (
@@ -1557,29 +1841,49 @@ class ApplicableQualificationTests(unittest.TestCase):
                 mock.patch.object(aq, "_api_json", return_value=invalid_commit) as api,
             ):
                 with self.assertRaisesRegex(
-                    aq.QualificationError, "base commit/tree identity unavailable",
+                    aq.QualificationError,
+                    "base commit/tree identity unavailable",
                 ):
                     aq._authority_bundle_digest(
-                        "linura-org/linura", 99, "token", [path], pr=identity,
+                        "linura-org/linura",
+                        99,
+                        "token",
+                        [path],
+                        pr=identity,
                     )
                 api.assert_called_once_with(
                     "https://api.github.com/repos/linura-org/linura/git/commits/"
-                    + base_sha, "token",
+                    + base_sha,
+                    "token",
                 )
 
     def test_authority_approval_requires_distinct_merged_review(self):
         digest = "sha256:" + "f" * 64
-        self.assertFalse(aq._independently_reviewed_authority_upgrade(
-            "linura-org/linura", 7, 7, digest, "token",
-            code_author="code-author", approval_mode="independent-review",
-            solo_operator="Ehsan-Azari",
-        ))
-        with mock.patch.object(aq, "_api_json", return_value={"merged": False}):
-            self.assertFalse(aq._independently_reviewed_authority_upgrade(
-                "linura-org/linura", 8, 7, digest, "token",
-                code_author="code-author", approval_mode="independent-review",
+        self.assertFalse(
+            aq._independently_reviewed_authority_upgrade(
+                "linura-org/linura",
+                7,
+                7,
+                digest,
+                "token",
+                code_author="code-author",
+                approval_mode="independent-review",
                 solo_operator="Ehsan-Azari",
-            ))
+            )
+        )
+        with mock.patch.object(aq, "_api_json", return_value={"merged": False}):
+            self.assertFalse(
+                aq._independently_reviewed_authority_upgrade(
+                    "linura-org/linura",
+                    8,
+                    7,
+                    digest,
+                    "token",
+                    code_author="code-author",
+                    approval_mode="independent-review",
+                    solo_operator="Ehsan-Azari",
+                )
+            )
 
     def test_authority_approval_binds_reviewed_ledger_snapshot(self):
         import base64
@@ -1595,51 +1899,85 @@ class ApplicableQualificationTests(unittest.TestCase):
             'rationale = "Reviewed separately"\n'
         )
         approved_pr = {
-            "merged": True, "merged_at": "2026-10-08T10:00:00Z",
+            "merged": True,
+            "merged_at": "2026-10-08T10:00:00Z",
             "base": {"ref": "main", "repo": {"full_name": "linura-org/linura"}},
-            "head": {"sha": "a" * 40}, "user": {"login": "author"},
+            "head": {"sha": "a" * 40},
+            "user": {"login": "author"},
         }
         recorded_source = {
             "encoding": "base64",
             "content": base64.b64encode(ledger.encode()).decode(),
         }
-        changed = [{
-            "filename": ".github/qualification-authority-approvals.toml",
-            "status": "modified",
-        }]
-        independent = [{
-            "user": {"login": "reviewer"},
-            "state": "APPROVED", "commit_id": "a" * 40,
-            "author_association": "COLLABORATOR",
-        }]
+        changed = [
+            {
+                "filename": ".github/qualification-authority-approvals.toml",
+                "status": "modified",
+            }
+        ]
+        independent = [
+            {
+                "user": {"login": "reviewer"},
+                "state": "APPROVED",
+                "commit_id": "a" * 40,
+                "author_association": "COLLABORATOR",
+            }
+        ]
         with (
-            mock.patch.object(aq, "_api_json", side_effect=[approved_pr, recorded_source]),
+            mock.patch.object(
+                aq, "_api_json", side_effect=[approved_pr, recorded_source]
+            ),
             mock.patch.object(aq, "_paged", side_effect=[changed, independent]),
         ):
-            self.assertTrue(aq._independently_reviewed_authority_upgrade(
-                "linura-org/linura", 101, 99, digest, "token",
-                code_author="code-author", approval_mode="independent-review",
-                solo_operator="Ehsan-Azari",
-            ))
+            self.assertTrue(
+                aq._independently_reviewed_authority_upgrade(
+                    "linura-org/linura",
+                    101,
+                    99,
+                    digest,
+                    "token",
+                    code_author="code-author",
+                    approval_mode="independent-review",
+                    solo_operator="Ehsan-Azari",
+                )
+            )
         with (
-            mock.patch.object(aq, "_api_json", side_effect=[approved_pr, recorded_source]),
-            mock.patch.object(aq, "_paged", side_effect=[
-                changed,
-                independent + [{
-                    "user": {"login": "reviewer"},
-                    "state": "DISMISSED", "commit_id": "a" * 40,
-                    "author_association": "COLLABORATOR",
-                }],
-            ]),
+            mock.patch.object(
+                aq, "_api_json", side_effect=[approved_pr, recorded_source]
+            ),
+            mock.patch.object(
+                aq,
+                "_paged",
+                side_effect=[
+                    changed,
+                    independent
+                    + [
+                        {
+                            "user": {"login": "reviewer"},
+                            "state": "DISMISSED",
+                            "commit_id": "a" * 40,
+                            "author_association": "COLLABORATOR",
+                        }
+                    ],
+                ],
+            ),
         ):
-            self.assertFalse(aq._independently_reviewed_authority_upgrade(
-                "linura-org/linura", 101, 99, digest, "token",
-                code_author="code-author", approval_mode="independent-review",
-                solo_operator="Ehsan-Azari",
-            ))
+            self.assertFalse(
+                aq._independently_reviewed_authority_upgrade(
+                    "linura-org/linura",
+                    101,
+                    99,
+                    digest,
+                    "token",
+                    code_author="code-author",
+                    approval_mode="independent-review",
+                    solo_operator="Ehsan-Azari",
+                )
+            )
 
     def test_executable_author_cannot_approve_independent_ledger(self):
         import base64
+
         digest = "sha256:" + "c" * 64
         source = (
             "schema_version = 1\n"
@@ -1651,34 +1989,50 @@ class ApplicableQualificationTests(unittest.TestCase):
             'rationale = "Separate human review required"\n'
         )
         reviewed = {
-            "merged": True, "merged_at": "2026-10-09T00:00:00Z",
+            "merged": True,
+            "merged_at": "2026-10-09T00:00:00Z",
             "base": {"ref": "main", "repo": {"full_name": "linura-org/linura"}},
-            "head": {"sha": "a" * 40}, "user": {"login": "ledger-author"},
+            "head": {"sha": "a" * 40},
+            "user": {"login": "ledger-author"},
         }
         encoded = {
             "encoding": "base64",
             "content": base64.b64encode(source.encode()).decode(),
         }
-        files = [{
-            "filename": ".github/qualification-authority-approvals.toml",
-            "status": "modified",
-        }]
-        reviews = [{
-            "user": {"login": "code-author"}, "state": "APPROVED",
-            "commit_id": "a" * 40, "author_association": "COLLABORATOR",
-        }]
+        files = [
+            {
+                "filename": ".github/qualification-authority-approvals.toml",
+                "status": "modified",
+            }
+        ]
+        reviews = [
+            {
+                "user": {"login": "code-author"},
+                "state": "APPROVED",
+                "commit_id": "a" * 40,
+                "author_association": "COLLABORATOR",
+            }
+        ]
         with (
             mock.patch.object(aq, "_api_json", side_effect=[reviewed, encoded]),
             mock.patch.object(aq, "_paged", side_effect=[files, reviews]),
         ):
-            self.assertFalse(aq._independently_reviewed_authority_upgrade(
-                "linura-org/linura", 100, 99, digest, "token",
-                code_author="code-author", approval_mode="independent-review",
-                solo_operator="Ehsan-Azari",
-            ))
+            self.assertFalse(
+                aq._independently_reviewed_authority_upgrade(
+                    "linura-org/linura",
+                    100,
+                    99,
+                    digest,
+                    "token",
+                    code_author="code-author",
+                    approval_mode="independent-review",
+                    solo_operator="Ehsan-Azari",
+                )
+            )
 
     def test_solo_operator_requires_distinct_ledger_and_all_native_gate_proofs(self):
         import base64
+
         digest = "sha256:" + "d" * 64
         source = (
             "schema_version = 1\n"
@@ -1690,75 +2044,120 @@ class ApplicableQualificationTests(unittest.TestCase):
             'rationale = "Operator-approved after adversarial review"\n'
         )
         meta = {
-            "merged": True, "merged_at": "2026-10-09T00:00:00Z",
+            "merged": True,
+            "merged_at": "2026-10-09T00:00:00Z",
             "author_association": "MEMBER",
-            "base": {"ref": "main", "sha": "1" * 40,
-                     "repo": {"full_name": "linura-org/linura", "id": 1350812666}},
-            "head": {"sha": "a" * 40}, "user": {"login": "Ehsan-Azari"},
+            "base": {
+                "ref": "main",
+                "sha": "1" * 40,
+                "repo": {"full_name": "linura-org/linura", "id": 1350812666},
+            },
+            "head": {"sha": "a" * 40},
+            "user": {"login": "Ehsan-Azari"},
             "merge_commit_sha": "d" * 40,
         }
         contents = {
             "encoding": "base64",
             "content": base64.b64encode(source.encode()).decode(),
         }
-        changed = [{
-            "filename": ".github/qualification-authority-approvals.toml",
-            "status": "modified",
-        }]
+        changed = [
+            {
+                "filename": ".github/qualification-authority-approvals.toml",
+                "status": "modified",
+            }
+        ]
         contract = aq.load_contract(ROOT)
         runs = [
             self._run(gate=g, head="a" * 40, pr=100, run_id=500 + i)
-            for i, g in enumerate(contract["gate"]) if g["mandatory"]
+            for i, g in enumerate(contract["gate"])
+            if g["mandatory"]
         ]
         merged_commit = {"sha": "d" * 40, "parents": [{"sha": "1" * 40}]}
-        tested_merge = {"sha": "e" * 40, "parents": [
-            {"sha": "1" * 40}, {"sha": "a" * 40}]}
+        tested_merge = {
+            "sha": "e" * 40,
+            "parents": [{"sha": "1" * 40}, {"sha": "a" * 40}],
+        }
 
         with (
-            mock.patch.object(aq, "_api_json", side_effect=[meta, contents, merged_commit, tested_merge]),
+            mock.patch.object(
+                aq,
+                "_api_json",
+                side_effect=[meta, contents, merged_commit, tested_merge],
+            ),
             mock.patch.object(aq, "_paged", return_value=changed),
             mock.patch.object(aq, "_head_runs", return_value=runs),
-            mock.patch.object(aq, "_verify_required_jobs",
-                              return_value="verified") as verify,
+            mock.patch.object(
+                aq, "_verify_required_jobs", return_value="verified"
+            ) as verify,
         ):
-            self.assertTrue(aq._independently_reviewed_authority_upgrade(
-                "linura-org/linura", 100, 99, digest, "token",
-                code_author="Ehsan-Azari", approval_mode="solo-operator",
-                solo_operator="Ehsan-Azari", root=ROOT, contract=contract,
-            ))
+            self.assertTrue(
+                aq._independently_reviewed_authority_upgrade(
+                    "linura-org/linura",
+                    100,
+                    99,
+                    digest,
+                    "token",
+                    code_author="Ehsan-Azari",
+                    approval_mode="solo-operator",
+                    solo_operator="Ehsan-Azari",
+                    root=ROOT,
+                    contract=contract,
+                )
+            )
             self.assertEqual(verify.call_count, 3)
         with (
-            mock.patch.object(aq, "_api_json", side_effect=[meta, contents, merged_commit]),
+            mock.patch.object(
+                aq, "_api_json", side_effect=[meta, contents, merged_commit]
+            ),
             mock.patch.object(aq, "_paged", return_value=changed),
             mock.patch.object(aq, "_head_runs", return_value=[]),
         ):
-            self.assertFalse(aq._independently_reviewed_authority_upgrade(
-                "linura-org/linura", 100, 99, digest, "token",
-                code_author="Ehsan-Azari", approval_mode="solo-operator",
-                solo_operator="Ehsan-Azari", root=ROOT, contract=contract,
-            ))
+            self.assertFalse(
+                aq._independently_reviewed_authority_upgrade(
+                    "linura-org/linura",
+                    100,
+                    99,
+                    digest,
+                    "token",
+                    code_author="Ehsan-Azari",
+                    approval_mode="solo-operator",
+                    solo_operator="Ehsan-Azari",
+                    root=ROOT,
+                    contract=contract,
+                )
+            )
         with (
             mock.patch.object(aq, "_api_json", side_effect=[meta, contents]),
             mock.patch.object(aq, "_paged", return_value=changed),
             mock.patch.object(aq, "_head_runs") as runs_called,
         ):
-            self.assertFalse(aq._independently_reviewed_authority_upgrade(
-                "linura-org/linura", 100, 99, digest, "token",
-                code_author="someone-else", approval_mode="solo-operator",
-                solo_operator="Ehsan-Azari", root=ROOT, contract=contract,
-            ))
+            self.assertFalse(
+                aq._independently_reviewed_authority_upgrade(
+                    "linura-org/linura",
+                    100,
+                    99,
+                    digest,
+                    "token",
+                    code_author="someone-else",
+                    approval_mode="solo-operator",
+                    solo_operator="Ehsan-Azari",
+                    root=ROOT,
+                    contract=contract,
+                )
+            )
             runs_called.assert_not_called()
 
     def test_renaming_gate_helper_to_docs_cannot_hide_authority_change(self):
         head = "a" * 40
         original = "tools/check_ci_cache_policy.py"
         destination = "docs/renamed-cache-checker.md"
-        pr = {"head": {"sha": head}, "changed_files": 1,
-              "base": {"ref": "main", "sha": "1" * 40,
-                       "repo": {"id": 1350812666}}}
+        pr = {
+            "head": {"sha": head},
+            "changed_files": 1,
+            "base": {"ref": "main", "sha": "1" * 40, "repo": {"id": 1350812666}},
+        }
 
-        def path_inventory(repository, number, token, *,
-                           include_rename_sources=False):
+        def path_inventory(repository, number, token, *, include_rename_sources=False):
             return [destination, original] if include_rename_sources else [destination]
 
         with (
@@ -1768,8 +2167,11 @@ class ApplicableQualificationTests(unittest.TestCase):
             mock.patch.object(aq, "_head_runs") as runs,
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=99, head_sha=head, token="token",
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=99,
+                head_sha=head,
+                token="token",
             )
         self.assertEqual(result["state"], "failure")
         self.assertIn("executable qualification authority", result["failures"][0])
@@ -1777,23 +2179,31 @@ class ApplicableQualificationTests(unittest.TestCase):
 
     def test_fake_successful_native_jobs_cannot_self_certify_changed_workflow(self):
         head = "a" * 40
-        gate = next(g for g in aq.load_contract(ROOT)["gate"] if g["id"] == "canonical-ci")
-        pr = {"head": {"sha": head}, "changed_files": 1,
-              "base": {"ref": "main", "sha": "1" * 40,
-                       "repo": {"id": 1350812666}}}
+        gate = next(
+            g for g in aq.load_contract(ROOT)["gate"] if g["id"] == "canonical-ci"
+        )
+        pr = {
+            "head": {"sha": head},
+            "changed_files": 1,
+            "base": {"ref": "main", "sha": "1" * 40, "repo": {"id": 1350812666}},
+        }
         with (
             mock.patch.object(aq, "_approved_gate_bundles", return_value={}),
             mock.patch.object(aq, "_api_json", return_value=pr),
-            mock.patch.object(aq, "_pr_changed_paths",
-                              return_value=[".github/workflows/ci.yml"]),
-            mock.patch.object(aq, "_head_runs", return_value=[
-                self._run(gate=gate, head=head)
-            ]) as runs,
+            mock.patch.object(
+                aq, "_pr_changed_paths", return_value=[".github/workflows/ci.yml"]
+            ),
+            mock.patch.object(
+                aq, "_head_runs", return_value=[self._run(gate=gate, head=head)]
+            ) as runs,
             mock.patch.object(aq, "_verify_required_jobs") as verify,
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=9, head_sha=head, token="token",
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=9,
+                head_sha=head,
+                token="token",
             )
         self.assertEqual(result["state"], "failure")
         self.assertIn("executable qualification authority", result["failures"][0])
@@ -1805,19 +2215,26 @@ class ApplicableQualificationTests(unittest.TestCase):
         old = "apps/linura-shell/ui/StatusPanel.qml"
         new = "docs/renamed-panel.md"
         head = "a" * 40
-        pr = {"head": {"sha": head}, "changed_files": 1,
-              "base": {"ref": "main", "sha": "1" * 40,
-                       "repo": {"id": 1350812666}}}
+        pr = {
+            "head": {"sha": head},
+            "changed_files": 1,
+            "base": {"ref": "main", "sha": "1" * 40, "repo": {"id": 1350812666}},
+        }
+
         def paths(repo, number, token, *, include_rename_sources=False):
             return sorted([old, new]) if include_rename_sources else [new]
+
         with (
             mock.patch.object(aq, "_api_json", return_value=pr),
             mock.patch.object(aq, "_pr_changed_paths", side_effect=paths),
             mock.patch.object(aq, "_head_runs") as runs,
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=9, head_sha=head, token="token",
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=9,
+                head_sha=head,
+                token="token",
             )
         self.assertEqual(result["state"], "failure")
         self.assertIn("Rename removes protected source paths", result["failures"][0])
@@ -1827,15 +2244,19 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_v09_rename_out_of_full_scope_remains_full_mode(self):
         from_path = "crates/linura-update/src/lib.rs"
         to_path = "docs/qualification/v0.9.0.md"
-        payload = [{
-            "filename": to_path,
-            "previous_filename": from_path,
-            "status": "renamed",
-        }]
+        payload = [
+            {
+                "filename": to_path,
+                "previous_filename": from_path,
+                "status": "renamed",
+            }
+        ]
         with mock.patch.object(aq, "_paged", return_value=payload):
             gate_paths = aq._pr_changed_paths("linura-org/linura", 9, "token")
             scope_paths = aq._pr_changed_paths(
-                "linura-org/linura", 9, "token",
+                "linura-org/linura",
+                9,
+                "token",
                 include_rename_sources=True,
             )
         self.assertEqual(gate_paths, [to_path])
@@ -1852,11 +2273,14 @@ class ApplicableQualificationTests(unittest.TestCase):
         from_path = "crates/linura-update/src/lib.rs"
         to_path = "docs/qualification/v0.9.0.md"
         other = "apps/linura-shell/ui/Other.qml"
-        payload = [{
-            "filename": to_path,
-            "previous_filename": from_path,
-            "status": "renamed",
-        }, {"filename": other, "status": "modified"}]
+        payload = [
+            {
+                "filename": to_path,
+                "previous_filename": from_path,
+                "status": "renamed",
+            },
+            {"filename": other, "status": "modified"},
+        ]
         contract = aq.load_contract(ROOT)
         required = aq.required_gate_ids(contract, [to_path, other])
         gates = {g["id"]: g for g in contract["gate"]}
@@ -1865,9 +2289,11 @@ class ApplicableQualificationTests(unittest.TestCase):
             for i, gate_id in enumerate(required)
         ]
         pr = {
-            "head": {"sha": head}, "changed_files": 2,
+            "head": {"sha": head},
+            "changed_files": 2,
             "base": {
-                "ref": "main", "sha": "1" * 40,
+                "ref": "main",
+                "sha": "1" * 40,
                 "repo": {"id": 1350812666},
             },
         }
@@ -1875,12 +2301,16 @@ class ApplicableQualificationTests(unittest.TestCase):
             mock.patch.object(aq, "_api_json", return_value=pr),
             mock.patch.object(aq, "_paged", return_value=payload),
             mock.patch.object(aq, "_head_runs", return_value=runs),
-            mock.patch.object(aq, "_verify_required_jobs",
-                              return_value="all-success") as verify,
+            mock.patch.object(
+                aq, "_verify_required_jobs", return_value="all-success"
+            ) as verify,
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=9, head_sha=head, token="token",
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=9,
+                head_sha=head,
+                token="token",
             )
         self.assertEqual(result["state"], "success")
         self.assertEqual(result["required_gate_ids"], required)
@@ -1888,13 +2318,13 @@ class ApplicableQualificationTests(unittest.TestCase):
             call.args[1]["id"]: call.kwargs["changed_paths"]
             for call in verify.call_args_list
         }
-        self.assertEqual(by_gate["v09-qualification"],
-                         sorted([from_path, to_path, other]))
+        self.assertEqual(
+            by_gate["v09-qualification"], sorted([from_path, to_path, other])
+        )
         self.assertEqual(by_gate["canonical-ci"], sorted([to_path, other]))
 
     def test_missing_rename_source_denies_v09_scope_admission(self):
-        payload = [{"filename": "docs/qualification/v0.9.0.md",
-                    "status": "renamed"}]
+        payload = [{"filename": "docs/qualification/v0.9.0.md", "status": "renamed"}]
         with mock.patch.object(aq, "_paged", return_value=payload):
             self.assertEqual(
                 aq._pr_changed_paths("linura-org/linura", 9, "token"),
@@ -1905,7 +2335,9 @@ class ApplicableQualificationTests(unittest.TestCase):
                 "renamed PR file lacks previous_filename",
             ):
                 aq._pr_changed_paths(
-                    "linura-org/linura", 9, "token",
+                    "linura-org/linura",
+                    9,
+                    "token",
                     include_rename_sources=True,
                 )
 
@@ -1914,16 +2346,20 @@ class ApplicableQualificationTests(unittest.TestCase):
         source = "docs/renamed-panel.md"
         destination = "apps/linura-shell/ui/StatusPanel.qml"
         for payload in (
-            [{"filename": destination, "previous_filename": source,
-              "status": "renamed"}],
+            [
+                {
+                    "filename": destination,
+                    "previous_filename": source,
+                    "status": "renamed",
+                }
+            ],
             [{"filename": destination, "status": "removed"}],
         ):
             with self.subTest(payload=payload):
                 with mock.patch.object(aq, "_paged", return_value=payload):
                     paths = aq._pr_changed_paths("linura-org/linura", 1, "token")
                 self.assertEqual(paths, [destination])
-                self.assertIn("v010-workstation",
-                              aq.required_gate_ids(contract, paths))
+                self.assertIn("v010-workstation", aq.required_gate_ids(contract, paths))
 
     @staticmethod
     def _base():
@@ -1953,14 +2389,24 @@ class ApplicableQualificationTests(unittest.TestCase):
             "path": gate["workflow"],
             "event": event,
             "head_sha": head,
-            "display_title": gate["workflow_name"] + " :: PR" + str(pr) + " :: " + "e" * 40,
+            "display_title": gate["workflow_name"]
+            + " :: PR"
+            + str(pr)
+            + " :: "
+            + "e" * 40,
             "status": status,
             "conclusion": conclusion,
-            "pull_requests": [{
-                "number": pr,
-                "head": {"sha": head, "ref": "feature", "repo": {"id": 1350812666}},
-                "base": {"ref": "main", "sha": "1" * 40, "repo": {"id": 1350812666}},
-            }],
+            "pull_requests": [
+                {
+                    "number": pr,
+                    "head": {"sha": head, "ref": "feature", "repo": {"id": 1350812666}},
+                    "base": {
+                        "ref": "main",
+                        "sha": "1" * 40,
+                        "repo": {"id": 1350812666},
+                    },
+                }
+            ],
         }
 
     def test_zero_diff_release_pr_selects_only_mandatory_native_gates(self):
@@ -1980,8 +2426,7 @@ class ApplicableQualificationTests(unittest.TestCase):
         sha = "b" * 40
         runs = [
             self._run(
-                gate=gate, head=sha, pr=9,
-                run_number=100 + index, run_id=500 + index
+                gate=gate, head=sha, pr=9, run_number=100 + index, run_id=500 + index
             )
             for index, gate in enumerate(gates)
         ]
@@ -1989,7 +2434,8 @@ class ApplicableQualificationTests(unittest.TestCase):
             "head": {"sha": sha},
             "changed_files": 0,
             "base": {
-                "ref": "main", "sha": "1" * 40,
+                "ref": "main",
+                "sha": "1" * 40,
                 "repo": {"id": 1350812666},
             },
         }
@@ -1997,11 +2443,16 @@ class ApplicableQualificationTests(unittest.TestCase):
             mock.patch.object(aq, "_api_json", return_value=pr),
             mock.patch.object(aq, "_pr_changed_paths", return_value=[]),
             mock.patch.object(aq, "_head_runs", return_value=runs),
-            mock.patch.object(aq, "_verify_required_jobs", return_value="all-success") as verify,
+            mock.patch.object(
+                aq, "_verify_required_jobs", return_value="all-success"
+            ) as verify,
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=9, head_sha=sha, token="token"
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=9,
+                head_sha=sha,
+                token="token",
             )
         self.assertEqual(result["state"], "success")
         self.assertEqual(result["required_gate_ids"], contract["mandatory_gate_ids"])
@@ -2017,7 +2468,8 @@ class ApplicableQualificationTests(unittest.TestCase):
             "head": {"sha": sha},
             "changed_files": 0,
             "base": {
-                "ref": "main", "sha": "1" * 40,
+                "ref": "main",
+                "sha": "1" * 40,
                 "repo": {"id": 1350812666},
             },
         }
@@ -2028,19 +2480,25 @@ class ApplicableQualificationTests(unittest.TestCase):
             mock.patch.object(aq, "_verify_required_jobs") as verify,
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=9, head_sha=sha, token="token"
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=9,
+                head_sha=sha,
+                token="token",
             )
         self.assertEqual(result["state"], "failure")
         self.assertEqual(len(result["accepted"]), 0)
         self.assertEqual(len(result["waiting"]), 2)
-        self.assertIn("canonical-ci: exact-head PR run concluded failure", result["failures"])
+        self.assertIn(
+            "canonical-ci: exact-head PR run concluded failure", result["failures"]
+        )
         verify.assert_not_called()
 
     def test_declared_nonzero_diff_cannot_be_downgraded_to_native_only(self):
         sha = "d" * 40
         pr = {
-            "head": {"sha": sha}, "changed_files": 3,
+            "head": {"sha": sha},
+            "changed_files": 3,
             "base": {"ref": "main", "sha": "1" * 40, "repo": {"id": 1350812666}},
         }
         with (
@@ -2052,8 +2510,11 @@ class ApplicableQualificationTests(unittest.TestCase):
                 aq.QualificationError, "file inventory incomplete"
             ):
                 aq.evaluate_pr(
-                    root=ROOT, repository="linura-org/linura",
-                    pr_number=9, head_sha=sha, token="token",
+                    root=ROOT,
+                    repository="linura-org/linura",
+                    pr_number=9,
+                    head_sha=sha,
+                    token="token",
                 )
             runs.assert_not_called()
 
@@ -2073,11 +2534,7 @@ class ApplicableQualificationTests(unittest.TestCase):
 
     def test_run_matching_rejects_dispatch_stale_sha_and_wrong_pr(self):
         contract = aq.load_contract(ROOT)
-        gate = next(
-            item
-            for item in contract["gate"]
-            if item["id"] == "v07-library"
-        )
+        gate = next(item for item in contract["gate"] if item["id"] == "v07-library")
         head = "a" * 40
         self.assertTrue(
             aq._run_matches(
@@ -2085,7 +2542,8 @@ class ApplicableQualificationTests(unittest.TestCase):
                 gate=gate,
                 head_sha=head,
                 pr_number=9,
-                pr_base=self._base(), merge_sha="e" * 40,
+                pr_base=self._base(),
+                merge_sha="e" * 40,
             )
         )
         for change in (
@@ -2102,7 +2560,8 @@ class ApplicableQualificationTests(unittest.TestCase):
                         gate=gate,
                         head_sha=head,
                         pr_number=9,
-                        pr_base=self._base(), merge_sha="e" * 40,
+                        pr_base=self._base(),
+                        merge_sha="e" * 40,
                     )
                 )
 
@@ -2110,14 +2569,24 @@ class ApplicableQualificationTests(unittest.TestCase):
         contract = aq.load_contract(ROOT)
         gate = next(item for item in contract["gate"] if item["id"] == "canonical-ci")
         head = "a" * 40
-        for suffix in ("", "@main", "@refs/heads/main", "@refs/pull/9/merge", "@release/v0.9"):
+        for suffix in (
+            "",
+            "@main",
+            "@refs/heads/main",
+            "@refs/pull/9/merge",
+            "@release/v0.9",
+        ):
             with self.subTest(valid_suffix=suffix):
                 run = self._run(gate=gate, head=head)
                 run["path"] = gate["workflow"] + suffix
                 self.assertTrue(
                     aq._run_matches(
-                        run, gate=gate, head_sha=head, pr_number=9,
-                        pr_base=self._base(), merge_sha="e" * 40,
+                        run,
+                        gate=gate,
+                        head_sha=head,
+                        pr_number=9,
+                        pr_base=self._base(),
+                        merge_sha="e" * 40,
                     )
                 )
         for value in (
@@ -2139,8 +2608,12 @@ class ApplicableQualificationTests(unittest.TestCase):
                 run["path"] = value
                 self.assertFalse(
                     aq._run_matches(
-                        run, gate=gate, head_sha=head, pr_number=9,
-                        pr_base=self._base(), merge_sha="e" * 40,
+                        run,
+                        gate=gate,
+                        head_sha=head,
+                        pr_number=9,
+                        pr_base=self._base(),
+                        merge_sha="e" * 40,
                     )
                 )
 
@@ -2155,38 +2628,54 @@ class ApplicableQualificationTests(unittest.TestCase):
                 run["path"] = gate["workflow"] + "@main"
                 self.assertFalse(
                     aq._run_matches(
-                        run, gate=gate, head_sha=head, pr_number=9,
-                        pr_base=self._base(), merge_sha="e" * 40,
+                        run,
+                        gate=gate,
+                        head_sha=head,
+                        pr_number=9,
+                        pr_base=self._base(),
+                        merge_sha="e" * 40,
                     )
                 )
-
 
     def test_head_reconciliation_recovers_empty_workflow_run_pr_list(self):
         head = "a" * 40
         identities = {17: self._identity(1), 19: self._identity(2)}
+
         def evaluation(**kwargs):
             return {
-                "pr_number": kwargs["pr_number"], "state": "pending",
-                "waiting": ["canonical-ci: absent"], "failures": [],
+                "pr_number": kwargs["pr_number"],
+                "state": "pending",
+                "waiting": ["canonical-ci: absent"],
+                "failures": [],
                 "required_gate_ids": ["canonical-ci"],
             }
+
         writes = []
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
+            mock.patch.object(
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
+            ),
             mock.patch.object(aq, "_open_head_prs", return_value=identities),
             mock.patch.object(aq, "evaluate_pr", side_effect=evaluation) as evaluate,
-            mock.patch.object(aq, "_post_json",
-                side_effect=lambda url, token, payload: writes.append((url, payload))),
+            mock.patch.object(
+                aq,
+                "_post_json",
+                side_effect=lambda url, token, payload: writes.append((url, payload)),
+            ),
         ):
             result = aq.reconcile_head(
                 root=ROOT, repository="linura-org/linura", head_sha=head, token="token"
             )
         self.assertEqual(result["pr_count"], 2)
         self.assertEqual(evaluate.call_count, 2)
-        self.assertEqual([payload["state"] for _, payload in writes], ["pending", "pending"])
+        self.assertEqual(
+            [payload["state"] for _, payload in writes], ["pending", "pending"]
+        )
         self.assertEqual([url.rsplit("/", 1)[1] for url, _ in writes], [head, head])
         self.assertIn("#17:", writes[-1][1]["description"])
 
@@ -2195,12 +2684,21 @@ class ApplicableQualificationTests(unittest.TestCase):
         item = {"number": 17, "state": "open", "head": {"sha": head}}
         with (
             mock.patch.object(aq, "_paged", return_value=[item, item]),
-            mock.patch.object(aq, "_api_json", return_value={
-                "number": 17, "state": "open",
-                "head": {"sha": head, "ref": "feature", "repo": {"id": 1350812666}},
-                "base": {"ref": "main", "sha": "1" * 40, "repo": {"id": 1350812666}},
-                "merge_commit_sha": "9" * 40,
-            }),
+            mock.patch.object(
+                aq,
+                "_api_json",
+                return_value={
+                    "number": 17,
+                    "state": "open",
+                    "head": {"sha": head, "ref": "feature", "repo": {"id": 1350812666}},
+                    "base": {
+                        "ref": "main",
+                        "sha": "1" * 40,
+                        "repo": {"id": 1350812666},
+                    },
+                    "merge_commit_sha": "9" * 40,
+                },
+            ),
         ):
             with self.assertRaisesRegex(aq.QualificationError, "invalid/duplicate"):
                 aq._open_head_prs("linura-org/linura", head, "token")
@@ -2214,16 +2712,22 @@ class ApplicableQualificationTests(unittest.TestCase):
 
     def test_head_reconciliation_ignores_absent_pr_associations(self):
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
+            mock.patch.object(
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
+            ),
             mock.patch.object(aq, "_open_head_prs", return_value={}),
             mock.patch.object(aq, "_post_json") as post,
         ):
             result = aq.reconcile_head(
-                root=ROOT, repository="linura-org/linura",
-                head_sha="e" * 40, token="token"
+                root=ROOT,
+                repository="linura-org/linura",
+                head_sha="e" * 40,
+                token="token",
             )
         self.assertEqual(result["state"], "ignored-no-open-pr")
         self.assertEqual(result["published_status"]["state"], "pending")
@@ -2234,12 +2738,19 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_reconcile_revokes_stale_success_before_discovery_raises(self):
         head = "d" * 40
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
-            mock.patch.object(aq, "_open_head_prs",
-                side_effect=aq.QualificationError("test-merge SHA unavailable")),
+            mock.patch.object(
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
+            ),
+            mock.patch.object(
+                aq,
+                "_open_head_prs",
+                side_effect=aq.QualificationError("test-merge SHA unavailable"),
+            ),
             mock.patch.object(aq, "_post_json") as publish,
             mock.patch.object(aq, "evaluate_pr") as evaluate,
         ):
@@ -2247,8 +2758,10 @@ class ApplicableQualificationTests(unittest.TestCase):
                 aq.QualificationError, "test-merge SHA unavailable"
             ):
                 aq.reconcile_head(
-                    root=ROOT, repository="linura-org/linura",
-                    head_sha=head, token="token"
+                    root=ROOT,
+                    repository="linura-org/linura",
+                    head_sha=head,
+                    token="token",
                 )
         publish.assert_called_once()
         self.assertEqual(publish.call_args.args[2]["state"], "pending")
@@ -2261,6 +2774,7 @@ class ApplicableQualificationTests(unittest.TestCase):
             {"number": 9, "state": "open", "head": {"sha": head}},
             {"number": 10, "state": "open", "head": {"sha": head}},
         ]
+
         def live_pr(url, token):
             number = int(url.split("/pulls/")[-1])
             return {
@@ -2269,21 +2783,29 @@ class ApplicableQualificationTests(unittest.TestCase):
                 "base": {"ref": "main", "sha": "1" * 40, "repo": {"id": 42}},
                 "merge_commit_sha": "e" * 40 if number == 9 else None,
             }
+
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
+            mock.patch.object(
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
+            ),
             mock.patch.object(aq, "_paged", return_value=associated),
             mock.patch.object(aq, "_api_json", side_effect=live_pr),
             mock.patch.object(aq, "_post_json") as publish,
             mock.patch.object(aq, "evaluate_pr") as evaluate,
         ):
-            with self.assertRaisesRegex(aq.QualificationError,
-                                        "synthetic merge SHA unavailable"):
+            with self.assertRaisesRegex(
+                aq.QualificationError, "synthetic merge SHA unavailable"
+            ):
                 aq.reconcile_head(
-                    root=ROOT, repository="linura-org/linura",
-                    head_sha=head, token="token"
+                    root=ROOT,
+                    repository="linura-org/linura",
+                    head_sha=head,
+                    token="token",
                 )
         publish.assert_called_once()
         self.assertEqual(publish.call_args.args[2]["state"], "pending")
@@ -2291,10 +2813,14 @@ class ApplicableQualificationTests(unittest.TestCase):
 
     def test_untrusted_reconciliation_input_never_publishes(self):
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
+            mock.patch.object(
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
+            ),
             mock.patch.object(aq, "_post_json") as publish,
             mock.patch.object(aq, "_open_head_prs") as resolve,
         ):
@@ -2309,12 +2835,18 @@ class ApplicableQualificationTests(unittest.TestCase):
         resolve.assert_not_called()
 
     def test_missing_mutable_association_cannot_override_immutable_event_proof(self):
-        gate = next(g for g in aq.load_contract(ROOT)["gate"]
-                    if g["id"] == "canonical-ci")
+        gate = next(
+            g for g in aq.load_contract(ROOT)["gate"] if g["id"] == "canonical-ci"
+        )
         head = "f" * 40
         run = self._run(gate=gate, head=head)
-        args = {"gate": gate, "head_sha": head, "pr_number": 9,
-                "pr_base": self._base(), "merge_sha": "e" * 40}
+        args = {
+            "gate": gate,
+            "head_sha": head,
+            "pr_number": 9,
+            "pr_base": self._base(),
+            "merge_sha": "e" * 40,
+        }
         run["pull_requests"] = []
         self.assertTrue(aq._run_matches(run, **args))
         run["pull_requests"] = [{"number": 10, "base": {"sha": "0" * 40}}]
@@ -2323,20 +2855,26 @@ class ApplicableQualificationTests(unittest.TestCase):
         run["event"] = "workflow_dispatch"
         self.assertFalse(aq._run_matches(run, **args))
 
-
     def test_mutable_association_base_does_not_replace_merge_parent_evidence(self):
-        gate = next(g for g in aq.load_contract(ROOT)["gate"]
-                    if g["id"] == "canonical-ci")
+        gate = next(
+            g for g in aq.load_contract(ROOT)["gate"] if g["id"] == "canonical-ci"
+        )
         head = "f" * 40
         run = self._run(gate=gate, head=head)
-        expected = {"gate": gate, "head_sha": head, "pr_number": 9,
-                    "pr_base": self._base(), "merge_sha": "e" * 40}
+        expected = {
+            "gate": gate,
+            "head_sha": head,
+            "pr_number": 9,
+            "pr_base": self._base(),
+            "merge_sha": "e" * 40,
+        }
         self.assertTrue(aq._run_matches(run, **expected))
         duplicate = self._run(gate=gate, head=head)
         duplicate["pull_requests"].append(duplicate["pull_requests"][0].copy())
         self.assertTrue(aq._run_matches(duplicate, **expected))
         for field, replacement in (
-            ("ref", "other-branch"), ("sha", "2" * 40),
+            ("ref", "other-branch"),
+            ("sha", "2" * 40),
         ):
             changed = self._run(gate=gate, head=head)
             changed["pull_requests"][0]["base"][field] = replacement
@@ -2348,11 +2886,11 @@ class ApplicableQualificationTests(unittest.TestCase):
         altered["display_title"] = gate["workflow_name"] + " :: PR9 :: " + "d" * 40
         self.assertFalse(aq._run_matches(altered, **expected))
 
-
     def test_pr_retarget_and_base_advancement_invalidate_old_runs(self):
         head = "c" * 40
         gate = next(
-            item for item in aq.load_contract(ROOT)["gate"]
+            item
+            for item in aq.load_contract(ROOT)["gate"]
             if item["id"] == "canonical-ci"
         )
         old_run = self._run(gate=gate, head=head)
@@ -2365,17 +2903,26 @@ class ApplicableQualificationTests(unittest.TestCase):
                 pr = {"head": {"sha": head}, "changed_files": 1, "base": changed}
                 with (
                     mock.patch.object(aq, "_api_json", return_value=pr),
-                    mock.patch.object(aq, "_reviewed_test_merge", return_value="f" * 40),
-                    mock.patch.object(aq, "_pr_changed_paths", return_value=["docs/README.md"]),
+                    mock.patch.object(
+                        aq, "_reviewed_test_merge", return_value="f" * 40
+                    ),
+                    mock.patch.object(
+                        aq, "_pr_changed_paths", return_value=["docs/README.md"]
+                    ),
                     mock.patch.object(aq, "_head_runs", return_value=[old_run]),
                     mock.patch.object(aq, "_verify_required_jobs") as verify,
                 ):
                     result = aq.evaluate_pr(
-                        root=ROOT, repository="linura-org/linura",
-                        pr_number=9, head_sha=head, token="token"
+                        root=ROOT,
+                        repository="linura-org/linura",
+                        pr_number=9,
+                        head_sha=head,
+                        token="token",
                     )
                 self.assertEqual(result["state"], "failure")
-                self.assertEqual(result["waiting"], ["security-rustsec: absent", "codeql: absent"])
+                self.assertEqual(
+                    result["waiting"], ["security-rustsec: absent", "codeql: absent"]
+                )
                 self.assertIn("canonical-ci: PR base changed", result["failures"][0])
                 self.assertIn("new native checks", result["failures"][0])
                 verify.assert_not_called()
@@ -2388,24 +2935,36 @@ class ApplicableQualificationTests(unittest.TestCase):
         current_base = "2" * 40
         current = []
         for index, gate in enumerate(mandatory):
-            run = self._run(gate=gate, head=head, run_id=200 + index,
-                            run_number=10 + index)
+            run = self._run(
+                gate=gate, head=head, run_id=200 + index, run_number=10 + index
+            )
             run["pull_requests"][0]["base"]["sha"] = current_base
             run["display_title"] = gate["workflow_name"] + " :: PR9 :: " + "f" * 40
             current.append(run)
-        pr = {"head": {"sha": head}, "changed_files": 1, "base": {
-            "ref": "main", "sha": current_base, "repo": {"id": 1350812666},
-        }}
+        pr = {
+            "head": {"sha": head},
+            "changed_files": 1,
+            "base": {
+                "ref": "main",
+                "sha": current_base,
+                "repo": {"id": 1350812666},
+            },
+        }
         with (
             mock.patch.object(aq, "_api_json", return_value=pr),
             mock.patch.object(aq, "_reviewed_test_merge", return_value="f" * 40),
             mock.patch.object(aq, "_pr_changed_paths", return_value=["docs/README.md"]),
             mock.patch.object(aq, "_head_runs", return_value=[previous, *current]),
-            mock.patch.object(aq, "_verify_required_jobs", return_value="all-success") as verify,
+            mock.patch.object(
+                aq, "_verify_required_jobs", return_value="all-success"
+            ) as verify,
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=9, head_sha=head, token="token"
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=9,
+                head_sha=head,
+                token="token",
             )
         self.assertEqual(result["state"], "success")
         self.assertEqual(result["failures"], [])
@@ -2414,7 +2973,8 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_dispatch_or_foreign_pr_never_counts_as_refresh_required(self):
         head = "c" * 40
         gate = next(
-            gate for gate in aq.load_contract(ROOT)["gate"]
+            gate
+            for gate in aq.load_contract(ROOT)["gate"]
             if gate["id"] == "canonical-ci"
         )
         old = self._run(gate=gate, head=head)
@@ -2426,47 +2986,64 @@ class ApplicableQualificationTests(unittest.TestCase):
         ]
         for payload in candidates:
             with self.subTest(payload=payload):
-                self.assertFalse(aq._has_stale_pr_base_run(
-                    [payload], gate=gate, head_sha=head,
-                    pr_number=9, pr_base=("main", "2" * 40, 1350812666), merge_sha="f" * 40,
-                ))
-        self.assertTrue(aq._has_stale_pr_base_run(
-            [old], gate=gate, head_sha=head, pr_number=9,
-            pr_base=("main", "2" * 40, 1350812666), merge_sha="f" * 40,
-        ))
+                self.assertFalse(
+                    aq._has_stale_pr_base_run(
+                        [payload],
+                        gate=gate,
+                        head_sha=head,
+                        pr_number=9,
+                        pr_base=("main", "2" * 40, 1350812666),
+                        merge_sha="f" * 40,
+                    )
+                )
+        self.assertTrue(
+            aq._has_stale_pr_base_run(
+                [old],
+                gate=gate,
+                head_sha=head,
+                pr_number=9,
+                pr_base=("main", "2" * 40, 1350812666),
+                merge_sha="f" * 40,
+            )
+        )
 
     def test_immutable_event_title_survives_mutable_pr_association_loss(self):
         head = "a" * 40
         gate = next(
-            item for item in aq.load_contract(ROOT)["gate"]
+            item
+            for item in aq.load_contract(ROOT)["gate"]
             if item["id"] == "canonical-ci"
         )
         run = self._run(gate=gate, head=head)
-        run.update({
-            "pull_requests": [],
-            "head_branch": "feature",
-            "head_repository": {"id": 1234},
-        })
-        pr = {"head": {"sha": head, "ref": "feature", "repo": {"id": 1234}},
-              "changed_files": 1,
-              "base": {"ref": "main", "sha": "1" * 40,
-                       "repo": {"id": 1350812666}}}
+        run.update(
+            {
+                "pull_requests": [],
+                "head_branch": "feature",
+                "head_repository": {"id": 1234},
+            }
+        )
+        pr = {
+            "head": {"sha": head, "ref": "feature", "repo": {"id": 1234}},
+            "changed_files": 1,
+            "base": {"ref": "main", "sha": "1" * 40, "repo": {"id": 1350812666}},
+        }
         shared = [
             {"state": "open", "number": 9, "head": {"sha": head}},
             {"state": "open", "number": 10, "head": {"sha": head}},
         ]
         with (
             mock.patch.object(aq, "_api_json", return_value=pr),
-            mock.patch.object(
-                aq, "_pr_changed_paths", return_value=["docs/README.md"]
-            ),
+            mock.patch.object(aq, "_pr_changed_paths", return_value=["docs/README.md"]),
             mock.patch.object(aq, "_head_runs", return_value=[run]),
             mock.patch.object(aq, "_verify_required_jobs", return_value="all-success"),
             mock.patch.object(aq, "_paged", return_value=shared),
         ):
             result = aq.evaluate_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=9, head_sha=head, token="token"
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=9,
+                head_sha=head,
+                token="token",
             )
         self.assertEqual(result["state"], "pending")
         self.assertEqual([g["gate_id"] for g in result["accepted"]], ["canonical-ci"])
@@ -2474,11 +3051,7 @@ class ApplicableQualificationTests(unittest.TestCase):
 
     def test_in_progress_rerun_supersedes_prior_success(self):
         contract = aq.load_contract(ROOT)
-        gate = next(
-            item
-            for item in contract["gate"]
-            if item["id"] == "v07-library"
-        )
+        gate = next(item for item in contract["gate"] if item["id"] == "v07-library")
         head = "6" * 40
         completed = self._run(
             gate=gate,
@@ -2503,18 +3076,15 @@ class ApplicableQualificationTests(unittest.TestCase):
             gate=gate,
             head_sha=head,
             pr_number=9,
-        pr_base=self._base(), merge_sha="e" * 40,
+            pr_base=self._base(),
+            merge_sha="e" * 40,
         )
         self.assertEqual(selected["id"], 81)
         self.assertEqual(selected["status"], "in_progress")
 
     def test_newest_matching_run_wins_over_old_success(self):
         contract = aq.load_contract(ROOT)
-        gate = next(
-            item
-            for item in contract["gate"]
-            if item["id"] == "v07-library"
-        )
+        gate = next(item for item in contract["gate"] if item["id"] == "v07-library")
         head = "c" * 40
         old = self._run(
             gate=gate,
@@ -2531,8 +3101,12 @@ class ApplicableQualificationTests(unittest.TestCase):
             run_id=2,
         )
         selected = aq._newest_matching_run(
-            [old, newer], gate=gate, head_sha=head, pr_number=9,
-        pr_base=self._base(), merge_sha="e" * 40,
+            [old, newer],
+            gate=gate,
+            head_sha=head,
+            pr_number=9,
+            pr_base=self._base(),
+            merge_sha="e" * 40,
         )
         self.assertEqual(selected["id"], 2)
         self.assertEqual(selected["conclusion"], "failure")
@@ -2545,8 +3119,11 @@ class ApplicableQualificationTests(unittest.TestCase):
             mock.patch.object(aq, "_api_json") as fetch_pr,
         ):
             actual = aq.reconcile_pr(
-                root=ROOT, repository="linura-org/linura",
-                pr_number=9, head_sha=head, token="token"
+                root=ROOT,
+                repository="linura-org/linura",
+                pr_number=9,
+                head_sha=head,
+                token="token",
             )
         self.assertEqual(actual, result)
         self.assertEqual(reconcile.call_args.kwargs["head_sha"], head)
@@ -2556,14 +3133,18 @@ class ApplicableQualificationTests(unittest.TestCase):
         with mock.patch.object(aq, "reconcile_head") as reconcile:
             with self.assertRaisesRegex(aq.QualificationError, "invalid PR number"):
                 aq.reconcile_pr(
-                    root=ROOT, repository="linura-org/linura",
-                    pr_number=0, head_sha="f" * 40, token="token"
+                    root=ROOT,
+                    repository="linura-org/linura",
+                    pr_number=0,
+                    head_sha="f" * 40,
+                    token="token",
                 )
             reconcile.assert_not_called()
 
     def test_shared_head_requires_all_prs_and_never_mints_independent_pass(self):
         head = "8" * 40
         identities = {9: self._identity(1), 10: self._identity(2)}
+
         def inspect(**kwargs):
             number = kwargs["pr_number"]
             return {
@@ -2573,20 +3154,27 @@ class ApplicableQualificationTests(unittest.TestCase):
                 "waiting": [] if number == 9 else ["canonical-ci: in_progress"],
                 "failures": [],
             }
+
         writes = []
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
+            mock.patch.object(
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
+            ),
             mock.patch.object(aq, "_open_head_prs", return_value=identities),
             mock.patch.object(aq, "evaluate_pr", side_effect=inspect) as evaluate,
-            mock.patch.object(aq, "_post_json",
-                side_effect=lambda url, token, status: writes.append((url, status))),
+            mock.patch.object(
+                aq,
+                "_post_json",
+                side_effect=lambda url, token, status: writes.append((url, status)),
+            ),
         ):
             result = aq.reconcile_head(
-                root=ROOT, repository="linura-org/linura",
-                head_sha=head, token="token"
+                root=ROOT, repository="linura-org/linura", head_sha=head, token="token"
             )
         self.assertEqual(evaluate.call_count, 2)
         self.assertEqual(result["state"], "pending")
@@ -2599,27 +3187,36 @@ class ApplicableQualificationTests(unittest.TestCase):
         identities = {9: self._identity(1)}
         observations = iter(("success", "pending"))
         writes = []
+
         def inspect(**kwargs):
             state = next(observations)
             return {
-                "pr_number": 9, "state": state,
+                "pr_number": 9,
+                "state": state,
                 "required_gate_ids": ["canonical-ci"],
                 "waiting": [] if state == "success" else ["canonical-ci: in_progress"],
                 "failures": [],
             }
+
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
+            mock.patch.object(
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
+            ),
             mock.patch.object(aq, "_open_head_prs", return_value=identities),
             mock.patch.object(aq, "evaluate_pr", side_effect=inspect) as evaluate,
-            mock.patch.object(aq, "_post_json",
-                side_effect=lambda url, token, status: writes.append(status)),
+            mock.patch.object(
+                aq,
+                "_post_json",
+                side_effect=lambda url, token, status: writes.append(status),
+            ),
         ):
             result = aq.reconcile_head(
-                root=ROOT, repository="linura-org/linura",
-                head_sha=head, token="token"
+                root=ROOT, repository="linura-org/linura", head_sha=head, token="token"
             )
         self.assertEqual(evaluate.call_count, 2)
         self.assertEqual(result["state"], "pending")
@@ -2629,25 +3226,35 @@ class ApplicableQualificationTests(unittest.TestCase):
         head = "6" * 40
         identities = {9: self._identity(1), 10: self._identity(2)}
         statuses = []
+
         def inspect(**kwargs):
             return {
-                "pr_number": kwargs["pr_number"], "state": "success",
+                "pr_number": kwargs["pr_number"],
+                "state": "success",
                 "required_gate_ids": ["canonical-ci"],
-                "waiting": [], "failures": [],
+                "waiting": [],
+                "failures": [],
             }
+
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
+            mock.patch.object(
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
+            ),
             mock.patch.object(aq, "_open_head_prs", return_value=identities),
             mock.patch.object(aq, "evaluate_pr", side_effect=inspect) as evaluate,
-            mock.patch.object(aq, "_post_json",
-                side_effect=lambda url, token, status: statuses.append((url, status))),
+            mock.patch.object(
+                aq,
+                "_post_json",
+                side_effect=lambda url, token, status: statuses.append((url, status)),
+            ),
         ):
             result = aq.reconcile_head(
-                root=ROOT, repository="linura-org/linura",
-                head_sha=head, token="token"
+                root=ROOT, repository="linura-org/linura", head_sha=head, token="token"
             )
         self.assertEqual(evaluate.call_count, 4)
         self.assertEqual(result["state"], "success")
@@ -2657,28 +3264,39 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_base_change_during_aggregation_cannot_publish_success(self):
         head = "5" * 40
         original = {9: self._identity(1)}
-        changed = {9: ("other", "9" * 40, 1350812666,
-                       "feature", 1350812666, "1" * 40)}
+        changed = {9: ("other", "9" * 40, 1350812666, "feature", 1350812666, "1" * 40)}
         statuses = []
+
         def inspect(**kwargs):
             return {
-                "pr_number": 9, "state": "success", "waiting": [],
-                "failures": [], "required_gate_ids": ["canonical-ci"],
+                "pr_number": 9,
+                "state": "success",
+                "waiting": [],
+                "failures": [],
+                "required_gate_ids": ["canonical-ci"],
             }
+
         with (
-            mock.patch.object(aq, "load_contract", return_value={
-                "repository": "linura-org/linura",
-                "branch_required_check": "applicable-qualification",
-            }),
-            mock.patch.object(aq, "_open_head_prs",
-                side_effect=[original, changed]) as resolve,
+            mock.patch.object(
+                aq,
+                "load_contract",
+                return_value={
+                    "repository": "linura-org/linura",
+                    "branch_required_check": "applicable-qualification",
+                },
+            ),
+            mock.patch.object(
+                aq, "_open_head_prs", side_effect=[original, changed]
+            ) as resolve,
             mock.patch.object(aq, "evaluate_pr", side_effect=inspect),
-            mock.patch.object(aq, "_post_json",
-                side_effect=lambda url, token, status: statuses.append(status)),
+            mock.patch.object(
+                aq,
+                "_post_json",
+                side_effect=lambda url, token, status: statuses.append(status),
+            ),
         ):
             result = aq.reconcile_head(
-                root=ROOT, repository="linura-org/linura",
-                head_sha=head, token="token"
+                root=ROOT, repository="linura-org/linura", head_sha=head, token="token"
             )
         self.assertEqual(resolve.call_count, 2)
         self.assertEqual(result["state"], "ignored-stale-pr-identity")
@@ -2687,21 +3305,17 @@ class ApplicableQualificationTests(unittest.TestCase):
     def test_terminal_non_success_conclusions_fail_closed(self):
         head = "d" * 40
         contract = aq.load_contract(ROOT)
-        mandatory = [
-            gate for gate in contract["gate"] if gate["mandatory"]
-        ]
+        mandatory = [gate for gate in contract["gate"] if gate["mandatory"]]
         changed = ["docs/README.md"]
         required_ids = aq.required_gate_ids(contract, changed)
-        self.assertEqual(
-            required_ids, [gate["id"] for gate in mandatory]
-        )
+        self.assertEqual(required_ids, [gate["id"] for gate in mandatory])
 
-        pr_payload = {"head": {"sha": head}, "changed_files": 1,
-                      "base": {"ref": "main", "sha": "1" * 40,
-                               "repo": {"id": 1350812666}}}
-        files_payload = [
-            {"filename": changed[0], "status": "modified"}
-        ]
+        pr_payload = {
+            "head": {"sha": head},
+            "changed_files": 1,
+            "base": {"ref": "main", "sha": "1" * 40, "repo": {"id": 1350812666}},
+        }
+        files_payload = [{"filename": changed[0], "status": "modified"}]
 
         for conclusion in (
             "failure",
@@ -2715,9 +3329,7 @@ class ApplicableQualificationTests(unittest.TestCase):
                     self._run(
                         gate=gate,
                         head=head,
-                        conclusion=(
-                            conclusion if index == 0 else "success"
-                        ),
+                        conclusion=(conclusion if index == 0 else "success"),
                         run_number=10 + index,
                         run_id=1000 + index,
                     )
@@ -2729,26 +3341,18 @@ class ApplicableQualificationTests(unittest.TestCase):
                         return pr_payload
                     raise AssertionError(url)
 
-                def fake_paged(
-                    url, token, collection_key=None
-                ):
+                def fake_paged(url, token, collection_key=None):
                     if "/pulls/9/files" in url:
                         return files_payload
                     if "/actions/runs?" in url:
                         return runs
                     if "/jobs?" in url:
-                        run_id = int(
-                            url.split("/actions/runs/", 1)[1]
-                            .split("/", 1)[0]
-                        )
-                        matching_run = next(
-                            run for run in runs if run["id"] == run_id
-                        )
+                        run_id = int(url.split("/actions/runs/", 1)[1].split("/", 1)[0])
+                        matching_run = next(run for run in runs if run["id"] == run_id)
                         gate = next(
                             item
                             for item in mandatory
-                            if item["workflow"]
-                            == matching_run["path"]
+                            if item["workflow"] == matching_run["path"]
                         )
                         return [
                             {
@@ -2765,12 +3369,8 @@ class ApplicableQualificationTests(unittest.TestCase):
                         "validate_repository",
                         return_value={"ready": True},
                     ),
-                    mock.patch.object(
-                        aq, "_api_json", side_effect=fake_api
-                    ),
-                    mock.patch.object(
-                        aq, "_paged", side_effect=fake_paged
-                    ),
+                    mock.patch.object(aq, "_api_json", side_effect=fake_api),
+                    mock.patch.object(aq, "_paged", side_effect=fake_paged),
                 ):
                     with self.assertRaisesRegex(
                         aq.QualificationError,
@@ -2786,15 +3386,17 @@ class ApplicableQualificationTests(unittest.TestCase):
                             poll_seconds=0,
                         )
 
-
     @staticmethod
     def _app_decision_result(pr, head, state="success", accepted=None):
         required = ["canonical-ci", "security-rustsec", "codeql"]
         if accepted is None:
             accepted = required if state == "success" else required[:1]
         return {
-            "schema_version": 1, "repository": "linura-org/linura",
-            "pr_number": pr, "head_sha": head, "state": state,
+            "schema_version": 1,
+            "repository": "linura-org/linura",
+            "pr_number": pr,
+            "head_sha": head,
+            "state": state,
             "required_gate_ids": required,
             "accepted": [{"gate_id": name} for name in accepted],
         }
@@ -2803,8 +3405,7 @@ class ApplicableQualificationTests(unittest.TestCase):
         head = "a" * 40
         identities = {9: self._identity(1), 10: self._identity(2)}
         source = {
-            number: self._app_decision_result(number, head)
-            for number in identities
+            number: self._app_decision_result(number, head) for number in identities
         }
         contract = {
             "repository": "linura-org/linura",
@@ -2815,26 +3416,36 @@ class ApplicableQualificationTests(unittest.TestCase):
             mock.patch.object(aq, "validate_repository") as validate,
             mock.patch.object(aq, "_open_head_prs", return_value=identities) as listing,
             mock.patch.object(aq, "_head_runs", return_value=[]) as runs,
-            mock.patch.object(aq, "evaluate_pr",
-                              side_effect=lambda **kw: source[kw["pr_number"]]) as evaluate,
+            mock.patch.object(
+                aq, "evaluate_pr", side_effect=lambda **kw: source[kw["pr_number"]]
+            ) as evaluate,
             mock.patch.object(aq, "_post_json") as status_write,
         ):
             receipt = aq.decision_head(
-                root=ROOT, repository="linura-org/linura",
-                head_sha=head, token="read-only-token",
+                root=ROOT,
+                repository="linura-org/linura",
+                head_sha=head,
+                token="read-only-token",
             )
         self.assertEqual(receipt["state"], "success")
         self.assertEqual([p["number"] for p in receipt["prs"]], [9, 10])
-        self.assertTrue(all(p["head_sha"] == head and p["base_ref"] == "main"
-                            and p["accepted_gate_ids"] == p["required_gate_ids"]
-                            for p in receipt["prs"]))
+        self.assertTrue(
+            all(
+                p["head_sha"] == head
+                and p["base_ref"] == "main"
+                and p["accepted_gate_ids"] == p["required_gate_ids"]
+                for p in receipt["prs"]
+            )
+        )
         self.assertEqual(evaluate.call_count, 4)  # Two independent successful reads.
         self.assertEqual(listing.call_count, 2)
         self.assertEqual(runs.call_count, 2)
-        runs.assert_has_calls([
-            mock.call("linura-org/linura", head, "read-only-token"),
-            mock.call("linura-org/linura", head, "read-only-token"),
-        ])
+        runs.assert_has_calls(
+            [
+                mock.call("linura-org/linura", head, "read-only-token"),
+                mock.call("linura-org/linura", head, "read-only-token"),
+            ]
+        )
         validate.assert_called_once()
         status_write.assert_not_called()
 
@@ -2847,26 +3458,34 @@ class ApplicableQualificationTests(unittest.TestCase):
         }
         for second_state, expected in (("pending", "pending"), ("failure", "failure")):
             with self.subTest(state=second_state):
+
                 def inspect(**kwargs):
                     number = kwargs["pr_number"]
                     return self._app_decision_result(
-                        number, head, second_state if number == 10 else "success")
+                        number, head, second_state if number == 10 else "success"
+                    )
+
                 with (
                     mock.patch.object(aq, "load_contract", return_value=contract),
                     mock.patch.object(aq, "validate_repository"),
                     mock.patch.object(aq, "_open_head_prs", return_value=identities),
                     mock.patch.object(aq, "_head_runs", return_value=[]) as runs,
-                    mock.patch.object(aq, "evaluate_pr", side_effect=inspect) as evaluate,
+                    mock.patch.object(
+                        aq, "evaluate_pr", side_effect=inspect
+                    ) as evaluate,
                     mock.patch.object(aq, "_post_json") as write,
                 ):
                     receipt = aq.decision_head(
-                        root=ROOT, repository="linura-org/linura",
-                        head_sha=head, token="read-only-token",
+                        root=ROOT,
+                        repository="linura-org/linura",
+                        head_sha=head,
+                        token="read-only-token",
                     )
                 self.assertEqual(receipt["state"], expected)
                 self.assertEqual(evaluate.call_count, 2)
                 runs.assert_called_once_with(
-                    "linura-org/linura", head, "read-only-token")
+                    "linura-org/linura", head, "read-only-token"
+                )
                 self.assertEqual(len(receipt["prs"]), 2)
                 write.assert_not_called()
 
@@ -2877,28 +3496,32 @@ class ApplicableQualificationTests(unittest.TestCase):
             "mandatory_gate_ids": ["canonical-ci", "security-rustsec", "codeql"],
         }
         original = {9: self._identity(1)}
-        updated = {9: ("main", "f" * 40, 1350812666,
-                       "feature", 1350812666, "1" * 40)}
+        updated = {9: ("main", "f" * 40, 1350812666, "feature", 1350812666, "1" * 40)}
         with (
             mock.patch.object(aq, "load_contract", return_value=contract),
             mock.patch.object(aq, "validate_repository"),
-            mock.patch.object(aq, "_open_head_prs",
-                              side_effect=[original, updated]),
+            mock.patch.object(aq, "_open_head_prs", side_effect=[original, updated]),
             mock.patch.object(aq, "_head_runs", return_value=[]) as runs,
-            mock.patch.object(aq, "evaluate_pr",
-                              return_value=self._app_decision_result(9, head)),
+            mock.patch.object(
+                aq, "evaluate_pr", return_value=self._app_decision_result(9, head)
+            ),
             mock.patch.object(aq, "_post_json") as write,
         ):
             with self.assertRaisesRegex(aq.QualificationError, "identity changed"):
                 aq.decision_head(
-                    root=ROOT, repository="linura-org/linura",
-                    head_sha=head, token="read-only-token")
+                    root=ROOT,
+                    repository="linura-org/linura",
+                    head_sha=head,
+                    token="read-only-token",
+                )
             write.assert_not_called()
             self.assertEqual(runs.call_count, 2)
-            runs.assert_has_calls([
-                mock.call("linura-org/linura", head, "read-only-token"),
-                mock.call("linura-org/linura", head, "read-only-token"),
-            ])
+            runs.assert_has_calls(
+                [
+                    mock.call("linura-org/linura", head, "read-only-token"),
+                    mock.call("linura-org/linura", head, "read-only-token"),
+                ]
+            )
         for identities, reason in (
             ({}, "no open main-targeting"),
             ({i: self._identity(1) for i in range(1, 10)}, "exceeds eight"),
@@ -2913,8 +3536,11 @@ class ApplicableQualificationTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(aq.QualificationError, reason):
                     aq.decision_head(
-                        root=ROOT, repository="linura-org/linura",
-                        head_sha=head, token="read-only-token")
+                        root=ROOT,
+                        repository="linura-org/linura",
+                        head_sha=head,
+                        token="read-only-token",
+                    )
                 evaluate.assert_not_called()
                 runs.assert_not_called()
 
@@ -2939,11 +3565,11 @@ class ApplicableQualificationTests(unittest.TestCase):
                 self.subTest(payload=payload),
                 mock.patch.object(aq, "load_contract", return_value=contract),
                 mock.patch.object(aq, "validate_repository"),
-                mock.patch.object(aq, "_open_head_prs",
-                                  return_value={9: self._identity(1)}),
+                mock.patch.object(
+                    aq, "_open_head_prs", return_value={9: self._identity(1)}
+                ),
                 mock.patch.object(aq, "_head_runs", return_value=[]) as runs,
-                mock.patch.object(aq, "evaluate_pr",
-                                  return_value=payload) as evaluate,
+                mock.patch.object(aq, "evaluate_pr", return_value=payload) as evaluate,
                 mock.patch.object(aq, "_post_json") as write,
             ):
                 with self.assertRaisesRegex(
@@ -2953,16 +3579,20 @@ class ApplicableQualificationTests(unittest.TestCase):
                     "|incomplete or ambiguous accepted gate receipt",
                 ):
                     aq.decision_head(
-                        root=ROOT, repository="linura-org/linura",
-                        head_sha=head, token="read-only-token")
+                        root=ROOT,
+                        repository="linura-org/linura",
+                        head_sha=head,
+                        token="read-only-token",
+                    )
                 self.assertEqual(runs.call_count, 2)
                 self.assertEqual(evaluate.call_count, 2)
-                runs.assert_has_calls([
-                    mock.call("linura-org/linura", head, "read-only-token"),
-                    mock.call("linura-org/linura", head, "read-only-token"),
-                ])
+                runs.assert_has_calls(
+                    [
+                        mock.call("linura-org/linura", head, "read-only-token"),
+                        mock.call("linura-org/linura", head, "read-only-token"),
+                    ]
+                )
                 write.assert_not_called()
-
 
     def test_independent_app_decision_rejects_github_read_outage(self):
         head = "a" * 40
@@ -2973,40 +3603,57 @@ class ApplicableQualificationTests(unittest.TestCase):
         with (
             mock.patch.object(aq, "load_contract", return_value=contract),
             mock.patch.object(aq, "validate_repository"),
-            mock.patch.object(aq, "_open_head_prs",
-                              return_value={9: self._identity(1)}),
             mock.patch.object(
-                aq, "_head_runs",
+                aq, "_open_head_prs", return_value={9: self._identity(1)}
+            ),
+            mock.patch.object(
+                aq,
+                "_head_runs",
                 side_effect=aq.QualificationError("GitHub read unavailable"),
             ) as runs,
             mock.patch.object(aq, "evaluate_pr") as evaluate,
             mock.patch.object(aq, "_post_json") as writer,
         ):
             with self.assertRaisesRegex(
-                aq.QualificationError, "GitHub read unavailable",
+                aq.QualificationError,
+                "GitHub read unavailable",
             ):
                 aq.decision_head(
-                    root=ROOT, repository="linura-org/linura",
-                    head_sha=head, token="read-only-token",
+                    root=ROOT,
+                    repository="linura-org/linura",
+                    head_sha=head,
+                    token="read-only-token",
                 )
-            runs.assert_called_once_with(
-                "linura-org/linura", head, "read-only-token")
+            runs.assert_called_once_with("linura-org/linura", head, "read-only-token")
             evaluate.assert_not_called()
             writer.assert_not_called()
 
     def test_independent_app_cli_emits_only_versioned_receipt(self):
         import io
+
         head = "e" * 40
         receipt = {
-            "schema_version": 1, "repository": "linura-org/linura",
-            "head_sha": head, "state": "pending", "prs": [],
+            "schema_version": 1,
+            "repository": "linura-org/linura",
+            "head_sha": head,
+            "state": "pending",
+            "prs": [],
         }
         with (
-            mock.patch.object(sys, "argv", [
-                "applicable_qualification.py", "decision-head",
-                "--repository", "linura-org/linura", "--head-sha", head,
-                "--token-env", "LINURA_READ_TEST_TOKEN",
-            ]),
+            mock.patch.object(
+                sys,
+                "argv",
+                [
+                    "applicable_qualification.py",
+                    "decision-head",
+                    "--repository",
+                    "linura-org/linura",
+                    "--head-sha",
+                    head,
+                    "--token-env",
+                    "LINURA_READ_TEST_TOKEN",
+                ],
+            ),
             mock.patch.dict(aq.os.environ, {"LINURA_READ_TEST_TOKEN": "token"}),
             mock.patch.object(aq, "decision_head", return_value=receipt) as decision,
             mock.patch.object(sys, "stdout", new_callable=io.StringIO) as out,
@@ -3026,18 +3673,16 @@ class ApplicableQualificationTests(unittest.TestCase):
         self.assertEqual(detected, changed)
 
 
-
-
 class ImmutableRunBaseProofTests(unittest.TestCase):
     """Exercise immutable event SHA independently from legacy routing mocks."""
 
     @staticmethod
     def _source_pr():
         return {
-            "state": "open", "merge_commit_sha": "c" * 40,
+            "state": "open",
+            "merge_commit_sha": "c" * 40,
             "head": {"sha": "a" * 40},
-            "base": {"ref": "main", "sha": "b" * 40,
-                     "repo": {"id": 1350812666}},
+            "base": {"ref": "main", "sha": "b" * 40, "repo": {"id": 1350812666}},
         }
 
     @staticmethod
@@ -3049,18 +3694,19 @@ class ImmutableRunBaseProofTests(unittest.TestCase):
 
     def test_pr_event_merge_sha_immutably_binds_exact_base_and_head(self):
         pr = self._source_pr()
-        with mock.patch.object(aq, "_api_json",
-                               return_value=self._merge_response()) as api:
+        with mock.patch.object(
+            aq, "_api_json", return_value=self._merge_response()
+        ) as api:
             sha = aq._reviewed_test_merge(
-                "linura-org/linura", pr, "a" * 40, "read-only")
+                "linura-org/linura", pr, "a" * 40, "read-only"
+            )
         self.assertEqual(sha, "c" * 40)
         self.assertIn("/commits/" + "c" * 40, api.call_args.args[0])
         for payload in (
             self._merge_response(base="d"),
             self._merge_response(head="e"),
             {"sha": "c" * 40, "parents": [{"sha": "b" * 40}]},
-            {"sha": "d" * 40, "parents": [{"sha": "b" * 40},
-                                         {"sha": "a" * 40}]},
+            {"sha": "d" * 40, "parents": [{"sha": "b" * 40}, {"sha": "a" * 40}]},
         ):
             with self.subTest(payload=payload):
                 with mock.patch.object(aq, "_api_json", return_value=payload):
@@ -3068,7 +3714,8 @@ class ImmutableRunBaseProofTests(unittest.TestCase):
                         aq.QualificationError, "synthetic merge parents"
                     ):
                         aq._reviewed_test_merge(
-                            "linura-org/linura", pr, "a" * 40, "read-only")
+                            "linura-org/linura", pr, "a" * 40, "read-only"
+                        )
 
     def test_unknown_merge_identity_fails_closed_even_with_native_success(self):
         pr = self._source_pr()
@@ -3078,33 +3725,47 @@ class ImmutableRunBaseProofTests(unittest.TestCase):
                 mutant.pop(field)
                 message = "synthetic test-merge"
             else:
-                mutant["base"] = {"ref": "feature", "sha": "b" * 40,
-                                  "repo": {"id": 1350812666}}
+                mutant["base"] = {
+                    "ref": "feature",
+                    "sha": "b" * 40,
+                    "repo": {"id": 1350812666},
+                }
                 message = "protected main"
             with self.subTest(field=field):
                 with self.assertRaisesRegex(aq.QualificationError, message):
                     aq._reviewed_test_merge(
-                        "linura-org/linura", mutant, "a" * 40, "read-only")
+                        "linura-org/linura", mutant, "a" * 40, "read-only"
+                    )
 
     def test_mutable_pr_association_cannot_reauthorize_old_base_run(self):
-        gate = next(g for g in aq.load_contract(ROOT)["gate"]
-                    if g["id"] == "canonical-ci")
+        gate = next(
+            g for g in aq.load_contract(ROOT)["gate"] if g["id"] == "canonical-ci"
+        )
         run = {
-            "path": gate["workflow"], "event": "pull_request",
+            "path": gate["workflow"],
+            "event": "pull_request",
             "head_sha": "a" * 40,
             "display_title": gate["workflow_name"] + " :: PR9 :: " + "c" * 40,
-            "pull_requests": [{"number": 9, "head": {"sha": "z" * 40},
-                               "base": {"ref": "main", "sha": "f" * 40}}],
+            "pull_requests": [
+                {
+                    "number": 9,
+                    "head": {"sha": "z" * 40},
+                    "base": {"ref": "main", "sha": "f" * 40},
+                }
+            ],
         }
         expected = {
-            "gate": gate, "head_sha": "a" * 40, "pr_number": 9,
+            "gate": gate,
+            "head_sha": "a" * 40,
+            "pr_number": 9,
             "pr_base": ("main", "b" * 40, 1350812666),
         }
         self.assertTrue(aq._run_matches(run, **expected, merge_sha="c" * 40))
         self.assertFalse(aq._run_matches(run, **expected, merge_sha="d" * 40))
         self.assertFalse(aq._run_matches(run, **expected))
-        self.assertTrue(aq._has_stale_pr_base_run(
-            [run], **expected, merge_sha="d" * 40))
+        self.assertTrue(
+            aq._has_stale_pr_base_run([run], **expected, merge_sha="d" * 40)
+        )
         for alternate in (
             {"display_title": gate["workflow_name"] + " :: PR9 :: forged"},
             {"event": "workflow_dispatch"},
@@ -3112,8 +3773,11 @@ class ImmutableRunBaseProofTests(unittest.TestCase):
             {"display_title": gate["workflow_name"] + " :: PR10 :: " + "c" * 40},
         ):
             with self.subTest(alternate=alternate):
-                self.assertFalse(aq._run_matches(
-                    {**run, **alternate}, **expected, merge_sha="c" * 40))
+                self.assertFalse(
+                    aq._run_matches(
+                        {**run, **alternate}, **expected, merge_sha="c" * 40
+                    )
+                )
 
     def test_merged_ledger_uses_actual_pre_merge_main_parent(self):
         contract = aq.load_contract(ROOT)
@@ -3121,44 +3785,67 @@ class ImmutableRunBaseProofTests(unittest.TestCase):
         approval = {"head": {"sha": head}, "merge_commit_sha": merged}
         runs = [
             {
-                "id": i+1, "run_number": i+1, "run_attempt": 1,
-                "event": "pull_request", "head_sha": head,
-                "path": gate["workflow"], "status": "completed",
+                "id": i + 1,
+                "run_number": i + 1,
+                "run_attempt": 1,
+                "event": "pull_request",
+                "head_sha": head,
+                "path": gate["workflow"],
+                "status": "completed",
                 "conclusion": "success",
                 "display_title": gate["workflow_name"] + " :: PR100 :: " + synthetic,
                 "pull_requests": [{"number": 100}],
             }
             for i, gate in enumerate(contract["gate"][:3])
         ]
+
         def fetched(url, token):
             if url.endswith("/commits/" + merged):
                 return {"sha": merged, "parents": [{"sha": base}]}
             if url.endswith("/commits/" + synthetic):
-                return {"sha": synthetic, "parents": [
-                    {"sha": base}, {"sha": head}]}
+                return {"sha": synthetic, "parents": [{"sha": base}, {"sha": head}]}
             raise AssertionError(url)
+
         with (
             mock.patch.object(aq, "_api_json", side_effect=fetched),
             mock.patch.object(aq, "_head_runs", return_value=runs),
-            mock.patch.object(aq, "_verify_required_jobs", return_value="all-success") as jobs,
+            mock.patch.object(
+                aq, "_verify_required_jobs", return_value="all-success"
+            ) as jobs,
         ):
-            self.assertTrue(aq._verify_ledger_native_checks(
-                root=ROOT, contract=contract, repository="linura-org/linura",
-                approval_pr=100, approval=approval, token="read-only"))
+            self.assertTrue(
+                aq._verify_ledger_native_checks(
+                    root=ROOT,
+                    contract=contract,
+                    repository="linura-org/linura",
+                    approval_pr=100,
+                    approval=approval,
+                    token="read-only",
+                )
+            )
         self.assertEqual(jobs.call_count, 3)
+
         def stale(url, token):
             payload = fetched(url, token)
             if url.endswith("/commits/" + synthetic):
                 payload["parents"][0]["sha"] = "e" * 40
             return payload
+
         with (
             mock.patch.object(aq, "_api_json", side_effect=stale),
             mock.patch.object(aq, "_head_runs", return_value=runs),
             mock.patch.object(aq, "_verify_required_jobs") as jobs,
         ):
-            self.assertFalse(aq._verify_ledger_native_checks(
-                root=ROOT, contract=contract, repository="linura-org/linura",
-                approval_pr=100, approval=approval, token="read-only"))
+            self.assertFalse(
+                aq._verify_ledger_native_checks(
+                    root=ROOT,
+                    contract=contract,
+                    repository="linura-org/linura",
+                    approval_pr=100,
+                    approval=approval,
+                    token="read-only",
+                )
+            )
             jobs.assert_not_called()
 
     def test_pr_file_cache_is_scoped_to_each_independent_snapshot(self):
@@ -3166,11 +3853,16 @@ class ImmutableRunBaseProofTests(unittest.TestCase):
         with mock.patch.object(aq, "_paged", return_value=entries) as paged:
             token = aq._PR_FILE_BATCH.set({})
             try:
-                self.assertEqual(aq._pr_changed_paths(
-                    "linura-org/linura", 9, "read-only"), ["docs/README.md"])
-                self.assertEqual(aq._pr_changed_paths(
-                    "linura-org/linura", 9, "read-only",
-                    include_rename_sources=True), ["docs/README.md"])
+                self.assertEqual(
+                    aq._pr_changed_paths("linura-org/linura", 9, "read-only"),
+                    ["docs/README.md"],
+                )
+                self.assertEqual(
+                    aq._pr_changed_paths(
+                        "linura-org/linura", 9, "read-only", include_rename_sources=True
+                    ),
+                    ["docs/README.md"],
+                )
                 self.assertEqual(paged.call_count, 1)
             finally:
                 aq._PR_FILE_BATCH.reset(token)
@@ -3182,32 +3874,50 @@ class ImmutableRunBaseProofTests(unittest.TestCase):
             self.assertEqual(paged.call_count, 2)
 
     def test_required_job_cache_is_snapshot_scoped_and_attempt_bound(self):
-        gate = next(g for g in aq.load_contract(ROOT)["gate"]
-                    if g["id"] == "canonical-ci")
-        jobs = [{"name": "canonical-check", "status": "completed",
-                 "conclusion": "success"}]
+        gate = next(
+            g for g in aq.load_contract(ROOT)["gate"] if g["id"] == "canonical-ci"
+        )
+        jobs = [
+            {"name": "canonical-check", "status": "completed", "conclusion": "success"}
+        ]
         run = {"id": 999, "run_attempt": 1}
         with mock.patch.object(aq, "_paged", return_value=jobs) as paged:
             batch = aq._RUN_JOBS_BATCH.set({})
             try:
                 for _ in range(2):
-                    self.assertEqual(aq._verify_required_jobs(
-                        "linura-org/linura", gate, run, "read-only",
-                        root=ROOT, changed_paths=["docs/README.md"]),
-                        "all-success")
+                    self.assertEqual(
+                        aq._verify_required_jobs(
+                            "linura-org/linura",
+                            gate,
+                            run,
+                            "read-only",
+                            root=ROOT,
+                            changed_paths=["docs/README.md"],
+                        ),
+                        "all-success",
+                    )
                 self.assertEqual(paged.call_count, 1)
                 aq._verify_required_jobs(
-                    "linura-org/linura", gate,
-                    {"id": 999, "run_attempt": 2}, "read-only",
-                    root=ROOT, changed_paths=["docs/README.md"])
+                    "linura-org/linura",
+                    gate,
+                    {"id": 999, "run_attempt": 2},
+                    "read-only",
+                    root=ROOT,
+                    changed_paths=["docs/README.md"],
+                )
                 self.assertEqual(paged.call_count, 2)
             finally:
                 aq._RUN_JOBS_BATCH.reset(batch)
             batch = aq._RUN_JOBS_BATCH.set({})
             try:
                 aq._verify_required_jobs(
-                    "linura-org/linura", gate, run, "read-only",
-                    root=ROOT, changed_paths=["docs/README.md"])
+                    "linura-org/linura",
+                    gate,
+                    run,
+                    "read-only",
+                    root=ROOT,
+                    changed_paths=["docs/README.md"],
+                )
             finally:
                 aq._RUN_JOBS_BATCH.reset(batch)
             self.assertEqual(paged.call_count, 3)
@@ -3216,19 +3926,22 @@ class ImmutableRunBaseProofTests(unittest.TestCase):
         token = aq._READ_DEADLINE.set(aq.time.monotonic() - 2.0)
         try:
             with mock.patch.object(aq, "urlopen") as network:
-                with self.assertRaisesRegex(aq.QualificationError,
-                                             "115-second API budget"):
+                with self.assertRaisesRegex(
+                    aq.QualificationError, "115-second API budget"
+                ):
                     aq._api_json(
                         "https://api.github.com/repos/linura-org/linura/pulls/9",
-                        "read-only")
+                        "read-only",
+                    )
                 network.assert_not_called()
         finally:
             aq._READ_DEADLINE.reset(token)
 
     def test_unreviewed_workflow_run_name_cannot_override_provenance(self):
         source = (ROOT / ".github/workflows/ci.yml").read_text()
-        actual = next(line for line in source.splitlines()
-                      if line.startswith("run-name:"))
+        actual = next(
+            line for line in source.splitlines() if line.startswith("run-name:")
+        )
         mutants = [
             source.replace(actual, "run-name: 'forged'", 1),
             source.replace(actual, "# " + actual + "\nrun-name: 'forged'", 1),
@@ -3236,30 +3949,41 @@ class ImmutableRunBaseProofTests(unittest.TestCase):
         original_read = aq._read
         for mutant in mutants:
             with self.subTest(mutant=mutant[:70]):
+
                 def fake_read(root, path):
-                    return mutant if str(path) == ".github/workflows/ci.yml" else original_read(root, path)
+                    return (
+                        mutant
+                        if str(path) == ".github/workflows/ci.yml"
+                        else original_read(root, path)
+                    )
+
                 with mock.patch.object(aq, "_read", side_effect=fake_read):
                     with self.assertRaisesRegex(
-                        aq.QualificationError, "merge-SHA run-name drift"):
+                        aq.QualificationError, "merge-SHA run-name drift"
+                    ):
                         aq.validate_repository(ROOT)
 
     def test_shared_head_evaluates_on_two_fresh_bounded_run_snapshots(self):
         head = "a" * 40
         base = "b" * 40
         identities = {
-            n: ("main", base, 1350812666, "feature",
-                1350812666, f"{n:040x}") for n in range(1, 9)
+            n: ("main", base, 1350812666, "feature", 1350812666, f"{n:040x}")
+            for n in range(1, 9)
         }
         required = ["canonical-ci", "security-rustsec", "codeql"]
-        contract = {"repository": "linura-org/linura",
-                    "mandatory_gate_ids": required}
+        contract = {"repository": "linura-org/linura", "mandatory_gate_ids": required}
+
         def evaluate(**kwargs):
             return {
-                "schema_version": 1, "repository": "linura-org/linura",
-                "pr_number": kwargs["pr_number"], "head_sha": head,
-                "state": "success", "required_gate_ids": required,
+                "schema_version": 1,
+                "repository": "linura-org/linura",
+                "pr_number": kwargs["pr_number"],
+                "head_sha": head,
+                "state": "success",
+                "required_gate_ids": required,
                 "accepted": [{"gate_id": g} for g in required],
             }
+
         with (
             mock.patch.object(aq, "load_contract", return_value=contract),
             mock.patch.object(aq, "validate_repository") as validate,
@@ -3269,18 +3993,24 @@ class ImmutableRunBaseProofTests(unittest.TestCase):
             mock.patch.object(aq, "_post_json") as writer,
         ):
             result = aq.decision_head(
-                root=ROOT, repository="linura-org/linura", head_sha=head,
-                token="read-only")
+                root=ROOT,
+                repository="linura-org/linura",
+                head_sha=head,
+                token="read-only",
+            )
         self.assertEqual(result["state"], "success")
         self.assertEqual(len(result["prs"]), 8)
         self.assertEqual(runs.call_count, 2)
         self.assertEqual(evaluator.call_count, 16)
         validate.assert_called_once()
         writer.assert_not_called()
-        self.assertTrue(all("validated_contract" in call.kwargs and
-                            "head_runs_snapshot" in call.kwargs
-                            for call in evaluator.call_args_list))
-
+        self.assertTrue(
+            all(
+                "validated_contract" in call.kwargs
+                and "head_runs_snapshot" in call.kwargs
+                for call in evaluator.call_args_list
+            )
+        )
 
 
 if __name__ == "__main__":

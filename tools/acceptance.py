@@ -31,8 +31,17 @@ def find_scenario(scenario_id: str) -> dict:
 
 def ssh_base(host: str, user: str, port: int, identity: str | None) -> list[str]:
     command = [
-        "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
-        "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=10", "-p", str(port),
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-o",
+        "ConnectTimeout=10",
+        "-p",
+        str(port),
     ]
     if identity:
         command.extend(["-i", identity])
@@ -41,7 +50,9 @@ def ssh_base(host: str, user: str, port: int, identity: str | None) -> list[str]
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Linura disposable-machine acceptance runner")
+    parser = argparse.ArgumentParser(
+        description="Linura disposable-machine acceptance runner"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
     run = sub.add_parser("run")
@@ -67,8 +78,10 @@ def main() -> int:
     def write_result(result: str) -> None:
         if args.result_file is None:
             return
-        if args.source_sha is None or len(args.source_sha) != 40 or any(
-            ch not in "0123456789abcdef" for ch in args.source_sha
+        if (
+            args.source_sha is None
+            or len(args.source_sha) != 40
+            or any(ch not in "0123456789abcdef" for ch in args.source_sha)
         ):
             raise SystemExit("--result-file requires a full lowercase --source-sha")
         scenario_path = scenario["_path"]
@@ -93,7 +106,9 @@ def main() -> int:
 
     for step in scenario["steps"]:
         command_text = step["command"]
-        command = ssh_base(args.host, args.user, args.port, args.identity) + [command_text]
+        command = ssh_base(args.host, args.user, args.port, args.identity) + [
+            command_text
+        ]
         print(f"[{step['name']}] {shlex.join(command)}")
         returncode = 0
         if not args.dry_run:
@@ -102,7 +117,9 @@ def main() -> int:
         result_steps.append(
             {
                 "name": step["name"],
-                "command_sha256": hashlib.sha256(command_text.encode("utf-8")).hexdigest(),
+                "command_sha256": hashlib.sha256(
+                    command_text.encode("utf-8")
+                ).hexdigest(),
                 "returncode": returncode,
             }
         )

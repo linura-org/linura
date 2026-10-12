@@ -9,33 +9,42 @@ class V09AdversarialTransportContractTests(unittest.TestCase):
     def test_ssh_and_scp_share_the_canonical_qualification_identity(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("SSH_USER=linura-qualification", source)
-        self.assertIn('ssh "${SSH_COMMON[@]}" -p "$SSH_PORT" "$SSH_USER@127.0.0.1" "$1"', source)
-        self.assertIn('scp "${SSH_COMMON[@]}" -P "$SSH_PORT" "target/release/$binary" "$SSH_USER@127.0.0.1:/tmp/"', source)
+        self.assertIn(
+            'ssh "${SSH_COMMON[@]}" -p "$SSH_PORT" "$SSH_USER@127.0.0.1" "$1"', source
+        )
+        self.assertIn(
+            'scp "${SSH_COMMON[@]}" -P "$SSH_PORT" "target/release/$binary" "$SSH_USER@127.0.0.1:/tmp/"',
+            source,
+        )
         self.assertNotIn("linura@127.0.0.1:/tmp/", source)
         self.assertIn('"$PREPARER_SSH_USER@127.0.0.1" true', source)
 
     def test_non_primary_transport_handoff_crosses_a_durable_power_cycle(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
-        start = source.index('if (( V09_BOUNDARY_START > 1 )); then\n  power_cycle "qualification-transport-handoff"')
+        start = source.index(
+            'if (( V09_BOUNDARY_START > 1 )); then\n  power_cycle "qualification-transport-handoff"'
+        )
         end = source.index("\nfi\n\nif ! remote 'command -v nft", start)
         handoff = source[start:end]
         persistent_mask = (
-            "systemctl mask --force ssh.service sshd.service "
-            "ssh.socket sshd.socket"
+            "systemctl mask --force ssh.service sshd.service ssh.socket sshd.socket"
         )
         generator_mask = (
-            "ln -sfn /dev/null "
-            "/etc/systemd/system-generators/sshd-socket-generator"
+            "ln -sfn /dev/null /etc/systemd/system-generators/sshd-socket-generator"
         )
 
         self.assertIn(persistent_mask, source)
         self.assertLess(source.index(persistent_mask), start)
         self.assertIn(generator_mask, source)
         self.assertLess(source.index(generator_mask), start)
-        barrier_anchor = "systemctl is-enabled --quiet linura-qualification-transport.service"
+        barrier_anchor = (
+            "systemctl is-enabled --quiet linura-qualification-transport.service"
+        )
         self.assertIn(barrier_anchor, source)
         barrier_start = source.index(barrier_anchor)
-        barrier_end = source.index('SSH_GUEST_PORT="$QUALIFICATION_SSH_GUEST_PORT"', barrier_start)
+        barrier_end = source.index(
+            'SSH_GUEST_PORT="$QUALIFICATION_SSH_GUEST_PORT"', barrier_start
+        )
         durability_barrier = source[barrier_start:barrier_end]
         self.assertIn("sudo -n sync", durability_barrier)
         self.assertIn(
@@ -70,12 +79,16 @@ class V09AdversarialTransportContractTests(unittest.TestCase):
             'if [[ "$SSH_GUEST_PORT" == "$QUALIFICATION_SSH_GUEST_PORT" ]]',
             source,
         )
-        self.assertIn("isolate_canonical_ssh", source[source.index("start_guest()") : start])
+        self.assertIn(
+            "isolate_canonical_ssh", source[source.index("start_guest()") : start]
+        )
         self.assertIn('power_cycle "qualification-transport-handoff"', handoff)
         self.assertNotIn("systemctl stop", handoff)
         self.assertNotIn("enable --now", handoff)
 
-    def test_product_bootstrap_uses_the_revocable_preparer_until_production_handoff(self) -> None:
+    def test_product_bootstrap_uses_the_revocable_preparer_until_production_handoff(
+        self,
+    ) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("PREPARER_SSH_USER=linura-preparer", source)
         self.assertIn("PREPARER_ACTIVE=true", source)
@@ -84,19 +97,31 @@ class V09AdversarialTransportContractTests(unittest.TestCase):
         self.assertNotIn("revoke_preparer_authority()", source)
         self.assertIn("verify_preparer_authority_revoked()", source)
         verify_start = source.index("verify_preparer_authority_revoked() {")
-        verify_end = source.index("\n}\n\nprovision_preparer_authority_fixture", verify_start)
+        verify_end = source.index(
+            "\n}\n\nprovision_preparer_authority_fixture", verify_start
+        )
         verifier = source[verify_start:verify_end]
-        for mutator in ("pkill -KILL", "usermod -G ''", "passwd -l", "rm -rf", "rm -f /etc/sudoers.d"):
+        for mutator in (
+            "pkill -KILL",
+            "usermod -G ''",
+            "passwd -l",
+            "rm -rf",
+            "rm -f /etc/sudoers.d",
+        ):
             self.assertNotIn(mutator, verifier)
         self.assertIn("preparer_revocation_producer=production-firstboot", source)
-        self.assertIn("preparer_revocation_verifier=independent-qualification-observation", source)
-        boundary = source[source.index('if [[ "$boundary" -eq 12 ]]'):]
+        self.assertIn(
+            "preparer_revocation_verifier=independent-qualification-observation", source
+        )
+        boundary = source[source.index('if [[ "$boundary" -eq 12 ]]') :]
         self.assertLess(
             boundary.index("/usr/local/bin/linura-firstboot --durable-bootstrap-step"),
             boundary.index('verify_preparer_authority_revoked "$PRODUCTION_ROOT"'),
         )
 
-    def test_release_facing_bootstrap_is_exercised_and_reobserved_after_restart(self) -> None:
+    def test_release_facing_bootstrap_is_exercised_and_reobserved_after_restart(
+        self,
+    ) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn('PUBLIC_BOOTSTRAP_ROOT="$ROOT/public-bootstrap"', source)
         self.assertIn('run_public_bootstrap_isolated "$PUBLIC_BOOTSTRAP_ROOT"', source)
@@ -104,7 +129,7 @@ class V09AdversarialTransportContractTests(unittest.TestCase):
         self.assertIn("production_bootstrap_fresh_state=verified", source)
         self.assertIn("production_bootstrap_authority_observation=independent", source)
         self.assertIn("test ! -e '$PUBLIC_BOOTSTRAP_ROOT/bootstrap.state'", source)
-        self.assertIn('power_cycle \'production-bootstrap-restart\'', source)
+        self.assertIn("power_cycle 'production-bootstrap-restart'", source)
         self.assertIn(
             "production_bootstrap_restart=reobserved-after-power-cycle",
             source,

@@ -18,8 +18,7 @@ SPEC.loader.exec_module(release_contract)
 
 def valid_notes(tag: str = "v0.0.0") -> str:
     headings = "\n\n".join(
-        f"{heading}\n\nEvidence text."
-        for heading in release_contract.REQUIRED_HEADINGS
+        f"{heading}\n\nEvidence text." for heading in release_contract.REQUIRED_HEADINGS
     )
     return (
         f"# {tag} — test release\n\n"
@@ -76,7 +75,9 @@ def create_release_intent(
     qualification_tree = git(repository, "rev-parse", "HEAD^{tree}")
     evidence = repository / "qualification-evidence.json"
     evidence.write_text('{"result":"passed"}\n', encoding="utf-8")
-    subprocess.run(["git", "add", "qualification-evidence.json"], cwd=repository, check=True)
+    subprocess.run(
+        ["git", "add", "qualification-evidence.json"], cwd=repository, check=True
+    )
     subprocess.run(
         ["git", "commit", "-q", "-m", "test: seal release qualification evidence"],
         cwd=repository,
@@ -85,10 +86,14 @@ def create_release_intent(
     reviewed_source = git(repository, "rev-parse", "HEAD")
     reviewed_tree = git(repository, "rev-parse", "HEAD^{tree}")
     if change_tree:
-        (repository / "candidate.txt").write_text("changed after review\n", encoding="utf-8")
+        (repository / "candidate.txt").write_text(
+            "changed after review\n", encoding="utf-8"
+        )
         subprocess.run(["git", "add", "candidate.txt"], cwd=repository, check=True)
     recorded_tree = "0" * 40 if wrong_tree else reviewed_tree
-    recorded_qualification_tree = reviewed_tree if wrong_qualification_tree else qualification_tree
+    recorded_qualification_tree = (
+        reviewed_tree if wrong_qualification_tree else qualification_tree
+    )
     message = (
         "release: v0.0.0 — test release\n\n"
         "Authorize the exact reviewed tree.\n\n"
@@ -122,7 +127,9 @@ def create_release_preparation(
 
     evidence = repository / "qualification-evidence.json"
     evidence.write_text('{"result":"passed"}\n', encoding="utf-8")
-    subprocess.run(["git", "add", "qualification-evidence.json"], cwd=repository, check=True)
+    subprocess.run(
+        ["git", "add", "qualification-evidence.json"], cwd=repository, check=True
+    )
     subprocess.run(
         ["git", "commit", "-q", "-m", "test: seal release qualification evidence"],
         cwd=repository,
@@ -202,10 +209,18 @@ class ReleaseContractTests(unittest.TestCase):
             with self.assertRaises(release_contract.ContractError):
                 release_contract.validate_contract(notes, "v0.0.0")
 
-    def test_release_intent_requires_tree_identical_single_parent_and_exact_trailers(self) -> None:
+    def test_release_intent_requires_tree_identical_single_parent_and_exact_trailers(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repository = initialized_repository(Path(temp_dir))
-            source, reviewed_source, reviewed_tree, qualification_source, qualification_tree = create_release_intent(repository)
+            (
+                source,
+                reviewed_source,
+                reviewed_tree,
+                qualification_source,
+                qualification_tree,
+            ) = create_release_intent(repository)
             metadata = release_contract.validate_release_intent(source, repository)
             self.assertEqual(metadata["source_sha"], source)
             self.assertEqual(metadata["reviewed_source_sha"], reviewed_source)
@@ -227,7 +242,9 @@ class ReleaseContractTests(unittest.TestCase):
             with self.assertRaises(release_contract.ContractError):
                 release_contract.validate_release_intent(source, repository)
 
-    def test_release_intent_rejects_non_independent_qualification_tree_trailer(self) -> None:
+    def test_release_intent_rejects_non_independent_qualification_tree_trailer(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repository = initialized_repository(Path(temp_dir))
             source, _, _, _, _ = create_release_intent(
@@ -282,7 +299,9 @@ class ReleaseContractTests(unittest.TestCase):
                     repository,
                 )
 
-    def test_release_preparation_rejects_forged_or_duplicate_qualification_binding(self) -> None:
+    def test_release_preparation_rejects_forged_or_duplicate_qualification_binding(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repository = initialized_repository(Path(temp_dir))
             source, _, _, _ = create_release_preparation(
@@ -318,7 +337,9 @@ class ReleaseContractTests(unittest.TestCase):
             artifact = directory / "linurad"
             artifact.write_bytes(b"original")
             evidence = release_contract.build_evidence(notes, tag, "a" * 40, [artifact])
-            (directory / "RELEASE-EVIDENCE.json").write_text(json.dumps(evidence) + "\n", encoding="utf-8")
+            (directory / "RELEASE-EVIDENCE.json").write_text(
+                json.dumps(evidence) + "\n", encoding="utf-8"
+            )
             release_contract.verify_evidence(directory, tag, "a" * 40)
             artifact.write_bytes(b"tampered")
             with self.assertRaises(release_contract.ContractError):
@@ -334,7 +355,9 @@ class ReleaseContractTests(unittest.TestCase):
             artifact = directory / "linurad"
             artifact.write_bytes(b"candidate")
             with self.assertRaises(release_contract.ContractError):
-                release_contract.build_evidence(notes, mismatched_tag, "a" * 40, [artifact])
+                release_contract.build_evidence(
+                    notes, mismatched_tag, "a" * 40, [artifact]
+                )
 
     def test_release_tree_uses_filename_as_tag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

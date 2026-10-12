@@ -32,6 +32,7 @@ V09_ROUTING_CONTRACT_PATH = Path("contracts/v09-qualification-routing.toml")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from tools import v09_qualification_scope as v09_scope  # noqa: E402
+
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 GATE_ID = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
 SUPPORTED_CONCLUSIONS = {
@@ -53,14 +54,21 @@ class QualificationError(RuntimeError):
 
 # Per-decision snapshots. Never cache GitHub state across independent reads,
 # reconciliations, requests, or positive second-pass verification.
-_PR_FILE_BATCH: ContextVar[dict[tuple[str, int], list[dict[str, Any]]] | None] = ContextVar(
-    "qualification_pr_file_batch", default=None,
+_PR_FILE_BATCH: ContextVar[dict[tuple[str, int], list[dict[str, Any]]] | None] = (
+    ContextVar(
+        "qualification_pr_file_batch",
+        default=None,
+    )
 )
-_RUN_JOBS_BATCH: ContextVar[dict[tuple[str, int, int], list[dict[str, Any]]] | None] = ContextVar(
-    "qualification_run_jobs_batch", default=None,
+_RUN_JOBS_BATCH: ContextVar[dict[tuple[str, int, int], list[dict[str, Any]]] | None] = (
+    ContextVar(
+        "qualification_run_jobs_batch",
+        default=None,
+    )
 )
 _READ_DEADLINE: ContextVar[float | None] = ContextVar(
-    "qualification_read_deadline", default=None,
+    "qualification_read_deadline",
+    default=None,
 )
 
 
@@ -87,16 +95,11 @@ def _load_toml(root: Path, relative: str | Path) -> dict[str, Any]:
     return value
 
 
-def _string_list(
-    value: object, label: str, *, allow_empty: bool = False
-) -> list[str]:
+def _string_list(value: object, label: str, *, allow_empty: bool = False) -> list[str]:
     _require(isinstance(value, list), f"{label} must be a list")
     _require(allow_empty or bool(value), f"{label} must not be empty")
     _require(
-        all(
-            isinstance(item, str) and item and item.strip() == item
-            for item in value
-        ),
+        all(isinstance(item, str) and item and item.strip() == item for item in value),
         f"{label} contains invalid strings",
     )
     result = list(value)
@@ -163,7 +166,8 @@ def _pull_request_paths(workflow: str) -> list[str] | None:
     events_start = lines.index("on:")
     events_end = next(
         (
-            index for index in range(events_start + 1, len(lines))
+            index
+            for index in range(events_start + 1, len(lines))
             if lines[index] and not lines[index].startswith((" ", "#"))
         ),
         len(lines),
@@ -187,7 +191,8 @@ def _pull_request_paths(workflow: str) -> list[str] | None:
     event_index = lines.index("  pull_request:")
     event_end = next(
         (
-            index for index in range(event_index + 1, events_end)
+            index
+            for index in range(event_index + 1, events_end)
             if re.match(r"^  [^ #].*:", lines[index])
         ),
         events_end,
@@ -196,8 +201,7 @@ def _pull_request_paths(workflow: str) -> list[str] | None:
     _require(
         pr_lines.count("    paths:") <= 1
         and not any(
-            re.match(r"^    ['\\\"]?paths['\\\"]?:", line)
-            and line != "    paths:"
+            re.match(r"^    ['\\\"]?paths['\\\"]?:", line) and line != "    paths:"
             for line in pr_lines
         )
         and not any(re.match(r"^    (?:<<|paths-ignore):", line) for line in pr_lines),
@@ -224,7 +228,6 @@ def _pull_request_paths(workflow: str) -> list[str] | None:
     return patterns
 
 
-
 def _push_paths(workflow: str) -> list[str] | None:
     """Read GitHub's reviewed on.push.paths subset, rejecting shadowed keys."""
     # First check the top-level on:/quoted shadow structure shared with PR routing.
@@ -232,16 +235,18 @@ def _push_paths(workflow: str) -> list[str] | None:
     lines = workflow.splitlines()
     on_idx = lines.index("on:")
     on_end = next(
-        (idx for idx in range(on_idx + 1, len(lines))
-         if lines[idx] and not lines[idx].startswith((" ", "#"))),
+        (
+            idx
+            for idx in range(on_idx + 1, len(lines))
+            if lines[idx] and not lines[idx].startswith((" ", "#"))
+        ),
         len(lines),
     )
-    events = lines[on_idx + 1:on_end]
+    events = lines[on_idx + 1 : on_end]
     _require(
         events.count("  push:") <= 1
         and not any(
-            re.match(r"""^  ['"]?push['"]?:""", line)
-            and line != "  push:"
+            re.match(r"""^  ['"]?push['"]?:""", line) and line != "  push:"
             for line in events
         ),
         "duplicate/noncanonical push event mapping",
@@ -250,21 +255,22 @@ def _push_paths(workflow: str) -> list[str] | None:
         return None
     start = lines.index("  push:")
     end = next(
-        (idx for idx in range(start + 1, on_end)
-         if re.match(r"^  [^ #].*:", lines[idx])),
+        (
+            idx
+            for idx in range(start + 1, on_end)
+            if re.match(r"^  [^ #].*:", lines[idx])
+        ),
         on_end,
     )
-    push_lines = lines[start + 1:end]
+    push_lines = lines[start + 1 : end]
     _require(
         push_lines.count("    paths:") <= 1
         and not any(
-            re.match(r"""^    ['"]?paths['"]?:""", line)
-            and line != "    paths:"
+            re.match(r"""^    ['"]?paths['"]?:""", line) and line != "    paths:"
             for line in push_lines
         )
         and not any(
-            re.match(r"^    (?:<<|paths-ignore):", line)
-            for line in push_lines
+            re.match(r"^    (?:<<|paths-ignore):", line) for line in push_lines
         ),
         "ambiguous push path routing",
     )
@@ -272,7 +278,7 @@ def _push_paths(workflow: str) -> list[str] | None:
         return []
     paths_index = lines.index("    paths:", start + 1, end)
     patterns: list[str] = []
-    for line in lines[paths_index + 1:end]:
+    for line in lines[paths_index + 1 : end]:
         if not line.strip() or line.startswith("      #"):
             continue
         match = re.fullmatch(r'      - "([^"]+)"(?:\s+#.*)?', line)
@@ -396,8 +402,7 @@ def load_contract(root: Path = ROOT) -> dict[str, Any]:
         gate_ids.add(gate_id)
         workflow = gate["workflow"]
         _require(
-            isinstance(workflow, str)
-            and workflow.startswith(".github/workflows/"),
+            isinstance(workflow, str) and workflow.startswith(".github/workflows/"),
             f"invalid gate workflow: {gate_id}",
         )
         _require(
@@ -415,9 +420,7 @@ def load_contract(root: Path = ROOT) -> dict[str, Any]:
         )
         _string_list(gate["execution_lanes"], f"{gate_id}.execution_lanes")
         jobs = _string_list(gate["required_jobs"], f"{gate_id}.required_jobs")
-        patterns = _string_list(
-            gate["paths"], f"{gate_id}.paths", allow_empty=True
-        )
+        patterns = _string_list(gate["paths"], f"{gate_id}.paths", allow_empty=True)
         if gate["mandatory"]:
             _require(
                 gate_id in mandatory,
@@ -464,9 +467,7 @@ def load_contract(root: Path = ROOT) -> dict[str, Any]:
     for lane in lanes:
         _require(isinstance(lane, dict), "lane must be a table")
         _require(
-            set(lane).issubset(
-                {"id", "kind", "gate_id", "workflow", "entrypoint"}
-            )
+            set(lane).issubset({"id", "kind", "gate_id", "workflow", "entrypoint"})
             and {"id", "kind"}.issubset(lane),
             "invalid lane fields",
         )
@@ -493,8 +494,7 @@ def load_contract(root: Path = ROOT) -> dict[str, Any]:
             )
         else:
             _require(
-                isinstance(lane.get("entrypoint"), str)
-                and "gate_id" not in lane,
+                isinstance(lane.get("entrypoint"), str) and "gate_id" not in lane,
                 f"physical lane shape invalid: {lane_id}",
             )
 
@@ -511,8 +511,7 @@ def load_contract(root: Path = ROOT) -> dict[str, Any]:
         )
         component_id = item["id"]
         _require(
-            isinstance(component_id, str)
-            and component_id not in seen_components,
+            isinstance(component_id, str) and component_id not in seen_components,
             f"duplicate component: {component_id}",
         )
         seen_components.add(component_id)
@@ -541,9 +540,7 @@ def load_contract(root: Path = ROOT) -> dict[str, Any]:
             f"duplicate contract: {path}",
         )
         seen_contracts.add(path)
-        route = _string_list(
-            item["gates"], f"contract.{path}.gates", allow_empty=True
-        )
+        route = _string_list(item["gates"], f"contract.{path}.gates", allow_empty=True)
         _require(
             all(gate in gate_ids for gate in route),
             f"contract references unknown gate: {path}",
@@ -557,9 +554,7 @@ def _gates_by_id(
     return {gate["id"]: gate for gate in contract["gate"]}
 
 
-def required_gate_ids(
-    contract: dict[str, Any], changed_paths: list[str]
-) -> list[str]:
+def required_gate_ids(contract: dict[str, Any], changed_paths: list[str]) -> list[str]:
     # Tree-identical release-authorization PRs legitimately have no changed files.
     # An empty *successful* GitHub files response still requires all native gates.
     _require(
@@ -573,17 +568,19 @@ def required_gate_ids(
             continue
         if any(path_selected(path, gate["paths"]) for path in changed_paths):
             required.add(gate["id"])
-    return [
-        gate["id"] for gate in contract["gate"] if gate["id"] in required
-    ]
+    return [gate["id"] for gate in contract["gate"] if gate["id"] in required]
 
 
 def activation_mode(root: Path = ROOT) -> str:
     """Read reviewed activation intent, not a claim of deployed App authority."""
     policy = _load_toml(root, ACTIVATION_CONTRACT_PATH)
     _require(
-        set(policy) == {
-            "schema_version", "mode", "publisher", "required_app_check",
+        set(policy)
+        == {
+            "schema_version",
+            "mode",
+            "publisher",
+            "required_app_check",
             "acceptance_evidence",
         }
         and type(policy.get("schema_version")) is int
@@ -661,11 +658,12 @@ jobs:
 
 def _validate_shadow_workflow(summary: str) -> None:
     """Actions remains manual-only and never publishes checks or statuses."""
-    _require(summary == EXPECTED_SHADOW_WORKFLOW,
-             "manual qualification workflow deviates from reviewed immutable template")
     _require(
-        summary.count("\non:\n") == 1
-        and summary.count("\npermissions:\n") == 1,
+        summary == EXPECTED_SHADOW_WORKFLOW,
+        "manual qualification workflow deviates from reviewed immutable template",
+    )
+    _require(
+        summary.count("\non:\n") == 1 and summary.count("\npermissions:\n") == 1,
         "shadow workflow must have one event and permission mapping",
     )
     on_block = summary.split("\non:\n", 1)[1].split("\npermissions:\n", 1)[0]
@@ -677,17 +675,29 @@ def _validate_shadow_workflow(summary: str) -> None:
         "qualification Actions must be manual-only with exact-head input",
     )
     for forbidden in (
-        "statuses: write", "checks: write", "contents: write",
-        "pull_request_target", "workflow_run:", "  push:", "  schedule:",
-        "repository_dispatch", "secrets.", "reconcile-heads", "event-heads",
-        "reconcile-head", "reconcile-pr",
+        "statuses: write",
+        "checks: write",
+        "contents: write",
+        "pull_request_target",
+        "workflow_run:",
+        "  push:",
+        "  schedule:",
+        "repository_dispatch",
+        "secrets.",
+        "reconcile-heads",
+        "event-heads",
+        "reconcile-head",
+        "reconcile-pr",
     ):
-        _require(forbidden not in summary,
-                 f"unreviewed automatic or write-capable qualification workflow: {forbidden}")
+        _require(
+            forbidden not in summary,
+            f"unreviewed automatic or write-capable qualification workflow: {forbidden}",
+        )
     _require(
         "  shadow:" in summary
         and "    name: read-only-shadow" in summary
-        and "    permissions:\n      contents: read\n      actions: read\n      pull-requests: read" in summary
+        and "    permissions:\n      contents: read\n      actions: read\n      pull-requests: read"
+        in summary
         and "persist-credentials: false" in summary
         and "ref: ${{ github.event.repository.default_branch }}" in summary
         and "python3 tools/applicable_qualification.py validate" in summary
@@ -713,8 +723,11 @@ def validate_repository(
             f"workflow name drift: {gate['id']}",
         )
         expected_run_name = (
-            "run-name: \"${{ github.workflow }} :: ${{ github.event_name == 'pull_request' && format('PR{0} :: {1}', github.event.pull_request.number, github.sha) || (inputs.dispatch_nonce || github.sha) }}\"" if gate["mandatory"] else
-            "run-name: '" + "${{ github.workflow }} :: PR${{ github.event.pull_request.number || 0 }} :: ${{ github.sha }}" + "'"
+            "run-name: \"${{ github.workflow }} :: ${{ github.event_name == 'pull_request' && format('PR{0} :: {1}', github.event.pull_request.number, github.sha) || (inputs.dispatch_nonce || github.sha) }}\""
+            if gate["mandatory"]
+            else "run-name: '"
+            + "${{ github.workflow }} :: PR${{ github.event.pull_request.number || 0 }} :: ${{ github.sha }}"
+            + "'"
         )
         _require(
             re.findall(r"(?m)^run-name:[^\n]*$", source) == [expected_run_name],
@@ -739,9 +752,7 @@ def validate_repository(
             )
 
     for path in contract["routing_authority_paths"]:
-        _require(
-            (root / path).is_file(), f"missing routing authority file: {path}"
-        )
+        _require((root / path).is_file(), f"missing routing authority file: {path}")
         for gate in contract["gate"]:
             if not gate["mandatory"]:
                 _require(
@@ -762,9 +773,7 @@ def validate_repository(
         f"missing={sorted(envelope_ids - matrix_ids)} "
         f"extra={sorted(matrix_ids - envelope_ids)}",
     )
-    envelope_workflows = {
-        lane["id"]: lane.get("workflow") for lane in envelope["lane"]
-    }
+    envelope_workflows = {lane["id"]: lane.get("workflow") for lane in envelope["lane"]}
     envelope_entrypoints = {
         lane["id"]: lane.get("entrypoint") for lane in envelope["lane"]
     }
@@ -798,9 +807,7 @@ def validate_repository(
 
     components = _load_toml(root, COMPONENTS_PATH).get("component", [])
     component_by_id = {item["id"]: item for item in components}
-    matrix_components = {
-        item["id"]: item for item in contract["component"]
-    }
+    matrix_components = {item["id"]: item for item in contract["component"]}
     _require(
         set(matrix_components) == set(component_by_id),
         "component qualification matrix is not exhaustive",
@@ -812,15 +819,11 @@ def validate_repository(
             matrix["path"] == component["path"],
             f"component path drift: {component_id}",
         )
-        probe = (
-            component["path"].rstrip("/")
-            + "/__qualification_route_probe__.rs"
-        )
+        probe = component["path"].rstrip("/") + "/__qualification_route_probe__.rs"
         selected = [
             gate["id"]
             for gate in contract["gate"]
-            if not gate["mandatory"]
-            and path_selected(probe, gate["paths"])
+            if not gate["mandatory"] and path_selected(probe, gate["paths"])
         ]
         _require(
             matrix["gates"] == selected,
@@ -883,9 +886,7 @@ def validate_repository(
         )
     repository_contracts |= registered_paths
 
-    matrix_contracts = {
-        item["path"]: item for item in contract["contract"]
-    }
+    matrix_contracts = {item["path"]: item for item in contract["contract"]}
     _require(
         set(matrix_contracts) == repository_contracts,
         "contract qualification matrix is not exhaustive: "
@@ -901,8 +902,7 @@ def validate_repository(
         selected = [
             gate["id"]
             for gate in contract["gate"]
-            if not gate["mandatory"]
-            and path_selected(path, gate["paths"])
+            if not gate["mandatory"] and path_selected(path, gate["paths"])
         ]
         _require(
             matrix_contracts[path]["gates"] == selected,
@@ -911,8 +911,7 @@ def validate_repository(
         if path in native_only_contracts:
             _require(
                 not selected,
-                "native-only contract unexpectedly has specialized route: "
-                f"{path}",
+                f"native-only contract unexpectedly has specialized route: {path}",
             )
         else:
             _require(
@@ -948,7 +947,9 @@ def _api_json(url: str, token: str) -> Any:
     deadline = _READ_DEADLINE.get()
     if deadline is not None:
         remaining = deadline - time.monotonic()
-        _require(remaining > 2.0, "read-only decision exceeded the 115-second API budget")
+        _require(
+            remaining > 2.0, "read-only decision exceeded the 115-second API budget"
+        )
         timeout = min(timeout, remaining - 1.0)
     try:
         with urlopen(request, timeout=timeout) as response:
@@ -959,9 +960,7 @@ def _api_json(url: str, token: str) -> Any:
             f"GitHub API {exc.code} for {url}: {body[:300]}"
         ) from exc
     except URLError as exc:
-        raise QualificationError(
-            f"GitHub API unavailable for {url}: {exc}"
-        ) from exc
+        raise QualificationError(f"GitHub API unavailable for {url}: {exc}") from exc
 
 
 def _post_json(url: str, token: str, payload: dict[str, Any]) -> Any:
@@ -1021,9 +1020,7 @@ def _paged(
     page = 1
     while True:
         separator = "&" if "?" in url else "?"
-        payload = _api_json(
-            f"{url}{separator}per_page=100&page={page}", token
-        )
+        payload = _api_json(f"{url}{separator}per_page=100&page={page}", token)
         if collection_key is None:
             _require(
                 isinstance(payload, list),
@@ -1044,10 +1041,15 @@ def _paged(
         values.extend(page_values)
         if len(page_values) < 100:
             break
-        if page == 30 and collection_key is None and re.fullmatch(
-            r"https://api\.github\.com/repos/[^/]+/[^/]+/pulls/[0-9]+/files",
-            url,
-        ) is not None:
+        if (
+            page == 30
+            and collection_key is None
+            and re.fullmatch(
+                r"https://api\.github\.com/repos/[^/]+/[^/]+/pulls/[0-9]+/files",
+                url,
+            )
+            is not None
+        ):
             # GitHub documents at most 3,000 PR files. Only this particular
             # endpoint has a hard 30-page cap; PR discovery must not truncate.
             break
@@ -1057,7 +1059,10 @@ def _paged(
 
 
 def _pr_changed_paths(
-    repository: str, pr_number: int, token: str, *,
+    repository: str,
+    pr_number: int,
+    token: str,
+    *,
     include_rename_sources: bool = False,
 ) -> list[str]:
     cache = _PR_FILE_BATCH.get()
@@ -1110,17 +1115,12 @@ def _workflow_path_matches(run_path: object, expected_path: str) -> bool:
         return True
     if not ref:
         return False
-    if any(
-        ord(char) < 33 or ord(char) == 127 or char in "\\~^:?*["
-        for char in ref
-    ):
+    if any(ord(char) < 33 or ord(char) == 127 or char in "\\~^:?*[" for char in ref):
         return False
     if ".." in ref or "@{" in ref or ref.endswith("."):
         return False
     return not any(
-        part in ("", ".", "..")
-        or part.startswith(".")
-        or part.endswith(".lock")
+        part in ("", ".", "..") or part.startswith(".") or part.endswith(".lock")
         for part in ref.split("/")
     )
 
@@ -1132,54 +1132,74 @@ def _pr_base_identity(pr: dict[str, Any]) -> tuple[str, str, int]:
     _require(isinstance(base_repo, dict), "PR base repository missing")
     ref, sha, repo_id = base.get("ref"), base.get("sha"), base_repo.get("id")
     _require(
-        isinstance(ref, str) and bool(ref)
-        and isinstance(sha, str) and HEX40.fullmatch(sha) is not None
-        and isinstance(repo_id, int) and repo_id > 0,
+        isinstance(ref, str)
+        and bool(ref)
+        and isinstance(sha, str)
+        and HEX40.fullmatch(sha) is not None
+        and isinstance(repo_id, int)
+        and repo_id > 0,
         "PR base identity incomplete",
     )
     return (ref, sha, repo_id)
 
 
-def _reviewed_test_merge(repository: str, pr: dict[str, Any], head_sha: str, token: str) -> str:
+def _reviewed_test_merge(
+    repository: str, pr: dict[str, Any], head_sha: str, token: str
+) -> str:
     """Prove immutable PR-event test-merge parents, never mutable run PR associations."""
     _require(pr.get("state", "open") == "open", "qualification PR is not open")
     base_ref, base_sha, _ = _pr_base_identity(pr)
     _require(base_ref == "main", "qualification base must be protected main")
     merge_sha = pr.get("merge_commit_sha")
-    _require(isinstance(merge_sha, str) and HEX40.fullmatch(merge_sha) is not None,
-             "PR synthetic test-merge commit unavailable")
-    commit = _api_json(f"https://api.github.com/repos/{repository}/commits/{merge_sha}", token)
-    _require(isinstance(commit, dict) and commit.get("sha") == merge_sha
-             and isinstance(commit.get("parents"), list)
-             and len(commit["parents"]) == 2
-             and [p.get("sha") if isinstance(p, dict) else None for p in commit["parents"]]
-             == [base_sha, head_sha],
-             "PR synthetic merge parents do not match current base/head")
+    _require(
+        isinstance(merge_sha, str) and HEX40.fullmatch(merge_sha) is not None,
+        "PR synthetic test-merge commit unavailable",
+    )
+    commit = _api_json(
+        f"https://api.github.com/repos/{repository}/commits/{merge_sha}", token
+    )
+    _require(
+        isinstance(commit, dict)
+        and commit.get("sha") == merge_sha
+        and isinstance(commit.get("parents"), list)
+        and len(commit["parents"]) == 2
+        and [p.get("sha") if isinstance(p, dict) else None for p in commit["parents"]]
+        == [base_sha, head_sha],
+        "PR synthetic merge parents do not match current base/head",
+    )
     return merge_sha
 
 
 def _reviewed_run_merge_sha(
-    run: dict[str, Any], gate: dict[str, Any], pr_number: int,
+    run: dict[str, Any],
+    gate: dict[str, Any],
+    pr_number: int,
 ) -> str | None:
     title = run.get("display_title")
     prefix = gate["workflow_name"] + " :: PR" + str(pr_number) + " :: "
     if not isinstance(title, str) or not title.startswith(prefix):
         return None
-    sha = title[len(prefix):]
+    sha = title[len(prefix) :]
     return sha if HEX40.fullmatch(sha) is not None else None
 
 
 def _run_matches(
-    run: dict[str, Any], *, gate: dict[str, Any], head_sha: str,
-    pr_number: int, pr_base: tuple[str, str, int],
+    run: dict[str, Any],
+    *,
+    gate: dict[str, Any],
+    head_sha: str,
+    pr_number: int,
+    pr_base: tuple[str, str, int],
     merge_sha: str | None = None,
 ) -> bool:
     """Only the event-derived immutable synthetic SHA proves historical base."""
-    if (not _workflow_path_matches(run.get("path"), gate["workflow"])
+    if (
+        not _workflow_path_matches(run.get("path"), gate["workflow"])
         or run.get("event") != "pull_request"
         or run.get("head_sha") != head_sha
         or merge_sha is None
-        or _reviewed_run_merge_sha(run, gate, pr_number) != merge_sha):
+        or _reviewed_run_merge_sha(run, gate, pr_number) != merge_sha
+    ):
         return False
     # PR identity is bound by GitHub's original event-derived title. The
     # mutable pull_requests association is deliberately not authorization.
@@ -1187,15 +1207,21 @@ def _run_matches(
 
 
 def _has_stale_pr_base_run(
-    runs: list[dict[str, Any]], *, gate: dict[str, Any],
-    head_sha: str, pr_number: int, pr_base: tuple[str, str, int],
+    runs: list[dict[str, Any]],
+    *,
+    gate: dict[str, Any],
+    head_sha: str,
+    pr_number: int,
+    pr_base: tuple[str, str, int],
     merge_sha: str | None = None,
 ) -> bool:
     """Detect older event-derived synthetic merge SHAs, never accept them."""
     for run in runs:
-        if (run.get("event") != "pull_request"
+        if (
+            run.get("event") != "pull_request"
             or run.get("head_sha") != head_sha
-            or not _workflow_path_matches(run.get("path"), gate["workflow"])):
+            or not _workflow_path_matches(run.get("path"), gate["workflow"])
+        ):
             continue
         historical = _reviewed_run_merge_sha(run, gate, pr_number)
         if historical is not None and historical != merge_sha:
@@ -1213,13 +1239,15 @@ def _newest_matching_run(
     merge_sha: str | None = None,
 ) -> dict[str, Any] | None:
     matching = [
-        run for run in runs
+        run
+        for run in runs
         if _run_matches(
             run,
             gate=gate,
             head_sha=head_sha,
             pr_number=pr_number,
-            pr_base=pr_base, merge_sha=merge_sha,
+            pr_base=pr_base,
+            merge_sha=merge_sha,
         )
     ]
     if not matching:
@@ -1234,9 +1262,7 @@ def _newest_matching_run(
     )
 
 
-def _head_runs(
-    repository: str, head_sha: str, token: str
-) -> list[dict[str, Any]]:
+def _head_runs(repository: str, head_sha: str, token: str) -> list[dict[str, Any]]:
     params = urlencode({"head_sha": head_sha})
     return _paged(
         f"https://api.github.com/repos/{repository}/actions/runs?{params}",
@@ -1295,8 +1321,7 @@ def _verify_required_jobs(
         for name in required:
             job = by_name[name]
             _require(
-                job.get("status") == "completed"
-                and job.get("conclusion") == "success",
+                job.get("status") == "completed" and job.get("conclusion") == "success",
                 f"{gate['id']}: required {label} job {name} is "
                 f"{job.get('status')}/{job.get('conclusion')}",
             )
@@ -1315,9 +1340,9 @@ def _verify_required_jobs(
     return f"v09-{mode}"
 
 
-
 def _trusted_gate_script_paths(
-    root: Path, contract: dict[str, Any],
+    root: Path,
+    contract: dict[str, Any],
 ) -> set[str]:
     """Inventory direct and transitive first-party gate executables.
 
@@ -1419,8 +1444,7 @@ def _trusted_gate_script_paths(
                     modules = [node.module]
                     if node.module.split(".", 1)[0] in ("tools", "scripts", "tests"):
                         modules.extend(
-                            node.module + "." + alias.name
-                            for alias in node.names
+                            node.module + "." + alias.name for alias in node.names
                         )
                 for module in modules:
                     if module.startswith(("tools.", "scripts.", "tests.")):
@@ -1428,8 +1452,10 @@ def _trusted_gate_script_paths(
         for dependency in sorted(dependencies):
             dep = Path(dependency)
             if (
-                dep.is_absolute() or ".." in dep.parts
-                or dependency in found or dependency in queue
+                dep.is_absolute()
+                or ".." in dep.parts
+                or dependency in found
+                or dependency in queue
             ):
                 continue
             if (root / dep).is_file() and not (root / dep).is_symlink():
@@ -1438,7 +1464,9 @@ def _trusted_gate_script_paths(
 
 
 def _untrusted_gate_definition_edits(
-    contract: dict[str, Any], paths: list[str], *,
+    contract: dict[str, Any],
+    paths: list[str],
+    *,
     root: Path = ROOT,
 ) -> list[str]:
     """Reject all changed first-party gate sources, including dependencies.
@@ -1448,66 +1476,81 @@ def _untrusted_gate_definition_edits(
     determined from protected base code, never a PR-controlled manifest.
     """
     trusted = _trusted_gate_script_paths(root, contract)
-    trusted.update({
-        "contracts/qualification-gate-matrix.toml",
-        "contracts/qualification-evidence-binding.toml",
-        "contracts/qualification-execution-envelopes.toml",
-        "tools/qualification_guest_identity.py",
-    })
-    return sorted({
-        path for path in paths
-        if (
-            path in trusted
-            or path.startswith(".github/workflows/")
-            or path.startswith(".github/actions/")
-            or path.startswith("tools/xtask/")
-            # Local VM/physical harness code and fixtures are themselves
-            # qualification authority, including newly added files not yet
-            # visible to a protected-base reference graph. Classify the full
-            # tree rather than enumerating historical script filenames.
-            or path.startswith("qualification/")
-            # VM/host acceptance cases are executable assertions and
-            # provisioning fixtures, not inert documentation. Protect new
-            # and modified JSON, systemd and udev inputs alike.
-            or path.startswith("tests/acceptance/")
-            or path.startswith("services/qualification-publisher/")
-            # Python startup hooks and module shadows can execute before
-            # the verifier imports its reviewed helpers. New paths are
-            # absent from the protected-base import graph: classify them
-            # by execution search path instead of relying on discovery.
-            # ROOT and the direct tools/scripts invocation directories
-            # can be sys.path entries for the trusted verifier or gates.
-            or ("/" not in path and path.endswith((".py", ".pyc", ".so", ".pyd")))
-            or (path.startswith(("tools/", "scripts/"))
-                and path.endswith((".py", ".pyc", ".so", ".pyd")))
-            # Modules can gain implicit package execution by adding an
-            # initializer, including in previously absent packages.
-            or (re.search(r"/__init__(?:\.[^/]+)?\.(?:py|pyc|so|pyd)$", path)
-                is not None
-                and (
-                    len(Path(path).parts) == 2
-                    or path.startswith((
-                        "tests/", "qualification/", "bindings/python/tests/",
-                    ))
-                ))
-            or (path.endswith(("/sitecustomize.py", "/usercustomize.py"))
-                or path in {"sitecustomize.py", "usercustomize.py"})
-
-            # Canonical xtask discovers all tests/tooling/test_*.py; both
-            # canonical CI and Codex discover bindings/python/tests/test_*.py.
-            # Include new modules and their helpers, which do not yet exist
-            # in the protected-base dependency graph.
-            or (path.startswith("tests/tooling/") and path.endswith(".py"))
-            or (path.startswith("bindings/python/tests/") and path.endswith(".py"))
-            or path.startswith(".cargo/")
-            or path in {
-                "Cargo.toml",
-                "Cargo.lock",
-                "rust-toolchain.toml",
-                "tools/codex/versions.env",
-            }
-        )
-    })
+    trusted.update(
+        {
+            "contracts/qualification-gate-matrix.toml",
+            "contracts/qualification-evidence-binding.toml",
+            "contracts/qualification-execution-envelopes.toml",
+            "tools/qualification_guest_identity.py",
+        }
+    )
+    return sorted(
+        {
+            path
+            for path in paths
+            if (
+                path in trusted
+                or path.startswith(".github/workflows/")
+                or path.startswith(".github/actions/")
+                or path.startswith("tools/xtask/")
+                # Local VM/physical harness code and fixtures are themselves
+                # qualification authority, including newly added files not yet
+                # visible to a protected-base reference graph. Classify the full
+                # tree rather than enumerating historical script filenames.
+                or path.startswith("qualification/")
+                # VM/host acceptance cases are executable assertions and
+                # provisioning fixtures, not inert documentation. Protect new
+                # and modified JSON, systemd and udev inputs alike.
+                or path.startswith("tests/acceptance/")
+                or path.startswith("services/qualification-publisher/")
+                # Python startup hooks and module shadows can execute before
+                # the verifier imports its reviewed helpers. New paths are
+                # absent from the protected-base import graph: classify them
+                # by execution search path instead of relying on discovery.
+                # ROOT and the direct tools/scripts invocation directories
+                # can be sys.path entries for the trusted verifier or gates.
+                or ("/" not in path and path.endswith((".py", ".pyc", ".so", ".pyd")))
+                or (
+                    path.startswith(("tools/", "scripts/"))
+                    and path.endswith((".py", ".pyc", ".so", ".pyd"))
+                )
+                # Modules can gain implicit package execution by adding an
+                # initializer, including in previously absent packages.
+                or (
+                    re.search(r"/__init__(?:\.[^/]+)?\.(?:py|pyc|so|pyd)$", path)
+                    is not None
+                    and (
+                        len(Path(path).parts) == 2
+                        or path.startswith(
+                            (
+                                "tests/",
+                                "qualification/",
+                                "bindings/python/tests/",
+                            )
+                        )
+                    )
+                )
+                or (
+                    path.endswith(("/sitecustomize.py", "/usercustomize.py"))
+                    or path in {"sitecustomize.py", "usercustomize.py"}
+                )
+                # Canonical xtask discovers all tests/tooling/test_*.py; both
+                # canonical CI and Codex discover bindings/python/tests/test_*.py.
+                # Include new modules and their helpers, which do not yet exist
+                # in the protected-base dependency graph.
+                or (path.startswith("tests/tooling/") and path.endswith(".py"))
+                or (path.startswith("bindings/python/tests/") and path.endswith(".py"))
+                or path.startswith(".cargo/")
+                or path
+                in {
+                    "Cargo.toml",
+                    "Cargo.lock",
+                    "rust-toolchain.toml",
+                    "tools/codex/versions.env",
+                }
+            )
+        }
+    )
 
 
 def _approved_gate_bundles(root: Path) -> dict[str, tuple[int, str]]:
@@ -1526,8 +1569,12 @@ def _approved_gate_bundles(root: Path) -> dict[str, tuple[int, str]]:
     for entry in approvals:
         _require(
             isinstance(entry, dict)
-            and set(entry) == {
-                "bundle_sha256", "review_pr", "rationale", "approval_mode",
+            and set(entry)
+            == {
+                "bundle_sha256",
+                "review_pr",
+                "rationale",
+                "approval_mode",
             },
             "authority approval entry has unreviewed fields",
         )
@@ -1544,7 +1591,8 @@ def _approved_gate_bundles(root: Path) -> dict[str, tuple[int, str]]:
             "duplicate or malformed authority approval digest",
         )
         _require(
-            isinstance(entry["review_pr"], int) and entry["review_pr"] > 0
+            isinstance(entry["review_pr"], int)
+            and entry["review_pr"] > 0
             and isinstance(entry["rationale"], str)
             and bool(entry["rationale"].strip()),
             "authority approval needs independent PR traceability and rationale",
@@ -1554,8 +1602,12 @@ def _approved_gate_bundles(root: Path) -> dict[str, tuple[int, str]]:
 
 
 def _authority_bundle_digest(
-    repository: str, pr_number: int, token: str, paths: list[str],
-    *, pr: dict[str, Any] | None = None,
+    repository: str,
+    pr_number: int,
+    token: str,
+    paths: list[str],
+    *,
+    pr: dict[str, Any] | None = None,
 ) -> str:
     """Bind a reviewed whole-PR diff to its PR head and prior blob identities.
 
@@ -1573,7 +1625,8 @@ def _authority_bundle_digest(
     """
     if pr is None:
         pr = _api_json(
-            f"https://api.github.com/repos/{repository}/pulls/{pr_number}", token,
+            f"https://api.github.com/repos/{repository}/pulls/{pr_number}",
+            token,
         )
     _require(isinstance(pr, dict), "authority PR metadata missing")
     head = pr.get("head")
@@ -1601,8 +1654,8 @@ def _authority_bundle_digest(
     )
     # A Git commit SHA is not its tree SHA; prove the immutable link.
     base_commit = _api_json(
-        f"https://api.github.com/repos/{repository}/git/commits/"
-        f"{base['sha']}", token,
+        f"https://api.github.com/repos/{repository}/git/commits/{base['sha']}",
+        token,
     )
     base_tree = base_commit.get("tree") if isinstance(base_commit, dict) else None
     _require(
@@ -1615,8 +1668,8 @@ def _authority_bundle_digest(
     )
     tree_sha = base_tree["sha"]
     tree = _api_json(
-        f"https://api.github.com/repos/{repository}/git/trees/"
-        f"{tree_sha}?recursive=1", token,
+        f"https://api.github.com/repos/{repository}/git/trees/{tree_sha}?recursive=1",
+        token,
     )
     _require(
         isinstance(tree, dict)
@@ -1629,13 +1682,19 @@ def _authority_bundle_digest(
     for item in tree["tree"]:
         _require(isinstance(item, dict), "malformed authority base tree")
         path, blob, mode, kind = (
-            item.get("path"), item.get("sha"), item.get("mode"), item.get("type"),
+            item.get("path"),
+            item.get("sha"),
+            item.get("mode"),
+            item.get("type"),
         )
         _require(
-            isinstance(path, str) and bool(path)
+            isinstance(path, str)
+            and bool(path)
             and path not in old_entries
-            and isinstance(blob, str) and HEX40.fullmatch(blob) is not None
-            and isinstance(mode, str) and bool(mode)
+            and isinstance(blob, str)
+            and HEX40.fullmatch(blob) is not None
+            and isinstance(mode, str)
+            and bool(mode)
             and kind in ("blob", "tree", "commit"),
             "ambiguous or invalid authority base tree entry",
         )
@@ -1650,13 +1709,13 @@ def _authority_bundle_digest(
         if file.get("status") == "renamed":
             affected.add(file.get("previous_filename"))
         covered.update(affected & authority)
-        name, status, blob = (
-            file.get("filename"), file.get("status"), file.get("sha")
-        )
+        name, status, blob = (file.get("filename"), file.get("status"), file.get("sha"))
         _require(
-            isinstance(name, str) and bool(name)
+            isinstance(name, str)
+            and bool(name)
             and isinstance(status, str)
-            and status in {"added", "modified", "removed", "renamed", "changed", "copied"}
+            and status
+            in {"added", "modified", "removed", "renamed", "changed", "copied"}
             and isinstance(blob, str)
             and HEX40.fullmatch(blob) is not None,
             "authority PR file identity unavailable or malformed",
@@ -1673,14 +1732,18 @@ def _authority_bundle_digest(
                 f"authority previous file identity missing for {status}: {name}",
             )
         record: dict[str, Any] = {
-            "path": name, "status": status, "blob": blob,
+            "path": name,
+            "status": status,
+            "blob": blob,
             "previous": previous,
         }
         if status in ("renamed", "copied"):
             former = file.get("previous_filename")
             _require(
-                isinstance(former, str) and bool(former)
-                and former != name and former in old_entries
+                isinstance(former, str)
+                and bool(former)
+                and former != name
+                and former in old_entries
                 and old_entries[former]["type"] != "tree",
                 "authority rename/copy source identity missing",
             )
@@ -1698,14 +1761,22 @@ def _authority_bundle_digest(
         "pr_number": pr_number,
         "files": sorted(entries, key=lambda entry: entry["path"]),
     }
-    return "sha256:" + hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    return (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+    )
 
 
 def _verify_ledger_native_checks(
-    *, root: Path, contract: dict[str, Any], repository: str,
-    approval_pr: int, approval: dict[str, Any], token: str,
+    *,
+    root: Path,
+    contract: dict[str, Any],
+    repository: str,
+    approval_pr: int,
+    approval: dict[str, Any],
+    token: str,
 ) -> bool:
     """Bind original native gates to immutable pre-approval-merge main.
 
@@ -1717,36 +1788,49 @@ def _verify_ledger_native_checks(
     try:
         head = approval["head"]["sha"]
         merged_sha = approval["merge_commit_sha"]
-        _require(isinstance(head, str) and HEX40.fullmatch(head) is not None
-                 and isinstance(merged_sha, str)
-                 and HEX40.fullmatch(merged_sha) is not None,
-                 "ledger approval missing immutable merge identities")
+        _require(
+            isinstance(head, str)
+            and HEX40.fullmatch(head) is not None
+            and isinstance(merged_sha, str)
+            and HEX40.fullmatch(merged_sha) is not None,
+            "ledger approval missing immutable merge identities",
+        )
         merged = _api_json(
-            f"https://api.github.com/repos/{repository}/commits/{merged_sha}", token)
-        _require(isinstance(merged, dict) and merged.get("sha") == merged_sha
-                 and isinstance(merged.get("parents"), list)
-                 and bool(merged["parents"])
-                 and isinstance(merged["parents"][0], dict)
-                 and HEX40.fullmatch(merged["parents"][0].get("sha", "")) is not None,
-                 "ledger merge parent unavailable")
+            f"https://api.github.com/repos/{repository}/commits/{merged_sha}", token
+        )
+        _require(
+            isinstance(merged, dict)
+            and merged.get("sha") == merged_sha
+            and isinstance(merged.get("parents"), list)
+            and bool(merged["parents"])
+            and isinstance(merged["parents"][0], dict)
+            and HEX40.fullmatch(merged["parents"][0].get("sha", "")) is not None,
+            "ledger merge parent unavailable",
+        )
         historical_base = merged["parents"][0]["sha"]
         runs = _head_runs(repository, head, token)
         gates = _gates_by_id(contract)
         proven_merges: set[str] = set()
         for gate_id in contract["mandatory_gate_ids"]:
             gate = gates[gate_id]
-            possible = [run for run in runs
+            possible = [
+                run
+                for run in runs
                 if run.get("event") == "pull_request"
                 and run.get("head_sha") == head
                 and _workflow_path_matches(run.get("path"), gate["workflow"])
-                and _reviewed_run_merge_sha(run, gate, approval_pr) is not None]
+                and _reviewed_run_merge_sha(run, gate, approval_pr) is not None
+            ]
             if not possible:
                 return False
-            run = max(possible, key=lambda r: (
-                int(r.get("run_number") or 0),
-                int(r.get("run_attempt") or 0),
-                int(r.get("id") or 0),
-            ))
+            run = max(
+                possible,
+                key=lambda r: (
+                    int(r.get("run_number") or 0),
+                    int(r.get("run_attempt") or 0),
+                    int(r.get("id") or 0),
+                ),
+            )
             run_merge = _reviewed_run_merge_sha(run, gate, approval_pr)
             if run_merge is None:
                 return False
@@ -1755,20 +1839,27 @@ def _verify_ledger_native_checks(
                     f"https://api.github.com/repos/{repository}/commits/{run_merge}",
                     token,
                 )
-                _require(isinstance(synthetic, dict)
-                         and synthetic.get("sha") == run_merge
-                         and isinstance(synthetic.get("parents"), list)
-                         and len(synthetic["parents"]) == 2
-                         and [p.get("sha") if isinstance(p, dict) else None
-                              for p in synthetic["parents"]]
-                         == [historical_base, head],
-                         "ledger native run did not test the merged base/head")
+                _require(
+                    isinstance(synthetic, dict)
+                    and synthetic.get("sha") == run_merge
+                    and isinstance(synthetic.get("parents"), list)
+                    and len(synthetic["parents"]) == 2
+                    and [
+                        p.get("sha") if isinstance(p, dict) else None
+                        for p in synthetic["parents"]
+                    ]
+                    == [historical_base, head],
+                    "ledger native run did not test the merged base/head",
+                )
                 proven_merges.add(run_merge)
-            if (run.get("status") != "completed"
-                or run.get("conclusion") != "success"):
+            if run.get("status") != "completed" or run.get("conclusion") != "success":
                 return False
             _verify_required_jobs(
-                repository, gate, run, token, root=root,
+                repository,
+                gate,
+                run,
+                token,
+                root=root,
                 changed_paths=[AUTHORITY_APPROVALS_PATH.as_posix()],
             )
     except (QualificationError, KeyError, TypeError, ValueError):
@@ -1777,10 +1868,17 @@ def _verify_ledger_native_checks(
 
 
 def _independently_reviewed_authority_upgrade(
-    repository: str, approval_pr: int, code_pr: int,
-    bundle_digest: str, token: str, *,
-    code_author: str, approval_mode: str, solo_operator: str,
-    root: Path = ROOT, contract: dict[str, Any] | None = None,
+    repository: str,
+    approval_pr: int,
+    code_pr: int,
+    bundle_digest: str,
+    token: str,
+    *,
+    code_author: str,
+    approval_mode: str,
+    solo_operator: str,
+    root: Path = ROOT,
+    contract: dict[str, Any] | None = None,
 ) -> bool:
     """Check separate, exact-bundle approval with explicit human authority.
 
@@ -1792,15 +1890,19 @@ def _independently_reviewed_authority_upgrade(
     if approval_pr == code_pr or not code_author:
         return False
     approval = _api_json(
-        f"https://api.github.com/repos/{repository}/pulls/{approval_pr}", token,
+        f"https://api.github.com/repos/{repository}/pulls/{approval_pr}",
+        token,
     )
     _require(isinstance(approval, dict), "approval PR metadata missing")
     base, head, author = (
-        approval.get("base"), approval.get("head"), approval.get("user")
+        approval.get("base"),
+        approval.get("head"),
+        approval.get("user"),
     )
     base_repo = base.get("repo") if isinstance(base, dict) else None
     if not (
-        approval.get("merged") is True and approval.get("merged_at")
+        approval.get("merged") is True
+        and approval.get("merged_at")
         and isinstance(base_repo, dict)
         and base.get("ref") == "main"
         and base_repo.get("full_name") == repository
@@ -1823,7 +1925,8 @@ def _independently_reviewed_authority_upgrade(
         return False
     historical = _api_json(
         f"https://api.github.com/repos/{repository}/contents/"
-        f"{AUTHORITY_APPROVALS_PATH.as_posix()}?ref={head['sha']}", token,
+        f"{AUTHORITY_APPROVALS_PATH.as_posix()}?ref={head['sha']}",
+        token,
     )
     _require(
         isinstance(historical, dict)
@@ -1834,7 +1937,8 @@ def _independently_reviewed_authority_upgrade(
     try:
         snapshot = tomllib.loads(
             base64.b64decode(
-                historical["content"].replace("\n", ""), validate=True,
+                historical["content"].replace("\n", ""),
+                validate=True,
             ).decode("utf-8")
         )
     except (ValueError, UnicodeError, tomllib.TOMLDecodeError) as exc:
@@ -1862,9 +1966,12 @@ def _independently_reviewed_authority_upgrade(
         ):
             return False
         return _verify_ledger_native_checks(
-            root=root, contract=contract or load_contract(root),
-            repository=repository, approval_pr=approval_pr,
-            approval=approval, token=token,
+            root=root,
+            contract=contract or load_contract(root),
+            repository=repository,
+            approval_pr=approval_pr,
+            approval=approval,
+            token=token,
         )
 
     if approval_mode != "independent-review":
@@ -1901,7 +2008,9 @@ def evaluate_pr(
         HEX40.fullmatch(head_sha) is not None,
         "head SHA must be an exact 40-hex commit",
     )
-    contract = validated_contract if validated_contract is not None else load_contract(root)
+    contract = (
+        validated_contract if validated_contract is not None else load_contract(root)
+    )
     if validated_contract is None:
         validate_repository(root, contract)
     _require(
@@ -1962,7 +2071,10 @@ def evaluate_pr(
     # deletion safety (the source path is also affected). Never accept a
     # rename that requires a specialized gate which GitHub did not trigger.
     original_paths = _pr_changed_paths(
-        repository, pr_number, token, include_rename_sources=True,
+        repository,
+        pr_number,
+        token,
+        include_rename_sources=True,
     )
     _require(
         set(changed_paths).issubset(original_paths),
@@ -1996,13 +2108,19 @@ def evaluate_pr(
     # Rename sources are affected authority even if GitHub routes only the
     # destination. Removing a native-only gate checker must not escape review.
     tampering = _untrusted_gate_definition_edits(
-        contract, original_paths, root=root,
+        contract,
+        original_paths,
+        root=root,
     )
     approvals = _approved_gate_bundles(root)
     independent_approval = False
     if tampering and approvals:
         bundle_digest = _authority_bundle_digest(
-            repository, pr_number, token, tampering, pr=pr,
+            repository,
+            pr_number,
+            token,
+            tampering,
+            pr=pr,
         )
         approval = approvals.get(bundle_digest)
         if approval is not None:
@@ -2012,11 +2130,16 @@ def evaluate_pr(
                 approval_pr, approval_mode = approval
                 policy = _load_toml(root, AUTHORITY_APPROVALS_PATH)
                 independent_approval = _independently_reviewed_authority_upgrade(
-                    repository, approval_pr, pr_number, bundle_digest, token,
+                    repository,
+                    approval_pr,
+                    pr_number,
+                    bundle_digest,
+                    token,
                     code_author=code_author,
                     approval_mode=approval_mode,
                     solo_operator=policy["solo_operator"],
-                    root=root, contract=contract,
+                    root=root,
+                    contract=contract,
                 )
     if tampering and not independent_approval:
         return {
@@ -2042,7 +2165,11 @@ def evaluate_pr(
         }
     gates = _gates_by_id(contract)
     merge_sha = _reviewed_test_merge(repository, pr, head_sha, token)
-    runs = head_runs_snapshot if head_runs_snapshot is not None else _head_runs(repository, head_sha, token)
+    runs = (
+        head_runs_snapshot
+        if head_runs_snapshot is not None
+        else _head_runs(repository, head_sha, token)
+    )
     pr_base = _pr_base_identity(pr)
     waiting: list[str] = []
     failures: list[str] = []
@@ -2055,12 +2182,17 @@ def evaluate_pr(
             gate=gate,
             head_sha=head_sha,
             pr_number=pr_number,
-            pr_base=pr_base, merge_sha=merge_sha,
+            pr_base=pr_base,
+            merge_sha=merge_sha,
         )
         if run is None:
             if _has_stale_pr_base_run(
-                runs, gate=gate, head_sha=head_sha,
-                pr_number=pr_number, pr_base=pr_base, merge_sha=merge_sha,
+                runs,
+                gate=gate,
+                head_sha=head_sha,
+                pr_number=pr_number,
+                pr_base=pr_base,
+                merge_sha=merge_sha,
             ):
                 # No automatic native PR workflow runs are started when
                 # main advances. In particular, rerunning old Actions
@@ -2079,14 +2211,10 @@ def evaluate_pr(
             waiting.append(f"{gate_id}: {status or 'unknown'}")
             continue
         if conclusion not in SUPPORTED_CONCLUSIONS:
-            failures.append(
-                f"{gate_id}: unknown completed conclusion {conclusion!r}"
-            )
+            failures.append(f"{gate_id}: unknown completed conclusion {conclusion!r}")
             continue
         if conclusion != "success":
-            failures.append(
-                f"{gate_id}: exact-head PR run concluded {conclusion}"
-            )
+            failures.append(f"{gate_id}: exact-head PR run concluded {conclusion}")
             continue
         try:
             job_paths = changed_paths
@@ -2095,7 +2223,9 @@ def evaluate_pr(
                 # rename affect the full-versus-regression job decision.
                 # Keep general workflow applicability destination-only.
                 job_paths = _pr_changed_paths(
-                    repository, pr_number, token,
+                    repository,
+                    pr_number,
+                    token,
                     include_rename_sources=True,
                 )
                 _require(
@@ -2143,9 +2273,7 @@ def evaluate_pr(
 def _status_description(result: dict[str, Any]) -> str:
     state = result["state"]
     if state == "success":
-        value = (
-            f"{len(result['required_gate_ids'])} applicable exact-head gates passed"
-        )
+        value = f"{len(result['required_gate_ids'])} applicable exact-head gates passed"
     elif state == "failure":
         value = "Failed: " + "; ".join(result["failures"][:2])
     else:
@@ -2205,12 +2333,12 @@ def verify_pr(
                 + ", ".join(result["waiting"])
             )
         print(
-            "waiting for exact-head qualification: "
-            + ", ".join(result["waiting"]),
+            "waiting for exact-head qualification: " + ", ".join(result["waiting"]),
             file=sys.stderr,
             flush=True,
         )
         time.sleep(poll_seconds)
+
 
 def _open_head_prs(
     repository: str, head_sha: str, token: str
@@ -2244,8 +2372,10 @@ def _open_head_prs(
         _require(isinstance(source_repo, dict), "PR source repository missing")
         branch, repo_id = pr_head.get("ref"), source_repo.get("id")
         _require(
-            isinstance(branch, str) and bool(branch)
-            and isinstance(repo_id, int) and repo_id > 0,
+            isinstance(branch, str)
+            and bool(branch)
+            and isinstance(repo_id, int)
+            and repo_id > 0,
             "PR source identity incomplete",
         )
         base = _pr_base_identity(pr)
@@ -2346,16 +2476,18 @@ def reconcile_head(
         }
 
     def inspect() -> dict[str, Any]:
-        return _aggregate([
-            evaluate_pr(
-                root=root,
-                repository=repository,
-                pr_number=number,
-                head_sha=head_sha,
-                token=token,
-            )
-            for number in identities
-        ])
+        return _aggregate(
+            [
+                evaluate_pr(
+                    root=root,
+                    repository=repository,
+                    pr_number=number,
+                    head_sha=head_sha,
+                    token=token,
+                )
+                for number in identities
+            ]
+        )
 
     result = inspect()
     # Gate reruns can begin while earlier results are read. Never publish
@@ -2398,7 +2530,6 @@ def reconcile_head(
     }
 
 
-
 def decision_head(
     *,
     root: Path,
@@ -2418,8 +2549,7 @@ def decision_head(
     validate_repository(root, contract)
     first = _open_head_prs(repository, head_sha, token)
     selected = {
-        number: identity for number, identity in first.items()
-        if identity[0] == "main"
+        number: identity for number, identity in first.items() if identity[0] == "main"
     }
     _require(bool(selected), "head has no open main-targeting PR")
     _require(len(selected) <= 8, "shared decision head exceeds eight PRs")
@@ -2434,9 +2564,13 @@ def decision_head(
             runs = _head_runs(repository, head_sha, token)
             return [
                 evaluate_pr(
-                    root=root, repository=repository, pr_number=number,
-                    head_sha=head_sha, token=token,
-                    validated_contract=contract, head_runs_snapshot=runs,
+                    root=root,
+                    repository=repository,
+                    pr_number=number,
+                    head_sha=head_sha,
+                    token=token,
+                    validated_contract=contract,
+                    head_runs_snapshot=runs,
                 )
                 for number in selected
             ]
@@ -2452,8 +2586,12 @@ def decision_head(
 
     fresh = _open_head_prs(repository, head_sha, token)
     _require(
-        {number: identity for number, identity in fresh.items()
-         if identity[0] == "main"} == selected,
+        {
+            number: identity
+            for number, identity in fresh.items()
+            if identity[0] == "main"
+        }
+        == selected,
         "PR identity changed during independent decision",
     )
 
@@ -2472,14 +2610,16 @@ def decision_head(
         required = result.get("required_gate_ids")
         accepted_records = result.get("accepted")
         _require(
-            isinstance(required, list) and bool(required)
+            isinstance(required, list)
+            and bool(required)
             and all(isinstance(gate, str) for gate in required)
             and len(set(required)) == len(required)
             and set(contract["mandatory_gate_ids"]).issubset(required)
             and isinstance(accepted_records, list)
-            and all(isinstance(entry, dict) and
-                    isinstance(entry.get("gate_id"), str)
-                    for entry in accepted_records),
+            and all(
+                isinstance(entry, dict) and isinstance(entry.get("gate_id"), str)
+                for entry in accepted_records
+            ),
             "invalid independent gate receipt",
         )
         accepted = [entry["gate_id"] for entry in accepted_records]
@@ -2490,17 +2630,21 @@ def decision_head(
             "incomplete or ambiguous accepted gate receipt",
         )
         base_ref, base_sha, _, _, _, _ = selected[number]
-        prs.append({
-            "number": number,
-            "head_sha": head_sha,
-            "base_ref": base_ref,
-            "base_sha": base_sha,
-            "required_gate_ids": required,
-            "accepted_gate_ids": accepted,
-        })
+        prs.append(
+            {
+                "number": number,
+                "head_sha": head_sha,
+                "base_ref": base_ref,
+                "base_sha": base_sha,
+                "required_gate_ids": required,
+                "accepted_gate_ids": accepted,
+            }
+        )
         states.append(result["state"])
-    state = "failure" if "failure" in states else (
-        "pending" if "pending" in states else "success"
+    state = (
+        "failure"
+        if "failure" in states
+        else ("pending" if "pending" in states else "success")
     )
     return {
         "schema_version": 1,
@@ -2532,8 +2676,10 @@ def resolve_event_heads(
         source = pr.get("head")
         _require(isinstance(source, dict), "PR head missing")
         sha = source.get("sha")
-        _require(isinstance(sha, str) and HEX40.fullmatch(sha) is not None,
-                 "PR event missing exact head SHA")
+        _require(
+            isinstance(sha, str) and HEX40.fullmatch(sha) is not None,
+            "PR event missing exact head SHA",
+        )
         heads.add(sha)
         if event.get("action") == "synchronize":
             before = event.get("before")
@@ -2552,17 +2698,23 @@ def resolve_event_heads(
         _require(isinstance(run, dict), "missing workflow-run metadata")
         if run.get("event") == "pull_request":
             sha = run.get("head_sha")
-            _require(isinstance(sha, str) and HEX40.fullmatch(sha) is not None,
-                     "workflow run missing exact head SHA")
+            _require(
+                isinstance(sha, str) and HEX40.fullmatch(sha) is not None,
+                "workflow run missing exact head SHA",
+            )
             heads.add(sha)
     elif event_name in ("push", "schedule"):
         if event_name == "push":
-            _require(event.get("ref") == "refs/heads/main",
-                     "base-update watcher must run only on protected main")
+            _require(
+                event.get("ref") == "refs/heads/main",
+                "base-update watcher must run only on protected main",
+            )
             _require(event.get("deleted") is not True, "deleted main branch")
         else:
-            _require(event.get("schedule") == "17 * * * *",
-                     "unknown qualification retry schedule")
+            _require(
+                event.get("schedule") == "17 * * * *",
+                "unknown qualification retry schedule",
+            )
         candidates = _paged(
             f"https://api.github.com/repos/{repository}/pulls?"
             + urlencode({"state": "open", "base": "main"}),
@@ -2583,13 +2735,14 @@ def resolve_event_heads(
             source = pr.get("head")
             _require(isinstance(source, dict), "PR source missing on base push")
             sha = source.get("sha")
-            _require(isinstance(sha, str) and HEX40.fullmatch(sha) is not None,
-                     "PR source commit invalid on base push")
+            _require(
+                isinstance(sha, str) and HEX40.fullmatch(sha) is not None,
+                "PR source commit invalid on base push",
+            )
             heads.add(sha)
     else:
         raise QualificationError(f"unsupported summary event: {event_name}")
     return sorted(heads)
-
 
 
 def group_head_shas(heads: list[str]) -> list[dict[str, Any]]:
@@ -2607,8 +2760,7 @@ def group_head_shas(heads: list[str]) -> list[dict[str, Any]]:
         )
         buckets.setdefault(head[0], []).append(head)
     return [
-        {"shard": shard, "heads": bucket}
-        for shard, bucket in sorted(buckets.items())
+        {"shard": shard, "heads": bucket} for shard, bucket in sorted(buckets.items())
     ]
 
 
@@ -2632,7 +2784,8 @@ def reconcile_heads(
     _require(bool(head_shas), "empty reconciliation head shard")
     groups = group_head_shas(head_shas)
     _require(
-        len(groups) == 1 and groups[0]["shard"] == shard
+        len(groups) == 1
+        and groups[0]["shard"] == shard
         and len(groups[0]["heads"]) == len(head_shas),
         "reconciliation heads must be unique and match writer shard",
     )
@@ -2667,7 +2820,9 @@ def reconcile_heads(
         except Exception as exc:
             failures.append(f"{head}: could not invalidate stale status: {exc}")
     results: list[dict[str, Any]] = []
-    for head in ([selected_head] if selected_head in ready and not invalidate_only else []):
+    for head in (
+        [selected_head] if selected_head in ready and not invalidate_only else []
+    ):
         try:
             results.append(
                 reconcile_head(
@@ -2707,13 +2862,16 @@ def _command_event_heads(args: argparse.Namespace) -> int:
     serialized = json.dumps(groups, separators=(",", ":"))
     with args.output.open("a", encoding="utf-8") as output:
         output.write(f"head_groups={serialized}\n")
-    print(json.dumps({
-        "event": args.event_name,
-        "head_count": len(heads),
-        "shard_count": len(groups),
-    }))
+    print(
+        json.dumps(
+            {
+                "event": args.event_name,
+                "head_count": len(heads),
+                "shard_count": len(groups),
+            }
+        )
+    )
     return 0
-
 
 
 def _command_reconcile_heads(args: argparse.Namespace) -> int:
@@ -2755,8 +2913,7 @@ def _command_reconcile_pr(args: argparse.Namespace) -> int:
     token = os.environ.get(args.token_env, "")
     _require(
         token,
-        "GitHub token environment variable is empty: "
-        f"{args.token_env}",
+        f"GitHub token environment variable is empty: {args.token_env}",
     )
     result = reconcile_pr(
         root=args.root,
@@ -2769,7 +2926,6 @@ def _command_reconcile_pr(args: argparse.Namespace) -> int:
     return 0
 
 
-
 def _command_decision_head(args: argparse.Namespace) -> int:
     token = os.environ.get(args.token_env, "")
     _require(bool(token), "GitHub read token is required")
@@ -2777,8 +2933,10 @@ def _command_decision_head(args: argparse.Namespace) -> int:
     deadline_token = _READ_DEADLINE.set(time.monotonic() + 115.0)
     try:
         receipt = decision_head(
-            root=args.root, repository=args.repository,
-            head_sha=args.head_sha, token=token,
+            root=args.root,
+            repository=args.repository,
+            head_sha=args.head_sha,
+            token=token,
         )
     finally:
         _READ_DEADLINE.reset(deadline_token)
@@ -2792,20 +2950,31 @@ def _command_authority_bundle(args: argparse.Namespace) -> int:
     contract = load_contract(args.root)
     _require(args.repository == contract["repository"], "repository mismatch")
     paths = _pr_changed_paths(
-        args.repository, args.pr_number, token,
+        args.repository,
+        args.pr_number,
+        token,
         include_rename_sources=True,
     )
     tampering = _untrusted_gate_definition_edits(contract, paths, root=args.root)
     _require(bool(tampering), "PR has no changed executable gate authority")
     digest = _authority_bundle_digest(
-        args.repository, args.pr_number, token, tampering,
+        args.repository,
+        args.pr_number,
+        token,
+        tampering,
     )
-    print(json.dumps({
-        "bundle_sha256": digest,
-        "changed_authority_paths": tampering,
-        "review_pr": args.pr_number,
-        "note": "Requires a separate reviewed PR to the protected-main ledger",
-    }, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "bundle_sha256": digest,
+                "changed_authority_paths": tampering,
+                "review_pr": args.pr_number,
+                "note": "Requires a separate reviewed PR to the protected-main ledger",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 
@@ -2820,11 +2989,7 @@ def _command_activation_mode(args: argparse.Namespace) -> int:
 
 
 def _command_validate(args: argparse.Namespace) -> int:
-    print(
-        json.dumps(
-            validate_repository(args.root), indent=2, sort_keys=True
-        )
-    )
+    print(json.dumps(validate_repository(args.root), indent=2, sort_keys=True))
     return 0
 
 
@@ -2833,9 +2998,7 @@ def _command_plan(args: argparse.Namespace) -> int:
     validate_repository(args.root, contract)
     paths = [
         line.strip()
-        for line in args.paths_file.read_text(
-            encoding="utf-8"
-        ).splitlines()
+        for line in args.paths_file.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     print(
@@ -2855,8 +3018,7 @@ def _command_verify_pr(args: argparse.Namespace) -> int:
     token = os.environ.get(args.token_env, "")
     _require(
         token,
-        "GitHub token environment variable is empty: "
-        f"{args.token_env}",
+        f"GitHub token environment variable is empty: {args.token_env}",
     )
     result = verify_pr(
         root=args.root,
@@ -2933,8 +3095,12 @@ def main() -> int:
     reconcile_group.add_argument("--repository", required=True)
     reconcile_group.add_argument("--heads-json", required=True)
     reconcile_group.add_argument("--shard", required=True)
-    reconcile_group.add_argument("--retry-only", choices=("true", "false"), default="false")
-    reconcile_group.add_argument("--invalidate-only", choices=("true", "false"), default="false")
+    reconcile_group.add_argument(
+        "--retry-only", choices=("true", "false"), default="false"
+    )
+    reconcile_group.add_argument(
+        "--invalidate-only", choices=("true", "false"), default="false"
+    )
     reconcile_group.add_argument("--token-env", default="GITHUB_TOKEN")
     reconcile_group.set_defaults(func=_command_reconcile_heads)
 

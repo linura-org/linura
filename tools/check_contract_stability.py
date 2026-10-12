@@ -27,7 +27,9 @@ def _safe_contract_path(value: object) -> str | None:
     return path.as_posix()
 
 
-def _load_registry_text(text: str, source: str, failures: list[str]) -> dict[str, object] | None:
+def _load_registry_text(
+    text: str, source: str, failures: list[str]
+) -> dict[str, object] | None:
     try:
         data = tomllib.loads(text)
     except (tomllib.TOMLDecodeError, ValueError) as error:
@@ -87,7 +89,9 @@ def _origin_default_branch(root: Path) -> str | None:
     return value[len(prefix) :] if value.startswith(prefix) else value or None
 
 
-def discover_baseline_commit(root: Path, explicit_ref: str | None = None) -> tuple[str | None, str | None]:
+def discover_baseline_commit(
+    root: Path, explicit_ref: str | None = None
+) -> tuple[str | None, str | None]:
     """Return the historical comparison commit and an error for explicit invalid refs.
 
     For feature branches we compare against the merge base of the protected/default branch.
@@ -253,7 +257,9 @@ def historical_failures(
         if error:
             return [error]
         if commit is None:
-            if any(entry.get("stability") == "stable" for entry in current_by_id.values()):
+            if any(
+                entry.get("stability") == "stable" for entry in current_by_id.values()
+            ):
                 return [
                     "Stable contracts require historical comparison, but no Git baseline is available; "
                     "provide --baseline-ref or --baseline-root"
@@ -298,7 +304,10 @@ def historical_failures(
                     f"Stable contract identity changed in place: {contract_id}: {field} "
                     f"{old.get(field)!r} -> {current.get(field)!r}; publish a new major generation"
                 )
-        if any(current.get(field) != old.get(field) for field in ("kind", "path", "version")):
+        if any(
+            current.get(field) != old.get(field)
+            for field in ("kind", "path", "version")
+        ):
             continue
 
         path = _safe_contract_path(current.get("path"))
@@ -307,12 +316,16 @@ def historical_failures(
         baseline_artifact = reader(path)
         current_path = root / path
         if baseline_artifact is None:
-            failures.append(f"Stable baseline artifact is missing for {contract_id}: {path}")
+            failures.append(
+                f"Stable baseline artifact is missing for {contract_id}: {path}"
+            )
             continue
         if not current_path.is_file():
             continue  # current-tree validation reports this separately
         current_artifact = current_path.read_text(encoding="utf-8")
-        if not _artifact_compatible(current.get("kind"), baseline_artifact, current_artifact):
+        if not _artifact_compatible(
+            current.get("kind"), baseline_artifact, current_artifact
+        ):
             failures.append(
                 f"Stable {current.get('kind')} contract changed incompatibly within generation "
                 f"{current.get('version')}: {contract_id} ({path})"
@@ -340,7 +353,9 @@ def validate(
     if registry.get("product_stability") not in ALLOWED:
         failures.append("invalid product_stability")
     if registry.get("default_contract_stability") != "experimental":
-        failures.append("default contract stability must remain experimental; promotion is explicit")
+        failures.append(
+            "default contract stability must remain experimental; promotion is explicit"
+        )
     if registry.get("policy_document") != "docs/api-versioning.md":
         failures.append("policy_document must be docs/api-versioning.md")
 
@@ -449,7 +464,9 @@ def validate(
             continue
         annotation_items = _annotations(interface)
         if annotation_items is None:
-            failures.append(f"D-Bus contract has invalid or duplicate annotations: {path}")
+            failures.append(
+                f"D-Bus contract has invalid or duplicate annotations: {path}"
+            )
             continue
         annotations = dict(annotation_items)
         if annotations.get("org.linura.ContractId") != entry.get("id"):
@@ -465,8 +482,13 @@ def validate(
     else:
         policy = policy_path.read_text(encoding="utf-8")
         required_policy = (
-            "contract version", "contract stability", "Experimental", "Preview", "Stable",
-            "Stability is never inferred", "Durable state is different",
+            "contract version",
+            "contract stability",
+            "Experimental",
+            "Preview",
+            "Stable",
+            "Stability is never inferred",
+            "Durable state is different",
         )
         for phrase in required_policy:
             if phrase not in policy:
@@ -485,7 +507,9 @@ def validate(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--root", type=Path, default=Path(__file__).resolve().parents[1]
+    )
     baseline = parser.add_mutually_exclusive_group()
     baseline.add_argument(
         "--baseline-ref",

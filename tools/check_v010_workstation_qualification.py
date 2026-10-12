@@ -17,10 +17,14 @@ EXPECTED_PROFILE = "arch-hyprland-v1"
 EXPECTED_MACHINE_CLASS = "workstation"
 EXPECTED_EVIDENCE = ["disposable-arch", "interactive-workstation", "inherited-v0.9"]
 EXPECTED_INTERACTION_ADR = "docs/adr/0031-v010-many-interfaces-one-authority-path.md"
-EXPECTED_PRODUCT_SCOPE_ADR = "docs/adr/0033-v010-complete-workstation-product-boundary.md"
+EXPECTED_PRODUCT_SCOPE_ADR = (
+    "docs/adr/0033-v010-complete-workstation-product-boundary.md"
+)
 EXPECTED_SLICE_CONTRACT = "contracts/v010-workstation-slices.toml"
 EXPECTED_OPERATION_SEMANTICS_CONTRACT = "contracts/operation-semantics.toml"
-EXPECTED_OPERATION_SEMANTICS_ADR = "docs/adr/0032-classify-operations-before-authority.md"
+EXPECTED_OPERATION_SEMANTICS_ADR = (
+    "docs/adr/0032-classify-operations-before-authority.md"
+)
 EXPECTED_INTERACTION_SURFACES = [
     "intent-state",
     "control-plane",
@@ -71,26 +75,100 @@ EXPECTED_REQUIRED_VISUAL_SURFACES = [
     "updates-snapshots-recovery",
     "personalization",
 ]
-EXPECTED_ALLOWED_VISUAL_SURFACES = set(EXPECTED_REQUIRED_VISUAL_SURFACES) | {"approval-dialog"}
+EXPECTED_ALLOWED_VISUAL_SURFACES = set(EXPECTED_REQUIRED_VISUAL_SURFACES) | {
+    "approval-dialog"
+}
 EXPECTED_Q10_SURFACE_WORKFLOW_OBSERVATIONS = {
-    "linura-firstboot": ["owner-enrollment-workflow-completed", "qualified-profile-state-rendered", "manual-no-ai-completion-verified"],
-    "linura-installer": ["supported-profile-install-plan-rendered", "destructive-step-review-completed", "installer-handoff-to-firstboot-verified"],
-    "linura-control-center": ["authoritative-state-reobserved", "registered-typed-effect-dispatched", "post-effect-verification-rendered"],
-    "command-palette": ["registered-target-resolved", "typed-operation-dispatched", "raw-privileged-shell-rejected"],
-    "quick-settings": ["fresh-authoritative-state-rendered", "registered-typed-effect-dispatched", "stale-or-unavailable-mutation-disabled"],
-    "desktop-shell-integration": ["verified-lifecycle-state-rendered", "shell-authority-escalation-absent", "session-restart-state-reconstructed"],
-    "shell-panel-tray-status": ["authoritative-status-rendered", "entrypoint-navigation-completed", "status-surface-authority-escalation-absent"],
-    "launcher-workspace": ["application-launch-completed", "workspace-navigation-completed", "ephemeral-navigation-not-recorded-as-durable-mutation"],
-    "notifications-osd": ["verified-commit-precedes-success-notification", "failure-lifecycle-notification-rendered", "secret-bearing-material-redacted"],
-    "lock-session-controls": ["authenticated-actor-bound", "registered-session-action-dispatched", "authority-unavailable-fails-closed"],
-    "network-connectivity": ["fresh-networkmanager-state-observed", "registered-network-effect-dispatched", "post-effect-network-state-reobserved"],
-    "bluetooth": ["fresh-bluez-state-observed", "registered-bluetooth-effect-dispatched", "post-effect-bluetooth-state-reobserved"],
-    "audio-media": ["fresh-pipewire-wireplumber-state-observed", "registered-audio-effect-dispatched", "post-effect-audio-state-reobserved"],
-    "display-power": ["fresh-display-power-state-observed", "supported-display-power-effect-dispatched", "unsupported-or-stale-state-rendered"],
-    "desktop-utilities": ["screenshot-or-recording-workflow-completed", "clipboard-history-workflow-completed", "privileged-shell-shortcut-absent"],
-    "applications-packages": ["typed-package-discovery-completed", "registered-package-install-remove-effect-dispatched", "arbitrary-package-or-shell-text-rejected"],
-    "updates-snapshots-recovery": ["coordinated-update-workflow-completed", "snapshot-or-rollback-workflow-completed", "durable-recovery-state-reobserved"],
-    "personalization": ["typed-preference-change-completed", "preference-persistence-reobserved", "authority-bearing-payload-rejected"],
+    "linura-firstboot": [
+        "owner-enrollment-workflow-completed",
+        "qualified-profile-state-rendered",
+        "manual-no-ai-completion-verified",
+    ],
+    "linura-installer": [
+        "supported-profile-install-plan-rendered",
+        "destructive-step-review-completed",
+        "installer-handoff-to-firstboot-verified",
+    ],
+    "linura-control-center": [
+        "authoritative-state-reobserved",
+        "registered-typed-effect-dispatched",
+        "post-effect-verification-rendered",
+    ],
+    "command-palette": [
+        "registered-target-resolved",
+        "typed-operation-dispatched",
+        "raw-privileged-shell-rejected",
+    ],
+    "quick-settings": [
+        "fresh-authoritative-state-rendered",
+        "registered-typed-effect-dispatched",
+        "stale-or-unavailable-mutation-disabled",
+    ],
+    "desktop-shell-integration": [
+        "verified-lifecycle-state-rendered",
+        "shell-authority-escalation-absent",
+        "session-restart-state-reconstructed",
+    ],
+    "shell-panel-tray-status": [
+        "authoritative-status-rendered",
+        "entrypoint-navigation-completed",
+        "status-surface-authority-escalation-absent",
+    ],
+    "launcher-workspace": [
+        "application-launch-completed",
+        "workspace-navigation-completed",
+        "ephemeral-navigation-not-recorded-as-durable-mutation",
+    ],
+    "notifications-osd": [
+        "verified-commit-precedes-success-notification",
+        "failure-lifecycle-notification-rendered",
+        "secret-bearing-material-redacted",
+    ],
+    "lock-session-controls": [
+        "authenticated-actor-bound",
+        "registered-session-action-dispatched",
+        "authority-unavailable-fails-closed",
+    ],
+    "network-connectivity": [
+        "fresh-networkmanager-state-observed",
+        "registered-network-effect-dispatched",
+        "post-effect-network-state-reobserved",
+    ],
+    "bluetooth": [
+        "fresh-bluez-state-observed",
+        "registered-bluetooth-effect-dispatched",
+        "post-effect-bluetooth-state-reobserved",
+    ],
+    "audio-media": [
+        "fresh-pipewire-wireplumber-state-observed",
+        "registered-audio-effect-dispatched",
+        "post-effect-audio-state-reobserved",
+    ],
+    "display-power": [
+        "fresh-display-power-state-observed",
+        "supported-display-power-effect-dispatched",
+        "unsupported-or-stale-state-rendered",
+    ],
+    "desktop-utilities": [
+        "screenshot-or-recording-workflow-completed",
+        "clipboard-history-workflow-completed",
+        "privileged-shell-shortcut-absent",
+    ],
+    "applications-packages": [
+        "typed-package-discovery-completed",
+        "registered-package-install-remove-effect-dispatched",
+        "arbitrary-package-or-shell-text-rejected",
+    ],
+    "updates-snapshots-recovery": [
+        "coordinated-update-workflow-completed",
+        "snapshot-or-rollback-workflow-completed",
+        "durable-recovery-state-reobserved",
+    ],
+    "personalization": [
+        "typed-preference-change-completed",
+        "preference-persistence-reobserved",
+        "authority-bearing-payload-rejected",
+    ],
 }
 
 EXPECTED_Q10_OVERLAY_INPUT_REGION_SURFACES = frozenset(
@@ -293,7 +371,11 @@ EXPECTED_Q11_CASE_OBSERVATIONS = {
         "interrupted-install-recovered",
         "post-install-first-boot-completed",
     ],
-    "physical-session-start": ["physical-hardware-present", "wayland-session-active", "hyprland-session-active"],
+    "physical-session-start": [
+        "physical-hardware-present",
+        "wayland-session-active",
+        "hyprland-session-active",
+    ],
     "session-supervision": [
         "hyprland-session-target-active",
         "graphical-session-target-active",
@@ -303,14 +385,25 @@ EXPECTED_Q11_CASE_OBSERVATIONS = {
         "linura-shell-stopped-with-graphical-session",
     ],
     "shell-render-and-input": ["shell-rendered", "keyboard-input", "pointer-input"],
-    "display-scale-and-hidpi": ["display-enumerated", "scale-applied", "hidpi-render-captured"],
+    "display-scale-and-hidpi": [
+        "display-enumerated",
+        "scale-applied",
+        "hidpi-render-captured",
+    ],
     "accessibility-and-visual": [
         "screen-reader-semantics-verified",
         "focus-navigation-verified",
         "reduced-motion-verified",
         "visual-artifact-retained",
     ],
-    "provider-runtime-identities": ["networkmanager-version", "bluez-version", "pipewire-version", "wireplumber-version", "udisks2-version", "polkit-version"],
+    "provider-runtime-identities": [
+        "networkmanager-version",
+        "bluez-version",
+        "pipewire-version",
+        "wireplumber-version",
+        "udisks2-version",
+        "polkit-version",
+    ],
     "session-audio-transient-effect": [
         "numeric-pipewire-output-bound",
         "typed-session-volume-operation-dispatched",
@@ -380,22 +473,86 @@ EXPECTED_Q11_AUDIO_SCENARIOS = {
 }
 
 EXPECTED_Q12_CASE_OBSERVATIONS = {
-    "update-success": ["candidate-applied", "post-update-state-reobserved", "update-audit-bound"],
-    "migration-v09-v010": ["v09-state-seeded", "v010-migration-applied", "persistent-state-reopened"],
-    "pre-migration-backup": ["risky-migration-identified", "writer-safe-backup-created", "backup-integrity-verified"],
-    "migration-failure-restore-retry": ["migration-failure-injected", "pre-migration-backup-restored", "retry-converged"],
-    "update-interruption": ["candidate-update-started", "interruption-injected", "restart-detected-incomplete-update"],
-    "restart-reobservation": ["restart-completed", "authoritative-state-reobserved", "reobserved-state-bound"],
-    "crash-before-dispatch": ["pre-dispatch-crash-injected", "executor-not-dispatched", "recovery-converged"],
-    "crash-after-effect-start": ["effect-start-confirmed", "post-effect-start-crash-injected", "reconciliation-converged"],
-    "crash-around-durable-commit": ["commit-boundary-crash-injected", "durable-state-recovered", "commit-outcome-reconciled"],
-    "indeterminate-external-outcome": ["external-outcome-made-indeterminate", "self-report-not-trusted", "authoritative-outcome-resolved"],
-    "deterministic-reconciliation": ["drift-detected", "reconciliation-plan-deterministic", "verified-state-converged"],
-    "power-loss-recovery": ["power-loss-injected", "durable-state-recovered", "external-state-reconciled"],
-    "snapshot-rollback": ["btrfs-snapshot-identified", "snapper-rollback-applied", "rollback-state-verified"],
-    "gui-unavailable-recovery": ["gui-unavailable", "native-recovery-invoked", "local-repair-completed"],
-    "offline-local-recovery": ["model-unavailable", "network-unavailable", "local-material-recovery-completed"],
-    "corrupt-newer-state-fail-closed": ["corrupt-state-injected", "unsupported-newer-state-injected", "state-open-failed-closed"],
+    "update-success": [
+        "candidate-applied",
+        "post-update-state-reobserved",
+        "update-audit-bound",
+    ],
+    "migration-v09-v010": [
+        "v09-state-seeded",
+        "v010-migration-applied",
+        "persistent-state-reopened",
+    ],
+    "pre-migration-backup": [
+        "risky-migration-identified",
+        "writer-safe-backup-created",
+        "backup-integrity-verified",
+    ],
+    "migration-failure-restore-retry": [
+        "migration-failure-injected",
+        "pre-migration-backup-restored",
+        "retry-converged",
+    ],
+    "update-interruption": [
+        "candidate-update-started",
+        "interruption-injected",
+        "restart-detected-incomplete-update",
+    ],
+    "restart-reobservation": [
+        "restart-completed",
+        "authoritative-state-reobserved",
+        "reobserved-state-bound",
+    ],
+    "crash-before-dispatch": [
+        "pre-dispatch-crash-injected",
+        "executor-not-dispatched",
+        "recovery-converged",
+    ],
+    "crash-after-effect-start": [
+        "effect-start-confirmed",
+        "post-effect-start-crash-injected",
+        "reconciliation-converged",
+    ],
+    "crash-around-durable-commit": [
+        "commit-boundary-crash-injected",
+        "durable-state-recovered",
+        "commit-outcome-reconciled",
+    ],
+    "indeterminate-external-outcome": [
+        "external-outcome-made-indeterminate",
+        "self-report-not-trusted",
+        "authoritative-outcome-resolved",
+    ],
+    "deterministic-reconciliation": [
+        "drift-detected",
+        "reconciliation-plan-deterministic",
+        "verified-state-converged",
+    ],
+    "power-loss-recovery": [
+        "power-loss-injected",
+        "durable-state-recovered",
+        "external-state-reconciled",
+    ],
+    "snapshot-rollback": [
+        "btrfs-snapshot-identified",
+        "snapper-rollback-applied",
+        "rollback-state-verified",
+    ],
+    "gui-unavailable-recovery": [
+        "gui-unavailable",
+        "native-recovery-invoked",
+        "local-repair-completed",
+    ],
+    "offline-local-recovery": [
+        "model-unavailable",
+        "network-unavailable",
+        "local-material-recovery-completed",
+    ],
+    "corrupt-newer-state-fail-closed": [
+        "corrupt-state-injected",
+        "unsupported-newer-state-injected",
+        "state-open-failed-closed",
+    ],
 }
 EXPECTED_UPDATE_RECOVERY_QUALIFICATION = {
     "evidence_manifest": "qualification/v010/update-recovery-evidence.json",
@@ -404,19 +561,73 @@ EXPECTED_UPDATE_RECOVERY_QUALIFICATION = {
 }
 
 EXPECTED_Q13_CASE_OBSERVATIONS = {
-    "inbound-firewall-default-deny": ["firewall-policy-loaded", "unsolicited-inbound-probe-denied", "no-exposure-created"],
-    "ssh-disabled-default": ["ssh-unit-disabled", "ssh-listener-absent", "boot-state-verified"],
-    "remote-exposure-typed-authority": ["remote-exposure-requested", "typed-authority-required", "unauthorized-enable-denied"],
-    "untrusted-package-source-denied": ["untrusted-source-presented", "source-rejected", "no-package-effect-dispatched"],
-    "polkit-authorization": ["polkit-policy-loaded", "unauthorized-caller-denied", "authorized-caller-bound"],
-    "privilege-boundary": ["unprivileged-daemon-confirmed", "generic-root-shell-absent", "privileged-effect-denied-without-authority"],
-    "binding-substitution-rejection": ["actor-substitution-rejected", "plan-substitution-rejected", "evidence-substitution-rejected", "session-substitution-rejected"],
-    "independent-verification": ["executor-self-report-injected", "authoritative-reobservation-performed", "self-report-not-accepted-as-verification"],
-    "authority-ceiling": ["gui-proposal-only", "model-proposal-only", "deterministic-protocol-authority-preserved"],
-    "secret-redaction": ["secret-bearing-input-injected", "audit-redacted", "diagnostics-redacted"],
-    "adversarial-input": ["malformed-input-rejected", "authority-not-widened", "no-effect-dispatched"],
-    "malicious-inputs": ["malicious-client-rejected", "malicious-proposal-rejected", "malicious-profile-rejected", "malicious-import-rejected"],
-    "recovery-boundary": ["gui-unavailable", "model-unavailable", "native-recovery-remains-available"],
+    "inbound-firewall-default-deny": [
+        "firewall-policy-loaded",
+        "unsolicited-inbound-probe-denied",
+        "no-exposure-created",
+    ],
+    "ssh-disabled-default": [
+        "ssh-unit-disabled",
+        "ssh-listener-absent",
+        "boot-state-verified",
+    ],
+    "remote-exposure-typed-authority": [
+        "remote-exposure-requested",
+        "typed-authority-required",
+        "unauthorized-enable-denied",
+    ],
+    "untrusted-package-source-denied": [
+        "untrusted-source-presented",
+        "source-rejected",
+        "no-package-effect-dispatched",
+    ],
+    "polkit-authorization": [
+        "polkit-policy-loaded",
+        "unauthorized-caller-denied",
+        "authorized-caller-bound",
+    ],
+    "privilege-boundary": [
+        "unprivileged-daemon-confirmed",
+        "generic-root-shell-absent",
+        "privileged-effect-denied-without-authority",
+    ],
+    "binding-substitution-rejection": [
+        "actor-substitution-rejected",
+        "plan-substitution-rejected",
+        "evidence-substitution-rejected",
+        "session-substitution-rejected",
+    ],
+    "independent-verification": [
+        "executor-self-report-injected",
+        "authoritative-reobservation-performed",
+        "self-report-not-accepted-as-verification",
+    ],
+    "authority-ceiling": [
+        "gui-proposal-only",
+        "model-proposal-only",
+        "deterministic-protocol-authority-preserved",
+    ],
+    "secret-redaction": [
+        "secret-bearing-input-injected",
+        "audit-redacted",
+        "diagnostics-redacted",
+    ],
+    "adversarial-input": [
+        "malformed-input-rejected",
+        "authority-not-widened",
+        "no-effect-dispatched",
+    ],
+    "malicious-inputs": [
+        "malicious-client-rejected",
+        "malicious-proposal-rejected",
+        "malicious-profile-rejected",
+        "malicious-import-rejected",
+    ],
+    "recovery-boundary": [
+        "gui-unavailable",
+        "model-unavailable",
+        "native-recovery-remains-available",
+    ],
 }
 EXPECTED_SECURITY_QUALIFICATION = {
     "evidence_manifest": "qualification/v010/security-evidence.json",
@@ -427,14 +638,16 @@ EXPECTED_SECURITY_QUALIFICATION = {
     "require_machine_execution_provenance": True,
     "required_cases": list(EXPECTED_Q13_CASE_OBSERVATIONS),
 }
-EXPECTED_UPDATE_RECOVERY_QUALIFICATION.update({
-    "required_profile": EXPECTED_PROFILE,
-    "required_machine_class": EXPECTED_MACHINE_CLASS,
-    "require_frozen_package_manifest": True,
-    "require_machine_execution_provenance": True,
-    "require_external_fault_injection_provenance": True,
-    "require_boot_transition_provenance": True,
-})
+EXPECTED_UPDATE_RECOVERY_QUALIFICATION.update(
+    {
+        "required_profile": EXPECTED_PROFILE,
+        "required_machine_class": EXPECTED_MACHINE_CLASS,
+        "require_frozen_package_manifest": True,
+        "require_machine_execution_provenance": True,
+        "require_external_fault_injection_provenance": True,
+        "require_boot_transition_provenance": True,
+    }
+)
 EXPECTED_Q12_EXECUTION_MECHANISMS = {
     "update-success": "machine-update",
     "migration-v09-v010": "machine-migration",
@@ -470,12 +683,24 @@ EXPECTED_Q13_EXECUTION_MECHANISMS = {
     "recovery-boundary": "gui-and-model-unavailability",
 }
 MACHINE_PROBE_NAMES = {"os_release", "root_filesystem", "virtualization", "boot_id"}
-VM_EXTERNAL_CONTROLLERS = {"qemu-host", "systemd-host", "network-harness", "storage-harness"}
-PHYSICAL_EXTERNAL_CONTROLLERS = {"maintainer-console", "systemd-host", "network-harness", "storage-harness"}
+VM_EXTERNAL_CONTROLLERS = {
+    "qemu-host",
+    "systemd-host",
+    "network-harness",
+    "storage-harness",
+}
+PHYSICAL_EXTERNAL_CONTROLLERS = {
+    "maintainer-console",
+    "systemd-host",
+    "network-harness",
+    "storage-harness",
+}
 OFFICIAL_REPOSITORIES = {"core", "extra", "multilib"}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-BOOT_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+BOOT_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PACKAGE_NAME_RE = re.compile(r"^[a-z0-9@._+-]+$")
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -485,7 +710,15 @@ VISUAL_MAX_TOTAL_PNG_BYTES = 256 * 1024 * 1024
 VISUAL_MAX_TOTAL_DECODE_PIXELS = 64 * 1024 * 1024
 VISUAL_MAX_FAILURE_DIFFS = 32
 PNG_BYTES_PER_PIXEL = {0: 1, 2: 3, 4: 2, 6: 4}
-PNG_UNSUPPORTED_COLOR_CHUNKS = {b"cHRM", b"gAMA", b"iCCP", b"sRGB", b"cICP", b"mDCV", b"cLLI"}
+PNG_UNSUPPORTED_COLOR_CHUNKS = {
+    b"cHRM",
+    b"gAMA",
+    b"iCCP",
+    b"sRGB",
+    b"cICP",
+    b"mDCV",
+    b"cLLI",
+}
 VISUAL_MAX_BASELINES = 128
 ARCHIVE_RE = re.compile(
     r"^https://archive\.archlinux\.org/repos/(\d{4})/(\d{2})/(\d{2})/\$repo/os/\$arch$"
@@ -679,7 +912,9 @@ def _decode_png_pixels(
                     return None
                 transparent_gray = struct.unpack(">H", payload)[0]
                 if transparent_gray > 255:
-                    failures.append(f"{label} has an out-of-range grayscale tRNS sample")
+                    failures.append(
+                        f"{label} has an out-of-range grayscale tRNS sample"
+                    )
                     return None
             elif color_type == 2:
                 if length != 6:
@@ -687,7 +922,9 @@ def _decode_png_pixels(
                     return None
                 transparent_rgb = struct.unpack(">HHH", payload)
                 if any(sample > 255 for sample in transparent_rgb):
-                    failures.append(f"{label} has an out-of-range truecolor tRNS sample")
+                    failures.append(
+                        f"{label} has an out-of-range truecolor tRNS sample"
+                    )
                     return None
             else:
                 failures.append(
@@ -776,7 +1013,9 @@ def _decode_png_pixels(
         for index in range(row_bytes):
             left = scanline[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
             up = previous[index]
-            upper_left = previous[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
+            upper_left = (
+                previous[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
+            )
             if filter_type == 0:
                 value = scanline[index]
             elif filter_type == 1:
@@ -790,7 +1029,9 @@ def _decode_png_pixels(
                     scanline[index] + _paeth_predictor(left, up, upper_left)
                 ) & 0xFF
             else:
-                failures.append(f"{label} uses unsupported PNG filter type {filter_type}")
+                failures.append(
+                    f"{label} uses unsupported PNG filter type {filter_type}"
+                )
                 return None
             scanline[index] = value
 
@@ -1011,7 +1252,9 @@ def _validate_runner_case_attestation(
     if attestation.get("schema_version") != 1:
         failures.append(f"{label} schema_version must be 1")
     if attestation.get("attestation_type") != "linura-v010-qualification-case":
-        failures.append(f"{label} attestation_type must be linura-v010-qualification-case")
+        failures.append(
+            f"{label} attestation_type must be linura-v010-qualification-case"
+        )
     if attestation.get("case") != case_name or attestation.get("result") != "passed":
         failures.append(f"{label} must bind a passed {case_name} result")
     if attestation.get("run_id") != manifest_run_id:
@@ -1023,10 +1266,14 @@ def _validate_runner_case_attestation(
         failures.append(f"{label} missing runner provenance")
     else:
         if runner.get("id") != "qualification/v010/workstation-runner":
-            failures.append(f"{label} runner.id must identify the v0.10 workstation runner")
+            failures.append(
+                f"{label} runner.id must identify the v0.10 workstation runner"
+            )
         for key in ("commit_sha", "linurad_sha256", "shell_bridge_sha256"):
             if runner.get(key) != source.get(key):
-                failures.append(f"{label} runner.{key} must match the parent source identity")
+                failures.append(
+                    f"{label} runner.{key} must match the parent source identity"
+                )
     observations = attestation.get("observations")
     if not isinstance(observations, list):
         failures.append(f"{label} observations must be an array")
@@ -1038,7 +1285,9 @@ def _validate_runner_case_attestation(
             continue
         name = observation.get("name")
         if not isinstance(name, str) or name in by_name:
-            failures.append(f"{label} observation {index} has invalid or duplicate name")
+            failures.append(
+                f"{label} observation {index} has invalid or duplicate name"
+            )
             continue
         by_name[name] = observation
     if set(by_name) != set(expected_observations):
@@ -1057,7 +1306,6 @@ def _validate_runner_case_attestation(
             failures.append(
                 f"{label} observation {name} must carry the typed success value {expected_value!r}"
             )
-
 
 
 def _validate_q11_bound_artifact(
@@ -1116,14 +1364,17 @@ def _validate_q11_machine_environment(
         return environment_sha256, None
     manifest_source = manifest.get("source")
     source_sha = (
-        manifest_source.get("commit_sha")
-        if isinstance(manifest_source, dict)
-        else None
+        manifest_source.get("commit_sha") if isinstance(manifest_source, dict) else None
     )
     if environment.get("schema_version") != 1:
         failures.append(f"{label} schema_version must be 1")
-    if environment.get("artifact_type") != "linura-v010-physical-workstation-environment":
-        failures.append(f"{label} artifact_type must identify physical workstation provenance")
+    if (
+        environment.get("artifact_type")
+        != "linura-v010-physical-workstation-environment"
+    ):
+        failures.append(
+            f"{label} artifact_type must identify physical workstation provenance"
+        )
     if environment.get("source_commit_sha") != source_sha:
         failures.append(f"{label} source must match the interactive workstation source")
     if environment.get("run_id") != manifest.get("run_id"):
@@ -1133,7 +1384,9 @@ def _validate_q11_machine_environment(
         failures.append(f"{label} requires the enrolled fixture binding")
     else:
         fixture_binding = manifest_fixture.get("contract")
-        expected_digest = fixture_binding.get("sha256") if isinstance(fixture_binding, dict) else None
+        expected_digest = (
+            fixture_binding.get("sha256") if isinstance(fixture_binding, dict) else None
+        )
         if environment.get("fixture_id") != manifest_fixture.get("fixture_id"):
             failures.append(f"{label} fixture identity must match the enrolled fixture")
         if environment.get("fixture_contract_sha256") != expected_digest:
@@ -1142,7 +1395,10 @@ def _validate_q11_machine_environment(
         failures.append(f"{label} must bind {EXPECTED_PROFILE}")
     if environment.get("machine_class") != EXPECTED_MACHINE_CLASS:
         failures.append(f"{label} machine_class must be workstation")
-    if expected_profile_sha256 is None or environment.get("profile_sha256") != expected_profile_sha256:
+    if (
+        expected_profile_sha256 is None
+        or environment.get("profile_sha256") != expected_profile_sha256
+    ):
         failures.append(f"{label} must bind the reviewed workstation profile digest")
     if (
         expected_package_manifest_sha256 is None
@@ -1151,7 +1407,9 @@ def _validate_q11_machine_environment(
     ):
         failures.append(f"{label} requires the frozen qualification substrate")
     elif environment.get("package_manifest_sha256") != expected_package_manifest_sha256:
-        failures.append(f"{label} package manifest digest must match the frozen substrate")
+        failures.append(
+            f"{label} package manifest digest must match the frozen substrate"
+        )
 
     execution = environment.get("execution")
     boot_id: str | None = None
@@ -1188,7 +1446,10 @@ def _validate_q11_machine_environment(
             label=f"{label} installed package inventory",
             failures=failures,
         )
-        if observed_packages is not None and observed_packages != expected_package_versions:
+        if (
+            observed_packages is not None
+            and observed_packages != expected_package_versions
+        ):
             failures.append(
                 f"{label} installed package inventory must exactly match the frozen package manifest"
             )
@@ -1212,26 +1473,46 @@ def _validate_q11_machine_environment(
         try:
             os_release_lines = {
                 line.strip()
-                for line in probe_paths["os_release"].read_text(encoding="utf-8").splitlines()
+                for line in probe_paths["os_release"]
+                .read_text(encoding="utf-8")
+                .splitlines()
                 if line.strip()
             }
         except UnicodeError:
             failures.append(f"{label} os-release probe must be valid UTF-8")
         else:
-            if "ID=arch" not in os_release_lines and 'ID="arch"' not in os_release_lines:
-                failures.append(f"{label} os-release probe must independently identify Arch Linux")
+            if (
+                "ID=arch" not in os_release_lines
+                and 'ID="arch"' not in os_release_lines
+            ):
+                failures.append(
+                    f"{label} os-release probe must independently identify Arch Linux"
+                )
     if "root_filesystem" in probe_paths:
-        if probe_paths["root_filesystem"].read_text(encoding="utf-8").strip() != "btrfs":
-            failures.append(f"{label} root-filesystem probe must independently identify btrfs")
+        if (
+            probe_paths["root_filesystem"].read_text(encoding="utf-8").strip()
+            != "btrfs"
+        ):
+            failures.append(
+                f"{label} root-filesystem probe must independently identify btrfs"
+            )
     if "virtualization" in probe_paths:
-        observed_virtualization = probe_paths["virtualization"].read_text(encoding="utf-8").strip()
+        observed_virtualization = (
+            probe_paths["virtualization"].read_text(encoding="utf-8").strip()
+        )
         if observed_virtualization != "none":
-            failures.append(f"{label} virtualization probe must independently prove no virtualization")
+            failures.append(
+                f"{label} virtualization probe must independently prove no virtualization"
+            )
         if virtualization is not None and observed_virtualization != virtualization:
-            failures.append(f"{label} virtualization probe must match the machine execution identity")
+            failures.append(
+                f"{label} virtualization probe must match the machine execution identity"
+            )
     if "boot_id" in probe_paths and boot_id is not None:
         if probe_paths["boot_id"].read_text(encoding="utf-8").strip() != boot_id:
-            failures.append(f"{label} boot-id probe must match the machine execution identity")
+            failures.append(
+                f"{label} boot-id probe must match the machine execution identity"
+            )
 
     hardware_probe_path = _validate_q11_bound_artifact(
         root,
@@ -1247,15 +1528,24 @@ def _validate_q11_machine_environment(
         )
         if hardware_probe:
             if hardware_probe.get("schema_version") != 1:
-                failures.append(f"{label} physical hardware probe schema_version must be 1")
-            if hardware_probe.get("artifact_type") != "linura-v010-physical-hardware-probe":
-                failures.append(f"{label} physical hardware probe artifact_type drifted")
+                failures.append(
+                    f"{label} physical hardware probe schema_version must be 1"
+                )
+            if (
+                hardware_probe.get("artifact_type")
+                != "linura-v010-physical-hardware-probe"
+            ):
+                failures.append(
+                    f"{label} physical hardware probe artifact_type drifted"
+                )
             if hardware_probe.get("source_commit_sha") != source_sha:
                 failures.append(f"{label} physical hardware probe source mismatch")
             if hardware_probe.get("run_id") != manifest.get("run_id"):
                 failures.append(f"{label} physical hardware probe run_id mismatch")
             if hardware_probe.get("hardware") != manifest.get("hardware"):
-                failures.append(f"{label} physical hardware probe must match manifest hardware identities")
+                failures.append(
+                    f"{label} physical hardware probe must match manifest hardware identities"
+                )
 
     return environment_sha256, boot_id
 
@@ -1277,26 +1567,39 @@ def _validate_q11_case_execution(
         return
     if execution.get("scope") != "machine":
         failures.append(f"{label} machine_execution.scope must be machine")
-    if environment_sha256 is None or execution.get("environment_sha256") != environment_sha256:
-        failures.append(f"{label} machine_execution must bind the physical machine environment digest")
+    if (
+        environment_sha256 is None
+        or execution.get("environment_sha256") != environment_sha256
+    ):
+        failures.append(
+            f"{label} machine_execution must bind the physical machine environment digest"
+        )
     if environment_boot_id is None or execution.get("boot_id") != environment_boot_id:
-        failures.append(f"{label} machine_execution must bind the physical machine boot identity")
+        failures.append(
+            f"{label} machine_execution must bind the physical machine boot identity"
+        )
     manifest_fixture = manifest.get("fixture")
     if not isinstance(manifest_fixture, dict):
         failures.append(f"{label} missing enrolled fixture")
         return
     fixture_binding = manifest_fixture.get("contract")
-    expected_fixture_digest = fixture_binding.get("sha256") if isinstance(fixture_binding, dict) else None
+    expected_fixture_digest = (
+        fixture_binding.get("sha256") if isinstance(fixture_binding, dict) else None
+    )
     if execution.get("fixture_id") != manifest_fixture.get("fixture_id"):
         failures.append(f"{label} machine_execution fixture identity mismatch")
     if execution.get("fixture_contract_sha256") != expected_fixture_digest:
         failures.append(f"{label} machine_execution fixture digest mismatch")
     controller = execution.get("controller")
     if controller not in PHYSICAL_EXTERNAL_CONTROLLERS:
-        failures.append(f"{label} machine_execution controller must be an external physical-machine controller")
+        failures.append(
+            f"{label} machine_execution controller must be an external physical-machine controller"
+        )
     expected_mechanism = EXPECTED_Q11_EXECUTION_MECHANISMS[case_name]
     if execution.get("mechanism") != expected_mechanism:
-        failures.append(f"{label} machine_execution mechanism must be {expected_mechanism}")
+        failures.append(
+            f"{label} machine_execution mechanism must be {expected_mechanism}"
+        )
 
     provenance_path = _validate_q11_bound_artifact(
         root,
@@ -1314,23 +1617,35 @@ def _validate_q11_case_execution(
     if not provenance:
         return
     if provenance.get("schema_version") != 1:
-        failures.append(f"{label} machine execution provenance schema_version must be 1")
-    if provenance.get("artifact_type") != "linura-v010-physical-workstation-case-provenance":
+        failures.append(
+            f"{label} machine execution provenance schema_version must be 1"
+        )
+    if (
+        provenance.get("artifact_type")
+        != "linura-v010-physical-workstation-case-provenance"
+    ):
         failures.append(f"{label} machine execution provenance artifact_type drifted")
     manifest_source = manifest.get("source")
     source_sha = (
-        manifest_source.get("commit_sha")
-        if isinstance(manifest_source, dict)
-        else None
+        manifest_source.get("commit_sha") if isinstance(manifest_source, dict) else None
     )
     if provenance.get("source_commit_sha") != source_sha:
         failures.append(f"{label} machine execution provenance source mismatch")
-    if provenance.get("run_id") != manifest.get("run_id") or provenance.get("case") != case_name:
-        failures.append(f"{label} machine execution provenance must bind the parent run and case")
+    if (
+        provenance.get("run_id") != manifest.get("run_id")
+        or provenance.get("case") != case_name
+    ):
+        failures.append(
+            f"{label} machine execution provenance must bind the parent run and case"
+        )
     if provenance.get("environment_sha256") != environment_sha256:
-        failures.append(f"{label} machine execution provenance environment binding mismatch")
+        failures.append(
+            f"{label} machine execution provenance environment binding mismatch"
+        )
     if provenance.get("fixture_id") != manifest_fixture.get("fixture_id"):
-        failures.append(f"{label} machine execution provenance fixture identity mismatch")
+        failures.append(
+            f"{label} machine execution provenance fixture identity mismatch"
+        )
     if provenance.get("fixture_contract_sha256") != expected_fixture_digest:
         failures.append(f"{label} machine execution provenance fixture digest mismatch")
     if provenance.get("boot_id") != environment_boot_id:
@@ -1342,9 +1657,13 @@ def _validate_q11_case_execution(
     if provenance.get("mechanism") != expected_mechanism:
         failures.append(f"{label} machine execution provenance mechanism mismatch")
     if provenance.get("external_controller") is not True:
-        failures.append(f"{label} machine execution provenance must prove external control")
+        failures.append(
+            f"{label} machine execution provenance must prove external control"
+        )
     if provenance.get("process_local_mock") is not False:
-        failures.append(f"{label} machine execution provenance process_local_mock must be false")
+        failures.append(
+            f"{label} machine execution provenance process_local_mock must be false"
+        )
 
     event_log_path = _validate_q11_bound_artifact(
         root,
@@ -1393,7 +1712,9 @@ def _validate_q11_session_audio_case(
         return
 
     if audio.get("operation_id") != EXPECTED_Q11_AUDIO_OPERATION_ID:
-        failures.append(f"{label} operation_id must bind the registered session-volume operation")
+        failures.append(
+            f"{label} operation_id must bind the registered session-volume operation"
+        )
     if audio.get("transport") != EXPECTED_Q11_AUDIO_TRANSPORT:
         failures.append(f"{label} transport must be org.linura.Session1")
     if audio.get("provider") != EXPECTED_Q11_AUDIO_PROVIDER:
@@ -1416,7 +1737,9 @@ def _validate_q11_session_audio_case(
         or not object_serial.isdigit()
         or int(object_serial) <= 0
     ):
-        failures.append(f"{label} object_serial must be a positive PipeWire object serial")
+        failures.append(
+            f"{label} object_serial must be a positive PipeWire object serial"
+        )
         object_serial = None
     node_name = audio.get("node_name")
     if not _nonempty_string(node_name):
@@ -1424,14 +1747,14 @@ def _validate_q11_session_audio_case(
         node_name = None
     requested_volume = audio.get("requested_volume_percent")
     if type(requested_volume) is not int or not 0 <= requested_volume <= 100:
-        failures.append(f"{label} requested_volume_percent must be an integer in 0..100")
+        failures.append(
+            f"{label} requested_volume_percent must be an integer in 0..100"
+        )
         requested_volume = None
 
     manifest_source = manifest.get("source")
     source_sha = (
-        manifest_source.get("commit_sha")
-        if isinstance(manifest_source, dict)
-        else None
+        manifest_source.get("commit_sha") if isinstance(manifest_source, dict) else None
     )
     run_id = manifest.get("run_id")
 
@@ -1449,7 +1772,10 @@ def _validate_q11_session_audio_case(
             return None
         if observation.get("schema_version") != 1:
             failures.append(f"{label} {phase} observation schema_version must be 1")
-        if observation.get("artifact_type") != "linura-v010-physical-session-audio-observation":
+        if (
+            observation.get("artifact_type")
+            != "linura-v010-physical-session-audio-observation"
+        ):
             failures.append(f"{label} {phase} observation artifact_type drifted")
         expected = {
             "source_commit_sha": source_sha,
@@ -1469,35 +1795,46 @@ def _validate_q11_session_audio_case(
                 failures.append(f"{label} {phase} observation {key} mismatch")
         volume = observation.get("volume_percent")
         if type(volume) is not int or not 0 <= volume <= 100:
-            failures.append(f"{label} {phase} observation volume_percent must be an integer in 0..100")
+            failures.append(
+                f"{label} {phase} observation volume_percent must be an integer in 0..100"
+            )
         observed_ns = observation.get("observed_monotonic_ns")
         if type(observed_ns) is not int or observed_ns <= 0:
-            failures.append(f"{label} {phase} observation observed_monotonic_ns must be positive")
+            failures.append(
+                f"{label} {phase} observation observed_monotonic_ns must be positive"
+            )
         return observation
 
     before = load_observation(audio.get("pre_effect_observation"), "pre-effect")
     after = load_observation(audio.get("post_effect_observation"), "post-effect")
     if before and after and requested_volume is not None:
         if before.get("volume_percent") == requested_volume:
-            failures.append(f"{label} pre-effect volume must differ from the requested volume")
+            failures.append(
+                f"{label} pre-effect volume must differ from the requested volume"
+            )
         if after.get("volume_percent") != requested_volume:
-            failures.append(f"{label} post-effect observation must verify the requested volume")
+            failures.append(
+                f"{label} post-effect observation must verify the requested volume"
+            )
         before_ns = before.get("observed_monotonic_ns")
         after_ns = after.get("observed_monotonic_ns")
-        if (
-            type(before_ns) is int
-            and type(after_ns) is int
-            and after_ns <= before_ns
-        ):
-            failures.append(f"{label} post-effect observation must be newer than pre-effect evidence")
+        if type(before_ns) is int and type(after_ns) is int and after_ns <= before_ns:
+            failures.append(
+                f"{label} post-effect observation must be newer than pre-effect evidence"
+            )
 
     scenarios = audio.get("scenario_evidence")
-    if not isinstance(scenarios, dict) or set(scenarios) != set(EXPECTED_Q11_AUDIO_SCENARIOS):
+    if not isinstance(scenarios, dict) or set(scenarios) != set(
+        EXPECTED_Q11_AUDIO_SCENARIOS
+    ):
         failures.append(
             f"{label} must retain exactly executor-failure, timeout and restart-recovery scenario evidence"
         )
     else:
-        for scenario, (fault_injection, expected_result) in EXPECTED_Q11_AUDIO_SCENARIOS.items():
+        for scenario, (
+            fault_injection,
+            expected_result,
+        ) in EXPECTED_Q11_AUDIO_SCENARIOS.items():
             path = _validate_q11_bound_artifact(
                 root,
                 scenarios.get(scenario),
@@ -1511,7 +1848,10 @@ def _validate_q11_session_audio_case(
                 continue
             if evidence.get("schema_version") != 1:
                 failures.append(f"{label} {scenario} scenario schema_version must be 1")
-            if evidence.get("artifact_type") != "linura-v010-physical-session-audio-scenario":
+            if (
+                evidence.get("artifact_type")
+                != "linura-v010-physical-session-audio-scenario"
+            ):
                 failures.append(f"{label} {scenario} scenario artifact_type drifted")
             expected = {
                 "source_commit_sha": source_sha,
@@ -1534,19 +1874,31 @@ def _validate_q11_session_audio_case(
                 if evidence.get(key) != expected_value:
                     failures.append(f"{label} {scenario} scenario {key} mismatch")
             if evidence.get("authoritative_state_reobserved") is not True:
-                failures.append(f"{label} {scenario} scenario must reobserve authoritative state")
+                failures.append(
+                    f"{label} {scenario} scenario must reobserve authoritative state"
+                )
             if scenario in {"executor-failure", "timeout"}:
                 if evidence.get("success_fabricated") is not False:
-                    failures.append(f"{label} {scenario} scenario must not fabricate success")
+                    failures.append(
+                        f"{label} {scenario} scenario must not fabricate success"
+                    )
             else:
                 if evidence.get("service_restarted") != "linurad":
-                    failures.append(f"{label} restart-recovery scenario must restart linurad")
+                    failures.append(
+                        f"{label} restart-recovery scenario must restart linurad"
+                    )
                 if evidence.get("post_restart_resource") != resource:
-                    failures.append(f"{label} restart-recovery scenario must reobserve the exact resource")
+                    failures.append(
+                        f"{label} restart-recovery scenario must reobserve the exact resource"
+                    )
                 if evidence.get("post_restart_object_serial") != object_serial:
-                    failures.append(f"{label} restart-recovery scenario must reobserve the exact object serial")
+                    failures.append(
+                        f"{label} restart-recovery scenario must reobserve the exact object serial"
+                    )
                 if evidence.get("post_restart_volume_percent") != requested_volume:
-                    failures.append(f"{label} restart-recovery scenario must reobserve the requested volume")
+                    failures.append(
+                        f"{label} restart-recovery scenario must reobserve the requested volume"
+                    )
 
     machine_execution = attestation.get("machine_execution")
     provenance_binding = (
@@ -1561,7 +1913,9 @@ def _validate_q11_session_audio_case(
         failures=failures,
     )
     if provenance_path is not None:
-        provenance = _load_json(provenance_path, f"{label} execution provenance", failures)
+        provenance = _load_json(
+            provenance_path, f"{label} execution provenance", failures
+        )
         event_binding = provenance.get("event_log") if provenance else None
         event_path = _validate_q11_bound_artifact(
             root,
@@ -1624,13 +1978,21 @@ def _validate_interactive_workstation_evidence(
     if manifest.get("profile_id") != EXPECTED_PROFILE:
         failures.append("interactive workstation evidence must bind arch-hyprland-v1")
     if manifest.get("machine_class") != EXPECTED_MACHINE_CLASS:
-        failures.append("interactive workstation evidence machine_class must be workstation")
+        failures.append(
+            "interactive workstation evidence machine_class must be workstation"
+        )
     if manifest.get("evidence_type") != "maintainer-physical-workstation":
-        failures.append("interactive workstation evidence_type must be maintainer-physical-workstation")
+        failures.append(
+            "interactive workstation evidence_type must be maintainer-physical-workstation"
+        )
     if manifest.get("evidence_tier") != "maintainer_hardware":
-        failures.append("interactive workstation evidence_tier must be maintainer_hardware")
+        failures.append(
+            "interactive workstation evidence_tier must be maintainer_hardware"
+        )
     if manifest.get("physical_hardware") is not True:
-        failures.append("interactive workstation evidence must attest physical_hardware=true")
+        failures.append(
+            "interactive workstation evidence must attest physical_hardware=true"
+        )
     if manifest.get("result") != "passed":
         failures.append("interactive workstation evidence result must be passed")
     if not _nonempty_string(manifest.get("run_id")):
@@ -1639,7 +2001,9 @@ def _validate_interactive_workstation_evidence(
         failures.append("interactive workstation evidence requires captured_at_utc")
     fixture = manifest.get("fixture")
     if not isinstance(fixture, dict) or set(fixture) != {"fixture_id", "contract"}:
-        failures.append("interactive workstation evidence requires exactly one enrolled fixture binding")
+        failures.append(
+            "interactive workstation evidence requires exactly one enrolled fixture binding"
+        )
     else:
         fixture_id = fixture.get("fixture_id")
         if (
@@ -1647,15 +2011,22 @@ def _validate_interactive_workstation_evidence(
             or not fixture_id
             or len(fixture_id) > 64
             or not fixture_id[0].isalnum()
-            or any(ch not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-" for ch in fixture_id)
+            or any(
+                ch
+                not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+                for ch in fixture_id
+            )
         ):
             failures.append("interactive workstation fixture identifier is invalid")
         fixture_binding = fixture.get("contract")
         if (
             not isinstance(fixture_binding, dict)
-            or fixture_binding.get("path") != "qualification/v010/interactive-workstation/fixture-contract.json"
+            or fixture_binding.get("path")
+            != "qualification/v010/interactive-workstation/fixture-contract.json"
         ):
-            failures.append("interactive workstation fixture contract path must be canonical")
+            failures.append(
+                "interactive workstation fixture contract path must be canonical"
+            )
         fixture_path = _validate_q11_bound_artifact(
             root,
             fixture_binding,
@@ -1664,7 +2035,9 @@ def _validate_interactive_workstation_evidence(
         )
         if fixture_path is not None:
             fixture_document = _load_json(
-                fixture_path, "interactive workstation enrolled fixture contract", failures
+                fixture_path,
+                "interactive workstation enrolled fixture contract",
+                failures,
             )
             if fixture_document is not None:
                 expected_fixture = {
@@ -1676,7 +2049,9 @@ def _validate_interactive_workstation_evidence(
                     "physical_hardware": True,
                 }
                 if fixture_document != expected_fixture:
-                    failures.append("interactive workstation enrolled fixture contract payload mismatch")
+                    failures.append(
+                        "interactive workstation enrolled fixture contract payload mismatch"
+                    )
     if expected_package_manifest_sha256 is None or expected_provider_versions is None:
         failures.append(
             "interactive workstation evidence requires the frozen qualification package manifest"
@@ -1694,11 +2069,17 @@ def _validate_interactive_workstation_evidence(
     else:
         commit_sha = source.get("commit_sha")
         if not isinstance(commit_sha, str) or not GIT_SHA_RE.fullmatch(commit_sha):
-            failures.append("interactive workstation source.commit_sha must be a lowercase 40-hex Git SHA")
+            failures.append(
+                "interactive workstation source.commit_sha must be a lowercase 40-hex Git SHA"
+            )
         elif expected_source_sha is None:
-            failures.append("interactive workstation evidence requires an expected release source SHA")
+            failures.append(
+                "interactive workstation evidence requires an expected release source SHA"
+            )
         elif commit_sha != expected_source_sha:
-            failures.append("interactive workstation source.commit_sha does not match the expected release source")
+            failures.append(
+                "interactive workstation source.commit_sha does not match the expected release source"
+            )
         expected_binary_digests = {
             "linurad_sha256": expected_linurad_sha256,
             "shell_bridge_sha256": expected_shell_bridge_sha256,
@@ -1706,7 +2087,9 @@ def _validate_interactive_workstation_evidence(
         for key, expected_digest in expected_binary_digests.items():
             value = source.get(key)
             if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
-                failures.append(f"interactive workstation source.{key} must be a lowercase SHA-256 digest")
+                failures.append(
+                    f"interactive workstation source.{key} must be a lowercase SHA-256 digest"
+                )
                 continue
             if expected_digest is not None and value != expected_digest:
                 failures.append(
@@ -1723,8 +2106,13 @@ def _validate_interactive_workstation_evidence(
         failures.append("interactive workstation evidence missing hardware identities")
     else:
         cpu = hardware.get("cpu")
-        if not isinstance(cpu, dict) or any(not _nonempty_string(cpu.get(key)) for key in ("architecture", "vendor", "model")):
-            failures.append("interactive workstation CPU identity must include architecture, vendor and model")
+        if not isinstance(cpu, dict) or any(
+            not _nonempty_string(cpu.get(key))
+            for key in ("architecture", "vendor", "model")
+        ):
+            failures.append(
+                "interactive workstation CPU identity must include architecture, vendor and model"
+            )
         else:
             if expected_architecture is None:
                 failures.append(
@@ -1735,19 +2123,30 @@ def _validate_interactive_workstation_evidence(
                     "interactive workstation CPU architecture must match the frozen qualification substrate"
                 )
         gpu = hardware.get("gpu")
-        if not isinstance(gpu, dict) or any(not _nonempty_string(gpu.get(key)) for key in ("vendor_id", "device_id", "driver", "driver_version")):
-            failures.append("interactive workstation GPU identity must include vendor/device/driver/version")
+        if not isinstance(gpu, dict) or any(
+            not _nonempty_string(gpu.get(key))
+            for key in ("vendor_id", "device_id", "driver", "driver_version")
+        ):
+            failures.append(
+                "interactive workstation GPU identity must include vendor/device/driver/version"
+            )
         displays = hardware.get("displays")
         if not isinstance(displays, list) or not displays or len(displays) > 16:
-            failures.append("interactive workstation evidence requires 1..16 identified displays")
+            failures.append(
+                "interactive workstation evidence requires 1..16 identified displays"
+            )
         else:
             for index, display in enumerate(displays):
                 if not isinstance(display, dict):
-                    failures.append(f"interactive workstation display {index} must be an object")
+                    failures.append(
+                        f"interactive workstation display {index} must be an object"
+                    )
                     continue
                 connector = display.get("connector")
                 if not _nonempty_string(connector):
-                    failures.append(f"interactive workstation display {index} requires connector identity")
+                    failures.append(
+                        f"interactive workstation display {index} requires connector identity"
+                    )
                 elif connector in display_by_connector:
                     failures.append(
                         f"interactive workstation display {index} duplicates connector {connector}"
@@ -1757,10 +2156,18 @@ def _validate_interactive_workstation_evidence(
                 for key in ("width", "height", "refresh_millihz"):
                     value = display.get(key)
                     if type(value) is not int or value <= 0:
-                        failures.append(f"interactive workstation display {index}.{key} must be a positive integer")
+                        failures.append(
+                            f"interactive workstation display {index}.{key} must be a positive integer"
+                        )
                 scale = display.get("scale")
-                if not isinstance(scale, (int, float)) or isinstance(scale, bool) or scale <= 0:
-                    failures.append(f"interactive workstation display {index}.scale must be positive")
+                if (
+                    not isinstance(scale, (int, float))
+                    or isinstance(scale, bool)
+                    or scale <= 0
+                ):
+                    failures.append(
+                        f"interactive workstation display {index}.scale must be positive"
+                    )
 
     session = manifest.get("session")
     if not isinstance(session, dict):
@@ -1769,7 +2176,9 @@ def _validate_interactive_workstation_evidence(
         if session.get("protocol") != "wayland":
             failures.append("interactive workstation session.protocol must be wayland")
         if session.get("compositor") != "hyprland":
-            failures.append("interactive workstation session.compositor must be hyprland")
+            failures.append(
+                "interactive workstation session.compositor must be hyprland"
+            )
         for key in (
             "compositor_version",
             "quickshell_version",
@@ -1778,7 +2187,9 @@ def _validate_interactive_workstation_evidence(
             "systemd_version",
         ):
             if not _nonempty_string(session.get(key)):
-                failures.append(f"interactive workstation session.{key} must be non-empty")
+                failures.append(
+                    f"interactive workstation session.{key} must be non-empty"
+                )
         for key, package_name in EXPECTED_Q11_SESSION_PACKAGE_VERSIONS.items():
             value = session.get(key)
             if not _nonempty_string(value):
@@ -1801,9 +2212,13 @@ def _validate_interactive_workstation_evidence(
     providers = manifest.get("providers")
     required_provider_ids = EXPECTED_INTERACTIVE_WORKSTATION["required_provider_ids"]
     if not isinstance(providers, dict) or set(providers) != set(required_provider_ids):
-        failures.append("interactive workstation provider identities must match the required provider set")
+        failures.append(
+            "interactive workstation provider identities must match the required provider set"
+        )
     elif expected_provider_versions is None:
-        failures.append("interactive workstation provider versions require a frozen package manifest")
+        failures.append(
+            "interactive workstation provider versions require a frozen package manifest"
+        )
     else:
         for provider_id in required_provider_ids:
             expected_version = expected_provider_versions.get(provider_id)
@@ -1829,7 +2244,9 @@ def _validate_interactive_workstation_evidence(
     cases = manifest.get("cases")
     required_cases = EXPECTED_INTERACTIVE_WORKSTATION["required_cases"]
     if not isinstance(cases, list) or len(cases) != len(required_cases):
-        failures.append("interactive workstation evidence must contain exactly the required Q11 cases")
+        failures.append(
+            "interactive workstation evidence must contain exactly the required Q11 cases"
+        )
         return
     by_name: dict[str, dict[str, object]] = {}
     for index, case in enumerate(cases):
@@ -1838,16 +2255,22 @@ def _validate_interactive_workstation_evidence(
             continue
         name = case.get("name")
         if not isinstance(name, str) or name in by_name:
-            failures.append(f"interactive workstation case {index} has invalid or duplicate name")
+            failures.append(
+                f"interactive workstation case {index} has invalid or duplicate name"
+            )
             continue
         by_name[name] = case
     if set(by_name) != set(required_cases):
-        failures.append("interactive workstation Q11 case set drifted from the qualification contract")
+        failures.append(
+            "interactive workstation Q11 case set drifted from the qualification contract"
+        )
         return
     for name in required_cases:
         case = by_name[name]
         if case.get("result") != "passed":
-            failures.append(f"interactive workstation case {name} must have result=passed")
+            failures.append(
+                f"interactive workstation case {name} must have result=passed"
+            )
         evidence_path = _bounded_regular_path(
             root,
             case.get("evidence"),
@@ -1857,9 +2280,13 @@ def _validate_interactive_workstation_evidence(
         )
         digest = case.get("sha256")
         if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
-            failures.append(f"interactive workstation case {name} requires a lowercase SHA-256 digest")
+            failures.append(
+                f"interactive workstation case {name} requires a lowercase SHA-256 digest"
+            )
         elif evidence_path is not None and _sha256(evidence_path) != digest:
-            failures.append(f"interactive workstation case {name} evidence digest mismatch")
+            failures.append(
+                f"interactive workstation case {name} evidence digest mismatch"
+            )
         elif evidence_path is not None and source_valid:
             expected_values: dict[str, object] = {
                 observation_name: True
@@ -1913,7 +2340,10 @@ def _validate_interactive_workstation_evidence(
                         failures=failures,
                     )
                     if isinstance(visual_binding, dict):
-                        if visual_binding.get("environment_sha256") != environment_sha256:
+                        if (
+                            visual_binding.get("environment_sha256")
+                            != environment_sha256
+                        ):
                             failures.append(
                                 "interactive workstation physical accessibility visual artifact must bind the physical machine environment"
                             )
@@ -1931,7 +2361,8 @@ def _validate_interactive_workstation_evidence(
                         if (
                             not isinstance(provenance_sha256, str)
                             or not SHA256_RE.fullmatch(provenance_sha256)
-                            or visual_binding.get("execution_provenance_sha256") != provenance_sha256
+                            or visual_binding.get("execution_provenance_sha256")
+                            != provenance_sha256
                         ):
                             failures.append(
                                 "interactive workstation physical accessibility visual artifact must bind the case execution provenance"
@@ -1969,11 +2400,17 @@ def _validate_interactive_workstation_evidence(
                                     display_scale = display.get("scale")
                                     if type(display_width) is int and display_width > 0:
                                         expected_visual_width = display_width
-                                    if type(display_height) is int and display_height > 0:
+                                    if (
+                                        type(display_height) is int
+                                        and display_height > 0
+                                    ):
                                         expected_visual_height = display_height
 
                                     capture_width = capture.get("pixel_width")
-                                    if type(capture_width) is not int or capture_width <= 0:
+                                    if (
+                                        type(capture_width) is not int
+                                        or capture_width <= 0
+                                    ):
                                         failures.append(
                                             "interactive workstation physical accessibility visual artifact capture.pixel_width must be a positive integer"
                                         )
@@ -1983,7 +2420,10 @@ def _validate_interactive_workstation_evidence(
                                         )
 
                                     capture_height = capture.get("pixel_height")
-                                    if type(capture_height) is not int or capture_height <= 0:
+                                    if (
+                                        type(capture_height) is not int
+                                        or capture_height <= 0
+                                    ):
                                         failures.append(
                                             "interactive workstation physical accessibility visual artifact capture.pixel_height must be a positive integer"
                                         )
@@ -2039,11 +2479,15 @@ def _load_release_machine_package_inventory(
             continue
         fields = line.split("\t")
         if len(fields) != 2:
-            failures.append(f"{label} line {line_number} must contain name and exact version")
+            failures.append(
+                f"{label} line {line_number} must contain name and exact version"
+            )
             continue
         name, version = fields
         if not PACKAGE_NAME_RE.fullmatch(name) or not _valid_exact_version(version):
-            failures.append(f"{label} line {line_number} has an invalid package identity")
+            failures.append(
+                f"{label} line {line_number} has an invalid package identity"
+            )
             continue
         if name in packages:
             failures.append(f"{label} contains duplicate package {name}")
@@ -2122,31 +2566,50 @@ def _validate_release_machine_environment(
     if environment.get("artifact_type") != "linura-v010-machine-environment":
         failures.append(f"{label} machine environment artifact_type drifted")
     if environment.get("source_commit_sha") != source_sha:
-        failures.append(f"{label} machine environment source must match the qualification source")
+        failures.append(
+            f"{label} machine environment source must match the qualification source"
+        )
     if environment.get("run_id") != run_id:
-        failures.append(f"{label} machine environment run_id must match the parent qualification run")
+        failures.append(
+            f"{label} machine environment run_id must match the parent qualification run"
+        )
     if environment.get("profile_id") != EXPECTED_PROFILE:
         failures.append(f"{label} machine environment must bind {EXPECTED_PROFILE}")
     if environment.get("machine_class") != EXPECTED_MACHINE_CLASS:
-        failures.append(f"{label} machine environment machine_class must be workstation")
-    if expected_profile_sha256 is None or environment.get("profile_sha256") != expected_profile_sha256:
-        failures.append(f"{label} machine environment must bind the reviewed workstation profile digest")
+        failures.append(
+            f"{label} machine environment machine_class must be workstation"
+        )
+    if (
+        expected_profile_sha256 is None
+        or environment.get("profile_sha256") != expected_profile_sha256
+    ):
+        failures.append(
+            f"{label} machine environment must bind the reviewed workstation profile digest"
+        )
     if (
         expected_package_manifest_sha256 is None
         or expected_package_versions is None
         or expected_architecture is None
     ):
-        failures.append(f"{label} machine environment requires a frozen qualification package manifest")
+        failures.append(
+            f"{label} machine environment requires a frozen qualification package manifest"
+        )
     elif environment.get("package_manifest_sha256") != expected_package_manifest_sha256:
-        failures.append(f"{label} machine environment package manifest digest must match the frozen substrate")
+        failures.append(
+            f"{label} machine environment package manifest digest must match the frozen substrate"
+        )
 
     runtime = environment.get("runtime")
     if expected_runtime_digests is None:
-        failures.append(f"{label} machine environment requires qualified Linura runtime digests")
+        failures.append(
+            f"{label} machine environment requires qualified Linura runtime digests"
+        )
     elif not isinstance(runtime, dict):
         failures.append(f"{label} machine environment missing runtime digest binding")
     elif runtime != expected_runtime_digests:
-        failures.append(f"{label} machine environment runtime digests must match the qualification manifest")
+        failures.append(
+            f"{label} machine environment runtime digests must match the qualification manifest"
+        )
 
     execution = environment.get("execution")
     boot_id: str | None = None
@@ -2156,35 +2619,55 @@ def _validate_release_machine_environment(
         failures.append(f"{label} machine environment missing execution identity")
     else:
         if execution.get("scope") != "machine":
-            failures.append(f"{label} machine environment execution.scope must be machine")
-        environment_kind = execution.get("kind") if isinstance(execution.get("kind"), str) else None
+            failures.append(
+                f"{label} machine environment execution.scope must be machine"
+            )
+        environment_kind = (
+            execution.get("kind") if isinstance(execution.get("kind"), str) else None
+        )
         if environment_kind not in {"physical", "virtual-machine"}:
-            failures.append(f"{label} machine environment execution.kind must be physical or virtual-machine")
+            failures.append(
+                f"{label} machine environment execution.kind must be physical or virtual-machine"
+            )
         if execution.get("architecture") != expected_architecture:
-            failures.append(f"{label} machine environment architecture must match the frozen substrate")
+            failures.append(
+                f"{label} machine environment architecture must match the frozen substrate"
+            )
         boot_value = execution.get("boot_id")
         if not isinstance(boot_value, str) or BOOT_ID_RE.fullmatch(boot_value) is None:
-            failures.append(f"{label} machine environment boot_id must be a canonical UUID")
+            failures.append(
+                f"{label} machine environment boot_id must be a canonical UUID"
+            )
         else:
             boot_id = boot_value
         virtualization_value = execution.get("virtualization")
         if not _nonempty_string(virtualization_value):
-            failures.append(f"{label} machine environment virtualization identity must be non-empty")
+            failures.append(
+                f"{label} machine environment virtualization identity must be non-empty"
+            )
         else:
             virtualization = str(virtualization_value)
             if environment_kind == "physical" and virtualization != "none":
-                failures.append(f"{label} physical machine environment must report virtualization=none")
+                failures.append(
+                    f"{label} physical machine environment must report virtualization=none"
+                )
             if environment_kind == "virtual-machine" and virtualization == "none":
-                failures.append(f"{label} virtual-machine environment must identify its virtualization")
+                failures.append(
+                    f"{label} virtual-machine environment must identify its virtualization"
+                )
 
     storage = environment.get("storage")
     if not isinstance(storage, dict):
         failures.append(f"{label} machine environment missing storage identity")
     else:
         if storage.get("root_filesystem") != "btrfs":
-            failures.append(f"{label} machine environment root filesystem must be btrfs")
+            failures.append(
+                f"{label} machine environment root filesystem must be btrfs"
+            )
         if storage.get("snapshot_provider") != "snapper":
-            failures.append(f"{label} machine environment snapshot provider must be snapper")
+            failures.append(
+                f"{label} machine environment snapshot provider must be snapper"
+            )
 
     package_inventory_path = _validate_sha256_bound_release_artifact(
         root,
@@ -2198,7 +2681,10 @@ def _validate_release_machine_environment(
             label=f"{label} installed package inventory",
             failures=failures,
         )
-        if observed_packages is not None and observed_packages != expected_package_versions:
+        if (
+            observed_packages is not None
+            and observed_packages != expected_package_versions
+        ):
             failures.append(
                 f"{label} installed package inventory must exactly match the frozen package manifest"
             )
@@ -2225,23 +2711,42 @@ def _validate_release_machine_environment(
         try:
             os_release_lines = {
                 line.strip()
-                for line in probe_paths["os_release"].read_text(encoding="utf-8").splitlines()
+                for line in probe_paths["os_release"]
+                .read_text(encoding="utf-8")
+                .splitlines()
                 if line.strip()
             }
         except UnicodeError:
             failures.append(f"{label} os-release probe must be valid UTF-8")
         else:
-            if "ID=arch" not in os_release_lines and 'ID="arch"' not in os_release_lines:
-                failures.append(f"{label} os-release probe must independently identify Arch Linux")
+            if (
+                "ID=arch" not in os_release_lines
+                and 'ID="arch"' not in os_release_lines
+            ):
+                failures.append(
+                    f"{label} os-release probe must independently identify Arch Linux"
+                )
     if "root_filesystem" in probe_paths:
-        if probe_paths["root_filesystem"].read_text(encoding="utf-8").strip() != "btrfs":
-            failures.append(f"{label} root-filesystem probe must independently identify btrfs")
+        if (
+            probe_paths["root_filesystem"].read_text(encoding="utf-8").strip()
+            != "btrfs"
+        ):
+            failures.append(
+                f"{label} root-filesystem probe must independently identify btrfs"
+            )
     if "virtualization" in probe_paths and virtualization is not None:
-        if probe_paths["virtualization"].read_text(encoding="utf-8").strip() != virtualization:
-            failures.append(f"{label} virtualization probe must match the machine environment identity")
+        if (
+            probe_paths["virtualization"].read_text(encoding="utf-8").strip()
+            != virtualization
+        ):
+            failures.append(
+                f"{label} virtualization probe must match the machine environment identity"
+            )
     if "boot_id" in probe_paths and boot_id is not None:
         if probe_paths["boot_id"].read_text(encoding="utf-8").strip() != boot_id:
-            failures.append(f"{label} boot-id probe must match the machine environment identity")
+            failures.append(
+                f"{label} boot-id probe must match the machine environment identity"
+            )
 
     return environment_sha256, boot_id, environment_kind
 
@@ -2266,8 +2771,13 @@ def _validate_machine_case_execution(
         return
     if execution.get("scope") != "machine":
         failures.append(f"{label} machine_execution.scope must be machine")
-    if environment_sha256 is None or execution.get("environment_sha256") != environment_sha256:
-        failures.append(f"{label} machine_execution must bind the parent machine environment digest")
+    if (
+        environment_sha256 is None
+        or execution.get("environment_sha256") != environment_sha256
+    ):
+        failures.append(
+            f"{label} machine_execution must bind the parent machine environment digest"
+        )
 
     requires_boot_transition = expected_mechanism in BOOT_TRANSITION_MECHANISMS
     pre_boot_id: str | None = None
@@ -2276,7 +2786,9 @@ def _validate_machine_case_execution(
         pre_value = execution.get("pre_boot_id")
         post_value = execution.get("post_boot_id")
         if not isinstance(pre_value, str) or BOOT_ID_RE.fullmatch(pre_value) is None:
-            failures.append(f"{label} machine_execution pre_boot_id must be a canonical UUID")
+            failures.append(
+                f"{label} machine_execution pre_boot_id must be a canonical UUID"
+            )
         else:
             pre_boot_id = pre_value
             if environment_boot_id is None or pre_boot_id != environment_boot_id:
@@ -2284,7 +2796,9 @@ def _validate_machine_case_execution(
                     f"{label} machine_execution pre_boot_id must bind the parent machine boot identity"
                 )
         if not isinstance(post_value, str) or BOOT_ID_RE.fullmatch(post_value) is None:
-            failures.append(f"{label} machine_execution post_boot_id must be a canonical UUID")
+            failures.append(
+                f"{label} machine_execution post_boot_id must be a canonical UUID"
+            )
         else:
             post_boot_id = post_value
             if pre_boot_id is not None and post_boot_id == pre_boot_id:
@@ -2296,7 +2810,9 @@ def _validate_machine_case_execution(
                 f"{label} rebooting machine_execution must use pre_boot_id/post_boot_id instead of boot_id"
             )
     elif environment_boot_id is None or execution.get("boot_id") != environment_boot_id:
-        failures.append(f"{label} machine_execution must bind the parent machine boot identity")
+        failures.append(
+            f"{label} machine_execution must bind the parent machine boot identity"
+        )
 
     controller = execution.get("controller")
     allowed_controllers = (
@@ -2305,7 +2821,9 @@ def _validate_machine_case_execution(
         else VM_EXTERNAL_CONTROLLERS
     )
     if controller not in allowed_controllers:
-        failures.append(f"{label} machine_execution controller must be externally controlled")
+        failures.append(
+            f"{label} machine_execution controller must be externally controlled"
+        )
     mechanism = execution.get("mechanism")
     if mechanism != expected_mechanism:
         failures.append(
@@ -2320,24 +2838,38 @@ def _validate_machine_case_execution(
     )
     if provenance_path is None:
         return
-    provenance = _load_json(provenance_path, f"{label} machine execution provenance", failures)
+    provenance = _load_json(
+        provenance_path, f"{label} machine execution provenance", failures
+    )
     if not provenance:
         return
     if provenance.get("schema_version") != 1:
-        failures.append(f"{label} machine execution provenance schema_version must be 1")
+        failures.append(
+            f"{label} machine execution provenance schema_version must be 1"
+        )
     if provenance.get("artifact_type") != "linura-v010-machine-case-provenance":
         failures.append(f"{label} machine execution provenance artifact_type drifted")
     if provenance.get("source_commit_sha") != source_sha:
-        failures.append(f"{label} machine execution provenance source must match the qualification source")
+        failures.append(
+            f"{label} machine execution provenance source must match the qualification source"
+        )
     if provenance.get("run_id") != run_id or provenance.get("case") != case_name:
-        failures.append(f"{label} machine execution provenance must bind the parent run and case")
+        failures.append(
+            f"{label} machine execution provenance must bind the parent run and case"
+        )
     if provenance.get("environment_sha256") != environment_sha256:
-        failures.append(f"{label} machine execution provenance environment binding mismatch")
+        failures.append(
+            f"{label} machine execution provenance environment binding mismatch"
+        )
     if requires_boot_transition:
         if provenance.get("pre_boot_id") != pre_boot_id:
-            failures.append(f"{label} machine execution provenance pre_boot_id mismatch")
+            failures.append(
+                f"{label} machine execution provenance pre_boot_id mismatch"
+            )
         if provenance.get("post_boot_id") != post_boot_id:
-            failures.append(f"{label} machine execution provenance post_boot_id mismatch")
+            failures.append(
+                f"{label} machine execution provenance post_boot_id mismatch"
+            )
         if "boot_id" in provenance:
             failures.append(
                 f"{label} rebooting machine execution provenance must use pre_boot_id/post_boot_id"
@@ -2350,7 +2882,9 @@ def _validate_machine_case_execution(
         )
         if post_boot_probe_path is not None and post_boot_id is not None:
             try:
-                observed_post_boot_id = post_boot_probe_path.read_text(encoding="utf-8").strip()
+                observed_post_boot_id = post_boot_probe_path.read_text(
+                    encoding="utf-8"
+                ).strip()
             except UnicodeError:
                 failures.append(f"{label} recovered boot probe must be valid UTF-8")
             else:
@@ -2367,9 +2901,13 @@ def _validate_machine_case_execution(
     if provenance.get("mechanism") != expected_mechanism:
         failures.append(f"{label} machine execution provenance mechanism mismatch")
     if provenance.get("external_controller") is not True:
-        failures.append(f"{label} machine execution provenance must prove external control")
+        failures.append(
+            f"{label} machine execution provenance must prove external control"
+        )
     if provenance.get("process_local_mock") is not False:
-        failures.append(f"{label} machine execution provenance process_local_mock must be false")
+        failures.append(
+            f"{label} machine execution provenance process_local_mock must be false"
+        )
 
     event_log_path = _validate_sha256_bound_release_artifact(
         root,
@@ -2392,7 +2930,11 @@ def _validate_machine_case_execution(
                 f"run_id={run_id}",
                 "scope=machine",
             }
-            if requires_boot_transition and pre_boot_id is not None and post_boot_id is not None:
+            if (
+                requires_boot_transition
+                and pre_boot_id is not None
+                and post_boot_id is not None
+            ):
                 required_event_lines.update(
                     {
                         f"pre_boot_id={pre_boot_id}",
@@ -2456,7 +2998,9 @@ def _validate_release_matrix_evidence(
     elif expected_source_sha is None:
         failures.append(f"{label} evidence requires an expected release source SHA")
     elif source_sha != expected_source_sha:
-        failures.append(f"{label} source_commit_sha does not match the expected release source")
+        failures.append(
+            f"{label} source_commit_sha does not match the expected release source"
+        )
 
     environment_sha256: str | None = None
     environment_boot_id: str | None = None
@@ -2468,10 +3012,14 @@ def _validate_release_matrix_evidence(
     }:
         runtime = manifest.get("runtime")
         if not isinstance(runtime, dict):
-            failures.append(f"{label} evidence requires qualified Linura runtime digests")
+            failures.append(
+                f"{label} evidence requires qualified Linura runtime digests"
+            )
         else:
             if runtime.get("source_commit_sha") != source_sha:
-                failures.append(f"{label} runtime source must match the qualification source")
+                failures.append(
+                    f"{label} runtime source must match the qualification source"
+                )
             runtime_digests = {}
             for key, expected_digest in (
                 ("linurad_sha256", expected_linurad_sha256),
@@ -2479,7 +3027,9 @@ def _validate_release_matrix_evidence(
             ):
                 value = runtime.get(key)
                 if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
-                    failures.append(f"{label} runtime.{key} must be a lowercase SHA-256 digest")
+                    failures.append(
+                        f"{label} runtime.{key} must be a lowercase SHA-256 digest"
+                    )
                     runtime_digests = None
                     continue
                 if expected_digest is not None and value != expected_digest:
@@ -2492,18 +3042,20 @@ def _validate_release_matrix_evidence(
                     )
                 if runtime_digests is not None:
                     runtime_digests[key] = value
-        environment_sha256, environment_boot_id, environment_kind = _validate_release_machine_environment(
-            root,
-            manifest,
-            label=label,
-            source_sha=source_sha,
-            run_id=manifest_run_id,
-            expected_profile_sha256=expected_profile_sha256,
-            expected_package_manifest_sha256=expected_package_manifest_sha256,
-            expected_package_versions=expected_package_versions,
-            expected_architecture=expected_architecture,
-            expected_runtime_digests=runtime_digests,
-            failures=failures,
+        environment_sha256, environment_boot_id, environment_kind = (
+            _validate_release_machine_environment(
+                root,
+                manifest,
+                label=label,
+                source_sha=source_sha,
+                run_id=manifest_run_id,
+                expected_profile_sha256=expected_profile_sha256,
+                expected_package_manifest_sha256=expected_package_manifest_sha256,
+                expected_package_versions=expected_package_versions,
+                expected_architecture=expected_architecture,
+                expected_runtime_digests=runtime_digests,
+                failures=failures,
+            )
         )
 
     cases = manifest.get("cases")
@@ -2553,21 +3105,34 @@ def _validate_release_matrix_evidence(
                 failures.append(f"{label} case {name} evidence digest mismatch")
             continue
         if evidence_path.suffix != ".json":
-            failures.append(f"{label} case {name} must use a structured JSON runner attestation")
+            failures.append(
+                f"{label} case {name} must use a structured JSON runner attestation"
+            )
             continue
-        attestation = _load_json(evidence_path, f"{label} case evidence {name}", failures)
+        attestation = _load_json(
+            evidence_path, f"{label} case evidence {name}", failures
+        )
         if not attestation:
             continue
         if attestation.get("schema_version") != 1:
             failures.append(f"{label} case {name} attestation schema_version must be 1")
-        if attestation.get("attestation_type") != "linura-v010-release-qualification-case":
+        if (
+            attestation.get("attestation_type")
+            != "linura-v010-release-qualification-case"
+        ):
             failures.append(f"{label} case {name} attestation_type drifted")
         if attestation.get("case") != name or attestation.get("result") != "passed":
-            failures.append(f"{label} case {name} attestation must bind a passed result")
+            failures.append(
+                f"{label} case {name} attestation must bind a passed result"
+            )
         if attestation.get("source_commit_sha") != source_sha:
-            failures.append(f"{label} case {name} attestation source must match the manifest")
+            failures.append(
+                f"{label} case {name} attestation source must match the manifest"
+            )
         if attestation.get("run_id") != manifest_run_id:
-            failures.append(f"{label} case {name} run_id must match the parent qualification run")
+            failures.append(
+                f"{label} case {name} run_id must match the parent qualification run"
+            )
         if not _nonempty_string(attestation.get("captured_at_utc")):
             failures.append(f"{label} case {name} requires captured_at_utc")
         runner = attestation.get("runner")
@@ -2575,11 +3140,15 @@ def _validate_release_matrix_evidence(
             failures.append(f"{label} case {name} missing runner provenance")
         else:
             if runner.get("id") != "qualification/v010/release-matrix-runner":
-                failures.append(f"{label} case {name} runner.id must identify the v0.10 release-matrix runner")
+                failures.append(
+                    f"{label} case {name} runner.id must identify the v0.10 release-matrix runner"
+                )
             if not _nonempty_string(runner.get("version")):
                 failures.append(f"{label} case {name} runner.version must be non-empty")
             if runner.get("commit_sha") != source_sha:
-                failures.append(f"{label} case {name} runner.commit_sha must match the parent source identity")
+                failures.append(
+                    f"{label} case {name} runner.commit_sha must match the parent source identity"
+                )
             if name in case_mechanisms and runtime_digests is not None:
                 for key, digest in runtime_digests.items():
                     if runner.get(key) != digest:
@@ -2609,25 +3178,37 @@ def _validate_release_matrix_evidence(
         by_observation: dict[str, dict[str, object]] = {}
         for index, observation in enumerate(observations):
             if not isinstance(observation, dict):
-                failures.append(f"{label} case {name} observation {index} must be an object")
+                failures.append(
+                    f"{label} case {name} observation {index} must be an object"
+                )
                 continue
             observation_name = observation.get("name")
-            if not isinstance(observation_name, str) or observation_name in by_observation:
-                failures.append(f"{label} case {name} observation {index} has invalid or duplicate name")
+            if (
+                not isinstance(observation_name, str)
+                or observation_name in by_observation
+            ):
+                failures.append(
+                    f"{label} case {name} observation {index} has invalid or duplicate name"
+                )
                 continue
             by_observation[observation_name] = observation
         expected_observations = case_observations[name]
         if set(by_observation) != set(expected_observations):
-            failures.append(f"{label} case {name} observation set does not prove the required case")
+            failures.append(
+                f"{label} case {name} observation set does not prove the required case"
+            )
             continue
         for observation_name in expected_observations:
             observation = by_observation[observation_name]
             if observation.get("result") != "passed":
-                failures.append(f"{label} case {name} observation {observation_name} must pass")
+                failures.append(
+                    f"{label} case {name} observation {observation_name} must pass"
+                )
             if observation.get("value") is not True:
                 failures.append(
                     f"{label} case {name} observation {observation_name} must carry boolean true"
                 )
+
 
 def _matches_canonical_visual_diff(
     baseline: tuple[int, int, bytes],
@@ -2639,7 +3220,9 @@ def _matches_canonical_visual_diff(
     baseline_pixels = baseline[2]
     capture_pixels = capture[2]
     diff_pixels = diff[2]
-    if len(baseline_pixels) != len(capture_pixels) or len(baseline_pixels) != len(diff_pixels):
+    if len(baseline_pixels) != len(capture_pixels) or len(baseline_pixels) != len(
+        diff_pixels
+    ):
         return False
     for offset in range(0, len(baseline_pixels), 4):
         delta = max(
@@ -2683,7 +3266,9 @@ def _validate_experience_evidence(
     )
     baseline_digest = experience.get("visual_baseline_manifest_sha256")
     if not isinstance(baseline_digest, str) or not SHA256_RE.fullmatch(baseline_digest):
-        failures.append("visual_baseline_manifest_sha256 must be a lowercase SHA-256 digest")
+        failures.append(
+            "visual_baseline_manifest_sha256 must be a lowercase SHA-256 digest"
+        )
         return
     if baseline_path is None:
         return
@@ -2691,7 +3276,9 @@ def _validate_experience_evidence(
         failures.append("v0.10 visual baseline manifest digest mismatch")
         return
 
-    baseline_manifest = _load_json(baseline_path, "v0.10 visual baseline manifest", failures)
+    baseline_manifest = _load_json(
+        baseline_path, "v0.10 visual baseline manifest", failures
+    )
     if baseline_manifest.get("schema_version") != 1:
         failures.append("v0.10 visual baseline manifest schema_version must be 1")
     baselines = baseline_manifest.get("baselines") if baseline_manifest else None
@@ -2726,11 +3313,20 @@ def _validate_experience_evidence(
         width = item.get("width")
         height = item.get("height")
         scale = item.get("scale")
-        if not isinstance(baseline_id, str) or not baseline_id or baseline_id in baseline_ids:
-            failures.append(f"visual baseline entry {index} has invalid or duplicate id")
+        if (
+            not isinstance(baseline_id, str)
+            or not baseline_id
+            or baseline_id in baseline_ids
+        ):
+            failures.append(
+                f"visual baseline entry {index} has invalid or duplicate id"
+            )
             continue
         baseline_ids.add(baseline_id)
-        if not isinstance(surface, str) or surface not in EXPECTED_ALLOWED_VISUAL_SURFACES:
+        if (
+            not isinstance(surface, str)
+            or surface not in EXPECTED_ALLOWED_VISUAL_SURFACES
+        ):
             failures.append(f"visual baseline {baseline_id} has unsupported surface")
             continue
         observed_surfaces.add(surface)
@@ -2783,12 +3379,15 @@ def _validate_experience_evidence(
 
     required_visual_surfaces = experience.get("required_visual_surfaces")
     if required_visual_surfaces != EXPECTED_REQUIRED_VISUAL_SURFACES:
-        failures.append("experience required_visual_surfaces drifted from the qualified UI surface set")
+        failures.append(
+            "experience required_visual_surfaces drifted from the qualified UI surface set"
+        )
     else:
         missing_surfaces = sorted(set(required_visual_surfaces) - observed_surfaces)
         if missing_surfaces:
             failures.append(
-                "visual baseline coverage missing required surfaces: " + ", ".join(missing_surfaces)
+                "visual baseline coverage missing required surfaces: "
+                + ", ".join(missing_surfaces)
             )
 
     required_scales = experience.get("representative_visual_scales")
@@ -2796,19 +3395,27 @@ def _validate_experience_evidence(
         not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0
         for value in required_scales
     ):
-        failures.append("experience representative_visual_scales must contain positive numbers")
+        failures.append(
+            "experience representative_visual_scales must contain positive numbers"
+        )
     else:
         missing_scales = sorted(
-            float(value) for value in required_scales if float(value) not in observed_scales
+            float(value)
+            for value in required_scales
+            if float(value) not in observed_scales
         )
         if missing_scales:
-            failures.append(f"visual baseline coverage missing representative scales: {missing_scales}")
+            failures.append(
+                f"visual baseline coverage missing representative scales: {missing_scales}"
+            )
 
     required_resolutions = experience.get("representative_visual_resolutions")
     if not isinstance(required_resolutions, list) or any(
         not isinstance(value, str) or not value for value in required_resolutions
     ):
-        failures.append("experience representative_visual_resolutions must contain non-empty strings")
+        failures.append(
+            "experience representative_visual_resolutions must contain non-empty strings"
+        )
     else:
         missing_resolutions = sorted(set(required_resolutions) - observed_resolutions)
         if missing_resolutions:
@@ -2826,7 +3433,9 @@ def _validate_experience_evidence(
     )
     evidence_digest = experience.get("experience_evidence_manifest_sha256")
     if not isinstance(evidence_digest, str) or not SHA256_RE.fullmatch(evidence_digest):
-        failures.append("experience_evidence_manifest_sha256 must be a lowercase SHA-256 digest")
+        failures.append(
+            "experience_evidence_manifest_sha256 must be a lowercase SHA-256 digest"
+        )
         return
     if evidence_path is None:
         return
@@ -2839,9 +3448,13 @@ def _validate_experience_evidence(
         failures.append("v0.10 experience evidence manifest schema_version must be 1")
     source_sha = evidence.get("source_commit_sha")
     if not isinstance(source_sha, str) or not GIT_SHA_RE.fullmatch(source_sha):
-        failures.append("v0.10 experience evidence source_commit_sha must be a lowercase 40-hex Git SHA")
+        failures.append(
+            "v0.10 experience evidence source_commit_sha must be a lowercase 40-hex Git SHA"
+        )
     elif expected_source_sha is None:
-        failures.append("v0.10 experience evidence requires an expected release source SHA")
+        failures.append(
+            "v0.10 experience evidence requires an expected release source SHA"
+        )
     elif source_sha != expected_source_sha:
         failures.append(
             "v0.10 experience evidence source_commit_sha does not match the expected release source"
@@ -2856,7 +3469,9 @@ def _validate_experience_evidence(
         root,
         {
             "evidence_manifest": experience.get("authority_evidence_manifest"),
-            "evidence_manifest_sha256": experience.get("authority_evidence_manifest_sha256"),
+            "evidence_manifest_sha256": experience.get(
+                "authority_evidence_manifest_sha256"
+            ),
         },
         EXPECTED_Q10_AUTHORITY_QUALIFICATION,
         label="Q10 experience authority/adversarial",
@@ -2881,15 +3496,21 @@ def _validate_experience_evidence(
             baseline_id = item.get("baseline_id")
             metadata = baseline_metadata.get(str(baseline_id))
             if baseline_id not in baseline_ids or metadata is None:
-                failures.append(f"visual comparison {index} references unknown or invalid baseline")
+                failures.append(
+                    f"visual comparison {index} references unknown or invalid baseline"
+                )
                 continue
             baseline_key = str(baseline_id)
             if baseline_key in covered_baselines:
-                failures.append(f"visual comparison {index} duplicates baseline {baseline_key}")
+                failures.append(
+                    f"visual comparison {index} duplicates baseline {baseline_key}"
+                )
                 continue
             covered_baselines.add(baseline_key)
             if item.get("status") != "pass" or item.get("reviewed") is not True:
-                failures.append(f"visual comparison for {baseline_id} must be reviewed and passing")
+                failures.append(
+                    f"visual comparison for {baseline_id} must be reviewed and passing"
+                )
             capture_path = _bounded_regular_path(
                 root,
                 item.get("capture"),
@@ -2921,36 +3542,69 @@ def _validate_experience_evidence(
             )
             if capture_attestation is not None:
                 if capture_attestation.get("schema_version") != 1:
-                    failures.append(f"visual capture attestation for {baseline_id} schema_version must be 1")
-                if capture_attestation.get("artifact_type") != "linura-v010-visual-capture-attestation":
-                    failures.append(f"visual capture attestation for {baseline_id} artifact_type drifted")
+                    failures.append(
+                        f"visual capture attestation for {baseline_id} schema_version must be 1"
+                    )
+                if (
+                    capture_attestation.get("artifact_type")
+                    != "linura-v010-visual-capture-attestation"
+                ):
+                    failures.append(
+                        f"visual capture attestation for {baseline_id} artifact_type drifted"
+                    )
                 if capture_attestation.get("source_commit_sha") != source_sha:
-                    failures.append(f"visual capture attestation for {baseline_id} source must match the experience run")
+                    failures.append(
+                        f"visual capture attestation for {baseline_id} source must match the experience run"
+                    )
                 if capture_attestation.get("run_id") != manifest_run_id:
-                    failures.append(f"visual capture attestation for {baseline_id} run_id must match the experience run")
+                    failures.append(
+                        f"visual capture attestation for {baseline_id} run_id must match the experience run"
+                    )
                 if capture_attestation.get("platform") != EXPECTED_PROFILE:
-                    failures.append(f"visual capture attestation for {baseline_id} platform must be {EXPECTED_PROFILE}")
+                    failures.append(
+                        f"visual capture attestation for {baseline_id} platform must be {EXPECTED_PROFILE}"
+                    )
                 if capture_attestation.get("baseline_id") != baseline_id:
-                    failures.append(f"visual capture attestation for {baseline_id} baseline binding mismatch")
-                if capture_attestation.get("capture_sha256") != item.get("capture_sha256"):
-                    failures.append(f"visual capture attestation for {baseline_id} capture digest mismatch")
+                    failures.append(
+                        f"visual capture attestation for {baseline_id} baseline binding mismatch"
+                    )
+                if capture_attestation.get("capture_sha256") != item.get(
+                    "capture_sha256"
+                ):
+                    failures.append(
+                        f"visual capture attestation for {baseline_id} capture digest mismatch"
+                    )
                 capture_runner = capture_attestation.get("runner")
                 if not isinstance(capture_runner, dict):
-                    failures.append(f"visual capture attestation for {baseline_id} missing runner provenance")
+                    failures.append(
+                        f"visual capture attestation for {baseline_id} missing runner provenance"
+                    )
                 else:
-                    if capture_runner.get("id") != "qualification/v010/visual-capture-runner":
-                        failures.append(f"visual capture attestation for {baseline_id} runner.id drifted")
+                    if (
+                        capture_runner.get("id")
+                        != "qualification/v010/visual-capture-runner"
+                    ):
+                        failures.append(
+                            f"visual capture attestation for {baseline_id} runner.id drifted"
+                        )
                     if not _nonempty_string(capture_runner.get("version")):
-                        failures.append(f"visual capture attestation for {baseline_id} runner.version must be non-empty")
+                        failures.append(
+                            f"visual capture attestation for {baseline_id} runner.version must be non-empty"
+                        )
                     if capture_runner.get("source_commit_sha") != source_sha:
-                        failures.append(f"visual capture attestation for {baseline_id} runner source mismatch")
+                        failures.append(
+                            f"visual capture attestation for {baseline_id} runner source mismatch"
+                        )
                     if capture_runner.get("run_id") != manifest_run_id:
-                        failures.append(f"visual capture attestation for {baseline_id} runner run_id mismatch")
+                        failures.append(
+                            f"visual capture attestation for {baseline_id} runner run_id mismatch"
+                        )
             baseline_pixel_digest = baseline_pixel_digests.get(str(baseline_id))
             if (
                 baseline_pixel_digest is not None
                 and capture_image is not None
-                and hashlib.sha256(capture_image[2]).hexdigest() != baseline_pixel_digest
+                and hashlib.sha256(capture_image[2]).hexdigest()
+                != baseline_pixel_digest
             ):
                 failures.append(
                     f"visual comparison for {baseline_id} does not match baseline pixels"
@@ -2958,12 +3612,15 @@ def _validate_experience_evidence(
     missing_comparisons = sorted(baseline_ids - covered_baselines)
     if missing_comparisons:
         failures.append(
-            "visual comparison evidence missing baselines: " + ", ".join(missing_comparisons)
+            "visual comparison evidence missing baselines: "
+            + ", ".join(missing_comparisons)
         )
 
     failure_diffs = evidence.get("retained_failure_diffs")
     if not isinstance(failure_diffs, list) or not failure_diffs:
-        failures.append("v0.10 experience evidence requires at least one retained reviewed failure diff")
+        failures.append(
+            "v0.10 experience evidence requires at least one retained reviewed failure diff"
+        )
     else:
         if len(failure_diffs) > VISUAL_MAX_FAILURE_DIFFS:
             failures.append(
@@ -2981,8 +3638,13 @@ def _validate_experience_evidence(
                 continue
             metadata = baseline_metadata[baseline_id]
             baseline_digest = baseline_digests.get(baseline_id)
-            if baseline_digest is None or item.get("baseline_sha256") != baseline_digest:
-                failures.append(f"{label} baseline digest does not match the reviewed baseline")
+            if (
+                baseline_digest is None
+                or item.get("baseline_sha256") != baseline_digest
+            ):
+                failures.append(
+                    f"{label} baseline digest does not match the reviewed baseline"
+                )
                 continue
             if item.get("status") != "fail":
                 failures.append(f"{label} must record status=fail")
@@ -3025,7 +3687,9 @@ def _validate_experience_evidence(
                 and failed_capture_image is not None
                 and failed_capture_image == baseline_image
             ):
-                failures.append(f"{label} does not represent an actual failed pixel comparison")
+                failures.append(
+                    f"{label} does not represent an actual failed pixel comparison"
+                )
 
             diff_path = _bounded_regular_path(
                 root,
@@ -3078,19 +3742,27 @@ def _validate_experience_evidence(
     if not isinstance(required_surfaces, list) or any(
         not isinstance(value, str) or not value for value in required_surfaces
     ):
-        failures.append("experience required_accessibility_surfaces must contain non-empty strings")
+        failures.append(
+            "experience required_accessibility_surfaces must contain non-empty strings"
+        )
         return
     records: dict[str, dict[str, object]] = {}
     if not isinstance(interactions, list):
-        failures.append("v0.10 experience evidence requires interaction_accessibility reports")
+        failures.append(
+            "v0.10 experience evidence requires interaction_accessibility reports"
+        )
         interactions = []
     for index, item in enumerate(interactions):
         if not isinstance(item, dict) or not isinstance(item.get("surface"), str):
-            failures.append(f"interaction/accessibility evidence {index} must identify a surface")
+            failures.append(
+                f"interaction/accessibility evidence {index} must identify a surface"
+            )
             continue
         surface = item["surface"]
         if surface in records:
-            failures.append(f"interaction/accessibility evidence has duplicate surface: {surface}")
+            failures.append(
+                f"interaction/accessibility evidence has duplicate surface: {surface}"
+            )
             continue
         records[surface] = item
 
@@ -3107,7 +3779,9 @@ def _validate_experience_evidence(
     for surface in required_surfaces:
         record = records.get(surface)
         if record is None:
-            failures.append(f"interaction/accessibility evidence missing surface: {surface}")
+            failures.append(
+                f"interaction/accessibility evidence missing surface: {surface}"
+            )
             continue
         report = _validate_digest_bound_json_artifact(
             root,
@@ -3119,13 +3793,21 @@ def _validate_experience_evidence(
         if report is None:
             continue
         if report.get("schema_version") != 1:
-            failures.append(f"interaction/accessibility report {surface} schema_version must be 1")
+            failures.append(
+                f"interaction/accessibility report {surface} schema_version must be 1"
+            )
         if report.get("artifact_type") != "linura-v010-interaction-accessibility":
-            failures.append(f"interaction/accessibility report {surface} has invalid artifact_type")
+            failures.append(
+                f"interaction/accessibility report {surface} has invalid artifact_type"
+            )
         if report.get("surface") != surface:
-            failures.append(f"interaction/accessibility report {surface} surface binding mismatch")
+            failures.append(
+                f"interaction/accessibility report {surface} surface binding mismatch"
+            )
         if report.get("result") != "pass":
-            failures.append(f"interaction/accessibility report {surface} must record result=pass")
+            failures.append(
+                f"interaction/accessibility report {surface} must record result=pass"
+            )
         if report.get("source_commit_sha") != source_sha:
             failures.append(
                 f"interaction/accessibility report {surface} source must match the experience evidence manifest"
@@ -3137,7 +3819,9 @@ def _validate_experience_evidence(
 
         runner = report.get("runner")
         if not isinstance(runner, dict):
-            failures.append(f"interaction/accessibility report {surface} missing runner identity")
+            failures.append(
+                f"interaction/accessibility report {surface} missing runner identity"
+            )
         else:
             for key in ("name", "version", "run_id", "platform"):
                 value = runner.get(key)
@@ -3160,7 +3844,9 @@ def _validate_experience_evidence(
 
         checks = report.get("checks")
         if not isinstance(checks, dict):
-            failures.append(f"interaction/accessibility report {surface} missing checks")
+            failures.append(
+                f"interaction/accessibility report {surface} missing checks"
+            )
             continue
         for key in required_checks:
             if checks.get(key) != "pass":
@@ -3175,7 +3861,9 @@ def _validate_experience_evidence(
                     "noninteractive regions and bounded interactive controls"
                 )
 
-        expected_workflow_observations = EXPECTED_Q10_SURFACE_WORKFLOW_OBSERVATIONS.get(surface)
+        expected_workflow_observations = EXPECTED_Q10_SURFACE_WORKFLOW_OBSERVATIONS.get(
+            surface
+        )
         workflow_observations = report.get("workflow_observations")
         if expected_workflow_observations is None:
             failures.append(
@@ -3214,7 +3902,9 @@ def _load_required_packages(root: Path, value: object, failures: list[str]) -> s
         )
     path = root / EXPECTED_REQUIRED_PACKAGES_PATH
     if not path.is_file() or path.is_symlink():
-        failures.append(f"required package contract is missing or not a regular file: {path}")
+        failures.append(
+            f"required package contract is missing or not a regular file: {path}"
+        )
         return set()
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -3267,7 +3957,10 @@ def _valid_exact_version(value: str) -> bool:
         bool(value)
         and len(value) <= 256
         and value.isascii()
-        and all(not character.isspace() and ord(character) >= 32 and ord(character) != 127 for character in value)
+        and all(
+            not character.isspace() and ord(character) >= 32 and ord(character) != 127
+            for character in value
+        )
     )
 
 
@@ -3279,7 +3972,9 @@ def _validate_package_manifest(
     failures: list[str],
 ) -> dict[str, str] | None:
     if not path.is_file() or path.is_symlink():
-        failures.append(f"frozen package manifest missing or not a regular file: {path}")
+        failures.append(
+            f"frozen package manifest missing or not a regular file: {path}"
+        )
         return None
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -3293,12 +3988,16 @@ def _validate_package_manifest(
         f"# architecture={architecture}",
     ]
     if lines[:3] != expected_headers:
-        failures.append("frozen package manifest identity headers do not match the qualification substrate")
+        failures.append(
+            "frozen package manifest identity headers do not match the qualification substrate"
+        )
         return None
 
     records = lines[3:]
     if not records:
-        failures.append("frozen package manifest must contain versioned package records")
+        failures.append(
+            "frozen package manifest must contain versioned package records"
+        )
         return None
     if any(not line for line in records):
         failures.append("frozen package manifest must not contain blank record lines")
@@ -3315,35 +4014,51 @@ def _validate_package_manifest(
         repository, name, version, package_arch = fields
         valid = True
         if repository not in OFFICIAL_REPOSITORIES:
-            failures.append(f"frozen package manifest line {line_number} uses a non-official repository")
+            failures.append(
+                f"frozen package manifest line {line_number} uses a non-official repository"
+            )
             valid = False
         if not PACKAGE_NAME_RE.fullmatch(name):
-            failures.append(f"frozen package manifest line {line_number} has an invalid package name")
+            failures.append(
+                f"frozen package manifest line {line_number} has an invalid package name"
+            )
             valid = False
         if not _valid_exact_version(version):
-            failures.append(f"frozen package manifest line {line_number} has an invalid exact version")
+            failures.append(
+                f"frozen package manifest line {line_number} has an invalid exact version"
+            )
             valid = False
         if package_arch not in {architecture, "any"}:
-            failures.append(f"frozen package manifest line {line_number} has an invalid architecture")
+            failures.append(
+                f"frozen package manifest line {line_number} has an invalid architecture"
+            )
             valid = False
         if name in seen_names:
-            failures.append(f"frozen package manifest contains duplicate package record: {name}")
+            failures.append(
+                f"frozen package manifest contains duplicate package record: {name}"
+            )
             valid = False
         seen_names.add(name)
         if valid:
             parsed.append((repository, name, version, package_arch))
 
     if not parsed:
-        failures.append("frozen package manifest must contain parseable versioned package records")
+        failures.append(
+            "frozen package manifest must contain parseable versioned package records"
+        )
         return None
     if parsed != sorted(parsed, key=lambda item: (item[1], item[0], item[2], item[3])):
-        failures.append("frozen package manifest records must use canonical package-name order")
+        failures.append(
+            "frozen package manifest records must use canonical package-name order"
+        )
     missing = sorted(required_packages - seen_names)
     if missing:
         failures.append(
-            "frozen package manifest is missing required versioned packages: " + ", ".join(missing)
+            "frozen package manifest is missing required versioned packages: "
+            + ", ".join(missing)
         )
     return {name: version for _, name, version, _ in parsed}
+
 
 def validate(
     root: Path,
@@ -3355,7 +4070,9 @@ def validate(
     post_release_closed: bool = False,
 ) -> list[str]:
     failures: list[str] = []
-    contract = _load_toml(root / CONTRACT_PATH, "v0.10 qualification contract", failures)
+    contract = _load_toml(
+        root / CONTRACT_PATH, "v0.10 qualification contract", failures
+    )
     roadmap = _load_toml(root / "contracts/roadmap.toml", "roadmap contract", failures)
     if not contract or not roadmap:
         return failures
@@ -3367,17 +4084,28 @@ def validate(
     if contract.get("claim_class") != "Experimental":
         failures.append("v0.10 qualification claim_class must remain Experimental")
     if contract.get("state") != "development":
-        failures.append("v0.10 qualification state must remain development until release qualification")
+        failures.append(
+            "v0.10 qualification state must remain development until release qualification"
+        )
     if contract.get("target_profile") != EXPECTED_PROFILE:
         failures.append(f"v0.10 target_profile must remain {EXPECTED_PROFILE}")
     if contract.get("target_machine_class") != EXPECTED_MACHINE_CLASS:
         failures.append("v0.10 target_machine_class must remain workstation")
     if contract.get("support_promotion_authority") != "protected-post-release-closure":
-        failures.append("v0.10 support promotion authority must remain protected-post-release-closure")
+        failures.append(
+            "v0.10 support promotion authority must remain protected-post-release-closure"
+        )
     if contract.get("required_evidence") != EXPECTED_EVIDENCE:
-        failures.append(f"v0.10 required_evidence must remain exactly {EXPECTED_EVIDENCE!r}")
-    if contract.get("operation_semantics_contract") != EXPECTED_OPERATION_SEMANTICS_CONTRACT:
-        failures.append("v0.10 operation_semantics_contract must bind the canonical operation-semantics contract")
+        failures.append(
+            f"v0.10 required_evidence must remain exactly {EXPECTED_EVIDENCE!r}"
+        )
+    if (
+        contract.get("operation_semantics_contract")
+        != EXPECTED_OPERATION_SEMANTICS_CONTRACT
+    ):
+        failures.append(
+            "v0.10 operation_semantics_contract must bind the canonical operation-semantics contract"
+        )
     elif not (root / EXPECTED_OPERATION_SEMANTICS_CONTRACT).is_file():
         failures.append("v0.10 operation-semantics contract file is missing")
     if contract.get("product_scope_decision") != EXPECTED_PRODUCT_SCOPE_ADR:
@@ -3385,7 +4113,9 @@ def validate(
     elif not (root / EXPECTED_PRODUCT_SCOPE_ADR).is_file():
         failures.append("v0.10 product-scope ADR 0033 is missing")
     if contract.get("slice_contract") != EXPECTED_SLICE_CONTRACT:
-        failures.append("v0.10 slice_contract must bind the canonical workstation slice ledger")
+        failures.append(
+            "v0.10 slice_contract must bind the canonical workstation slice ledger"
+        )
     elif not (root / EXPECTED_SLICE_CONTRACT).is_file():
         failures.append("v0.10 workstation slice ledger is missing")
     experience = contract.get("experience")
@@ -3398,7 +4128,9 @@ def validate(
         static_experience.pop("authority_evidence_manifest_sha256", None)
         static_experience.pop("visual_baseline_manifest_sha256", None)
         if static_experience != EXPECTED_EXPERIENCE:
-            failures.append("v0.10 experience contract drifted from the required multi-interface workstation boundary")
+            failures.append(
+                "v0.10 experience contract drifted from the required multi-interface workstation boundary"
+            )
     if not (root / EXPECTED_INTERACTION_ADR).is_file():
         failures.append("v0.10 interaction ADR 0031 is missing")
 
@@ -3407,35 +4139,67 @@ def validate(
         failures.append("roadmap missing v0.10.0 milestone")
     else:
         if milestone.get("target_platform_profiles") != [EXPECTED_PROFILE]:
-            failures.append("roadmap v0.10 target_platform_profiles must remain exactly arch-hyprland-v1")
+            failures.append(
+                "roadmap v0.10 target_platform_profiles must remain exactly arch-hyprland-v1"
+            )
         if milestone.get("interaction_model") != "one-model-many-interfaces":
-            failures.append("roadmap v0.10 interaction_model must remain one-model-many-interfaces")
-        if milestone.get("required_interaction_surfaces") != EXPECTED_INTERACTION_SURFACES:
-            failures.append("roadmap v0.10 required_interaction_surfaces drifted from the v0.10 experience contract")
-        if milestone.get("desktop_shell_scope") != "complete-first-party-workstation-shell":
-            failures.append("roadmap v0.10 desktop_shell_scope must remain complete-first-party-workstation-shell")
+            failures.append(
+                "roadmap v0.10 interaction_model must remain one-model-many-interfaces"
+            )
+        if (
+            milestone.get("required_interaction_surfaces")
+            != EXPECTED_INTERACTION_SURFACES
+        ):
+            failures.append(
+                "roadmap v0.10 required_interaction_surfaces drifted from the v0.10 experience contract"
+            )
+        if (
+            milestone.get("desktop_shell_scope")
+            != "complete-first-party-workstation-shell"
+        ):
+            failures.append(
+                "roadmap v0.10 desktop_shell_scope must remain complete-first-party-workstation-shell"
+            )
         if milestone.get("experience_scope") != "complete-daily-usable-workstation":
-            failures.append("roadmap v0.10 experience_scope must remain complete-daily-usable-workstation")
-        if milestone.get("installation_scope") != "bounded-qualified-install-plus-adoption":
-            failures.append("roadmap v0.10 installation_scope must remain bounded-qualified-install-plus-adoption")
+            failures.append(
+                "roadmap v0.10 experience_scope must remain complete-daily-usable-workstation"
+            )
+        if (
+            milestone.get("installation_scope")
+            != "bounded-qualified-install-plus-adoption"
+        ):
+            failures.append(
+                "roadmap v0.10 installation_scope must remain bounded-qualified-install-plus-adoption"
+            )
         if milestone.get("daily_use_target") is not True:
             failures.append("roadmap v0.10 daily_use_target must remain true")
         if milestone.get("product_scope_adr") != EXPECTED_PRODUCT_SCOPE_ADR:
             failures.append("roadmap v0.10 product_scope_adr must bind ADR 0033")
         if milestone.get("slice_contract") != EXPECTED_SLICE_CONTRACT:
-            failures.append("roadmap v0.10 slice_contract must bind the workstation slice ledger")
+            failures.append(
+                "roadmap v0.10 slice_contract must bind the workstation slice ledger"
+            )
         if milestone.get("interaction_adr") != EXPECTED_INTERACTION_ADR:
             failures.append("roadmap v0.10 interaction_adr must bind ADR 0031")
-        if milestone.get("operation_semantics_contract") != EXPECTED_OPERATION_SEMANTICS_CONTRACT:
-            failures.append("roadmap v0.10 operation_semantics_contract must bind the canonical contract")
+        if (
+            milestone.get("operation_semantics_contract")
+            != EXPECTED_OPERATION_SEMANTICS_CONTRACT
+        ):
+            failures.append(
+                "roadmap v0.10 operation_semantics_contract must bind the canonical contract"
+            )
         if milestone.get("operation_semantics_adr") != EXPECTED_OPERATION_SEMANTICS_ADR:
             failures.append("roadmap v0.10 operation_semantics_adr must bind ADR 0032")
         if milestone.get("claim_class") != "Experimental":
             failures.append("roadmap v0.10 claim_class must remain Experimental")
         if milestone.get("qualification_contract") != CONTRACT_PATH:
-            failures.append(f"roadmap v0.10 qualification_contract must point to {CONTRACT_PATH}")
+            failures.append(
+                f"roadmap v0.10 qualification_contract must point to {CONTRACT_PATH}"
+            )
         if milestone.get("qualification") != contract.get("qualification_document"):
-            failures.append("roadmap and v0.10 qualification contract disagree on qualification document")
+            failures.append(
+                "roadmap and v0.10 qualification contract disagree on qualification document"
+            )
 
     profile_path_value = contract.get("profile_path")
     if profile_path_value != "profiles/arch-hyprland-v1.toml":
@@ -3446,7 +4210,9 @@ def validate(
     profile = _load_toml(profile_path, "target PlatformProfile", failures)
     if profile:
         expected_digest = contract.get("profile_sha256")
-        if not isinstance(expected_digest, str) or not SHA256_RE.fullmatch(expected_digest):
+        if not isinstance(expected_digest, str) or not SHA256_RE.fullmatch(
+            expected_digest
+        ):
             failures.append("profile_sha256 must be a lowercase SHA-256 digest")
         else:
             profile_bytes = profile_path.read_bytes()
@@ -3454,7 +4220,9 @@ def validate(
                 try:
                     profile_text = profile_bytes.decode("utf-8")
                 except UnicodeDecodeError:
-                    failures.append("arch-hyprland-v1 must remain UTF-8 after support promotion")
+                    failures.append(
+                        "arch-hyprland-v1 must remain UTF-8 after support promotion"
+                    )
                 else:
                     promoted_marker = 'status = "release-qualified"'
                     if profile_text.count(promoted_marker) != 1:
@@ -3473,7 +4241,9 @@ def validate(
                 )
         if profile.get("schema_version") != 1 or profile.get("id") != EXPECTED_PROFILE:
             failures.append("target PlatformProfile schema/id mismatch")
-        expected_profile_status = "release-qualified" if post_release_closed else "development"
+        expected_profile_status = (
+            "release-qualified" if post_release_closed else "development"
+        )
         if profile.get("status") != expected_profile_status:
             if post_release_closed:
                 failures.append(
@@ -3484,13 +4254,21 @@ def validate(
                     "arch-hyprland-v1 must remain development before protected post-release closure"
                 )
         if profile.get("base") != EXPECTED_BASE:
-            failures.append("arch-hyprland-v1 base identity drifted from the v0.10 qualification contract")
+            failures.append(
+                "arch-hyprland-v1 base identity drifted from the v0.10 qualification contract"
+            )
         if profile.get("providers") != EXPECTED_PROVIDERS:
-            failures.append("arch-hyprland-v1 provider identity drifted from the v0.10 qualification contract")
+            failures.append(
+                "arch-hyprland-v1 provider identity drifted from the v0.10 qualification contract"
+            )
         if profile.get("security") != EXPECTED_SECURITY:
-            failures.append("arch-hyprland-v1 security baseline drifted from the v0.10 qualification contract")
+            failures.append(
+                "arch-hyprland-v1 security baseline drifted from the v0.10 qualification contract"
+            )
         if profile.get("updates") != EXPECTED_UPDATES:
-            failures.append("arch-hyprland-v1 update boundary drifted from the v0.10 qualification contract")
+            failures.append(
+                "arch-hyprland-v1 update boundary drifted from the v0.10 qualification contract"
+            )
 
     identity = contract.get("profile_identity")
     if not isinstance(identity, dict):
@@ -3500,7 +4278,9 @@ def validate(
             if identity.get(key) != expected:
                 failures.append(f"profile_identity.{key} must remain {expected}")
         if identity.get("status_until_post_release_closure") != "development":
-            failures.append("profile_identity must keep the target profile development until post-release closure")
+            failures.append(
+                "profile_identity must keep the target profile development until post-release closure"
+            )
         if identity.get("providers") != EXPECTED_PROVIDERS:
             failures.append("profile_identity.providers must remain exact")
 
@@ -3512,7 +4292,11 @@ def validate(
     if support:
         classes = support.get("machine_classes")
         workstation = classes.get("workstation") if isinstance(classes, dict) else None
-        profiles = workstation.get("release_qualified_profiles") if isinstance(workstation, dict) else None
+        profiles = (
+            workstation.get("release_qualified_profiles")
+            if isinstance(workstation, dict)
+            else None
+        )
         if not isinstance(profiles, list):
             failures.append("workstation release_qualified_profiles must be an array")
         elif post_release_closed:
@@ -3527,7 +4311,9 @@ def validate(
 
     qualification_document = contract.get("qualification_document")
     if qualification_document != "docs/qualification/v0.10.0.md":
-        failures.append("qualification_document must remain docs/qualification/v0.10.0.md")
+        failures.append(
+            "qualification_document must remain docs/qualification/v0.10.0.md"
+        )
     elif not (root / qualification_document).is_file():
         failures.append("v0.10 qualification document is missing")
 
@@ -3540,7 +4326,9 @@ def validate(
     else:
         state = substrate.get("state")
         if state not in {"source-pinned-package-set-pending", "frozen"}:
-            failures.append("substrate.state must be source-pinned-package-set-pending or frozen")
+            failures.append(
+                "substrate.state must be source-pinned-package-set-pending or frozen"
+            )
         if substrate.get("source_kind") != "arch-linux-archive":
             failures.append("substrate.source_kind must remain arch-linux-archive")
         snapshot_date = substrate.get("snapshot_date")
@@ -3552,26 +4340,49 @@ def validate(
             failures.append("substrate.repository_url must be a string")
         else:
             parsed_url = urlparse(repository_url)
-            if parsed_url.scheme != "https" or parsed_url.netloc != "archive.archlinux.org":
-                failures.append("substrate.repository_url must use the official Arch Linux Archive over HTTPS")
+            if (
+                parsed_url.scheme != "https"
+                or parsed_url.netloc != "archive.archlinux.org"
+            ):
+                failures.append(
+                    "substrate.repository_url must use the official Arch Linux Archive over HTTPS"
+                )
             match = ARCHIVE_RE.fullmatch(repository_url)
             if match is None:
-                failures.append("substrate.repository_url must use an exact dated Arch Linux Archive repository path")
-            elif isinstance(snapshot_date, str) and "-".join(match.groups()) != snapshot_date:
-                failures.append("substrate snapshot_date and repository_url date must match")
+                failures.append(
+                    "substrate.repository_url must use an exact dated Arch Linux Archive repository path"
+                )
+            elif (
+                isinstance(snapshot_date, str)
+                and "-".join(match.groups()) != snapshot_date
+            ):
+                failures.append(
+                    "substrate snapshot_date and repository_url date must match"
+                )
             lowered = repository_url.lower()
-            if any(f"/{name}/" in lowered for name in ("last", "week", "month")) or "latest" in lowered:
-                failures.append("mutable Arch archive aliases/latest are forbidden for v0.10 qualification")
+            if (
+                any(f"/{name}/" in lowered for name in ("last", "week", "month"))
+                or "latest" in lowered
+            ):
+                failures.append(
+                    "mutable Arch archive aliases/latest are forbidden for v0.10 qualification"
+                )
         if architecture != "x86_64":
             failures.append("v0.10 Arch qualification architecture must remain x86_64")
         if state == "frozen" and _nonempty_string(architecture):
             frozen_substrate_architecture = architecture
 
-        required_packages = _load_required_packages(root, substrate.get("required_packages_path"), failures)
+        required_packages = _load_required_packages(
+            root, substrate.get("required_packages_path"), failures
+        )
         if substrate.get("package_manifest_format") != EXPECTED_MANIFEST_FORMAT:
-            failures.append(f"substrate.package_manifest_format must remain {EXPECTED_MANIFEST_FORMAT}")
+            failures.append(
+                f"substrate.package_manifest_format must remain {EXPECTED_MANIFEST_FORMAT}"
+            )
         if substrate.get("package_manifest_directory") != EXPECTED_MANIFEST_DIRECTORY:
-            failures.append(f"substrate.package_manifest_directory must remain {EXPECTED_MANIFEST_DIRECTORY}")
+            failures.append(
+                f"substrate.package_manifest_directory must remain {EXPECTED_MANIFEST_DIRECTORY}"
+            )
         for key in (
             "forbid_mutable_latest",
             "require_https",
@@ -3590,24 +4401,38 @@ def validate(
         manifest_digest = substrate.get("package_manifest_sha256")
         if state == "source-pinned-package-set-pending":
             if release_ready is not False:
-                failures.append("source-pinned/package-pending substrate cannot be release_qualification_ready")
+                failures.append(
+                    "source-pinned/package-pending substrate cannot be release_qualification_ready"
+                )
             if manifest_value not in ("", None) or manifest_digest not in ("", None):
-                failures.append("pending package-set state must not carry unverified package-manifest bindings")
+                failures.append(
+                    "pending package-set state must not carry unverified package-manifest bindings"
+                )
         elif state == "frozen":
             if release_ready is not True:
-                failures.append("frozen substrate must set release_qualification_ready=true")
+                failures.append(
+                    "frozen substrate must set release_qualification_ready=true"
+                )
             if not isinstance(manifest_value, str) or not manifest_value:
                 failures.append("frozen substrate requires package_manifest")
-            if not isinstance(manifest_digest, str) or not SHA256_RE.fullmatch(manifest_digest):
-                failures.append("frozen substrate requires lowercase package_manifest_sha256")
+            if not isinstance(manifest_digest, str) or not SHA256_RE.fullmatch(
+                manifest_digest
+            ):
+                failures.append(
+                    "frozen substrate requires lowercase package_manifest_sha256"
+                )
             if isinstance(manifest_value, str) and manifest_value:
                 manifest_path = _manifest_path(root, manifest_value, failures)
                 if manifest_path is not None:
                     manifest_digest_matches = False
-                    if isinstance(manifest_digest, str) and SHA256_RE.fullmatch(manifest_digest):
+                    if isinstance(manifest_digest, str) and SHA256_RE.fullmatch(
+                        manifest_digest
+                    ):
                         if manifest_path.is_file() and not manifest_path.is_symlink():
                             if _sha256(manifest_path) != manifest_digest:
-                                failures.append("frozen package manifest digest mismatch")
+                                failures.append(
+                                    "frozen package manifest digest mismatch"
+                                )
                             else:
                                 manifest_digest_matches = True
                     if isinstance(snapshot_date, str) and isinstance(architecture, str):
@@ -3633,11 +4458,15 @@ def validate(
                 failures,
             )
             slice_items = slice_contract.get("slice") if slice_contract else None
-            status_by_id = {
-                item.get("id"): item.get("status")
-                for item in slice_items
-                if isinstance(item, dict)
-            } if isinstance(slice_items, list) else {}
+            status_by_id = (
+                {
+                    item.get("id"): item.get("status")
+                    for item in slice_items
+                    if isinstance(item, dict)
+                }
+                if isinstance(slice_items, list)
+                else {}
+            )
             required_product_slices = [f"S{index:02d}" for index in range(1, 29)]
             incomplete_product_slices = [
                 slice_id
@@ -3658,7 +4487,9 @@ def validate(
 
     interactive = contract.get("interactive_workstation")
     if not isinstance(interactive, dict):
-        failures.append("v0.10 qualification contract missing interactive_workstation evidence contract")
+        failures.append(
+            "v0.10 qualification contract missing interactive_workstation evidence contract"
+        )
     else:
         static_interactive = dict(interactive)
         static_interactive.pop("evidence_ready", None)
@@ -3692,8 +4523,16 @@ def validate(
             )
 
     for section_name, expected, label in (
-        ("update_recovery_qualification", EXPECTED_UPDATE_RECOVERY_QUALIFICATION, "Q12 update/recovery"),
-        ("security_qualification", EXPECTED_SECURITY_QUALIFICATION, "Q13 workstation security"),
+        (
+            "update_recovery_qualification",
+            EXPECTED_UPDATE_RECOVERY_QUALIFICATION,
+            "Q12 update/recovery",
+        ),
+        (
+            "security_qualification",
+            EXPECTED_SECURITY_QUALIFICATION,
+            "Q13 workstation security",
+        ),
     ):
         section = contract.get(section_name)
         if not isinstance(section, dict):
@@ -3728,18 +4567,28 @@ def validate(
                 failures=failures,
             )
         elif section.get("evidence_manifest_sha256") not in {"", None}:
-            failures.append(f"{section_name} evidence digest must remain empty until evidence is ready")
+            failures.append(
+                f"{section_name} evidence digest must remain empty until evidence is ready"
+            )
 
     if contract.get("security") != EXPECTED_SECURITY:
-        failures.append("v0.10 contract security baseline must match the target PlatformProfile")
+        failures.append(
+            "v0.10 contract security baseline must match the target PlatformProfile"
+        )
     if contract.get("updates") != EXPECTED_UPDATES:
-        failures.append("v0.10 contract update boundary must match the target PlatformProfile")
+        failures.append(
+            "v0.10 contract update boundary must match the target PlatformProfile"
+        )
 
     return failures
 
 
 def main(argv: list[str]) -> int:
-    root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[1]
+    root = (
+        Path(argv[1]).resolve()
+        if len(argv) > 1
+        else Path(__file__).resolve().parents[1]
+    )
     post_release_closed = False
     roadmap_path = root / "contracts/roadmap.toml"
     if roadmap_path.is_file():
@@ -3752,8 +4601,13 @@ def main(argv: list[str]) -> int:
             isinstance(milestone, dict) and milestone.get("status") == "released"
         )
     expected_source_sha = os.environ.get("LINURA_EXPECTED_SOURCE_SHA")
-    if expected_source_sha is not None and not GIT_SHA_RE.fullmatch(expected_source_sha):
-        print("ERROR: LINURA_EXPECTED_SOURCE_SHA must be a lowercase 40-hex Git SHA", file=sys.stderr)
+    if expected_source_sha is not None and not GIT_SHA_RE.fullmatch(
+        expected_source_sha
+    ):
+        print(
+            "ERROR: LINURA_EXPECTED_SOURCE_SHA must be a lowercase 40-hex Git SHA",
+            file=sys.stderr,
+        )
         return 1
     expected_linurad_sha256 = os.environ.get("LINURA_EXPECTED_LINURAD_SHA256")
     expected_shell_bridge_sha256 = os.environ.get("LINURA_EXPECTED_SHELL_BRIDGE_SHA256")

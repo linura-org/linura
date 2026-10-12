@@ -115,7 +115,9 @@ def verify_metadata(
     try:
         normalized_remote_version = normalize_pep440(remote_version)
     except Pep440VersionError as error:
-        raise VerificationError(f"PyPI returned an invalid version: {remote_version!r}") from error
+        raise VerificationError(
+            f"PyPI returned an invalid version: {remote_version!r}"
+        ) from error
     if normalized_remote_version != version:
         raise VerificationError("PyPI project/version identity mismatch")
 
@@ -148,12 +150,16 @@ def verify_metadata(
             raise VerificationError(f"sealed PyPI artifact is yanked: {filename}")
         digests = item.get("digests")
         if not isinstance(digests, dict) or digests.get("sha256") != expected_digest:
-            raise VerificationError(f"PyPI metadata digest differs from sealed artifact: {filename}")
+            raise VerificationError(
+                f"PyPI metadata digest differs from sealed artifact: {filename}"
+            )
         url = item.get("url")
         if not isinstance(url, str) or not url:
             raise VerificationError(f"PyPI artifact URL is missing: {filename}")
         if download and download_digest(url, timeout) != expected_digest:
-            raise VerificationError(f"fresh PyPI download differs from sealed artifact: {filename}")
+            raise VerificationError(
+                f"fresh PyPI download differs from sealed artifact: {filename}"
+            )
 
 
 def verify_release(
@@ -182,7 +188,9 @@ def verify_release(
             if metadata is None:
                 if allow_missing:
                     return "missing"
-                raise VerificationError(f"PyPI release does not exist: {project_name}=={version}")
+                raise VerificationError(
+                    f"PyPI release does not exist: {project_name}=={version}"
+                )
             verify_metadata(
                 metadata,
                 project_name=project_name,
@@ -228,7 +236,12 @@ def main() -> int:
             retries=args.retries,
             retry_delay=args.retry_delay,
         )
-    except (OSError, tomllib.TOMLDecodeError, VerificationError, urllib.error.URLError) as error:
+    except (
+        OSError,
+        tomllib.TOMLDecodeError,
+        VerificationError,
+        urllib.error.URLError,
+    ) as error:
         print(f"PyPI verification failed: {error}", file=sys.stderr)
         return 1
 

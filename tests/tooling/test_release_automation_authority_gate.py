@@ -9,7 +9,9 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "tools/probe_release_automation_authority.py"
-SPEC = importlib.util.spec_from_file_location("probe_release_automation_authority", MODULE_PATH)
+SPEC = importlib.util.spec_from_file_location(
+    "probe_release_automation_authority", MODULE_PATH
+)
 assert SPEC is not None and SPEC.loader is not None
 probe = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(probe)
@@ -36,24 +38,34 @@ def missing_ref_body() -> str:
 
 class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
     def test_same_head_merge_proves_contents_write_capability(self) -> None:
-        accepted = probe.validate_contents_probe_response(status=204, credential_source="github-app")
+        accepted = probe.validate_contents_probe_response(
+            status=204, credential_source="github-app"
+        )
         self.assertEqual("dedicated Linura Release GitHub App token", accepted)
 
     def test_github_app_without_contents_write_is_rejected(self) -> None:
         with self.assertRaisesRegex(probe.AuthorityProbeError, "Contents write"):
-            probe.validate_contents_probe_response(status=403, credential_source="github-app")
+            probe.validate_contents_probe_response(
+                status=403, credential_source="github-app"
+            )
 
     def test_github_token_without_contents_write_is_rejected(self) -> None:
         with self.assertRaisesRegex(probe.AuthorityProbeError, "Contents write"):
-            probe.validate_contents_probe_response(status=403, credential_source="github")
+            probe.validate_contents_probe_response(
+                status=403, credential_source="github"
+            )
 
     def test_dedicated_token_without_contents_write_is_rejected(self) -> None:
         with self.assertRaisesRegex(probe.AuthorityProbeError, "Contents write"):
-            probe.validate_contents_probe_response(status=403, credential_source="dedicated")
+            probe.validate_contents_probe_response(
+                status=403, credential_source="dedicated"
+            )
 
     def test_unexpected_contents_success_is_rejected(self) -> None:
         with self.assertRaisesRegex(probe.AuthorityProbeError, "unexpectedly changed"):
-            probe.validate_contents_probe_response(status=201, credential_source="github-app")
+            probe.validate_contents_probe_response(
+                status=201, credential_source="github-app"
+            )
 
     def test_exact_same_head_validation_proves_release_app_pr_authority(self) -> None:
         accepted = probe.validate_pr_probe_response(
@@ -88,7 +100,9 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
             )
 
     def test_unparseable_pr_422_is_rejected(self) -> None:
-        with self.assertRaisesRegex(probe.AuthorityProbeError, "non-JSON GitHub response"):
+        with self.assertRaisesRegex(
+            probe.AuthorityProbeError, "non-JSON GitHub response"
+        ):
             probe.validate_pr_probe_response(
                 status=422,
                 body="not-json",
@@ -98,7 +112,9 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
             )
 
     def test_repository_github_token_pr_failure_points_to_release_app(self) -> None:
-        with self.assertRaisesRegex(probe.AuthorityProbeError, "dedicated Linura Release GitHub App"):
+        with self.assertRaisesRegex(
+            probe.AuthorityProbeError, "dedicated Linura Release GitHub App"
+        ):
             probe.validate_pr_probe_response(
                 status=403,
                 body='{"message":"GitHub Actions is not permitted to create or approve pull requests."}',
@@ -107,7 +123,9 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
                 credential_source="github",
             )
 
-    def test_github_app_pr_permission_failure_has_least_privilege_guidance(self) -> None:
+    def test_github_app_pr_permission_failure_has_least_privilege_guidance(
+        self,
+    ) -> None:
         with self.assertRaisesRegex(probe.AuthorityProbeError, "Pull requests write"):
             probe.validate_pr_probe_response(
                 status=403,
@@ -117,7 +135,9 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
                 credential_source="github-app",
             )
 
-    def test_exact_missing_ref_validation_proves_app_actions_dispatch_authority(self) -> None:
+    def test_exact_missing_ref_validation_proves_app_actions_dispatch_authority(
+        self,
+    ) -> None:
         accepted = probe.validate_actions_probe_response(
             status=422,
             body=missing_ref_body(),
@@ -174,7 +194,9 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
         self.assertEqual("main", pr_call.kwargs["body"]["head"])
         self.assertEqual("POST", actions_call.kwargs["method"])
         self.assertIn("/actions/workflows/", actions_call.kwargs["url"])
-        self.assertEqual({"ref": probe.MISSING_WORKFLOW_REF}, actions_call.kwargs["body"])
+        self.assertEqual(
+            {"ref": probe.MISSING_WORKFLOW_REF}, actions_call.kwargs["body"]
+        )
 
     def test_probe_requires_identical_base_and_head(self) -> None:
         with self.assertRaisesRegex(probe.AuthorityProbeError, "identical base/head"):
@@ -186,7 +208,9 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
                 credential_source="github-app",
             )
 
-    def test_release_contract_docs_require_live_non_mutating_authority_probe(self) -> None:
+    def test_release_contract_docs_require_live_non_mutating_authority_probe(
+        self,
+    ) -> None:
         guide = (ROOT / "agents/skills/release.md").read_text(encoding="utf-8")
         engineering = (ROOT / "docs/release-engineering.md").read_text(encoding="utf-8")
         for text in (guide, engineering):
@@ -197,10 +221,17 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
         self.assertIn("merge", engineering.casefold())
 
     def test_release_promotion_preflights_release_app_before_publication(self) -> None:
-        workflow = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/release-promotion.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("closure-readiness:", workflow)
-        self.assertIn("prove Release App closure authority before publication", workflow)
-        self.assertIn("actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1", workflow)
+        self.assertIn(
+            "prove Release App closure authority before publication", workflow
+        )
+        self.assertIn(
+            "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+            workflow,
+        )
         self.assertIn("LINURA_RELEASE_APP_CLIENT_ID", workflow)
         self.assertIn("LINURA_RELEASE_APP_PRIVATE_KEY", workflow)
         self.assertIn("permission-actions: write", workflow)
@@ -221,7 +252,9 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
         self.assertLess(dispatch_job_index, dispatch_index)
 
     def test_release_dispatch_job_does_not_inherit_release_app_credential(self) -> None:
-        workflow = (ROOT / ".github/workflows/release-promotion.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/release-promotion.yml").read_text(
+            encoding="utf-8"
+        )
         dispatch = workflow.split("\n  dispatch:", 1)[1]
         self.assertIn("GH_TOKEN: ${{ github.token }}", dispatch)
         self.assertNotIn("LINURA_RELEASE_APP_PRIVATE_KEY", dispatch)
@@ -231,7 +264,9 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
 
     def test_publication_environment_is_limited_to_pypi_identity(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        publish = workflow.split("\n  publish:", 1)[1].split("\n  pypi-preflight:", 1)[0]
+        publish = workflow.split("\n  publish:", 1)[1].split("\n  pypi-preflight:", 1)[
+            0
+        ]
         pypi = workflow.split("\n  publish-pypi:", 1)[1].split("\n  verify-pypi:", 1)[0]
         self.assertIn("contents: write", publish)
         self.assertNotIn("environment:", publish)
@@ -253,7 +288,9 @@ class ReleaseAutomationAuthorityGateTests(unittest.TestCase):
         )
 
     def test_verifier_does_not_require_downloaded_executable_mode(self) -> None:
-        workflow = (ROOT / ".github/workflows/release-verification.yml").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/release-verification.yml").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("test -f published/linura-authorityd", workflow)
         self.assertNotIn("test -x published/linura-authorityd", workflow)
         self.assertIn("python3 tools/release_contract.py verify", workflow)

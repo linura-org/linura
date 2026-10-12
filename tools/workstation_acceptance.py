@@ -276,7 +276,6 @@ def validate_contract(contract: dict[str, Any]) -> list[str]:
     return failures
 
 
-
 def q11_required_cases(path: Path = DEFAULT_QUALIFICATION_CONTRACT) -> list[str]:
     try:
         contract = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -286,7 +285,9 @@ def q11_required_cases(path: Path = DEFAULT_QUALIFICATION_CONTRACT) -> list[str]
         raise AcceptanceError(f"invalid qualification contract: {error}") from error
     interactive = contract.get("interactive_workstation")
     if not isinstance(interactive, dict):
-        raise AcceptanceError("qualification contract is missing interactive_workstation")
+        raise AcceptanceError(
+            "qualification contract is missing interactive_workstation"
+        )
     cases = interactive.get("required_cases")
     if (
         not isinstance(cases, list)
@@ -294,7 +295,9 @@ def q11_required_cases(path: Path = DEFAULT_QUALIFICATION_CONTRACT) -> list[str]
         or any(not isinstance(item, str) or not item for item in cases)
         or len(cases) != len(set(cases))
     ):
-        raise AcceptanceError("interactive_workstation.required_cases must be a non-empty unique string list")
+        raise AcceptanceError(
+            "interactive_workstation.required_cases must be a non-empty unique string list"
+        )
     expected = [item["id"] for item in Q11_CASE_SPECS]
     if list(cases) != expected:
         raise AcceptanceError(
@@ -319,8 +322,14 @@ def _slice_statuses(path: Path = DEFAULT_SLICE_CONTRACT) -> dict[str, str]:
             raise AcceptanceError("slice contract contains a non-object entry")
         slice_id = item.get("id")
         status = item.get("status")
-        if not isinstance(slice_id, str) or not isinstance(status, str) or slice_id in statuses:
-            raise AcceptanceError("slice contract contains invalid or duplicate slice identity")
+        if (
+            not isinstance(slice_id, str)
+            or not isinstance(status, str)
+            or slice_id in statuses
+        ):
+            raise AcceptanceError(
+                "slice contract contains invalid or duplicate slice identity"
+            )
         statuses[slice_id] = status
     return statuses
 
@@ -466,7 +475,8 @@ def validate_fixture_payload(
     }
     if set(payload) != expected_keys:
         failures.append(
-            "fixture contract fields must be exactly: " + ", ".join(sorted(expected_keys))
+            "fixture contract fields must be exactly: "
+            + ", ".join(sorted(expected_keys))
         )
     if payload.get("schema_version") != 1:
         failures.append("fixture contract schema_version must be 1")
@@ -476,11 +486,17 @@ def validate_fixture_payload(
         or not observed_id
         or len(observed_id) > 64
         or not observed_id[0].isalnum()
-        or any(ch not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-" for ch in observed_id)
+        or any(
+            ch
+            not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-"
+            for ch in observed_id
+        )
     ):
         failures.append("fixture contract fixture_id must be a bounded identifier")
     elif fixture_id is not None and observed_id != fixture_id:
-        failures.append("fixture contract fixture_id does not match the requested fixture")
+        failures.append(
+            "fixture contract fixture_id does not match the requested fixture"
+        )
     expected_values = {
         "profile_id": "arch-hyprland-v1",
         "machine_class": "workstation",
@@ -505,32 +521,52 @@ def read_hardware_fixture(
     try:
         descriptor = os.open(path, flags)
     except FileNotFoundError as error:
-        raise AcceptanceError(f"maintained hardware fixture contract not found: {path}") from error
+        raise AcceptanceError(
+            f"maintained hardware fixture contract not found: {path}"
+        ) from error
     except OSError as error:
-        raise AcceptanceError(f"maintained hardware fixture contract cannot be opened safely: {error}") from error
+        raise AcceptanceError(
+            f"maintained hardware fixture contract cannot be opened safely: {error}"
+        ) from error
     try:
         stat_result = os.fstat(descriptor)
         if not stat.S_ISREG(stat_result.st_mode):
-            raise AcceptanceError("maintained hardware fixture contract must be a regular file")
+            raise AcceptanceError(
+                "maintained hardware fixture contract must be a regular file"
+            )
         if stat_result.st_nlink != 1:
-            raise AcceptanceError("maintained hardware fixture contract must have exactly one hard link")
+            raise AcceptanceError(
+                "maintained hardware fixture contract must have exactly one hard link"
+            )
         if stat_result.st_size <= 0 or stat_result.st_size > HARDWARE_FIXTURE_MAX_BYTES:
-            raise AcceptanceError("maintained hardware fixture contract exceeds the bounded size")
+            raise AcceptanceError(
+                "maintained hardware fixture contract exceeds the bounded size"
+            )
         if require_root_owned and stat_result.st_uid != 0:
-            raise AcceptanceError("maintained hardware fixture contract must be owned by root")
+            raise AcceptanceError(
+                "maintained hardware fixture contract must be owned by root"
+            )
         if stat_result.st_mode & 0o022:
-            raise AcceptanceError("maintained hardware fixture contract must not be group/world writable")
+            raise AcceptanceError(
+                "maintained hardware fixture contract must not be group/world writable"
+            )
         data = os.read(descriptor, HARDWARE_FIXTURE_MAX_BYTES + 1)
         if len(data) != stat_result.st_size or len(data) > HARDWARE_FIXTURE_MAX_BYTES:
-            raise AcceptanceError("maintained hardware fixture contract changed or exceeded bounds while reading")
+            raise AcceptanceError(
+                "maintained hardware fixture contract changed or exceeded bounds while reading"
+            )
     finally:
         os.close(descriptor)
     try:
         payload = json.loads(data.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as error:
-        raise AcceptanceError("maintained hardware fixture contract must be valid UTF-8 JSON") from error
+        raise AcceptanceError(
+            "maintained hardware fixture contract must be valid UTF-8 JSON"
+        ) from error
     if not isinstance(payload, dict):
-        raise AcceptanceError("maintained hardware fixture contract must be a JSON object")
+        raise AcceptanceError(
+            "maintained hardware fixture contract must be a JSON object"
+        )
     failures = validate_fixture_payload(payload, fixture_id=fixture_id)
     if failures:
         raise AcceptanceError("; ".join(failures))
@@ -565,10 +601,16 @@ def sanitize_hyprland_monitors(payload: Any) -> list[dict[str, Any]]:
             value = monitor.get(key)
             if value is None and key != "name":
                 continue
-            if not isinstance(value, str) or not value or len(value) > MONITOR_TEXT_MAX_CHARS:
+            if (
+                not isinstance(value, str)
+                or not value
+                or len(value) > MONITOR_TEXT_MAX_CHARS
+            ):
                 raise AcceptanceError(f"Hyprland monitor field {key} is invalid")
             if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
-                raise AcceptanceError(f"Hyprland monitor field {key} contains control characters")
+                raise AcceptanceError(
+                    f"Hyprland monitor field {key} contains control characters"
+                )
             entry[key] = value
         for key in required_numeric + optional_numeric:
             if key not in monitor:
@@ -593,18 +635,24 @@ def sanitize_hyprland_monitors(payload: Any) -> list[dict[str, Any]]:
 def read_sanitized_hyprland_monitors() -> list[dict[str, Any]]:
     data = sys.stdin.buffer.read(MONITOR_SNAPSHOT_MAX_BYTES + 1)
     if len(data) > MONITOR_SNAPSHOT_MAX_BYTES:
-        raise AcceptanceError("Hyprland monitor snapshot exceeds the bounded input size")
+        raise AcceptanceError(
+            "Hyprland monitor snapshot exceeds the bounded input size"
+        )
     try:
         payload = json.loads(data.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as error:
-        raise AcceptanceError("Hyprland monitor snapshot must be valid UTF-8 JSON") from error
+        raise AcceptanceError(
+            "Hyprland monitor snapshot must be valid UTF-8 JSON"
+        ) from error
     return sanitize_hyprland_monitors(payload)
 
 
 def validate_virtualization_probe(returncode: int, output: str) -> list[str]:
     observed = output.strip()
     if returncode == 0:
-        return [f"Level C requires physical hardware; virtualization detected: {observed or 'unknown'}"]
+        return [
+            f"Level C requires physical hardware; virtualization detected: {observed or 'unknown'}"
+        ]
     if returncode != 1:
         return [f"Level C physicality probe failed with status {returncode}"]
     if observed not in {"", "none"}:
@@ -624,7 +672,10 @@ def hardware_doctor(
         load_hardware_fixture(fixture_contract, fixture_id=fixture_id)
     except AcceptanceError as error:
         failures.append(str(error))
-    if not (os.environ.get("WAYLAND_DISPLAY") and os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")):
+    if not (
+        os.environ.get("WAYLAND_DISPLAY")
+        and os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    ):
         failures.append("Level C requires an existing Hyprland Wayland session")
     detector = shutil.which("systemd-detect-virt")
     if detector is None:
@@ -637,7 +688,9 @@ def hardware_doctor(
             text=True,
             timeout=5,
         )
-        failures.extend(validate_virtualization_probe(completed.returncode, completed.stdout))
+        failures.extend(
+            validate_virtualization_probe(completed.returncode, completed.stdout)
+        )
     hyprctl = shutil.which("hyprctl")
     if hyprctl is not None:
         completed = subprocess.run(
@@ -682,7 +735,15 @@ def doctor(
     if mode == "hardware" and display != "none":
         return ["hardware mode does not use a VM display backend"]
     if mode in {"automated", "interactive"}:
-        commands = ["qemu-system-x86_64", "qemu-img", "ssh", "scp", "ssh-keygen", "cloud-localds", "git"]
+        commands = [
+            "qemu-system-x86_64",
+            "qemu-img",
+            "ssh",
+            "scp",
+            "ssh-keygen",
+            "cloud-localds",
+            "git",
+        ]
         if mode == "automated":
             # Level A recording is mandatory regardless of the caller's --record flag.
             commands.append("ffprobe")
@@ -695,7 +756,9 @@ def doctor(
                 missing.append(command)
     if mode == "interactive" and display == "gtk":
         if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-            missing.append("host graphical display environment (DISPLAY or WAYLAND_DISPLAY)")
+            missing.append(
+                "host graphical display environment (DISPLAY or WAYLAND_DISPLAY)"
+            )
     if mode == "hardware":
         commands = [
             "Hyprland",
@@ -721,7 +784,9 @@ def doctor(
     return missing
 
 
-def plan_payload(contract: dict[str, Any], mode: str, display: str, record: bool) -> dict[str, Any]:
+def plan_payload(
+    contract: dict[str, Any], mode: str, display: str, record: bool
+) -> dict[str, Any]:
     if mode not in MODES:
         raise AcceptanceError(f"unsupported mode: {mode}")
     if mode == "automated":
@@ -731,7 +796,9 @@ def plan_payload(contract: dict[str, Any], mode: str, display: str, record: bool
         launcher = contract["vm_launcher"]
     elif mode == "interactive":
         if display not in INTERACTIVE_DISPLAYS:
-            raise AcceptanceError("interactive mode requires display=gtk or display=vnc")
+            raise AcceptanceError(
+                "interactive mode requires display=gtk or display=vnc"
+            )
         recording = record
         launcher = contract["interactive_launcher"]
     else:
@@ -811,11 +878,13 @@ def validate_probe_payload(
     if not isinstance(streams, list):
         raise AcceptanceError("ffprobe result is missing streams")
     video_streams = [
-        item for item in streams
+        item
+        for item in streams
         if isinstance(item, dict) and item.get("codec_type") == "video"
     ]
     audio_streams = [
-        item for item in streams
+        item
+        for item in streams
         if isinstance(item, dict) and item.get("codec_type") == "audio"
     ]
     if len(video_streams) != recording_contract["video_stream_count"]:
@@ -832,7 +901,10 @@ def validate_probe_payload(
     height = stream.get("height")
     if type(width) is not int or type(height) is not int or width <= 0 or height <= 0:
         raise AcceptanceError("recording dimensions must be positive integers")
-    if width > recording_contract["maximum_width"] or height > recording_contract["maximum_height"]:
+    if (
+        width > recording_contract["maximum_width"]
+        or height > recording_contract["maximum_height"]
+    ):
         raise AcceptanceError("recording dimensions exceed the bounded maximum")
 
     format_payload = probe.get("format")
@@ -895,36 +967,52 @@ def _open_recording_snapshot(
             while remaining:
                 chunk = os.pread(descriptor, min(1024 * 1024, remaining), offset)
                 if not chunk:
-                    raise AcceptanceError("recording changed while the verifier was snapshotting it")
+                    raise AcceptanceError(
+                        "recording changed while the verifier was snapshotting it"
+                    )
                 snapshot.write(chunk)
                 offset += len(chunk)
                 remaining -= len(chunk)
             if os.pread(descriptor, 1, offset):
-                raise AcceptanceError("recording grew while the verifier was snapshotting it")
+                raise AcceptanceError(
+                    "recording grew while the verifier was snapshotting it"
+                )
 
         after = os.fstat(descriptor)
         identity = _recording_identity(before)
         if _recording_identity(after) != identity:
-            raise AcceptanceError("recording changed while the verifier was snapshotting it")
+            raise AcceptanceError(
+                "recording changed while the verifier was snapshotting it"
+            )
         try:
             path_after_snapshot = os.lstat(path)
         except OSError as error:
-            raise AcceptanceError("recording path changed while the verifier was snapshotting it") from error
-        if stat.S_ISLNK(path_after_snapshot.st_mode) or _recording_identity(path_after_snapshot) != identity:
-            raise AcceptanceError("recording path changed while the verifier was snapshotting it")
+            raise AcceptanceError(
+                "recording path changed while the verifier was snapshotting it"
+            ) from error
+        if (
+            stat.S_ISLNK(path_after_snapshot.st_mode)
+            or _recording_identity(path_after_snapshot) != identity
+        ):
+            raise AcceptanceError(
+                "recording path changed while the verifier was snapshotting it"
+            )
         return identity, file_size
     finally:
         os.close(descriptor)
 
 
-def _require_recording_identity(path: Path, identity: tuple[int, int, int, int, int]) -> None:
+def _require_recording_identity(
+    path: Path, identity: tuple[int, int, int, int, int]
+) -> None:
     try:
         current = os.lstat(path)
     except OSError as error:
-        raise AcceptanceError("recording path changed while it was being verified") from error
+        raise AcceptanceError(
+            "recording path changed while it was being verified"
+        ) from error
     if stat.S_ISLNK(current.st_mode) or _recording_identity(current) != identity:
         raise AcceptanceError("recording changed while it was being verified")
-
 
 
 def _validate_recording_output_paths(
@@ -945,7 +1033,9 @@ def _validate_recording_output_paths(
         canonical = os.path.realpath(candidate)
         previous = canonical_paths.get(canonical)
         if previous is not None:
-            raise AcceptanceError(f"recording output paths alias: {previous} and {label}")
+            raise AcceptanceError(
+                f"recording output paths alias: {previous} and {label}"
+            )
         canonical_paths[canonical] = label
 
         try:
@@ -953,7 +1043,9 @@ def _validate_recording_output_paths(
         except FileNotFoundError:
             continue
         except OSError as error:
-            raise AcceptanceError(f"recording {label} path cannot be inspected") from error
+            raise AcceptanceError(
+                f"recording {label} path cannot be inspected"
+            ) from error
         if label != "recording" and (
             not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
         ):
@@ -963,9 +1055,10 @@ def _validate_recording_output_paths(
         inode = (info.st_dev, info.st_ino)
         previous = existing_inodes.get(inode)
         if previous is not None:
-            raise AcceptanceError(f"recording output paths alias: {previous} and {label}")
+            raise AcceptanceError(
+                f"recording output paths alias: {previous} and {label}"
+            )
         existing_inodes[inode] = label
-
 
 
 def _require_sidecar_parent(path: Path, directory: int) -> None:
@@ -974,28 +1067,40 @@ def _require_sidecar_parent(path: Path, directory: int) -> None:
         current = os.stat(path.parent, follow_symlinks=False)
         pinned = os.fstat(directory)
     except OSError as error:
-        raise AcceptanceError("recording sidecar directory changed during publication") from error
-    if (
-        not stat.S_ISDIR(current.st_mode)
-        or (current.st_dev, current.st_ino) != (pinned.st_dev, pinned.st_ino)
+        raise AcceptanceError(
+            "recording sidecar directory changed during publication"
+        ) from error
+    if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != (
+        pinned.st_dev,
+        pinned.st_ino,
     ):
         raise AcceptanceError("recording sidecar directory changed during publication")
 
 
 def _unlink_owned_recording_sidecar(
-    path: Path, identity: tuple[int, int], *, directory_fd: int | None = None,
+    path: Path,
+    identity: tuple[int, int],
+    *,
+    directory_fd: int | None = None,
 ) -> None:
     """Only revoke this invocation's inode, even after a parent rename."""
     owned_directory = directory_fd is None
-    directory = directory_fd if directory_fd is not None else os.open(
-        path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    directory = (
+        directory_fd
+        if directory_fd is not None
+        else os.open(
+            path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        )
     )
     try:
         try:
             current = os.stat(path.name, dir_fd=directory, follow_symlinks=False)
         except FileNotFoundError:
             return
-        if stat.S_ISREG(current.st_mode) and (current.st_dev, current.st_ino) == identity:
+        if (
+            stat.S_ISREG(current.st_mode)
+            and (current.st_dev, current.st_ino) == identity
+        ):
             os.unlink(path.name, dir_fd=directory)
     finally:
         if owned_directory:
@@ -1003,14 +1108,21 @@ def _unlink_owned_recording_sidecar(
 
 
 def _publish_recording_sidecar(
-    path: Path, content: str, *, directory_fd: int | None = None,
+    path: Path,
+    content: str,
+    *,
+    directory_fd: int | None = None,
 ) -> tuple[int, int]:
     """Atomically publish relative to the parent pinned before any sidecar write."""
     owned_directory = directory_fd is None
     if owned_directory:
         path.parent.mkdir(parents=True, exist_ok=True)
-    directory = directory_fd if directory_fd is not None else os.open(
-        path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    directory = (
+        directory_fd
+        if directory_fd is not None
+        else os.open(
+            path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        )
     )
     temporary = f".{path.name}.{secrets.token_hex(16)}.tmp"
     published_identity: tuple[int, int] | None = None
@@ -1052,7 +1164,9 @@ def _publish_recording_sidecar(
         if published_identity is not None:
             try:
                 _unlink_owned_recording_sidecar(
-                    path, published_identity, directory_fd=directory,
+                    path,
+                    published_identity,
+                    directory_fd=directory,
                 )
             except OSError:
                 pass
@@ -1087,7 +1201,9 @@ def verify_recording(
         )
         ffprobe = shutil.which("ffprobe")
         if ffprobe is None:
-            raise AcceptanceError("ffprobe is required to verify a workstation recording")
+            raise AcceptanceError(
+                "ffprobe is required to verify a workstation recording"
+            )
         completed = subprocess.run(
             [
                 ffprobe,
@@ -1105,7 +1221,9 @@ def verify_recording(
             timeout=15,
         )
         if completed.returncode != 0:
-            raise AcceptanceError(f"ffprobe rejected recording: {completed.stderr.strip()}")
+            raise AcceptanceError(
+                f"ffprobe rejected recording: {completed.stderr.strip()}"
+            )
         try:
             probe = json.loads(completed.stdout)
         except json.JSONDecodeError as error:
@@ -1126,8 +1244,12 @@ def verify_recording(
         **summary,
     }
     if source_sha is not None:
-        if len(source_sha) != 40 or any(ch not in "0123456789abcdef" for ch in source_sha):
-            raise AcceptanceError("source SHA must be 40 lowercase hexadecimal characters")
+        if len(source_sha) != 40 or any(
+            ch not in "0123456789abcdef" for ch in source_sha
+        ):
+            raise AcceptanceError(
+                "source SHA must be 40 lowercase hexadecimal characters"
+            )
         metadata["source_sha"] = source_sha
 
     # Acquire every directory before the first write. Opening each parent
@@ -1150,24 +1272,31 @@ def verify_recording(
         confirm_all_parents()
         if metadata_path is not None:
             pinned = pinned_directories[metadata_path]
-            published_sidecars.append((
-                metadata_path,
-                _publish_recording_sidecar(
-                    metadata_path, json.dumps(metadata, indent=2, sort_keys=True) + "\n",
-                    directory_fd=pinned,
-                ),
-                pinned,
-            ))
+            published_sidecars.append(
+                (
+                    metadata_path,
+                    _publish_recording_sidecar(
+                        metadata_path,
+                        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+                        directory_fd=pinned,
+                    ),
+                    pinned,
+                )
+            )
             confirm_all_parents()
         if digest_path is not None:
             pinned = pinned_directories[digest_path]
-            published_sidecars.append((
-                digest_path,
-                _publish_recording_sidecar(
-                    digest_path, f"{digest}  {path.name}\n", directory_fd=pinned,
-                ),
-                pinned,
-            ))
+            published_sidecars.append(
+                (
+                    digest_path,
+                    _publish_recording_sidecar(
+                        digest_path,
+                        f"{digest}  {path.name}\n",
+                        directory_fd=pinned,
+                    ),
+                    pinned,
+                )
+            )
             confirm_all_parents()
         # A second sidecar must not overwrite or substitute the first one.
         for sidecar, owned_identity, directory in published_sidecars:
@@ -1184,7 +1313,9 @@ def verify_recording(
         for sidecar, owned_identity, directory in reversed(published_sidecars):
             try:
                 _unlink_owned_recording_sidecar(
-                    sidecar, owned_identity, directory_fd=directory,
+                    sidecar,
+                    owned_identity,
+                    directory_fd=directory,
                 )
             except OSError:
                 pass  # Preserve the original verification failure.
@@ -1196,7 +1327,9 @@ def verify_recording(
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Linura v0.10 workstation acceptance helper")
+    parser = argparse.ArgumentParser(
+        description="Linura v0.10 workstation acceptance helper"
+    )
     parser.add_argument("--contract", type=Path, default=DEFAULT_CONTRACT)
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -1303,7 +1436,13 @@ def main(argv: list[str]) -> int:
             print(json.dumps(requests, indent=2, sort_keys=True))
             return 0
         if args.command == "sanitize-monitors":
-            print(json.dumps(read_sanitized_hyprland_monitors(), sort_keys=True, separators=(",", ":")))
+            print(
+                json.dumps(
+                    read_sanitized_hyprland_monitors(),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
             return 0
         if args.command == "fixture-check":
             payload, fixture_digest = read_hardware_fixture(
@@ -1320,8 +1459,12 @@ def main(argv: list[str]) -> int:
         metadata = verify_recording(
             Path(os.path.abspath(args.path)),
             contract=contract,
-            metadata_path=Path(os.path.abspath(args.metadata)) if args.metadata else None,
-            digest_path=Path(os.path.abspath(args.digest_file)) if args.digest_file else None,
+            metadata_path=Path(os.path.abspath(args.metadata))
+            if args.metadata
+            else None,
+            digest_path=Path(os.path.abspath(args.digest_file))
+            if args.digest_file
+            else None,
             source_sha=args.source_sha,
         )
         print(json.dumps(metadata, indent=2, sort_keys=True))

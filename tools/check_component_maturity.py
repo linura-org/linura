@@ -14,9 +14,20 @@ ALLOWED_MATURITY = (
     "integrated-experimental",
     "stable",
 )
-ALLOWED_KINDS = {"app", "binding", "crate", "executor", "verifier", "tool", "planned-app", "shell"}
+ALLOWED_KINDS = {
+    "app",
+    "binding",
+    "crate",
+    "executor",
+    "verifier",
+    "tool",
+    "planned-app",
+    "shell",
+}
 VERSION_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
-RELEASE_BINARIES_COMMAND = "python3 tools/check_component_maturity.py --release-binaries"
+RELEASE_BINARIES_COMMAND = (
+    "python3 tools/check_component_maturity.py --release-binaries"
+)
 RELEASE_PAYLOAD_VERIFY_COMMAND = 'python3 tools/release_verify.py "$PAYLOAD_DIR"'
 RELEASE_PAYLOAD_COMPONENT_CONTRACT = "--component-contract contracts/components.toml"
 RELEASE_PAYLOAD_PYTHON_CONTRACT = "--python-package bindings/python/pyproject.toml"
@@ -34,11 +45,18 @@ def image_binaries(path: Path) -> set[str]:
     for node in tree.body:
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            if not any(isinstance(target, ast.Name) and target.id == "BINARIES" for target in targets):
+            if not any(
+                isinstance(target, ast.Name) and target.id == "BINARIES"
+                for target in targets
+            ):
                 continue
             value = ast.literal_eval(node.value)
-            if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
-                raise ValueError("tools/image.py BINARIES must be a literal string-keyed mapping")
+            if not isinstance(value, dict) or not all(
+                isinstance(key, str) for key in value
+            ):
+                raise ValueError(
+                    "tools/image.py BINARIES must be a literal string-keyed mapping"
+                )
             return set(value)
     raise ValueError("tools/image.py does not declare a literal BINARIES mapping")
 
@@ -49,7 +67,10 @@ def release_binaries_from_contract(contract: dict[str, object]) -> list[str]:
         raise ValueError("components contract must contain a component list")
     binaries: list[str] = []
     for component in raw_components:
-        if not isinstance(component, dict) or component.get("release_artifact") is not True:
+        if (
+            not isinstance(component, dict)
+            or component.get("release_artifact") is not True
+        ):
             continue
         binary = component.get("binary")
         if not isinstance(binary, str) or not binary:
@@ -78,7 +99,9 @@ def check(root: Path) -> list[str]:
         image_harness,
     ):
         if not path.is_file():
-            failures.append(f"missing component-maturity dependency: {path.relative_to(root)}")
+            failures.append(
+                f"missing component-maturity dependency: {path.relative_to(root)}"
+            )
     if failures:
         return failures
 
@@ -93,14 +116,23 @@ def check(root: Path) -> list[str]:
         failures.append("contracts/components.toml schema_version must be 1")
     if contract.get("roadmap_contract") != "contracts/roadmap.toml":
         failures.append("components contract must bind the canonical roadmap contract")
-    if contract.get("release_workflow") != ".github/workflows/reusable-release-build.yml":
+    if (
+        contract.get("release_workflow")
+        != ".github/workflows/reusable-release-build.yml"
+    ):
         failures.append("components contract must bind the canonical release workflow")
     if tuple(contract.get("maturity_order", ())) != ALLOWED_MATURITY:
-        failures.append("component maturity order changed without an explicit contract revision")
+        failures.append(
+            "component maturity order changed without an explicit contract revision"
+        )
 
-    raw_milestones = [item for item in roadmap.get("milestone", []) if isinstance(item, dict)]
+    raw_milestones = [
+        item for item in roadmap.get("milestone", []) if isinstance(item, dict)
+    ]
     milestones_by_version = {
-        item.get("version"): item for item in raw_milestones if isinstance(item.get("version"), str)
+        item.get("version"): item
+        for item in raw_milestones
+        if isinstance(item.get("version"), str)
     }
     milestones = set(milestones_by_version)
     current_release = roadmap.get("current_release")
@@ -168,7 +200,9 @@ def check(root: Path) -> list[str]:
 
         activation_milestone: dict[str, object] | None = None
         if not isinstance(activation, str) or activation not in milestones:
-            failures.append(f"{component_id}: activation_milestone {activation!r} is not in the canonical roadmap")
+            failures.append(
+                f"{component_id}: activation_milestone {activation!r} is not in the canonical roadmap"
+            )
             activation_key = None
         else:
             activation_milestone = milestones_by_version[activation]
@@ -179,27 +213,45 @@ def check(root: Path) -> list[str]:
                 activation_key = None
 
         if kind == "planned-app" and maturity != "roadmap-scaffold":
-            failures.append(f"{component_id}: planned-app kind must remain roadmap-scaffold")
+            failures.append(
+                f"{component_id}: planned-app kind must remain roadmap-scaffold"
+            )
 
         if kind == "shell":
             if workspace_member is not False:
-                failures.append(f"{component_id}: shell components must remain outside the Cargo workspace")
+                failures.append(
+                    f"{component_id}: shell components must remain outside the Cargo workspace"
+                )
             if release_artifact is not False:
-                failures.append(f"{component_id}: shell components are runtime assets, not release binaries")
+                failures.append(
+                    f"{component_id}: shell components are runtime assets, not release binaries"
+                )
             shell_root = root / path / "shell.qml"
             bridge_manifest = root / path / "bridge" / "CMakeLists.txt"
             if not shell_root.is_file():
-                failures.append(f"{component_id}: active shell component must declare shell.qml")
+                failures.append(
+                    f"{component_id}: active shell component must declare shell.qml"
+                )
             if not bridge_manifest.is_file():
-                failures.append(f"{component_id}: active shell component must declare bridge/CMakeLists.txt")
+                failures.append(
+                    f"{component_id}: active shell component must declare bridge/CMakeLists.txt"
+                )
 
         if maturity == "roadmap-scaffold":
             if release_artifact is True:
-                failures.append(f"{component_id}: roadmap scaffold cannot be a release artifact")
+                failures.append(
+                    f"{component_id}: roadmap scaffold cannot be a release artifact"
+                )
             if activation_key is not None and activation_key <= current_key:
-                failures.append(f"{component_id}: roadmap scaffold activation must remain in a future milestone")
+                failures.append(
+                    f"{component_id}: roadmap scaffold activation must remain in a future milestone"
+                )
 
-        if maturity == "integrated-experimental" and activation_key is not None and activation_key > next_key:
+        if (
+            maturity == "integrated-experimental"
+            and activation_key is not None
+            and activation_key > next_key
+        ):
             failures.append(
                 f"{component_id}: integrated component activation {activation} is later than candidate {next_release}"
             )
@@ -209,8 +261,13 @@ def check(root: Path) -> list[str]:
                 failures.append(
                     f"{component_id}: stable component activation {activation} is later than candidate {next_release}"
                 )
-            if activation_milestone is not None and activation_milestone.get("claim_class") != "Stable":
-                failures.append(f"{component_id}: stable maturity requires a Stable activation milestone")
+            if (
+                activation_milestone is not None
+                and activation_milestone.get("claim_class") != "Stable"
+            ):
+                failures.append(
+                    f"{component_id}: stable maturity requires a Stable activation milestone"
+                )
             if activation_milestone is not None:
                 for evidence_field in ("release_contract", "qualification"):
                     evidence = activation_milestone.get(evidence_field)
@@ -231,37 +288,59 @@ def check(root: Path) -> list[str]:
 
         if release_artifact is True:
             if maturity not in {"integrated-experimental", "stable"}:
-                failures.append(f"{component_id}: release artifact must be integrated or stable")
+                failures.append(
+                    f"{component_id}: release artifact must be integrated or stable"
+                )
             if activation_key is not None and activation_key > next_key:
                 failures.append(
                     f"{component_id}: future component for {activation} cannot ship in candidate {next_release}"
                 )
             if not isinstance(binary, str) or not binary:
-                failures.append(f"{component_id}: release artifact must declare its binary name")
+                failures.append(
+                    f"{component_id}: release artifact must declare its binary name"
+                )
             elif binary in release_binaries:
                 failures.append(f"duplicate release binary declaration: {binary}")
             else:
                 release_binaries.add(binary)
         elif binary is not None:
-            failures.append(f"{component_id}: non-release component must not declare a binary")
+            failures.append(
+                f"{component_id}: non-release component must not declare a binary"
+            )
 
         if authority_role == "privileged-executor" and kind != "executor":
-            failures.append(f"{component_id}: privileged-executor role is reserved for executor components")
+            failures.append(
+                f"{component_id}: privileged-executor role is reserved for executor components"
+            )
         if authority_role == "privileged-executor" and release_artifact is not True:
-            failures.append(f"{component_id}: active privileged executor must be an explicit release artifact")
+            failures.append(
+                f"{component_id}: active privileged executor must be an explicit release artifact"
+            )
         if authority_role == "proposal-only" and release_artifact is True:
-            failures.append(f"{component_id}: proposal-only component cannot be a release artifact")
-        if authority_role == "authority-runtime" and (kind != "app" or release_artifact is not True):
-            failures.append(f"{component_id}: authority runtime must be an explicit released app boundary")
+            failures.append(
+                f"{component_id}: proposal-only component cannot be a release artifact"
+            )
+        if authority_role == "authority-runtime" and (
+            kind != "app" or release_artifact is not True
+        ):
+            failures.append(
+                f"{component_id}: authority runtime must be an explicit released app boundary"
+            )
 
-    declared_workspace = {path for path, item in by_path.items() if item.get("workspace_member") is True}
+    declared_workspace = {
+        path for path, item in by_path.items() if item.get("workspace_member") is True
+    }
     actual_workspace = set(workspace.get("workspace", {}).get("members", []))
     missing = sorted(actual_workspace - declared_workspace)
     extra = sorted(declared_workspace - actual_workspace)
     if missing:
-        failures.append(f"workspace members missing component maturity ownership: {missing}")
+        failures.append(
+            f"workspace members missing component maturity ownership: {missing}"
+        )
     if extra:
-        failures.append(f"component contract claims non-members as workspace members: {extra}")
+        failures.append(
+            f"component contract claims non-members as workspace members: {extra}"
+        )
 
     non_workspace_app_dirs = {
         path.relative_to(root).as_posix()
@@ -294,7 +373,9 @@ def check(root: Path) -> list[str]:
         RELEASE_PAYLOAD_PYTHON_CONTRACT,
     )
     missing_payload_verification = [
-        fragment for fragment in required_payload_verification if fragment not in release_text
+        fragment
+        for fragment in required_payload_verification
+        if fragment not in release_text
     ]
     if missing_payload_verification:
         failures.append(
@@ -318,7 +399,9 @@ def check(root: Path) -> list[str]:
 
 def print_release_binaries(root: Path) -> int:
     try:
-        contract = tomllib.loads((root / "contracts/components.toml").read_text(encoding="utf-8"))
+        contract = tomllib.loads(
+            (root / "contracts/components.toml").read_text(encoding="utf-8")
+        )
         binaries = release_binaries_from_contract(contract)
     except (OSError, tomllib.TOMLDecodeError, ValueError) as error:
         print(f"cannot derive release binaries: {error}", file=sys.stderr)
@@ -331,7 +414,10 @@ def print_release_binaries(root: Path) -> int:
 def main() -> int:
     if len(sys.argv) >= 2 and sys.argv[1] == "--release-binaries":
         if len(sys.argv) > 3:
-            print("usage: check_component_maturity.py --release-binaries [root]", file=sys.stderr)
+            print(
+                "usage: check_component_maturity.py --release-binaries [root]",
+                file=sys.stderr,
+            )
             return 2
         root = Path(sys.argv[2]).resolve() if len(sys.argv) == 3 else DEFAULT_ROOT
         return print_release_binaries(root)

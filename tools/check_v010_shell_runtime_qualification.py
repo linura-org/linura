@@ -203,7 +203,9 @@ def _local_runtime_dependency_paths(
     root_resolved = root.resolve()
     start = root / start_manifest
     if not start.is_file() or start.is_symlink():
-        failures.append(f"linurad runtime manifest missing or untrusted: {start_manifest}")
+        failures.append(
+            f"linurad runtime manifest missing or untrusted: {start_manifest}"
+        )
         return []
 
     pending = [start]
@@ -273,11 +275,17 @@ def validate(root: Path) -> list[str]:
         failures.append(f"workstation acceptance contract: {failure}")
 
     if workstation.get("shell_runtime_qualification_contract") != CONTRACT:
-        failures.append("v0.10 workstation qualification must bind the shell runtime qualification contract")
+        failures.append(
+            "v0.10 workstation qualification must bind the shell runtime qualification contract"
+        )
     if contract.get("substrate_contract") != SUBSTRATE_CONTRACT:
-        failures.append("shell runtime qualification must bind the cacheable substrate contract")
+        failures.append(
+            "shell runtime qualification must bind the cacheable substrate contract"
+        )
     if contract.get("workstation_acceptance_contract") != ACCEPTANCE_CONTRACT:
-        failures.append("shell runtime qualification must bind the A/B/C workstation acceptance contract")
+        failures.append(
+            "shell runtime qualification must bind the A/B/C workstation acceptance contract"
+        )
 
     expected_scalars = {
         "schema_version": 1,
@@ -329,9 +337,15 @@ def validate(root: Path) -> list[str]:
     if not isinstance(cache_policy, dict):
         failures.append("shell runtime substrate cache_policy is missing")
     else:
-        for key in ("base_image_bytes", "prepared_guest_bytes", "cargo_dependency_bytes"):
+        for key in (
+            "base_image_bytes",
+            "prepared_guest_bytes",
+            "cargo_dependency_bytes",
+        ):
             if cache_policy.get(key) is not True:
-                failures.append(f"shell runtime substrate cache_policy.{key} must remain true")
+                failures.append(
+                    f"shell runtime substrate cache_policy.{key} must remain true"
+                )
         for key in (
             "qualification_evidence",
             "linura_build_outputs",
@@ -339,12 +353,18 @@ def validate(root: Path) -> list[str]:
             "release_support_promotion",
         ):
             if cache_policy.get(key) is not False:
-                failures.append(f"shell runtime substrate cache_policy.{key} must remain false")
+                failures.append(
+                    f"shell runtime substrate cache_policy.{key} must remain false"
+                )
 
     if contract.get("required_components") != EXPECTED_COMPONENTS:
-        failures.append("shell runtime required_components drifted from the real authority/runtime matrix")
+        failures.append(
+            "shell runtime required_components drifted from the real authority/runtime matrix"
+        )
     if contract.get("required_cases") != EXPECTED_CASES:
-        failures.append("shell runtime required_cases drifted from the executable qualification matrix")
+        failures.append(
+            "shell runtime required_cases drifted from the executable qualification matrix"
+        )
 
     base_url = contract.get("base_image_url")
     checksum_url = contract.get("base_image_checksum_url")
@@ -353,19 +373,37 @@ def validate(root: Path) -> list[str]:
     else:
         parsed = urlparse(base_url)
         if parsed.scheme != "https" or parsed.netloc != "geo.mirror.pkgbuild.com":
-            failures.append("shell runtime base image must use the official Arch mirror over HTTPS")
+            failures.append(
+                "shell runtime base image must use the official Arch mirror over HTTPS"
+            )
         if "/images/v" not in parsed.path or "/latest/" in parsed.path:
-            failures.append("shell runtime base image must be version-addressed and never use latest")
+            failures.append(
+                "shell runtime base image must be version-addressed and never use latest"
+            )
         if not re.search(r"/Arch-Linux-x86_64-cloudimg-[0-9.]+\.qcow2$", parsed.path):
-            failures.append("shell runtime base image must be an exact x86_64 Arch cloud image")
-    if not isinstance(checksum_url, str) or not isinstance(base_url, str) or checksum_url != base_url + ".SHA256":
-        failures.append("shell runtime checksum URL must bind the exact version-addressed base image")
+            failures.append(
+                "shell runtime base image must be an exact x86_64 Arch cloud image"
+            )
+    if (
+        not isinstance(checksum_url, str)
+        or not isinstance(base_url, str)
+        or checksum_url != base_url + ".SHA256"
+    ):
+        failures.append(
+            "shell runtime checksum URL must bind the exact version-addressed base image"
+        )
 
     workstation_substrate = workstation.get("substrate", {})
-    if contract.get("arch_archive_snapshot") != workstation_substrate.get("snapshot_date"):
-        failures.append("shell runtime Arch archive snapshot must match the v0.10 workstation substrate")
+    if contract.get("arch_archive_snapshot") != workstation_substrate.get(
+        "snapshot_date"
+    ):
+        failures.append(
+            "shell runtime Arch archive snapshot must match the v0.10 workstation substrate"
+        )
     if contract.get("arch_archive_url") != workstation_substrate.get("repository_url"):
-        failures.append("shell runtime Arch archive URL must match the v0.10 workstation substrate")
+        failures.append(
+            "shell runtime Arch archive URL must match the v0.10 workstation substrate"
+        )
 
     evidence = contract.get("evidence")
     if not isinstance(evidence, dict):
@@ -400,30 +438,41 @@ def validate(root: Path) -> list[str]:
         if evidence.get("result") != "passed":
             failures.append("shell runtime evidence result contract must remain passed")
         if evidence.get("release_support_promotion") is not False:
-            failures.append("shell runtime development evidence must never promote release support")
+            failures.append(
+                "shell runtime development evidence must never promote release support"
+            )
 
     for relative in RUNTIME_FILES:
         path = root / relative
         if not path.is_file() or path.is_symlink():
-            failures.append(f"shell runtime qualification file missing or untrusted: {relative}")
+            failures.append(
+                f"shell runtime qualification file missing or untrusted: {relative}"
+            )
 
     for relative in EXECUTABLE_RUNTIME_SCRIPTS:
         script = root / relative
-        if (script.is_symlink() or not script.is_file()
-                or not (stat.S_IMODE(script.stat().st_mode) & stat.S_IXUSR)):
-            failures.append(f"shell runtime qualification script not executable or untrusted: {relative}")
+        if (
+            script.is_symlink()
+            or not script.is_file()
+            or not (stat.S_IMODE(script.stat().st_mode) & stat.S_IXUSR)
+        ):
+            failures.append(
+                f"shell runtime qualification script not executable or untrusted: {relative}"
+            )
 
     workflow_path = root / WORKFLOW
     parent_path = root / PARENT_WORKFLOW
-    workflow = workflow_path.read_text(encoding="utf-8") if workflow_path.is_file() else ""
+    workflow = (
+        workflow_path.read_text(encoding="utf-8") if workflow_path.is_file() else ""
+    )
     parent = parent_path.read_text(encoding="utf-8") if parent_path.is_file() else ""
     required_workflow_fragments = (
         "name: v0.10 shell runtime qualification",
         "workflow_call:",
-        'runs-on: ubuntu-24.04',
-        'timeout-minutes: 90',
-        'python3 tools/check_v010_shell_runtime_qualification.py',
-        'installed_shell_bridge_sha=',
+        "runs-on: ubuntu-24.04",
+        "timeout-minutes: 90",
+        "python3 tools/check_v010_shell_runtime_qualification.py",
+        "installed_shell_bridge_sha=",
         "SHELL_BRIDGE_SHA256",
         '"shell_bridge_sha256": os.environ["SHELL_BRIDGE_SHA256"]',
         "source tools/codex/versions.env",
@@ -438,8 +487,8 @@ def validate(root: Path) -> list[str]:
         "deadline=$((SECONDS + 420))",
         "'timeout 240 cloud-init status --wait --long'",
         "sudo -n modprobe virtio_gpu",
-        'sudo -n systemctl enable seatd.service',
-        'sudo -n systemctl start seatd.service',
+        "sudo -n systemctl enable seatd.service",
+        "sudo -n systemctl start seatd.service",
         "dump_graphics_state",
         "sudo -n journalctl -u seatd.service -b --no-pager",
         'seat_group="$(stat -c \'%G\' "$seat_socket")"',
@@ -475,9 +524,9 @@ def validate(root: Path) -> list[str]:
         "LC_ALL=C.UTF-8",
         "RUSTFLAGS=--remap-path-prefix=%s=/workspace",
         'cargo build --workspace --release --locked --target "$RELEASE_TARGET"',
-        'target/$RELEASE_TARGET/release/linurad',
-        'LINURAD_SHA256=%s',
-        'SESSION_AUDIO_HELPER_SHA256=%s',
+        "target/$RELEASE_TARGET/release/linurad",
+        "LINURAD_SHA256=%s",
+        "SESSION_AUDIO_HELPER_SHA256=%s",
         "bash qualification/v010/shell-runtime/start-vm.sh",
         "--mode automated",
         "--display none",
@@ -499,7 +548,7 @@ def validate(root: Path) -> list[str]:
         "prepared-substrate-packages.txt",
         "prepared substrate package universe drifted before qualification",
         "git archive --format=tar.gz",
-        'linura@127.0.0.1:/tmp/linurad-qualification',
+        "linura@127.0.0.1:/tmp/linurad-qualification",
         "installed linurad digest does not match exact-source build",
         "installed session-audio helper digest does not match exact source",
         "runtime-install-integrity.txt",
@@ -565,7 +614,9 @@ def validate(root: Path) -> list[str]:
             failures.append(f"shell runtime workflow missing: {fragment}")
     package_set_marker = "required_packages = {"
     if package_set_marker not in workflow:
-        failures.append("shell runtime workflow missing exact runtime package evidence set")
+        failures.append(
+            "shell runtime workflow missing exact runtime package evidence set"
+        )
     else:
         package_set = workflow.split(package_set_marker, 1)[1].split("}", 1)[0]
         for required_package in ("pipewire-audio", "ffmpeg", "wf-recorder", "wayland"):
@@ -599,18 +650,28 @@ def validate(root: Path) -> list[str]:
 
     save_block = workflow_step_block(workflow, "Save prepared runtime substrate")
     if "cache-primary-key" not in save_block:
-        failures.append("prepared runtime substrate must be saved under the exact restored key")
+        failures.append(
+            "prepared runtime substrate must be saved under the exact restored key"
+        )
 
     runtime_restore_index = workflow.rfind("- name: Restore prepared runtime substrate")
     runtime_restore = ""
     if runtime_restore_index >= 0:
-        runtime_restore = workflow[runtime_restore_index:].split("\n      - name:", 1)[0]
+        runtime_restore = workflow[runtime_restore_index:].split("\n      - name:", 1)[
+            0
+        ]
     if "fail-on-cache-miss: true" not in runtime_restore:
-        failures.append("exact-source runtime must fail closed if prepared substrate is unavailable")
+        failures.append(
+            "exact-source runtime must fail closed if prepared substrate is unavailable"
+        )
 
-    builder_step = workflow_step_block(workflow, "Build sanitized prepared runtime substrate")
+    builder_step = workflow_step_block(
+        workflow, "Build sanitized prepared runtime substrate"
+    )
     if "prepare-substrate.sh" not in builder_step:
-        failures.append("prepared substrate cache miss must invoke the repository-owned builder")
+        failures.append(
+            "prepared substrate cache miss must invoke the repository-owned builder"
+        )
 
     base_image_step = workflow_step_block(
         workflow, "Download and verify official Arch base image"
@@ -620,7 +681,7 @@ def validate(root: Path) -> list[str]:
         "| sha256sum --check --strict; then"
     )
     final_base_check = (
-        "printf '%s  %s\\n' \"$digest\" \"$image\" | sha256sum --check --strict"
+        'printf \'%s  %s\\n\' "$digest" "$image" | sha256sum --check --strict'
     )
     if cached_base_check not in base_image_step:
         failures.append(
@@ -638,24 +699,42 @@ def validate(root: Path) -> list[str]:
     else:
         runtime_job = workflow[runtime_job_index:]
     if "pacman -Syu" in runtime_job:
-        failures.append("exact-source runtime job must not rebuild the prepared Arch package substrate")
+        failures.append(
+            "exact-source runtime job must not rebuild the prepared Arch package substrate"
+        )
     if "linura-v010-pacman" in workflow:
         failures.append("v0.10 runtime must not use the obsolete package-payload cache")
     if "--persistent" in runtime_job:
-        failures.append("exact-source qualification runtime must remain snapshot/disposable")
+        failures.append(
+            "exact-source qualification runtime must remain snapshot/disposable"
+        )
     if 'cp --reflink=auto "$PREPARED_IMAGE" "$vm_image"' not in runtime_job:
-        failures.append("exact-source runtime must clone the verified prepared substrate")
+        failures.append(
+            "exact-source runtime must clone the verified prepared substrate"
+        )
 
     if isinstance(base_url, str) and f"BASE_IMAGE_URL: {base_url}" not in workflow:
         failures.append("shell runtime workflow base image does not match its contract")
-    if isinstance(checksum_url, str) and f"BASE_IMAGE_CHECKSUM_URL: {checksum_url}" not in workflow:
-        failures.append("shell runtime workflow checksum URL does not match its contract")
+    if (
+        isinstance(checksum_url, str)
+        and f"BASE_IMAGE_CHECKSUM_URL: {checksum_url}" not in workflow
+    ):
+        failures.append(
+            "shell runtime workflow checksum URL does not match its contract"
+        )
     archive_url = contract.get("arch_archive_url")
-    if isinstance(archive_url, str) and f"ARCH_ARCHIVE_URL: {archive_url}" not in workflow:
-        failures.append("shell runtime workflow archive URL does not match its contract")
+    if (
+        isinstance(archive_url, str)
+        and f"ARCH_ARCHIVE_URL: {archive_url}" not in workflow
+    ):
+        failures.append(
+            "shell runtime workflow archive URL does not match its contract"
+        )
     for forbidden in ("continue-on-error:", "/images/latest/", "runs-on: self-hosted"):
         if forbidden in workflow:
-            failures.append(f"shell runtime workflow contains forbidden weakening: {forbidden}")
+            failures.append(
+                f"shell runtime workflow contains forbidden weakening: {forbidden}"
+            )
     for forbidden_cache_path in (
         "linura-v010-evidence-cache",
         "linura-v010-runtime-binary-cache",
@@ -668,7 +747,11 @@ def validate(root: Path) -> list[str]:
 
     for cache_workflow, label, build_marker in (
         (workflow, "runtime", "- name: Build exact-source Linura session authority"),
-        (parent, "parent", "- name: Verify roadmap, support and v0.10 qualification contracts"),
+        (
+            parent,
+            "parent",
+            "- name: Verify roadmap, support and v0.10 qualification contracts",
+        ),
     ):
         if "- name: Restore Cargo dependency cache" in cache_workflow:
             cache_block = cache_workflow.split(
@@ -711,7 +794,9 @@ def validate(root: Path) -> list[str]:
     )
     for fragment in parent_fragments:
         if fragment not in parent:
-            failures.append(f"v0.10 parent qualification workflow missing shell runtime gate: {fragment}")
+            failures.append(
+                f"v0.10 parent qualification workflow missing shell runtime gate: {fragment}"
+            )
 
     for dependency_path in _local_runtime_dependency_paths(
         root,
@@ -728,7 +813,9 @@ def validate(root: Path) -> list[str]:
     if production_packages_path.is_file() and not production_packages_path.is_symlink():
         production_packages = {
             line.strip()
-            for line in production_packages_path.read_text(encoding="utf-8").splitlines()
+            for line in production_packages_path.read_text(
+                encoding="utf-8"
+            ).splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         }
         if "pipewire-audio" not in production_packages:
@@ -744,7 +831,9 @@ def validate(root: Path) -> list[str]:
                 "v0.10 contract and shell runtime qualification must remain parallel independent gates"
             )
 
-    production_service = (root / "packaging/systemd/user/linura-shell.service").read_text(encoding="utf-8")
+    production_service = (
+        root / "packaging/systemd/user/linura-shell.service"
+    ).read_text(encoding="utf-8")
     production_service_lines = set(production_service.splitlines())
     if any(
         line.startswith("Environment=QT_QUICK_BACKEND=")
@@ -754,14 +843,10 @@ def validate(root: Path) -> list[str]:
             "production shell service must not pin the qualification-only Qt Quick software backend"
         )
     qualification_services = {
-        "linura-shell-qualification.service":
-            "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-controller.qml",
-        "linura-palette-qualification.service":
-            "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-palette.qml",
-        "linura-quick-settings-qualification.service":
-            "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-quick-settings.qml",
-        "linura-panel-qualification.service":
-            "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-panel.qml",
+        "linura-shell-qualification.service": "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-controller.qml",
+        "linura-palette-qualification.service": "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-palette.qml",
+        "linura-quick-settings-qualification.service": "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-quick-settings.qml",
+        "linura-panel-qualification.service": "ExecStart=/usr/bin/quickshell -n -p /opt/linura-source/apps/linura-shell/qualification-panel.qml",
     }
     for service_name, expected_exec_start in qualification_services.items():
         service = (
@@ -792,11 +877,17 @@ def validate(root: Path) -> list[str]:
                 )
         for line in SANDBOX_LINES:
             if line not in production_service_lines:
-                failures.append(f"production shell service unexpectedly lacks sandbox line: {line}")
+                failures.append(
+                    f"production shell service unexpectedly lacks sandbox line: {line}"
+                )
             if line not in service_lines:
-                failures.append(f"{service_name} must preserve production shell sandbox line: {line}")
+                failures.append(
+                    f"{service_name} must preserve production shell sandbox line: {line}"
+                )
 
-    controller = (root / "apps/linura-shell/qualification-controller.qml").read_text(encoding="utf-8")
+    controller = (root / "apps/linura-shell/qualification-controller.qml").read_text(
+        encoding="utf-8"
+    )
     for fragment in (
         "//@ pragma ShellId linura-qualification-controller",
         "import qs.integrations.xdg as Xdg",
@@ -806,11 +897,17 @@ def validate(root: Path) -> list[str]:
         "launcher.launchApplication(applicationId, requestGeneration)",
     ):
         if fragment not in controller:
-            failures.append(f"controller runtime fixture missing production binding: {fragment}")
+            failures.append(
+                f"controller runtime fixture missing production binding: {fragment}"
+            )
     if "../../../../apps/linura-shell" in controller:
-        failures.append("controller runtime fixture must not use a cross-root relative QML import")
+        failures.append(
+            "controller runtime fixture must not use a cross-root relative QML import"
+        )
 
-    palette = (root / "apps/linura-shell/qualification-palette.qml").read_text(encoding="utf-8")
+    palette = (root / "apps/linura-shell/qualification-palette.qml").read_text(
+        encoding="utf-8"
+    )
     for fragment in (
         "//@ pragma ShellId linura-qualification-palette",
         'import "plugins/command-palette" as Palette',
@@ -819,15 +916,21 @@ def validate(root: Path) -> list[str]:
         "palette.completeApplicationRequest(status, requestGeneration)",
     ):
         if fragment not in palette:
-            failures.append(f"palette runtime fixture missing production binding: {fragment}")
+            failures.append(
+                f"palette runtime fixture missing production binding: {fragment}"
+            )
     if "../../../../apps/linura-shell" in palette:
-        failures.append("palette runtime fixture must not use a cross-root relative QML import")
+        failures.append(
+            "palette runtime fixture must not use a cross-root relative QML import"
+        )
     if "qs.plugins.command-palette" in palette:
-        failures.append("palette runtime fixture must not use an invalid hyphenated qs module path")
+        failures.append(
+            "palette runtime fixture must not use an invalid hyphenated qs module path"
+        )
 
-    quick_settings = (root / "apps/linura-shell/qualification-quick-settings.qml").read_text(
-        encoding="utf-8"
-    )
+    quick_settings = (
+        root / "apps/linura-shell/qualification-quick-settings.qml"
+    ).read_text(encoding="utf-8")
     for fragment in (
         "//@ pragma ShellId linura-qualification-quick-settings",
         "import Quickshell.Io",
@@ -843,7 +946,13 @@ def validate(root: Path) -> list[str]:
             failures.append(
                 f"Quick Settings runtime fixture missing real production binding: {fragment}"
             )
-    for forbidden in ("MockAudio", "FakeAudio", "wpctl", "wpexec", "SetAudioOutputVolume"):
+    for forbidden in (
+        "MockAudio",
+        "FakeAudio",
+        "wpctl",
+        "wpexec",
+        "SetAudioOutputVolume",
+    ):
         if forbidden in quick_settings:
             failures.append(
                 f"Quick Settings runtime fixture must not bypass the production bridge: {forbidden}"
@@ -885,28 +994,44 @@ def validate(root: Path) -> list[str]:
             )
 
     run_script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
-    provision_script = root / "qualification/v010/shell-runtime/provision-shell-runtime.sh"
+    provision_script = (
+        root / "qualification/v010/shell-runtime/provision-shell-runtime.sh"
+    )
     vm_launcher = root / "qualification/v010/shell-runtime/start-vm.sh"
-    recorder_script = root / "qualification/v010/workstation-acceptance/record-session.sh"
-    live_session_script = root / "qualification/v010/workstation-acceptance/run-live-session.sh"
-    interactive_launcher = root / "qualification/v010/workstation-acceptance/launch-interactive.sh"
-    hardware_capture_script = root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
-    hardware_runner_script = root / "qualification/v010/workstation-acceptance/run-hardware-qualification.sh"
+    recorder_script = (
+        root / "qualification/v010/workstation-acceptance/record-session.sh"
+    )
+    live_session_script = (
+        root / "qualification/v010/workstation-acceptance/run-live-session.sh"
+    )
+    interactive_launcher = (
+        root / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+    )
+    hardware_capture_script = (
+        root / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+    )
+    hardware_runner_script = (
+        root / "qualification/v010/workstation-acceptance/run-hardware-qualification.sh"
+    )
     acceptance_tool = root / "tools/workstation_acceptance.py"
     q11_orchestrator = root / "tools/workstation_q11_runner.py"
-    prepare_substrate_script = root / "qualification/v010/shell-runtime/prepare-substrate.sh"
-    verify_substrate_script = root / "qualification/v010/shell-runtime/verify-substrate.py"
+    prepare_substrate_script = (
+        root / "qualification/v010/shell-runtime/prepare-substrate.sh"
+    )
+    verify_substrate_script = (
+        root / "qualification/v010/shell-runtime/verify-substrate.py"
+    )
 
     if provision_script.is_file():
         provision_text = provision_script.read_text(encoding="utf-8")
         for fragment in (
-            'ui_module_dir=/usr/local/lib/qt6/qml/org/linura/UI',
+            "ui_module_dir=/usr/local/lib/qt6/qml/org/linura/UI",
             'ui_plugin="$ui_module_dir/liblinura-uiplugin.so"',
             'ui_backing="$ui_module_dir/liblinura-ui.so"',
             'ui_linkage="$(ldd "$ui_plugin")"',
             "Linura UI QML plugin has unresolved installed dependencies",
             "Linura UI QML plugin did not resolve its backing library from the module directory",
-            'bridge_module_dir=/usr/local/lib/qt6/qml/org/linura/ShellBridge',
+            "bridge_module_dir=/usr/local/lib/qt6/qml/org/linura/ShellBridge",
             'bridge_plugin="$bridge_module_dir/liblinura-shell-bridgeplugin.so"',
             'bridge_backing="$bridge_module_dir/liblinura-shell-bridge.so"',
             'bridge_linkage="$(ldd "$bridge_plugin")"',
@@ -914,7 +1039,7 @@ def validate(root: Path) -> list[str]:
             "Linura ShellBridge QML plugin did not resolve its backing library from the module directory",
             "cmake --build",
             "cmake --install",
-            "install -o root -g root -m 0755 \"$linurad_binary\" /usr/bin/linurad",
+            'install -o root -g root -m 0755 "$linurad_binary" /usr/bin/linurad',
             "install -o root -g root -m 0644",
             "/usr/lib/linura/linura-session-audio.lua",
         ):
@@ -941,7 +1066,9 @@ def validate(root: Path) -> list[str]:
             text=True,
         )
         if completed.returncode != 0:
-            failures.append(f"invalid shell runtime script {script.relative_to(root)}: {completed.stderr.strip()}")
+            failures.append(
+                f"invalid shell runtime script {script.relative_to(root)}: {completed.stderr.strip()}"
+            )
 
     if verify_substrate_script.is_file():
         verify_source = verify_substrate_script.read_text(encoding="utf-8")
@@ -974,13 +1101,13 @@ def validate(root: Path) -> list[str]:
                     f"Level C hardware runner missing bounded case protocol: {fragment}"
                 )
         for forbidden in (
-            'eval ',
-            'bash -c',
-            'sh -c',
+            "eval ",
+            "bash -c",
+            "sh -c",
             'exec "$@"',
             'command "$@"',
-            '--command',
-            '--argv',
+            "--command",
+            "--argv",
         ):
             if forbidden in hardware_runner_text:
                 failures.append(
@@ -1006,8 +1133,8 @@ def validate(root: Path) -> list[str]:
             "fixture_contract_sha256",
             'virtualization="none"',
             "fully clean exact-source checkout",
-            'record=0',
-            '--record) record=1',
+            "record=0",
+            "--record) record=1",
             'if [[ "$record" -eq 0 ]]; then',
             "without screen recording",
             "supporting evidence only; all Q11 cases must pass",
@@ -1036,7 +1163,9 @@ def validate(root: Path) -> list[str]:
         hardware_capture_text = hardware_capture_script.read_text(encoding="utf-8")
         opt_out = hardware_capture_text.find('if [[ "$record" -eq 0 ]]; then')
         stale_cleanup = hardware_capture_text.find("stale_recordings=()")
-        stale_preflight = hardware_capture_text.find('stale_recordings+=("$stale_recording")')
+        stale_preflight = hardware_capture_text.find(
+            'stale_recordings+=("$stale_recording")'
+        )
         stale_purge = hardware_capture_text.find('rm -f -- "$stale_recording"')
         snapshot_validation = hardware_capture_text.find(
             'safe_snapshot_destination "$evidence_root/$snapshot_name"'
@@ -1053,8 +1182,12 @@ def validate(root: Path) -> list[str]:
         snapshot_publish = hardware_capture_text.find(
             'mv -fT -- "$snapshot_temporary_dir/$snapshot_name" "$evidence_root/$snapshot_name"'
         )
-        recording_path = hardware_capture_text.find('recording="$capture_state_dir/hardware-$fixture_id.mkv"')
-        recorder_start = hardware_capture_text.find('"$recorder" start "$recording" "$output_name"')
+        recording_path = hardware_capture_text.find(
+            'recording="$capture_state_dir/hardware-$fixture_id.mkv"'
+        )
+        recorder_start = hardware_capture_text.find(
+            '"$recorder" start "$recording" "$output_name"'
+        )
         capture_state = hardware_capture_text.find(
             'capture_state_dir="$HOME/.local/state/linura/acceptance"'
         )
@@ -1066,13 +1199,24 @@ def validate(root: Path) -> list[str]:
             '[[ "$recorder_state" == "inactive" ]]'
         )
         if (
-            min(capture_state, capture_lock_helper, capture_lock, idle_recorder, stale_cleanup) < 0
-            or 'coproc capture_lock_holder {' not in hardware_capture_text
-            or 'LOCKED) ;;' not in hardware_capture_text
-            or 'BUSY) fail "Level C capture already in progress' not in hardware_capture_text
+            min(
+                capture_state,
+                capture_lock_helper,
+                capture_lock,
+                idle_recorder,
+                stale_cleanup,
+            )
+            < 0
+            or "coproc capture_lock_holder {" not in hardware_capture_text
+            or "LOCKED) ;;" not in hardware_capture_text
+            or 'BUSY) fail "Level C capture already in progress'
+            not in hardware_capture_text
             or not (
-                capture_state < capture_lock_helper < capture_lock
-                < idle_recorder < stale_cleanup
+                capture_state
+                < capture_lock_helper
+                < capture_lock
+                < idle_recorder
+                < stale_cleanup
             )
         ):
             failures.append(
@@ -1102,14 +1246,17 @@ def validate(root: Path) -> list[str]:
             "sys.stdin.buffer.read()",
         ):
             if fragment not in helper_text:
-                failures.append(f"Level C capture lock helper missing safety boundary: {fragment}")
+                failures.append(
+                    f"Level C capture lock helper missing safety boundary: {fragment}"
+                )
 
         if (
             min(stale_cleanup, stale_preflight, stale_purge) < 0
             or not (stale_cleanup < stale_preflight < stale_purge)
-            or 'stale_recordings=()' not in hardware_capture_text
+            or "stale_recordings=()" not in hardware_capture_text
             or 'stale_recordings+=("$stale_recording")' not in hardware_capture_text
-            or 'for stale_recording in "${stale_recordings[@]}"' not in hardware_capture_text
+            or 'for stale_recording in "${stale_recordings[@]}"'
+            not in hardware_capture_text
             or any(
                 fragment not in hardware_capture_text
                 for fragment in (
@@ -1126,16 +1273,31 @@ def validate(root: Path) -> list[str]:
 
         if (
             min(
-                opt_out, stale_cleanup, stale_purge, snapshot_validation,
-                snapshot_temporary, snapshot_start, snapshot_source_check,
-                snapshot_publish, recording_path, recorder_start,
-            ) < 0
+                opt_out,
+                stale_cleanup,
+                stale_purge,
+                snapshot_validation,
+                snapshot_temporary,
+                snapshot_start,
+                snapshot_source_check,
+                snapshot_publish,
+                recording_path,
+                recorder_start,
+            )
+            < 0
             or '[[ ! -L "$destination" ]]' not in hardware_capture_text
             or 'stat -c %h -- "$destination"' not in hardware_capture_text
             or not (
-                snapshot_validation < stale_cleanup < stale_purge
-                < snapshot_temporary < snapshot_start < snapshot_source_check
-                < snapshot_publish < opt_out < recording_path < recorder_start
+                snapshot_validation
+                < stale_cleanup
+                < stale_purge
+                < snapshot_temporary
+                < snapshot_start
+                < snapshot_source_check
+                < snapshot_publish
+                < opt_out
+                < recording_path
+                < recorder_start
             )
         ):
             failures.append(
@@ -1145,11 +1307,11 @@ def validate(root: Path) -> list[str]:
         if any(
             fragment not in hardware_capture_text
             for fragment in (
-                'maximum_duration_seconds',
+                "maximum_duration_seconds",
                 'capture_start_seconds="$SECONDS"',
-                'SECONDS - capture_start_seconds >= recording_duration_budget',
-                'break',
-                'sleep 1',
+                "SECONDS - capture_start_seconds >= recording_duration_budget",
+                "break",
+                "sleep 1",
             )
         ):
             failures.append(
@@ -1159,7 +1321,8 @@ def validate(root: Path) -> list[str]:
     panel_qualification_path = root / "apps/linura-shell/qualification-panel.qml"
     panel_qualification_text = (
         panel_qualification_path.read_text(encoding="utf-8")
-        if panel_qualification_path.is_file() and not panel_qualification_path.is_symlink()
+        if panel_qualification_path.is_file()
+        and not panel_qualification_path.is_symlink()
         else ""
     )
     for fragment in (
@@ -1180,7 +1343,7 @@ def validate(root: Path) -> list[str]:
         for fragment in (
             'doctor_args=(doctor --mode interactive --display "$display_backend")',
             'if [[ "$record" -eq 1 ]]; then',
-            'doctor_args+=(--record)',
+            "doctor_args+=(--record)",
             'python3 "$build_root/tools/workstation_acceptance.py" "${doctor_args[@]}"',
         ):
             if fragment not in interactive_text:
@@ -1190,17 +1353,16 @@ def validate(root: Path) -> list[str]:
 
     if interactive_launcher.is_file():
         interactive_text = interactive_launcher.read_text(encoding="utf-8")
-        copied = interactive_text.find('cp --reflink=auto "$prepared_image" "$vm_image"')
-        private_digest = interactive_text.find(
-            'copied_sha="$(sha256sum "$vm_image"'
+        copied = interactive_text.find(
+            'cp --reflink=auto "$prepared_image" "$vm_image"'
         )
+        private_digest = interactive_text.find('copied_sha="$(sha256sum "$vm_image"')
         digest_guard = interactive_text.find(
             '[[ "$copied_sha" == "$prepared_sha" ]] || fail'
         )
         resized = interactive_text.find('qemu-img resize "$vm_image" 16G')
-        if (
-            min(copied, private_digest, digest_guard, resized) < 0
-            or not (copied < private_digest < digest_guard < resized)
+        if min(copied, private_digest, digest_guard, resized) < 0 or not (
+            copied < private_digest < digest_guard < resized
         ):
             failures.append(
                 "Level B launcher must verify its private substrate copy before resizing or booting"
@@ -1293,7 +1455,9 @@ def validate(root: Path) -> list[str]:
             '"release_support_promotion": False',
         ):
             if fragment not in prepare_text:
-                failures.append(f"prepared substrate builder missing fail-closed invariant: {fragment}")
+                failures.append(
+                    f"prepared substrate builder missing fail-closed invariant: {fragment}"
+                )
 
     if verify_substrate_script.is_file():
         verify_text = verify_substrate_script.read_text(encoding="utf-8")
@@ -1307,7 +1471,9 @@ def validate(root: Path) -> list[str]:
             '("release_support_promotion", False)',
         ):
             if fragment not in verify_text:
-                failures.append(f"prepared substrate verifier missing invariant: {fragment}")
+                failures.append(
+                    f"prepared substrate verifier missing invariant: {fragment}"
+                )
 
     if vm_launcher.is_file():
         launcher_text = vm_launcher.read_text(encoding="utf-8")
@@ -1321,13 +1487,15 @@ def validate(root: Path) -> list[str]:
             "interactive:gtk)",
             "interactive:vnc)",
             "automated:none)",
-            'display_args=(-display none)',
-            'display_args=(-display gtk,gl=off,show-cursor=on)',
+            "display_args=(-display none)",
+            "display_args=(-display gtk,gl=off,show-cursor=on)",
             '-vnc "127.0.0.1:$vnc_display"',
             '"${display_args[@]}"',
         ):
             if fragment not in launcher_text:
-                failures.append(f"shell runtime VM launcher missing bounded persistence contract: {fragment}")
+                failures.append(
+                    f"shell runtime VM launcher missing bounded persistence contract: {fragment}"
+                )
 
     if run_script.is_file():
         run_text = run_script.read_text(encoding="utf-8")
@@ -1337,12 +1505,19 @@ def validate(root: Path) -> list[str]:
             )
         for case_id in EXPECTED_CASES:
             if f'pass_case "{case_id}"' not in run_text:
-                failures.append(f"runtime protocol does not positively record required case: {case_id}")
-        if ('effectSnapshot 2>/dev/null)" == "ready|63|verified"' not in run_text
-                or 'function effectSnapshot(): string' not in (
-                    root / "apps/linura-shell/qualification-quick-settings.qml"
-                ).read_text(encoding="utf-8")):
-            failures.append("runtime protocol must use one atomic Quick Settings verified-effect snapshot")
+                failures.append(
+                    f"runtime protocol does not positively record required case: {case_id}"
+                )
+        if (
+            'effectSnapshot 2>/dev/null)" == "ready|63|verified"' not in run_text
+            or "function effectSnapshot(): string"
+            not in (
+                root / "apps/linura-shell/qualification-quick-settings.qml"
+            ).read_text(encoding="utf-8")
+        ):
+            failures.append(
+                "runtime protocol must use one atomic Quick Settings verified-effect snapshot"
+            )
         if "wtype -P space" in run_text:
             failures.append(
                 "native tray activation must use one press-release without a held key"
@@ -1354,22 +1529,26 @@ def validate(root: Path) -> list[str]:
             'python3 "$source_root/tools/verify_tray_keyboard.py"',
             'python3 "$source_root/tools/verify_tray_keyboard.py" holding',
             '"$native_input_receipt" "$panel_tray_snapshot_held"',
-            'panel_tray_open_by_keyboard hold',
+            "panel_tray_open_by_keyboard hold",
             'wait_until "workstation tray observed held-key repeats" panel_tray_held_key_ready',
-            'native_input_send release',
-            'native_input_send escape',
+            "native_input_send release",
+            "native_input_send escape",
             'wait "$native_input_pid" || fail',
             '"$evidence_root/tray-keyboard-behavior.jsonl"',
         ):
             if marker not in run_text:
-                failures.append(f"native tray behavioral qualification missing {marker}")
+                failures.append(
+                    f"native tray behavioral qualification missing {marker}"
+                )
         for marker in (
-            'from tools.verify_tray_keyboard import verify_retained',
-            'verify_retained(tray_keyboard_behavior, native_keyboard_events, native_keyboard_digest)',
-            'tests.tooling.test_native_keyboard',
-            'artifact-name: linura-v010-shell-runtime-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}',
+            "from tools.verify_tray_keyboard import verify_retained",
+            "verify_retained(tray_keyboard_behavior, native_keyboard_events, native_keyboard_digest)",
+            "tests.tooling.test_native_keyboard",
+            "artifact-name: linura-v010-shell-runtime-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}",
         ):
-            if marker not in workflow + (root / ".github/workflows/v010-qualification.yml").read_text(encoding="utf-8"):
+            if marker not in workflow + (
+                root / ".github/workflows/v010-qualification.yml"
+            ).read_text(encoding="utf-8"):
                 failures.append(f"native tray evidence gate missing {marker}")
         if run_text.count("SELECT count(*) FROM transient_effect_audit") != 4:
             failures.append(
@@ -1381,16 +1560,18 @@ def validate(root: Path) -> list[str]:
                 "runtime protocol must retain both write/read references for Session1 failure diagnostics"
             )
         draft_wait = "quick_settings_bind_draft() {"
-        draft_attempt = 'checked_quick_settings_call linura.quick-settings-qualification beginDraft 2>/dev/null'
+        draft_attempt = "checked_quick_settings_call linura.quick-settings-qualification beginDraft 2>/dev/null"
         draft_accept = "if quick_settings_bind_draft; then"
         authority_probe = '[[ "$(checked_quick_settings_call linura.quick-settings-qualification authority)" == "native-api" ]]'
-        audit_baseline = 'audit_count_before="$(sqlite3 "$audio_audit" \'SELECT count(*) FROM transient_effect_audit;\' 2>/dev/null || printf \'0\')"'
+        audit_baseline = "audit_count_before=\"$(sqlite3 \"$audio_audit\" 'SELECT count(*) FROM transient_effect_audit;' 2>/dev/null || printf '0')\""
         draft_wait_index = run_text.find(draft_wait)
         draft_attempt_index = run_text.find(draft_attempt)
         draft_accept_index = run_text.find(draft_accept)
         authority_index = run_text.find(authority_probe)
         audit_index = run_text.find(audit_baseline)
-        open_index = run_text.find("checked_quick_settings_call linura.quick-settings-qualification openSettings")
+        open_index = run_text.find(
+            "checked_quick_settings_call linura.quick-settings-qualification openSettings"
+        )
         if (
             draft_wait_index < 0
             or draft_attempt_index < 0
@@ -1447,7 +1628,11 @@ def validate(root: Path) -> list[str]:
             )
         fixture_index = run_text.find("context.objects = [")
         pipewire_start_index = run_text.find("systemctl --user start pipewire.service")
-        if fixture_index < 0 or pipewire_start_index < 0 or fixture_index > pipewire_start_index:
+        if (
+            fixture_index < 0
+            or pipewire_start_index < 0
+            or fixture_index > pipewire_start_index
+        ):
             failures.append(
                 "runtime PipeWire fixture config must be installed before PipeWire starts"
             )
@@ -1477,25 +1662,25 @@ def validate(root: Path) -> list[str]:
             "kill -0",
             "generation_two > generation_one",
             "hyprctl monitors -j",
-            'hyprland_ipc_deadline=$((SECONDS + 45))',
-            'while (( SECONDS < hyprland_ipc_deadline )); do',
-            'systemctl --user is-active --quiet linura-hyprland-qualification.service',
+            "hyprland_ipc_deadline=$((SECONDS + 45))",
+            "while (( SECONDS < hyprland_ipc_deadline )); do",
+            "systemctl --user is-active --quiet linura-hyprland-qualification.service",
             'fail "Hyprland exited before IPC became responsive"',
             'fail "Hyprland IPC readiness deadline exceeded"',
             "systemctl is-active --quiet seatd.service",
-            'ui_module_dir=/usr/local/lib/qt6/qml/org/linura/UI',
+            "ui_module_dir=/usr/local/lib/qt6/qml/org/linura/UI",
             'ui_plugin="$ui_module_dir/liblinura-uiplugin.so"',
             'ui_backing="$ui_module_dir/liblinura-ui.so"',
             'ui_linkage_file="$evidence_root/ui-module-linkage.txt"',
             'ldd "$ui_plugin" > "$ui_linkage_file"',
             "Linura UI QML plugin has unresolved installed dependencies",
             "Linura UI QML plugin did not resolve its backing library from the module directory",
-            'bridge_module_dir=/usr/local/lib/qt6/qml/org/linura/ShellBridge',
+            "bridge_module_dir=/usr/local/lib/qt6/qml/org/linura/ShellBridge",
             'bridge_linkage_file="$evidence_root/bridge-module-linkage.txt"',
             'ldd "$bridge_plugin" > "$bridge_linkage_file"',
             "Linura ShellBridge QML plugin has unresolved installed dependencies",
             "Linura ShellBridge QML plugin did not resolve its backing library from the module directory",
-            "seat_group=\"$(stat -c '%G' \"$seat_socket\")\"",
+            'seat_group="$(stat -c \'%G\' "$seat_socket")"',
             'qualification_gpu_pci_bdf="0000:00:02.0"',
             'qualification_gpu_vendor_id="0x1af4"',
             'qualification_gpu_device_id="0x1050"',
@@ -1554,12 +1739,12 @@ def validate(root: Path) -> list[str]:
             "activateQuickSettingsControl",
             "activateControlCenterControl",
             "activateWorkspaceControl",
-            'bind = SUPER CTRL, P, global, linura:workstationPanel',
-            'bind = SUPER CTRL, S, global, linura:quickSettings',
-            'bind = SUPER, SPACE, global, linura:commandPalette',
+            "bind = SUPER CTRL, P, global, linura:workstationPanel",
+            "bind = SUPER CTRL, S, global, linura:quickSettings",
+            "bind = SUPER, SPACE, global, linura:commandPalette",
             'panel_shortcuts="$evidence_root/workstation-panel-shortcuts.json"',
             'hyprctl binds -j > "$panel_shortcuts"',
-            'hyprctl dispatch global linura:workstationPanel >/dev/null',
+            "hyprctl dispatch global linura:workstationPanel >/dev/null",
             'panel_global_shortcuts_bound="true"',
             'panel_keyboard_focus_entered="true"',
             "panel_keyboard_focus_ready() {",
@@ -1567,7 +1752,7 @@ def validate(root: Path) -> list[str]:
             'wait_until "workstation panel compositor global-shortcut focus entry" panel_keyboard_focus_ready',
             'panel_keyboard_entry_focused="$(checked_panel_call linura.panel-qualification panelKeyboardEntryFocused)"',
             '[[ "$panel_keyboard_entry_focused" == "true" ]]',
-            'printf \'keyboard_entry_focused=%s\\n\' "$panel_keyboard_entry_focused"',
+            "printf 'keyboard_entry_focused=%s\\n' \"$panel_keyboard_entry_focused\"",
             'panel_status_time="$(checked_panel_call linura.panel-qualification statusTimeText)"',
             'panel_status_timestamp_before="$(checked_panel_call linura.panel-qualification statusTimestampMs)"',
             'wait_until "workstation status clock advancement" panel_status_advanced',
@@ -1577,9 +1762,9 @@ def validate(root: Path) -> list[str]:
             'panel_tray_overflow_opened="$(checked_panel_call linura.panel-qualification trayOverflowVisible)"',
             "panel_tray_open_by_keyboard() {",
             'native_input_send "$panel_tray_input_mode"',
-            'trayOverflowOpenCount',
-            'panel_tray_overflow_opened_by_key',
-            'count == panel_tray_open_count_before + 1',
+            "trayOverflowOpenCount",
+            "panel_tray_overflow_opened_by_key",
+            "count == panel_tray_open_count_before + 1",
             'wait_until "workstation tray parent native keyboard focus" panel_keyboard_focus_ready',
             'wait_until "workstation tray reopen cycle $panel_tray_cycle parent native keyboard focus" panel_keyboard_focus_ready',
             'wait_until "workstation tray overflow visibility after keyboard handoff" panel_tray_overflow_visible',
@@ -1588,13 +1773,13 @@ def validate(root: Path) -> list[str]:
             'panel_tray_cancelled="$(checked_panel_call linura.panel-qualification cancelTrayOverflowControl)"',
             'wait_until "workstation tray overflow keyboard-session restoration" panel_tray_keyboard_focus_restored',
             'wait_until "reopened workstation tray overflow delegate readiness" panel_tray_overflow_entry_ready',
-            'for panel_tray_cycle in 1 2 3; do',
-            'workstation tray reopen cycle $panel_tray_cycle did not retain delegate keyboard focus',
+            "for panel_tray_cycle in 1 2 3; do",
+            "workstation tray reopen cycle $panel_tray_cycle did not retain delegate keyboard focus",
             '[[ "$(checked_panel_call linura.panel-qualification trayOverflowEntryReady 4)" == "true" ]]',
             'panel_tray_overflow_activated="$(checked_panel_call linura.panel-qualification activateTrayOverflowControl 4)"',
-            'printf \'status_timestamp_after=%s\\n\' "$panel_status_timestamp_after"',
-            'printf \'tray_primary_requests=%s\\n\' "$panel_tray_primary_requests"',
-            'printf \'tray_menu_requests=%s\\n\' "$panel_tray_menu_requests"',
+            "printf 'status_timestamp_after=%s\\n' \"$panel_status_timestamp_after\"",
+            "printf 'tray_primary_requests=%s\\n' \"$panel_tray_primary_requests\"",
+            "printf 'tray_menu_requests=%s\\n' \"$panel_tray_menu_requests\"",
             'panel_command_palette_activated="$(checked_panel_call linura.panel-qualification activateCommandPaletteControl)"',
             'panel_quick_settings_activated="$(checked_panel_call linura.panel-qualification activateQuickSettingsControl)"',
             'panel_control_center_activated="$(checked_panel_call linura.panel-qualification activateControlCenterControl)"',
@@ -1607,10 +1792,10 @@ def validate(root: Path) -> list[str]:
             '[[ "$panel_compositor_reserve" == "true" ]]',
             "checked_quick_settings_call()",
             'fail "Quick Settings IPC call failed with status $status: $*"',
-            'quick_settings_bind_draft() {',
-            'checked_quick_settings_call linura.quick-settings-qualification beginDraft 2>/dev/null',
-            'if quick_settings_bind_draft; then',
-            'checked_quick_settings_call linura.quick-settings-qualification canCommitDraft',
+            "quick_settings_bind_draft() {",
+            "checked_quick_settings_call linura.quick-settings-qualification beginDraft 2>/dev/null",
+            "if quick_settings_bind_draft; then",
+            "checked_quick_settings_call linura.quick-settings-qualification canCommitDraft",
             'pipewire_fixture_config="$pipewire_fixture_dir/90-linura-qualification-sink.conf"',
             "context.objects = [",
             "factory = adapter",
@@ -1631,8 +1816,8 @@ def validate(root: Path) -> list[str]:
             "channelVolumes = [ 0.064 0.064 ]",
             'chmod 0600 "$pipewire_fixture_config"',
             'cp "$pipewire_fixture_config" "$evidence_root/pipewire-fixture-create.txt"',
-            'systemctl --user start pipewire.service',
-            'systemctl --user start wireplumber.service',
+            "systemctl --user start pipewire.service",
+            "systemctl --user start wireplumber.service",
             'command -v pw-dump >/dev/null || fail "pw-dump is missing"',
             "pipewire_fixture_identity()",
             "pw-dump | python3 -c",
@@ -1646,15 +1831,15 @@ def validate(root: Path) -> list[str]:
             'cat "$evidence_root/pipewire-fixture-diagnostics.txt" >&2',
             "pw-cli ls Node",
             "pipewire-fixture-props.txt",
-            'pipewire-snapshot-initial.txt',
-            'quick-settings-audio-fixture.txt',
+            "pipewire-snapshot-initial.txt",
+            "quick-settings-audio-fixture.txt",
             'wpctl set-default "$qualification_sink_id"',
             '/usr/bin/wpexec "$audio_helper"',
-            'systemctl --user start linurad.service',
-            'busctl --user status org.linura.Control1',
-            'operation:audio.output.set-session-volume',
-            'audio:session:output:$qualification_sink_id',
-            'SELECT count(*) FROM transient_effect_audit',
+            "systemctl --user start linurad.service",
+            "busctl --user status org.linura.Control1",
+            "operation:audio.output.set-session-volume",
+            "audio:session:output:$qualification_sink_id",
+            "SELECT count(*) FROM transient_effect_audit",
             '[[ "$audit_mode" == "600" ]]',
             '[[ "$audit_links" == "1" ]]',
             "PRAGMA application_id;",
@@ -1667,42 +1852,46 @@ def validate(root: Path) -> list[str]:
             "sqlite_schema",
             '[[ "$audit_table_sql" == *"STRICT"* ]]',
             'audit_wal="${audio_audit}-wal"',
-            '(( audit_wal_size <= 16777216 ))',
+            "(( audit_wal_size <= 16777216 ))",
             '$audit_disposition" == "verified"',
-            'quick_settings_effect_deadline=$((SECONDS + 30))',
-            'quick-settings-session1-failure.txt',
+            "quick_settings_effect_deadline=$((SECONDS + 30))",
+            "quick-settings-session1-failure.txt",
             "'-- transient audit --'",
-            'SELECT rowid,request_id,resource,disposition,failure_code,pre_effect_evidence_id,post_effect_evidence_id FROM transient_effect_audit ORDER BY rowid DESC LIMIT 3;',
+            "SELECT rowid,request_id,resource,disposition,failure_code,pre_effect_evidence_id,post_effect_evidence_id FROM transient_effect_audit ORDER BY rowid DESC LIMIT 3;",
             "quick_settings_bind_drift_draft() {",
             'wait_until "bound fresh Quick Settings precondition-drift draft" quick_settings_bind_drift_draft',
             '[[ "$(checked_quick_settings_call linura.quick-settings-qualification canCommitDraft 2>/dev/null)" == "true" ]]',
-            'Quick Settings precondition-drift draft did not bind authoritative volume 63',
+            "Quick Settings precondition-drift draft did not bind authoritative volume 63",
             'pass_case "quick-settings-precondition-drift-rejection"',
             'pass_case "quick-settings-service-loss-fail-closed"',
-            'quick_settings_recovered() {',
+            "quick_settings_recovered() {",
             'wait_until "Quick Settings recovery after linurad restart" quick_settings_recovered',
             'pass_case "quick-settings-restart-recovery"',
             "seat-drm-preflight.txt",
-            'pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite ffmpeg wf-recorder wayland',
-            'package-versions.txt',
+            "pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite ffmpeg wf-recorder wayland",
+            "package-versions.txt",
         ):
             if fragment not in run_text:
-                failures.append(f"runtime protocol missing externally observable proof: {fragment}")
+                failures.append(
+                    f"runtime protocol missing externally observable proof: {fragment}"
+                )
 
     if run_script.is_file():
         for request, readiness, opening in (
             (
                 'panel_tray_focus_reentered="$(checked_panel_call linura.panel-qualification focusPanelControl)"',
                 'wait_until "workstation tray parent native keyboard focus" panel_keyboard_focus_ready',
-                'panel_tray_open_by_keyboard\npanel_tray_overflow_visible() {',
+                "panel_tray_open_by_keyboard\npanel_tray_overflow_visible() {",
             ),
             (
-                'for panel_tray_cycle in 1 2 3; do',
+                "for panel_tray_cycle in 1 2 3; do",
                 'wait_until "workstation tray reopen cycle $panel_tray_cycle parent native keyboard focus" panel_keyboard_focus_ready',
                 '    panel_tray_open_by_keyboard\n    wait_until "workstation tray reopen cycle $panel_tray_cycle visibility"',
             ),
         ):
-            stages = [run_text.find(fragment) for fragment in (request, readiness, opening)]
+            stages = [
+                run_text.find(fragment) for fragment in (request, readiness, opening)
+            ]
             if min(stages) < 0 or not stages[0] < stages[1] < stages[2]:
                 failures.append(
                     "tray keyboard opening must wait for parent native focus after requesting it"
@@ -1715,10 +1904,12 @@ wait_until "WirePlumber mixer state for qualification sink" wireplumber_fixture_
 """
         if mixer_readiness_contract not in run_text:
             failures.append(
-                'WirePlumber mixer readiness must call wpctl get-volume on the exact qualification sink'
+                "WirePlumber mixer readiness must call wpctl get-volume on the exact qualification sink"
             )
 
-        diagnostics_redirect = '} > "$evidence_root/pipewire-fixture-diagnostics.txt" 2>&1'
+        diagnostics_redirect = (
+            '} > "$evidence_root/pipewire-fixture-diagnostics.txt" 2>&1'
+        )
         if run_text.count(diagnostics_redirect) != 2:
             failures.append(
                 "both PipeWire fixture failure paths must retain pipewire-fixture-diagnostics.txt"
@@ -1730,7 +1921,9 @@ wait_until "WirePlumber mixer state for qualification sink" wireplumber_fixture_
             )
         native_identity = run_text.find("pipewire_fixture_identity()")
         helper_observation = run_text.find("audio_snapshot()")
-        props_establish = run_text.find('pw-cli set-param "$qualification_sink_id" Props')
+        props_establish = run_text.find(
+            'pw-cli set-param "$qualification_sink_id" Props'
+        )
         mixer_ready = run_text.find("wireplumber_fixture_mixer_ready()")
         if min(native_identity, helper_observation, props_establish, mixer_ready) < 0:
             failures.append(

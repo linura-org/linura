@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Independently admit qualification artifacts against an exact execution envelope."""
+
 from __future__ import annotations
 
 import argparse
@@ -29,14 +30,16 @@ ACTION_PATH = Path(".github/actions/qualification-evidence/action.yml")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 NAME = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 ALLOWED_ARTIFACT_KINDS = {"json-result", "file"}
-CONTROL_FILES = frozenset({
-    "qualification-execution-envelope.json",
-    "qualification-execution-envelope.json.sha256",
-    "verifier-result.json",
-    "verifier-result.json.sha256",
-    "evidence-binding.json",
-    "evidence-binding.json.sha256",
-})
+CONTROL_FILES = frozenset(
+    {
+        "qualification-execution-envelope.json",
+        "qualification-execution-envelope.json.sha256",
+        "verifier-result.json",
+        "verifier-result.json.sha256",
+        "evidence-binding.json",
+        "evidence-binding.json.sha256",
+    }
+)
 TRIGGER_FILES = (
     ".github/actions/qualification-evidence/**",
     "contracts/qualification-evidence-binding.toml",
@@ -56,7 +59,9 @@ def _require(condition: bool, message: str) -> None:
 
 
 def _canonical(value: object) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
 
 
 def _stat_identity(value: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
@@ -80,7 +85,9 @@ def _open_stable_regular(path: Path) -> tuple[int, os.stat_result]:
         raise EvidenceError(f"cannot open evidence file safely: {path}: {exc}") from exc
     try:
         before = os.fstat(descriptor)
-        _require(stat.S_ISREG(before.st_mode), f"evidence path is not a regular file: {path}")
+        _require(
+            stat.S_ISREG(before.st_mode), f"evidence path is not a regular file: {path}"
+        )
         _require(before.st_nlink == 1, f"evidence file must have a single link: {path}")
     except Exception:
         os.close(descriptor)
@@ -88,9 +95,7 @@ def _open_stable_regular(path: Path) -> tuple[int, os.stat_result]:
     return descriptor, before
 
 
-def _finish_stable_regular(
-    path: Path, descriptor: int, before: os.stat_result
-) -> None:
+def _finish_stable_regular(path: Path, descriptor: int, before: os.stat_result) -> None:
     after = os.fstat(descriptor)
     _require(
         _stat_identity(after) == _stat_identity(before),
@@ -99,7 +104,9 @@ def _finish_stable_regular(
     try:
         named = os.lstat(path)
     except OSError as exc:
-        raise EvidenceError(f"evidence file path changed while being read: {path}: {exc}") from exc
+        raise EvidenceError(
+            f"evidence file path changed while being read: {path}: {exc}"
+        ) from exc
     _require(
         stat.S_ISREG(named.st_mode)
         and named.st_nlink == 1
@@ -145,30 +152,52 @@ def _read_text_file(path: Path) -> str:
     except UnicodeDecodeError as exc:
         raise EvidenceError(f"evidence text file is not UTF-8: {path}") from exc
 
+
 def _safe_repo_file(root: Path, relative: str) -> Path:
-    _require(isinstance(relative, str) and relative and not relative.startswith("/"),
-             "repository path must be non-empty and relative")
-    _require(".." not in Path(relative).parts, "repository path may not traverse parents")
+    _require(
+        isinstance(relative, str) and relative and not relative.startswith("/"),
+        "repository path must be non-empty and relative",
+    )
+    _require(
+        ".." not in Path(relative).parts, "repository path may not traverse parents"
+    )
     path = root / relative
-    _require(path.is_file() and not path.is_symlink(), f"missing or unsafe repository file: {relative}")
-    _require(path.resolve().is_relative_to(root.resolve()), f"repository file escapes root: {relative}")
+    _require(
+        path.is_file() and not path.is_symlink(),
+        f"missing or unsafe repository file: {relative}",
+    )
+    _require(
+        path.resolve().is_relative_to(root.resolve()),
+        f"repository file escapes root: {relative}",
+    )
     return path
 
 
 def _bundle_file(bundle: Path, filename: object, label: str) -> Path:
-    _require(isinstance(filename, str) and filename and Path(filename).name == filename,
-             f"{label} filename is invalid")
+    _require(
+        isinstance(filename, str) and filename and Path(filename).name == filename,
+        f"{label} filename is invalid",
+    )
     path = bundle / filename
     _require(path.is_file() and not path.is_symlink(), f"{label} is missing or unsafe")
-    _require(path.stat(follow_symlinks=False).st_nlink == 1, f"{label} must have a single link")
-    _require(path.resolve().parent == bundle.resolve(), f"{label} escapes evidence bundle")
+    _require(
+        path.stat(follow_symlinks=False).st_nlink == 1,
+        f"{label} must have a single link",
+    )
+    _require(
+        path.resolve().parent == bundle.resolve(), f"{label} escapes evidence bundle"
+    )
     return path
 
 
 def _atomic_write(path: Path, content: str) -> None:
-    _require(not path.exists() or not path.is_symlink(), f"unsafe output path: {path.name}")
+    _require(
+        not path.exists() or not path.is_symlink(), f"unsafe output path: {path.name}"
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
     temporary = Path(name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
@@ -189,16 +218,23 @@ def _write_json_with_checksum(path: Path, payload: dict, digest_field: str) -> N
 
 def _verify_checksum(path: Path, digest: str) -> None:
     checksum = path.with_name(path.name + ".sha256")
-    _require(checksum.is_file() and not checksum.is_symlink(), f"{path.name} checksum is missing or unsafe")
-    _require(_read_text_file(checksum).strip() == f"{digest}  {path.name}",
-             f"{path.name} checksum mismatch")
+    _require(
+        checksum.is_file() and not checksum.is_symlink(),
+        f"{path.name} checksum is missing or unsafe",
+    )
+    _require(
+        _read_text_file(checksum).strip() == f"{digest}  {path.name}",
+        f"{path.name} checksum mismatch",
+    )
 
 
 def _string_list(value: object, label: str, *, allow_empty: bool = False) -> list[str]:
     _require(isinstance(value, list), f"{label} must be a list")
     _require(allow_empty or bool(value), f"{label} must not be empty")
-    _require(all(isinstance(item, str) and item and item.strip() == item for item in value),
-             f"{label} contains invalid strings")
+    _require(
+        all(isinstance(item, str) and item and item.strip() == item for item in value),
+        f"{label} contains invalid strings",
+    )
     _require(len(value) == len(set(value)), f"{label} contains duplicates")
     return list(value)
 
@@ -211,48 +247,79 @@ def load_contract(root: Path = ROOT) -> dict:
         raise EvidenceError(f"cannot load evidence-binding contract: {exc}") from exc
 
     expected_top = {
-        "schema_version", "id", "repository", "digest_algorithm", "canonicalization",
-        "execution_envelope_contract", "execution_envelope_schema_version",
-        "publication_policy", "binding_model", "non_evidence_lanes",
-        "authority_boundary", "acceptance", "artifact_policy", "privacy",
+        "schema_version",
+        "id",
+        "repository",
+        "digest_algorithm",
+        "canonicalization",
+        "execution_envelope_contract",
+        "execution_envelope_schema_version",
+        "publication_policy",
+        "binding_model",
+        "non_evidence_lanes",
+        "authority_boundary",
+        "acceptance",
+        "artifact_policy",
+        "privacy",
         "profile",
     }
-    _require(set(contract) == expected_top, "evidence-binding contract fields changed without schema review")
+    _require(
+        set(contract) == expected_top,
+        "evidence-binding contract fields changed without schema review",
+    )
     _require(contract["schema_version"] == 3, "unsupported evidence-binding schema")
-    _require(contract["id"] == "qualification/evidence-binding", "unexpected contract id")
-    _require(contract["repository"] == "linura-org/linura", "unexpected repository identity")
+    _require(
+        contract["id"] == "qualification/evidence-binding", "unexpected contract id"
+    )
+    _require(
+        contract["repository"] == "linura-org/linura", "unexpected repository identity"
+    )
     _require(contract["digest_algorithm"] == "sha256", "evidence digest must be sha256")
-    _require(contract["canonicalization"] == "json-sort-keys-compact-utf8-v1", "unexpected evidence canonicalization")
-    _require(contract["binding_model"] == "semantic-adapter-plus-envelope-plus-sealed-artifact-set-v3",
-             "unexpected evidence binding model")
+    _require(
+        contract["canonicalization"] == "json-sort-keys-compact-utf8-v1",
+        "unexpected evidence canonicalization",
+    )
+    _require(
+        contract["binding_model"]
+        == "semantic-adapter-plus-envelope-plus-sealed-artifact-set-v3",
+        "unexpected evidence binding model",
+    )
     _safe_repo_file(root, contract["execution_envelope_contract"])
     _safe_repo_file(root, contract["publication_policy"])
     _safe_repo_file(root, IMPLEMENTATION_PATH.as_posix())
     _safe_repo_file(root, VERIFIER_PATH.as_posix())
     _safe_repo_file(root, ACTION_PATH.as_posix())
 
-    _require(contract["authority_boundary"] == {
-        "role": "evidence-acceptance-only",
-        "consumes_execution_envelopes": True,
-        "mutates_execution_envelopes": False,
-        "grants_publication_authority": False,
-        "grants_release_authority": False,
-    }, "evidence authority boundary changed without schema review")
-    _require(contract["acceptance"] == {
-        "self_declared_pass_allowed": False,
-        "stale_source_allowed": False,
-        "cross_envelope_substitution_allowed": False,
-        "cross_lane_substitution_allowed": False,
-        "missing_artifact_allowed": False,
-        "extra_artifact_claims_allowed": False,
-        "symlink_artifact_allowed": False,
-        "artifact_sha256_required": True,
-        "artifact_set_sha256_required": True,
-        "verifier_result_sha256_required": True,
-        "verifier_implementation_identity_required": True,
-        "semantic_verification_required": True,
-        "sealed_upload_required": True,
-    }, "evidence acceptance policy changed without schema review")
+    _require(
+        contract["authority_boundary"]
+        == {
+            "role": "evidence-acceptance-only",
+            "consumes_execution_envelopes": True,
+            "mutates_execution_envelopes": False,
+            "grants_publication_authority": False,
+            "grants_release_authority": False,
+        },
+        "evidence authority boundary changed without schema review",
+    )
+    _require(
+        contract["acceptance"]
+        == {
+            "self_declared_pass_allowed": False,
+            "stale_source_allowed": False,
+            "cross_envelope_substitution_allowed": False,
+            "cross_lane_substitution_allowed": False,
+            "missing_artifact_allowed": False,
+            "extra_artifact_claims_allowed": False,
+            "symlink_artifact_allowed": False,
+            "artifact_sha256_required": True,
+            "artifact_set_sha256_required": True,
+            "verifier_result_sha256_required": True,
+            "verifier_implementation_identity_required": True,
+            "semantic_verification_required": True,
+            "sealed_upload_required": True,
+        },
+        "evidence acceptance policy changed without schema review",
+    )
     artifact_policy = contract["artifact_policy"]
     _require(
         isinstance(artifact_policy, dict)
@@ -270,8 +337,7 @@ def load_contract(root: Path = ROOT) -> dict:
             "workflow_direct_accepted_upload_forbidden",
             "post_upload_readback_required",
         }
-        and artifact_policy["inventory"]
-        == "recursive-bind-all-retained-files-v1"
+        and artifact_policy["inventory"] == "recursive-bind-all-retained-files-v1"
         and isinstance(artifact_policy["control_files"], list)
         and len(artifact_policy["control_files"]) == len(CONTROL_FILES)
         and set(artifact_policy["control_files"]) == CONTROL_FILES
@@ -286,46 +352,78 @@ def load_contract(root: Path = ROOT) -> dict:
         and artifact_policy["post_upload_readback_required"] is True,
         "evidence artifact policy changed without schema review",
     )
-    _require(contract["privacy"] == {
-        "physical_recording_publication": "explicit-approval-and-redaction-required",
-        "private_evidence_default": True,
-    }, "evidence privacy policy changed without schema review")
+    _require(
+        contract["privacy"]
+        == {
+            "physical_recording_publication": "explicit-approval-and-redaction-required",
+            "private_evidence_default": True,
+        },
+        "evidence privacy policy changed without schema review",
+    )
 
     envelope_contract = envelope_lib.load_contract(root)
-    _require(envelope_contract["schema_version"] == contract["execution_envelope_schema_version"],
-             "evidence binding is not aligned with execution-envelope schema")
+    _require(
+        envelope_contract["schema_version"]
+        == contract["execution_envelope_schema_version"],
+        "evidence binding is not aligned with execution-envelope schema",
+    )
     envelope_lanes = {lane["id"]: lane for lane in envelope_contract["lane"]}
     non_evidence = _string_list(contract["non_evidence_lanes"], "non_evidence_lanes")
-    _require(all(lane in envelope_lanes for lane in non_evidence),
-             "non-evidence lane references unknown execution lane")
+    _require(
+        all(lane in envelope_lanes for lane in non_evidence),
+        "non-evidence lane references unknown execution lane",
+    )
 
     profiles = contract["profile"]
-    _require(isinstance(profiles, list) and profiles, "evidence profile inventory is empty")
+    _require(
+        isinstance(profiles, list) and profiles, "evidence profile inventory is empty"
+    )
     seen_ids: set[str] = set()
     seen_lanes: set[str] = set()
     for profile in profiles:
         _require(isinstance(profile, dict), "evidence profile must be a table")
         required = {
-            "id", "lane_id", "test_ids", "contract_ids", "verification_class",
-            "verifier_id", "verifier_adapter", "primary_artifact", "accepted_results",
-            "accepted_schema_versions", "required_json_values",
-            "require_observation_identity", "publication_default", "artifact",
+            "id",
+            "lane_id",
+            "test_ids",
+            "contract_ids",
+            "verification_class",
+            "verifier_id",
+            "verifier_adapter",
+            "primary_artifact",
+            "accepted_results",
+            "accepted_schema_versions",
+            "required_json_values",
+            "require_observation_identity",
+            "publication_default",
+            "artifact",
         }
         allowed = required | {"observation_policy", "observation_identity_fields"}
-        _require(required.issubset(profile) and set(profile).issubset(allowed),
-                 "evidence profile fields changed without schema review")
+        _require(
+            required.issubset(profile) and set(profile).issubset(allowed),
+            "evidence profile fields changed without schema review",
+        )
         profile_id = profile["id"]
         lane_id = profile["lane_id"]
-        _require(isinstance(profile_id, str) and NAME.fullmatch(profile_id),
-                 f"invalid evidence profile id: {profile_id!r}")
-        _require(profile_id not in seen_ids, f"duplicate evidence profile: {profile_id}")
-        _require(isinstance(lane_id, str) and lane_id in envelope_lanes,
-                 f"evidence profile references unknown lane: {lane_id!r}")
+        _require(
+            isinstance(profile_id, str) and NAME.fullmatch(profile_id),
+            f"invalid evidence profile id: {profile_id!r}",
+        )
+        _require(
+            profile_id not in seen_ids, f"duplicate evidence profile: {profile_id}"
+        )
+        _require(
+            isinstance(lane_id, str) and lane_id in envelope_lanes,
+            f"evidence profile references unknown lane: {lane_id!r}",
+        )
         _require(lane_id not in seen_lanes, f"duplicate evidence lane: {lane_id}")
         seen_ids.add(profile_id)
         seen_lanes.add(lane_id)
-        _require(isinstance(profile["verifier_id"], str) and NAME.fullmatch(profile["verifier_id"]),
-                 f"invalid verifier id for {profile_id}")
+        _require(
+            isinstance(profile["verifier_id"], str)
+            and NAME.fullmatch(profile["verifier_id"]),
+            f"invalid verifier id for {profile_id}",
+        )
         _require(
             profile["verifier_adapter"] == semantic_verifier.ADAPTER_IDS.get(lane_id),
             f"{profile_id} semantic verifier adapter is not reviewed for its lane",
@@ -334,14 +432,29 @@ def load_contract(root: Path = ROOT) -> dict:
         _string_list(profile["contract_ids"], f"{profile_id}.contract_ids")
         _string_list(profile["accepted_results"], f"{profile_id}.accepted_results")
         schemas = profile["accepted_schema_versions"]
-        _require(isinstance(schemas, list) and schemas
-                 and all(isinstance(item, int) and not isinstance(item, bool) and item >= 1 for item in schemas)
-                 and len(schemas) == len(set(schemas)),
-                 f"{profile_id} has invalid accepted schema versions")
-        _string_list(profile["required_json_values"], f"{profile_id}.required_json_values", allow_empty=True)
-        _require(profile["publication_default"] == "private", f"{profile_id} has unsafe publication default")
-        _require(isinstance(profile["require_observation_identity"], bool),
-                 f"{profile_id} observation identity flag is invalid")
+        _require(
+            isinstance(schemas, list)
+            and schemas
+            and all(
+                isinstance(item, int) and not isinstance(item, bool) and item >= 1
+                for item in schemas
+            )
+            and len(schemas) == len(set(schemas)),
+            f"{profile_id} has invalid accepted schema versions",
+        )
+        _string_list(
+            profile["required_json_values"],
+            f"{profile_id}.required_json_values",
+            allow_empty=True,
+        )
+        _require(
+            profile["publication_default"] == "private",
+            f"{profile_id} has unsafe publication default",
+        )
+        _require(
+            isinstance(profile["require_observation_identity"], bool),
+            f"{profile_id} observation identity flag is invalid",
+        )
         if profile["require_observation_identity"]:
             policy = profile.get("observation_policy")
             _require(isinstance(policy, str), f"{profile_id} lacks observation policy")
@@ -366,29 +479,62 @@ def load_contract(root: Path = ROOT) -> dict:
             )
 
         artifacts = profile["artifact"]
-        _require(isinstance(artifacts, list) and artifacts, f"{profile_id} artifact inventory is empty")
+        _require(
+            isinstance(artifacts, list) and artifacts,
+            f"{profile_id} artifact inventory is empty",
+        )
         roles: set[str] = set()
         filenames: set[str] = set()
         for spec in artifacts:
-            _require(isinstance(spec, dict) and set(spec) == {"role", "filename", "kind"},
-                     f"{profile_id} artifact fields changed without schema review")
+            _require(
+                isinstance(spec, dict) and set(spec) == {"role", "filename", "kind"},
+                f"{profile_id} artifact fields changed without schema review",
+            )
             role, filename, kind = spec["role"], spec["filename"], spec["kind"]
-            _require(isinstance(role, str) and NAME.fullmatch(role), f"{profile_id} has invalid artifact role")
-            _require(role not in roles, f"{profile_id} has duplicate artifact role: {role}")
-            _require(isinstance(filename, str) and Path(filename).name == filename and filename,
-                     f"{profile_id} has unsafe artifact filename")
-            _require(filename not in filenames, f"{profile_id} has duplicate artifact filename")
-            _require(kind in ALLOWED_ARTIFACT_KINDS, f"{profile_id} has unsupported artifact kind")
+            _require(
+                isinstance(role, str) and NAME.fullmatch(role),
+                f"{profile_id} has invalid artifact role",
+            )
+            _require(
+                role not in roles, f"{profile_id} has duplicate artifact role: {role}"
+            )
+            _require(
+                isinstance(filename, str)
+                and Path(filename).name == filename
+                and filename,
+                f"{profile_id} has unsafe artifact filename",
+            )
+            _require(
+                filename not in filenames,
+                f"{profile_id} has duplicate artifact filename",
+            )
+            _require(
+                kind in ALLOWED_ARTIFACT_KINDS,
+                f"{profile_id} has unsupported artifact kind",
+            )
             roles.add(role)
             filenames.add(filename)
-        _require(profile["primary_artifact"] in roles, f"{profile_id} primary artifact is not declared")
-        primary = next(item for item in artifacts if item["role"] == profile["primary_artifact"])
-        _require(primary["kind"] == "json-result", f"{profile_id} primary artifact must be a JSON result")
+        _require(
+            profile["primary_artifact"] in roles,
+            f"{profile_id} primary artifact is not declared",
+        )
+        primary = next(
+            item for item in artifacts if item["role"] == profile["primary_artifact"]
+        )
+        _require(
+            primary["kind"] == "json-result",
+            f"{profile_id} primary artifact must be a JSON result",
+        )
 
     non_evidence_set = set(non_evidence)
-    _require(non_evidence_set.isdisjoint(seen_lanes), "a lane cannot be both evidence-bearing and non-evidence")
-    _require(non_evidence_set | seen_lanes == set(envelope_lanes),
-             "every execution-envelope lane must be explicitly classified")
+    _require(
+        non_evidence_set.isdisjoint(seen_lanes),
+        "a lane cannot be both evidence-bearing and non-evidence",
+    )
+    _require(
+        non_evidence_set | seen_lanes == set(envelope_lanes),
+        "every execution-envelope lane must be explicitly classified",
+    )
     return contract
 
 
@@ -441,14 +587,16 @@ def _artifact_inventory(profile: dict, bundle: Path) -> list[dict]:
             role = "retained-auxiliary"
             kind = "file"
             required_artifact = False
-        inventory.append({
-            "role": role,
-            "path": relative,
-            "kind": kind,
-            "required": required_artifact,
-            "sha256": _sha256_file(path),
-            "size": path.stat().st_size,
-        })
+        inventory.append(
+            {
+                "role": role,
+                "path": relative,
+                "kind": kind,
+                "required": required_artifact,
+                "sha256": _sha256_file(path),
+                "size": path.stat().st_size,
+            }
+        )
 
     _require(
         seen_required == set(required),
@@ -465,7 +613,10 @@ def _artifact_set_sha256(inventory: list[dict]) -> str:
 def _lookup_json(payload: object, dotted: str) -> object:
     current = payload
     for part in dotted.split("."):
-        _require(isinstance(current, dict) and part in current, f"required JSON value is missing: {dotted}")
+        _require(
+            isinstance(current, dict) and part in current,
+            f"required JSON value is missing: {dotted}",
+        )
         current = current[part]
     return current
 
@@ -480,24 +631,47 @@ def _parse_claim_value(text: str) -> object:
     return text
 
 
-def _verify_primary_result(contract: dict, profile: dict, bundle: Path, envelope: dict) -> dict:
-    primary_spec = next(item for item in profile["artifact"] if item["role"] == profile["primary_artifact"])
+def _verify_primary_result(
+    contract: dict, profile: dict, bundle: Path, envelope: dict
+) -> dict:
+    primary_spec = next(
+        item
+        for item in profile["artifact"]
+        if item["role"] == profile["primary_artifact"]
+    )
     path = _bundle_file(bundle, primary_spec["filename"], "primary result")
     try:
         payload = json.loads(_read_text_file(path))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise EvidenceError(f"invalid primary result: {exc}") from exc
     _require(isinstance(payload, dict), "primary result must be an object")
-    _require(payload.get("schema_version") in profile["accepted_schema_versions"], "primary result schema is not approved")
-    _require(payload.get("source_sha") == envelope["source"]["commit_sha"], "primary result source SHA mismatch")
-    _require(payload.get("result") in profile["accepted_results"], "primary result is not an accepted pass")
+    _require(
+        payload.get("schema_version") in profile["accepted_schema_versions"],
+        "primary result schema is not approved",
+    )
+    _require(
+        payload.get("source_sha") == envelope["source"]["commit_sha"],
+        "primary result source SHA mismatch",
+    )
+    _require(
+        payload.get("result") in profile["accepted_results"],
+        "primary result is not an accepted pass",
+    )
     if "repository" in payload:
-        _require(payload["repository"] == contract["repository"], "primary result repository mismatch")
+        _require(
+            payload["repository"] == contract["repository"],
+            "primary result repository mismatch",
+        )
     for claim in profile["required_json_values"]:
         key, separator, expected = claim.partition("=")
-        _require(separator == "=" and key and expected, f"invalid reviewed JSON claim: {claim!r}")
-        _require(_lookup_json(payload, key) == _parse_claim_value(expected),
-                 f"primary result reviewed claim mismatch: {key}")
+        _require(
+            separator == "=" and key and expected,
+            f"invalid reviewed JSON claim: {claim!r}",
+        )
+        _require(
+            _lookup_json(payload, key) == _parse_claim_value(expected),
+            f"primary result reviewed claim mismatch: {key}",
+        )
     return payload
 
 
@@ -511,7 +685,6 @@ def _observation_identity(root: Path, profile: dict, primary: dict) -> dict:
             for field in profile["observation_identity_fields"]
         },
     }
-
 
 
 def _semantic_outcome(
@@ -532,8 +705,14 @@ def _semantic_outcome(
     except semantic_verifier.VerificationError as exc:
         raise EvidenceError(f"semantic evidence verification failed: {exc}") from exc
     expected = {
-        "adapter", "result", "independent", "environment_verified",
-        "verified_claims", "test_ids", "contract_ids", "details",
+        "adapter",
+        "result",
+        "independent",
+        "environment_verified",
+        "verified_claims",
+        "test_ids",
+        "contract_ids",
+        "details",
     }
     _require(
         isinstance(outcome, dict) and set(outcome) == expected,
@@ -564,7 +743,9 @@ def _semantic_outcome(
         and all(isinstance(item, str) and item for item in outcome["verified_claims"]),
         "semantic verifier claim inventory is invalid",
     )
-    _require(isinstance(outcome["details"], dict), "semantic verifier details are invalid")
+    _require(
+        isinstance(outcome["details"], dict), "semantic verifier details are invalid"
+    )
     return outcome
 
 
@@ -628,13 +809,16 @@ def attest(*, root: Path, lane_id: str, bundle: Path, output: Path) -> dict:
         bundle, "qualification-execution-envelope.json", "execution envelope"
     )
     envelope = envelope_lib.verify_envelope(root, envelope_path)
-    _require(envelope["lane"]["id"] == lane_id, "cross-lane execution envelope substitution")
+    _require(
+        envelope["lane"]["id"] == lane_id, "cross-lane execution envelope substitution"
+    )
     inventory = _artifact_inventory(profile, bundle)
     primary = _verify_primary_result(contract, profile, bundle, envelope)
     outcome = _semantic_outcome(root, profile, bundle, primary, envelope)
     artifact_set = _artifact_set_sha256(inventory)
     primary_sha256 = next(
-        item["sha256"] for item in inventory
+        item["sha256"]
+        for item in inventory
         if item["role"] == profile["primary_artifact"] and item["required"] is True
     )
     body = {
@@ -668,23 +852,43 @@ def _load_verifier_result(
     artifact_set: str,
     semantic: bool,
 ) -> tuple[dict, str]:
-    _require(path.is_file() and not path.is_symlink(), "verifier result is missing or unsafe")
+    _require(
+        path.is_file() and not path.is_symlink(), "verifier result is missing or unsafe"
+    )
     try:
         result = json.loads(_read_text_file(path))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise EvidenceError(f"invalid verifier result: {exc}") from exc
     expected = {
-        "schema_version", "result", "independent", "source_sha", "source_tree_sha",
-        "lane_id", "execution_envelope_sha256", "artifact_set_sha256",
-        "test_ids", "contract_ids", "verifier", "verification",
+        "schema_version",
+        "result",
+        "independent",
+        "source_sha",
+        "source_tree_sha",
+        "lane_id",
+        "execution_envelope_sha256",
+        "artifact_set_sha256",
+        "test_ids",
+        "contract_ids",
+        "verifier",
+        "verification",
         "verifier_result_sha256",
     }
-    _require(isinstance(result, dict) and set(result) == expected, "verifier result fields do not match schema")
+    _require(
+        isinstance(result, dict) and set(result) == expected,
+        "verifier result fields do not match schema",
+    )
     digest = result.get("verifier_result_sha256")
-    _require(isinstance(digest, str) and HEX64.fullmatch(digest), "verifier result digest is invalid")
+    _require(
+        isinstance(digest, str) and HEX64.fullmatch(digest),
+        "verifier result digest is invalid",
+    )
     body = dict(result)
     body.pop("verifier_result_sha256")
-    _require(hashlib.sha256(_canonical(body)).hexdigest() == digest, "verifier result canonical digest mismatch")
+    _require(
+        hashlib.sha256(_canonical(body)).hexdigest() == digest,
+        "verifier result canonical digest mismatch",
+    )
     _verify_checksum(path, digest)
     _require(
         result["schema_version"] == 3
@@ -698,15 +902,30 @@ def _load_verifier_result(
         "verifier source/tree mismatch",
     )
     _require(result["lane_id"] == envelope["lane"]["id"], "verifier lane mismatch")
-    _require(result["execution_envelope_sha256"] == envelope["envelope_sha256"], "verifier execution-envelope mismatch")
-    _require(result["artifact_set_sha256"] == artifact_set, "verifier artifact-set mismatch")
-    _require(result["test_ids"] == sorted(profile["test_ids"]), "verifier test-id binding mismatch")
-    _require(result["contract_ids"] == sorted(profile["contract_ids"]), "verifier contract-id binding mismatch")
-    _require(result["verifier"] == _verifier_provenance(root, contract, profile), "verifier implementation provenance mismatch")
+    _require(
+        result["execution_envelope_sha256"] == envelope["envelope_sha256"],
+        "verifier execution-envelope mismatch",
+    )
+    _require(
+        result["artifact_set_sha256"] == artifact_set, "verifier artifact-set mismatch"
+    )
+    _require(
+        result["test_ids"] == sorted(profile["test_ids"]),
+        "verifier test-id binding mismatch",
+    )
+    _require(
+        result["contract_ids"] == sorted(profile["contract_ids"]),
+        "verifier contract-id binding mismatch",
+    )
+    _require(
+        result["verifier"] == _verifier_provenance(root, contract, profile),
+        "verifier implementation provenance mismatch",
+    )
 
     current_inventory = _artifact_inventory(profile, path.parent)
     primary_entry = next(
-        item for item in current_inventory
+        item
+        for item in current_inventory
         if item["role"] == profile["primary_artifact"] and item["required"] is True
     )
     primary_payload = _verify_primary_result(contract, profile, path.parent, envelope)
@@ -741,12 +960,19 @@ def _load_verifier_result(
         )
     return result, digest
 
-def bind(*, root: Path, lane_id: str, bundle: Path, verifier_path: Path, output: Path) -> dict:
+
+def bind(
+    *, root: Path, lane_id: str, bundle: Path, verifier_path: Path, output: Path
+) -> dict:
     contract = load_contract(root)
     profile = profile_for_lane(contract, lane_id)
-    envelope_path = _bundle_file(bundle, "qualification-execution-envelope.json", "execution envelope")
+    envelope_path = _bundle_file(
+        bundle, "qualification-execution-envelope.json", "execution envelope"
+    )
     envelope = envelope_lib.verify_envelope(root, envelope_path)
-    _require(envelope["lane"]["id"] == lane_id, "cross-lane execution envelope substitution")
+    _require(
+        envelope["lane"]["id"] == lane_id, "cross-lane execution envelope substitution"
+    )
     inventory = _artifact_inventory(profile, bundle)
     _verify_primary_result(contract, profile, bundle, envelope)
     artifact_set = _artifact_set_sha256(inventory)
@@ -761,15 +987,20 @@ def bind(*, root: Path, lane_id: str, bundle: Path, verifier_path: Path, output:
     )
     body = {
         "schema_version": 3,
-        "binding_contract": {"id": contract["id"], "sha256": _sha256_file(_safe_repo_file(root, CONTRACT_PATH.as_posix()))},
+        "binding_contract": {
+            "id": contract["id"],
+            "sha256": _sha256_file(_safe_repo_file(root, CONTRACT_PATH.as_posix())),
+        },
         "profile": {
-            "id": profile["id"], "lane_id": lane_id,
+            "id": profile["id"],
+            "lane_id": lane_id,
             "verification_class": profile["verification_class"],
             "publication_default": profile["publication_default"],
         },
         "source": dict(envelope["source"]),
         "execution_envelope": {
-            "filename": envelope_path.name, "sha256": envelope["envelope_sha256"],
+            "filename": envelope_path.name,
+            "sha256": envelope["envelope_sha256"],
             "profile_version": envelope["lane"]["profile_version"],
         },
         "artifact_set_sha256": artifact_set,
@@ -777,15 +1008,20 @@ def bind(*, root: Path, lane_id: str, bundle: Path, verifier_path: Path, output:
         "contract_ids": sorted(profile["contract_ids"]),
         "artifacts": inventory,
         "verifier_result": {
-            "filename": verifier_path.name, "sha256": verifier_digest,
+            "filename": verifier_path.name,
+            "sha256": verifier_digest,
             "verifier_id": verifier["verifier"]["id"],
-            "semantic_verifier_sha256": verifier["verifier"]["semantic_verifier"]["sha256"],
+            "semantic_verifier_sha256": verifier["verifier"]["semantic_verifier"][
+                "sha256"
+            ],
             "binder_sha256": verifier["verifier"]["binder"]["sha256"],
             "independent": verifier["independent"],
         },
         "privacy": {
             "publication_default": profile["publication_default"],
-            "physical_recording_publication": contract["privacy"]["physical_recording_publication"],
+            "physical_recording_publication": contract["privacy"][
+                "physical_recording_publication"
+            ],
         },
     }
     body["binding_sha256"] = hashlib.sha256(_canonical(body)).hexdigest()
@@ -794,64 +1030,126 @@ def bind(*, root: Path, lane_id: str, bundle: Path, verifier_path: Path, output:
 
 
 def verify_binding(root: Path, path: Path, *, semantic: bool = True) -> dict:
-    _require(path.is_file() and not path.is_symlink(), "evidence binding is missing or unsafe")
+    _require(
+        path.is_file() and not path.is_symlink(),
+        "evidence binding is missing or unsafe",
+    )
     try:
         binding = json.loads(_read_text_file(path))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise EvidenceError(f"invalid evidence binding: {exc}") from exc
     expected = {
-        "schema_version", "binding_contract", "profile", "source",
-        "execution_envelope", "artifact_set_sha256", "test_ids",
-        "contract_ids", "artifacts", "verifier_result", "privacy",
+        "schema_version",
+        "binding_contract",
+        "profile",
+        "source",
+        "execution_envelope",
+        "artifact_set_sha256",
+        "test_ids",
+        "contract_ids",
+        "artifacts",
+        "verifier_result",
+        "privacy",
         "binding_sha256",
     }
-    _require(isinstance(binding, dict) and set(binding) == expected, "evidence binding fields do not match schema")
+    _require(
+        isinstance(binding, dict) and set(binding) == expected,
+        "evidence binding fields do not match schema",
+    )
     digest = binding.get("binding_sha256")
-    _require(binding["schema_version"] == 3 and isinstance(digest, str) and HEX64.fullmatch(digest),
-             "evidence binding schema or digest is invalid")
+    _require(
+        binding["schema_version"] == 3
+        and isinstance(digest, str)
+        and HEX64.fullmatch(digest),
+        "evidence binding schema or digest is invalid",
+    )
     body = dict(binding)
     body.pop("binding_sha256")
-    _require(hashlib.sha256(_canonical(body)).hexdigest() == digest, "evidence binding canonical digest mismatch")
+    _require(
+        hashlib.sha256(_canonical(body)).hexdigest() == digest,
+        "evidence binding canonical digest mismatch",
+    )
     _verify_checksum(path, digest)
 
     contract = load_contract(root)
-    _require(binding["binding_contract"] == {
-        "id": contract["id"], "sha256": _sha256_file(_safe_repo_file(root, CONTRACT_PATH.as_posix()))
-    }, "evidence binding contract mismatch")
+    _require(
+        binding["binding_contract"]
+        == {
+            "id": contract["id"],
+            "sha256": _sha256_file(_safe_repo_file(root, CONTRACT_PATH.as_posix())),
+        },
+        "evidence binding contract mismatch",
+    )
     profile_info = binding["profile"]
-    _require(isinstance(profile_info, dict) and set(profile_info)
-             == {"id", "lane_id", "verification_class", "publication_default"},
-             "evidence profile binding is malformed")
+    _require(
+        isinstance(profile_info, dict)
+        and set(profile_info)
+        == {"id", "lane_id", "verification_class", "publication_default"},
+        "evidence profile binding is malformed",
+    )
     profile = profile_for_lane(contract, profile_info["lane_id"])
-    _require(profile_info == {
-        "id": profile["id"], "lane_id": profile["lane_id"],
-        "verification_class": profile["verification_class"],
-        "publication_default": profile["publication_default"],
-    }, "evidence profile mismatch")
+    _require(
+        profile_info
+        == {
+            "id": profile["id"],
+            "lane_id": profile["lane_id"],
+            "verification_class": profile["verification_class"],
+            "publication_default": profile["publication_default"],
+        },
+        "evidence profile mismatch",
+    )
     bundle = path.parent
     envelope_info = binding["execution_envelope"]
-    _require(isinstance(envelope_info, dict) and set(envelope_info) == {"filename", "sha256", "profile_version"},
-             "execution envelope binding is malformed")
-    envelope_path = _bundle_file(bundle, envelope_info["filename"], "execution envelope")
-    envelope = envelope_lib.verify_envelope(root, envelope_path, source_sha=binding["source"].get("commit_sha"))
-    _require(envelope["lane"]["id"] == profile["lane_id"], "cross-lane envelope substitution")
+    _require(
+        isinstance(envelope_info, dict)
+        and set(envelope_info) == {"filename", "sha256", "profile_version"},
+        "execution envelope binding is malformed",
+    )
+    envelope_path = _bundle_file(
+        bundle, envelope_info["filename"], "execution envelope"
+    )
+    envelope = envelope_lib.verify_envelope(
+        root, envelope_path, source_sha=binding["source"].get("commit_sha")
+    )
+    _require(
+        envelope["lane"]["id"] == profile["lane_id"], "cross-lane envelope substitution"
+    )
     _require(binding["source"] == envelope["source"], "evidence source/tree mismatch")
-    _require(envelope_info["sha256"] == envelope["envelope_sha256"]
-             and envelope_info["profile_version"] == envelope["lane"]["profile_version"],
-             "execution envelope identity mismatch")
+    _require(
+        envelope_info["sha256"] == envelope["envelope_sha256"]
+        and envelope_info["profile_version"] == envelope["lane"]["profile_version"],
+        "execution envelope identity mismatch",
+    )
     inventory = _artifact_inventory(profile, bundle)
     _verify_primary_result(contract, profile, bundle, envelope)
     artifact_set = _artifact_set_sha256(inventory)
     _require(binding["artifacts"] == inventory, "bound artifact inventory mismatch")
-    _require(binding["artifact_set_sha256"] == artifact_set, "bound artifact-set digest mismatch")
-    _require(binding["test_ids"] == sorted(profile["test_ids"]),
-             "bound test-id inventory mismatch")
-    _require(binding["contract_ids"] == sorted(profile["contract_ids"]),
-             "bound contract-id inventory mismatch")
+    _require(
+        binding["artifact_set_sha256"] == artifact_set,
+        "bound artifact-set digest mismatch",
+    )
+    _require(
+        binding["test_ids"] == sorted(profile["test_ids"]),
+        "bound test-id inventory mismatch",
+    )
+    _require(
+        binding["contract_ids"] == sorted(profile["contract_ids"]),
+        "bound contract-id inventory mismatch",
+    )
     verifier_info = binding["verifier_result"]
-    _require(isinstance(verifier_info, dict) and set(verifier_info)
-             == {"filename", "sha256", "verifier_id", "semantic_verifier_sha256", "binder_sha256", "independent"},
-             "verifier binding is malformed")
+    _require(
+        isinstance(verifier_info, dict)
+        and set(verifier_info)
+        == {
+            "filename",
+            "sha256",
+            "verifier_id",
+            "semantic_verifier_sha256",
+            "binder_sha256",
+            "independent",
+        },
+        "verifier binding is malformed",
+    )
     verifier_path = _bundle_file(bundle, verifier_info["filename"], "verifier result")
     verifier, verifier_digest = _load_verifier_result(
         root,
@@ -862,32 +1160,53 @@ def verify_binding(root: Path, path: Path, *, semantic: bool = True) -> dict:
         artifact_set=artifact_set,
         semantic=semantic,
     )
-    _require(verifier_info == {
-        "filename": verifier_path.name,
-        "sha256": verifier_digest,
-        "verifier_id": verifier["verifier"]["id"],
-        "semantic_verifier_sha256": verifier["verifier"]["semantic_verifier"]["sha256"],
-        "binder_sha256": verifier["verifier"]["binder"]["sha256"],
-        "independent": verifier["independent"],
-    }, "verifier result binding mismatch")
-    _require(binding["privacy"] == {
-        "publication_default": profile["publication_default"],
-        "physical_recording_publication": contract["privacy"]["physical_recording_publication"],
-    }, "evidence privacy binding mismatch")
+    _require(
+        verifier_info
+        == {
+            "filename": verifier_path.name,
+            "sha256": verifier_digest,
+            "verifier_id": verifier["verifier"]["id"],
+            "semantic_verifier_sha256": verifier["verifier"]["semantic_verifier"][
+                "sha256"
+            ],
+            "binder_sha256": verifier["verifier"]["binder"]["sha256"],
+            "independent": verifier["independent"],
+        },
+        "verifier result binding mismatch",
+    )
+    _require(
+        binding["privacy"]
+        == {
+            "publication_default": profile["publication_default"],
+            "physical_recording_publication": contract["privacy"][
+                "physical_recording_publication"
+            ],
+        },
+        "evidence privacy binding mismatch",
+    )
     return binding
 
 
-
 def _sealed_member_bytes(bundle: Path) -> list[tuple[str, bytes]]:
-    _require(bundle.is_dir() and not bundle.is_symlink(), "evidence bundle is missing or unsafe")
+    _require(
+        bundle.is_dir() and not bundle.is_symlink(),
+        "evidence bundle is missing or unsafe",
+    )
     members: list[tuple[str, bytes]] = []
-    for path in sorted(bundle.rglob("*"), key=lambda item: item.relative_to(bundle).as_posix()):
+    for path in sorted(
+        bundle.rglob("*"), key=lambda item: item.relative_to(bundle).as_posix()
+    ):
         relative = path.relative_to(bundle).as_posix()
-        _require(not path.is_symlink(), f"sealed evidence path is a symlink: {relative}")
+        _require(
+            not path.is_symlink(), f"sealed evidence path is a symlink: {relative}"
+        )
         if path.is_dir():
             continue
         _require(path.is_file(), f"sealed evidence path is not regular: {relative}")
-        _require(path.stat(follow_symlinks=False).st_nlink == 1, f"sealed evidence file must have one link: {relative}")
+        _require(
+            path.stat(follow_symlinks=False).st_nlink == 1,
+            f"sealed evidence file must have one link: {relative}",
+        )
         members.append((relative, _read_bytes_file(path)))
     _require(members, "sealed evidence bundle is empty")
     return members
@@ -920,7 +1239,10 @@ def verify_sealed_archive(
                     and name not in seen,
                     f"unsafe or duplicate sealed evidence member: {name!r}",
                 )
-                _require(member.isfile(), f"sealed evidence member is not a regular file: {name}")
+                _require(
+                    member.isfile(),
+                    f"sealed evidence member is not a regular file: {name}",
+                )
                 _require(
                     member.uid == 0
                     and member.gid == 0
@@ -933,11 +1255,19 @@ def verify_sealed_archive(
                 seen.add(name)
                 extracted = destination / name
                 extracted.parent.mkdir(parents=True, exist_ok=True)
-                _require(extracted.resolve().is_relative_to(destination.resolve()), "sealed member escapes destination")
+                _require(
+                    extracted.resolve().is_relative_to(destination.resolve()),
+                    "sealed member escapes destination",
+                )
                 stream = archive.extractfile(member)
-                _require(stream is not None, f"cannot read sealed evidence member: {name}")
+                _require(
+                    stream is not None, f"cannot read sealed evidence member: {name}"
+                )
                 data = stream.read()
-                _require(len(data) == member.size, f"sealed evidence member size mismatch: {name}")
+                _require(
+                    len(data) == member.size,
+                    f"sealed evidence member size mismatch: {name}",
+                )
                 descriptor = os.open(
                     extracted,
                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
@@ -968,7 +1298,10 @@ def seal_bundle(
         "binding must be inside the bundle being sealed",
     )
     verified = verify_binding(root, binding_path, semantic=True)
-    _require(not destination.exists() and not destination.is_symlink(), "sealed archive destination already exists")
+    _require(
+        not destination.exists() and not destination.is_symlink(),
+        "sealed archive destination already exists",
+    )
     destination.parent.mkdir(parents=True, exist_ok=True)
     _require(
         not destination.resolve().is_relative_to(bundle.resolve()),
@@ -1015,7 +1348,10 @@ def unseal_archive(
     *,
     semantic: bool = False,
 ) -> tuple[str, str]:
-    _require(not destination.exists() and not destination.is_symlink(), "unseal destination already exists")
+    _require(
+        not destination.exists() and not destination.is_symlink(),
+        "unseal destination already exists",
+    )
     archive_bytes = _read_bytes_file(archive_path)
     archive_sha256 = hashlib.sha256(archive_bytes).hexdigest()
     destination.mkdir(parents=True, mode=0o700)
@@ -1044,11 +1380,19 @@ def unseal_archive(
                 seen.add(name)
                 output = destination / name
                 output.parent.mkdir(parents=True, exist_ok=True)
-                _require(output.resolve().is_relative_to(destination.resolve()), "sealed member escapes destination")
+                _require(
+                    output.resolve().is_relative_to(destination.resolve()),
+                    "sealed member escapes destination",
+                )
                 stream = archive.extractfile(member)
-                _require(stream is not None, f"cannot read sealed evidence member: {name}")
+                _require(
+                    stream is not None, f"cannot read sealed evidence member: {name}"
+                )
                 data = stream.read()
-                _require(len(data) == member.size, f"sealed evidence member size mismatch: {name}")
+                _require(
+                    len(data) == member.size,
+                    f"sealed evidence member size mismatch: {name}",
+                )
                 descriptor = os.open(
                     output,
                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
@@ -1087,9 +1431,7 @@ def _composite_action_step_blocks(source: str) -> list[tuple[int, str]]:
     """Return only concrete steps from a repository-owned composite action."""
     lines = source.splitlines()
     try:
-        runs_index = next(
-            index for index, line in enumerate(lines) if line == "runs:"
-        )
+        runs_index = next(index for index, line in enumerate(lines) if line == "runs:")
     except StopIteration:
         return []
     steps_index: int | None = None
@@ -1220,9 +1562,7 @@ def _admission_action_has_sealed_upload(source: str) -> bool:
     for block in (attest, bind, verify, seal, upload, verify_upload):
         if (
             envelope_lib.workflow_step_direct_value(block, "if") is not None
-            or envelope_lib.workflow_step_direct_value(
-                block, "continue-on-error"
-            )
+            or envelope_lib.workflow_step_direct_value(block, "continue-on-error")
             is not None
         ):
             return False
@@ -1236,7 +1576,7 @@ def _admission_action_has_sealed_upload(source: str) -> bool:
     if "qualification_evidence.py seal" not in seal:
         return False
     for block in (attest, bind, verify, seal):
-        if 'LINURA_EVIDENCE_ROOT: ${{ inputs.artifact-root }}' not in block:
+        if "LINURA_EVIDENCE_ROOT: ${{ inputs.artifact-root }}" not in block:
             return False
     if '--bundle "$LINURA_EVIDENCE_ROOT"' not in seal:
         return False
@@ -1266,15 +1606,9 @@ def _admission_action_has_sealed_upload(source: str) -> bool:
     ):
         return False
 
-    first_condition = envelope_lib.workflow_step_direct_value(
-        readback_1, "if"
-    )
-    second_condition = envelope_lib.workflow_step_direct_value(
-        readback_2, "if"
-    )
-    third_condition = envelope_lib.workflow_step_direct_value(
-        readback_3, "if"
-    )
+    first_condition = envelope_lib.workflow_step_direct_value(readback_1, "if")
+    second_condition = envelope_lib.workflow_step_direct_value(readback_2, "if")
+    third_condition = envelope_lib.workflow_step_direct_value(readback_3, "if")
     retry_1_condition = envelope_lib.workflow_step_direct_value(retry_1, "if")
     retry_2_condition = envelope_lib.workflow_step_direct_value(retry_2, "if")
     expected_retry_1 = "${{ steps.readback-1.outcome != 'success' }}"
@@ -1284,19 +1618,13 @@ def _admission_action_has_sealed_upload(source: str) -> bool:
     )
     if (
         first_condition is not None
-        or envelope_lib.workflow_step_direct_value(
-            readback_1, "continue-on-error"
-        )
+        or envelope_lib.workflow_step_direct_value(readback_1, "continue-on-error")
         != "true"
         or second_condition != expected_retry_1
-        or envelope_lib.workflow_step_direct_value(
-            readback_2, "continue-on-error"
-        )
+        or envelope_lib.workflow_step_direct_value(readback_2, "continue-on-error")
         != "true"
         or third_condition != expected_retry_2
-        or envelope_lib.workflow_step_direct_value(
-            readback_3, "continue-on-error"
-        )
+        or envelope_lib.workflow_step_direct_value(readback_3, "continue-on-error")
         is not None
         or retry_1_condition != expected_retry_1
         or retry_2_condition != expected_retry_2
@@ -1314,16 +1642,15 @@ def _admission_action_has_sealed_upload(source: str) -> bool:
     return (
         'sealed="$RUNNER_TEMP/qualification-evidence.tar"' in seal
         and 'test "$archive_sha" = "$actual_archive_sha"' in seal
-        and "printf 'archive=%s\\n' \"$sealed\" >> \"$GITHUB_OUTPUT\""
-        in seal
-        and "LINURA_EXPECTED_ARCHIVE_SHA256: "
-        "${{ steps.seal.outputs.archive-sha256 }}" in verify_upload
-        and 'readback="$RUNNER_TEMP/qualification-evidence-readback/'
-        'qualification-evidence.tar"' in verify_upload
-        and 'test "$actual" = "$LINURA_EXPECTED_ARCHIVE_SHA256"'
+        and 'printf \'archive=%s\\n\' "$sealed" >> "$GITHUB_OUTPUT"' in seal
+        and "LINURA_EXPECTED_ARCHIVE_SHA256: ${{ steps.seal.outputs.archive-sha256 }}"
         in verify_upload
-        and "printf 'archive-sha256=%s\\n' \"$actual\" >> "
-        '\"$GITHUB_OUTPUT\"' in verify_upload
+        and 'readback="$RUNNER_TEMP/qualification-evidence-readback/'
+        'qualification-evidence.tar"'
+        in verify_upload
+        and 'test "$actual" = "$LINURA_EXPECTED_ARCHIVE_SHA256"' in verify_upload
+        and 'printf \'archive-sha256=%s\\n\' "$actual" >> "$GITHUB_OUTPUT"'
+        in verify_upload
     )
 
 
@@ -1334,7 +1661,6 @@ def _workflow_job_at(source: str, start_line: int) -> str | None:
         if match is not None:
             return match.group(1)
     return None
-
 
 
 def _ordered_evidence_admission(source: str, expected_lane: str) -> bool:
@@ -1406,6 +1732,7 @@ def _ordered_evidence_admission(source: str, expected_lane: str) -> bool:
             return False
     return True
 
+
 def _trusted_release_has_split_v010_source_roots(source: str) -> bool:
     """Require distinct exact-source roots for pre-seal and prepared v0.10 evidence."""
     required = (
@@ -1415,7 +1742,7 @@ def _trusted_release_has_split_v010_source_roots(source: str) -> bool:
         'worktree add --detach \\\n            "$V010_QUALIFICATION_SOURCE_ROOT" "$QUALIFICATION_SOURCE_SHA"',
         'worktree add --detach \\\n            "$V010_PREPARED_SOURCE_ROOT" "$SOURCE_SHA"',
         'git -C "$V010_QUALIFICATION_SOURCE_ROOT" rev-parse HEAD',
-        'git -C "$V010_QUALIFICATION_SOURCE_ROOT" rev-parse \'HEAD^{tree}\'',
+        "git -C \"$V010_QUALIFICATION_SOURCE_ROOT\" rev-parse 'HEAD^{tree}'",
         '"$QUALIFICATION_TREE_SHA"',
         'git -C "$V010_PREPARED_SOURCE_ROOT" rev-parse HEAD',
         '"$V010_QUALIFICATION_SOURCE_ROOT/tools/qualification_evidence.py"',
@@ -1426,9 +1753,8 @@ def _trusted_release_has_split_v010_source_roots(source: str) -> bool:
         '--root "$V010_PREPARED_SOURCE_ROOT" verify --structural-only',
         'cd "$V010_PREPARED_SOURCE_ROOT"',
     )
-    return (
-        "V010_SOURCE_ROOT:" not in source
-        and all(fragment in source for fragment in required)
+    return "V010_SOURCE_ROOT:" not in source and all(
+        fragment in source for fragment in required
     )
 
 
@@ -1446,13 +1772,12 @@ def validate_integrations(root: Path, contract: dict | None = None) -> None:
         "evidence action digest output is not reverify-bound",
     )
     _require(
-        "artifact-root:" in action
-        and "artifact-name:" in action,
+        "artifact-root:" in action and "artifact-name:" in action,
         "evidence action public inputs are incomplete",
     )
-    trusted_release = _read_text_file(_safe_repo_file(
-        root, ".github/workflows/trusted-release-proof.yml"
-    ))
+    trusted_release = _read_text_file(
+        _safe_repo_file(root, ".github/workflows/trusted-release-proof.yml")
+    )
     _require(
         _trusted_release_has_split_v010_source_roots(trusted_release),
         "trusted release must verify pre-seal and prepared v0.10 evidence against distinct exact-source roots",
@@ -1461,7 +1786,10 @@ def validate_integrations(root: Path, contract: dict | None = None) -> None:
         lane_id = profile["lane_id"]
         lane = lanes[lane_id]
         target = lane.get("workflow")
-        _require(isinstance(target, str), f"evidence-bearing lane lacks hosted workflow: {lane_id}")
+        _require(
+            isinstance(target, str),
+            f"evidence-bearing lane lacks hosted workflow: {lane_id}",
+        )
         integration_target = target
         expected_lane = lane_id
         if lane_id == "control1-plan-preview-vm":
@@ -1469,7 +1797,9 @@ def validate_integrations(root: Path, contract: dict | None = None) -> None:
             expected_lane = "${{ inputs.envelope_lane || 'vm-acceptance' }}"
             wrapper = _read_text_file(_safe_repo_file(root, target))
             for trigger in TRIGGER_FILES:
-                _require(trigger in wrapper, f"control1 evidence trigger missing: {trigger}")
+                _require(
+                    trigger in wrapper, f"control1 evidence trigger missing: {trigger}"
+                )
         elif lane_id == "vm-acceptance":
             expected_lane = "${{ inputs.envelope_lane || 'vm-acceptance' }}"
         source = _read_text_file(_safe_repo_file(root, integration_target))
@@ -1479,9 +1809,9 @@ def validate_integrations(root: Path, contract: dict | None = None) -> None:
         )
         trigger_source = source
         if lane_id == "v010-shell-runtime":
-            trigger_source = _read_text_file(_safe_repo_file(
-                root, ".github/workflows/v010-qualification.yml"
-            ))
+            trigger_source = _read_text_file(
+                _safe_repo_file(root, ".github/workflows/v010-qualification.yml")
+            )
         for trigger in TRIGGER_FILES:
             _require(
                 trigger in trigger_source,
@@ -1492,32 +1822,44 @@ def validate_integrations(root: Path, contract: dict | None = None) -> None:
 def _command_validate(args: argparse.Namespace) -> int:
     contract = load_contract(args.root)
     validate_integrations(args.root, contract)
-    print(json.dumps({
-        "ready": True, "schema_version": contract["schema_version"],
-        "contract_id": contract["id"],
-        "profiles": [profile["id"] for profile in contract["profile"]],
-        "non_evidence_lanes": contract["non_evidence_lanes"],
-    }, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "ready": True,
+                "schema_version": contract["schema_version"],
+                "contract_id": contract["id"],
+                "profiles": [profile["id"] for profile in contract["profile"]],
+                "non_evidence_lanes": contract["non_evidence_lanes"],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 
 def _command_attest(args: argparse.Namespace) -> int:
-    result = attest(root=args.root, lane_id=args.lane, bundle=args.bundle, output=args.output)
+    result = attest(
+        root=args.root, lane_id=args.lane, bundle=args.bundle, output=args.output
+    )
     print(result["verifier_result_sha256"])
     return 0
 
 
 def _command_bind(args: argparse.Namespace) -> int:
-    result = bind(root=args.root, lane_id=args.lane, bundle=args.bundle,
-                  verifier_path=args.verifier_result, output=args.output)
+    result = bind(
+        root=args.root,
+        lane_id=args.lane,
+        bundle=args.bundle,
+        verifier_path=args.verifier_result,
+        output=args.output,
+    )
     print(result["binding_sha256"])
     return 0
 
 
 def _command_verify(args: argparse.Namespace) -> int:
-    result = verify_binding(
-        args.root, args.binding, semantic=not args.structural_only
-    )
+    result = verify_binding(args.root, args.binding, semantic=not args.structural_only)
     print(result["binding_sha256"])
     return 0
 
@@ -1526,11 +1868,16 @@ def _command_seal(args: argparse.Namespace) -> int:
     archive_sha256, binding_sha256 = seal_bundle(
         args.root, args.bundle, args.binding, args.destination
     )
-    print(json.dumps({
-        "archive_sha256": archive_sha256,
-        "binding_sha256": binding_sha256,
-        "archive": str(args.destination),
-    }, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "archive_sha256": archive_sha256,
+                "binding_sha256": binding_sha256,
+                "archive": str(args.destination),
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 
@@ -1541,11 +1888,16 @@ def _command_unseal(args: argparse.Namespace) -> int:
         args.destination,
         semantic=args.semantic,
     )
-    print(json.dumps({
-        "archive_sha256": archive_sha256,
-        "binding_sha256": binding_sha256,
-        "destination": str(args.destination),
-    }, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "archive_sha256": archive_sha256,
+                "binding_sha256": binding_sha256,
+                "destination": str(args.destination),
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 
@@ -1553,11 +1905,18 @@ def _command_admit(args: argparse.Namespace) -> int:
     verifier = args.bundle / "verifier-result.json"
     binding = args.bundle / "evidence-binding.json"
     attest(root=args.root, lane_id=args.lane, bundle=args.bundle, output=verifier)
-    result = bind(root=args.root, lane_id=args.lane, bundle=args.bundle,
-                  verifier_path=verifier, output=binding)
+    result = bind(
+        root=args.root,
+        lane_id=args.lane,
+        bundle=args.bundle,
+        verifier_path=verifier,
+        output=binding,
+    )
     verified = verify_binding(args.root, binding)
-    _require(verified["binding_sha256"] == result["binding_sha256"],
-             "post-write evidence verification changed binding identity")
+    _require(
+        verified["binding_sha256"] == result["binding_sha256"],
+        "post-write evidence verification changed binding identity",
+    )
     print(result["binding_sha256"])
     return 0
 

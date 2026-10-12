@@ -61,8 +61,10 @@ def _canonical_json(value: object) -> bytes:
 
 
 def _validate_hex(value: object, label: str, size: int) -> str:
-    if not isinstance(value, str) or len(value) != size or any(
-        ch not in "0123456789abcdef" for ch in value
+    if (
+        not isinstance(value, str)
+        or len(value) != size
+        or any(ch not in "0123456789abcdef" for ch in value)
     ):
         raise RunnerError(f"{label} must be {size} lowercase hexadecimal characters")
     return value
@@ -182,6 +184,7 @@ def _digest_regular(path: Path, maximum: int = MAX_FILE_BYTES) -> tuple[str, int
     finally:
         os.close(fd)
 
+
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         result = json.loads(_read_regular(path).decode())
@@ -203,14 +206,28 @@ def _exact_source(source_root: Path, source_sha: str) -> Path:
         timeout=10,
     )
     status = subprocess.run(
-        ["git", "-C", str(source_root), "status", "--porcelain=v1", "--untracked-files=all"],
+        [
+            "git",
+            "-C",
+            str(source_root),
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+        ],
         check=False,
         capture_output=True,
         text=True,
         timeout=15,
     )
-    if head.returncode or head.stdout.strip() != source_sha or status.returncode or status.stdout:
-        raise RunnerError("Level C orchestration requires a fully clean exact-source checkout")
+    if (
+        head.returncode
+        or head.stdout.strip() != source_sha
+        or status.returncode
+        or status.stdout
+    ):
+        raise RunnerError(
+            "Level C orchestration requires a fully clean exact-source checkout"
+        )
     return source_root
 
 
@@ -247,7 +264,12 @@ def _state_root(path: Path, source_root: Path, *, create: bool) -> Path:
 def _locked_state(root: Path) -> Iterator[None]:
     """Serialize the entire read/verify/update transaction for one Q11 run."""
     lock_path = root / ".run-state.lock"
-    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_RDWR
+        | os.O_CREAT
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
     try:
         fd = os.open(lock_path, flags, 0o600)
     except OSError as error:
@@ -260,7 +282,9 @@ def _locked_state(root: Path) -> Iterator[None]:
             or info.st_uid != os.geteuid()
             or stat.S_IMODE(info.st_mode) & 0o077
         ):
-            raise RunnerError("Q11 state lock must be a private single-link regular file")
+            raise RunnerError(
+                "Q11 state lock must be a private single-link regular file"
+            )
         deadline = time.monotonic() + 180
         while True:
             try:
@@ -268,7 +292,9 @@ def _locked_state(root: Path) -> Iterator[None]:
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
-                    raise RunnerError("Q11 run state is busy; concurrent update timed out")
+                    raise RunnerError(
+                        "Q11 run state is busy; concurrent update timed out"
+                    )
                 time.sleep(0.05)
         path_info = os.lstat(lock_path)
         if (path_info.st_dev, path_info.st_ino) != (info.st_dev, info.st_ino):
@@ -284,16 +310,24 @@ def _state_file(root: Path) -> Path:
 
 def _load_state(root: Path) -> dict[str, Any]:
     state = _read_json(_state_file(root))
-    if state.get("artifact_type") != STATE_ARTIFACT_TYPE or state.get("schema_version") != 1:
+    if (
+        state.get("artifact_type") != STATE_ARTIFACT_TYPE
+        or state.get("schema_version") != 1
+    ):
         raise RunnerError("Q11 run state identity drifted")
-    if state.get("release_support_promotion") is not False or state.get("evidence_ready") is not False:
+    if (
+        state.get("release_support_promotion") is not False
+        or state.get("evidence_ready") is not False
+    ):
         raise RunnerError("Q11 run state cannot claim support or evidence readiness")
     return state
 
 
 def _enrolled_fixture_matches(state: dict[str, Any]) -> None:
     fixture_id = _identifier(state["fixture_id"], "fixture-id", 64)
-    digest = _validate_hex(state["fixture_contract_sha256"], "fixture contract digest", 64)
+    digest = _validate_hex(
+        state["fixture_contract_sha256"], "fixture contract digest", 64
+    )
     enrolled_path = Path(state["fixture_contract_path"])
     enrolled, observed_digest = workstation_acceptance.read_hardware_fixture(
         enrolled_path, fixture_id=fixture_id
@@ -309,7 +343,11 @@ def _request_file(root: Path, case: str) -> Path:
 def _request_set(root: Path, state: dict[str, Any]) -> dict[str, dict[str, Any]]:
     required = state.get("required_cases")
     digests = state.get("request_sha256")
-    if not isinstance(required, list) or not isinstance(digests, dict) or set(required) != set(digests):
+    if (
+        not isinstance(required, list)
+        or not isinstance(digests, dict)
+        or set(required) != set(digests)
+    ):
         raise RunnerError("Q11 request bindings are invalid")
     result: dict[str, dict[str, Any]] = {}
     for case in required:
@@ -339,16 +377,15 @@ def _bundle_tree(bundle: Path) -> None:
             path = base / name
             info = os.lstat(path)
             relative = path.relative_to(bundle)
-            within_evidence = (
-                relative == Q11_PREFIX
-                or Q11_PREFIX in relative.parents
-            )
+            within_evidence = relative == Q11_PREFIX or Q11_PREFIX in relative.parents
             if (
                 stat.S_ISLNK(info.st_mode)
                 or not stat.S_ISDIR(info.st_mode)
                 or (relative not in allowed_ancestors and not within_evidence)
             ):
-                raise RunnerError("Q11 bundle contains an unsafe or out-of-namespace directory")
+                raise RunnerError(
+                    "Q11 bundle contains an unsafe or out-of-namespace directory"
+                )
         for name in files:
             path = base / name
             info = os.lstat(path)
@@ -360,7 +397,9 @@ def _bundle_tree(bundle: Path) -> None:
                 or info.st_nlink != 1
                 or (relative != MANIFEST and not within_evidence)
             ):
-                raise RunnerError(f"Q11 bundle path is outside the candidate evidence namespace: {relative}")
+                raise RunnerError(
+                    f"Q11 bundle path is outside the candidate evidence namespace: {relative}"
+                )
             count += 1
             total += info.st_size
             if count > MAX_BUNDLE_FILES or total > MAX_BUNDLE_BYTES:
@@ -385,9 +424,7 @@ def _freeze_bundle(source: Path, snapshot: Path) -> None:
         destination = snapshot / relative
         destination.mkdir(parents=True, exist_ok=True)
         for name in files:
-            data = _read_regular(
-                Path(directory) / name, maximum=MAX_BUNDLE_BYTES
-            )
+            data = _read_regular(Path(directory) / name, maximum=MAX_BUNDLE_BYTES)
             count += 1
             total += len(data)
             if count > MAX_BUNDLE_FILES or total > MAX_BUNDLE_BYTES:
@@ -414,6 +451,7 @@ def _bundle_snapshot_digest(bundle: Path) -> str:
                 {"path": relative, "type": "file", "size": size, "sha256": digest}
             )
     return _sha_bytes(_canonical_json(entries))
+
 
 def _binding(bundle: Path, value: object, label: str) -> tuple[Path, str]:
     if not isinstance(value, dict):
@@ -464,7 +502,9 @@ def begin_run(
         fixture_contract=fixture_contract, fixture_id=fixture_id
     )
     if failures:
-        raise RunnerError("Level C physical prerequisites failed: " + "; ".join(failures))
+        raise RunnerError(
+            "Level C physical prerequisites failed: " + "; ".join(failures)
+        )
     state_root = _state_root(state_root, source_root, create=True)
     bundle_fixture = state_root / "bundle" / FIXTURE_EVIDENCE
     fixture_bytes = _read_regular(fixture_contract)
@@ -523,8 +563,13 @@ def _validate_case(
     }
     for key, value in expected.items():
         if attestation.get(key) != value:
-            raise RunnerError(f"case attestation {key} does not match the bounded request")
-    if not isinstance(attestation.get("captured_at_utc"), str) or not attestation["captured_at_utc"]:
+            raise RunnerError(
+                f"case attestation {key} does not match the bounded request"
+            )
+    if (
+        not isinstance(attestation.get("captured_at_utc"), str)
+        or not attestation["captured_at_utc"]
+    ):
         raise RunnerError("case attestation requires captured_at_utc")
     runner = attestation.get("runner")
     if not isinstance(runner, dict) or runner.get("id") != RUNNER_ID:
@@ -538,7 +583,11 @@ def _validate_case(
         raise RunnerError("case observations must be an array")
     observed = {}
     for item in observations:
-        if not isinstance(item, dict) or not isinstance(item.get("name"), str) or item["name"] in observed:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("name"), str)
+            or item["name"] in observed
+        ):
             raise RunnerError("case observations must have unique names")
         observed[item["name"]] = item
     if set(observed) != set(request["required_observations"]):
@@ -558,18 +607,24 @@ def _validate_case(
         raise RunnerError("case requires machine execution provenance")
     controller = execution.get("controller")
     if controller not in ALLOWED_CONTROLLERS:
-        raise RunnerError("case controller is not an allowed external physical controller")
+        raise RunnerError(
+            "case controller is not an allowed external physical controller"
+        )
     if execution.get("mechanism") != request["mechanism"]:
         raise RunnerError("case mechanism does not match the bounded request")
     if execution.get("fixture_id") != state["fixture_id"]:
         raise RunnerError("case execution fixture identity mismatch")
     if execution.get("fixture_contract_sha256") != state["fixture_contract_sha256"]:
         raise RunnerError("case execution fixture enrollment digest mismatch")
-    environment = _validate_hex(execution.get("environment_sha256"), "environment digest", 64)
+    environment = _validate_hex(
+        execution.get("environment_sha256"), "environment digest", 64
+    )
     boot_id = execution.get("boot_id")
     if not isinstance(boot_id, str) or len(boot_id) != 36:
         raise RunnerError("case boot identity is invalid")
-    provenance_path, _ = _binding(bundle, execution.get("provenance"), "case provenance")
+    provenance_path, _ = _binding(
+        bundle, execution.get("provenance"), "case provenance"
+    )
     provenance = _read_json(provenance_path)
     expected_provenance = {
         "schema_version": 1,
@@ -621,7 +676,9 @@ def record_case(
         if case_id not in requests:
             raise RunnerError(f"unsupported Q11 case: {case_id}")
         if state.get("status") != "collecting":
-            raise RunnerError("validated Q11 candidate is immutable; start a new run for new evidence")
+            raise RunnerError(
+                "validated Q11 candidate is immutable; start a new run for new evidence"
+            )
         bundle = state_root / "bundle"
         _bundle_tree(bundle)
         digest = _validate_case(bundle, attestation, requests[case_id], state)
@@ -646,7 +703,10 @@ def _patch_contract(path: Path, digest: str) -> None:
     if end < 0:
         end = len(text)
     section = text[start:end]
-    if section.count("evidence_ready = false") != 1 or section.count('evidence_manifest_sha256 = ""') != 1:
+    if (
+        section.count("evidence_ready = false") != 1
+        or section.count('evidence_manifest_sha256 = ""') != 1
+    ):
         raise RunnerError("interactive workstation readiness markers drifted")
     section = section.replace("evidence_ready = false", "evidence_ready = true", 1)
     section = section.replace(
@@ -660,7 +720,16 @@ def _patch_contract(path: Path, digest: str) -> None:
 def _extract_source(source_root: Path, source_sha: str, destination: Path) -> None:
     archive = destination.parent / "source.tar"
     result = subprocess.run(
-        ["git", "-C", str(source_root), "archive", "--format=tar", "--output", str(archive), source_sha],
+        [
+            "git",
+            "-C",
+            str(source_root),
+            "archive",
+            "--format=tar",
+            "--output",
+            str(archive),
+            source_sha,
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -691,7 +760,11 @@ def _manifest_cases(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
         raise RunnerError("Q11 candidate manifest cases must be an array")
     result = {}
     for item in cases:
-        if not isinstance(item, dict) or not isinstance(item.get("name"), str) or item["name"] in result:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("name"), str)
+            or item["name"] in result
+        ):
             raise RunnerError("Q11 candidate manifest has invalid or duplicate cases")
         result[item["name"]] = item
     return result
@@ -718,14 +791,22 @@ def finalize_run(source_root: Path, state_root: Path) -> dict[str, Any]:
             _freeze_bundle(bundle, frozen_bundle)
             bundle_digest = _bundle_snapshot_digest(frozen_bundle)
             if _bundle_snapshot_digest(bundle) != bundle_digest:
-                raise RunnerError("Q11 candidate bundle changed during snapshot acquisition")
+                raise RunnerError(
+                    "Q11 candidate bundle changed during snapshot acquisition"
+                )
             manifest_data = _read_regular(frozen_bundle / MANIFEST)
             manifest_digest = _sha_bytes(manifest_data)
             manifest = json.loads(manifest_data)
-            if not isinstance(manifest, dict) or manifest.get("run_id") != state["run_id"]:
+            if (
+                not isinstance(manifest, dict)
+                or manifest.get("run_id") != state["run_id"]
+            ):
                 raise RunnerError("Q11 candidate manifest does not bind the run")
             source = manifest.get("source")
-            if not isinstance(source, dict) or source.get("commit_sha") != state["source_commit_sha"]:
+            if (
+                not isinstance(source, dict)
+                or source.get("commit_sha") != state["source_commit_sha"]
+            ):
                 raise RunnerError("Q11 candidate manifest source mismatch")
             fixture_binding = manifest.get("fixture")
             expected_binding = {
@@ -737,7 +818,9 @@ def finalize_run(source_root: Path, state_root: Path) -> dict[str, Any]:
             }
             if fixture_binding != expected_binding:
                 raise RunnerError("Q11 candidate fixture enrollment binding mismatch")
-            fixture_path, _ = _binding(frozen_bundle, fixture_binding["contract"], "candidate fixture")
+            fixture_path, _ = _binding(
+                frozen_bundle, fixture_binding["contract"], "candidate fixture"
+            )
             if _read_json(fixture_path) != state["fixture"]:
                 raise RunnerError("Q11 candidate fixture payload mismatch")
             cases = _manifest_cases(manifest)
@@ -750,9 +833,13 @@ def finalize_run(source_root: Path, state_root: Path) -> dict[str, Any]:
                     or item.get("evidence") != accepted[case]["path"]
                     or item.get("sha256") != accepted[case]["sha256"]
                 ):
-                    raise RunnerError(f"Q11 candidate manifest binding mismatch: {case}")
+                    raise RunnerError(
+                        f"Q11 candidate manifest binding mismatch: {case}"
+                    )
 
-            with tempfile.TemporaryDirectory(prefix="linura-q11-candidate-") as temporary:
+            with tempfile.TemporaryDirectory(
+                prefix="linura-q11-candidate-"
+            ) as temporary:
                 verification = Path(temporary) / "root"
                 _extract_source(source_root, state["source_commit_sha"], verification)
                 for directory, _directories, files in os.walk(frozen_bundle):
@@ -774,7 +861,10 @@ def finalize_run(source_root: Path, state_root: Path) -> dict[str, Any]:
                 result = subprocess.run(
                     [
                         sys.executable,
-                        str(verification / "tools/check_v010_workstation_qualification.py"),
+                        str(
+                            verification
+                            / "tools/check_v010_workstation_qualification.py"
+                        ),
                         str(verification),
                     ],
                     check=False,
@@ -789,7 +879,9 @@ def finalize_run(source_root: Path, state_root: Path) -> dict[str, Any]:
                         + (result.stderr.strip() or result.stdout.strip())
                     )
             if _bundle_snapshot_digest(bundle) != bundle_digest:
-                raise RunnerError("Q11 candidate bundle changed during canonical verification")
+                raise RunnerError(
+                    "Q11 candidate bundle changed during canonical verification"
+                )
             finalization = {
                 "schema_version": 1,
                 "artifact_type": FINALIZATION_ARTIFACT_TYPE,
@@ -860,19 +952,27 @@ def status(source_root: Path, state_root: Path) -> dict[str, Any]:
             )
             observed_bundle = _bundle_snapshot_digest(state_root / "bundle")
             if observed_bundle != expected_bundle:
-                raise RunnerError("validated Q11 candidate bundle changed after finalization")
+                raise RunnerError(
+                    "validated Q11 candidate bundle changed after finalization"
+                )
             if _sha_bytes(_read_regular(state_root / "bundle" / MANIFEST)) != state.get(
                 "candidate_manifest_sha256"
             ):
-                raise RunnerError("validated Q11 candidate manifest changed after finalization")
-            finalization_data = _read_regular(state_root / "candidate-finalization.json")
+                raise RunnerError(
+                    "validated Q11 candidate manifest changed after finalization"
+                )
+            finalization_data = _read_regular(
+                state_root / "candidate-finalization.json"
+            )
             expected_finalization = _validate_hex(
                 state.get("candidate_finalization_sha256"),
                 "candidate finalization digest",
                 64,
             )
             if _sha_bytes(finalization_data) != expected_finalization:
-                raise RunnerError("Q11 candidate finalization record changed after validation")
+                raise RunnerError(
+                    "Q11 candidate finalization record changed after validation"
+                )
             finalization = json.loads(finalization_data)
             if (
                 not isinstance(finalization, dict)
@@ -897,7 +997,9 @@ def status(source_root: Path, state_root: Path) -> dict[str, Any]:
             "status": state["status"],
             "required_cases": len(state["required_cases"]),
             "accepted_cases": len(accepted),
-            "pending_cases": [case for case in state["required_cases"] if case not in accepted],
+            "pending_cases": [
+                case for case in state["required_cases"] if case not in accepted
+            ],
             "release_support_promotion": False,
             "evidence_ready": False,
         }

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import unittest
 
-from tools.python_package_version import Pep440VersionError, normalize_pep440, wheel_version
+from tools.python_package_version import (
+    Pep440VersionError,
+    normalize_pep440,
+    wheel_version,
+)
 
 
 class PythonPackageVersionTests(unittest.TestCase):

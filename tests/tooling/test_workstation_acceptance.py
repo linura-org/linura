@@ -19,7 +19,9 @@ ROOT = Path(__file__).resolve().parents[2]
 class WorkstationAcceptanceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.contract = tomllib.loads(
-            (ROOT / "contracts/v010-workstation-acceptance.toml").read_text(encoding="utf-8")
+            (ROOT / "contracts/v010-workstation-acceptance.toml").read_text(
+                encoding="utf-8"
+            )
         )
 
     def test_repository_contract_is_valid(self) -> None:
@@ -48,7 +50,9 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         self.assertEqual(payload["capture"], self.contract["hardware_capture"])
         self.assertNotEqual(payload["launcher"], self.contract["vm_launcher"])
         qualification = tomllib.loads(
-            (ROOT / "contracts/v010-workstation-qualification.toml").read_text(encoding="utf-8")
+            (ROOT / "contracts/v010-workstation-qualification.toml").read_text(
+                encoding="utf-8"
+            )
         )
         self.assertEqual(
             payload["required_q11_cases"],
@@ -96,7 +100,9 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         self.assertNotIn("command", request)
         self.assertNotIn("argv", request)
 
-    def test_level_c_case_request_fails_closed_on_incomplete_product_slice(self) -> None:
+    def test_level_c_case_request_fails_closed_on_incomplete_product_slice(
+        self,
+    ) -> None:
         with self.assertRaisesRegex(
             workstation_acceptance.AcceptanceError,
             "bounded-installer-lane prerequisite S28 is planned, not complete",
@@ -130,7 +136,9 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 self.contract, "automated", "gtk", False
             )
 
-    def test_doctor_rejects_unsupported_mode_display_pairs_before_host_probes(self) -> None:
+    def test_doctor_rejects_unsupported_mode_display_pairs_before_host_probes(
+        self,
+    ) -> None:
         self.assertEqual(
             workstation_acceptance.doctor("automated", "gtk"),
             ["automated mode requires display=none"],
@@ -194,9 +202,9 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         import json
 
         schema = json.loads(
-            (ROOT / "schemas/v010-maintained-workstation-fixture.v1.schema.json").read_text(
-                encoding="utf-8"
-            )
+            (
+                ROOT / "schemas/v010-maintained-workstation-fixture.v1.schema.json"
+            ).read_text(encoding="utf-8")
         )
         expected_fields = {
             "schema_version",
@@ -308,8 +316,12 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         self.assertNotIn("serial", sanitized[0])
         self.assertNotIn("description", sanitized[0])
 
-    def test_hyprland_monitor_sanitizer_fails_closed_on_incomplete_geometry(self) -> None:
-        with self.assertRaisesRegex(workstation_acceptance.AcceptanceError, "missing scale"):
+    def test_hyprland_monitor_sanitizer_fails_closed_on_incomplete_geometry(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(
+            workstation_acceptance.AcceptanceError, "missing scale"
+        ):
             workstation_acceptance.sanitize_hyprland_monitors(
                 [
                     {
@@ -342,7 +354,9 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "failed with status 2" in failure
-                for failure in workstation_acceptance.validate_virtualization_probe(2, "")
+                for failure in workstation_acceptance.validate_virtualization_probe(
+                    2, ""
+                )
             )
         )
 
@@ -371,7 +385,12 @@ class WorkstationAcceptanceTests(unittest.TestCase):
     def test_recording_probe_rejects_audio(self) -> None:
         probe = {
             "streams": [
-                {"codec_type": "video", "codec_name": "ffv1", "width": 1280, "height": 800},
+                {
+                    "codec_type": "video",
+                    "codec_name": "ffv1",
+                    "width": 1280,
+                    "height": 800,
+                },
                 {"codec_type": "audio", "codec_name": "opus"},
             ],
             "format": {"format_name": "matroska", "duration": "1.0"},
@@ -425,7 +444,9 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             recording = Path(temp_dir) / "recording.mkv"
             recording.write_bytes(b"x" * 4096)
 
-            def fake_probe(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            def fake_probe(
+                *args: object, **kwargs: object
+            ) -> subprocess.CompletedProcess[str]:
                 command = args[0]
                 self.assertNotEqual(Path(command[-1]), recording)
                 recording.write_bytes(recording.read_bytes() + b"changed")
@@ -436,14 +457,17 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                     stderr="",
                 )
 
-            with mock.patch.object(
-                workstation_acceptance.shutil,
-                "which",
-                return_value="/usr/bin/ffprobe",
-            ), mock.patch.object(
-                workstation_acceptance.subprocess,
-                "run",
-                side_effect=fake_probe,
+            with (
+                mock.patch.object(
+                    workstation_acceptance.shutil,
+                    "which",
+                    return_value="/usr/bin/ffprobe",
+                ),
+                mock.patch.object(
+                    workstation_acceptance.subprocess,
+                    "run",
+                    side_effect=fake_probe,
+                ),
             ):
                 with self.assertRaisesRegex(
                     workstation_acceptance.AcceptanceError,
@@ -470,39 +494,47 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                     contract=self.contract,
                 )
 
-
-
-    def test_recorder_start_failure_stops_service_and_clears_partial_evidence(self) -> None:
+    def test_recorder_start_failure_stops_service_and_clears_partial_evidence(
+        self,
+    ) -> None:
         recorder = (
             ROOT / "qualification/v010/workstation-acceptance/record-session.sh"
         ).read_text(encoding="utf-8")
-        start = recorder.index('    start)\n')
-        stop = recorder.index('    stop)\n', start)
+        start = recorder.index("    start)\n")
+        stop = recorder.index("    stop)\n", start)
         start_path = recorder[start:stop]
         cleanup = start_path[
-            start_path.index('        startup_cleanup() {'):
-            start_path.index('        trap startup_cleanup EXIT')
+            start_path.index("        startup_cleanup() {") : start_path.index(
+                "        trap startup_cleanup EXIT"
+            )
         ]
-        self.assertIn('systemctl --user kill --kill-who=main --signal=INT "$unit"', cleanup)
+        self.assertIn(
+            'systemctl --user kill --kill-who=main --signal=INT "$unit"', cleanup
+        )
         self.assertIn('systemctl --user stop "$unit"', cleanup)
         self.assertIn('wait "$helper_pid"', cleanup)
         self.assertIn('rm -f -- "$status_file" "$helper_pid_file" "$path"', cleanup)
         self.assertLess(
-            start_path.index('        trap startup_cleanup EXIT'),
-            start_path.index('        (\n'),
+            start_path.index("        trap startup_cleanup EXIT"),
+            start_path.index("        (\n"),
         )
-        self.assertIn('                trap - EXIT\n                exit 0', start_path)
+        self.assertIn("                trap - EXIT\n                exit 0", start_path)
         self.assertLess(
-            start_path.index('        trap startup_cleanup EXIT'),
-            start_path.index('        fail "workstation recorder did not become active"'),
+            start_path.index("        trap startup_cleanup EXIT"),
+            start_path.index(
+                '        fail "workstation recorder did not become active"'
+            ),
         )
 
-    def test_level_c_snapshot_publication_refuses_links_and_uses_private_temporaries(self) -> None:
+    def test_level_c_snapshot_publication_refuses_links_and_uses_private_temporaries(
+        self,
+    ) -> None:
         capture = (
-            ROOT / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            ROOT
+            / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            'snapshot_names=(virtualization.txt fixture-contract.sha256 hardware-session.txt)',
+            "snapshot_names=(virtualization.txt fixture-contract.sha256 hardware-session.txt)",
             capture,
         )
         self.assertIn('[[ ! -L "$destination" ]] || fail', capture)
@@ -510,9 +542,12 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         self.assertIn('stat -c %h -- "$destination"', capture)
         self.assertIn('mktemp -d "$evidence_root/.linura-snapshot.XXXXXXXX"', capture)
         self.assertIn('mv -fT -- "$snapshot_temporary_dir/$snapshot_name"', capture)
-        self.assertIn('source_checkout_matches || fail "Level C source checkout changed before snapshot publication"', capture)
+        self.assertIn(
+            'source_checkout_matches || fail "Level C source checkout changed before snapshot publication"',
+            capture,
+        )
         check = capture.index('for snapshot_name in "${snapshot_names[@]}"; do')
-        purge = capture.index('stale_recordings=()', check)
+        purge = capture.index("stale_recordings=()", check)
         self.assertLess(check, purge)
         self.assertNotIn('> "$evidence_root/hardware-session.txt"', capture)
         self.assertNotIn('> "$evidence_root/virtualization.txt"', capture)
@@ -520,7 +555,8 @@ class WorkstationAcceptanceTests(unittest.TestCase):
 
     def test_level_c_publication_is_bound_to_the_recorder_verified_digest(self) -> None:
         capture = (
-            ROOT / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            ROOT
+            / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
         ).read_text(encoding="utf-8")
         recorder_stop = capture.index('recording_verification="$(')
         expected_digest = capture.index('verified_recording_sha256="$(', recorder_stop)
@@ -592,8 +628,10 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 workstation_acceptance.AcceptanceError, "alias"
             ):
                 workstation_acceptance.verify_recording(
-                    recording, contract=self.contract,
-                    metadata_path=metadata, digest_path=metadata,
+                    recording,
+                    contract=self.contract,
+                    metadata_path=metadata,
+                    digest_path=metadata,
                 )
             self.assertFalse(metadata.exists())
 
@@ -604,8 +642,10 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 workstation_acceptance.AcceptanceError, "single-link|alias"
             ):
                 workstation_acceptance.verify_recording(
-                    recording, contract=self.contract,
-                    metadata_path=metadata, digest_path=digest,
+                    recording,
+                    contract=self.contract,
+                    metadata_path=metadata,
+                    digest_path=digest,
                 )
             self.assertEqual(metadata.read_text(encoding="utf-8"), "original metadata")
             self.assertEqual(digest.read_text(encoding="utf-8"), "original metadata")
@@ -620,14 +660,22 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 workstation_acceptance.AcceptanceError, "alias"
             ):
                 workstation_acceptance.verify_recording(
-                    recording, contract=self.contract,
+                    recording,
+                    contract=self.contract,
                     metadata_path=root / "alias" / "recording.mkv",
                 )
             self.assertEqual(recording.read_bytes(), b"x" * 4096)
 
     def test_recording_mutated_during_sidecar_write_is_rejected(self) -> None:
         probe = {
-            "streams": [{"codec_type": "video", "codec_name": "ffv1", "width": 1280, "height": 800}],
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "ffv1",
+                    "width": 1280,
+                    "height": 800,
+                }
+            ],
             "format": {"format_name": "matroska", "duration": "1.0"},
         }
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -639,37 +687,58 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             original_publish = workstation_acceptance._publish_recording_sidecar
 
             def mutate_when_publishing_sidecar(
-                path: Path, content: str, *, directory_fd: int | None = None,
+                path: Path,
+                content: str,
+                *,
+                directory_fd: int | None = None,
             ) -> tuple[int, int]:
                 result = original_publish(path, content, directory_fd=directory_fd)
                 if path == digest_file:
                     recording.write_bytes(b"y" * 4096)
                 return result
 
-            with mock.patch.object(
-                workstation_acceptance.shutil, "which", return_value="/usr/bin/ffprobe"
-            ), mock.patch.object(
-                workstation_acceptance.subprocess, "run",
-                return_value=subprocess.CompletedProcess(
-                    ["/usr/bin/ffprobe"], 0, stdout=json.dumps(probe), stderr=""
+            with (
+                mock.patch.object(
+                    workstation_acceptance.shutil,
+                    "which",
+                    return_value="/usr/bin/ffprobe",
                 ),
-            ), mock.patch.object(
-                workstation_acceptance, "_publish_recording_sidecar",
-                side_effect=mutate_when_publishing_sidecar,
+                mock.patch.object(
+                    workstation_acceptance.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess(
+                        ["/usr/bin/ffprobe"], 0, stdout=json.dumps(probe), stderr=""
+                    ),
+                ),
+                mock.patch.object(
+                    workstation_acceptance,
+                    "_publish_recording_sidecar",
+                    side_effect=mutate_when_publishing_sidecar,
+                ),
             ):
                 with self.assertRaisesRegex(
-                    workstation_acceptance.AcceptanceError, "changed while it was being verified"
+                    workstation_acceptance.AcceptanceError,
+                    "changed while it was being verified",
                 ):
                     workstation_acceptance.verify_recording(
-                        recording, contract=self.contract,
-                        metadata_path=metadata, digest_path=digest_file,
+                        recording,
+                        contract=self.contract,
+                        metadata_path=metadata,
+                        digest_path=digest_file,
                     )
             self.assertFalse(metadata.exists())
             self.assertFalse(digest_file.exists())
 
     def test_sidecar_path_swaps_cannot_modify_other_files(self) -> None:
         probe = {
-            "streams": [{"codec_type": "video", "codec_name": "ffv1", "width": 1280, "height": 800}],
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "ffv1",
+                    "width": 1280,
+                    "height": 800,
+                }
+            ],
             "format": {"format_name": "matroska", "duration": "1.0"},
         }
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -683,7 +752,10 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             original_publish = workstation_acceptance._publish_recording_sidecar
 
             def swap_before_publish(
-                path: Path, content: str, *, directory_fd: int | None = None,
+                path: Path,
+                content: str,
+                *,
+                directory_fd: int | None = None,
             ) -> tuple[int, int]:
                 if path == metadata:
                     path.symlink_to(victim)
@@ -691,33 +763,56 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                     path.hardlink_to(metadata)
                 return original_publish(path, content, directory_fd=directory_fd)
 
-            with mock.patch.object(
-                workstation_acceptance.shutil, "which", return_value="/usr/bin/ffprobe"
-            ), mock.patch.object(
-                workstation_acceptance.subprocess, "run",
-                return_value=subprocess.CompletedProcess(
-                    ["/usr/bin/ffprobe"], 0, stdout=json.dumps(probe), stderr=""
+            with (
+                mock.patch.object(
+                    workstation_acceptance.shutil,
+                    "which",
+                    return_value="/usr/bin/ffprobe",
                 ),
-            ), mock.patch.object(
-                workstation_acceptance, "_publish_recording_sidecar",
-                side_effect=swap_before_publish,
+                mock.patch.object(
+                    workstation_acceptance.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess(
+                        ["/usr/bin/ffprobe"], 0, stdout=json.dumps(probe), stderr=""
+                    ),
+                ),
+                mock.patch.object(
+                    workstation_acceptance,
+                    "_publish_recording_sidecar",
+                    side_effect=swap_before_publish,
+                ),
             ):
                 result = workstation_acceptance.verify_recording(
-                    recording, contract=self.contract,
-                    metadata_path=metadata, digest_path=digest_file,
+                    recording,
+                    contract=self.contract,
+                    metadata_path=metadata,
+                    digest_path=digest_file,
                 )
             self.assertEqual(victim.read_text(encoding="utf-8"), "untouched")
             self.assertFalse(metadata.is_symlink())
             self.assertEqual(os.stat(metadata).st_nlink, 1)
-            self.assertEqual(json.loads(metadata.read_text(encoding="utf-8"))["sha256"], result["sha256"])
-            self.assertEqual(digest_file.read_text(encoding="utf-8"), f"{result['sha256']}  recording.mkv\n")
+            self.assertEqual(
+                json.loads(metadata.read_text(encoding="utf-8"))["sha256"],
+                result["sha256"],
+            )
+            self.assertEqual(
+                digest_file.read_text(encoding="utf-8"),
+                f"{result['sha256']}  recording.mkv\n",
+            )
 
     def test_sidecar_cross_parent_swap_fails_without_overwriting_metadata(self) -> None:
         # The two sidecars deliberately use the same basename in different
         # writable directories. Moving their parents after the first write
         # must not let the second write reopen and clobber the first.
         probe = {
-            "streams": [{"codec_type": "video", "codec_name": "ffv1", "width": 1280, "height": 800}],
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "ffv1",
+                    "width": 1280,
+                    "height": 800,
+                }
+            ],
             "format": {"format_name": "matroska", "duration": "1.0"},
         }
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -734,7 +829,10 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             swapped = False
 
             def swap_after_first(
-                path: Path, content: str, *, directory_fd: int | None = None,
+                path: Path,
+                content: str,
+                *,
+                directory_fd: int | None = None,
             ) -> tuple[int, int]:
                 nonlocal swapped
                 result = original_publish(path, content, directory_fd=directory_fd)
@@ -745,24 +843,34 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                     (root / "temporary").rename(second)
                 return result
 
-            with mock.patch.object(
-                workstation_acceptance.shutil, "which", return_value="/usr/bin/ffprobe"
-            ), mock.patch.object(
-                workstation_acceptance.subprocess, "run",
-                return_value=subprocess.CompletedProcess(
-                    ["/usr/bin/ffprobe"], 0, stdout=json.dumps(probe), stderr=""
+            with (
+                mock.patch.object(
+                    workstation_acceptance.shutil,
+                    "which",
+                    return_value="/usr/bin/ffprobe",
                 ),
-            ), mock.patch.object(
-                workstation_acceptance, "_publish_recording_sidecar",
-                side_effect=swap_after_first,
+                mock.patch.object(
+                    workstation_acceptance.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess(
+                        ["/usr/bin/ffprobe"], 0, stdout=json.dumps(probe), stderr=""
+                    ),
+                ),
+                mock.patch.object(
+                    workstation_acceptance,
+                    "_publish_recording_sidecar",
+                    side_effect=swap_after_first,
+                ),
             ):
                 with self.assertRaisesRegex(
                     workstation_acceptance.AcceptanceError,
                     "sidecar directory changed",
                 ):
                     workstation_acceptance.verify_recording(
-                        recording, contract=self.contract,
-                        metadata_path=metadata, digest_path=digest,
+                        recording,
+                        contract=self.contract,
+                        metadata_path=metadata,
+                        digest_path=digest,
                     )
             self.assertTrue(swapped)
             self.assertFalse((first / "result").exists())
@@ -774,48 +882,58 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             ROOT / "qualification/v010/workstation-acceptance/record-session.sh"
         ).read_text(encoding="utf-8")
         capture = (
-            ROOT / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            ROOT
+            / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
         ).read_text(encoding="utf-8")
         abort_helper = recorder[
-            recorder.index('abort_recorder_state() {'):
-            recorder.index('\n}\n\ncase "$command_name" in')
+            recorder.index("abort_recorder_state() {") : recorder.index(
+                '\n}\n\ncase "$command_name" in'
+            )
         ]
-        self.assertIn('read -r helper_pid helper_start < "$helper_pid_file"', abort_helper)
-        self.assertIn('recorder_helper_is_live', abort_helper)
+        self.assertIn(
+            'read -r helper_pid helper_start < "$helper_pid_file"', abort_helper
+        )
+        self.assertIn("recorder_helper_is_live", abort_helper)
         self.assertIn('kill -KILL "$helper_pid"', abort_helper)
         self.assertLess(
-            abort_helper.index('fail "recorder helper remains alive; refusing to clear its shared state"'),
+            abort_helper.index(
+                'fail "recorder helper remains alive; refusing to clear its shared state"'
+            ),
             abort_helper.index('rm -f -- "$status_file" "$helper_pid_file" "$path"'),
         )
         abort_case = recorder[
-            recorder.index('    abort)\n'):recorder.index('    verify)\n')
+            recorder.index("    abort)\n") : recorder.index("    verify)\n")
         ]
         self.assertIn('abort_recorder_state "$path"', abort_case)
         self.assertIn('"$recorder" abort "$recording" "$output_name"', capture)
-        self.assertIn('trap cleanup EXIT', capture)
-        self.assertIn('previous workstation recorder helper has not exited', recorder)
+        self.assertIn("trap cleanup EXIT", capture)
+        self.assertIn("previous workstation recorder helper has not exited", recorder)
 
     def test_recorder_stop_timeout_uses_bounded_abort_cleanup(self) -> None:
         recorder = (
             ROOT / "qualification/v010/workstation-acceptance/record-session.sh"
         ).read_text(encoding="utf-8")
-        stop = recorder[recorder.index('    stop)\n'):recorder.index('    abort)\n')]
+        stop = recorder[recorder.index("    stop)\n") : recorder.index("    abort)\n")]
         timeout = stop[
-            stop.index('        if [[ ! -f "$status_file" ]]; then'):
-            stop.index('        recorder_status="$(cat "$status_file")"')
+            stop.index('        if [[ ! -f "$status_file" ]]; then') : stop.index(
+                '        recorder_status="$(cat "$status_file")"'
+            )
         ]
         self.assertIn('abort_recorder_state "$path"', timeout)
         self.assertLess(
             timeout.index('abort_recorder_state "$path"'),
-            timeout.index('fail "workstation recorder did not publish its final exit status"'),
+            timeout.index(
+                'fail "workstation recorder did not publish its final exit status"'
+            ),
         )
         abort_case = recorder[
-            recorder.index('    abort)\n'):recorder.index('    verify)\n')
+            recorder.index("    abort)\n") : recorder.index("    verify)\n")
         ]
         self.assertIn('abort_recorder_state "$path"', abort_case)
         abort_helper = recorder[
-            recorder.index('abort_recorder_state() {'):
-            recorder.index('\n}\n\ncase "$command_name" in')
+            recorder.index("abort_recorder_state() {") : recorder.index(
+                '\n}\n\ncase "$command_name" in'
+            )
         ]
         self.assertIn('systemctl --user stop "$unit"', abort_helper)
         self.assertIn('kill -TERM "$helper_pid"', abort_helper)
@@ -825,7 +943,9 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             abort_helper.index('rm -f -- "$status_file" "$helper_pid_file" "$path"'),
         )
 
-    def test_level_b_qemu_log_publication_replaces_symlink_without_following_it(self) -> None:
+    def test_level_b_qemu_log_publication_replaces_symlink_without_following_it(
+        self,
+    ) -> None:
         import sys
 
         if sys.platform != "linux":
@@ -834,8 +954,8 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         launcher = (
             ROOT / "qualification/v010/workstation-acceptance/launch-interactive.sh"
         ).read_text(encoding="utf-8")
-        start = launcher.index('publish_qemu_log() {')
-        end = launcher.index('\n}\n\ncleanup()', start) + 2
+        start = launcher.index("publish_qemu_log() {")
+        end = launcher.index("\n}\n\ncleanup()", start) + 2
         publish = launcher[start:end]
         self.assertNotIn('cp "$vm_log" "$evidence_dir/qemu.log"', launcher)
         self.assertIn('mktemp "$evidence_dir/.qemu.log.XXXXXXXX"', publish)
@@ -855,7 +975,7 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             script = (
                 "set -euo pipefail\n"
                 + publish
-                + "\nvm_log=\"$1\"\nevidence_dir=\"$2\"\npublish_qemu_log\n"
+                + '\nvm_log="$1"\nevidence_dir="$2"\npublish_qemu_log\n'
             )
             result = subprocess.run(
                 ["bash", "-c", script, "bash", str(vm_log), str(evidence)],
@@ -865,11 +985,17 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(victim.read_text(encoding="utf-8"), "must remain unchanged\n")
+            self.assertEqual(
+                victim.read_text(encoding="utf-8"), "must remain unchanged\n"
+            )
             self.assertFalse(destination.is_symlink())
-            self.assertEqual(destination.read_text(encoding="utf-8"), "new qemu diagnostics\n")
+            self.assertEqual(
+                destination.read_text(encoding="utf-8"), "new qemu diagnostics\n"
+            )
 
-    def test_level_b_guest_evidence_publication_replaces_symlink_without_following_it(self) -> None:
+    def test_level_b_guest_evidence_publication_replaces_symlink_without_following_it(
+        self,
+    ) -> None:
         import sys
 
         if sys.platform != "linux":
@@ -904,7 +1030,7 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 + publish
                 + "\n"
                 + 'fail() { printf "FAIL: %s\\n" "$*" >&2; exit 1; }\n'
-                + 'evidence_directory_matches() { return 0; }\n'
+                + "evidence_directory_matches() { return 0; }\n"
                 + 'evidence_dir="$1"\nstaged="$2"\n'
                 + 'publish_guest_evidence_file "$staged" "live-session.txt"\n'
             )
@@ -949,39 +1075,56 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             copied = root / "private.qcow2"
             prepared.write_bytes(b"unexpected concurrently refreshed image")
             expected_digest = hashlib.sha256(b"verified original image").hexdigest()
-            fragment = launcher[start:resize + len(resize_command)]
+            fragment = launcher[start : resize + len(resize_command)]
             script = (
                 "set -euo pipefail\n"
                 'prepared_image="$1"\nvm_image="$2"\nprepared_sha="$3"\n'
-                'fail() { printf "FAIL: %s\\n" "$*" >&2; exit 1; }\n'
-                + fragment
+                'fail() { printf "FAIL: %s\\n" "$*" >&2; exit 1; }\n' + fragment
             )
             result = subprocess.run(
-                ["bash", "-c", script, "bash", str(prepared), str(copied), expected_digest],
-                capture_output=True, text=True, timeout=10, check=False,
+                [
+                    "bash",
+                    "-c",
+                    script,
+                    "bash",
+                    str(prepared),
+                    str(copied),
+                    expected_digest,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("copied substrate differs", result.stderr)
             self.assertEqual(copied.read_bytes(), prepared.read_bytes())
 
-    def test_level_c_concurrent_capture_is_refused_before_evidence_deletion(self) -> None:
+    def test_level_c_concurrent_capture_is_refused_before_evidence_deletion(
+        self,
+    ) -> None:
         import sys
 
         if sys.platform != "linux":
             self.skipTest("Linux-only no-follow flock helper")
 
         capture = (
-            ROOT / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            ROOT
+            / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
         ).read_text(encoding="utf-8")
         lock_check = capture.index("coproc capture_lock_holder {")
         lock_ack = capture.index('case "$capture_lock_state" in', lock_check)
         retained_purge = capture.index("for stale_recording in", lock_ack)
         old_recording_purge = capture.index('rm -f "$recording"', lock_ack)
-        recorder_preflight = capture.index('recorder_unit="linura-workstation-recorder.service"')
+        recorder_preflight = capture.index(
+            'recorder_unit="linura-workstation-recorder.service"'
+        )
         self.assertLess(lock_ack, recorder_preflight)
         self.assertLess(lock_ack, retained_purge)
         self.assertLess(lock_ack, old_recording_purge)
-        self.assertIn('python3 -u "$source_root/tools/workstation_capture_lock.py"', capture)
+        self.assertIn(
+            'python3 -u "$source_root/tools/workstation_capture_lock.py"', capture
+        )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             directory = Path(temp_dir) / "private"
@@ -990,16 +1133,21 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             helper = ROOT / "tools/workstation_capture_lock.py"
             holder = subprocess.Popen(
                 [sys.executable, "-u", str(helper), str(lock)],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, text=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
             try:
                 self.assertEqual(holder.stdout.readline().strip(), "LOCKED")
                 self.assertEqual(lock.stat().st_mode & 0o777, 0o600)
                 second = subprocess.run(
                     [sys.executable, "-u", str(helper), str(lock)],
-                    input="", text=True, capture_output=True,
-                    timeout=5, check=False,
+                    input="",
+                    text=True,
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
                 )
                 self.assertNotEqual(second.returncode, 0)
                 self.assertEqual(second.stdout.strip(), "BUSY")
@@ -1014,13 +1162,18 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             self.assertEqual(holder.returncode, 0)
             acquired_again = subprocess.run(
                 [sys.executable, "-u", str(helper), str(lock)],
-                input="", text=True, capture_output=True,
-                timeout=5, check=False,
+                input="",
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
             )
             self.assertEqual(acquired_again.returncode, 0, acquired_again.stderr)
             self.assertEqual(acquired_again.stdout.strip(), "LOCKED")
 
-    def test_level_c_capture_lock_refuses_hardlinks_and_symlinks_without_modification(self) -> None:
+    def test_level_c_capture_lock_refuses_hardlinks_and_symlinks_without_modification(
+        self,
+    ) -> None:
         import sys
 
         if sys.platform != "linux":
@@ -1041,12 +1194,17 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                         lock.symlink_to(victim)
                     result = subprocess.run(
                         [sys.executable, "-u", str(helper), str(lock)],
-                        input="", text=True, capture_output=True,
-                        timeout=5, check=False,
+                        input="",
+                        text=True,
+                        capture_output=True,
+                        timeout=5,
+                        check=False,
                     )
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual(result.stdout.strip(), "UNSAFE")
-                    self.assertEqual(victim.read_bytes(), b"never truncate another file")
+                    self.assertEqual(
+                        victim.read_bytes(), b"never truncate another file"
+                    )
                     lock.unlink()
 
     def test_level_c_capture_lock_refuses_unsafe_file_and_directory_modes(self) -> None:
@@ -1063,8 +1221,11 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             lock.chmod(0o644)
             wrong_lock = subprocess.run(
                 [sys.executable, "-u", str(helper), str(lock)],
-                input="", text=True, capture_output=True,
-                timeout=5, check=False,
+                input="",
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
             )
             self.assertNotEqual(wrong_lock.returncode, 0)
             self.assertEqual(wrong_lock.stdout.strip(), "UNSAFE")
@@ -1072,35 +1233,42 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             directory.chmod(0o755)
             wrong_directory = subprocess.run(
                 [sys.executable, "-u", str(helper), str(lock)],
-                input="", text=True, capture_output=True,
-                timeout=5, check=False,
+                input="",
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
             )
             self.assertNotEqual(wrong_directory.returncode, 0)
             self.assertEqual(wrong_directory.stdout.strip(), "UNSAFE")
 
     def test_level_c_reused_evidence_root_clears_every_fixture_bundle(self) -> None:
         capture = (
-            ROOT / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            ROOT
+            / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
         ).read_text(encoding="utf-8")
         purge = capture.index("stale_recordings=()")
         self.assertIn("for stale_recording in", capture)
         self.assertLess(purge, capture.index("# Generate all snapshot data", purge))
         self.assertIn('"$evidence_root"/hardware-*.metadata.json', capture)
         self.assertIn('"$evidence_root"/hardware-*.sha256', capture)
-        fragment = capture[purge:capture.index("# Generate all snapshot data", purge)]
+        fragment = capture[purge : capture.index("# Generate all snapshot data", purge)]
         script = (
             "set -euo pipefail\n"
             'fail() { printf "FAIL: %s\\n" "$*" >&2; exit 1; }\n'
-            'evidence_root="$1"\n'
-            + fragment
+            'evidence_root="$1"\n' + fragment
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             evidence = root / "evidence"
             evidence.mkdir()
             for filename in (
-                "hardware-A.mkv", "hardware-A.metadata.json", "hardware-A.sha256",
-                "hardware-B.mkv", "hardware-B.metadata.json", "hardware-B.sha256",
+                "hardware-A.mkv",
+                "hardware-A.metadata.json",
+                "hardware-A.sha256",
+                "hardware-B.mkv",
+                "hardware-B.metadata.json",
+                "hardware-B.sha256",
             ):
                 (evidence / filename).write_bytes(b"stale")
             preserved = root / "unrelated.txt"
@@ -1108,7 +1276,10 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             (evidence / "hardware-alias.mkv").symlink_to(preserved)
             result = subprocess.run(
                 ["bash", "-c", script, "bash", str(evidence)],
-                capture_output=True, text=True, timeout=5, check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(list(evidence.glob("hardware-*")), [])
@@ -1120,37 +1291,50 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             (evidence / "hardware-Z.mkv").mkdir()
             rejected = subprocess.run(
                 ["bash", "-c", script, "bash", str(evidence)],
-                capture_output=True, text=True, timeout=5, check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
             )
             self.assertNotEqual(rejected.returncode, 0)
-            self.assertEqual((evidence / "hardware-A.mkv").read_bytes(), b"retain on failure")
+            self.assertEqual(
+                (evidence / "hardware-A.mkv").read_bytes(), b"retain on failure"
+            )
 
     def test_level_c_capture_auto_stops_before_recording_duration_limit(self) -> None:
         capture = (
-            ROOT / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            ROOT
+            / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
         ).read_text(encoding="utf-8")
-        self.assertIn('maximum_duration_seconds', capture)
+        self.assertIn("maximum_duration_seconds", capture)
         self.assertIn('capture_start_seconds="$SECONDS"', capture)
-        self.assertIn('SECONDS - capture_start_seconds >= recording_duration_budget', capture)
-        fragment = capture[capture.rindex("while true; do"):]
+        self.assertIn(
+            "SECONDS - capture_start_seconds >= recording_duration_budget", capture
+        )
+        fragment = capture[capture.rindex("while true; do") :]
         script = (
             "set -euo pipefail\n"
             "systemctl() { return 0; }\n"
             "capture_start_seconds=0\n"
             "recording_duration_budget=1\n"
-            "SECONDS=2\n"
-            + fragment
+            "SECONDS=2\n" + fragment
         )
         result = subprocess.run(
-            ["bash", "-c", script], capture_output=True,
-            text=True, timeout=5, check=False,
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("recording budget reached", result.stdout)
 
-    def test_level_c_recorder_preflight_accepts_absent_and_rejects_active_or_unknown(self) -> None:
+    def test_level_c_recorder_preflight_accepts_absent_and_rejects_active_or_unknown(
+        self,
+    ) -> None:
         capture = (
-            ROOT / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+            ROOT
+            / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
         ).read_text(encoding="utf-8")
         start = capture.index('recorder_unit="linura-workstation-recorder.service"')
         end = capture.index('\n\nif [[ -L "$evidence_root" ]]', start)
@@ -1158,22 +1342,21 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         script = (
             "set -euo pipefail\n"
             'fail() { printf "FAIL: %s\\n" "$*" >&2; exit 1; }\n'
-            'systemctl() {\n'
+            "systemctl() {\n"
             '    case "$2" in\n'
-            '        list-units)\n'
+            "        list-units)\n"
             '            if [[ "$SCENARIO" == manager-error ]]; then return 1; fi\n'
             '            if [[ "$SCENARIO" != absent ]]; then\n'
             '                printf "%s\\n" "linura-workstation-recorder.service loaded active running"\n'
-            '            fi\n'
-            '            ;;\n'
-            '        show)\n'
+            "            fi\n"
+            "            ;;\n"
+            "        show)\n"
             '            if [[ "$SCENARIO" == absent ]]; then return 99; fi\n'
             '            if [[ "$SCENARIO" == inactive ]]; then echo inactive; else echo active; fi\n'
-            '            ;;\n'
-            '        *) return 98 ;;\n'
-            '    esac\n'
-            '}\n'
-            + fragment + "\n"
+            "            ;;\n"
+            "        *) return 98 ;;\n"
+            "    esac\n"
+            "}\n" + fragment + "\n"
         )
         for scenario, should_succeed in (
             ("absent", True),
@@ -1195,9 +1378,13 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                     self.assertIn("FAIL:", result.stderr)
 
     def test_level_b_clears_stale_recordings_on_every_invocation(self) -> None:
-        launcher = (ROOT / "qualification/v010/workstation-acceptance/launch-interactive.sh").read_text(encoding="utf-8")
+        launcher = (
+            ROOT / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+        ).read_text(encoding="utf-8")
         purge = launcher.index('rm -f -- "$evidence_dir/live-session.txt"')
-        guest = launcher.index('bash "$build_root/qualification/v010/shell-runtime/start-vm.sh"')
+        guest = launcher.index(
+            'bash "$build_root/qualification/v010/shell-runtime/start-vm.sh"'
+        )
         self.assertLess(purge, guest)
         self.assertIn('"$evidence_dir/workstation-live.metadata.json"', launcher)
         self.assertIn('"$evidence_dir/workstation-live.sha256"', launcher)
@@ -1228,19 +1415,20 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         self.assertLess(lock_open, lock_check)
         self.assertLess(lock_check, purge)
         self.assertLess(lock_check, guest)
-        self.assertIn("flock", launcher.split("for command_name in", 1)[1].split("; do", 1)[0])
+        self.assertIn(
+            "flock", launcher.split("for command_name in", 1)[1].split("; do", 1)[0]
+        )
 
         # Exercise the exact preflight and purge, without starting a VM. Both
         # the default SHA path and an explicit alias must contend on the inode.
-        fragment = launcher[start:launcher.index("\ncleanup() {", start)]
+        fragment = launcher[start : launcher.index("\ncleanup() {", start)]
         script = (
             "set -euo pipefail\n"
             'source_root="$1"\n'
             'source_sha="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\n'
             'evidence_dir="$2"\n'
             'ssh_port="$3"\n'
-            'fail() { printf "FAIL: %s\\n" "$*" >&2; exit 1; }\n'
-            + fragment
+            'fail() { printf "FAIL: %s\\n" "$*" >&2; exit 1; }\n' + fragment
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1269,17 +1457,35 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 ):
                     with self.subTest(supplied_dir=supplied_dir, port=port):
                         result = subprocess.run(
-                            ["bash", "-c", script, "bash", str(root), supplied_dir, str(port)],
-                            capture_output=True, text=True, timeout=10, check=False,
+                            [
+                                "bash",
+                                "-c",
+                                script,
+                                "bash",
+                                str(root),
+                                supplied_dir,
+                                str(port),
+                            ],
+                            capture_output=True,
+                            text=True,
+                            timeout=10,
+                            check=False,
                         )
                         self.assertNotEqual(result.returncode, 0)
-                        self.assertIn("evidence directory already in use", result.stderr)
-                        self.assertEqual(existing.read_bytes(), b"active run must not be erased")
+                        self.assertIn(
+                            "evidence directory already in use", result.stderr
+                        )
+                        self.assertEqual(
+                            existing.read_bytes(), b"active run must not be erased"
+                        )
                         self.assertTrue(old_session.exists())
                         self.assertTrue(old_log.exists())
             success = subprocess.run(
                 ["bash", "-c", script, "bash", str(root), "", "2224"],
-                capture_output=True, text=True, timeout=10, check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
             )
             self.assertEqual(success.returncode, 0, success.stderr)
             self.assertFalse(existing.exists())
@@ -1288,34 +1494,45 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             self.assertEqual(unrelated.read_text(), "keep operator notes")
 
     def test_level_b_recording_auto_stops_with_finalization_margin(self) -> None:
-        live = (ROOT / "qualification/v010/workstation-acceptance/run-live-session.sh").read_text(encoding="utf-8")
-        self.assertIn('maximum_duration_seconds', live)
+        live = (
+            ROOT / "qualification/v010/workstation-acceptance/run-live-session.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("maximum_duration_seconds", live)
         self.assertIn('recording_start_seconds="$SECONDS"', live)
-        self.assertIn('SECONDS - recording_start_seconds >= recording_duration_budget', live)
-        fragment = live[live.rindex("while true; do"):]
+        self.assertIn(
+            "SECONDS - recording_start_seconds >= recording_duration_budget", live
+        )
+        fragment = live[live.rindex("while true; do") :]
         script = (
             "set -euo pipefail\n"
             "systemctl() { return 0; }\n"
             "recording_started=1\n"
             "recording_start_seconds=0\n"
             "recording_duration_budget=1\n"
-            "SECONDS=2\n"
-            + fragment
+            "SECONDS=2\n" + fragment
         )
         result = subprocess.run(
-            ["bash", "-c", script], capture_output=True,
-            text=True, timeout=5, check=False,
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Level B recording budget reached", result.stdout)
 
-    def test_level_b_renamed_directory_cannot_redirect_evidence_publication(self) -> None:
+    def test_level_b_renamed_directory_cannot_redirect_evidence_publication(
+        self,
+    ) -> None:
         import sys
+
         if sys.platform != "linux":
             self.skipTest("Linux-only directory descriptor evidence contract")
-        launcher = (ROOT / "qualification/v010/workstation-acceptance/launch-interactive.sh").read_text(encoding="utf-8")
+        launcher = (
+            ROOT / "qualification/v010/workstation-acceptance/launch-interactive.sh"
+        ).read_text(encoding="utf-8")
         start = launcher.index('if [[ -z "$evidence_dir" ]]; then')
-        fragment = launcher[start:launcher.index("\ncleanup() {", start)]
+        fragment = launcher[start : launcher.index("\ncleanup() {", start)]
         script = (
             "set -euo pipefail\n"
             'source_root="$1"\n'
@@ -1336,19 +1553,34 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             staged = root / "staged.txt"
             staged.write_text("genuine data", encoding="utf-8")
             result = subprocess.run(
-                ["bash", "-c", script, "bash", str(root), str(destination), str(staged)],
-                capture_output=True, text=True, timeout=10, check=False,
+                [
+                    "bash",
+                    "-c",
+                    script,
+                    "bash",
+                    str(root),
+                    str(destination),
+                    str(staged),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("directory was replaced", result.stderr)
-            self.assertEqual((destination / "live-session.txt").read_text(), "replacement")
+            self.assertEqual(
+                (destination / "live-session.txt").read_text(), "replacement"
+            )
             self.assertFalse((root / "evidence.moved" / "live-session.txt").exists())
 
     def test_level_a_fails_closed_before_mandatory_video_expires(self) -> None:
-        runtime = (ROOT / "qualification/v010/shell-runtime/run-shell-runtime.sh").read_text(encoding="utf-8")
-        self.assertIn('maximum_duration_seconds', runtime)
-        self.assertIn('print(int(maximum) - 60)', runtime)
-        self.assertIn('trap - EXIT USR1', runtime)
+        runtime = (
+            ROOT / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("maximum_duration_seconds", runtime)
+        self.assertIn("print(int(maximum) - 60)", runtime)
+        self.assertIn("trap - EXIT USR1", runtime)
         self.assertIn('recording_deadline_pid=""', runtime)
         start = runtime.index("trap 'fail \"Level A recording budget exceeded")
         end = runtime.index("systemctl --user daemon-reload", start)
@@ -1356,31 +1588,44 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         script = (
             "set -euo pipefail\n"
             'fail() { printf "FAIL: %s\\n" "$*" >&2; exit 1; }\n'
-            'source_root=/tmp\nsource_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
-            'workstation_recorder=/bin/true\nworkstation_recording=/tmp/nonexistent.mkv\n'
-            'recording_duration_budget=1\n'
-            + fragment
-            + '\nsleep 3\n'
+            "source_root=/tmp\nsource_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+            "workstation_recorder=/bin/true\nworkstation_recording=/tmp/nonexistent.mkv\n"
+            "recording_duration_budget=1\n" + fragment + "\nsleep 3\n"
         )
         result = subprocess.run(
-            ["bash", "-c", script], capture_output=True,
-            text=True, timeout=6, check=False,
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=6,
+            check=False,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Level A recording budget exceeded", result.stderr)
 
     def test_level_c_directory_rename_cannot_redirect_snapshots(self) -> None:
         import sys
+
         if sys.platform != "linux":
             self.skipTest("Linux-only directory descriptor evidence contract")
-        capture = (ROOT / "qualification/v010/workstation-acceptance/capture-hardware-session.sh").read_text(encoding="utf-8")
+        capture = (
+            ROOT
+            / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
+        ).read_text(encoding="utf-8")
         start = capture.index('evidence_root="$(cd "$evidence_root" && pwd -P)"')
         end = capture.index('evidence_basename="hardware-$fixture_id"', start)
         fragment = capture[start:end]
         self.assertIn('evidence_root="/proc/self/fd/$evidence_root_fd"', fragment)
-        self.assertIn('evidence_directory_matches || fail "Level C evidence directory changed before snapshot publication"', capture)
-        self.assertIn('if ! source_checkout_matches || ! evidence_directory_matches; then', capture)
-        self.assertIn("Level C evidence directory changed during recording publication", capture)
+        self.assertIn(
+            'evidence_directory_matches || fail "Level C evidence directory changed before snapshot publication"',
+            capture,
+        )
+        self.assertIn(
+            "if ! source_checkout_matches || ! evidence_directory_matches; then",
+            capture,
+        )
+        self.assertIn(
+            "Level C evidence directory changed during recording publication", capture
+        )
         script = (
             "set -euo pipefail\n"
             'fail() { printf "FAIL: %s\\n" "$*" >&2; exit 1; }\n'
@@ -1389,7 +1634,7 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             + '\nmv -- "$evidence_path" "$evidence_path.moved"\n'
             + 'mkdir "$evidence_path"\n'
             + 'printf "locked inode" > "$evidence_root/hardware-session.txt"\n'
-            + 'if evidence_directory_matches; then exit 91; fi\n'
+            + "if evidence_directory_matches; then exit 91; fi\n"
             + 'test ! -e "$evidence_path/hardware-session.txt"\n'
             + 'test -f "$evidence_path.moved/hardware-session.txt"\n'
         )
@@ -1398,12 +1643,17 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             evidence.mkdir()
             result = subprocess.run(
                 ["bash", "-c", script, "bash", str(evidence)],
-                capture_output=True, text=True, timeout=10, check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse((evidence / "hardware-session.txt").exists())
             self.assertEqual(
-                (Path(temp_dir) / "evidence.moved" / "hardware-session.txt").read_text(),
+                (
+                    Path(temp_dir) / "evidence.moved" / "hardware-session.txt"
+                ).read_text(),
                 "locked inode",
             )
 
@@ -1431,14 +1681,17 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 stdout=json.dumps(probe),
                 stderr="",
             )
-            with mock.patch.object(
-                workstation_acceptance.shutil,
-                "which",
-                return_value="/usr/bin/ffprobe",
-            ), mock.patch.object(
-                workstation_acceptance.subprocess,
-                "run",
-                return_value=completed,
+            with (
+                mock.patch.object(
+                    workstation_acceptance.shutil,
+                    "which",
+                    return_value="/usr/bin/ffprobe",
+                ),
+                mock.patch.object(
+                    workstation_acceptance.subprocess,
+                    "run",
+                    return_value=completed,
+                ),
             ):
                 result = workstation_acceptance.verify_recording(
                     recording,

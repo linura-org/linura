@@ -13,7 +13,11 @@ ROOT = Path(__file__).resolve().parents[2]
 class AuthorityFoundationTests(unittest.TestCase):
     def _run_checker(self, root: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, str(ROOT / "tools/check_authority_foundation.py"), str(root)],
+            [
+                sys.executable,
+                str(ROOT / "tools/check_authority_foundation.py"),
+                str(root),
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -61,7 +65,9 @@ class AuthorityFoundationTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("v0.3.0: authority_state must remain 'review-only'", result.stderr)
+            self.assertIn(
+                "v0.3.0: authority_state must remain 'review-only'", result.stderr
+            )
 
     def test_removed_action_plan_cannot_be_reintroduced(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -75,7 +81,9 @@ class AuthorityFoundationTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("superseded bootstrap authority marker reintroduced", result.stderr)
+            self.assertIn(
+                "superseded bootstrap authority marker reintroduced", result.stderr
+            )
 
     def test_provider_owned_planning_cannot_be_reintroduced(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -83,13 +91,16 @@ class AuthorityFoundationTests(unittest.TestCase):
             self._copy_fixture(root)
             provider = root / "crates/linura-provider-sdk/src/lib.rs"
             provider.write_text(
-                provider.read_text(encoding="utf-8") + "\npub trait Provider: Send + Sync {}\n",
+                provider.read_text(encoding="utf-8")
+                + "\npub trait Provider: Send + Sync {}\n",
                 encoding="utf-8",
             )
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("superseded bootstrap authority marker reintroduced", result.stderr)
+            self.assertIn(
+                "superseded bootstrap authority marker reintroduced", result.stderr
+            )
 
     def test_canonical_lifecycle_scaffold_cannot_be_accidentally_deleted(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -168,7 +179,9 @@ class AuthorityFoundationTests(unittest.TestCase):
             self.assertIn("required authority-foundation file missing", result.stderr)
             self.assertIn("approval_strength.rs", result.stderr)
 
-    def test_executable_approval_strength_contract_marker_cannot_be_gutted(self) -> None:
+    def test_executable_approval_strength_contract_marker_cannot_be_gutted(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -182,7 +195,9 @@ class AuthorityFoundationTests(unittest.TestCase):
 
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("executable approval-strength contract marker missing", result.stderr)
+            self.assertIn(
+                "executable approval-strength contract marker missing", result.stderr
+            )
 
     def test_milestone_cannot_drop_risk_floor_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -43,14 +43,22 @@ REQUIRED_HEADINGS = (
 TAG_RE = re.compile(r"^v(?P<version>[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 PR_RE = re.compile(r"https://github\.com/linura-org/linura/pull/([1-9][0-9]*)")
-COMMIT_RE = re.compile(r"https://github\.com/linura-org/linura/commit/([0-9a-f]{40})(?![0-9a-f])")
+COMMIT_RE = re.compile(
+    r"https://github\.com/linura-org/linura/commit/([0-9a-f]{40})(?![0-9a-f])"
+)
 CLAIM_RE = re.compile(r"^\*\*Claim class:\*\*\s*(.+?)\s*$", re.MULTILINE)
-PROFILES_RE = re.compile(r"^\*\*Supported platform profiles:\*\*\s*(.+?)\s*$", re.MULTILINE)
+PROFILES_RE = re.compile(
+    r"^\*\*Supported platform profiles:\*\*\s*(.+?)\s*$", re.MULTILINE
+)
 STATUS_RE = re.compile(r"^\*\*Status:\*\*\s*(.+?)\s*$", re.MULTILINE)
 REVIEWED_SOURCE_RE = re.compile(r"^Reviewed-Source:\s*([0-9a-f]{40})\s*$", re.MULTILINE)
 REVIEWED_TREE_RE = re.compile(r"^Reviewed-Tree:\s*([0-9a-f]{40})\s*$", re.MULTILINE)
-QUALIFICATION_SOURCE_RE = re.compile(r"^Qualification-Source:\s*([0-9a-f]{40})\s*$", re.MULTILINE)
-QUALIFICATION_TREE_RE = re.compile(r"^Qualification-Tree:\s*([0-9a-f]{40})\s*$", re.MULTILINE)
+QUALIFICATION_SOURCE_RE = re.compile(
+    r"^Qualification-Source:\s*([0-9a-f]{40})\s*$", re.MULTILINE
+)
+QUALIFICATION_TREE_RE = re.compile(
+    r"^Qualification-Tree:\s*([0-9a-f]{40})\s*$", re.MULTILINE
+)
 
 
 class ContractError(ValueError):
@@ -83,7 +91,9 @@ def extract_metadata(text: str) -> tuple[str, list[str]]:
         raise ContractError(f"unsupported claim class: {claim_class!r}")
     profiles_match = PROFILES_RE.search(text)
     if profiles_match is None:
-        raise ContractError("release contract is missing **Supported platform profiles:** metadata")
+        raise ContractError(
+            "release contract is missing **Supported platform profiles:** metadata"
+        )
     raw_profiles = profiles_match.group(1).strip()
     if raw_profiles.lower() == "none":
         profiles: list[str] = []
@@ -100,7 +110,9 @@ def extract_traceability(text: str) -> tuple[list[int], list[str]]:
     pull_requests = sorted({int(value) for value in PR_RE.findall(text)})
     commits = sorted(set(COMMIT_RE.findall(text)))
     if not pull_requests and not commits:
-        raise ContractError("release contract must contain at least one canonical PR or full-SHA commit link")
+        raise ContractError(
+            "release contract must contain at least one canonical PR or full-SHA commit link"
+        )
     return pull_requests, commits
 
 
@@ -139,11 +151,15 @@ def validate_release_intent(source_sha: str, repository: Path = ROOT) -> dict[st
     inside a tracked file would create.
     """
     if SHA_RE.fullmatch(source_sha) is None:
-        raise ContractError("release-intent source SHA must be lowercase 40-character hexadecimal")
+        raise ContractError(
+            "release-intent source SHA must be lowercase 40-character hexadecimal"
+        )
 
     lineage = _git(repository, "rev-list", "--parents", "-n", "1", source_sha).split()
     if len(lineage) != 2 or lineage[0] != source_sha:
-        raise ContractError("release-intent commit must exist and have exactly one reviewed parent")
+        raise ContractError(
+            "release-intent commit must exist and have exactly one reviewed parent"
+        )
     reviewed_source_sha = lineage[1]
 
     source_tree_sha = _git(repository, "rev-parse", f"{source_sha}^{{tree}}")
@@ -198,7 +214,6 @@ def validate_release_intent(source_sha: str, repository: Path = ROOT) -> dict[st
     }
 
 
-
 def validate_release_preparation(
     source_sha: str,
     tag: str,
@@ -228,7 +243,10 @@ def validate_release_preparation(
 
     subject = _git(repository, "show", "-s", "--format=%s", source_sha)
     expected_prefix = f"release: prepare {tag} "
-    if not subject.startswith(expected_prefix) or not subject[len(expected_prefix):].strip():
+    if (
+        not subject.startswith(expected_prefix)
+        or not subject[len(expected_prefix) :].strip()
+    ):
         raise ContractError(
             f"release-preparation subject must start with {expected_prefix!r} and include a theme"
         )
@@ -253,7 +271,10 @@ def validate_release_preparation(
 
     parent_tree_sha = _git(repository, "rev-parse", f"{parent_sha}^{{tree}}")
     source_tree_sha = _git(repository, "rev-parse", f"{source_sha}^{{tree}}")
-    if qualification_source_sha == parent_sha or qualification_tree_sha == parent_tree_sha:
+    if (
+        qualification_source_sha == parent_sha
+        or qualification_tree_sha == parent_tree_sha
+    ):
         raise ContractError(
             "release-preparation qualification source/tree must pre-exist the reviewed evidence-seal parent"
         )
@@ -288,7 +309,10 @@ def validate_release_preparation(
         "changed_files": changed_files,
     }
 
-def validate_contract(notes: Path, tag: str, *, require_workspace_version: bool = False) -> dict[str, object]:
+
+def validate_contract(
+    notes: Path, tag: str, *, require_workspace_version: bool = False
+) -> dict[str, object]:
     version = parse_tag(tag)
     if not notes.is_file():
         raise ContractError(f"release contract does not exist: {notes}")
@@ -296,15 +320,21 @@ def validate_contract(notes: Path, tag: str, *, require_workspace_version: bool 
     first_line = text.splitlines()[0] if text else ""
     expected_title_prefix = f"# {tag} — "
     if not first_line.startswith(expected_title_prefix):
-        raise ContractError(f"release contract title must start with {expected_title_prefix!r}")
+        raise ContractError(
+            f"release contract title must start with {expected_title_prefix!r}"
+        )
     release_theme = first_line[len(expected_title_prefix) :].strip()
     if not release_theme:
-        raise ContractError("release contract title must include a non-empty implementation theme")
+        raise ContractError(
+            "release contract title must include a non-empty implementation theme"
+        )
     positions: list[int] = []
     for heading in REQUIRED_HEADINGS:
         position = text.find(heading)
         if position < 0:
-            raise ContractError(f"release contract is missing required heading: {heading}")
+            raise ContractError(
+                f"release contract is missing required heading: {heading}"
+            )
         positions.append(position)
     if positions != sorted(positions):
         raise ContractError("release contract headings are not in canonical order")
@@ -313,7 +343,9 @@ def validate_contract(notes: Path, tag: str, *, require_workspace_version: bool 
     if require_workspace_version:
         current = workspace_version()
         if version != current:
-            raise ContractError(f"tag version {version} does not match workspace version {current}")
+            raise ContractError(
+                f"tag version {version} does not match workspace version {current}"
+            )
     return {
         "version": version,
         "claim_class": claim_class,
@@ -323,7 +355,9 @@ def validate_contract(notes: Path, tag: str, *, require_workspace_version: bool 
     }
 
 
-def build_evidence(notes: Path, tag: str, source_sha: str, artifacts: list[Path]) -> dict[str, object]:
+def build_evidence(
+    notes: Path, tag: str, source_sha: str, artifacts: list[Path]
+) -> dict[str, object]:
     if SHA_RE.fullmatch(source_sha) is None:
         raise ContractError("source SHA must be lowercase 40-character hexadecimal")
     metadata = validate_contract(notes, tag, require_workspace_version=True)
@@ -348,14 +382,21 @@ def build_evidence(notes: Path, tag: str, source_sha: str, artifacts: list[Path]
         "claim_class": metadata["claim_class"],
         "supported_platform_profiles": metadata["supported_platform_profiles"],
         "release_notes": {"name": "RELEASE_NOTES.md", "sha256": sha256(notes)},
-        "traceability": {"pull_requests": metadata["pull_requests"], "commits": metadata["commits"]},
+        "traceability": {
+            "pull_requests": metadata["pull_requests"],
+            "commits": metadata["commits"],
+        },
         "artifacts": artifact_records,
     }
 
 
-def write_evidence(notes: Path, tag: str, source_sha: str, artifacts: list[Path], output: Path) -> None:
+def write_evidence(
+    notes: Path, tag: str, source_sha: str, artifacts: list[Path], output: Path
+) -> None:
     evidence = build_evidence(notes, tag, source_sha, artifacts)
-    output.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    output.write_text(
+        json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def verify_evidence(directory: Path, tag: str, source_sha: str) -> None:
@@ -370,7 +411,10 @@ def verify_evidence(directory: Path, tag: str, source_sha: str) -> None:
     evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
     if not isinstance(evidence, dict):
         raise ContractError("release evidence must be a JSON object")
-    if evidence.get("$schema") != "https://linura.org/schemas/release-evidence.v1.schema.json":
+    if (
+        evidence.get("$schema")
+        != "https://linura.org/schemas/release-evidence.v1.schema.json"
+    ):
         raise ContractError("release evidence schema URI mismatch")
     if evidence.get("schema") != 1:
         raise ContractError("unsupported release evidence schema")
@@ -390,9 +434,15 @@ def verify_evidence(directory: Path, tag: str, source_sha: str) -> None:
     metadata = validate_contract(notes_path, tag)
     if evidence.get("claim_class") != metadata["claim_class"]:
         raise ContractError("release evidence claim class mismatch")
-    if evidence.get("supported_platform_profiles") != metadata["supported_platform_profiles"]:
+    if (
+        evidence.get("supported_platform_profiles")
+        != metadata["supported_platform_profiles"]
+    ):
         raise ContractError("release evidence supported-platform mismatch")
-    expected_traceability = {"pull_requests": metadata["pull_requests"], "commits": metadata["commits"]}
+    expected_traceability = {
+        "pull_requests": metadata["pull_requests"],
+        "commits": metadata["commits"],
+    }
     if evidence.get("traceability") != expected_traceability:
         raise ContractError("release evidence traceability mismatch")
     artifacts = evidence.get("artifacts")
@@ -427,12 +477,15 @@ def validate_tree(releases_dir: Path) -> None:
 def compare_release_body(notes: Path, body: Path) -> None:
     def normalized(path: Path) -> str:
         return path.read_text(encoding="utf-8").replace("\r\n", "\n").rstrip("\n")
+
     if normalized(notes) != normalized(body):
         raise ContractError("GitHub Release body does not match frozen release notes")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate Linura release contracts and evidence")
+    parser = argparse.ArgumentParser(
+        description="Validate Linura release contracts and evidence"
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
     validate_parser = subparsers.add_parser("validate")
     validate_parser.add_argument("--tag", required=True)
@@ -452,21 +505,34 @@ def main() -> int:
     evidence_parser.add_argument("--source-sha", required=True)
     evidence_parser.add_argument("--notes", required=True, type=Path)
     evidence_parser.add_argument("--output", required=True, type=Path)
-    evidence_parser.add_argument("--artifact", dest="artifacts", required=True, action="append", type=Path)
+    evidence_parser.add_argument(
+        "--artifact", dest="artifacts", required=True, action="append", type=Path
+    )
     verify_parser = subparsers.add_parser("verify")
     verify_parser.add_argument("--directory", required=True, type=Path)
     verify_parser.add_argument("--tag", required=True)
     verify_parser.add_argument("--source-sha", required=True)
     tree_parser = subparsers.add_parser("validate-tree")
-    tree_parser.add_argument("--releases-dir", type=Path, default=ROOT / "docs" / "releases")
+    tree_parser.add_argument(
+        "--releases-dir", type=Path, default=ROOT / "docs" / "releases"
+    )
     body_parser = subparsers.add_parser("compare-body")
     body_parser.add_argument("--notes", required=True, type=Path)
     body_parser.add_argument("--body", required=True, type=Path)
     args = parser.parse_args()
     try:
         if args.command == "validate":
-            metadata = validate_contract(args.notes, args.tag, require_workspace_version=args.require_workspace_version)
-            print("release contract valid: " f"{args.tag} / {metadata['claim_class']} / " f"{len(metadata['pull_requests'])} PR(s) / " f"{len(metadata['commits'])} commit(s)")
+            metadata = validate_contract(
+                args.notes,
+                args.tag,
+                require_workspace_version=args.require_workspace_version,
+            )
+            print(
+                "release contract valid: "
+                f"{args.tag} / {metadata['claim_class']} / "
+                f"{len(metadata['pull_requests'])} PR(s) / "
+                f"{len(metadata['commits'])} commit(s)"
+            )
         elif args.command == "validate-intent":
             metadata = validate_release_intent(args.source_sha, args.repository)
             if args.json:
@@ -498,7 +564,9 @@ def main() -> int:
                     f"changed={','.join(metadata['changed_files']) or 'none'}"
                 )
         elif args.command == "evidence":
-            write_evidence(args.notes, args.tag, args.source_sha, args.artifacts, args.output)
+            write_evidence(
+                args.notes, args.tag, args.source_sha, args.artifacts, args.output
+            )
             print(f"wrote release evidence: {args.output}")
         elif args.command == "verify":
             verify_evidence(args.directory, args.tag, args.source_sha)

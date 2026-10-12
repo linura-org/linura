@@ -113,13 +113,17 @@ class CodexEnvironmentContractTests(unittest.TestCase):
 
     def test_rustup_bootstrap_is_pinned_and_digest_verified(self) -> None:
         versions = (ROOT / "tools/codex/versions.env").read_text(encoding="utf-8")
-        setup = (ROOT / "scripts/setup_codex_environment.sh").read_text(encoding="utf-8")
-        bootstrap = (ROOT / "scripts/lib/bootstrap_rustup.sh").read_text(encoding="utf-8")
+        setup = (ROOT / "scripts/setup_codex_environment.sh").read_text(
+            encoding="utf-8"
+        )
+        bootstrap = (ROOT / "scripts/lib/bootstrap_rustup.sh").read_text(
+            encoding="utf-8"
+        )
 
         self.assertRegex(versions, r"(?m)^RUSTUP_VERSION=\d+\.\d+\.\d+$")
         self.assertRegex(versions, r"(?m)^RUSTUP_INIT_SHA256=[0-9a-f]{64}$")
         self.assertIn(
-            'https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${RUSTUP_TARGET}/rustup-init',
+            "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${RUSTUP_TARGET}/rustup-init",
             setup,
         )
         self.assertIn(
@@ -129,7 +133,9 @@ class CodexEnvironmentContractTests(unittest.TestCase):
         self.assertIn("sha256sum --check --strict", bootstrap)
         self.assertIn("--default-toolchain none", bootstrap)
 
-    def test_rustup_bootstrap_executes_canonical_basename_and_cleans_success(self) -> None:
+    def test_rustup_bootstrap_executes_canonical_basename_and_cleans_success(
+        self,
+    ) -> None:
         completed, basename, bootstrap_dir_exists = self._exercise_rustup_bootstrap()
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
@@ -155,24 +161,38 @@ class CodexEnvironmentContractTests(unittest.TestCase):
         self.assertFalse(bootstrap_dir_exists)
 
     def test_bindings_recreation_drops_contaminated_cache(self) -> None:
-        setup = (ROOT / "scripts/setup_codex_environment.sh").read_text(encoding="utf-8")
+        setup = (ROOT / "scripts/setup_codex_environment.sh").read_text(
+            encoding="utf-8"
+        )
         self.assertIn('python3 -m venv --clear "$python_root"', setup)
         self.assertIn('[[ -L "$TOOL_ROOT" || -L "$python_root" ]]', setup)
-        self.assertIn("--no-cache-dir --require-hashes --only-binary=:all: --no-deps", setup)
-        self.assertIn('.linura-bindings-lock-sha256', setup)
+        self.assertIn(
+            "--no-cache-dir --require-hashes --only-binary=:all: --no-deps", setup
+        )
+        self.assertIn(".linura-bindings-lock-sha256", setup)
         with tempfile.TemporaryDirectory() as temp:
             environment = Path(temp) / "python"
-            subprocess.run([sys.executable, "-m", "venv", str(environment)],
-                           check=True, capture_output=True, text=True)
+            subprocess.run(
+                [sys.executable, "-m", "venv", str(environment)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
             stale = environment / "lib/python-stale-contamination"
             stale.parent.mkdir(exist_ok=True)
             stale.write_text("undeclared package survives\n", encoding="utf-8")
-            subprocess.run([sys.executable, "-m", "venv", "--clear", str(environment)],
-                           check=True, capture_output=True, text=True)
+            subprocess.run(
+                [sys.executable, "-m", "venv", "--clear", str(environment)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
             self.assertFalse(stale.exists())
 
     def test_fresh_host_does_not_require_preinstalled_rustup(self) -> None:
-        setup = (ROOT / "scripts/setup_codex_environment.sh").read_text(encoding="utf-8")
+        setup = (ROOT / "scripts/setup_codex_environment.sh").read_text(
+            encoding="utf-8"
+        )
         host_loop = re.search(
             r"for command_name in (?P<commands>[^;]+); do\n\s+require_command",
             setup,
@@ -214,14 +234,16 @@ class CodexEnvironmentContractTests(unittest.TestCase):
                 script_name,
             )
             self.assertIn('export CARGO_HOME="$CARGO_ROOT"', script, script_name)
-            self.assertIn('${CARGO_ROOT}/bin:', script, script_name)
+            self.assertIn("${CARGO_ROOT}/bin:", script, script_name)
 
     def test_rustup_cannot_self_update_during_pinned_toolchain_install(self) -> None:
-        setup = (ROOT / "scripts/setup_codex_environment.sh").read_text(encoding="utf-8")
+        setup = (ROOT / "scripts/setup_codex_environment.sh").read_text(
+            encoding="utf-8"
+        )
         disable = "rustup set auto-self-update disable"
         install = (
             'rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal '
-            '--component clippy --component rustfmt --no-self-update'
+            "--component clippy --component rustfmt --no-self-update"
         )
         self.assertIn(disable, setup)
         self.assertIn(install, setup)
@@ -233,8 +255,12 @@ class CodexEnvironmentContractTests(unittest.TestCase):
         self.assertIn("rustup self-updated during toolchain setup", setup)
 
     def test_rust_toolchain_host_is_fully_qualified_and_verified(self) -> None:
-        setup = (ROOT / "scripts/setup_codex_environment.sh").read_text(encoding="utf-8")
-        preflight = (ROOT / "scripts/preflight_codex_environment.sh").read_text(encoding="utf-8")
+        setup = (ROOT / "scripts/setup_codex_environment.sh").read_text(
+            encoding="utf-8"
+        )
+        preflight = (ROOT / "scripts/preflight_codex_environment.sh").read_text(
+            encoding="utf-8"
+        )
         for script in (setup, preflight):
             self.assertIn(
                 'readonly RUST_TOOLCHAIN="${RUST_VERSION}-${RUSTUP_TARGET}"',
@@ -245,14 +271,18 @@ class CodexEnvironmentContractTests(unittest.TestCase):
         self.assertIn('rustup default "$RUST_TOOLCHAIN"', setup)
         self.assertIn('active_toolchain="$(rustup show active-toolchain', setup)
         self.assertIn('active_toolchain="$(rustup show active-toolchain', preflight)
-        self.assertIn('$1 == toolchain', preflight)
+        self.assertIn("$1 == toolchain", preflight)
         self.assertIn('rustup which --toolchain "$RUST_TOOLCHAIN" rustc', preflight)
         self.assertIn('rustup which --toolchain "$RUST_TOOLCHAIN" cargo', preflight)
 
     def test_task_preflight_requires_exact_rustup_version(self) -> None:
-        preflight = (ROOT / "scripts/preflight_codex_environment.sh").read_text(encoding="utf-8")
+        preflight = (ROOT / "scripts/preflight_codex_environment.sh").read_text(
+            encoding="utf-8"
+        )
         self.assertIn(': "${RUSTUP_VERSION:?}"', preflight)
-        self.assertIn('reports_exact_version "$RUSTUP_VERSION" rustup --version', preflight)
+        self.assertIn(
+            'reports_exact_version "$RUSTUP_VERSION" rustup --version', preflight
+        )
 
 
 if __name__ == "__main__":

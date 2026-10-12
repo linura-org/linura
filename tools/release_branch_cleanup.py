@@ -78,7 +78,9 @@ def _branch_patterns(tag: str) -> tuple[re.Pattern[str], ...]:
     return (
         re.compile(rf"automation/release-prep-{escaped}-(?P<sha>[0-9a-f]{{40}})"),
         re.compile(rf"automation/release-reprepare-{escaped}-(?P<sha>[0-9a-f]{{40}})"),
-        re.compile(rf"automation/release-authorization-{escaped}-(?P<sha>[0-9a-f]{{40}})"),
+        re.compile(
+            rf"automation/release-authorization-{escaped}-(?P<sha>[0-9a-f]{{40}})"
+        ),
         re.compile(rf"automation/post-release-{escaped}-(?P<sha>[0-9a-f]{{40}})"),
     )
 
@@ -103,7 +105,10 @@ def load_legacy(path: pathlib.Path, tag: str) -> dict[str, str]:
             or name.endswith("/")
         ):
             raise CleanupError(f"invalid explicit cleanup branch name: {name!r}")
-        if not isinstance(expected_sha, str) or FULL_SHA_RE.fullmatch(expected_sha) is None:
+        if (
+            not isinstance(expected_sha, str)
+            or FULL_SHA_RE.fullmatch(expected_sha) is None
+        ):
             raise CleanupError(f"invalid cleanup SHA for {name!r}")
         if name in legacy:
             raise CleanupError(f"duplicate cleanup branch: {name}")
@@ -235,9 +240,7 @@ def delete_candidate(repository: str, candidate: Candidate, token: str) -> str:
             f"current={current} reviewed={candidate.expected_sha}"
         )
 
-    result = _atomic_delete(
-        repository, candidate.name, candidate.expected_sha, token
-    )
+    result = _atomic_delete(repository, candidate.name, candidate.expected_sha, token)
     if result.returncode == 0:
         return f"deleted {candidate.name} at {candidate.expected_sha}"
 
@@ -278,10 +281,13 @@ def main() -> int:
     try:
         if not args.repository or args.repository.count("/") != 1:
             raise CleanupError("repository must be in owner/name form")
-        if re.fullmatch(
-            r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
-            args.tag,
-        ) is None:
+        if (
+            re.fullmatch(
+                r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
+                args.tag,
+            )
+            is None
+        ):
             raise CleanupError("invalid release tag")
         token = os.environ.get("GH_TOKEN", "")
         if not token:

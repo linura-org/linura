@@ -21,7 +21,9 @@ def _read_text(root: Path, value: object, label: str, failures: list[str]) -> st
     return path.read_text(encoding="utf-8")
 
 
-def _read_json(root: Path, relative: str, label: str, failures: list[str]) -> dict[str, object]:
+def _read_json(
+    root: Path, relative: str, label: str, failures: list[str]
+) -> dict[str, object]:
     path = root / relative
     if not path.is_file():
         failures.append(f"{label} missing: {relative}")
@@ -86,7 +88,9 @@ def validate(root: Path) -> list[str]:
     if not isinstance(support_path_value, str) or not support_path_value:
         failures.append("hardware_support_matrix must be a non-empty string path")
     else:
-        support = _read_json(root, support_path_value, "hardware support matrix", failures)
+        support = _read_json(
+            root, support_path_value, "hardware support matrix", failures
+        )
 
     required_roadmap_markers = (
         "Machine classes are support targets, not domains.",
@@ -100,7 +104,9 @@ def validate(root: Path) -> list[str]:
     )
     for marker in required_roadmap_markers:
         if roadmap_text and marker not in roadmap_text:
-            failures.append(f"canonical roadmap missing machine-class invariant: {marker}")
+            failures.append(
+                f"canonical roadmap missing machine-class invariant: {marker}"
+            )
 
     required_profile_markers = (
         "## MachineProfile is not PlatformProfile or QualificationEnvironment",
@@ -120,7 +126,9 @@ def validate(root: Path) -> list[str]:
     )
     for marker in required_profile_markers:
         if machine_profile_text and marker not in machine_profile_text:
-            failures.append(f"machine profile document missing machine-class invariant: {marker}")
+            failures.append(
+                f"machine profile document missing machine-class invariant: {marker}"
+            )
 
     required_domain_markers = (
         "## Machine-class applicability",
@@ -133,12 +141,18 @@ def validate(root: Path) -> list[str]:
     )
     for marker in required_domain_markers:
         if domain_text and marker not in domain_text:
-            failures.append(f"system domain map missing machine-class invariant: {marker}")
+            failures.append(
+                f"system domain map missing machine-class invariant: {marker}"
+            )
 
-    qualification_environments = support.get("qualification_environments") if support else None
+    qualification_environments = (
+        support.get("qualification_environments") if support else None
+    )
     release_qualified_environments: list[str] = []
     if not isinstance(qualification_environments, dict):
-        failures.append("hardware support matrix must define qualification_environments as an object")
+        failures.append(
+            "hardware support matrix must define qualification_environments as an object"
+        )
     else:
         values = qualification_environments.get("release_qualified")
         if not isinstance(values, list) or not all(
@@ -148,7 +162,9 @@ def validate(root: Path) -> list[str]:
                 "qualification_environments.release_qualified must be an array of non-empty strings"
             )
         elif len(values) != len(set(values)):
-            failures.append("qualification_environments.release_qualified contains duplicates")
+            failures.append(
+                "qualification_environments.release_qualified contains duplicates"
+            )
         else:
             release_qualified_environments = values
             for value in values:
@@ -160,7 +176,9 @@ def validate(root: Path) -> list[str]:
 
     support_classes = support.get("machine_classes") if support else None
     if not isinstance(support_classes, dict):
-        failures.append("hardware support matrix must define machine_classes as an object")
+        failures.append(
+            "hardware support matrix must define machine_classes as an object"
+        )
     else:
         if tuple(support_classes.keys()) != EXPECTED_MACHINE_CLASSES:
             failures.append(
@@ -173,7 +191,9 @@ def validate(root: Path) -> list[str]:
         for machine_class in EXPECTED_MACHINE_CLASSES:
             entry = support_classes.get(machine_class)
             if not isinstance(entry, dict):
-                failures.append(f"machine class {machine_class} support entry must be an object")
+                failures.append(
+                    f"machine class {machine_class} support entry must be an object"
+                )
                 continue
             profiles = entry.get("release_qualified_profiles")
             if not isinstance(profiles, list) or not all(
@@ -184,7 +204,9 @@ def validate(root: Path) -> list[str]:
                 )
                 continue
             if len(profiles) != len(set(profiles)):
-                failures.append(f"machine class {machine_class} release_qualified_profiles contains duplicates")
+                failures.append(
+                    f"machine class {machine_class} release_qualified_profiles contains duplicates"
+                )
             for profile in profiles:
                 if profile.startswith("qualification/"):
                     failures.append(
@@ -196,7 +218,10 @@ def validate(root: Path) -> list[str]:
     current_platform_support: object = None
     if isinstance(milestones, list) and isinstance(current_release, str):
         for milestone in milestones:
-            if isinstance(milestone, dict) and milestone.get("version") == current_release:
+            if (
+                isinstance(milestone, dict)
+                and milestone.get("version") == current_release
+            ):
                 current_platform_support = milestone.get("platform_support")
                 break
 
@@ -213,7 +238,9 @@ def validate(root: Path) -> list[str]:
                 "current release has platform_support=none, so qualification_environments.release_qualified must remain empty"
             )
 
-    if current_platform_support == "reference-experimental" and isinstance(support_classes, dict):
+    if current_platform_support == "reference-experimental" and isinstance(
+        support_classes, dict
+    ):
         has_profile = any(
             isinstance(support_classes.get(machine_class), dict)
             and bool(support_classes[machine_class].get("release_qualified_profiles"))
@@ -229,7 +256,9 @@ def validate(root: Path) -> list[str]:
     # checks because replay must retain the source class as data.
     intent_model_path = root / "crates/linura-intent/src/model.rs"
     if not intent_model_path.is_file():
-        failures.append("machine-class intent contract missing: crates/linura-intent/src/model.rs")
+        failures.append(
+            "machine-class intent contract missing: crates/linura-intent/src/model.rs"
+        )
     else:
         intent_text = intent_model_path.read_text(encoding="utf-8")
         for marker in (
@@ -240,15 +269,21 @@ def validate(root: Path) -> list[str]:
             "pub machine_class: MachineClass,",
         ):
             if marker not in intent_text:
-                failures.append(f"typed machine profile missing machine-class contract marker: {marker}")
+                failures.append(
+                    f"typed machine profile missing machine-class contract marker: {marker}"
+                )
 
     sdk_path = root / "crates/linura-sdk/src/lib.rs"
     if not sdk_path.is_file():
-        failures.append("machine-class SDK contract missing: crates/linura-sdk/src/lib.rs")
+        failures.append(
+            "machine-class SDK contract missing: crates/linura-sdk/src/lib.rs"
+        )
     else:
         sdk_text = sdk_path.read_text(encoding="utf-8")
         if "MachineClass, MachineProfile" not in sdk_text:
-            failures.append("public SDK must re-export MachineClass with MachineProfile")
+            failures.append(
+                "public SDK must re-export MachineClass with MachineProfile"
+            )
 
     portable_schema = _read_json(
         root,
@@ -263,16 +298,22 @@ def validate(root: Path) -> list[str]:
     else:
         required = profile_schema.get("required")
         if not isinstance(required, list) or "machine_class" not in required:
-            failures.append("portable profile schema must require profile.machine_class")
+            failures.append(
+                "portable profile schema must require profile.machine_class"
+            )
         profile_properties = profile_schema.get("properties")
         machine_class_schema = (
-            profile_properties.get("machine_class") if isinstance(profile_properties, dict) else None
+            profile_properties.get("machine_class")
+            if isinstance(profile_properties, dict)
+            else None
         )
         if not isinstance(machine_class_schema, dict):
             failures.append("portable profile schema must define profile.machine_class")
         else:
             if machine_class_schema.get("type") != "string":
-                failures.append("portable profile profile.machine_class must be a string")
+                failures.append(
+                    "portable profile profile.machine_class must be a string"
+                )
             values = machine_class_schema.get("enum")
             if values != list(EXPECTED_MACHINE_CLASSES):
                 failures.append(
@@ -284,7 +325,9 @@ def validate(root: Path) -> list[str]:
     # workstation/server/edge machines; neither is a local machine class.
     if isinstance(machine_classes, list):
         if "fleet" in machine_classes or "enterprise" in machine_classes:
-            failures.append("fleet/enterprise must not be encoded as a local machine class")
+            failures.append(
+                "fleet/enterprise must not be encoded as a local machine class"
+            )
         if "agent" in machine_classes or "ai" in machine_classes:
             failures.append("agents/AI must not be encoded as a local machine class")
 
@@ -292,7 +335,11 @@ def validate(root: Path) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[1]
+    root = (
+        Path(argv[1]).resolve()
+        if len(argv) > 1
+        else Path(__file__).resolve().parents[1]
+    )
     failures = validate(root)
     if failures:
         for failure in failures:

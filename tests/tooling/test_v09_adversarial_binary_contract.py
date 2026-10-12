@@ -16,7 +16,9 @@ BINARIES = (
 
 
 class V09AdversarialBinaryContractTests(unittest.TestCase):
-    def test_artifact_producer_and_guest_bind_the_same_required_binary_set(self) -> None:
+    def test_artifact_producer_and_guest_bind_the_same_required_binary_set(
+        self,
+    ) -> None:
         qualification = QUALIFICATION.read_text(encoding="utf-8")
         guest = GUEST.read_text(encoding="utf-8")
         for binary in BINARIES:

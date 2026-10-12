@@ -8,18 +8,20 @@ Linura treats development infrastructure as part of the product safety boundary.
 cargo xtask check
 ```
 
-This executes Rust formatting, the pinned Ruff Python correctness baseline, Clippy, workspace tests, repository invariants, and structured asset validation. Additional commands expose acceptance scenarios and build plans without requiring contributors to memorize implementation-specific scripts.
+This checks Rust formatting, pinned Ruff Python lint and repository-wide formatting, Clippy, workspace tests, repository invariants, and structured asset validation. Additional commands expose acceptance scenarios and build plans without requiring contributors to memorize implementation-specific scripts.
 
 ## Editor and Python analysis baseline
 
-VS Code recommendations are repository-owned in `.vscode/extensions.json`: rust-analyzer for Rust, the Microsoft Python/Pylance pair for Python language intelligence, and Ruff for Python lint/format integration. `.vscode/settings.json` contains only project-relevant behavior; personal UI preferences and other workspace state remain ignored. Editor diagnostics are convenience feedback and never replace repository gates.
+VS Code recommendations are repository-owned in `.vscode/extensions.json`: rust-analyzer for Rust, the Microsoft Python/Pylance pair for Python language intelligence, Ruff for Python lint/format integration, and Code Spell Checker for project terminology. `.vscode/settings.json` contains only project-relevant behavior; personal UI preferences and other workspace state remain ignored. Editor diagnostics are convenience feedback and never replace repository gates.
 
 The language-specific rulers are tiered review guides rather than new compiler semantics:
 
 - Rust uses columns **100 / 120 / 140**: rustfmt-aligned primary width, extended review boundary, then an exceptional-line boundary.
 - Python uses columns **88 / 100 / 120**: Ruff formatter-aligned primary width, extended review boundary, then an exceptional-line boundary.
 
-Rust formatting runs on save because rustfmt is already a canonical gate. Python formatting stays explicit so adopting Ruff does not silently rewrite the existing tooling corpus; Ruff lint diagnostics are still active in the editor and `ruff check .` is enforced by `cargo xtask check`.
+Rust and Python both format on save, using rustfmt and Ruff respectively. VS Code points to the repository-provisioned Ruff at `${userHome}/.local/bin/ruff`; run `bash scripts/setup_codex_environment.sh` before editing. The extension may otherwise fall back to its bundled executable, so only the pinned CLI and canonical checks are authoritative. `cargo xtask check` enforces both `ruff check .` and `ruff format --check .`, in addition to `cargo fmt --all --check`. To format deliberately, run `cargo fmt --all` and `ruff format .`; run the pinned toolchain before committing.
+
+VS Code indexes the repository's `tools` and Python bindings through `python.analysis.extraPaths`. Linura intentionally does not set `python.defaultInterpreterPath`: a bare `python3` is treated as workspace-relative by the Python extension rather than reliably resolved on `PATH`. Allow VS Code interpreter discovery, then use **Python: Select Interpreter** to select an installed Python 3.12 interpreter. The supported development environment validates Python 3.12 independently of editor selection. The curated `cSpell.words` vocabulary covers project, provider and tooling terms only; it does not suppress Ruff or Pylance diagnostics. Python typing migration is tracked in #217.
 
 The canonical Ruff version is pinned in `tools/codex/versions.env` and installed from `tools/python/ruff-requirements.lock` with hashes. `ruff.toml` selects `E4`, `E7`, `E9` and `F` explicitly instead of inheriting Ruff's changing default rule set. Repository tooling targets the canonical Python 3.12 host while `bindings/python/**` is checked against its public Python 3.10 minimum. This starts with high-signal Python correctness and compatibility checks; broader style/security categories should be adopted deliberately with a clean migration rather than appearing implicitly after a tool upgrade.
 
