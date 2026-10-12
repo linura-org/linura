@@ -21,28 +21,28 @@ Scope {
         target: "linura.palette-qualification"
 
         function openPalette(): int {
-            root.paletteOpen = true
-            return palette.sessionGeneration
+            root.paletteOpen = true;
+            return palette.sessionGeneration;
         }
 
         function closePalette(): void {
-            root.paletteOpen = false
+            root.paletteOpen = false;
         }
 
         function generation(): int {
-            return palette.sessionGeneration
+            return palette.sessionGeneration;
         }
 
         function isOpen(): bool {
-            return root.paletteOpen
+            return root.paletteOpen;
         }
 
         function status(): string {
-            return palette.statusText
+            return palette.statusText;
         }
 
         function complete(status: string, requestGeneration: int): void {
-            palette.completeApplicationRequest(status, requestGeneration)
+            palette.completeApplicationRequest(status, requestGeneration);
         }
     }
 }

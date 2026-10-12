@@ -1,0 +1,11 @@
+{
+  "name": "@linura/source-format",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Version-pinned formatter tools for JavaScript, JSON, YAML and Lua",
+  "scripts": {},
+  "devDependencies": {
+    "prettier": "3.6.2",
+    "@johnnymorganz/stylua-bin": "2.5.2"
+  }
+}

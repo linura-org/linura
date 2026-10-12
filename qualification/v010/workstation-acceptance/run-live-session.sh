@@ -26,7 +26,7 @@ cleanup() {
     trap - EXIT
     set +e
     if [[ "$recording_started" -eq 1 ]]; then
-        LINURA_SOURCE_ROOT="$source_root" LINURA_SOURCE_SHA="$source_sha"             "$recorder" stop "$recording_path" || cleanup_status=$?
+        LINURA_SOURCE_ROOT="$source_root" LINURA_SOURCE_SHA="$source_sha" "$recorder" stop "$recording_path" || cleanup_status=$?
         recording_started=0
     fi
     systemctl --user stop linura-shell-live.service >/dev/null 2>&1 || true
@@ -70,15 +70,15 @@ done
 [[ "${#drm_cards[@]}" -eq 1 ]] || fail "interactive VM expects exactly one qualification DRM card"
 export AQ_DRM_DEVICES="/dev/dri/${drm_cards[0]}"
 
-cat > /tmp/linura-hyprland-live.conf <<'EOF'
+cat >/tmp/linura-hyprland-live.conf <<'EOF'
 debug:disable_logs = false
 misc:disable_hyprland_logo = true
 misc:disable_splash_rendering = true
 EOF
 
-systemctl --user import-environment     XDG_RUNTIME_DIR LIBSEAT_BACKEND AQ_DRM_DEVICES AQ_NO_KMS_REQUIREMENT     LIBGL_ALWAYS_SOFTWARE WLR_RENDERER_ALLOW_SOFTWARE XDG_CURRENT_DESKTOP     XDG_SESSION_DESKTOP XDG_SESSION_TYPE QT_QPA_PLATFORM QML2_IMPORT_PATH QT_QUICK_BACKEND
+systemctl --user import-environment XDG_RUNTIME_DIR LIBSEAT_BACKEND AQ_DRM_DEVICES AQ_NO_KMS_REQUIREMENT LIBGL_ALWAYS_SOFTWARE WLR_RENDERER_ALLOW_SOFTWARE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE QT_QPA_PLATFORM QML2_IMPORT_PATH QT_QUICK_BACKEND
 
-systemd-run --user --unit=linura-hyprland-live.service --collect --quiet --service-type=exec     /usr/bin/Hyprland --config /tmp/linura-hyprland-live.conf
+systemd-run --user --unit=linura-hyprland-live.service --collect --quiet --service-type=exec /usr/bin/Hyprland --config /tmp/linura-hyprland-live.conf
 
 wayland_socket=""
 for _ in $(seq 1 150); do
@@ -111,7 +111,7 @@ systemctl --user start pipewire.service
 systemctl --user start wireplumber.service
 systemctl --user start linurad.service
 
-systemd-run --user     --unit=linura-shell-live.service     --collect     --quiet     --service-type=exec     --setenv="QS_DISABLE_FILE_WATCHER=1"     --setenv="QML2_IMPORT_PATH=/usr/local/lib/qt6/qml"     --setenv="QT_QUICK_BACKEND=software"     --setenv="WAYLAND_DISPLAY=$WAYLAND_DISPLAY"     /usr/bin/qs -p "$source_root/apps/linura-shell"
+systemd-run --user --unit=linura-shell-live.service --collect --quiet --service-type=exec --setenv="QS_DISABLE_FILE_WATCHER=1" --setenv="QML2_IMPORT_PATH=/usr/local/lib/qt6/qml" --setenv="QT_QUICK_BACKEND=software" --setenv="WAYLAND_DISPLAY=$WAYLAND_DISPLAY" /usr/bin/qs -p "$source_root/apps/linura-shell"
 
 for _ in $(seq 1 100); do
     systemctl --user is-active --quiet linura-shell-live.service && break
@@ -129,11 +129,12 @@ systemctl --user is-active --quiet linura-shell-live.service || {
     printf 'hyprland_instance_signature=%s\n' "$HYPRLAND_INSTANCE_SIGNATURE"
     printf 'drm_device=%s\n' "$AQ_DRM_DEVICES"
     hyprctl monitors -j
-} > "$evidence_root/live-session.txt"
+} >"$evidence_root/live-session.txt"
 
 if [[ "$record" == "1" ]]; then
     # Reserve margin for stop delivery, muxer finalization and verification.
-    recording_duration_budget="$(python3 - "$source_root/contracts/v010-workstation-acceptance.toml" <<'PY'
+    recording_duration_budget="$(
+        python3 - "$source_root/contracts/v010-workstation-acceptance.toml" <<'PY'
 import sys
 import tomllib
 with open(sys.argv[1], "rb") as handle:
@@ -142,10 +143,10 @@ if not 30 < maximum <= 86400:
     raise SystemExit("invalid bounded Level B recording duration")
 print(int(maximum) - 30)
 PY
-)"
-    [[ "$recording_duration_budget" =~ ^[1-9][0-9]*$ ]] \
-        || fail "Level B recording duration budget is invalid"
-    LINURA_SOURCE_ROOT="$source_root" LINURA_SOURCE_SHA="$source_sha"         "$recorder" start "$recording_path"
+    )"
+    [[ "$recording_duration_budget" =~ ^[1-9][0-9]*$ ]] ||
+        fail "Level B recording duration budget is invalid"
+    LINURA_SOURCE_ROOT="$source_root" LINURA_SOURCE_SHA="$source_sha" "$recorder" start "$recording_path"
     recording_started=1
     recording_start_seconds="$SECONDS"
 fi
@@ -153,18 +154,18 @@ fi
 printf '%s\n' "Linura interactive workstation session is live."
 printf '%s\n' "Use the QEMU GTK window or configured VNC display. Press Ctrl-C here to stop."
 while true; do
-    systemctl --user is-active --quiet linura-hyprland-live.service \
-        || fail "interactive Hyprland session exited unexpectedly"
-    systemctl --user is-active --quiet linura-shell-live.service \
-        || fail "Linura Shell exited during interactive acceptance"
-    systemctl --user is-active --quiet linurad.service \
-        || fail "linurad exited during interactive acceptance"
+    systemctl --user is-active --quiet linura-hyprland-live.service ||
+        fail "interactive Hyprland session exited unexpectedly"
+    systemctl --user is-active --quiet linura-shell-live.service ||
+        fail "Linura Shell exited during interactive acceptance"
+    systemctl --user is-active --quiet linurad.service ||
+        fail "linurad exited during interactive acceptance"
     if [[ "$recording_started" -eq 1 ]]; then
-        systemctl --user is-active --quiet linura-workstation-recorder.service \
-            || fail "interactive recorder exited before requested stop"
+        systemctl --user is-active --quiet linura-workstation-recorder.service ||
+            fail "interactive recorder exited before requested stop"
     fi
-    if [[ "$recording_started" -eq 1 ]] \
-            && (( SECONDS - recording_start_seconds >= recording_duration_budget )); then
+    if [[ "$recording_started" -eq 1 ]] &&
+        ((SECONDS - recording_start_seconds >= recording_duration_budget)); then
         printf '%s\n' "Level B recording budget reached; finalizing interactive evidence."
         break
     fi

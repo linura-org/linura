@@ -13,17 +13,13 @@ PanelWindow {
 
     required property var controller
     property int topInset: 0
-    readonly property int availableOverlayHeight: root.targetScreen
-        ? Math.max(theme.controlMd, root.targetScreen.height - root.topInset - theme.spacingLg * 2)
-        : 520
-    readonly property int availableOverlayWidth: root.targetScreen
-        ? Math.max(theme.controlMd, root.targetScreen.width - theme.spacingLg * 2)
-        : 420
+    readonly property int availableOverlayHeight: root.targetScreen ? Math.max(theme.controlMd, root.targetScreen.height - root.topInset - theme.spacingLg * 2) : 520
+    readonly property int availableOverlayWidth: root.targetScreen ? Math.max(theme.controlMd, root.targetScreen.width - theme.spacingLg * 2) : 420
     property bool opened: false
     property int draftVolume: controller.volumePercent
     property bool draftDirty: false
 
-    signal closeRequested()
+    signal closeRequested
 
     visible: opened
     implicitWidth: Math.min(420, root.availableOverlayWidth)
@@ -43,9 +39,7 @@ PanelWindow {
 
     WlrLayershell.namespace: "linura-control-center"
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: opened
-        ? WlrKeyboardFocus.OnDemand
-        : WlrKeyboardFocus.None
+    WlrLayershell.keyboardFocus: opened ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
     LinuraTheme {
         id: theme
@@ -53,51 +47,50 @@ PanelWindow {
 
     function stateColor(state) {
         if (state === "ready")
-            return theme.success
+            return theme.success;
         if (state === "loading" || state === "applying")
-            return theme.accent
+            return theme.accent;
         if (state === "stale" || state === "unavailable")
-            return theme.warning
-        return theme.danger
+            return theme.warning;
+        return theme.danger;
     }
 
     function closePanel() {
-        root.draftDirty = false
-        root.controller.cancelVolumeDraft()
-        root.closeRequested()
+        root.draftDirty = false;
+        root.controller.cancelVolumeDraft();
+        root.closeRequested();
     }
 
     function ensureVisible(item) {
         if (!opened || !item || !item.activeFocus)
-            return
-
-        Qt.callLater(function() {
-            if (!root.opened || !item.activeFocus)
-                return
-            const point = item.mapToItem(controlViewport.contentItem, 0, 0)
-            const margin = theme.spacingMd
-            const top = Math.max(0, point.y - margin)
-            const bottom = point.y + item.height + margin
-            const maximum = Math.max(0, controlViewport.contentHeight - controlViewport.height)
-            if (top < controlViewport.contentY)
-                controlViewport.contentY = Math.max(0, Math.min(maximum, top))
-            else if (bottom > controlViewport.contentY + controlViewport.height)
-                controlViewport.contentY = Math.max(0, Math.min(maximum, bottom - controlViewport.height))
-        })
+            return;
+        Qt.callLater(function () {
+                if (!root.opened || !item.activeFocus)
+                    return;
+                const point = item.mapToItem(controlViewport.contentItem, 0, 0);
+                const margin = theme.spacingMd;
+                const top = Math.max(0, point.y - margin);
+                const bottom = point.y + item.height + margin;
+                const maximum = Math.max(0, controlViewport.contentHeight - controlViewport.height);
+                if (top < controlViewport.contentY)
+                    controlViewport.contentY = Math.max(0, Math.min(maximum, top));
+                else if (bottom > controlViewport.contentY + controlViewport.height)
+                    controlViewport.contentY = Math.max(0, Math.min(maximum, bottom - controlViewport.height));
+            });
     }
 
     onOpenedChanged: {
         if (opened) {
-            draftDirty = false
-            controller.cancelVolumeDraft()
-            draftVolume = Math.min(100, controller.volumePercent)
-            Qt.callLater(function() {
-                if (root.opened)
-                    closeButton.forceActiveFocus(Qt.TabFocusReason)
-            })
+            draftDirty = false;
+            controller.cancelVolumeDraft();
+            draftVolume = Math.min(100, controller.volumePercent);
+            Qt.callLater(function () {
+                    if (root.opened)
+                        closeButton.forceActiveFocus(Qt.TabFocusReason);
+                });
         } else {
-            draftDirty = false
-            controller.cancelVolumeDraft()
+            draftDirty = false;
+            controller.cancelVolumeDraft();
         }
     }
 
@@ -106,12 +99,12 @@ PanelWindow {
 
         function onSnapshotChanged() {
             if (!root.draftDirty)
-                root.draftVolume = Math.min(100, controller.volumePercent)
+                root.draftVolume = Math.min(100, controller.volumePercent);
         }
 
         function onStateChanged() {
             if (controller.state === "ready" && !root.draftDirty)
-                root.draftVolume = Math.min(100, controller.volumePercent)
+                root.draftVolume = Math.min(100, controller.volumePercent);
         }
     }
 
@@ -143,223 +136,216 @@ PanelWindow {
                 width: Math.max(0, controlViewport.width - theme.spacingXl * 2)
                 spacing: theme.spacingLg
 
-            RowLayout {
-                Layout.fillWidth: true
-
-                ColumnLayout {
+                RowLayout {
                     Layout.fillWidth: true
-                    spacing: theme.spacingXs
 
-                    LinuraText {
-                        text: qsTr("Control Center")
-                        role: "display"
-                        Accessible.name: text
-                    }
-
-                    LinuraText {
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        text: qsTr("Authoritative current-session controls")
-                        muted: true
-                        elide: Text.ElideRight
-                        Accessible.name: text
-                    }
-                }
+                        spacing: theme.spacingXs
 
-                LinuraButton {
-                    id: closeButton
-                    text: qsTr("Close")
-                    onClicked: root.closePanel()
-                    Accessible.name: qsTr("Close Control Center")
-                    onActiveFocusChanged: root.ensureVisible(closeButton)
-                }
-            }
-
-            LinuraSurface {
-                Layout.fillWidth: true
-                implicitHeight: audioColumn.implicitHeight + theme.spacingXl * 2
-
-                ColumnLayout {
-                    id: audioColumn
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.margins: theme.spacingXl
-                    spacing: theme.spacingMd
-
-                    RowLayout {
-                        Layout.fillWidth: true
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: theme.spacingXs
-
-                            LinuraText {
-                                text: qsTr("Audio output")
-                                role: "title"
-                                Accessible.name: text
-                            }
-
-                            LinuraText {
-                                Layout.fillWidth: true
-                                text: controller.sinkName
-                                muted: true
-                                elide: Text.ElideRight
-                                Accessible.name: qsTr("Current audio output: %1").arg(text)
-                            }
+                        LinuraText {
+                            text: qsTr("Control Center")
+                            role: "display"
+                            Accessible.name: text
                         }
 
                         LinuraText {
-                            text: qsTr("%1%").arg(root.draftVolume)
-                            role: "title"
-                            Accessible.name: qsTr("Selected volume %1 percent").arg(root.draftVolume)
-                        }
-                    }
-
-                    LinuraSlider {
-                        id: volumeSlider
-                        Layout.fillWidth: true
-                        from: 0
-                        to: 100
-                        stepSize: 1
-                        value: root.draftVolume
-                        enabled: controller.canApply && !controller.busy
-
-                        Accessible.name: qsTr("Output volume")
-                        Accessible.description: qsTr("Changes are applied only after authoritative state is revalidated.")
-                        onActiveFocusChanged: root.ensureVisible(volumeSlider)
-
-                        onPressedChanged: {
-                            if (pressed) {
-                                controller.beginVolumeDraft()
-                            } else if (!root.draftDirty) {
-                                controller.cancelVolumeDraft()
-                            }
-                        }
-
-                        onMoved: {
-                            if (!root.draftDirty)
-                                controller.beginVolumeDraft()
-                            root.draftDirty = true
-                            root.draftVolume = Math.round(value)
-                        }
-
-                        Keys.onLeftPressed: event => {
-                            controller.beginVolumeDraft()
-                            root.draftDirty = true
-                            root.draftVolume = Math.max(0, root.draftVolume - 1)
-                            event.accepted = true
-                        }
-
-                        Keys.onRightPressed: event => {
-                            controller.beginVolumeDraft()
-                            root.draftDirty = true
-                            root.draftVolume = Math.min(100, root.draftVolume + 1)
-                            event.accepted = true
-                        }
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-
-                        LinuraButton {
-                            id: resetButton
-                            text: qsTr("Reset")
-                            enabled: !controller.busy
-                            onClicked: {
-                                root.draftDirty = false
-                                root.draftVolume = Math.min(100, controller.volumePercent)
-                                controller.cancelVolumeDraft()
-                            }
-                            Accessible.name: qsTr("Reset selected volume")
-                            onActiveFocusChanged: root.ensureVisible(resetButton)
-                        }
-
-                        Item {
                             Layout.fillWidth: true
+                            text: qsTr("Authoritative current-session controls")
+                            muted: true
+                            elide: Text.ElideRight
+                            Accessible.name: text
                         }
+                    }
 
-                        LinuraButton {
-                            id: applyButton
-                            text: qsTr("Apply volume")
-                            enabled: controller.canApply
-                                && !controller.busy
-                                && root.draftDirty
-                                && root.draftVolume !== controller.volumePercent
-                            highlighted: true
-                            onClicked: {
-                                root.draftDirty = false
-                                controller.setVolume(root.draftVolume)
+                    LinuraButton {
+                        id: closeButton
+                        text: qsTr("Close")
+                        onClicked: root.closePanel()
+                        Accessible.name: qsTr("Close Control Center")
+                        onActiveFocusChanged: root.ensureVisible(closeButton)
+                    }
+                }
+
+                LinuraSurface {
+                    Layout.fillWidth: true
+                    implicitHeight: audioColumn.implicitHeight + theme.spacingXl * 2
+
+                    ColumnLayout {
+                        id: audioColumn
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: theme.spacingXl
+                        spacing: theme.spacingMd
+
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacingXs
+
+                                LinuraText {
+                                    text: qsTr("Audio output")
+                                    role: "title"
+                                    Accessible.name: text
+                                }
+
+                                LinuraText {
+                                    Layout.fillWidth: true
+                                    text: controller.sinkName
+                                    muted: true
+                                    elide: Text.ElideRight
+                                    Accessible.name: qsTr("Current audio output: %1").arg(text)
+                                }
                             }
-                            Accessible.name: qsTr("Apply selected output volume")
-                            onActiveFocusChanged: root.ensureVisible(applyButton)
+
+                            LinuraText {
+                                text: qsTr("%1%").arg(root.draftVolume)
+                                role: "title"
+                                Accessible.name: qsTr("Selected volume %1 percent").arg(root.draftVolume)
+                            }
+                        }
+
+                        LinuraSlider {
+                            id: volumeSlider
+                            Layout.fillWidth: true
+                            from: 0
+                            to: 100
+                            stepSize: 1
+                            value: root.draftVolume
+                            enabled: controller.canApply && !controller.busy
+
+                            Accessible.name: qsTr("Output volume")
+                            Accessible.description: qsTr("Changes are applied only after authoritative state is revalidated.")
+                            onActiveFocusChanged: root.ensureVisible(volumeSlider)
+
+                            onPressedChanged: {
+                                if (pressed) {
+                                    controller.beginVolumeDraft();
+                                } else if (!root.draftDirty) {
+                                    controller.cancelVolumeDraft();
+                                }
+                            }
+
+                            onMoved: {
+                                if (!root.draftDirty)
+                                    controller.beginVolumeDraft();
+                                root.draftDirty = true;
+                                root.draftVolume = Math.round(value);
+                            }
+
+                            Keys.onLeftPressed: event => {
+                                controller.beginVolumeDraft();
+                                root.draftDirty = true;
+                                root.draftVolume = Math.max(0, root.draftVolume - 1);
+                                event.accepted = true;
+                            }
+
+                            Keys.onRightPressed: event => {
+                                controller.beginVolumeDraft();
+                                root.draftDirty = true;
+                                root.draftVolume = Math.min(100, root.draftVolume + 1);
+                                event.accepted = true;
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            LinuraButton {
+                                id: resetButton
+                                text: qsTr("Reset")
+                                enabled: !controller.busy
+                                onClicked: {
+                                    root.draftDirty = false;
+                                    root.draftVolume = Math.min(100, controller.volumePercent);
+                                    controller.cancelVolumeDraft();
+                                }
+                                Accessible.name: qsTr("Reset selected volume")
+                                onActiveFocusChanged: root.ensureVisible(resetButton)
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                            }
+
+                            LinuraButton {
+                                id: applyButton
+                                text: qsTr("Apply volume")
+                                enabled: controller.canApply && !controller.busy && root.draftDirty && root.draftVolume !== controller.volumePercent
+                                highlighted: true
+                                onClicked: {
+                                    root.draftDirty = false;
+                                    controller.setVolume(root.draftVolume);
+                                }
+                                Accessible.name: qsTr("Apply selected output volume")
+                                onActiveFocusChanged: root.ensureVisible(applyButton)
+                            }
                         }
                     }
                 }
-            }
 
-            LinuraSurface {
-                Layout.fillWidth: true
-                implicitHeight: statusColumn.implicitHeight + theme.spacingXl * 2
-                outlineColor: root.stateColor(controller.state)
+                LinuraSurface {
+                    Layout.fillWidth: true
+                    implicitHeight: statusColumn.implicitHeight + theme.spacingXl * 2
+                    outlineColor: root.stateColor(controller.state)
 
-                ColumnLayout {
-                    id: statusColumn
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.margins: theme.spacingXl
-                    spacing: theme.spacingSm
+                    ColumnLayout {
+                        id: statusColumn
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: theme.spacingXl
+                        spacing: theme.spacingSm
 
-                    LinuraText {
-                        text: qsTr("Authority status")
-                        role: "title"
-                        Accessible.name: text
-                    }
+                        LinuraText {
+                            text: qsTr("Authority status")
+                            role: "title"
+                            Accessible.name: text
+                        }
 
-                    LinuraText {
-                        Layout.fillWidth: true
-                        text: controller.statusText
-                        wrapMode: Text.WordWrap
-                        Accessible.name: text
-                    }
+                        LinuraText {
+                            Layout.fillWidth: true
+                            text: controller.statusText
+                            wrapMode: Text.WordWrap
+                            Accessible.name: text
+                        }
 
-                    LinuraText {
-                        Layout.fillWidth: true
-                        text: qsTr("Observation: %1 · %2")
-                            .arg(controller.authority)
-                            .arg(controller.freshness)
-                        role: "caption"
-                        muted: true
-                        Accessible.name: text
-                    }
+                        LinuraText {
+                            Layout.fillWidth: true
+                            text: qsTr("Observation: %1 · %2").arg(controller.authority).arg(controller.freshness)
+                            role: "caption"
+                            muted: true
+                            Accessible.name: text
+                        }
 
-                    LinuraText {
-                        Layout.fillWidth: true
-                        visible: controller.lastReceiptStatus.length > 0
-                        text: qsTr("Last Session1 receipt: %1 · evidence %2")
-                            .arg(controller.lastReceiptStatus)
-                            .arg(controller.lastEvidenceId)
-                        role: "caption"
-                        muted: true
-                        elide: Text.ElideMiddle
-                        Accessible.name: text
+                        LinuraText {
+                            Layout.fillWidth: true
+                            visible: controller.lastReceiptStatus.length > 0
+                            text: qsTr("Last Session1 receipt: %1 · evidence %2").arg(controller.lastReceiptStatus).arg(controller.lastEvidenceId)
+                            role: "caption"
+                            muted: true
+                            elide: Text.ElideMiddle
+                            Accessible.name: text
+                        }
                     }
                 }
-            }
 
-            LinuraText {
-                Layout.fillWidth: true
-                text: qsTr("This panel is a Linura client, not an executor. It cannot run provider commands or choose policy, risk, or operation class.")
-                role: "caption"
-                muted: true
-                wrapMode: Text.WordWrap
-                Accessible.name: text
-            }
+                LinuraText {
+                    Layout.fillWidth: true
+                    text: qsTr("This panel is a Linura client, not an executor. It cannot run provider commands or choose policy, risk, or operation class.")
+                    role: "caption"
+                    muted: true
+                    wrapMode: Text.WordWrap
+                    Accessible.name: text
+                }
 
-            Item {
-                Layout.fillHeight: true
+                Item {
+                    Layout.fillHeight: true
+                }
             }
-        }
         }
     }
 }

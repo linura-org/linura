@@ -1,7 +1,9 @@
 import QtQuick
 
 QtObject {
-    readonly property SystemPalette systemPalette: SystemPalette { colorGroup: SystemPalette.Active }
+    readonly property SystemPalette systemPalette: SystemPalette {
+        colorGroup: SystemPalette.Active
+    }
     readonly property int spacingXs: 4
     readonly property int spacingSm: 8
     readonly property int spacingMd: 12

@@ -1,6 +1,13 @@
 /** Runtime entrypoint. Start ONLY from a trusted host/systemd, never Actions. */
 import http from 'node:http';
-import { configuration, verifyWebhook, GitHubClient, Publisher, FileApprovalJournal, trustedDecision } from './publisher.mjs';
+import {
+  configuration,
+  verifyWebhook,
+  GitHubClient,
+  Publisher,
+  FileApprovalJournal,
+  trustedDecision,
+} from './publisher.mjs';
 
 const MAX_WEBHOOK_BYTES = 1024 * 1024;
 const SWEEP_MS = 10 * 60 * 1000;
@@ -9,16 +16,25 @@ export function createServer(config, publisher, { maxBytes = MAX_WEBHOOK_BYTES }
   const deliveries = new Set();
   return http.createServer(async (req, res) => {
     const respond = (status, message) => {
-      res.writeHead(status, { 'content-type': 'text/plain; charset=utf-8',
-        'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      res.writeHead(status, {
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+      });
       res.end(`${message}\n`);
     };
     if (req.method === 'GET' && req.url === '/health/live') return respond(200, 'alive');
     if (req.method === 'GET' && req.url === '/health/ready') {
       const age = publisher.lastCompleted ? Date.now() - Date.parse(publisher.lastCompleted) : NaN;
-      const healthy = config.enabled && !publisher.lastError && !publisher.reconciling &&
-        !publisher.pendingSweep && !publisher.epoch && Number.isFinite(age) &&
-        age >= 0 && age < 2 * SWEEP_MS;
+      const healthy =
+        config.enabled &&
+        !publisher.lastError &&
+        !publisher.reconciling &&
+        !publisher.pendingSweep &&
+        !publisher.epoch &&
+        Number.isFinite(age) &&
+        age >= 0 &&
+        age < 2 * SWEEP_MS;
       return respond(healthy ? 200 : 503, healthy ? 'ready' : 'not ready');
     }
     if (req.method !== 'POST' || req.url !== '/github/webhook') return respond(404, 'not found');
@@ -39,17 +55,24 @@ export function createServer(config, publisher, { maxBytes = MAX_WEBHOOK_BYTES }
         return respond(400, 'invalid delivery ID');
       }
       let event;
-      try { event = JSON.parse(raw.toString('utf-8')); }
-      catch { return respond(400, 'invalid JSON'); }
-      if (event?.repository?.full_name !== config.repository) return respond(403, 'repository mismatch');
+      try {
+        event = JSON.parse(raw.toString('utf-8'));
+      } catch {
+        return respond(400, 'invalid JSON');
+      }
+      if (event?.repository?.full_name !== config.repository)
+        return respond(403, 'repository mismatch');
       const kind = req.headers['x-github-event'];
       if (!['pull_request', 'push', 'workflow_run', 'check_run', 'installation'].includes(kind)) {
         return respond(202, 'ignored event');
       }
       // Our own Check Runs emit check_run webhooks. Re-enqueuing on those
       // would create an unbounded self-triggered check-run storm.
-      if (kind === 'check_run' && event.check_run?.app?.id === config.appId &&
-          event.action !== 'rerequested') {
+      if (
+        kind === 'check_run' &&
+        event.check_run?.app?.id === config.appId &&
+        event.action !== 'rerequested'
+      ) {
         // Normal created/completed webhooks must never recursively schedule
         // another check. A maintainer's explicit rerequest still deserves a
         // fresh independent decision even if the normal scan has not run.
@@ -82,8 +105,12 @@ export async function runServer(env = process.env) {
     initialize: allowInitialization,
   });
   const client = new GitHubClient(config);
-  const publisher = new Publisher({ client, journal, enabled: config.enabled,
-    decide: (token, head, signal) => trustedDecision(config, token, head, signal) });
+  const publisher = new Publisher({
+    client,
+    journal,
+    enabled: config.enabled,
+    decide: (token, head, signal) => trustedDecision(config, token, head, signal),
+  });
   const server = createServer(config, publisher);
   server.requestTimeout = 10_000;
   server.headersTimeout = 10_000;
@@ -103,7 +130,7 @@ export async function runServer(env = process.env) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  runServer().catch(error => {
+  runServer().catch((error) => {
     console.error(`qualification publisher startup failed: ${error.message}`);
     process.exitCode = 1;
   });

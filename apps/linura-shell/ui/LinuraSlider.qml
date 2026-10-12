@@ -3,7 +3,9 @@ import QtQuick.Controls
 
 Slider {
     id: control
-    LinuraTheme { id: theme }
+    LinuraTheme {
+        id: theme
+    }
     activeFocusOnTab: true
     implicitWidth: 220
     implicitHeight: theme.controlSm

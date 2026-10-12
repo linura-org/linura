@@ -3,7 +3,9 @@ import QtQuick.Controls
 
 Button {
     id: control
-    LinuraTheme { id: theme }
+    LinuraTheme {
+        id: theme
+    }
     activeFocusOnTab: true
     font.pixelSize: theme.typeBody
     implicitHeight: theme.controlMd
@@ -16,8 +18,7 @@ Button {
     contentItem: Text {
         text: control.text
         font: control.font
-        color: !control.enabled ? theme.muted
-            : control.highlighted ? theme.highlightedText : theme.foreground
+        color: !control.enabled ? theme.muted : control.highlighted ? theme.highlightedText : theme.foreground
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
@@ -25,8 +26,7 @@ Button {
 
     background: Rectangle {
         radius: theme.radiusMd
-        color: control.highlighted ? theme.accent
-            : control.down ? theme.surfaceElevated : theme.surface
+        color: control.highlighted ? theme.accent : control.down ? theme.surfaceElevated : theme.surface
         border.width: control.activeFocus ? theme.focusBorderWidth : theme.borderWidth
         border.color: control.activeFocus ? theme.focus : theme.surfaceElevated
         opacity: control.enabled ? 1.0 : 0.55

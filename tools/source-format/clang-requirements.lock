@@ -1,0 +1,2 @@
+# Pin Linux x86_64 clang-format 18.1.8 wheel with PyPI SHA-256 digest.
+clang-format==18.1.8 --hash=sha256:2de122b8aa78ba49e326f974131caab2c79f4ae877c227cd4e3e5d82a98d21e5

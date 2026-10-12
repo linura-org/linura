@@ -7,7 +7,9 @@ TextField {
     property string errorText: ""
     property string accessibleName: ""
     property string accessibleDescription: ""
-    LinuraTheme { id: theme }
+    LinuraTheme {
+        id: theme
+    }
 
     activeFocusOnTab: true
     selectByMouse: true
@@ -27,8 +29,7 @@ TextField {
         radius: theme.radiusMd
         color: theme.surface
         border.width: control.activeFocus ? theme.focusBorderWidth : theme.borderWidth
-        border.color: control.invalid ? theme.danger
-            : control.activeFocus ? theme.focus : theme.surfaceElevated
+        border.color: control.invalid ? theme.danger : control.activeFocus ? theme.focus : theme.surfaceElevated
         opacity: control.enabled ? 1.0 : 0.55
     }
 

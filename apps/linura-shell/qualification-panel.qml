@@ -17,13 +17,7 @@ Scope {
     property int trayPrimaryRequests: 0
     property int traySecondaryRequests: 0
     property int trayMenuRequests: 0
-    property var qualificationTrayItems: [
-        trayItemOne,
-        trayItemTwo,
-        trayItemThree,
-        trayItemFour,
-        trayItemFive
-    ]
+    property var qualificationTrayItems: [trayItemOne, trayItemTwo, trayItemThree, trayItemFour, trayItemFive]
 
     QtObject {
         id: trayItemOne
@@ -33,9 +27,15 @@ Scope {
         property string icon: ""
         property bool hasMenu: false
         property bool onlyMenu: false
-        function activate() { root.trayPrimaryRequests += 1 }
-        function secondaryActivate() { root.traySecondaryRequests += 1 }
-        function display(parentWindow, relativeX, relativeY) { root.trayMenuRequests += 1 }
+        function activate() {
+            root.trayPrimaryRequests += 1;
+        }
+        function secondaryActivate() {
+            root.traySecondaryRequests += 1;
+        }
+        function display(parentWindow, relativeX, relativeY) {
+            root.trayMenuRequests += 1;
+        }
     }
 
     QtObject {
@@ -46,9 +46,15 @@ Scope {
         property string icon: ""
         property bool hasMenu: true
         property bool onlyMenu: true
-        function activate() { root.trayPrimaryRequests += 1 }
-        function secondaryActivate() { root.traySecondaryRequests += 1 }
-        function display(parentWindow, relativeX, relativeY) { root.trayMenuRequests += 1 }
+        function activate() {
+            root.trayPrimaryRequests += 1;
+        }
+        function secondaryActivate() {
+            root.traySecondaryRequests += 1;
+        }
+        function display(parentWindow, relativeX, relativeY) {
+            root.trayMenuRequests += 1;
+        }
     }
 
     QtObject {
@@ -59,9 +65,15 @@ Scope {
         property string icon: ""
         property bool hasMenu: false
         property bool onlyMenu: false
-        function activate() { root.trayPrimaryRequests += 1 }
-        function secondaryActivate() { root.traySecondaryRequests += 1 }
-        function display(parentWindow, relativeX, relativeY) { root.trayMenuRequests += 1 }
+        function activate() {
+            root.trayPrimaryRequests += 1;
+        }
+        function secondaryActivate() {
+            root.traySecondaryRequests += 1;
+        }
+        function display(parentWindow, relativeX, relativeY) {
+            root.trayMenuRequests += 1;
+        }
     }
 
     QtObject {
@@ -72,9 +84,15 @@ Scope {
         property string icon: ""
         property bool hasMenu: false
         property bool onlyMenu: false
-        function activate() { root.trayPrimaryRequests += 1 }
-        function secondaryActivate() { root.traySecondaryRequests += 1 }
-        function display(parentWindow, relativeX, relativeY) { root.trayMenuRequests += 1 }
+        function activate() {
+            root.trayPrimaryRequests += 1;
+        }
+        function secondaryActivate() {
+            root.traySecondaryRequests += 1;
+        }
+        function display(parentWindow, relativeX, relativeY) {
+            root.trayMenuRequests += 1;
+        }
     }
 
     QtObject {
@@ -85,9 +103,15 @@ Scope {
         property string icon: ""
         property bool hasMenu: false
         property bool onlyMenu: false
-        function activate() { root.trayPrimaryRequests += 1 }
-        function secondaryActivate() { root.traySecondaryRequests += 1 }
-        function display(parentWindow, relativeX, relativeY) { root.trayMenuRequests += 1 }
+        function activate() {
+            root.trayPrimaryRequests += 1;
+        }
+        function secondaryActivate() {
+            root.traySecondaryRequests += 1;
+        }
+        function display(parentWindow, relativeX, relativeY) {
+            root.trayMenuRequests += 1;
+        }
     }
 
     HyprlandIntegration.WorkspaceNavigationController {
@@ -103,8 +127,8 @@ Scope {
         onQuickSettingsRequested: screen => root.quickSettingsRequests += 1
         onControlCenterRequested: screen => root.controlCenterRequests += 1
         onWorkspaceRequested: workspaceId => {
-            root.workspaceRequests += 1
-            root.lastWorkspaceActivation = workspaceNavigation.activateWorkspace(workspaceId)
+            root.workspaceRequests += 1;
+            root.lastWorkspaceActivation = workspaceNavigation.activateWorkspace(workspaceId);
         }
     }
 
@@ -119,95 +143,142 @@ Scope {
         target: "linura.panel-qualification"
 
         function trayKeyboardSnapshot(): string {
-            return workstationPanel.trayKeyboardSnapshot(0)
+            return workstationPanel.trayKeyboardSnapshot(0);
         }
 
-        function screenCount(): int { return workstationPanel.screenCount }
-        function panelHeight(): int { return workstationPanel.panelHeight }
-        function panelWindowCount(): int { return workstationPanel.instantiatedPanelCount }
-        function panelScreenMatches(index: int): bool { return workstationPanel.panelScreenMatches(index) }
-        function panelWindowWidth(index: int): int { return workstationPanel.panelWidth(index) }
-        function panelWindowHeight(index: int): int { return workstationPanel.panelHeightActual(index) }
-        function panelScreenWidth(index: int): int { return workstationPanel.panelScreenWidth(index) }
-        function panelExclusiveZone(index: int): int { return workstationPanel.panelExclusiveZone(index) }
-        function panelExclusionNormal(index: int): bool { return workstationPanel.panelExclusionNormal(index) }
-        function panelAnchorsValid(index: int): bool { return workstationPanel.panelAnchorsValid(index) }
-        function workspaceCount(): int { return workspaceNavigation.workspaceEntries.length }
+        function screenCount(): int {
+            return workstationPanel.screenCount;
+        }
+        function panelHeight(): int {
+            return workstationPanel.panelHeight;
+        }
+        function panelWindowCount(): int {
+            return workstationPanel.instantiatedPanelCount;
+        }
+        function panelScreenMatches(index: int): bool {
+            return workstationPanel.panelScreenMatches(index);
+        }
+        function panelWindowWidth(index: int): int {
+            return workstationPanel.panelWidth(index);
+        }
+        function panelWindowHeight(index: int): int {
+            return workstationPanel.panelHeightActual(index);
+        }
+        function panelScreenWidth(index: int): int {
+            return workstationPanel.panelScreenWidth(index);
+        }
+        function panelExclusiveZone(index: int): int {
+            return workstationPanel.panelExclusiveZone(index);
+        }
+        function panelExclusionNormal(index: int): bool {
+            return workstationPanel.panelExclusionNormal(index);
+        }
+        function panelAnchorsValid(index: int): bool {
+            return workstationPanel.panelAnchorsValid(index);
+        }
+        function workspaceCount(): int {
+            return workspaceNavigation.workspaceEntries.length;
+        }
         function focusedWorkspaceCount(): int {
-            let count = 0
+            let count = 0;
             for (let i = 0; i < workspaceNavigation.workspaceEntries.length; i++) {
                 if (workspaceNavigation.workspaceEntries[i].focused)
-                    count += 1
+                    count += 1;
             }
-            return count
+            return count;
         }
         function firstWorkspaceId(): int {
-            return workspaceNavigation.workspaceEntries.length > 0
-                ? workspaceNavigation.workspaceEntries[0].id : 0
+            return workspaceNavigation.workspaceEntries.length > 0 ? workspaceNavigation.workspaceEntries[0].id : 0;
         }
         function focusPanelControl(): bool {
-            return workstationPanel.focusPanel(0)
+            return workstationPanel.focusPanel(0);
         }
         function panelKeyboardEntryFocused(): bool {
-            return workstationPanel.panelKeyboardEntryFocused(0)
+            return workstationPanel.panelKeyboardEntryFocused(0);
         }
         function panelKeyboardNavigationActive(): bool {
-            return workstationPanel.panelKeyboardNavigationActive(0)
+            return workstationPanel.panelKeyboardNavigationActive(0);
         }
-        function statusTimeText(): string { return workstationPanel.statusTimeText() }
-        function statusDateText(): string { return workstationPanel.statusDateText() }
-        function statusTimestampMs(): string { return String(workstationPanel.statusTimestampMs()) }
-        function statusTimeRendered(): bool { return workstationPanel.statusTimeRendered(0) }
-        function trayItemCount(): int { return workstationPanel.trayItemCount(0) }
-        function trayOverflowCount(): int { return workstationPanel.trayOverflowCount(0) }
+        function statusTimeText(): string {
+            return workstationPanel.statusTimeText();
+        }
+        function statusDateText(): string {
+            return workstationPanel.statusDateText();
+        }
+        function statusTimestampMs(): string {
+            return String(workstationPanel.statusTimestampMs());
+        }
+        function statusTimeRendered(): bool {
+            return workstationPanel.statusTimeRendered(0);
+        }
+        function trayItemCount(): int {
+            return workstationPanel.trayItemCount(0);
+        }
+        function trayOverflowCount(): int {
+            return workstationPanel.trayOverflowCount(0);
+        }
         function activateTrayInlineControl(index: int): bool {
-            return workstationPanel.activateTrayInlineControl(0, index)
+            return workstationPanel.activateTrayInlineControl(0, index);
         }
         function openTrayOverflowControl(): bool {
-            return workstationPanel.openTrayOverflowControl(0)
+            return workstationPanel.openTrayOverflowControl(0);
         }
         function focusTrayOverflowButtonControl(): bool {
-            return workstationPanel.focusTrayOverflowButtonControl(0)
+            return workstationPanel.focusTrayOverflowButtonControl(0);
         }
         function cancelTrayOverflowControl(): bool {
-            return workstationPanel.cancelTrayOverflowControl(0)
+            return workstationPanel.cancelTrayOverflowControl(0);
         }
         function trayOverflowVisible(): bool {
-            return workstationPanel.trayOverflowVisible(0)
+            return workstationPanel.trayOverflowVisible(0);
         }
         function trayOverflowOpenCount(): int {
-            return workstationPanel.trayOverflowOpenCount(0)
+            return workstationPanel.trayOverflowOpenCount(0);
         }
         function trayOverflowButtonFocused(): bool {
-            return workstationPanel.trayOverflowButtonFocused(0)
+            return workstationPanel.trayOverflowButtonFocused(0);
         }
         function trayOverflowEntryReady(index: int): bool {
-            return workstationPanel.trayOverflowEntryReady(0, index)
+            return workstationPanel.trayOverflowEntryReady(0, index);
         }
         function trayOverflowReadinessState(index: int): string {
-            return workstationPanel.trayOverflowReadinessState(0, index)
+            return workstationPanel.trayOverflowReadinessState(0, index);
         }
         function activateTrayOverflowControl(index: int): bool {
-            return workstationPanel.activateTrayOverflowControl(0, index)
+            return workstationPanel.activateTrayOverflowControl(0, index);
         }
-        function trayPrimaryCount(): int { return root.trayPrimaryRequests }
-        function trayMenuCount(): int { return root.trayMenuRequests }
+        function trayPrimaryCount(): int {
+            return root.trayPrimaryRequests;
+        }
+        function trayMenuCount(): int {
+            return root.trayMenuRequests;
+        }
         function activateCommandPaletteControl(): bool {
-            return workstationPanel.activateCommandPaletteControl(0)
+            return workstationPanel.activateCommandPaletteControl(0);
         }
         function activateQuickSettingsControl(): bool {
-            return workstationPanel.activateQuickSettingsControl(0)
+            return workstationPanel.activateQuickSettingsControl(0);
         }
         function activateControlCenterControl(): bool {
-            return workstationPanel.activateControlCenterControl(0)
+            return workstationPanel.activateControlCenterControl(0);
         }
         function activateWorkspaceControl(workspaceId: int): bool {
-            return workstationPanel.activateWorkspaceControl(0, workspaceId)
+            return workstationPanel.activateWorkspaceControl(0, workspaceId);
         }
-        function commandPaletteCount(): int { return root.commandPaletteRequests }
-        function quickSettingsCount(): int { return root.quickSettingsRequests }
-        function controlCenterCount(): int { return root.controlCenterRequests }
-        function workspaceCountRequested(): int { return root.workspaceRequests }
-        function lastWorkspaceActivated(): bool { return root.lastWorkspaceActivation }
+        function commandPaletteCount(): int {
+            return root.commandPaletteRequests;
+        }
+        function quickSettingsCount(): int {
+            return root.quickSettingsRequests;
+        }
+        function controlCenterCount(): int {
+            return root.controlCenterRequests;
+        }
+        function workspaceCountRequested(): int {
+            return root.workspaceRequests;
+        }
+        function lastWorkspaceActivated(): bool {
+            return root.lastWorkspaceActivation;
+        }
     }
 }

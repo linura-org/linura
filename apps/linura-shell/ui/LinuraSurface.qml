@@ -8,11 +8,12 @@ Rectangle {
     property int cornerRadius: theme.radiusLg
     property int outlineWidth: outlined ? theme.borderWidth : 0
 
-    LinuraTheme { id: theme }
+    LinuraTheme {
+        id: theme
+    }
 
     radius: cornerRadius
-    color: level === "background" ? theme.background
-        : level === "elevated" ? theme.surfaceElevated : theme.surface
+    color: level === "background" ? theme.background : level === "elevated" ? theme.surfaceElevated : theme.surface
     border.width: outlineWidth
     border.color: outlineColor
 }

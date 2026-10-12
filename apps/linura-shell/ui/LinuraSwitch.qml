@@ -4,7 +4,9 @@ import QtQuick.Controls
 Switch {
     id: control
     property string accessibleName: ""
-    LinuraTheme { id: theme }
+    LinuraTheme {
+        id: theme
+    }
 
     activeFocusOnTab: true
     hoverEnabled: true
@@ -28,8 +30,7 @@ Switch {
             width: parent.height - theme.spacingSm
             height: width
             radius: width / 2
-            x: theme.spacingXs
-                + control.visualPosition * (parent.width - width - theme.spacingXs * 2)
+            x: theme.spacingXs + control.visualPosition * (parent.width - width - theme.spacingXs * 2)
             y: (parent.height - height) / 2
             color: control.checked ? theme.highlightedText : theme.foreground
         }
