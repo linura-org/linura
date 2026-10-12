@@ -73,10 +73,7 @@ class EditorToolingTests(unittest.TestCase):
         config = tomllib.loads((ROOT / "ruff.toml").read_text(encoding="utf-8"))
         self.assertEqual(config["line-length"], 88)
         self.assertEqual(config["target-version"], "py312")
-        self.assertEqual(
-            config["per-file-target-version"]["bindings/python/**/*.py"],
-            "py310",
-        )
+        self.assertNotIn("per-file-target-version", config)
         self.assertEqual(config["lint"]["select"], ["E4", "E7", "E9", "F"])
 
         lock = (ROOT / "tools/python/ruff-requirements.lock").read_text(
@@ -114,10 +111,13 @@ class EditorToolingTests(unittest.TestCase):
             self.assertIn("RUFF_VERSION", text, path)
             self.assertIn("ruff-requirements.lock", text, path)
 
-    def test_future_python_type_checker_is_an_explicit_single_choice(self) -> None:
+    def test_python_type_checker_is_one_pinned_canonical_choice(self) -> None:
         text = (ROOT / "docs/development-infrastructure.md").read_text(encoding="utf-8")
-        self.assertIn("Pyright versus mypy", text)
-        self.assertIn("choose one canonical checker", text)
+        self.assertIn("Pyright 1.1.408", text)
+        self.assertIn(
+            "Pyright was selected rather than introducing a parallel mandatory mypy baseline",
+            text,
+        )
 
 
 if __name__ == "__main__":

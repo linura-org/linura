@@ -72,7 +72,11 @@ def version_from_path(path: Path) -> tuple[int, int, int] | None:
     match = VERSION_FILE_RE.fullmatch(path.name)
     if match is None:
         return None
-    return tuple(int(match.group(name)) for name in ("major", "minor", "patch"))
+    return (
+        int(match.group("major")),
+        int(match.group("minor")),
+        int(match.group("patch")),
+    )
 
 
 def _find_temporary_lifecycle_assertion(text: str) -> tuple[str, int] | None:

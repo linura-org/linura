@@ -33,11 +33,13 @@ RELEASE_PAYLOAD_COMPONENT_CONTRACT = "--component-contract contracts/components.
 RELEASE_PAYLOAD_PYTHON_CONTRACT = "--python-package bindings/python/pyproject.toml"
 
 
-def version_key(value: str) -> tuple[int, int, int]:
+def version_key(value: object) -> tuple[int, int, int]:
+    if not isinstance(value, str):
+        raise TypeError("milestone version must be a string")
     match = VERSION_RE.fullmatch(value)
     if match is None:
         raise ValueError(f"invalid milestone version: {value!r}")
-    return tuple(int(part) for part in match.groups())
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
 
 
 def image_binaries(path: Path) -> set[str]:
@@ -50,6 +52,8 @@ def image_binaries(path: Path) -> set[str]:
                 for target in targets
             ):
                 continue
+            if node.value is None:
+                raise ValueError("tools/image.py BINARIES must have a literal value")
             value = ast.literal_eval(node.value)
             if not isinstance(value, dict) or not all(
                 isinstance(key, str) for key in value

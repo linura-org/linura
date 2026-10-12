@@ -372,11 +372,11 @@ def require_slice_scope(repository: str, number: int, slice_id: str) -> None:
         raise EvidenceError(f"{slice_id}: PR #{number} has no reviewable changed files")
 
     matched = sorted(
-        record["filename"]
+        filename
         for record in records
         if record.get("status") in {"added", "modified"}
-        and isinstance(record.get("filename"), str)
-        and path_matches_slice(slice_id, record["filename"])
+        if isinstance(filename := record.get("filename"), str)
+        if path_matches_slice(slice_id, filename)
     )
     if not matched:
         owned = ", ".join(SLICE_PATH_PREFIXES[slice_id])

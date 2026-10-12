@@ -155,7 +155,7 @@ def _read_text_file(path: Path) -> str:
 
 def _safe_repo_file(root: Path, relative: str) -> Path:
     _require(
-        isinstance(relative, str) and relative and not relative.startswith("/"),
+        bool(isinstance(relative, str) and relative and not relative.startswith("/")),
         "repository path must be non-empty and relative",
     )
     _require(
@@ -174,10 +174,8 @@ def _safe_repo_file(root: Path, relative: str) -> Path:
 
 
 def _bundle_file(bundle: Path, filename: object, label: str) -> Path:
-    _require(
-        isinstance(filename, str) and filename and Path(filename).name == filename,
-        f"{label} filename is invalid",
-    )
+    if not isinstance(filename, str) or not filename or Path(filename).name != filename:
+        raise EvidenceError(f"{label} filename is invalid")
     path = bundle / filename
     _require(path.is_file() and not path.is_symlink(), f"{label} is missing or unsafe")
     _require(
@@ -229,14 +227,16 @@ def _verify_checksum(path: Path, digest: str) -> None:
 
 
 def _string_list(value: object, label: str, *, allow_empty: bool = False) -> list[str]:
-    _require(isinstance(value, list), f"{label} must be a list")
+    if not isinstance(value, list):
+        raise EvidenceError(f"{label} must be a list")
     _require(allow_empty or bool(value), f"{label} must not be empty")
-    _require(
-        all(isinstance(item, str) and item and item.strip() == item for item in value),
-        f"{label} contains invalid strings",
-    )
-    _require(len(value) == len(set(value)), f"{label} contains duplicates")
-    return list(value)
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item or item.strip() != item:
+            raise EvidenceError(f"{label} contains invalid strings")
+        result.append(item)
+    _require(len(result) == len(set(result)), f"{label} contains duplicates")
+    return result
 
 
 def load_contract(root: Path = ROOT) -> dict:
@@ -376,7 +376,8 @@ def load_contract(root: Path = ROOT) -> dict:
 
     profiles = contract["profile"]
     _require(
-        isinstance(profiles, list) and profiles, "evidence profile inventory is empty"
+        bool(isinstance(profiles, list) and profiles),
+        "evidence profile inventory is empty",
     )
     seen_ids: set[str] = set()
     seen_lanes: set[str] = set()
@@ -406,7 +407,7 @@ def load_contract(root: Path = ROOT) -> dict:
         profile_id = profile["id"]
         lane_id = profile["lane_id"]
         _require(
-            isinstance(profile_id, str) and NAME.fullmatch(profile_id),
+            bool(isinstance(profile_id, str) and NAME.fullmatch(profile_id)),
             f"invalid evidence profile id: {profile_id!r}",
         )
         _require(
@@ -420,8 +421,10 @@ def load_contract(root: Path = ROOT) -> dict:
         seen_ids.add(profile_id)
         seen_lanes.add(lane_id)
         _require(
-            isinstance(profile["verifier_id"], str)
-            and NAME.fullmatch(profile["verifier_id"]),
+            bool(
+                isinstance(profile["verifier_id"], str)
+                and NAME.fullmatch(profile["verifier_id"])
+            ),
             f"invalid verifier id for {profile_id}",
         )
         _require(
@@ -433,13 +436,15 @@ def load_contract(root: Path = ROOT) -> dict:
         _string_list(profile["accepted_results"], f"{profile_id}.accepted_results")
         schemas = profile["accepted_schema_versions"]
         _require(
-            isinstance(schemas, list)
-            and schemas
-            and all(
-                isinstance(item, int) and not isinstance(item, bool) and item >= 1
-                for item in schemas
-            )
-            and len(schemas) == len(set(schemas)),
+            bool(
+                isinstance(schemas, list)
+                and schemas
+                and all(
+                    isinstance(item, int) and not isinstance(item, bool) and item >= 1
+                    for item in schemas
+                )
+                and len(schemas) == len(set(schemas))
+            ),
             f"{profile_id} has invalid accepted schema versions",
         )
         _string_list(
@@ -480,7 +485,7 @@ def load_contract(root: Path = ROOT) -> dict:
 
         artifacts = profile["artifact"]
         _require(
-            isinstance(artifacts, list) and artifacts,
+            bool(isinstance(artifacts, list) and artifacts),
             f"{profile_id} artifact inventory is empty",
         )
         roles: set[str] = set()
@@ -492,16 +497,18 @@ def load_contract(root: Path = ROOT) -> dict:
             )
             role, filename, kind = spec["role"], spec["filename"], spec["kind"]
             _require(
-                isinstance(role, str) and NAME.fullmatch(role),
+                bool(isinstance(role, str) and NAME.fullmatch(role)),
                 f"{profile_id} has invalid artifact role",
             )
             _require(
                 role not in roles, f"{profile_id} has duplicate artifact role: {role}"
             )
             _require(
-                isinstance(filename, str)
-                and Path(filename).name == filename
-                and filename,
+                bool(
+                    isinstance(filename, str)
+                    and Path(filename).name == filename
+                    and filename
+                ),
                 f"{profile_id} has unsafe artifact filename",
             )
             _require(
@@ -602,7 +609,7 @@ def _artifact_inventory(profile: dict, bundle: Path) -> list[dict]:
         seen_required == set(required),
         "required artifact inventory changed during evidence admission",
     )
-    _require(inventory, "retained artifact inventory is empty")
+    _require(bool(inventory), "retained artifact inventory is empty")
     return inventory
 
 
@@ -613,10 +620,8 @@ def _artifact_set_sha256(inventory: list[dict]) -> str:
 def _lookup_json(payload: object, dotted: str) -> object:
     current = payload
     for part in dotted.split("."):
-        _require(
-            isinstance(current, dict) and part in current,
-            f"required JSON value is missing: {dotted}",
-        )
+        if not isinstance(current, dict) or part not in current:
+            raise EvidenceError(f"required JSON value is missing: {dotted}")
         current = current[part]
     return current
 
@@ -737,10 +742,14 @@ def _semantic_outcome(
         "semantic verifier contract-id conclusion mismatch",
     )
     _require(
-        isinstance(outcome["verified_claims"], list)
-        and outcome["verified_claims"]
-        and outcome["verified_claims"] == sorted(set(outcome["verified_claims"]))
-        and all(isinstance(item, str) and item for item in outcome["verified_claims"]),
+        bool(
+            isinstance(outcome["verified_claims"], list)
+            and outcome["verified_claims"]
+            and outcome["verified_claims"] == sorted(set(outcome["verified_claims"]))
+            and all(
+                isinstance(item, str) and item for item in outcome["verified_claims"]
+            )
+        ),
         "semantic verifier claim inventory is invalid",
     )
     _require(
@@ -874,15 +883,11 @@ def _load_verifier_result(
         "verification",
         "verifier_result_sha256",
     }
-    _require(
-        isinstance(result, dict) and set(result) == expected,
-        "verifier result fields do not match schema",
-    )
+    if not isinstance(result, dict) or set(result) != expected:
+        raise EvidenceError("verifier result fields do not match schema")
     digest = result.get("verifier_result_sha256")
-    _require(
-        isinstance(digest, str) and HEX64.fullmatch(digest),
-        "verifier result digest is invalid",
-    )
+    if not isinstance(digest, str) or HEX64.fullmatch(digest) is None:
+        raise EvidenceError("verifier result digest is invalid")
     body = dict(result)
     body.pop("verifier_result_sha256")
     _require(
@@ -1057,12 +1062,12 @@ def verify_binding(root: Path, path: Path, *, semantic: bool = True) -> dict:
         "evidence binding fields do not match schema",
     )
     digest = binding.get("binding_sha256")
-    _require(
+    if not (
         binding["schema_version"] == 3
         and isinstance(digest, str)
-        and HEX64.fullmatch(digest),
-        "evidence binding schema or digest is invalid",
-    )
+        and HEX64.fullmatch(digest)
+    ):
+        raise EvidenceError("evidence binding schema or digest is invalid")
     body = dict(binding)
     body.pop("binding_sha256")
     _require(
@@ -1208,7 +1213,7 @@ def _sealed_member_bytes(bundle: Path) -> list[tuple[str, bytes]]:
             f"sealed evidence file must have one link: {relative}",
         )
         members.append((relative, _read_bytes_file(path)))
-    _require(members, "sealed evidence bundle is empty")
+    _require(bool(members), "sealed evidence bundle is empty")
     return members
 
 
@@ -1233,10 +1238,12 @@ def verify_sealed_archive(
             for member in archive.getmembers():
                 name = member.name
                 _require(
-                    name
-                    and not name.startswith("/")
-                    and ".." not in Path(name).parts
-                    and name not in seen,
+                    bool(
+                        name
+                        and not name.startswith("/")
+                        and ".." not in Path(name).parts
+                        and name not in seen
+                    ),
                     f"unsafe or duplicate sealed evidence member: {name!r}",
                 )
                 _require(
@@ -1260,9 +1267,8 @@ def verify_sealed_archive(
                     "sealed member escapes destination",
                 )
                 stream = archive.extractfile(member)
-                _require(
-                    stream is not None, f"cannot read sealed evidence member: {name}"
-                )
+                if stream is None:
+                    raise EvidenceError(f"cannot read sealed evidence member: {name}")
                 data = stream.read()
                 _require(
                     len(data) == member.size,
@@ -1361,11 +1367,13 @@ def unseal_archive(
             for member in archive.getmembers():
                 name = member.name
                 _require(
-                    name
-                    and not name.startswith("/")
-                    and ".." not in Path(name).parts
-                    and name not in seen
-                    and member.isfile(),
+                    bool(
+                        name
+                        and not name.startswith("/")
+                        and ".." not in Path(name).parts
+                        and name not in seen
+                        and member.isfile()
+                    ),
                     f"unsafe sealed evidence member: {name!r}",
                 )
                 _require(
@@ -1385,9 +1393,8 @@ def unseal_archive(
                     "sealed member escapes destination",
                 )
                 stream = archive.extractfile(member)
-                _require(
-                    stream is not None, f"cannot read sealed evidence member: {name}"
-                )
+                if stream is None:
+                    raise EvidenceError(f"cannot read sealed evidence member: {name}")
                 data = stream.read()
                 _require(
                     len(data) == member.size,

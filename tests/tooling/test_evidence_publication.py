@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location(
     "evidence_publication", ROOT / "tools/evidence_publication.py"
 )
+if spec is None or spec.loader is None:
+    raise RuntimeError("evidence publication module specification is unavailable")
 publication = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(publication)
 REAL_VERIFY_VIDEO = publication.verify_video
@@ -109,7 +111,7 @@ class EvidencePublicationTests(unittest.TestCase):
                 "event": "workflow_dispatch",
             },
         }
-        self.run = {
+        self.run_record = {
             "id": RUN_ID,
             "run_attempt": ATTEMPT,
             "head_sha": SOURCE,
@@ -155,7 +157,7 @@ class EvidencePublicationTests(unittest.TestCase):
         )
 
     def admit(self):
-        publication.github_run(self.run, SOURCE, RUN_ID, ATTEMPT)
+        publication.github_run(self.run_record, SOURCE, RUN_ID, ATTEMPT)
         reviewer = publication.github_approval(
             self.approvals, "Ehsan-Azari", PUBLICATION["run_attempt"]
         )
@@ -365,7 +367,7 @@ class EvidencePublicationTests(unittest.TestCase):
 
     def admitted_snapshot(self):
         source_run = self.root / "source-run.json"
-        source_run.write_bytes(publication.canonical(self.run))
+        source_run.write_bytes(publication.canonical(self.run_record))
         staged = self.root / "admitted-evidence"
         env = {
             "GITHUB_REF": "refs/heads/main",
@@ -748,12 +750,12 @@ class EvidencePublicationTests(unittest.TestCase):
             self.admit()
 
     def test_failed_remote_run_refused(self):
-        self.run["conclusion"] = "failure"
+        self.run_record["conclusion"] = "failure"
         with self.assertRaisesRegex(publication.AdmissionError, "not successful"):
             self.admit()
 
     def test_pr_run_refused(self):
-        self.run["head_branch"] = "feat/untrusted"
+        self.run_record["head_branch"] = "feat/untrusted"
         with self.assertRaisesRegex(publication.AdmissionError, "main source"):
             self.admit()
 
@@ -764,7 +766,7 @@ class EvidencePublicationTests(unittest.TestCase):
             ".github/workflows/v010-shell-runtime-qualification.yml@main/other",
         ):
             with self.subTest(path=path):
-                self.run["path"] = path
+                self.run_record["path"] = path
                 with self.assertRaisesRegex(
                     publication.AdmissionError, "untrusted workflow origin"
                 ):
@@ -777,7 +779,7 @@ class EvidencePublicationTests(unittest.TestCase):
             ".github/workflows/v010-shell-runtime-qualification.yml@refs/heads/main",
         ):
             with self.subTest(path=path):
-                self.run["path"] = path
+                self.run_record["path"] = path
                 self.admit()
 
     def test_publication_preflight_workflow_path_matches_python_admission(self):
@@ -805,7 +807,7 @@ class EvidencePublicationTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 run_file.write_text(
-                    json.dumps({**self.run, "path": path}), encoding="utf-8"
+                    json.dumps({**self.run_record, "path": path}), encoding="utf-8"
                 )
                 result = subprocess.run(
                     [
@@ -825,7 +827,7 @@ class EvidencePublicationTests(unittest.TestCase):
                 self.assertEqual(result.returncode == 0, permitted, result.stderr)
 
     def test_wrong_run_attempt_refused(self):
-        self.run["run_attempt"] = 1
+        self.run_record["run_attempt"] = 1
         with self.assertRaisesRegex(publication.AdmissionError, "run/attempt mismatch"):
             self.admit()
 
@@ -1077,6 +1079,64 @@ class EvidencePublicationTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(publication.AdmissionError, "container"):
                 REAL_VERIFY_VIDEO(self.bundle / "workstation-runtime.mkv")
+
+
+class EvidencePublicationCliTests(unittest.TestCase):
+    def _arguments(self, approval_file: Path | None, approved_at: str | None):
+        return publication.argparse.Namespace(
+            command="publish",
+            directory=Path("/nonexistent/bundle"),
+            run_json=Path("/nonexistent/run.json"),
+            approval_json=approval_file,
+            category="baselines",
+            source_sha=SOURCE,
+            run_id=RUN_ID,
+            attempt=ATTEMPT,
+            actor="test-actor",
+            reason="test",
+            approved_at=approved_at,
+            admission_sha256=None,
+        )
+
+    def test_missing_approval_provenance_fails_before_publishing(self):
+        cases = (
+            (None, DATE),
+            (Path("/nonexistent/approval.json"), None),
+            (None, None),
+        )
+        for approval_file, approved_at in cases:
+            with self.subTest(approval_file=approval_file, approved_at=approved_at):
+                arguments = self._arguments(approval_file, approved_at)
+                with (
+                    patch.object(
+                        publication.argparse.ArgumentParser,
+                        "parse_args",
+                        return_value=arguments,
+                    ),
+                    patch.object(publication, "load_policy", return_value={}),
+                    patch.object(publication, "publish") as publisher,
+                ):
+                    self.assertEqual(publication.main(), 1)
+                    publisher.assert_not_called()
+
+    def test_valid_approval_provenance_is_forwarded_without_casts(self):
+        approval_file = Path("/nonexistent/approval.json")
+        arguments = self._arguments(approval_file, DATE)
+        with (
+            patch.object(
+                publication.argparse.ArgumentParser,
+                "parse_args",
+                return_value=arguments,
+            ),
+            patch.object(publication, "load_policy", return_value={}),
+            patch.object(
+                publication, "publish", return_value="index/test"
+            ) as publisher,
+        ):
+            self.assertEqual(publication.main(), 0)
+        publisher.assert_called_once()
+        self.assertEqual(publisher.call_args.args[2], approval_file)
+        self.assertEqual(publisher.call_args.args[9], DATE)
 
 
 if __name__ == "__main__":

@@ -819,7 +819,7 @@ def finalize_run(source_root: Path, state_root: Path) -> dict[str, Any]:
             if fixture_binding != expected_binding:
                 raise RunnerError("Q11 candidate fixture enrollment binding mismatch")
             fixture_path, _ = _binding(
-                frozen_bundle, fixture_binding["contract"], "candidate fixture"
+                frozen_bundle, expected_binding["contract"], "candidate fixture"
             )
             if _read_json(fixture_path) != state["fixture"]:
                 raise RunnerError("Q11 candidate fixture payload mismatch")

@@ -2,9 +2,6 @@ line-length = 88
 target-version = "py312"
 preview = false
 
-[per-file-target-version]
-"bindings/python/**/*.py" = "py310"
-
 [lint]
 select = ["E4", "E7", "E9", "F"]
 

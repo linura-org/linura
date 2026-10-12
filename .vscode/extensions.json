@@ -4,6 +4,10 @@
     "ms-python.python",
     "ms-python.vscode-pylance",
     "charliermarsh.ruff",
-    "streetsidesoftware.code-spell-checker"
+    "streetsidesoftware.code-spell-checker",
+    "xaver.clang-format",
+    "esbenp.prettier-vscode",
+    "JohnnyMorganz.stylua",
+    "foxundermoon.shell-format"
   ]
 }

@@ -40,6 +40,12 @@ def require(ok: bool, message: str) -> None:
         raise AdmissionError(message)
 
 
+def require_object(value: object, message: str) -> dict[str, Any]:
+    if type(value) is not dict:
+        raise AdmissionError(message)
+    return value
+
+
 def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -195,7 +201,9 @@ def verified_bundle(
         sidecar.read_text(encoding="ascii") == f"{sha256(manifest_file)}  {MANIFEST}\n",
         "manifest checksum sidecar mismatch",
     )
-    manifest = parse_json(manifest_file.read_text(encoding="utf-8"))
+    manifest = require_object(
+        parse_json(manifest_file.read_text(encoding="utf-8")), "unknown evidence schema"
+    )
     require(
         type(manifest) is dict and manifest.get("schema_version") == 1,
         "unknown evidence schema",
@@ -212,7 +220,7 @@ def verified_bundle(
         "unexpected qualification claim",
     )
     require(manifest.get("target_profile") == "arch-hyprland-v1", "profile mismatch")
-    workflow = manifest.get("workflow")
+    workflow = require_object(manifest.get("workflow"), "workflow provenance mismatch")
     require(
         isinstance(workflow, dict)
         and workflow.get("run_id") == run_id
@@ -228,7 +236,9 @@ def verified_bundle(
         workflow.get("event") == "workflow_dispatch",
         "evidence must come from a trusted main workflow dispatch",
     )
-    cases = manifest.get("cases")
+    cases = require_object(
+        manifest.get("cases"), "qualification cases not independently passed"
+    )
     require(
         type(cases) is dict
         and bool(cases)
@@ -238,7 +248,9 @@ def verified_bundle(
         ),
         "qualification cases not independently passed",
     )
-    artifacts = manifest.get("artifacts")
+    artifacts = require_object(
+        manifest.get("artifacts"), "missing canonical case-results artifact binding"
+    )
     require(
         type(artifacts) is dict and bool(artifacts) and "cases.tsv" in artifacts,
         "missing canonical case-results artifact binding",
@@ -250,12 +262,20 @@ def verified_bundle(
     runtime_contract = tomllib.loads(runtime_contract_file.read_text(encoding="utf-8"))
     expected_cases = runtime_contract["required_cases"]
     require(
+        isinstance(expected_cases, list)
+        and all(isinstance(name, str) for name in expected_cases),
+        "runtime case contract must contain string case names",
+    )
+    require(
         type(expected_cases) is list
         and len(expected_cases) == len(set(expected_cases))
         and set(cases) == set(expected_cases),
         "runtime case set is incomplete or differs from the current publication contract",
     )
-    runtime_binding = manifest.get("runtime_contract")
+    runtime_binding = require_object(
+        manifest.get("runtime_contract"),
+        "runtime qualification contract binding mismatch",
+    )
     require(
         type(runtime_binding) is dict
         and runtime_binding.get("path")
@@ -274,7 +294,9 @@ def verified_bundle(
         require(case_id not in retained_cases, "duplicate retained runtime case")
         retained_cases[case_id] = outcome
     require(retained_cases == cases, "retained runtime cases differ from manifest")
-    record = manifest.get("workstation_recording")
+    record = require_object(
+        manifest.get("workstation_recording"), "missing Level A recording"
+    )
     require(
         isinstance(record, dict)
         and record.get("scope") == "captured-automated-wayland-session",
@@ -284,6 +306,7 @@ def verified_bundle(
     require(
         recording_name == "workstation-runtime.mkv", "unexpected Level A recording path"
     )
+    recording_name = "workstation-runtime.mkv"
     metadata_name = "workstation-runtime.metadata.json"
     digest_name = "workstation-runtime.sha256"
     # The real Level A manifest binds the video/sidecars in workstation_recording,
@@ -330,7 +353,10 @@ def verified_bundle(
         "recording size outside the Level A contract bounds",
     )
     video_summary = verify_video(directory / recording_name)
-    meta = parse_json((directory / metadata_name).read_text(encoding="utf-8"))
+    meta = require_object(
+        parse_json((directory / metadata_name).read_text(encoding="utf-8")),
+        "recording metadata mismatch",
+    )
     required_metadata = {
         "schema_version": 1,
         "recording": recording_name,
@@ -453,14 +479,20 @@ def validate_approval_provenance(
         timestamp.tzinfo is not None and timestamp.utcoffset() is not None,
         "admission timestamp requires timezone",
     )
+    publication_run = require_object(
+        publication_run, "exact publication run provenance is required"
+    )
+    publication_run_id = publication_run.get("run_id")
+    publication_attempt = publication_run.get("run_attempt")
+    publication_head_sha = publication_run.get("head_sha")
     require(
         type(publication_run) is dict
-        and type(publication_run.get("run_id")) is int
-        and publication_run["run_id"] > 0
-        and type(publication_run.get("run_attempt")) is int
-        and publication_run["run_attempt"] == 1
-        and isinstance(publication_run.get("head_sha"), str)
-        and SHA.fullmatch(publication_run["head_sha"]) is not None
+        and type(publication_run_id) is int
+        and publication_run_id > 0
+        and type(publication_attempt) is int
+        and publication_attempt == 1
+        and isinstance(publication_head_sha, str)
+        and SHA.fullmatch(publication_head_sha) is not None
         and publication_run.get("workflow_ref")
         == "linura-org/linura/.github/workflows/publish-qualification-evidence.yml@refs/heads/main",
         "exact publication run provenance is required",
@@ -778,7 +810,9 @@ def read_admission(
     receipt_path = safe_file(directory, ADMISSION, 131072)
     require(sha256(receipt_path) == expected_sha, "admission receipt digest mismatch")
     receipt_bytes = receipt_path.read_bytes()
-    receipt = parse_json(receipt_bytes.decode("utf-8"))
+    receipt = require_object(
+        parse_json(receipt_bytes.decode("utf-8")), "noncanonical admission receipt"
+    )
     require(
         type(receipt) is dict and receipt_bytes == canonical(receipt),
         "noncanonical admission receipt",
@@ -797,8 +831,10 @@ def read_admission(
         and receipt.get("policy_sha256") == sha256(CONTRACT),
         "admission receipt identity or policy mismatch",
     )
-    manifest = receipt.get("manifest")
-    files = receipt.get("files")
+    manifest = require_object(
+        receipt.get("manifest"), "invalid admitted qualification manifest"
+    )
+    files = require_object(receipt.get("files"), "invalid admitted evidence inventory")
     require(
         type(manifest) is dict
         and manifest.get("source_sha") == source
@@ -827,7 +863,8 @@ def read_admission(
     }
     require(set(files) == expected_files, "admission file set mismatch")
     total = 0
-    for name, binding in files.items():
+    for name, raw_binding in files.items():
+        binding = require_object(raw_binding, "invalid admitted file binding")
         require(
             type(name) is str
             and FILE.fullmatch(name) is not None
@@ -891,7 +928,10 @@ def publish(
         "untrusted R2 endpoint",
     )
     require(
-        os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"),
+        bool(
+            os.environ.get("AWS_ACCESS_KEY_ID")
+            and os.environ.get("AWS_SECRET_ACCESS_KEY")
+        ),
         "missing restricted publisher credentials",
     )
     run = parse_json(run_file.read_text(encoding="utf-8"))
@@ -985,22 +1025,22 @@ def main() -> int:
             )
             print(f"credential-free admission passed: {digest}")
         else:
-            require(
-                args.approval_json is not None and args.approved_at is not None,
-                "approved publication provenance required",
-            )
+            approval_file: Path | None = args.approval_json
+            approved_at: str | None = args.approved_at
+            if approval_file is None or approved_at is None:
+                raise AdmissionError("approved publication provenance required")
             print(
                 publish(
                     args.directory,
                     args.run_json,
-                    args.approval_json,
+                    approval_file,
                     args.category,
                     args.source_sha,
                     args.run_id,
                     args.attempt,
                     args.actor,
                     args.reason,
-                    args.approved_at,
+                    approved_at,
                     policy,
                     admission_sha=args.admission_sha256,
                 )

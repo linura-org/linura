@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tomllib
+from typing import TypedDict
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "linura-org/linura"
@@ -214,11 +215,27 @@ def validate_release_intent(source_sha: str, repository: Path = ROOT) -> dict[st
     }
 
 
+class ReleasePreparationMetadata(TypedDict):
+    source_sha: str
+    parent_sha: str
+    qualification_source_sha: str
+    qualification_tree_sha: str
+    changed_files: list[str]
+
+
+class ReleaseContractMetadata(TypedDict):
+    version: str
+    claim_class: str
+    supported_platform_profiles: list[str]
+    pull_requests: list[int]
+    commits: list[str]
+
+
 def validate_release_preparation(
     source_sha: str,
     tag: str,
     repository: Path = ROOT,
-) -> dict[str, object]:
+) -> ReleasePreparationMetadata:
     """Validate a deterministic mechanical release-preparation commit.
 
     This shape is deliberately narrower than a release-intent commit. It may
@@ -312,7 +329,7 @@ def validate_release_preparation(
 
 def validate_contract(
     notes: Path, tag: str, *, require_workspace_version: bool = False
-) -> dict[str, object]:
+) -> ReleaseContractMetadata:
     version = parse_tag(tag)
     if not notes.is_file():
         raise ContractError(f"release contract does not exist: {notes}")

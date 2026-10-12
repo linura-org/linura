@@ -843,7 +843,7 @@ class V010WorkstationQualificationTests(unittest.TestCase):
                 "process_local_mock": False,
                 "event_log": binding(event_log),
             }
-            machine_execution = {
+            machine_execution: dict[str, object] = {
                 "scope": "machine",
                 "environment_sha256": environment_binding["sha256"],
                 "controller": "qemu-host",

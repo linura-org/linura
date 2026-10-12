@@ -33,6 +33,8 @@ def requires_full_qualification(changed: list[str], contract: dict) -> bool:
         or guidance != ["AGENTS.md", "README.md"]
     ):
         raise RoutingError("invalid full-qualification route contract")
+    if not isinstance(exact, list) or not isinstance(prefixes, list):
+        raise RoutingError("invalid full-qualification route contract")
     if not changed:
         return True  # Unknown or empty impact is not a valid fast-lane exemption.
     for path in changed:
@@ -46,6 +48,9 @@ def requires_full_qualification(changed: list[str], contract: dict) -> bool:
             raise RoutingError("unsafe or ambiguous changed path")
         if path in exact:
             return True
-        if path.startswith(tuple(prefixes)) and path.rsplit("/", 1)[-1] not in guidance:
+        if path.startswith(tuple(prefixes)) and path.rsplit("/", 1)[-1] not in (
+            "AGENTS.md",
+            "README.md",
+        ):
             return True
     return False

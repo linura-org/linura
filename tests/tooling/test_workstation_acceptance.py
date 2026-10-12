@@ -448,6 +448,7 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 *args: object, **kwargs: object
             ) -> subprocess.CompletedProcess[str]:
                 command = args[0]
+                assert isinstance(command, (list, tuple))
                 self.assertNotEqual(Path(command[-1]), recording)
                 recording.write_bytes(recording.read_bytes() + b"changed")
                 return subprocess.CompletedProcess(
@@ -613,7 +614,10 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                         workstation_acceptance.AcceptanceError, "alias"
                     ):
                         workstation_acceptance.verify_recording(
-                            recording, contract=self.contract, **kwargs
+                            recording,
+                            contract=self.contract,
+                            metadata_path=kwargs.get("metadata_path"),
+                            digest_path=kwargs.get("digest_path"),
                         )
                     self.assertEqual(recording.read_bytes(), original_bytes)
             self.assertFalse((root / "recording.sha256").exists())
@@ -1139,6 +1143,7 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 text=True,
             )
             try:
+                assert holder.stdout is not None
                 self.assertEqual(holder.stdout.readline().strip(), "LOCKED")
                 self.assertEqual(lock.stat().st_mode & 0o777, 0o600)
                 second = subprocess.run(

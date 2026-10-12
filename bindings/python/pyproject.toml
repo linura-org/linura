@@ -10,10 +10,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "linura"
-version = "0.0.1"
+version = "0.0.2"
 description = "Official Python entry point for Linura, the intelligent system layer for Linux."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Linura contributors" }]
 keywords = ["linux", "automation", "agents", "system-management", "control-plane"]
@@ -23,6 +23,7 @@ classifiers = [
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
   "Topic :: System :: Operating System",
 ]
 dependencies = []

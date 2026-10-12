@@ -123,6 +123,22 @@ jobs:
           /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --check services/qualification-publisher/publisher.mjs
           /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --check services/qualification-publisher/server.mjs
           /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --test services/qualification-publisher/test/*.test.mjs
+      - name: Verify pinned Python basic-mode typing
+        shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}
+        env:
+          NODE_OPTIONS: ''
+          BASH_ENV: ''
+          ENV: ''
+          SHELLOPTS: ''
+          BASHOPTS: ''
+        run: |
+          set -euo pipefail
+          typing_root="${RUNNER_TEMP:?}/linura-python-typecheck"
+          mkdir -p "$typing_root"
+          cp tools/python-typecheck/package.json tools/python-typecheck/package-lock.json "$typing_root/"
+          npm ci --prefix "$typing_root" --ignore-scripts --omit=optional --no-audit --no-fund
+          test "$(node -p 'require(process.argv[1]).version' "$typing_root/node_modules/pyright/package.json")" = '1.1.408'
+          node "$typing_root/node_modules/pyright/index.js" --project pyrightconfig.json
       - name: Validate Python tooling syntax before builds
         run: python3 -m compileall -q scripts tools tests/tooling
       - name: Validate CI dependency cache policy before builds
@@ -297,7 +313,7 @@ jobs:
           PYTHONPATH="$install_dir" python3 - <<'PY'
           import linura
 
-          assert linura.__version__ == "0.0.1"
+          assert linura.__version__ == "0.0.2"
           assert linura.CONTROL1_SERVICE == "org.linura.Control1"
           assert linura.find_installation(path="") is None
           PY

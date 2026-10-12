@@ -130,7 +130,7 @@ def version_key(value: str) -> tuple[int, int, int]:
     match = VERSION_RE.fullmatch(value)
     if match is None:
         raise ValueError(f"invalid semantic milestone version: {value!r}")
-    return tuple(int(part) for part in match.groups())
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
 
 
 def _sha256(path: Path) -> str:
@@ -666,7 +666,10 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
 
     def dependency_closure(version: str) -> set[str]:
         visited: set[str] = set()
-        stack = list(by_version.get(version, {}).get("depends_on", []))
+        dependencies = by_version.get(version, {}).get("depends_on", [])
+        if not isinstance(dependencies, list):
+            raise ValueError(f"{version}: depends_on must be a list")
+        stack = list(dependencies)
         while stack:
             dependency = stack.pop()
             if not isinstance(dependency, str) or dependency in visited:

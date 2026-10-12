@@ -242,7 +242,8 @@ def validate(root: Path, *, as_of: date | None = None) -> list[str]:
     else:
         start = headers[0] + 1
         separator = re.compile(r"(?:\|[ \t]*:?-{3,}:?[ \t]*){5}\|")
-        if start >= len(lines) or separator.fullmatch(lines[start]) is None:
+        separator_line = lines[start] if start < len(lines) else None
+        if separator_line is None or separator.fullmatch(separator_line) is None:
             failures.append("invalid radar table separator")
         else:
             for line in lines[start + 1 :]:

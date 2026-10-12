@@ -21,6 +21,10 @@ class PythonPackageContractTests(unittest.TestCase):
         self.assertEqual(metadata["name"], "linura")
         self.assertEqual(metadata["version"], linura.__version__)
         self.assertEqual(metadata["dependencies"], [])
+        self.assertEqual(metadata["version"], "0.0.2")
+        self.assertEqual(metadata["requires-python"], ">=3.12")
+        self.assertIn("Programming Language :: Python :: 3.12", metadata["classifiers"])
+        self.assertEqual(linura.__version__, "0.0.2")
 
     def test_build_environment_is_fully_pinned(self) -> None:
         metadata = tomllib.loads(

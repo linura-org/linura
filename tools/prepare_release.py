@@ -20,7 +20,7 @@ def _version_tuple(value: str) -> tuple[int, int, int]:
     match = re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", value)
     if match is None:
         raise PreparationError(f"invalid workspace version: {value!r}")
-    return tuple(int(part) for part in match.groups())
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
 
 
 def _workspace_package_names(root: Path, workspace: dict[str, object]) -> set[str]:

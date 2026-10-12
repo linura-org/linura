@@ -29,6 +29,7 @@ class NativeFocusReadinessTests(unittest.TestCase):
         def function(name):
             match = re.search(r"^" + name + r"\(\) \{\n.*?^\}", text, re.M | re.S)
             self.assertIsNotNone(match)
+            assert match is not None
             return match.group()
 
         with tempfile.TemporaryDirectory() as directory:
@@ -239,6 +240,7 @@ class NativeKeyboardProducerTests(unittest.TestCase):
             stderr=subprocess.PIPE,
             text=True,
         )
+        assert process.stdout is not None and process.stdin is not None
         self.assertEqual(process.stdout.readline().strip(), "ready")
         process.stdin.write("hold\n")
         process.stdin.flush()

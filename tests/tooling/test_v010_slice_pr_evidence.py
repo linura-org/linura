@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "tools" / "verify_v010_slice_pr_evidence.py"
@@ -131,56 +132,53 @@ class V010SlicePREvidenceTests(unittest.TestCase):
         self.assertFalse(verifier.evidence_seal_path_allowed(paths[1]))
 
     def test_slice_scope_requires_added_or_modified_owned_path(self) -> None:
-        original = verifier.pr_file_records
-        try:
-            for status in ("added", "modified"):
-                with self.subTest(status=status):
-                    verifier.pr_file_records = (
-                        lambda repository, number, status=status: [
-                            {
-                                "filename": "apps/linurad/src/session_audio.rs",
-                                "status": status,
-                            }
-                        ]
-                    )
-                    verifier.require_slice_scope("linura-org/linura", 154, "S08")
-        finally:
-            verifier.pr_file_records = original
+        for status in ("added", "modified"):
+            with (
+                self.subTest(status=status),
+                mock.patch.object(
+                    verifier,
+                    "pr_file_records",
+                    lambda repository, number, status=status: [
+                        {
+                            "filename": "apps/linurad/src/session_audio.rs",
+                            "status": status,
+                        }
+                    ],
+                ),
+            ):
+                verifier.require_slice_scope("linura-org/linura", 154, "S08")
 
     def test_slice_scope_rejects_deleted_owned_path(self) -> None:
-        original = verifier.pr_file_records
-        try:
-            verifier.pr_file_records = lambda repository, number: [
-                {
-                    "filename": "apps/linurad/src/session_audio.rs",
-                    "status": "removed",
-                }
-            ]
+        with mock.patch.object(
+            verifier,
+            "pr_file_records",
+            return_value=[
+                {"filename": "apps/linurad/src/session_audio.rs", "status": "removed"}
+            ],
+        ):
             with self.assertRaisesRegex(
                 verifier.EvidenceError,
                 "does not add or modify a canonical owned path",
             ):
                 verifier.require_slice_scope("linura-org/linura", 154, "S08")
-        finally:
-            verifier.pr_file_records = original
 
     def test_slice_scope_rejects_renamed_only_owned_path(self) -> None:
-        original = verifier.pr_file_records
-        try:
-            verifier.pr_file_records = lambda repository, number: [
+        with mock.patch.object(
+            verifier,
+            "pr_file_records",
+            return_value=[
                 {
                     "filename": "apps/linurad/src/session_audio.rs",
                     "previous_filename": "apps/linurad/src/legacy_audio.rs",
                     "status": "renamed",
                 }
-            ]
+            ],
+        ):
             with self.assertRaisesRegex(
                 verifier.EvidenceError,
                 "does not add or modify a canonical owned path",
             ):
                 verifier.require_slice_scope("linura-org/linura", 154, "S08")
-        finally:
-            verifier.pr_file_records = original
 
     def test_scope_matching_rejects_unrelated_paths(self) -> None:
         self.assertFalse(verifier.path_matches_slice("S18", "README.md"))

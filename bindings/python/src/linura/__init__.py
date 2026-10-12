@@ -12,7 +12,7 @@ from pathlib import Path
 import shutil
 from typing import Final
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 
 NAME: Final = "Linura"
 HOMEPAGE: Final = "https://linura.org"

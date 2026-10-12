@@ -137,6 +137,25 @@ class ValidationGateTests(unittest.TestCase):
                 )
                 target.write_text(original, encoding="utf-8")
 
+    def test_cross_language_source_formatting_cannot_be_skipped(self):
+        target = self.root / "tools/xtask/src/main.rs"
+        original = target.read_text(encoding="utf-8")
+        invocation = '    run("python3", &["tools/check_source_formatting.py"])?;'
+        self.assertEqual(original.count(invocation), 1)
+        try:
+            target.write_text(original.replace(invocation, "", 1), encoding="utf-8")
+            errors = gates.check(self.root)
+            self.assertTrue(
+                any(
+                    "canonical xtask execution sequence changed" in error
+                    for error in errors
+                ),
+                errors,
+            )
+        finally:
+            target.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
     def test_checked_in_contract(self):
         self.assertEqual(gates.check(ROOT), [])
 
@@ -783,6 +802,7 @@ class ValidationGateTests(unittest.TestCase):
                         original,
                     )
                     self.assertIsNotNone(marker)
+                    assert marker is not None
                     indent = marker.group(1)
                     injected = (
                         indent
@@ -803,6 +823,7 @@ class ValidationGateTests(unittest.TestCase):
                         original[marker.end() :],
                     )
                     self.assertIsNotNone(following)
+                    assert following is not None
                     pos = marker.end() + following.start()
                     target.write_text(
                         original[:pos] + injected + original[pos:],
@@ -1415,7 +1436,11 @@ class ValidationGateTests(unittest.TestCase):
         reviewed_shell = (
             "        shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}\n"
         )
-        self.assertEqual(original.count(reviewed_shell), 1)
+        publisher_step = original.split(
+            "      - name: Validate trusted qualification publisher in canonical CI\n",
+            1,
+        )[1].split("      - name:", 1)[0]
+        self.assertEqual(publisher_step.count(reviewed_shell), 1)
         attacks = (
             ("remove explicit shell", ""),
             ("use PATH-resolved Bash", "        shell: bash\n"),
@@ -1696,6 +1721,7 @@ class ValidationGateTests(unittest.TestCase):
                     original,
                 )
                 self.assertIsNotNone(pin, action)
+                assert pin is not None
                 old = action + pin.group(1)
                 path.write_text(
                     original.replace(old, action + "main", 1), encoding="utf-8"
@@ -1723,6 +1749,7 @@ class ValidationGateTests(unittest.TestCase):
                 original,
             )
             self.assertIsNotNone(match, action)
+            assert match is not None
             pins[action] = match.group(1)
         self.assertEqual(pins[actions[0]], pins[actions[1]])
 
@@ -2444,6 +2471,7 @@ class ValidationGateTests(unittest.TestCase):
                 continue  # Reusable-workflow caller has no executable steps.
             first = re.search(r"(?m)^      - name: ([^\r\n]+)$", body or "")
             self.assertIsNotNone(first, (name, job))
+            assert first is not None
             marker = first.group(0) + "\n"
             self.assertIn(marker, original)
             for directive in (
@@ -3322,10 +3350,13 @@ class ValidationGateTests(unittest.TestCase):
         workflow = ".github/workflows/v010-qualification.yml"
         source = (self.root / workflow).read_text()
         events = gates.section(source, "on")
+        assert events is not None
         pr = gates.section(events, "pull_request", 2)
+        assert pr is not None
         paths = gates.section(pr, "paths", 4)
         import re
 
+        assert paths is not None
         patterns = re.findall(r'(?m)^      - "([^"]+)"\s*$', paths)
         for guidance in gates.GUIDANCE_EXCLUSIONS["v010"]:
             with self.subTest(path=guidance):

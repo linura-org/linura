@@ -31,6 +31,24 @@ def _require(condition: bool, message: str) -> None:
         raise VerificationError(message)
 
 
+def _required_object(value: object, message: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise VerificationError(message)
+    return value
+
+
+def _required_list(value: object, message: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise VerificationError(message)
+    return value
+
+
+def _required_match(value: re.Match[str] | None, message: str) -> re.Match[str]:
+    if value is None:
+        raise VerificationError(message)
+    return value
+
+
 def _stable_bytes(path: Path) -> bytes:
     _require(hasattr(os, "O_NOFOLLOW"), "no-follow file opens are unavailable")
     flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
@@ -164,7 +182,8 @@ def _sha256(path: Path) -> str:
 
 def _repo_file(root: Path, relative: str) -> Path:
     _require(
-        relative and not relative.startswith("/"), "repository path must be relative"
+        bool(relative and not relative.startswith("/")),
+        "repository path must be relative",
     )
     _require(".." not in Path(relative).parts, "repository path may not traverse")
     path = root / relative
@@ -181,7 +200,8 @@ def _repo_file(root: Path, relative: str) -> Path:
 
 def _bundle_file(bundle: Path, name: str) -> Path:
     _require(
-        name and Path(name).name == name, f"unsafe verifier artifact name: {name!r}"
+        bool(name and Path(name).name == name),
+        f"unsafe verifier artifact name: {name!r}",
     )
     path = bundle / name
     _require(
@@ -203,7 +223,7 @@ def _common_primary(primary: dict[str, Any], envelope: dict[str, Any]) -> None:
 
 
 def _artifact_digest_record(root: Path, record: object, label: str) -> None:
-    _require(isinstance(record, dict), f"{label} artifact binding is missing")
+    record = _required_object(record, f"{label} artifact binding is missing")
     _require(
         set(record) == {"path", "sha256", "size"},
         f"{label} artifact binding fields drifted",
@@ -237,7 +257,7 @@ def _cargo_log(
         f"{label} contains a failed test",
     )
     matches = re.findall(r"test result: ok\. ([0-9]+) passed; ([0-9]+) failed;", text)
-    _require(matches, f"{label} cargo result summary is missing")
+    _require(bool(matches), f"{label} cargo result summary is missing")
     _require(
         all(int(failed) == 0 for _, failed in matches), f"{label} reports failed tests"
     )
@@ -258,8 +278,11 @@ def _cargo_log(
 
 def _envelope_guest_environment(envelope: dict[str, Any]) -> dict[str, Any]:
     subject = envelope.get("execution_subject")
+    subject = _required_object(
+        subject, "lane did not execute in a verified virtual-machine subject"
+    )
     _require(
-        isinstance(subject, dict) and subject.get("kind") == "virtual-machine",
+        subject.get("kind") == "virtual-machine",
         "lane did not execute in a verified virtual-machine subject",
     )
     for key in (
@@ -279,10 +302,12 @@ def _require_base_image_binding(
     primary: dict[str, Any], envelope: dict[str, Any]
 ) -> None:
     subject = _envelope_guest_environment(envelope)
-    images = subject.get("image_digests")
-    _require(isinstance(images, dict), "guest subject image identity is missing")
-    primary_image = primary.get("base_image")
-    _require(isinstance(primary_image, dict), "primary base-image identity is missing")
+    images = _required_object(
+        subject.get("image_digests"), "guest subject image identity is missing"
+    )
+    primary_image = _required_object(
+        primary.get("base_image"), "primary base-image identity is missing"
+    )
     _require(
         primary_image.get("sha256") == images.get("base_image_sha256"),
         "primary base image does not match execution envelope",
@@ -386,7 +411,9 @@ def _verify_vm(
     _require(
         result.get("result") == "passed", "VM runner did not complete successfully"
     )
-    scenario = result.get("scenario")
+    scenario = _required_object(
+        result.get("scenario"), "VM runner scenario identity is malformed"
+    )
     _require(
         isinstance(scenario, dict) and set(scenario) == {"id", "path", "sha256"},
         "VM runner scenario identity is malformed",
@@ -406,10 +433,15 @@ def _verify_vm(
     scenario_payload = _json(scenario_path)
     _require(scenario_payload.get("schema_version") == 1, "VM scenario schema mismatch")
     _require(scenario_payload.get("id") == scenario["id"], "VM scenario id mismatch")
-    expected_steps = scenario_payload.get("steps")
-    observed_steps = result.get("steps")
+    expected_steps = _required_list(
+        scenario_payload.get("steps"), "VM scenario has no steps"
+    )
+    observed_steps = _required_list(
+        result.get("steps"), "VM runner step inventory mismatch"
+    )
     _require(
-        isinstance(expected_steps, list) and expected_steps, "VM scenario has no steps"
+        bool(isinstance(expected_steps, list) and expected_steps),
+        "VM scenario has no steps",
     )
     _require(
         isinstance(observed_steps, list) and len(observed_steps) == len(expected_steps),
@@ -426,6 +458,8 @@ def _verify_vm(
             isinstance(command, str) and isinstance(name, str),
             "VM scenario step is invalid",
         )
+        if not isinstance(command, str):
+            raise VerificationError("VM scenario step is invalid")
         expected_digest = hashlib.sha256(command.encode("utf-8")).hexdigest()
         _require(
             observed
@@ -439,10 +473,13 @@ def _verify_vm(
 
     _require_base_image_binding(primary, envelope)
     subject = _envelope_guest_environment(envelope)
-    qualification = primary.get("qualification_environment")
-    _require(isinstance(qualification, dict), "VM qualification environment is missing")
-    guest = qualification.get("guest_observation")
-    _require(isinstance(guest, dict), "VM guest observation is missing")
+    qualification = _required_object(
+        primary.get("qualification_environment"),
+        "VM qualification environment is missing",
+    )
+    guest = _required_object(
+        qualification.get("guest_observation"), "VM guest observation is missing"
+    )
     for key in (
         "architecture",
         "virtualization",
@@ -453,9 +490,11 @@ def _verify_vm(
             guest.get(key) == subject.get(key), f"VM guest environment mismatch: {key}"
         )
 
-    binaries = primary.get("binaries")
+    binaries = _required_object(
+        primary.get("binaries"), "VM executable identity evidence is missing"
+    )
     _require(
-        isinstance(binaries, dict) and binaries,
+        bool(isinstance(binaries, dict) and binaries),
         "VM executable identity evidence is missing",
     )
     for name, binding in binaries.items():
@@ -473,6 +512,7 @@ def _verify_vm(
             isinstance(host, dict) and guest_binding == host,
             f"VM installed bytes differ: {name}",
         )
+        host = _required_object(host, f"VM installed bytes differ: {name}")
         _require(
             HEX64.fullmatch(str(host.get("sha256", ""))) is not None,
             f"VM binary digest invalid: {name}",
@@ -512,7 +552,9 @@ def _verify_v04_durability(
         "v0.4 durability hypervisor claim mismatch",
     )
     _require_base_image_binding(primary, envelope)
-    probe = primary.get("probe")
+    probe = _required_object(
+        primary.get("probe"), "v0.4 durability probe binding is malformed"
+    )
     _require(
         isinstance(probe, dict) and set(probe) == {"source", "host_executable"},
         "v0.4 durability probe binding is malformed",
@@ -700,6 +742,18 @@ def _verify_v04_enospc(
         "unexpected terminal snapshot" not in witness,
         "v0.4 ENOSPC witness contains terminal-state failure",
     )
+    available_before = _required_match(
+        available_before, "v0.4 ENOSPC pre-retirement witness missing"
+    )
+    available_after = _required_match(
+        available_after, "v0.4 ENOSPC independent witness missing"
+    )
+    reserve_allocated = _required_match(
+        reserve_allocated, "v0.4 ENOSPC reserve witness missing"
+    )
+    filler_allocated = _required_match(
+        filler_allocated, "v0.4 ENOSPC pressure witness missing"
+    )
     return _outcome(
         adapter="v04-enospc-semantic-v1",
         test_ids=["qualification/v0.4/enospc-recovery/result-v1"],
@@ -759,13 +813,17 @@ def _verify_v05(
         pre is not None and post is not None and int(post.group(1)) > int(pre.group(1)),
         "v0.5 transcript does not prove a fresh activation",
     )
-    artifacts = primary.get("artifacts")
+    artifacts = _required_object(
+        primary.get("artifacts"), "v0.5 repository artifact bindings are missing"
+    )
     _require(
-        isinstance(artifacts, dict) and artifacts,
+        bool(artifacts),
         "v0.5 repository artifact bindings are missing",
     )
     for name, record in artifacts.items():
         _artifact_digest_record(root, record, f"v0.5 {name}")
+    pre = _required_match(pre, "v0.5 pre-activation witness missing")
+    post = _required_match(post, "v0.5 post-activation witness missing")
     return _outcome(
         adapter="v05-executor-verifier-semantic-v1",
         test_ids=["qualification/v0.5/executor-verifier/result-v1"],
@@ -829,9 +887,11 @@ def _verify_v06(
         isinstance(fault_matrix, dict) and fault_matrix.get("cases") == 11,
         "v0.6 primary fault-matrix cardinality mismatch",
     )
-    artifacts = primary.get("artifacts")
+    artifacts = _required_object(
+        primary.get("artifacts"), "v0.6 repository artifact bindings are missing"
+    )
     _require(
-        isinstance(artifacts, dict) and artifacts,
+        bool(artifacts),
         "v0.6 repository artifact bindings are missing",
     )
     for name, record in artifacts.items():
@@ -914,7 +974,9 @@ def _verify_v07(
         primary.get("imported_approval_or_executor_authority") is False,
         "v0.7 imported authority boundary drifted",
     )
-    scenarios = primary.get("qualified_scenarios")
+    scenarios = _required_list(
+        primary.get("qualified_scenarios"), "v0.7 qualified-scenario inventory mismatch"
+    )
     _require(
         isinstance(scenarios, list) and len(scenarios) == 23,
         "v0.7 qualified-scenario inventory mismatch",
@@ -1009,8 +1071,12 @@ def _verify_v08(
         primary.get("control_acceptance_persistent_key_required") is True,
         "v0.8 Control persistent-key boundary drifted",
     )
-    source_contracts = primary.get("source_contracts")
-    rust_tests = primary.get("rust_tests")
+    source_contracts = _required_list(
+        primary.get("source_contracts"), "v0.8 source-contract inventory mismatch"
+    )
+    rust_tests = _required_list(
+        primary.get("rust_tests"), "v0.8 reviewed Rust-test inventory mismatch"
+    )
     _require(
         isinstance(source_contracts, list)
         and len(source_contracts) == 14
@@ -1057,9 +1123,8 @@ def _verify_v09(
         primary.get("schema_version") == 2 and primary.get("result") == "passed",
         "v0.9 primary result mismatch",
     )
-    qualification_environment = primary.get("qualification_environment")
-    _require(
-        isinstance(qualification_environment, dict),
+    qualification_environment = _required_object(
+        primary.get("qualification_environment"),
         "v0.9 qualification environment is missing",
     )
     _require(
@@ -1137,7 +1202,9 @@ def _verify_v09(
         for index in range(1, 14)
     )
     _require_markers(transcript, required, "v0.9 adversarial transcript")
-    source_contracts = primary.get("source_contracts")
+    source_contracts = _required_list(
+        primary.get("source_contracts"), "v0.9 source-contract inventory mismatch"
+    )
     _require(
         isinstance(source_contracts, list)
         and len(source_contracts) == 12
@@ -1264,9 +1331,11 @@ def _verify_v010(
         "v0.10 recording verifier digest mismatch",
     )
 
-    artifacts = primary.get("artifacts")
+    artifacts = _required_object(
+        primary.get("artifacts"), "v0.10 retained artifact bindings are missing"
+    )
     _require(
-        isinstance(artifacts, dict) and artifacts,
+        bool(artifacts),
         "v0.10 retained artifact bindings are missing",
     )
     for name, binding in artifacts.items():

@@ -21,9 +21,11 @@ A client may save, inspect, export or request adoption of reusable setups throug
 ## Python package
 
 `bindings/python` owns the canonical PyPI distribution and import namespace, both named
-`linura`. Its initial `0.0.1` surface is deliberately narrower than `linura-sdk`:
+`linura`. Its initial `0.0.1` surface was deliberately narrower than `linura-sdk`:
 canonical project metadata, Experimental `Control1` identifiers, and non-executing
-local `linuractl` discovery.
+local `linuractl` discovery. Version `0.0.2` retains that narrow API and raises
+the client minimum to supported Python 3.12; the published `0.0.1` artifacts
+remain immutable.
 
 It contains no authority, policy, provider, executor, verifier, or persistence
 implementation, does not connect to D-Bus, and does not invoke `linuractl`. A future
