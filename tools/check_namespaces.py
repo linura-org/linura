@@ -861,8 +861,15 @@ def check(root: Path) -> list[str]:
         token = item.get("token")
         service = item.get("service")
         bus = item.get("bus")
-        if not all(
-            isinstance(value, str) and value for value in (source, token, service, bus)
+        if not (
+            isinstance(source, str)
+            and source
+            and isinstance(token, str)
+            and token
+            and isinstance(service, str)
+            and service
+            and isinstance(bus, str)
+            and bus
         ):
             failures.append(f"dbus_name_binding #{index} has invalid fields")
             continue
@@ -1020,9 +1027,15 @@ def check(root: Path) -> list[str]:
         path_token = item.get("path_token")
         object_token = item.get("object_token")
         interface = item.get("interface")
-        if not all(
-            isinstance(value, str) and value
-            for value in (source, path_token, object_token, interface)
+        if not (
+            isinstance(source, str)
+            and source
+            and isinstance(path_token, str)
+            and path_token
+            and isinstance(object_token, str)
+            and object_token
+            and isinstance(interface, str)
+            and interface
         ):
             failures.append(f"dbus_registration #{index} has invalid fields")
             continue
@@ -1076,9 +1089,17 @@ def check(root: Path) -> list[str]:
         token = item.get("token")
         action = item.get("action")
         policy = item.get("policy")
-        if not all(
-            isinstance(value, str) and value
-            for value in (source, usage, token, action, policy)
+        if not (
+            isinstance(source, str)
+            and source
+            and isinstance(usage, str)
+            and usage
+            and isinstance(token, str)
+            and token
+            and isinstance(action, str)
+            and action
+            and isinstance(policy, str)
+            and policy
         ):
             failures.append(f"polkit_binding #{index} has invalid fields")
             continue

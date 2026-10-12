@@ -16,3 +16,6 @@ __pycache__/
 *.py[cod]
 
 .artifacts/
+
+# Pinned Python type-checker dependencies
+node_modules/

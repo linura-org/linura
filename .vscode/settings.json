@@ -76,5 +76,52 @@
     "wireplumber",
     "wlroots",
     "xwayland"
-  ]
+  ],
+  "[c]": {
+    "editor.defaultFormatter": "xaver.clang-format",
+    "editor.rulers": [
+      100,
+      120,
+      140
+    ]
+  },
+  "[cpp]": {
+    "editor.defaultFormatter": "xaver.clang-format",
+    "editor.rulers": [
+      100,
+      120,
+      140
+    ]
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.rulers": [
+      100,
+      120,
+      140
+    ]
+  },
+  "[lua]": {
+    "editor.defaultFormatter": "JohnnyMorganz.stylua",
+    "editor.rulers": [
+      100,
+      120,
+      140
+    ]
+  },
+  "[qml]": {
+    "editor.rulers": [
+      100,
+      120,
+      140
+    ]
+  },
+  "[shellscript]": {
+    "editor.defaultFormatter": "foxundermoon.shell-format",
+    "editor.rulers": [
+      100,
+      120,
+      140
+    ]
+  }
 }

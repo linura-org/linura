@@ -1004,6 +1004,8 @@ esac
             fake.chmod(0o755)
             with mock.patch.dict(os.environ, {"PATH": directory}, clear=False):
                 resolved = envelopes._trusted_executable("systemd-detect-virt")
+                self.assertIsNotNone(resolved)
+                assert resolved is not None
                 self.assertNotEqual(Path(resolved), fake)
                 self.assertTrue(Path(resolved).is_absolute())
             environment = envelopes._trusted_command_environment()

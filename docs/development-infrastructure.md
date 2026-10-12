@@ -21,11 +21,40 @@ The language-specific rulers are tiered review guides rather than new compiler s
 
 Rust and Python both format on save, using rustfmt and Ruff respectively. VS Code points to the repository-provisioned Ruff at `${userHome}/.local/bin/ruff`; run `bash scripts/setup_codex_environment.sh` before editing. The extension may otherwise fall back to its bundled executable, so only the pinned CLI and canonical checks are authoritative. `cargo xtask check` enforces both `ruff check .` and `ruff format --check .`, in addition to `cargo fmt --all --check`. To format deliberately, run `cargo fmt --all` and `ruff format .`; run the pinned toolchain before committing.
 
-VS Code indexes the repository's `tools` and Python bindings through `python.analysis.extraPaths`. Linura intentionally does not set `python.defaultInterpreterPath`: a bare `python3` is treated as workspace-relative by the Python extension rather than reliably resolved on `PATH`. Allow VS Code interpreter discovery, then use **Python: Select Interpreter** to select an installed Python 3.12 interpreter. The supported development environment validates Python 3.12 independently of editor selection. The curated `cSpell.words` vocabulary covers project, provider and tooling terms only; it does not suppress Ruff or Pylance diagnostics. Python typing migration is tracked in #217.
+VS Code indexes the repository's `tools` and Python bindings through `python.analysis.extraPaths`. Linura intentionally does not set `python.defaultInterpreterPath`: a bare `python3` is treated as workspace-relative by the Python extension rather than reliably resolved on `PATH`. Allow VS Code interpreter discovery, then use **Python: Select Interpreter** to select an installed Python 3.12 interpreter. The supported development environment validates Python 3.12 independently of editor selection. The sorted `cSpell.words` vocabulary contains only recognized project/provider/tooling terms and does not suppress Ruff or Pylance diagnostics. Python 3.12 basic-mode type checking is pinned to **Pyright 1.1.408** in `tools/python-typecheck/package-lock.json` and enforced in required canonical CI against `pyrightconfig.json`. The lockfile contains the registry tarball integrity digest; the CI installation runs with lifecycle scripts disabled and optional dependencies omitted. Run `npm ci --prefix tools/python-typecheck --ignore-scripts --omit=optional --no-audit --no-fund` and `npm --prefix tools/python-typecheck run check` locally to reproduce the exact diagnostic corpus. The initial migration and authority-sensitive typing corrections are traced by issue #217.
 
-The canonical Ruff version is pinned in `tools/codex/versions.env` and installed from `tools/python/ruff-requirements.lock` with hashes. `ruff.toml` selects `E4`, `E7`, `E9` and `F` explicitly instead of inheriting Ruff's changing default rule set. Repository tooling targets the canonical Python 3.12 host while `bindings/python/**` is checked against its public Python 3.10 minimum. This starts with high-signal Python correctness and compatibility checks; broader style/security categories should be adopted deliberately with a clean migration rather than appearing implicitly after a tool upgrade.
+The canonical Ruff version is pinned in `tools/codex/versions.env` and installed from `tools/python/ruff-requirements.lock` with hashes. `ruff.toml` selects `E4`, `E7`, `E9` and `F` explicitly instead of inheriting Ruff's changing default rule set. Repository tooling and the published Python binding target Python 3.12 or newer; canonical Pyright and Ruff checks enforce the 3.12 minimum. This starts with high-signal Python correctness and compatibility checks; broader style/security categories should be adopted deliberately with a clean migration rather than appearing implicitly after a tool upgrade.
 
-Pylance runs basic workspace analysis for interactive feedback, but Linura does **not** yet have a repository-enforced Python type checker. Before type checking becomes a required gate, evaluate **Pyright versus mypy** against the real scripts, tooling, qualification code and Python binding, then choose one canonical checker and migration plan. Do not make both mandatory by default and create competing diagnostic standards.
+Pylance continues to provide basic-mode workspace diagnostics in VS Code, and canonical CI independently runs the same analyzer family through the pinned Pyright CLI. The target corpus includes `tools`, `scripts`, `tests/tooling`, `bindings/python/src`, `bindings/python/tests`, and `qualification/v010`. These roots are type checked without blanket ignores or downgraded diagnostic severity; other repository languages and isolated Python profiles are not claimed as covered. Pyright was selected rather than introducing a parallel mandatory mypy baseline. Any future expansion or version upgrade must qualify the target corpus on exact committed source and preserve authority and fail-closed behavior.
+
+## Cross-language formatting contracts
+
+Linura's canonical Rust format is `cargo fmt --all --check` under Rust 1.98.0,
+with an explicit 100-column `rustfmt.toml` maximum. Python is governed by
+the hash-locked Ruff 0.16.10 `ruff check .` and `ruff format --check .`
+checks. C/C++ has a versionable Qt-derived `.clang-format` policy
+(100 columns); JavaScript/MJS has `.prettierrc.json` (100 columns);
+Lua has `.stylua.toml`; QML and shell scripts have declared
+`.editorconfig` indentation rules and editor ruler guidance.
+
+The mandatory `cargo xtask check` also executes
+`python3 tools/check_source_formatting.py`. This uses the tracked Git index
+to validate UTF-8, LF line endings, final newlines, absence of NUL bytes
+and tab characters, and trailing whitespace for **every tracked Rust, Python,
+C/C++, JS/MJS, QML, Lua, shell, and CMake source file**. Python multiline
+string literals retain intentional embedded whitespace. Added files become
+covered when staged/tracked. The checker rejects missing and symlinked source
+inputs and does not inspect generated artifacts or untracked build outputs.
+
+The C/C++, JavaScript, QML, Lua and shell-specific reformatting engines are
+**not yet pinned as independently required canonical format gates**.
+Their editor settings and style files establish explicit targets, not proof
+that all existing sources have been normalized by each language formatter.
+Do not autoformat security-sensitive workflows, evidence contracts or
+external-effect command strings en masse; each subsequent language-format
+migration must include an exact-version, integrity-pinned tool installer,
+complete baseline, semantic/adversarial review and a failing CI check before
+claiming format-complete coverage.
 
 ## Deterministic Codex/cloud environment
 

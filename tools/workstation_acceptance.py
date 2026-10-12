@@ -855,6 +855,8 @@ def _sha256(path: Path) -> str:
 
 def _safe_number(value: object, label: str) -> float:
     try:
+        if not isinstance(value, (str, int, float)):
+            raise TypeError("numeric scalar expected")
         number = float(value)
     except (TypeError, ValueError) as error:
         raise AcceptanceError(f"recording {label} is not numeric") from error

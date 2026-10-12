@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+from typing import Literal, overload
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = Path("contracts/qualification-execution-envelopes.toml")
@@ -274,7 +275,7 @@ def _canonical_json(value: object) -> bytes:
 
 def _safe_file(root: Path, relative: str) -> Path:
     _require(
-        isinstance(relative, str) and relative and not relative.startswith("/"),
+        bool(isinstance(relative, str) and relative and not relative.startswith("/")),
         "repository input path must be non-empty and relative",
     )
     parts = Path(relative).parts
@@ -331,9 +332,19 @@ def _trusted_command_environment() -> dict[str, str]:
     }
 
 
+@overload
+def _trusted_executable(name: str, *, required: Literal[True] = True) -> str: ...
+
+
+@overload
+def _trusted_executable(name: str, *, required: Literal[False]) -> str | None: ...
+
+
 def _trusted_executable(name: str, *, required: bool = True) -> str | None:
     candidates = TRUSTED_EXECUTABLES.get(name)
     _require(candidates is not None, f"unknown trusted executable: {name}")
+    if candidates is None:
+        raise EnvelopeError(f"unknown trusted executable: {name}")
     rejected: list[str] = []
     for candidate in candidates:
         try:
@@ -491,14 +502,35 @@ def _git(root: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
+def _required_object(value: object, message: str) -> dict:
+    if not isinstance(value, dict):
+        raise EnvelopeError(message)
+    return value
+
+
+def _required_list(value: object, message: str) -> list:
+    if not isinstance(value, list):
+        raise EnvelopeError(message)
+    return value
+
+
+def _required_string(value: object, message: str) -> str:
+    if not isinstance(value, str):
+        raise EnvelopeError(message)
+    return value
+
+
 def _string_list(value: object, field: str, *, allow_empty: bool = True) -> list[str]:
-    _require(isinstance(value, list), f"{field} must be an array")
+    values = _required_list(value, f"{field} must be an array")
     result: list[str] = []
-    for item in value:
+    for item in values:
         _require(
-            isinstance(item, str) and item, f"{field} entries must be non-empty strings"
+            bool(isinstance(item, str) and item),
+            f"{field} entries must be non-empty strings",
         )
-        result.append(item)
+        result.append(
+            _required_string(item, f"{field} entries must be non-empty strings")
+        )
     _require(len(result) == len(set(result)), f"{field} contains duplicates")
     if not allow_empty:
         _require(bool(result), f"{field} may not be empty")
@@ -514,9 +546,13 @@ def _require_exact_keys(value: dict, expected: set[str], field: str) -> None:
 
 def _single_line(value: object, field: str) -> str:
     _require(
-        isinstance(value, str) and value and "\n" not in value and "\r" not in value,
+        bool(
+            isinstance(value, str) and value and "\n" not in value and "\r" not in value
+        ),
         f"{field} must be a single-line non-empty string",
     )
+    if not isinstance(value, str):
+        raise EnvelopeError(f"{field} must be a single-line non-empty string")
     return value
 
 
@@ -596,15 +632,12 @@ def load_contract(root: Path = ROOT) -> dict:
         "cache policy changed without schema review",
     )
 
-    runners = contract.get("runner")
-    _require(isinstance(runners, dict), "runner profiles are missing")
+    runners = _required_object(contract.get("runner"), "runner profiles are missing")
     _require_exact_keys(runners, {"github_hosted", "physical"}, "runner")
     hosted = runners["github_hosted"]
     physical = runners["physical"]
-    _require(
-        isinstance(hosted, dict) and isinstance(physical, dict),
-        "runner profiles must be tables",
-    )
+    hosted = _required_object(hosted, "runner profiles must be tables")
+    physical = _required_object(physical, "runner profiles must be tables")
     _require_exact_keys(
         hosted,
         {
@@ -684,6 +717,9 @@ def load_contract(root: Path = ROOT) -> dict:
         guest_profiles == expected_guest_profiles,
         "guest execution profiles changed without schema review",
     )
+    guest_profiles = _required_object(
+        guest_profiles, "guest execution profiles changed without schema review"
+    )
 
     expected_v09_shards = [
         {
@@ -701,7 +737,9 @@ def load_contract(root: Path = ROOT) -> dict:
     )
 
     lanes = contract.get("lane")
-    _require(isinstance(lanes, list) and lanes, "lane inventory must be non-empty")
+    _require(
+        bool(isinstance(lanes, list) and lanes), "lane inventory must be non-empty"
+    )
     seen: set[str] = set()
     targets: dict[str, str] = {}
     shared_target_pairs = frozenset(
@@ -710,8 +748,8 @@ def load_contract(root: Path = ROOT) -> dict:
             frozenset({"v09-adversarial-security", "v09-adversarial-security-shard"}),
         }
     )
-    for lane in lanes:
-        _require(isinstance(lane, dict), "lane entry must be a table")
+    for lane in _required_list(lanes, "lane inventory must be non-empty"):
+        lane = _required_object(lane, "lane entry must be a table")
         required_lane_fields = {
             "id",
             "kind",
@@ -741,9 +779,12 @@ def load_contract(root: Path = ROOT) -> dict:
             f"invalid lane id: {lane_id!r}",
         )
         _require(lane_id not in seen, f"duplicate lane id: {lane_id}")
+        lane_id = _required_string(lane_id, f"invalid lane id: {lane_id!r}")
         seen.add(lane_id)
         binding = REQUIRED_LANE_BINDINGS.get(lane_id)
         _require(binding is not None, f"unreviewed qualification lane: {lane_id}")
+        if binding is None:
+            raise EnvelopeError(f"unreviewed qualification lane: {lane_id}")
         expected_kind, target_field, target = binding
         _require(lane.get("kind") == expected_kind, f"runner kind drift for {lane_id}")
         _require(
@@ -865,7 +906,7 @@ def _parse_named(values: list[str], option: str) -> dict[str, str]:
     for raw in values:
         name, separator, value = raw.partition("=")
         _require(
-            separator == "=" and NAME.fullmatch(name) is not None and value,
+            bool(separator == "=" and NAME.fullmatch(name) is not None and value),
             f"invalid {option}: {raw!r}",
         )
         _require(name not in result, f"duplicate {option} name: {name}")
@@ -889,7 +930,9 @@ def _verified_caches(values: list[str]) -> dict[str, dict]:
     for name, specification in parsed.items():
         path_text, separator, expected = specification.rpartition("@")
         _require(
-            separator == "@" and path_text and HEX64.fullmatch(expected) is not None,
+            bool(
+                separator == "@" and path_text and HEX64.fullmatch(expected) is not None
+            ),
             f"verified cache {name} must use NAME=PATH@SHA256",
         )
         path = Path(path_text)
@@ -952,11 +995,11 @@ def _parse_source_tree(
         if not record:
             continue
         metadata, separator, path = record.partition(b"\t")
-        _require(separator == b"\t" and path, "unexpected git tree record")
+        _require(bool(separator == b"\t" and path), "unexpected git tree record")
         fields = metadata.decode("ascii").split()
         _require(len(fields) == 3, "unexpected git tree metadata")
         mode, object_type, object_id = fields
-        _require(object_id and path not in entries, "duplicate git tree path")
+        _require(bool(object_id and path not in entries), "duplicate git tree path")
         entries[path] = (mode, object_type, object_id)
     return entries
 
@@ -967,7 +1010,7 @@ def _parse_index(root: Path) -> dict[bytes, tuple[str, str]]:
         if not record:
             continue
         metadata, separator, path = record.partition(b"\t")
-        _require(separator == b"\t" and path, "unexpected git index record")
+        _require(bool(separator == b"\t" and path), "unexpected git index record")
         fields = metadata.decode("ascii").split()
         _require(len(fields) == 3, "unexpected git index metadata")
         mode, object_id, stage = fields
@@ -1187,7 +1230,7 @@ def _runner_identity(contract: dict, lane: dict, environment: dict[str, str]) ->
 
 
 def _validate_runner_binding(contract: dict, lane: dict, runner: object) -> dict:
-    _require(isinstance(runner, dict), "execution envelope runner is missing")
+    runner = _required_object(runner, "execution envelope runner is missing")
     base_fields = {
         "kind",
         "architecture",
@@ -1278,8 +1321,11 @@ def _validate_runner_binding(contract: dict, lane: dict, runner: object) -> dict
 def _validate_observations(
     observations: object, expected_names: set[str], lane_id: str
 ) -> dict[str, str]:
+    observations = _required_object(
+        observations, "execution envelope observation set mismatch"
+    )
     _require(
-        isinstance(observations, dict) and set(observations) == expected_names,
+        set(observations) == expected_names,
         "execution envelope observation set mismatch",
     )
     for name, value in observations.items():
@@ -1361,7 +1407,7 @@ def _validate_execution_subject(
     observations: dict[str, str],
 ) -> dict:
     mode = lane["execution_subject"]
-    _require(isinstance(subject, dict), "execution subject is missing")
+    subject = _required_object(subject, "execution subject is missing")
     if mode == "runner":
         expected = _runner_subject(runner)
         _require(subject == expected, "runner execution subject binding mismatch")
@@ -1471,6 +1517,9 @@ def _execution_subject_binding(
             ],
         }
     _require(captured is not None, "guest lane requires a captured execution subject")
+    captured = _required_object(
+        captured, "guest lane requires a captured execution subject"
+    )
     _require_exact_keys(
         captured, GUEST_CAPTURE_FIELDS, "captured guest execution subject"
     )
@@ -1490,12 +1539,12 @@ def _execution_subject_binding(
 
 
 def _validate_cache_bindings(caches: object, expected_names: set[str]) -> dict:
+    caches = _required_object(caches, "execution envelope verified-cache set mismatch")
     _require(
-        isinstance(caches, dict) and set(caches) == expected_names,
-        "execution envelope verified-cache set mismatch",
+        set(caches) == expected_names, "execution envelope verified-cache set mismatch"
     )
     for name, entry in caches.items():
-        _require(isinstance(entry, dict), f"invalid verified-cache binding: {name}")
+        entry = _required_object(entry, f"invalid verified-cache binding: {name}")
         _require_exact_keys(
             entry,
             {"sha256", "size", "qualification_authority", "verification"},
@@ -2314,19 +2363,23 @@ def _inputs_from_environment(
         _require(
             value is not None and value != "", f"missing envelope environment: {key}"
         )
-        digests[name] = value
+        digests[name] = _required_string(value, f"missing envelope environment: {key}")
     for name in lane["required_observations"]:
         key = _environment_key(name)
         value = environment.get(key)
         _require(
             value is not None and value != "", f"missing envelope environment: {key}"
         )
-        observations[name] = value
+        observations[name] = _required_string(
+            value, f"missing envelope environment: {key}"
+        )
     for name in lane["required_cache_digests"]:
         prefix = _environment_key(name)
         path = environment.get(prefix + "_PATH")
         digest = environment.get(prefix + "_SHA256")
-        _require(path and digest, f"missing verified-cache environment for {name}")
+        _require(
+            bool(path and digest), f"missing verified-cache environment for {name}"
+        )
         caches.append(f"{name}={path}@{digest}")
     return digests, observations, caches
 
@@ -2711,7 +2764,7 @@ def _physical_provider_manifest_sha256() -> str:
             + completed.stderr.strip(),
         )
         output = completed.stdout.strip() or completed.stderr.strip()
-        _require(output, f"physical provider identity is empty: {name}")
+        _require(bool(output), f"physical provider identity is empty: {name}")
         value = _single_line(output.splitlines()[0], name)
         lines.append(f"{name}={value}")
     return _sha256_bytes(("\n".join(lines) + "\n").encode("utf-8"))

@@ -263,7 +263,7 @@ RELEASE_INHERITED = {
 
 
 # Pin the executable canonical check body; strings in Rust comments are not evidence.
-XTASK_CHECK_BODY = '    run("cargo", &["fmt", "--all", "--check"])?;\n    verify_ruff_version()?;\n    run("ruff", &["check", "."])?;\n    run("ruff", &["format", "--check", "."])?;\n    run(\n        "cargo",\n        &[\n            "clippy",\n            "--workspace",\n            "--all-targets",\n            "--all-features",\n            "--locked",\n            "--",\n            "-D",\n            "warnings",\n        ],\n    )?;\n    run(\n        "cargo",\n        &["test", "--workspace", "--all-features", "--locked"],\n    )?;\n    run("python3", &["scripts/check_repository.py"])?;\n    component_maturity()?;\n    authority_foundation()?;\n    run("python3", &["scripts/validate_assets.py"])?;\n    desktop_identity()?;\n    release_contracts()?;\n    run(\n        "python3",\n        &[\n            "-m",\n            "unittest",\n            "discover",\n            "-s",\n            "tests/tooling",\n            "-p",\n            "test_*.py",\n        ],\n    )?;\n    Ok(())\n'
+XTASK_CHECK_BODY = '    run("cargo", &["fmt", "--all", "--check"])?;\n    run("python3", &["tools/check_source_formatting.py"])?;\n    verify_ruff_version()?;\n    run("ruff", &["check", "."])?;\n    run("ruff", &["format", "--check", "."])?;\n    run(\n        "cargo",\n        &[\n            "clippy",\n            "--workspace",\n            "--all-targets",\n            "--all-features",\n            "--locked",\n            "--",\n            "-D",\n            "warnings",\n        ],\n    )?;\n    run(\n        "cargo",\n        &["test", "--workspace", "--all-features", "--locked"],\n    )?;\n    run("python3", &["scripts/check_repository.py"])?;\n    component_maturity()?;\n    authority_foundation()?;\n    run("python3", &["scripts/validate_assets.py"])?;\n    desktop_identity()?;\n    release_contracts()?;\n    run(\n        "python3",\n        &[\n            "-m",\n            "unittest",\n            "discover",\n            "-s",\n            "tests/tooling",\n            "-p",\n            "test_*.py",\n        ],\n    )?;\n    Ok(())\n'
 
 PYPI_VERIFICATION_COMMANDS = (
     "set -euo pipefail",
@@ -285,7 +285,7 @@ PYPI_VERIFICATION_COMMANDS = (
     '"$dist_dir"/linura-*.whl',
     "PYTHONPATH=\"$install_dir\" python3 - <<'PY'",
     "import linura",
-    'assert linura.__version__ == "0.0.1"',
+    'assert linura.__version__ == "0.0.2"',
     'assert linura.CONTROL1_SERVICE == "org.linura.Control1"',
     'assert linura.find_installation(path="") is None',
     "PY",

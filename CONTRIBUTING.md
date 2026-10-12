@@ -88,7 +88,7 @@ Run:
 cargo xtask check
 ```
 
-before opening a pull request. It is the canonical local entry point for the same primary repository checks used by CI. The gate expects the exact Ruff version from `tools/codex/versions.env`; the repository development setup provisions it from the hash-locked wheel contract rather than accepting an arbitrary global linter. It checks Python lint and formatting (`ruff check .` and `ruff format --check .`) alongside Rust formatting. To apply formatting before validation, use `cargo fmt --all` and `ruff format .` with the pinned tools.
+before opening a pull request. It is the canonical local entry point for the same primary repository checks used by CI. The gate expects the exact Ruff version from `tools/codex/versions.env`; the repository development setup provisions it from the hash-locked wheel contract rather than accepting an arbitrary global linter. It checks Python lint and formatting (`ruff check .` and `ruff format --check .`) alongside Rust formatting. To apply formatting before validation, use `cargo fmt --all` and `ruff format .` with the pinned tools. Canonical CI also requires pinned Pyright basic-mode typing on the configured Python corpus. Run `npm ci --prefix tools/python-typecheck --ignore-scripts --omit=optional --no-audit --no-fund` and `npm --prefix tools/python-typecheck run check` to reproduce the check locally.
 
 New managed mutation behavior must test allow/deny, unsupported capability, executor failure, verification failure, provenance origin, and retry/idempotency semantics.
 

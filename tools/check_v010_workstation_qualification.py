@@ -910,7 +910,7 @@ def _decode_png_pixels(
                 if length != 2:
                     failures.append(f"{label} has an invalid grayscale tRNS chunk")
                     return None
-                transparent_gray = struct.unpack(">H", payload)[0]
+                transparent_gray = int(struct.unpack(">H", payload)[0])
                 if transparent_gray > 255:
                     failures.append(
                         f"{label} has an out-of-range grayscale tRNS sample"
@@ -2143,7 +2143,7 @@ def _validate_interactive_workstation_evidence(
                     )
                     continue
                 connector = display.get("connector")
-                if not _nonempty_string(connector):
+                if not isinstance(connector, str) or not _nonempty_string(connector):
                     failures.append(
                         f"interactive workstation display {index} requires connector identity"
                     )
@@ -2384,7 +2384,9 @@ def _validate_interactive_workstation_evidence(
                                     "interactive workstation physical accessibility visual artifact capture.coordinate_space must be physical-pixels"
                                 )
                             connector = capture.get("connector")
-                            if not _nonempty_string(connector):
+                            if not isinstance(connector, str) or not _nonempty_string(
+                                connector
+                            ):
                                 failures.append(
                                     "interactive workstation physical accessibility visual artifact capture.connector must identify a physical display"
                                 )
@@ -3060,6 +3062,11 @@ def _validate_release_matrix_evidence(
 
     cases = manifest.get("cases")
     required_cases = expected["required_cases"]
+    if not isinstance(required_cases, list) or not all(
+        isinstance(name, str) for name in required_cases
+    ):
+        failures.append(f"{label} required_cases contract must be a string list")
+        return
     if not isinstance(cases, list) or len(cases) != len(required_cases):
         failures.append(f"{label} evidence must contain exactly the required cases")
         return
@@ -3378,7 +3385,10 @@ def _validate_experience_evidence(
             baseline_digests[baseline_id] = baseline_digest
 
     required_visual_surfaces = experience.get("required_visual_surfaces")
-    if required_visual_surfaces != EXPECTED_REQUIRED_VISUAL_SURFACES:
+    if (
+        not isinstance(required_visual_surfaces, list)
+        or required_visual_surfaces != EXPECTED_REQUIRED_VISUAL_SURFACES
+    ):
         failures.append(
             "experience required_visual_surfaces drifted from the qualified UI surface set"
         )
@@ -4206,7 +4216,7 @@ def validate(
         failures.append("v0.10 profile_path must remain profiles/arch-hyprland-v1.toml")
         profile_path = root / "profiles/arch-hyprland-v1.toml"
     else:
-        profile_path = root / profile_path_value
+        profile_path = root / "profiles/arch-hyprland-v1.toml"
     profile = _load_toml(profile_path, "target PlatformProfile", failures)
     if profile:
         expected_digest = contract.get("profile_sha256")
@@ -4288,7 +4298,9 @@ def validate(
     if support_path != "hardware/support-matrix.json":
         failures.append("support_matrix_path must remain hardware/support-matrix.json")
         support_path = "hardware/support-matrix.json"
-    support = _load_json(root / support_path, "hardware support matrix", failures)
+    support = _load_json(
+        root / "hardware/support-matrix.json", "hardware support matrix", failures
+    )
     if support:
         classes = support.get("machine_classes")
         workstation = classes.get("workstation") if isinstance(classes, dict) else None
@@ -4314,8 +4326,13 @@ def validate(
         failures.append(
             "qualification_document must remain docs/qualification/v0.10.0.md"
         )
-    elif not (root / qualification_document).is_file():
+    elif not (root / "docs/qualification/v0.10.0.md").is_file():
         failures.append("v0.10 qualification document is missing")
+
+    profile_sha256_value = contract.get("profile_sha256")
+    expected_profile_sha256 = (
+        profile_sha256_value if isinstance(profile_sha256_value, str) else None
+    )
 
     frozen_package_manifest_digest: str | None = None
     frozen_package_versions: dict[str, str] | None = None
@@ -4505,11 +4522,7 @@ def validate(
                 interactive,
                 failures,
                 expected_source_sha=expected_source_sha,
-                expected_profile_sha256=(
-                    contract.get("profile_sha256")
-                    if isinstance(contract.get("profile_sha256"), str)
-                    else None
-                ),
+                expected_profile_sha256=expected_profile_sha256,
                 expected_package_manifest_sha256=frozen_package_manifest_digest,
                 expected_provider_versions=frozen_package_versions,
                 expected_architecture=frozen_substrate_architecture,
@@ -4553,11 +4566,7 @@ def validate(
                 expected,
                 label=label,
                 expected_source_sha=expected_source_sha,
-                expected_profile_sha256=(
-                    contract.get("profile_sha256")
-                    if isinstance(contract.get("profile_sha256"), str)
-                    else None
-                ),
+                expected_profile_sha256=expected_profile_sha256,
                 expected_package_manifest_sha256=frozen_package_manifest_digest,
                 expected_package_versions=frozen_package_versions,
                 expected_architecture=frozen_substrate_architecture,

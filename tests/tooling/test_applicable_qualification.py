@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from email.message import Message
+from typing import cast
 import sys
 import unittest
 from unittest import mock
@@ -761,7 +763,7 @@ class ApplicableQualificationTests(unittest.TestCase):
         from urllib.error import HTTPError
 
         url = "https://api.github.com/repos/linura-org/linura/statuses/" + "a" * 40
-        error = HTTPError(url, 503, "temporary", {}, io.BytesIO(b"temporary"))
+        error = HTTPError(url, 503, "temporary", Message(), io.BytesIO(b"temporary"))
         with (
             mock.patch.object(
                 aq, "urlopen", side_effect=[error, io.BytesIO(b'{"ok":true}')]
@@ -779,13 +781,10 @@ class ApplicableQualificationTests(unittest.TestCase):
         from urllib.error import HTTPError
 
         url = "https://api.github.com/repos/linura-org/linura/statuses/" + "b" * 40
-        error = HTTPError(
-            url,
-            403,
-            "rate limit",
-            {"X-RateLimit-Remaining": "0", "Retry-After": "60"},
-            io.BytesIO(b"rate limited"),
-        )
+        headers = Message()
+        headers["X-RateLimit-Remaining"] = "0"
+        headers["Retry-After"] = "60"
+        error = HTTPError(url, 403, "rate limit", headers, io.BytesIO(b"rate limited"))
         with (
             mock.patch.object(aq, "urlopen", side_effect=error) as call,
             mock.patch.object(aq.time, "sleep") as sleep,
@@ -2377,7 +2376,7 @@ class ApplicableQualificationTests(unittest.TestCase):
         pr=9,
         event="pull_request",
         status="completed",
-        conclusion="success",
+        conclusion: str | None = "success",
         run_number=5,
         attempt=1,
         run_id=100,
@@ -2530,7 +2529,7 @@ class ApplicableQualificationTests(unittest.TestCase):
         for paths in (None, "README.md", ["README.md", None], [""]):
             with self.subTest(paths=paths):
                 with self.assertRaises(aq.QualificationError):
-                    aq.required_gate_ids(contract, paths)
+                    aq.required_gate_ids(contract, cast(list[str], paths))
 
     def test_run_matching_rejects_dispatch_stale_sha_and_wrong_pr(self):
         contract = aq.load_contract(ROOT)
@@ -3079,6 +3078,8 @@ class ApplicableQualificationTests(unittest.TestCase):
             pr_base=self._base(),
             merge_sha="e" * 40,
         )
+        self.assertIsNotNone(selected)
+        assert selected is not None
         self.assertEqual(selected["id"], 81)
         self.assertEqual(selected["status"], "in_progress")
 
@@ -3108,6 +3109,8 @@ class ApplicableQualificationTests(unittest.TestCase):
             pr_base=self._base(),
             merge_sha="e" * 40,
         )
+        self.assertIsNotNone(selected)
+        assert selected is not None
         self.assertEqual(selected["id"], 2)
         self.assertEqual(selected["conclusion"], "failure")
 

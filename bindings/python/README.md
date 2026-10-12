@@ -58,6 +58,13 @@ The canonical `linura` project is established on PyPI. All subsequent publicatio
 
 ## Compatibility
 
+Python 3.12 or newer is required starting with package 0.0.2. Python 3.10
+reached end of life in October 2026, so future Linura packages no longer
+advertise it as a supported runtime. Python 3.11 is also outside the supported
+client baseline; internal tooling and the published package share Python 3.12
+as their tested minimum. The already-published 0.0.1 artifact is immutable and
+retains its original packaging metadata.
+
 This package is currently pre-1.0 and its public surface is intentionally
 small while the Python client transport is designed against Linura's versioned
 public contracts.

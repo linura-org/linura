@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -87,7 +88,7 @@ def _parse_capture_output(text: str, package_manager: str) -> dict:
     for line in text.splitlines():
         name, separator, value = line.partition("=")
         _require(
-            separator == "=" and name and value,
+            bool(separator == "=" and name and value),
             f"invalid guest identity record: {line!r}",
         )
         _require(name not in parsed, f"duplicate guest identity record: {name}")
@@ -279,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
         return 0
     except GuestIdentityError as exc:
-        print(f"guest identity error: {exc}", file=os.sys.stderr)
+        print(f"guest identity error: {exc}", file=sys.stderr)
         return 2
 
 

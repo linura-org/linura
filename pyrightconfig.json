@@ -1,0 +1,18 @@
+{
+  "include": [
+    "tools",
+    "scripts",
+    "tests/tooling",
+    "bindings/python/src",
+    "bindings/python/tests",
+    "qualification/v010"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "extraPaths": [
+    ".",
+    "tools",
+    "bindings/python/src"
+  ],
+  "reportMissingImports": "error"
+}

@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import sys
 import tomllib
+from typing import TypedDict
 
 ROOT = Path(__file__).resolve().parents[1]
 CACHE_SHA = "55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
@@ -40,6 +41,12 @@ FORBIDDEN_CACHE_FRAGMENTS = (
 )
 
 
+class CiStep(TypedDict):
+    fields: dict[str, str]
+    run_lines: list[str]
+    with_lines: list[str]
+
+
 def _read(root: Path, relative: str) -> str:
     path = root / relative
     if not path.is_file() or path.is_symlink():
@@ -70,7 +77,12 @@ def _canonical_composite_steps(source: str, label: str) -> list[dict[str, object
         if block_indent is not None:
             if indent > block_indent:
                 if block_indent == 6 and steps:
-                    steps[-1].setdefault("run_lines", []).append(stripped)
+                    raw_lines = steps[-1].get("run_lines")
+                    if not isinstance(raw_lines, list) or not all(
+                        isinstance(item, str) for item in raw_lines
+                    ):
+                        raise ValueError(f"{label} action has invalid literal run body")
+                    raw_lines.append(stripped)
                 continue
             block_indent = None
         if stripped.startswith("#"):
@@ -171,12 +183,19 @@ def _canonical_composite_steps(source: str, label: str) -> list[dict[str, object
 
 def _effective_shell_lines(steps: list[dict[str, object]]) -> list[str]:
     """Non-comment shell lines for diagnostics; reviewed hashes authorize semantics."""
-    return [
-        line.strip()
-        for step in steps
-        for line in step.get("run_lines", [])
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
+    result: list[str] = []
+    for step in steps:
+        raw_lines = step.get("run_lines", [])
+        if not isinstance(raw_lines, list) or not all(
+            isinstance(item, str) for item in raw_lines
+        ):
+            raise ValueError("composite action has invalid shell lines")
+        result.extend(
+            line.strip()
+            for line in raw_lines
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+    return result
 
 
 # The QML and bridge build recipe is reviewed independently of unrelated CI
@@ -186,7 +205,7 @@ REVIEWED_QML_BUILD_SHA256 = (
 )
 
 
-def _canonical_ci_steps(source: str) -> list[dict[str, object]]:
+def _canonical_ci_steps(source: str) -> list[CiStep]:
     """Inspect the effective job/step structure, not raw text occurrences."""
     lines = source.splitlines()
     root_keys = [
@@ -220,7 +239,7 @@ def _canonical_ci_steps(source: str) -> list[dict[str, object]]:
             "canonical CI job must run unconditionally with its reviewed runner and steps"
         )
 
-    steps: list[dict[str, object]] = []
+    steps: list[CiStep] = []
     mode: str | None = None
     allowed = {"name", "uses", "id", "run", "env", "with", "shell"}
     for number, line in enumerate(job_lines, 1):
@@ -293,7 +312,7 @@ def _canonical_ci_steps(source: str) -> list[dict[str, object]]:
 
 def _verify_ci_execution_steps(source: str) -> None:
     steps = _canonical_ci_steps(source)
-    named = {}
+    named: dict[str, CiStep] = {}
     for step in steps:
         name = step["fields"].get("name")
         if name is not None:
@@ -315,7 +334,7 @@ def _verify_ci_execution_steps(source: str) -> None:
         if item is None or set(item["fields"]) != expected:
             raise ValueError(f"canonical CI critical step structure drifted: {name}")
 
-    def required(name: str) -> dict[str, object]:
+    def required(name: str) -> CiStep:
         if name not in named:
             raise ValueError(f"canonical CI missing executable step: {name}")
         return named[name]

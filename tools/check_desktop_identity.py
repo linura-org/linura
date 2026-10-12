@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import configparser
 import hashlib
+from typing import Never
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -27,7 +28,7 @@ ICON = BASE / "icons/hicolor/scalable/apps" / f"{APP_ID}.svg"
 CANONICAL_ICON_GIT_BLOB = "b3bf10b29762d605ad0818dfb081d86fe03e0a98"
 
 
-def fail(message: str) -> None:
+def fail(message: str) -> Never:
     raise SystemExit(f"desktop identity validation failed: {message}")
 
 
@@ -117,8 +118,13 @@ if recommended_controls != {"keyboard", "pointing"}:
         f"(got {sorted(recommended_controls)!r})"
     )
 
-parser = configparser.ConfigParser(interpolation=None, strict=True)
-parser.optionxform = str
+
+class CasePreservingConfigParser(configparser.ConfigParser):
+    def optionxform(self, optionstr: str) -> str:
+        return optionstr
+
+
+parser = CasePreservingConfigParser(interpolation=None, strict=True)
 try:
     with DESKTOP.open("r", encoding="utf-8") as handle:
         parser.read_file(handle)

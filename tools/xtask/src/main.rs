@@ -82,6 +82,7 @@ fn desktop_identity() -> Result<(), String> {
 
 fn check() -> Result<(), String> {
     run("cargo", &["fmt", "--all", "--check"])?;
+    run("python3", &["tools/check_source_formatting.py"])?;
     verify_ruff_version()?;
     run("ruff", &["check", "."])?;
     run("ruff", &["format", "--check", "."])?;
