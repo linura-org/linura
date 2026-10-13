@@ -559,8 +559,33 @@ def aws(args: list[str], *, output: bool = False) -> str:
             f"R2 operation unavailable or timed out: {args[0]}"
         ) from exc
     if proc.returncode:
+        # Only a reviewed S3 error identifier may reach logs. Never log stderr.
+        match = re.search(
+            r"An error occurred \(([A-Za-z0-9]+)\) when calling the "
+            r"[A-Za-z0-9]+ operation",
+            proc.stderr or "",
+        )
+        codes = {
+            "AccessDenied",
+            "InvalidAccessKeyId",
+            "SignatureDoesNotMatch",
+            "NoSuchBucket",
+            "NoSuchKey",
+            "NotFound",
+            "404",
+            "403",
+            "PreconditionFailed",
+            "ConditionalRequestConflict",
+            "InvalidRequest",
+            "InvalidToken",
+            "ExpiredToken",
+            "RequestTimeout",
+            "SlowDown",
+            "NotImplemented",
+        }
+        code = match.group(1) if match and match.group(1) in codes else "unclassified"
         raise AdmissionError(
-            f"R2 operation failed: {args[0]} (status {proc.returncode}); inspect secured runner logs"
+            f"R2 operation failed: {args[0]} ({code}; status {proc.returncode})"
         )
     return proc.stdout if output else ""
 
@@ -584,11 +609,19 @@ def put_new(bucket: str, key: str, path: Path, expected: str) -> None:
                 f"sha256={expected}",
             ]
         )
-    except AdmissionError:
-        pass
-    head = parse_json(
-        aws(["head-object", "--bucket", bucket, "--key", key], output=True)
-    )
+    except AdmissionError as exc:
+        # Only exact remote bytes may rescue a failed or ambiguous put.
+        put_failure = exc
+    else:
+        put_failure = None
+    try:
+        head = parse_json(
+            aws(["head-object", "--bucket", bucket, "--key", key], output=True)
+        )
+    except AdmissionError as exc:
+        if put_failure is not None:
+            raise AdmissionError(f"{put_failure}; R2 readback failed: {exc}") from exc
+        raise
     require(
         head.get("Metadata", {}).get("sha256") == expected
         and head.get("ContentLength") == path.stat().st_size,
@@ -608,13 +641,16 @@ def put_index(bucket: str, key: str, path: Path, record: dict[str, Any]) -> None
     try:
         put_new(bucket, key, path, sha256(path))
         return
-    except AdmissionError:
-        # A successful earlier attempt may already have published the same
-        # evidence using its original reviewer, reason and admission timestamp.
-        pass
-    head = parse_json(
-        aws(["head-object", "--bucket", bucket, "--key", key], output=True)
-    )
+    except AdmissionError as put_failure:
+        # An earlier approved publication may already own the immutable index.
+        try:
+            head = parse_json(
+                aws(["head-object", "--bucket", bucket, "--key", key], output=True)
+            )
+        except AdmissionError as exc:
+            raise AdmissionError(
+                f"R2 index publication failed: {put_failure}; R2 readback failed: {exc}"
+            ) from exc
     digest = head.get("Metadata", {}).get("sha256")
     require(
         isinstance(digest, str) and DIGEST.fullmatch(digest) is not None,
