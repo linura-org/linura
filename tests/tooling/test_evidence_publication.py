@@ -365,6 +365,136 @@ class EvidencePublicationTests(unittest.TestCase):
                 with self.assertRaisesRegex(publication.AdmissionError, "timed out"):
                     publication.aws(["head-object", "--bucket", "example"])
 
+    def test_r2_error_codes_are_allowlisted_and_stderr_is_never_logged(self):
+        for reported, expected in (
+            ("AccessDenied", "AccessDenied"),
+            ("NoSuchBucket", "NoSuchBucket"),
+            ("SignatureDoesNotMatch", "SignatureDoesNotMatch"),
+            ("UnknownServiceCode", "unclassified"),
+            ("SECRET_MARKER", "unclassified"),
+        ):
+            with self.subTest(reported=reported):
+                result = subprocess.CompletedProcess(
+                    args=["aws", "s3api", "put-object"],
+                    returncode=254,
+                    stdout="",
+                    stderr=(
+                        f"An error occurred ({reported}) when calling the "
+                        "PutObject operation: SECRET_MARKER"
+                    ),
+                )
+                with patch.dict(
+                    os.environ,
+                    {
+                        "R2_ENDPOINT": "https://"
+                        + "a" * 32
+                        + ".r2.cloudflarestorage.com"
+                    },
+                ):
+                    with patch.object(
+                        publication.subprocess, "run", return_value=result
+                    ):
+                        with self.assertRaises(publication.AdmissionError) as context:
+                            publication.aws(["put-object", "--bucket", "example"])
+                message = str(context.exception)
+                self.assertIn(f"put-object ({expected}; status 254)", message)
+                self.assertNotIn("SECRET_MARKER", message)
+
+    def test_put_failure_and_head_failure_both_remain_diagnostic(self):
+        source = self.bundle / "workstation-runtime.mkv"
+
+        def denied(args, output=False):
+            if args[0] == "put-object":
+                raise publication.AdmissionError(
+                    "R2 operation failed: put-object (AccessDenied; status 254)"
+                )
+            raise publication.AdmissionError(
+                "R2 operation failed: head-object (NoSuchBucket; status 254)"
+            )
+
+        with patch.object(publication, "aws", side_effect=denied):
+            with self.assertRaises(publication.AdmissionError) as context:
+                publication.put_new(
+                    "bucket", "baselines/a", source, digest(self.recording)
+                )
+        self.assertIn("put-object (AccessDenied", str(context.exception))
+        self.assertIn("head-object (NoSuchBucket", str(context.exception))
+
+    def test_conditional_put_collision_reuses_only_verified_remote_bytes(self):
+        source = self.bundle / "workstation-runtime.mkv"
+        calls = []
+
+        def already_exists(args, output=False):
+            calls.append(args[0])
+            if args[0] == "put-object":
+                raise publication.AdmissionError(
+                    "R2 operation failed: put-object (PreconditionFailed; status 254)"
+                )
+            if args[0] == "head-object":
+                return json.dumps(
+                    {
+                        "Metadata": {"sha256": digest(self.recording)},
+                        "ContentLength": len(self.recording),
+                    }
+                )
+            if args[0] == "get-object":
+                Path(args[-1]).write_bytes(self.recording)
+            return ""
+
+        with patch.object(publication, "aws", side_effect=already_exists):
+            publication.put_new("bucket", "baselines/a", source, digest(self.recording))
+        self.assertEqual(calls, ["put-object", "head-object", "get-object"])
+
+    def test_failed_put_cannot_accept_corrupted_existing_object(self):
+        source = self.bundle / "workstation-runtime.mkv"
+
+        def collision(args, output=False):
+            if args[0] == "put-object":
+                raise publication.AdmissionError(
+                    "R2 operation failed: put-object (PreconditionFailed; status 254)"
+                )
+            if args[0] == "head-object":
+                return json.dumps(
+                    {
+                        "Metadata": {"sha256": digest(self.recording)},
+                        "ContentLength": len(self.recording),
+                    }
+                )
+            if args[0] == "get-object":
+                Path(args[-1]).write_bytes(b"x" * len(self.recording))
+            return ""
+
+        with patch.object(publication, "aws", side_effect=collision):
+            with self.assertRaisesRegex(
+                publication.AdmissionError, "remote object bytes mismatch"
+            ):
+                publication.put_new(
+                    "bucket", "baselines/a", source, digest(self.recording)
+                )
+
+    def test_index_put_and_lookup_failure_both_remain_diagnostic(self):
+        source = self.bundle / "workstation-runtime.mkv"
+        with (
+            patch.object(
+                publication,
+                "put_new",
+                side_effect=publication.AdmissionError(
+                    "R2 operation failed: put-object (AccessDenied; status 254)"
+                ),
+            ),
+            patch.object(
+                publication,
+                "aws",
+                side_effect=publication.AdmissionError(
+                    "R2 operation failed: head-object (NoSuchBucket; status 254)"
+                ),
+            ),
+        ):
+            with self.assertRaises(publication.AdmissionError) as context:
+                publication.put_index("bucket", "index/baselines/a", source, {})
+        self.assertIn("put-object (AccessDenied", str(context.exception))
+        self.assertIn("head-object (NoSuchBucket", str(context.exception))
+
     def admitted_snapshot(self):
         source_run = self.root / "source-run.json"
         source_run.write_bytes(publication.canonical(self.run_record))
