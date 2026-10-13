@@ -526,6 +526,115 @@ class EvidencePublicationTests(unittest.TestCase):
         self.assertTrue(result.startswith("index/baselines/"))
         self.assertEqual(len(uploaded), len(self.bindings) + 5)
 
+    def test_publication_unseals_verified_archive_before_admission(self):
+        workflow = (
+            ROOT / ".github/workflows/publish-qualification-evidence.yml"
+        ).read_text(encoding="utf-8")
+        admission = workflow.split("\n  admission:\n", 1)[1].split("\n  archive:\n", 1)[
+            0
+        ]
+        self.assertLess(
+            admission.index("name: Download exact origin attempt"),
+            admission.index("name: Unseal and verify selected qualification evidence"),
+        )
+        self.assertLess(
+            admission.index("name: Unseal and verify selected qualification evidence"),
+            admission.index("name: Admit media and snapshot evidence"),
+        )
+        self.assertIn(
+            'archive="$RUNNER_TEMP/selected-evidence/qualification-evidence.tar"',
+            admission,
+        )
+        self.assertIn('test -f "$archive"', admission)
+        self.assertIn('test ! -L "$archive"', admission)
+        self.assertIn(
+            '/usr/bin/python3 -I "$source_root/tools/qualification_evidence.py"',
+            admission,
+        )
+        self.assertNotIn(
+            "/usr/bin/python3 -I tools/qualification_evidence.py",
+            admission,
+        )
+        self.assertIn('--root "$source_root" unseal', admission)
+        self.assertIn('--archive "$archive"', admission)
+        self.assertIn('--destination "$RUNNER_TEMP/unsealed-evidence"', admission)
+        self.assertIn("--semantic", admission)
+        self.assertIn('--directory "$RUNNER_TEMP/unsealed-evidence"', admission)
+        self.assertNotIn("AWS_ACCESS_KEY_ID:", admission)
+        self.assertNotIn("AWS_SECRET_ACCESS_KEY:", admission)
+
+    def test_unseal_uses_exact_qualified_source_and_preinstalled_ffprobe(self):
+        workflow = (
+            ROOT / ".github/workflows/publish-qualification-evidence.yml"
+        ).read_text(encoding="utf-8")
+        admission = workflow.split("\n  admission:\n", 1)[1].split("\n  archive:\n", 1)[
+            0
+        ]
+        trusted = "name: Checkout trusted admission code"
+        source = "name: Checkout exact qualification source for evidence verification"
+        media = "name: Install pinned-host media verifier before semantic admission"
+        unseal = "name: Unseal and verify selected qualification evidence"
+        admitted = "name: Admit media and snapshot evidence"
+        self.assertLess(admission.index(trusted), admission.index(source))
+        self.assertLess(admission.index(source), admission.index(unseal))
+        self.assertLess(admission.index(media), admission.index(unseal))
+        self.assertLess(admission.index(unseal), admission.index(admitted))
+        self.assertIn("ref: ${{ github.sha }}", admission)
+        self.assertIn("ref: ${{ needs.preflight.outputs.source_sha }}", admission)
+        self.assertIn("path: qualification-source", admission)
+        self.assertIn("persist-credentials: false", admission)
+        self.assertIn('source_root="$GITHUB_WORKSPACE/qualification-source"', admission)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"', admission)
+        self.assertIn(
+            'test "$(git -C "$source_root" rev-parse HEAD)" = "$SOURCE_SHA"',
+            admission,
+        )
+        self.assertIn(
+            'git -C "$source_root" status --porcelain --untracked-files=all',
+            admission,
+        )
+        self.assertIn(
+            '/usr/bin/python3 -I "$source_root/tools/qualification_evidence.py"',
+            admission,
+        )
+        self.assertNotIn(
+            "/usr/bin/python3 -I tools/qualification_evidence.py",
+            admission,
+        )
+        self.assertIn('--root "$source_root"', admission)
+        self.assertIn(
+            "sudo apt-get install -y --no-install-recommends ffmpeg", admission
+        )
+        self.assertIn("command -v ffprobe >/dev/null", admission)
+        self.assertEqual(admission.count("sudo apt-get update -qq"), 1)
+        self.assertEqual(
+            admission.count("sudo apt-get install -y --no-install-recommends ffmpeg"),
+            1,
+        )
+        self.assertNotIn("AWS_ACCESS_KEY_ID:", admission)
+        self.assertNotIn("AWS_SECRET_ACCESS_KEY:", admission)
+
+    def test_unseal_global_root_is_parsed_before_subcommand(self):
+        from tools.qualification_evidence import build_parser
+
+        parsed = build_parser().parse_args(
+            [
+                "--root",
+                str(ROOT),
+                "unseal",
+                "--archive",
+                "sealed.tar",
+                "--destination",
+                "verified",
+                "--semantic",
+            ]
+        )
+        self.assertEqual(parsed.root, ROOT)
+        self.assertEqual(parsed.command, "unseal")
+        self.assertTrue(parsed.semantic)
+        self.assertEqual(parsed.archive, Path("sealed.tar"))
+        self.assertEqual(parsed.destination, Path("verified"))
+
     def test_workflow_media_and_r2_credentials_use_different_jobs(self):
         workflow = (
             ROOT / ".github/workflows/publish-qualification-evidence.yml"
