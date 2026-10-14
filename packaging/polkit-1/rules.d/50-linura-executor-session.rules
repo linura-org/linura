@@ -1,0 +1,9 @@
+// This service check is independent of native human confirmation/authentication.
+// The executor also freshly attests the exact supervised Control bus owner.
+polkit.addRule(function(action, subject) {
+    if ((action.id === "org.linura.executor.session.set-secure" ||
+         action.id === "org.linura.executor.session.execute-transition") &&
+        subject.user === "linura-authority") {
+        return polkit.Result.YES;
+    }
+});

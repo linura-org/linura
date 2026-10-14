@@ -131,6 +131,7 @@ impl FreshRecoveryApproval {
 enum RecoveryApproval {
     Existing(Option<ApprovalEvidenceId>),
     OnDemand(FreshRecoveryApproval),
+    ObserveOnly,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -165,9 +166,13 @@ pub struct DurableAuthorityCandidate {
     precondition_digest: ContentDigest,
     observation_digest: ContentDigest,
     review_digest: ContentDigest,
+    protective: Option<crate::protective_lock_execution::ProtectiveLockContext>,
 }
 
 impl DurableAuthorityCandidate {
+    pub(crate) fn is_protective(&self) -> bool {
+        self.protective.is_some()
+    }
     #[must_use]
     pub fn principal(&self) -> &AuthenticatedPrincipal {
         &self.principal
@@ -361,7 +366,7 @@ where
         actor: Actor,
         request: PlanDesiredStateRequest,
     ) -> Result<DurableAuthorityCandidate, DurableAuthorityError> {
-        self.candidate_inner(previews, principal, actor, request, None)
+        self.candidate_inner(previews, principal, actor, request, None, None)
     }
 
     pub(crate) fn candidate_with_risk_floor(
@@ -372,7 +377,26 @@ where
         request: PlanDesiredStateRequest,
         risk_floor: TrustedRiskFloor,
     ) -> Result<DurableAuthorityCandidate, DurableAuthorityError> {
-        self.candidate_inner(previews, principal, actor, request, Some(risk_floor))
+        self.candidate_inner(previews, principal, actor, request, Some(risk_floor), None)
+    }
+
+    pub(crate) fn protective_candidate(
+        &mut self,
+        previews: &mut PlanPreviewControl,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        context: crate::protective_lock_execution::ProtectiveLockContext,
+        risk_floor: TrustedRiskFloor,
+    ) -> Result<DurableAuthorityCandidate, DurableAuthorityError> {
+        let request = context.request().map_err(DurableAuthorityError::Preview)?;
+        self.candidate_inner(
+            previews,
+            principal,
+            actor,
+            request,
+            Some(risk_floor),
+            Some(context),
+        )
     }
 
     fn candidate_inner(
@@ -382,10 +406,14 @@ where
         actor: Actor,
         request: PlanDesiredStateRequest,
         risk_floor: Option<TrustedRiskFloor>,
+        protective: Option<crate::protective_lock_execution::ProtectiveLockContext>,
     ) -> Result<DurableAuthorityCandidate, DurableAuthorityError> {
         let request_digest = digest_request(&request)?;
-        let (plan, observation) =
-            previews.authority_candidate(principal.clone(), actor, request)?;
+        let (plan, observation) = if let Some(context) = &protective {
+            previews.protective_authority_candidate(principal.clone(), actor, request, context)?
+        } else {
+            previews.authority_candidate(principal.clone(), actor, request)?
+        };
         if plan.status != linura_planner::PlanStatus::ChangeProposed
             || plan.changes.is_empty()
             || plan.execution_authorized()
@@ -395,8 +423,12 @@ where
 
         let classification = classify_candidate_risk(&plan, risk_floor);
         let risk = risk_provenance(&classification)?;
-        let review = review_plan_with_classification(&principal, &plan, classification)
-            .map_err(|error| DurableAuthorityError::Preview(format!("{error:?}")))?;
+        let review = if let Some(context) = &protective {
+            crate::policy_review::review_protective_plan(&principal, &plan, classification, context)
+        } else {
+            review_plan_with_classification(&principal, &plan, classification)
+        }
+        .map_err(|error| DurableAuthorityError::Preview(format!("{error:?}")))?;
         if review.subject().prospective_risk() != risk.risk {
             return Err(DurableAuthorityError::AuthorityChanged);
         }
@@ -423,6 +455,7 @@ where
             precondition_digest,
             observation_digest,
             review_digest,
+            protective,
         })
     }
 
@@ -458,9 +491,32 @@ where
         candidate: DurableAuthorityCandidate,
         approval_evidence_id: Option<ApprovalEvidenceId>,
     ) -> Result<PreparedDurableAuthority, DurableAuthorityError> {
+        self.prepare_inner(candidate, approval_evidence_id, None)
+    }
+
+    pub(crate) fn prepare_protective(
+        &mut self,
+        candidate: DurableAuthorityCandidate,
+        previews: &mut PlanPreviewControl,
+        settings: &crate::ProtectiveLockSettingsControl,
+    ) -> Result<PreparedDurableAuthority, DurableAuthorityError> {
+        self.validate_protective_now(&candidate, previews, settings)?;
+        self.prepare_inner(candidate, None, Some(settings))
+    }
+
+    fn prepare_inner(
+        &mut self,
+        candidate: DurableAuthorityCandidate,
+        approval_evidence_id: Option<ApprovalEvidenceId>,
+        settings: Option<&crate::ProtectiveLockSettingsControl>,
+    ) -> Result<PreparedDurableAuthority, DurableAuthorityError> {
         let now_unix_ms = self.authority_now_unix_ms()?;
-        let binding =
-            self.revalidate_and_bind(&candidate, approval_evidence_id.as_ref(), now_unix_ms)?;
+        let binding = self.revalidate_and_bind(
+            &candidate,
+            approval_evidence_id.as_ref(),
+            now_unix_ms,
+            settings,
+        )?;
         let snapshot = match self.transactions.prepare(&binding)? {
             PrepareOutcome::Created(snapshot) | PrepareOutcome::Existing(snapshot) => snapshot,
         };
@@ -486,6 +542,56 @@ where
         principal: &AuthenticatedPrincipal,
         prepared: &mut PreparedDurableAuthority,
     ) -> Result<DispatchPermit, DurableAuthorityError> {
+        self.handoff_inner(principal, prepared, None)
+    }
+
+    pub(crate) fn handoff_protective(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        prepared: &mut PreparedDurableAuthority,
+        previews: &mut PlanPreviewControl,
+        settings: &crate::ProtectiveLockSettingsControl,
+    ) -> Result<DispatchPermit, DurableAuthorityError> {
+        self.validate_protective_now(&prepared.candidate, previews, settings)?;
+        self.handoff_inner(principal, prepared, Some(settings))
+    }
+
+    fn validate_protective_now(
+        &mut self,
+        candidate: &DurableAuthorityCandidate,
+        previews: &mut PlanPreviewControl,
+        settings: &crate::ProtectiveLockSettingsControl,
+    ) -> Result<(), DurableAuthorityError> {
+        let context = candidate
+            .protective
+            .as_ref()
+            .ok_or(DurableAuthorityError::AuthorityChanged)?;
+        context
+            .require_current(settings)
+            .map_err(DurableAuthorityError::Preview)?;
+        let fresh = self.protective_candidate(
+            previews,
+            candidate.principal.clone(),
+            candidate.plan.actor.clone(),
+            context.clone(),
+            candidate
+                .risk_floor
+                .ok_or(DurableAuthorityError::AuthorityChanged)?,
+        )?;
+        if !crate::managed_lifecycle::review_semantics_unchanged(&candidate.review, &fresh.review)
+            || fresh.risk != candidate.risk
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        Ok(())
+    }
+
+    fn handoff_inner(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        prepared: &mut PreparedDurableAuthority,
+        settings: Option<&crate::ProtectiveLockSettingsControl>,
+    ) -> Result<DispatchPermit, DurableAuthorityError> {
         if prepared.handed_off {
             return Err(DurableAuthorityError::AlreadyHandedOff);
         }
@@ -500,6 +606,7 @@ where
             &prepared.candidate,
             prepared.approval_evidence_id.as_ref(),
             now_unix_ms,
+            settings,
         )?;
         if current.digest() != prepared.binding.digest() {
             return Err(DurableAuthorityError::AuthorityChanged);
@@ -593,6 +700,26 @@ where
         )
     }
 
+    /// Recovery observation is structurally unable to reconstruct dispatch:
+    /// even a policy-allow candidate cannot enter IntendedEffectAbsent/reprepare.
+    pub(crate) fn recover_indeterminate_without_replay(
+        &mut self,
+        previews: &mut PlanPreviewControl,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: PlanDesiredStateRequest,
+        risk_floor: TrustedRiskFloor,
+    ) -> Result<DurableRecoveryOutcome, DurableAuthorityError> {
+        self.recover_indeterminate_inner(
+            previews,
+            principal,
+            actor,
+            request,
+            RecoveryApproval::ObserveOnly,
+            Some(risk_floor),
+        )
+    }
+
     /// Recover using approval authority bound to the exact fresh recovery candidate.
     pub fn recover_indeterminate_with_approver(
         &mut self,
@@ -655,8 +782,16 @@ where
         }
 
         let request_digest = anchor.request_digest.clone();
-        let (plan, observation) =
-            previews.authority_candidate(principal.clone(), actor, request)?;
+        let protective_recovery =
+            crate::protective_lock_execution::retained_protective_request(&principal, &request);
+        if protective_recovery && !matches!(&approval, RecoveryApproval::ObserveOnly) {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        let (plan, observation) = if protective_recovery {
+            previews.protective_recovery_candidate(principal.clone(), actor, request)?
+        } else {
+            previews.authority_candidate(principal.clone(), actor, request)?
+        };
         observation
             .validate(&plan.provider, &plan.resource, &plan.observation_capability)
             .map_err(|error| DurableAuthorityError::Preview(error.to_string()))?;
@@ -735,6 +870,25 @@ where
                     };
                 }
 
+                if matches!(&approval, RecoveryApproval::ObserveOnly) {
+                    let authorized_at_unix_ms = self.authority_now_unix_ms()?;
+                    observation
+                        .require_current(authorized_at_unix_ms)
+                        .map_err(|error| DurableAuthorityError::Preview(error.to_string()))?;
+                    let recovery = self.authority_signer.authorize_recovery(
+                        &anchor.snapshot,
+                        RecoveryResolution::Ambiguous { observation_digest },
+                        authorized_at_unix_ms,
+                        observation_expires_at_unix_ms(&observation)?,
+                    )?;
+                    return match self.transactions.recover(&recovery)? {
+                        RecoveryOutcome::StillIndeterminate(snapshot) => {
+                            Ok(DurableRecoveryOutcome::StillIndeterminate(snapshot))
+                        }
+                        _ => Err(DurableAuthorityError::AuthorityChanged),
+                    };
+                }
+
                 let classification = classify_candidate_risk(&plan, risk_floor);
                 let risk = risk_provenance(&classification)?;
                 let review = review_plan_with_classification(&principal, &plan, classification)
@@ -780,8 +934,12 @@ where
                     precondition_digest,
                     observation_digest: observation_digest.clone(),
                     review_digest,
+                    protective: None,
                 };
                 let approval_evidence_id = match &approval {
+                    RecoveryApproval::ObserveOnly => {
+                        return Err(DurableAuthorityError::AuthorityChanged);
+                    }
                     RecoveryApproval::Existing(existing) => existing.clone(),
                     RecoveryApproval::OnDemand(approval) => match candidate.review.decision() {
                         PolicyDecision::Allow => None,
@@ -805,6 +963,7 @@ where
                     &candidate,
                     approval_evidence_id.as_ref(),
                     now_unix_ms,
+                    None,
                 )?;
                 let authorized_at_unix_ms = self.authority_now_unix_ms()?;
                 candidate
@@ -958,7 +1117,15 @@ where
         candidate: &DurableAuthorityCandidate,
         approval_evidence_id: Option<&ApprovalEvidenceId>,
         now_unix_ms: u64,
+        settings: Option<&crate::ProtectiveLockSettingsControl>,
     ) -> Result<AuthorityBinding, DurableAuthorityError> {
+        match (&candidate.protective, settings) {
+            (Some(context), Some(settings)) => context
+                .require_current(settings)
+                .map_err(DurableAuthorityError::Preview)?,
+            (None, None) => {}
+            _ => return Err(DurableAuthorityError::AuthorityChanged),
+        }
         candidate
             .observation
             .require_current(now_unix_ms)
@@ -980,9 +1147,17 @@ where
         if risk != candidate.risk {
             return Err(DurableAuthorityError::AuthorityChanged);
         }
-        let review =
+        let review = if let Some(context) = &candidate.protective {
+            crate::policy_review::review_protective_plan(
+                &candidate.principal,
+                &candidate.plan,
+                classification,
+                context,
+            )
+        } else {
             review_plan_with_classification(&candidate.principal, &candidate.plan, classification)
-                .map_err(|error| DurableAuthorityError::Preview(format!("{error:?}")))?;
+        }
+        .map_err(|error| DurableAuthorityError::Preview(format!("{error:?}")))?;
         if review.subject().prospective_risk() != risk.risk
             || digest_review(&review)? != candidate.review_digest
             || review != candidate.review
@@ -1089,6 +1264,7 @@ fn risk_provenance(
 fn approval_class_name(class: ApprovalClass) -> &'static str {
     match class {
         ApprovalClass::InteractiveUser => "interactive-user",
+        ApprovalClass::SessionOwnerAuthentication => "session-owner-authentication",
         ApprovalClass::Administrator => "administrator",
         ApprovalClass::DestructiveAction => "destructive-action",
     }
@@ -1166,7 +1342,7 @@ impl CanonicalHasher {
     }
 }
 
-fn digest_request(
+pub(crate) fn digest_request(
     request: &PlanDesiredStateRequest,
 ) -> Result<ContentDigest, DurableAuthorityError> {
     let mut digest = CanonicalHasher::new("linura.control.desired-request.v1")?;
@@ -1231,7 +1407,7 @@ fn digest_plan_precondition(
     digest.finish()
 }
 
-fn digest_observation(
+pub(crate) fn digest_observation(
     observation: &ObservationEnvelope,
 ) -> Result<ContentDigest, DurableAuthorityError> {
     let mut digest = CanonicalHasher::new("linura.control.observation.v1")?;

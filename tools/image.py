@@ -19,10 +19,26 @@ SHELL_BRIDGE_SOURCE = ROOT / "apps/linura-shell/bridge"
 SHELL_BRIDGE_BUILD = ROOT / ".artifacts/linura-shell-bridge-build"
 UI_SDK_SOURCE = ROOT / "apps/linura-shell/ui"
 UI_SDK_BUILD = ROOT / ".artifacts/linura-ui-build"
+SECURITY_OWNER_SOURCE = ROOT / "apps/linura-shell/security-owner"
+SECURITY_OWNER_BUILD = ROOT / ".artifacts/linura-security-owner-build"
 
 SHELL_BRIDGE_QT_MODULES = ("Qt6Core", "Qt6DBus", "Qt6Qml")
 UI_SDK_QT_MODULES = ("Qt6Core", "Qt6Qml", "Qt6Quick", "Qt6QuickControls2")
-DOCTOR_QT_MODULES = tuple(dict.fromkeys(SHELL_BRIDGE_QT_MODULES + UI_SDK_QT_MODULES))
+SECURITY_OWNER_MODULES = (
+    "Qt6Core",
+    "Qt6DBus",
+    "Qt6Gui",
+    "Qt6Qml",
+    "Qt6Quick",
+    "Qt6QuickControls2",
+    "polkit-agent-1",
+    "wayland-client",
+    "wayland-protocols",
+    "xkbcommon",
+)
+DOCTOR_QT_MODULES = tuple(
+    dict.fromkeys(SHELL_BRIDGE_QT_MODULES + UI_SDK_QT_MODULES + SECURITY_OWNER_MODULES)
+)
 
 BINARIES = {
     "linurad": "usr/bin/linurad",
@@ -30,10 +46,51 @@ BINARIES = {
     "linura-firstboot": "usr/bin/linura-firstboot",
     "linura-update-guard": "usr/lib/linura/linura-update-guard",
     "linura-executor-systemd": "usr/lib/linura/linura-executor-systemd",
+    "linura-executor-session": "usr/lib/linura/linura-executor-session",
     "linura-authorityd": "usr/lib/linura/linura-authorityd",
 }
 
 RUNTIME_ASSETS = {
+    ROOT
+    / "packaging/security-owner/install-capability.sh": "usr/lib/linura/linura-security-owner-install-capability",
+    ROOT
+    / "packaging/arch/hooks/90-linura-security-owner-capability.hook": "etc/pacman.d/hooks/90-linura-security-owner-capability.hook",
+    ROOT
+    / "packaging/sysusers.d/linura-authority.conf": "usr/lib/sysusers.d/linura-authority.conf",
+    ROOT
+    / "packaging/systemd/system/linura-authorityd.service": "usr/lib/systemd/system/linura-authorityd.service",
+    ROOT
+    / "packaging/systemd/system/linura-executor-systemd.service": "usr/lib/systemd/system/linura-executor-systemd.service",
+    ROOT
+    / "packaging/systemd/system/linura-executor-session.service": "usr/lib/systemd/system/linura-executor-session.service",
+    ROOT
+    / "packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf": "usr/lib/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf",
+    ROOT
+    / "packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf": "usr/lib/systemd/sleep.conf.d/50-linura-qualified-sleep.conf",
+    ROOT
+    / "packaging/dbus-1/system.d/org.linura.Authority1.conf": "usr/share/dbus-1/system.d/org.linura.Authority1.conf",
+    ROOT
+    / "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf": "usr/share/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
+    ROOT
+    / "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf": "usr/share/dbus-1/system.d/org.linura.Executor.Session1.conf",
+    ROOT
+    / "packaging/polkit-1/actions/org.linura.authority.policy": "usr/share/polkit-1/actions/org.linura.authority.policy",
+    ROOT
+    / "packaging/polkit-1/actions/org.linura.executor.systemd.policy": "usr/share/polkit-1/actions/org.linura.executor.systemd.policy",
+    ROOT
+    / "packaging/polkit-1/actions/org.linura.executor.session.policy": "usr/share/polkit-1/actions/org.linura.executor.session.policy",
+    ROOT
+    / "packaging/polkit-1/rules.d/50-linura-executor-systemd.rules": "usr/share/polkit-1/rules.d/50-linura-executor-systemd.rules",
+    ROOT
+    / "packaging/polkit-1/rules.d/50-linura-executor-session.rules": "usr/share/polkit-1/rules.d/50-linura-executor-session.rules",
+    ROOT
+    / "interfaces/dbus/org.linura.Authority1.xml": "usr/share/dbus-1/interfaces/org.linura.Authority1.xml",
+    ROOT
+    / "interfaces/dbus/org.linura.SleepGate1.xml": "usr/share/dbus-1/interfaces/org.linura.SleepGate1.xml",
+    ROOT
+    / "interfaces/dbus/org.linura.Executor.Systemd1.xml": "usr/share/dbus-1/interfaces/org.linura.Executor.Systemd1.xml",
+    ROOT
+    / "interfaces/dbus/org.linura.Executor.Session1.xml": "usr/share/dbus-1/interfaces/org.linura.Executor.Session1.xml",
     ROOT
     / "packaging/wireplumber/linura-session-audio.lua": "usr/lib/linura/linura-session-audio.lua",
     ROOT
@@ -41,6 +98,14 @@ RUNTIME_ASSETS = {
     ROOT
     / "packaging/systemd/user/linura-shell.service": "usr/lib/systemd/user/linura-shell.service",
     ROOT / "apps/linura-shell/shell.qml": "usr/share/linura/shell/shell.qml",
+    ROOT
+    / "apps/linura-shell/plugins/session/SessionControls.qml": "usr/share/linura/shell/plugins/session/SessionControls.qml",
+    ROOT
+    / "apps/linura-shell/plugins/session/manifest.json": "usr/share/linura/shell/plugins/session/manifest.json",
+    ROOT
+    / "apps/linura-shell/plugins/power/PowerControls.qml": "usr/share/linura/shell/plugins/power/PowerControls.qml",
+    ROOT
+    / "apps/linura-shell/plugins/power/manifest.json": "usr/share/linura/shell/plugins/power/manifest.json",
     ROOT
     / "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml": "usr/share/linura/shell/plugins/control-center/ControlCenterPanel.qml",
     ROOT
@@ -181,6 +246,49 @@ def build_ui_sdk(profile: Path) -> None:
     )
 
 
+def build_security_owner(profile: Path) -> None:
+    missing = [
+        name
+        for name in ("cmake", "ninja", "pkg-config", "wayland-scanner")
+        if shutil.which(name) is None
+    ]
+    if missing or not have_qt_modules(SECURITY_OWNER_MODULES):
+        raise RuntimeError(
+            "native security-owner build dependencies are missing; "
+            "prepare the prescribed environment, never disable native authentication"
+        )
+    subprocess.run(
+        [
+            "cmake",
+            "-S",
+            str(SECURITY_OWNER_SOURCE),
+            "-B",
+            str(SECURITY_OWNER_BUILD),
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DBUILD_TESTING=OFF",
+            "-DLINURA_SECURITY_OWNER_NATIVE_AUTH=ON",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["cmake", "--build", str(SECURITY_OWNER_BUILD), "--parallel", "1"], check=True
+    )
+    subprocess.run(
+        [
+            "cmake",
+            "--install",
+            str(SECURITY_OWNER_BUILD),
+            "--prefix",
+            str(profile / "airootfs/usr"),
+        ],
+        check=True,
+    )
+    # The image's libcap post-transaction hook establishes secure-exec only
+    # after ArchISO has applied final root ownership. Never set host capabilities.
+
+
 def install_binaries(profile: Path, binaries_dir: Path) -> None:
     missing = [name for name in BINARIES if not (binaries_dir / name).is_file()]
     if missing:
@@ -200,13 +308,19 @@ def install_binaries(profile: Path, binaries_dir: Path) -> None:
         destination = profile / "airootfs" / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
-        destination.chmod(0o644)
+        destination.chmod(
+            0o755
+            if relative == "usr/lib/linura/linura-security-owner-install-capability"
+            else 0o644
+        )
 
     user_unit_dir = profile / "airootfs/usr/lib/systemd/user"
     service_links = {
         user_unit_dir / "default.target.wants/linurad.service": "../linurad.service",
         user_unit_dir
         / "graphical-session.target.wants/linura-shell.service": "../linura-shell.service",
+        profile
+        / "airootfs/usr/lib/systemd/system/multi-user.target.wants/linura-authorityd.service": "../linura-authorityd.service",
     }
     for link, target in service_links.items():
         link.parent.mkdir(parents=True, exist_ok=True)
@@ -252,6 +366,7 @@ def stage_profile(binaries_dir: Path) -> None:
     install_binaries(STAGED, binaries_dir)
     build_shell_bridge(STAGED)
     build_ui_sdk(STAGED)
+    build_security_owner(STAGED)
 
 
 def main() -> int:
@@ -303,7 +418,10 @@ def main() -> int:
         print(
             "7. build and install the first-party org.linura.UI QML module into the staged image"
         )
-        print(f"8. {shlex.join(mkarchiso_command())}")
+        print(
+            "8. build and install the native security owner with official Polkit authentication; final image transaction establishes its fixed file capability"
+        )
+        print(f"9. {shlex.join(mkarchiso_command())}")
         return 0
     if shutil.which("mkarchiso") is None:
         print(

@@ -1,0 +1,15 @@
+[Unit]
+Description=Linura native compositor availability for UID %i
+After=user@%i.service
+BindsTo=user@%i.service
+
+[Path]
+# This is only a bounded startup trigger. Socket paths are never identity or
+# authority: startup freshly attests the actual connected kernel peers/session.
+PathExistsGlob=/run/user/%i/hypr/*/.socket.sock
+Unit=linura-security-owner@%i.service
+TriggerLimitIntervalSec=120s
+TriggerLimitBurst=5
+
+[Install]
+WantedBy=user@%i.service

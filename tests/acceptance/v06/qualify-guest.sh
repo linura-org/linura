@@ -254,7 +254,13 @@ printf 'sqlite-integrity=%s\n' "$integrity"
 sudo -n sqlite3 /var/lib/linura-authority/authority.sqlite3 '.tables'
 
 stage deterministic-fault-matrix-inside-disposable-guest
-/usr/libexec/linura/v06-qualification-matrix --test-threads=1 --nocapture 2>&1 | tee /tmp/v06-matrix.log
+# Run the complete expanded binary first: no S17 tests are skipped. Retain its
+# own transcript; the historical v0.6 evidence contract still names eleven cases.
+/usr/libexec/linura/v06-qualification-matrix --test-threads=1 --nocapture 2>&1 | tee /tmp/v06-complete-matrix.log
+grep -F 'test result: ok. 48 passed; 0 failed; 0 ignored' /tmp/v06-complete-matrix.log
+# Rerun the original eleven-case projection for the unchanged v0.6 verifier.
+# This is additional execution, never a replacement for the full matrix above.
+/usr/libexec/linura/v06-qualification-matrix --skip s17_managed_ --test-threads=1 --nocapture 2>&1 | tee /tmp/v06-matrix.log
 grep -F 'test result: ok. 11 passed' /tmp/v06-matrix.log
 
 echo "real-authority1-success=qualified"

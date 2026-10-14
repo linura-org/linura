@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -60,6 +61,14 @@ EXPECTED_RUNTIME_PACKAGES = [
     "ffmpeg",
     "wf-recorder",
     "wayland",
+    "wayland-protocols",
+    "polkit",
+    "at-spi2-core",
+    "libcap",
+    "libxkbcommon",
+    "libx11",
+    "fontconfig",
+    "ttf-dejavu",
 ]
 
 EXPECTED_CASES = [
@@ -98,6 +107,12 @@ RUNTIME_FILES = (
     "apps/linura-shell/bridge/CMakeLists.txt",
     "apps/linura-shell/bridge/audio_session_controller.h",
     "apps/linura-shell/bridge/audio_session_controller.cpp",
+    "apps/linura-shell/bridge/session_controller.h",
+    "apps/linura-shell/bridge/session_controller.cpp",
+    "apps/linura-shell/bridge/session_receipt.h",
+    "apps/linura-shell/bridge/session_receipt.cpp",
+    "apps/linura-shell/plugins/session/SessionControls.qml",
+    "apps/linura-shell/plugins/power/PowerControls.qml",
     "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml",
     "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml",
     "apps/linura-shell/plugins/notifications-osd/manifest.json",
@@ -303,6 +318,7 @@ def validate(root: Path) -> list[str]:
         "vm_gpu_vendor_id": "0x1af4",
         "vm_gpu_device_id": "0x1050",
         "vm_disk_size_gib": 16,
+        "runtime_disk_mode": "verified-private-disposable-persistent-copy",
         "runtime_root": "qualification/v010/shell-runtime",
     }
     for key, expected in expected_scalars.items():
@@ -528,6 +544,36 @@ def validate(root: Path) -> list[str]:
         "LINURAD_SHA256=%s",
         "SESSION_AUDIO_HELPER_SHA256=%s",
         "bash qualification/v010/shell-runtime/start-vm.sh",
+        '--qmp-socket "$native_input_socket"',
+        "umask 077",
+        "timeout --signal=TERM --kill-after=5s 900 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-auth.py",
+        '--bootstrap "$ARTIFACT_DIR/s17-native-bootstrap.json"',
+        '"$ARTIFACT_DIR/s17-native-authentication.json"',
+        '"$ARTIFACT_DIR/s17-native-case-digests.sha256"',
+        "'sha256sum /usr/lib/linura/qualification/linura-s17-assistive-probe'",
+        '> "$ARTIFACT_DIR/s17-native-assistive-binary.sha256"',
+        '"$ARTIFACT_DIR/s17-native-assistive-binary.sha256" \\',
+        "qualification/v010/session-security/native-assistive-fixture.py \\",
+        "qualification/v010/session-security/native-assistive-probe.cpp \\",
+        "qualification/v010/session-security/native-assistive-denial.h \\",
+        "qualification/v010/session-security/native-assistive-denial-test.cpp \\",
+        "qualification/v010/session-security/CMakeLists.txt \\",
+        "timeout --signal=TERM --kill-after=5s 360 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-suspend.py",
+        '"$ARTIFACT_DIR/s17-native-suspend.json"',
+        '"$ARTIFACT_DIR/s17-native-suspend-digests.sha256"',
+        "start-vm.sh --persistent             --mode automated",
+        "for purpose in logout reboot power-off; do",
+        "timeout --signal=TERM --kill-after=5s 180 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-transition.py",
+        "timeout --signal=TERM --kill-after=5s 600 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-transition.py",
+        '"$ARTIFACT_DIR/s17-native-terminating-digests.sha256"',
+        'vm_directory="$(mktemp -d "$RUNNER_TEMP/linura-s17-disk.XXXXXX")"',
+        'vm_image="$vm_directory/guest.qcow2"',
+        'chmod 0600 "$vm_image"',
+        "/usr/bin/python3 -I -S qualification/v010/session-security/guard-disposable-disk.py",
+        '--source "$PREPARED_IMAGE" --copy "$vm_image"',
+        '--source "$PREPARED_IMAGE" --copy "$VM_IMAGE"',
+        '--expected-source-sha "$PREPARED_IMAGE_SHA256" --phase before',
+        '--expected-source-sha "$PREPARED_IMAGE_SHA256" --phase after',
         "--mode automated",
         "--display none",
         "cloud-localds",
@@ -704,9 +750,51 @@ def validate(root: Path) -> list[str]:
         )
     if "linura-v010-pacman" in workflow:
         failures.append("v0.10 runtime must not use the obsolete package-payload cache")
-    if "--persistent" in runtime_job:
+    # S17 power-off recovery needs persistence across QEMU exit, but only on the
+    # separately guarded private copy. Preserve the former no-writable-substrate
+    # assertion: no other persistent launch, image substitution or extra flag is
+    # admitted. The default shared launcher remains snapshot/disposable.
+    launches = re.findall(
+        r"bash qualification/v010/shell-runtime/start-vm\.sh\s+(.*?)\s+>",
+        runtime_job.replace("\\\n", " "),
+        re.DOTALL,
+    )
+    expected_launch = [
+        "--persistent",
+        "--mode",
+        "automated",
+        "--display",
+        "none",
+        "--image",
+        "$VM_IMAGE",
+        "--seed",
+        "$SEED_IMAGE",
+        "--memory",
+        "6144",
+        "--cpus",
+        "4",
+        "--nic-mac",
+        "$QUALIFICATION_NIC_MAC",
+        "--ssh-port",
+        "2223",
+        "--qmp-socket",
+    ]
+    try:
+        actual_launches = [
+            shlex.split(value.replace("\\\n", " ")) for value in launches
+        ]
+    except ValueError:
+        actual_launches = []
+    if (
+        actual_launches
+        != [
+            expected_launch + ["$native_input_socket"],
+            expected_launch + ["$NATIVE_INPUT_SOCKET"],
+        ]
+        or runtime_job.count("--persistent") != 2
+    ):
         failures.append(
-            "exact-source qualification runtime must remain snapshot/disposable"
+            "exact-source qualification runtime must remain snapshot/disposable except for its two exact guarded S17 private-copy boots"
         )
     if 'cp --reflink=auto "$PREPARED_IMAGE" "$vm_image"' not in runtime_job:
         failures.append(

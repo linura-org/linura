@@ -23,6 +23,7 @@ on:
       - "crates/linura-dbus/**"
       - "crates/linura-graph/**"
       - "crates/linura-linux-observation/**"
+      - "crates/linura-linux-session/**"
       - "crates/linura-observation/**"
       - "crates/linura-observation-control/**"
       - "crates/linura-planner/**"

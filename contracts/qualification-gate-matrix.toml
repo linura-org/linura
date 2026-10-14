@@ -176,6 +176,7 @@ paths = [
   "crates/linura-hardware/**",
   "crates/linura-dbus/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-linux-session/**",
   "crates/linura-observation/**",
   "crates/linura-observation-control/**",
   "crates/linura-sdk/**",
@@ -223,6 +224,7 @@ paths = [
   "crates/linura-dbus/**",
   "crates/linura-graph/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-linux-session/**",
   "crates/linura-observation/**",
   "crates/linura-observation-control/**",
   "crates/linura-planner/**",
@@ -328,6 +330,7 @@ paths = [
   "tests/tooling/test_qualification_evidence.py",
   ".github/workflows/trusted-release-proof.yml",
   "crates/linura-linux-observation/**",
+  "crates/linura-linux-session/**",
   "crates/linura-observation/**",
   "crates/linura-provider-sdk/**",
   "executors/linura-executor-systemd/**",
@@ -372,6 +375,7 @@ paths = [
   "crates/linura-dbus/**",
   "crates/linura-lifecycle/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-linux-session/**",
   "crates/linura-observation/**",
   "crates/linura-observation-control/**",
   "crates/linura-persistence-sqlite/**",
@@ -546,6 +550,7 @@ paths = [
   "crates/linura-core/**",
   "crates/linura-hardware/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-linux-session/**",
   "crates/linura-migrations/**",
   "crates/linura-observation/**",
   "crates/linura-observation-control/**",
@@ -653,10 +658,30 @@ paths = [
   "!apps/linura-shell/AGENTS.md",
   "!apps/linura-shell/README.md",
   "apps/linurad/**",
+  "apps/linuractl/**",
+  "apps/linura-authorityd/**",
+  "crates/linura-sdk/**",
+  "tools/image.py",
+  "tests/tooling/test_s17_deployment.py",
+  "tests/tooling/test_s17_native_session_fixture.py",
+  "tests/tooling/test_s17_native_authentication.py",
+  "tests/tooling/test_s17_native_assistive.py",
+  "tests/tooling/test_s17_native_input.py",
+  "tests/tooling/test_s17_native_suspend.py",
+  "tests/tooling/test_s17_native_transition.py",
+  "tests/tooling/test_s17_disposable_disk.py",
+  "packaging/security-owner/**",
+  "packaging/systemd/system/linura-security-owner@.*",
+  "packaging/systemd/system/user@.service.d/50-linura-security-owner.conf",
+  "packaging/systemd/system/linura-authorityd.service",
+  "packaging/sysusers.d/linura-authority.conf",
+  "packaging/dbus-1/system.d/org.linura.Authority1.conf",
+  "packaging/polkit-1/actions/org.linura.authority.policy",
   "packaging/systemd/user/linura-shell.service",
   "packaging/systemd/user/linurad.service",
   "packaging/wireplumber/linura-session-audio.lua",
   "qualification/v010/shell-runtime/**",
+  "qualification/v010/session-security/**",
   "qualification/v010/workstation-acceptance/**",
   "tools/check_linura_shell.py",
   "tools/check_v010_shell_runtime_qualification.py",
@@ -686,6 +711,7 @@ paths = [
   "crates/linura-library/**",
   "crates/linura-lifecycle/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-linux-session/**",
   "crates/linura-observation/**",
   "crates/linura-observation-control/**",
   "crates/linura-planner/**",
@@ -694,6 +720,7 @@ paths = [
   "crates/linura-provenance/**",
   "crates/linura-provider-sdk/**",
   "crates/linura-transaction/**",
+  "executors/linura-executor-session/**",
   "contracts/layering.toml",
   "Cargo.toml",
   "Cargo.lock",
@@ -726,6 +753,14 @@ paths = [
   "tools/workstation_capture_lock.py",
   "interfaces/dbus/org.linura.Control1.xml",
   "interfaces/dbus/org.linura.Session1.xml",
+  "interfaces/dbus/org.linura.SecurityOwner1.xml",
+  "interfaces/dbus/org.linura.SleepGate1.xml",
+  "interfaces/dbus/org.linura.Authority1.xml",
+  "interfaces/dbus/org.linura.Executor.Session1.xml",
+  "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf",
+  "packaging/polkit-1/actions/org.linura.executor.session.policy",
+  "packaging/polkit-1/rules.d/50-linura-executor-session.rules",
+  "packaging/systemd/system/linura-executor-session.service",
   "schemas/capability-blueprint.v1.schema.json",
   "schemas/capability-snapshot.v1.schema.json",
   "schemas/derived-surface.v1.schema.json",
@@ -873,7 +908,7 @@ gates = ["vm-acceptance","control1-plan-preview","v09-qualification","v010-works
 [[component]]
 id = "linuractl"
 path = "apps/linuractl"
-gates = ["vm-acceptance","control1-plan-preview","v09-qualification"]
+gates = ["vm-acceptance","control1-plan-preview","v09-qualification","v010-workstation"]
 
 [[component]]
 id = "linura-firstboot"
@@ -883,7 +918,7 @@ gates = ["vm-acceptance","v09-qualification"]
 [[component]]
 id = "linura-authorityd"
 path = "apps/linura-authorityd"
-gates = ["v06-managed-lifecycle","v09-qualification"]
+gates = ["v06-managed-lifecycle","v09-qualification","v010-workstation"]
 
 [[component]]
 id = "linura-update-guard"
@@ -946,6 +981,11 @@ path = "crates/linura-dbus"
 gates = ["vm-acceptance","control1-plan-preview","v06-managed-lifecycle","v09-qualification","v010-workstation"]
 
 [[component]]
+id = "linura-linux-session"
+path = "crates/linura-linux-session"
+gates = ["vm-acceptance","control1-plan-preview","v05-executor-verifier","v06-managed-lifecycle","v09-qualification","v010-workstation"]
+
+[[component]]
 id = "linura-planner"
 path = "crates/linura-planner"
 gates = ["control1-plan-preview","v07-library","v09-qualification","v010-workstation"]
@@ -963,7 +1003,7 @@ gates = ["control1-plan-preview","v09-qualification","v010-workstation"]
 [[component]]
 id = "linura-sdk"
 path = "crates/linura-sdk"
-gates = ["vm-acceptance","control1-plan-preview","v07-library","v09-qualification"]
+gates = ["vm-acceptance","control1-plan-preview","v07-library","v09-qualification","v010-workstation"]
 
 [[component]]
 id = "linura-provenance"
@@ -1034,6 +1074,11 @@ gates = ["v06-managed-lifecycle","v09-qualification","v010-workstation"]
 id = "xtask"
 path = "tools/xtask"
 gates = []
+
+[[component]]
+id = "linura-executor-session"
+path = "executors/linura-executor-session"
+gates = ["v09-qualification","v010-workstation"]
 
 [[component]]
 id = "linura-executor-systemd"
@@ -1148,12 +1193,24 @@ path = "interfaces/dbus/org.linura.Session1.xml"
 gates = ["control1-plan-preview","v09-qualification","v010-workstation"]
 
 [[contract]]
+path = "interfaces/dbus/org.linura.SecurityOwner1.xml"
+gates = ["control1-plan-preview","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "interfaces/dbus/org.linura.SleepGate1.xml"
+gates = ["control1-plan-preview","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "interfaces/dbus/org.linura.Executor.Session1.xml"
+gates = ["control1-plan-preview","v09-qualification","v010-workstation"]
+
+[[contract]]
 path = "apps/linuractl/src/main.rs"
-gates = ["vm-acceptance","control1-plan-preview","v09-qualification"]
+gates = ["vm-acceptance","control1-plan-preview","v09-qualification","v010-workstation"]
 
 [[contract]]
 path = "crates/linura-sdk/src/lib.rs"
-gates = ["vm-acceptance","control1-plan-preview","v07-library","v09-qualification"]
+gates = ["vm-acceptance","control1-plan-preview","v07-library","v09-qualification","v010-workstation"]
 
 [[contract]]
 path = "bindings/python/src/linura/__init__.py"
@@ -1261,4 +1318,4 @@ gates = ["control1-plan-preview","v06-managed-lifecycle","v09-qualification"]
 
 [[contract]]
 path = "interfaces/dbus/org.linura.Authority1.xml"
-gates = ["control1-plan-preview","v06-managed-lifecycle","v09-qualification"]
+gates = ["control1-plan-preview","v06-managed-lifecycle","v09-qualification","v010-workstation"]

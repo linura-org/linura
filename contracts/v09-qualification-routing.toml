@@ -89,6 +89,7 @@ full_prefixes = [
   "crates/linura-capability-sdk/",
   "crates/linura-hardware/",
   "crates/linura-linux-observation/",
+  "crates/linura-linux-session/",
   "crates/linura-observation/",
   "crates/linura-observation-control/",
   "interfaces/dbus/",

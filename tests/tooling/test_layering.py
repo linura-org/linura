@@ -313,6 +313,66 @@ class LayeringContractTests(unittest.TestCase):
                 result.stderr,
             )
 
+    def test_native_session_adapter_cannot_gain_control_orchestration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            self._add_dependency(
+                root / "crates/linura-linux-session/Cargo.toml",
+                "linura-control",
+                '{ path = "../linura-control" }',
+            )
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "linura-linux-session violates inward dependency boundary",
+                result.stderr,
+            )
+
+    def test_native_session_handles_cannot_reach_public_sdk_or_agent_by_alias(
+        self,
+    ) -> None:
+        for package in ["linura-sdk", "linura-agent-runtime", "linura-control"]:
+            with (
+                self.subTest(package=package),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                self._add_dependency(
+                    root / f"crates/{package}/Cargo.toml",
+                    "native_bus",
+                    '{ package = "linura-linux-session", path = "../linura-linux-session" }',
+                )
+                result = self._run_checker(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("trusted session composition roots", result.stderr)
+
+    def test_native_adapter_target_and_workspace_aliases_cannot_evade_boundary(
+        self,
+    ) -> None:
+        for target in [True, False]:
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                manifest = root / "crates/linura-sdk/Cargo.toml"
+                if target:
+                    self._add_target_dependency(
+                        manifest,
+                        "native_bus",
+                        '{ package = "linura-linux-session", path = "../linura-linux-session" }',
+                    )
+                else:
+                    self._add_workspace_dependency(
+                        root,
+                        "native_bus",
+                        '{ package = "linura-linux-session", path = "crates/linura-linux-session" }',
+                    )
+                    self._add_dependency(manifest, "native_bus", "{ workspace = true }")
+                result = self._run_checker(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("trusted session composition roots", result.stderr)
+
     def test_principal_terminology_cannot_be_downgraded_to_client_claim(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -53,6 +53,9 @@ class QualificationScopeTests(unittest.TestCase):
             "tools/acceptance.py",
             "scripts/qualification/v09-adversarial-guest.sh",
             "tests/acceptance/008-control1-plan-preview.json",
+            "crates/linura-linux-session/Cargo.toml",
+            "crates/linura-linux-session/src/owner.rs",
+            "crates/linura-linux-session/src/sleep_gate.rs",
         )
         for path in protected:
             with self.subTest(path=path):
@@ -126,6 +129,8 @@ class QualificationScopeTests(unittest.TestCase):
             "crates/linura-control/README.md",
             "apps/linura-authorityd/AGENTS.md",
             "apps/linura-authorityd/README.md",
+            "crates/linura-linux-session/AGENTS.md",
+            "crates/linura-linux-session/README.md",
             "docs/development-infrastructure.md",
         ]
         for path in guidance:
@@ -142,6 +147,11 @@ class QualificationScopeTests(unittest.TestCase):
             routing.requires_full_qualification(
                 ["apps/linura-authorityd/AGENTS.md", "apps/linura-authorityd/build.rs"],
                 self.contract,
+            )
+        )
+        self.assertTrue(
+            routing.requires_full_qualification(
+                guidance + ["crates/linura-linux-session/src/owner.rs"], self.contract
             )
         )
 
