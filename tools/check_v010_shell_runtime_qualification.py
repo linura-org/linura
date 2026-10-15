@@ -475,7 +475,8 @@ def validate(root: Path) -> list[str]:
         "installed_shell_bridge_sha=",
         "SHELL_BRIDGE_SHA256",
         '"shell_bridge_sha256": os.environ["SHELL_BRIDGE_SHA256"]',
-        "source tools/codex/versions.env",
+        "--values tools/codex/versions.env",
+        "read -r ACTIONLINT_SHA256",
         'rustup toolchain install "$RUST_VERSION" --profile minimal',
         "growpart:",
         'devices: ["/"]',
@@ -1433,15 +1434,22 @@ def validate(root: Path) -> list[str]:
 
     if prepare_substrate_script.is_file():
         prepare_text = prepare_substrate_script.read_text(encoding="utf-8")
+        if 'eval "$(' in prepare_text or "shlex.quote" in prepare_text:
+            failures.append(
+                "substrate builder must load validated data, not executable shell"
+            )
         for fragment in (
             "--persistent",
             "--mode automated",
             "--display none",
             "pacman -Syu",
             "timeout --signal=TERM --kill-after=10s 720",
-            "--disable-download-timeout",
+            "--disable-download-timeout -- $RUNTIME_PACKAGES",
             "for attempt in 1 2 3",
             "prepared substrate package installation failed after 3 bounded attempts",
+            "substrate contract rejected before data loading",
+            "unsafe substrate package declaration",
+            "read -r BASE_IMAGE_URL_CONTRACT",
             "cloud-init clean --logs --seed",
             "test ! -e /opt/linura-source",
             "test ! -e /usr/bin/linurad",
@@ -2007,7 +2015,8 @@ wait_until "WirePlumber mixer state for qualification sink" wireplumber_fixture_
             "run-live-session.sh",
             'git -C "$source_root" archive --format=tar.gz --output="$source_archive" "$source_sha"',
             'tar -xzf "$source_archive" -C "$build_root"',
-            'source "$build_root/tools/codex/versions.env"',
+            '--values "$build_root/tools/codex/versions.env"',
+            "read -r ACTIONLINT_SHA256",
             'cargo +"$RUST_VERSION" build --workspace --release --locked --target "$release_target"',
             'RUSTFLAGS="--remap-path-prefix=$build_root=/workspace"',
             'linurad_binary="$build_root/target/$release_target/release/linurad"',

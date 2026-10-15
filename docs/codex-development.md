@@ -161,6 +161,34 @@ defaults, and required jobs prohibit unapproved step-shell overrides.
 Required qualification steps reject arbitrary conditions and failure suppression;
 only explicitly reviewed cleanup, v0.9 full-lane and reusable v0.10
 cache-miss conditions are accepted.
+Every workflow job that executes checked-out repository code must first run an
+unconditional isolated toolchain validator, including jobs in newly added
+workflows and helpers written in non-shell languages. Known pin consumers load
+the validated fields; other jobs use validation-only mode. Source authentication
+that must precede repository execution remains before this validator and is
+bound to an exact reviewed job-specific prefix. A modified prefix cannot fall
+back to the ordinary checkout rule. Main-source validation requires an explicit
+job-level `SOURCE_SHA: ${{ inputs.source_sha }}` binding; missing or rebound
+declarations fail closed. The few checkout-free API handoffs and
+sealed-artifact upload jobs are bound to their complete reviewed job bodies;
+adding a local helper invalidates that exception. Local reusable-workflow calls
+must target present, callable workflows and form an acyclic graph.
+Validation steps have unique `toolchain_data` IDs. Status-override cleanup and
+diagnostic steps require that validation outcome to be `success`, so they still
+run after later failures but cannot execute rejected configuration. Later
+checkouts cannot replace validated files; the evidence-admission job's separately
+rooted data-only checkout is bound to its complete reviewed step.
+Protected jobs also require the reviewed hosted runner without
+containers or services. Workflow, job and step environments accept only the
+reviewed data-variable names in `TOOLCHAIN_DATA_ENV_KEYS`; introducing a new name
+requires an explicit security review. Startup variables have only their reviewed
+empty-clearing exception. Exported Bash functions, interpreter/native-loader
+overrides and unknown ambient controls cannot precede or replace validation.
+Environment maps must be inspectable block mappings with literal, unique variable
+names: whole-map expressions, flow maps, aliases, merges and nested maps fail
+closed. Literal shell/data blocks remain opaque rather than being interpreted as
+workflow metadata. This is a conservative supported workflow grammar, not a
+general YAML or shell interpreter.
 A new subsystem must update its qualification routing instead of accepting
 an omitted trigger as success.
 

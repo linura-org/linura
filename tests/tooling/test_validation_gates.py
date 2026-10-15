@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import os
 import re
@@ -7,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,6 +22,11 @@ class ValidationGateTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         paths = set(gates.MANDATORY.values())
+        paths.update(gates.TOOLCHAIN_DATA_WORKFLOWS)
+        paths.update(
+            path.relative_to(ROOT).as_posix()
+            for path in (ROOT / ".github/workflows").glob("*.y*ml")
+        )
         paths.update(
             (
                 "tools/xtask/src/main.rs",
@@ -155,6 +162,1797 @@ class ValidationGateTests(unittest.TestCase):
         finally:
             target.write_text(original, encoding="utf-8")
         self.assertEqual(gates.check(self.root), [])
+
+    def test_transitive_local_shell_sourcing_is_rejected(self):
+        """Every repository helper is scanned, including nested and unused scripts."""
+        for payload in (
+            "source tools/codex/versions.env",
+            'CONTRACT=tools/codex/versions.env\nsource "$CONTRACT"',
+            ". tools/codex/versions.env",
+            'eval "source tools/codex/versions.env"',
+            'bash -c "source tools/codex/versions.env"',
+            *(
+                'prefix=tools/codex\ncontract="$prefix/versions.env"\n' + command
+                for command in (
+                    'command -- source "$contract"',
+                    'builtin -- source "$contract"',
+                    'command -p -- source "$contract"',
+                    'case x in x) command -- source "$contract" ;; esac',
+                    'command -- eval "source $contract"',
+                    'builtin -- eval "source $contract"',
+                    'if false; then :; else source "$contract"; fi',
+                    'if false; then :; else . "$contract"; fi',
+                    'if false; then :; else command -- source "$contract"; fi',
+                    'if false; then :; else builtin -- source "$contract"; fi',
+                    'if false; then :; else eval "source $contract"; fi',
+                    'if false; then :; else command -- eval "source $contract"; fi',
+                    'time -p source "$contract"',
+                    'time -p eval "source $contract"',
+                    'coproc source "$contract"',
+                    'if false; then :; else time -p source "$contract"; fi',
+                )
+            ),
+            *(
+                'prefix=tools/codex\ncontract="$prefix/versions.env"\n'
+                + f'{shell} -c \'. "$1"\' _ "$contract"'
+                for shell in (
+                    "dash",
+                    "/bin/dash",
+                    "zsh",
+                    "ksh",
+                    "ash",
+                    "mksh",
+                    "env dash",
+                    "command dash",
+                    "dash -e",
+                )
+            ),
+        ):
+            with self.subTest(payload=payload):
+                helper = self.root / "scripts/nested/load-contract.sh"
+                helper.parent.mkdir(parents=True, exist_ok=True)
+                helper.write_text(
+                    "#!/usr/bin/env bash\nset -euo pipefail\n" + payload + "\n",
+                    encoding="utf-8",
+                )
+                try:
+                    errors = gates.check(self.root)
+                    # Source builtins retain their line-level rejection;
+                    # nested interpreters now require whole-file review
+                    # regardless of how their input is supplied.
+                    self.assertTrue(
+                        {
+                            "scripts/nested/load-contract.sh: unreviewed local shell source/evaluation",
+                            "scripts/nested/load-contract.sh: unreviewed shell execution",
+                        }.intersection(errors),
+                        errors,
+                    )
+                finally:
+                    helper.unlink()
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_ignored_workspace_is_not_source_but_untracked_helper_is(self):
+        (self.root / ".gitignore").write_text(".artifacts/\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "."], cwd=self.root, check=True)
+
+        ignored = self.root / ".artifacts/worktrees/other/scripts/load-contract.sh"
+        ignored.parent.mkdir(parents=True)
+        ignored.write_text(
+            "#!/usr/bin/env bash\nsource tools/codex/versions.env\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(gates.check(self.root), [])
+
+        untracked = self.root / "scripts/untracked-load-contract.sh"
+        untracked.write_text(
+            "#!/usr/bin/env bash\nsource tools/codex/versions.env\n",
+            encoding="utf-8",
+        )
+        failures = gates.check(self.root)
+        self.assertTrue(
+            any(
+                "scripts/untracked-load-contract.sh: unreviewed local" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
+    def test_repository_source_inventory_failure_is_closed(self):
+        (self.root / ".git").write_text("gitdir: missing\n", encoding="utf-8")
+        self.assertIn("repository source inventory unavailable", gates.check(self.root))
+
+    def test_dynamic_shell_command_names_are_denied(self):
+        for command in (
+            '"$loader" "$contract"',
+            '$loader "$contract"',
+            '"${loader}" "$contract"',
+            '"${loader[@]}" "$contract"',
+            '"$load"er "$contract"',
+            's"$suffix" "$contract"',
+            '"$(printf source)" "$contract"',
+            '`printf source` "$contract"',
+            "$'source' \"$contract\"",
+            'command -- "$loader" "$contract"',
+            'command -p "$loader" "$contract"',
+            'builtin -- "$loader" "$contract"',
+            'env -u IGNORED "$loader" "$contract"',
+            '/usr/bin/env -u IGNORED "$loader" "$contract"',
+            'exec -a ignored "$loader" "$contract"',
+            'FLAG=value "$loader" "$contract"',
+            '2>/dev/null "$loader" "$contract"',
+            'if "$loader" "$contract"; then :; fi',
+            'if false; then :; else "$loader" "$contract"; fi',
+            'time -p "$loader" "$contract"',
+            'coproc "$loader" "$contract"',
+            'case x in x) "$loader" "$contract" ;; esac',
+            'case x in\nx) "$loader" "$contract" ;;\nesac',
+            'output="$("$loader" "$contract")"',
+            '[[ "$("$loader" "$contract")" == expected ]]',
+            '"$load\\\ner" "$contract"',
+        ):
+            with self.subTest(command=command):
+                self.assertTrue(gates.dynamic_shell_execution(command), command)
+
+    def test_dynamic_shell_helper_cannot_run_before_validated_load(self):
+        workflow = self.root / ".github/workflows/security.yml"
+        original = workflow.read_text(encoding="utf-8")
+        marker = "      - name: Load repository toolchain contract"
+        helper = self.root / "tools/dynamic-helper.md"
+        workflow.write_text(
+            original.replace(
+                marker,
+                "      - name: Unreviewed helper\n"
+                "        run: bash tools/dynamic-helper.md\n" + marker,
+                1,
+            ),
+            encoding="utf-8",
+        )
+        for command in (
+            'loader=source; "$loader" "$contract"',
+            'loader=(source); "${loader[@]}" "$contract"',
+            'loader=source; command -p "$loader" "$contract"',
+            'loader=source; output="$("$loader" "$contract")"',
+        ):
+            with self.subTest(command=command):
+                helper.write_text(
+                    'prefix=tools/codex\ncontract="$prefix/versions.env"\n'
+                    + command
+                    + "\n",
+                    encoding="utf-8",
+                )
+                self.assertIn(
+                    "tools/dynamic-helper.md: unreviewed shell execution",
+                    gates.check(self.root),
+                )
+
+    def test_dynamic_shell_review_binds_every_variable_definition(self):
+        relative = "scripts/lint_github_workflows.sh"
+        target = self.root / relative
+        original = (ROOT / relative).read_text(encoding="utf-8")
+        target.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+        self.assertIn('actionlint_bin="$1"', original)
+        target.write_text(
+            original.replace('actionlint_bin="$1"', "actionlint_bin=source", 1),
+            encoding="utf-8",
+        )
+        self.assertIn(relative + ": unreviewed shell execution", gates.check(self.root))
+        target.write_text("printf '%s\\n' changed\n", encoding="utf-8")
+        self.assertIn(relative + ": unreviewed shell execution", gates.check(self.root))
+
+    def test_dynamic_shell_interpreters_require_review_for_every_input(self):
+        commands = (
+            'bash < "$contract"',
+            'bash 0< "$contract"',
+            "bash <&3",
+            'bash /dev/stdin < "$contract"',
+            'bash /dev/fd/3 3< "$contract"',
+            'bash /proc/self/fd/3 3< "$contract"',
+            'cat "$contract" | bash',
+            'bash <<< "$payload"',
+            "bash <<'INPUT'\necho payload\nINPUT",
+            'bash -s -- < "$contract"',
+            'bash --noprofile --norc -s < "$contract"',
+            'command -- /bin/bash < "$contract"',
+            'env -u IGNORED /usr/bin/sh < "$contract"',
+            '/usr/bin/env -u IGNORED /bin/sh < "$contract"',
+            '"/usr/bin/env" "bash" < "$contract"',
+            'exec -a label bash < "$contract"',
+            'env -S "bash -s" < "$contract"',
+            'env --split-string="sh -s" < "$contract"',
+            'busybox sh < "$contract"',
+            'toybox sh < "$contract"',
+            '3<"$contract" bash <&3',
+            'if false; then :; else bash < "$contract"; fi',
+            'output="$(bash < "$contract")"',
+            'ba"sh" < "$contract"',
+            'ba\\\nsh < "$contract"',
+            "bash scripts/ordinary.sh",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertTrue(
+                    gates.dynamic_shell_execution(command, literal_interpreters=True),
+                    command,
+                )
+        for shell in ("bash", "dash", "zsh", "ksh", "ash", "mksh", "sh"):
+            with self.subTest(shell=shell):
+                self.assertTrue(
+                    gates.dynamic_shell_execution(
+                        shell + ' < "$contract"', literal_interpreters=True
+                    )
+                )
+        for data in (
+            '# bash < "$contract"',
+            'printf "%s\\n" bash',
+            "command -v bash",
+            '[[ "$value" == bash ]]',
+            "arguments=(bash)",
+        ):
+            with self.subTest(data=data):
+                self.assertFalse(
+                    gates.dynamic_shell_execution(data, literal_interpreters=True), data
+                )
+
+    def test_dynamic_shell_bootstrap_closure_is_interpreter_independent(self):
+        self.assertEqual(gates.local_shell_sources_guarded(self.root), [])
+        commands = (
+            'bash < "$contract"',
+            'cat "$contract" | bash',
+            'bash <<< "$payload"',
+            "python3 -c 'exec(open(\"payload\").read())'",
+            "node tools/load-contract.js",
+            "ruby tools/load-contract.rb",
+            "perl tools/load-contract.pl",
+            "./tools/native-loader",
+            "contract=elsewhere",
+            "# Even changing a comment requires an explicit complete-file review.",
+        )
+        for relative in gates.PREVALIDATION_SHELL_FILES:
+            target = self.root / relative
+            original = target.read_text(encoding="utf-8")
+            for command in commands:
+                with self.subTest(helper=relative, command=command):
+                    target.write_text(
+                        original
+                        + '\nprefix=tools/codex\ncontract="$prefix/versions.env"\n'
+                        + command
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    self.assertIn(
+                        relative + ": unreviewed shell execution",
+                        gates.local_shell_sources_guarded(self.root),
+                    )
+            target.write_text(original, encoding="utf-8")
+
+    def test_dynamic_shell_bootstrap_closure_cannot_disappear_or_be_symlinked(self):
+        for relative in gates.PREVALIDATION_SHELL_FILES:
+            target = self.root / relative
+            original = target.read_bytes()
+            for kind in ("missing", "symlink"):
+                with self.subTest(helper=relative, kind=kind):
+                    target.unlink()
+                    if kind == "symlink":
+                        target.symlink_to(ROOT / relative)
+                    self.assertIn(
+                        relative + ": missing or symlinked pre-validation bootstrap",
+                        gates.local_shell_sources_guarded(self.root),
+                    )
+                    if target.is_symlink():
+                        target.unlink()
+                    target.write_bytes(original)
+
+    def test_dynamic_shell_full_file_review_uses_raw_bytes(self):
+        relative = "scripts/lib/codex_source_state.sh"
+        target = self.root / relative
+        original = target.read_bytes()
+        self.assertNotIn(b"\r", original)
+        target.write_bytes(original.replace(b"\n", b"\r\n"))
+        self.assertIn(
+            relative + ": unreviewed shell execution",
+            gates.local_shell_sources_guarded(self.root),
+        )
+
+    def test_dynamic_shell_redirected_input_in_new_helpers_is_denied(self):
+        helper = self.root / "tools/stdin-loader.sh"
+        for command in (
+            'bash < "$contract"',
+            'cat "$contract" | bash',
+            'bash <<< "$payload"',
+            'command -- sh < "$contract"',
+            'env -S "sh -s" < "$contract"',
+        ):
+            with self.subTest(command=command):
+                helper.write_text(
+                    'prefix=tools/codex\ncontract="$prefix/versions.env"\n'
+                    + command
+                    + "\n",
+                    encoding="utf-8",
+                )
+                self.assertIn(
+                    "tools/stdin-loader.sh: unreviewed shell execution",
+                    gates.local_shell_sources_guarded(self.root),
+                )
+
+    def test_dynamic_shell_workflow_command_names_are_denied(self):
+        original = (self.root / ".github/workflows/security.yml").read_text(
+            encoding="utf-8"
+        )
+        marker = "          set -euo pipefail\n"
+        for command in (
+            '"${loader[@]}" "$contract"',
+            's"$suffix" "$contract"',
+            'builtin -- "$loader" "$contract"',
+            'command -p "$loader" "$contract"',
+            'FLAG=value "$loader" "$contract"',
+            'if false; then :; else "$loader" "$contract"; fi',
+            '"$(printf source)" "$contract"',
+        ):
+            with self.subTest(command=command):
+                changed = original.replace(
+                    marker,
+                    marker + "          " + command + "\n",
+                    1,
+                )
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(changed, require_load=True),
+                    command,
+                )
+
+    def test_dynamic_shell_arguments_and_diagnostics_are_not_commands(self):
+        for command in (
+            'printf "%s\\n" "$loader" "$contract"',
+            'command -v "$command_name"',
+            'command -V "$command_name"',
+            '[[ "$value" == foo || "$value" == bar ]]',
+            'arguments=("$loader" "$contract")',
+            '# "$loader" "$contract"',
+        ):
+            with self.subTest(command=command):
+                self.assertFalse(gates.dynamic_shell_execution(command), command)
+
+    def test_dynamic_shell_quoted_literal_builtins_are_reviewed(self):
+        helper = self.root / "tools/quoted-source.sh"
+        for command in (
+            '"source" "$contract"',
+            'so"ur"ce "$contract"',
+            '\\source "$contract"',
+            'builtin -- "source" "$contract"',
+            'command -p "eval" "$payload"',
+        ):
+            with self.subTest(command=command):
+                helper.write_text(command + "\n", encoding="utf-8")
+                self.assertIn(
+                    "tools/quoted-source.sh: unreviewed local shell source/evaluation",
+                    gates.check(self.root),
+                )
+
+    def test_toolchain_preload_rejects_every_unreviewed_execution_type(self):
+        for name in gates.TOOLCHAIN_DATA_WORKFLOWS:
+            original = (self.root / name).read_text(encoding="utf-8")
+            lines = original.splitlines()
+            loader = next(
+                index
+                for index, line in enumerate(lines)
+                if gates.TOOLCHAIN_WORKFLOW_LOAD in line
+            )
+            step = loader
+            while not lines[step].startswith("      - "):
+                step -= 1
+            marker = lines[step] + "\n"
+            for injected in (
+                "      - name: Python helper\n        run: python3 tools/load_contract.py\n",
+                "      - name: Python inline\n        run: python3 -c 'exec(open(\"payload\").read())'\n",
+                "      - name: Node helper\n        run: node tools/load_contract.js\n",
+                "      - name: Other interpreter\n        run: ruby tools/load_contract.rb\n",
+                "      - name: Native helper\n        run: ./tools/load-contract\n",
+                "      - uses: ./.github/actions/load-contract\n",
+                "      - uses: attacker/load-contract@0123456789012345678901234567890123456789\n",
+                "      - run: echo apparently-harmless\n",
+            ):
+                with self.subTest(workflow=name, injected=injected):
+                    self.assertFalse(
+                        gates.toolchain_data_loads_guarded(
+                            original.replace(marker, injected + marker, 1),
+                            require_load=True,
+                        )
+                    )
+
+    def test_toolchain_preload_inherited_function_executes_before_validator(self):
+        source = (self.root / ".github/workflows/security.yml").read_text()
+        contract = self.root / "tools/codex/versions.env"
+        contract.write_text(
+            contract.read_text() + '\nprintf executed > "$PROBE_MARKER"\n'
+        )
+        marker = self.root / "function-executed"
+        function = (
+            '() { /bin/bash "$PROBE_CONTRACT"; '
+            "printf '%s\\n' 'x x x x x x x x x x x x'; }"
+        )
+        step = source.split("      - name: Load repository toolchain contract\n", 1)[
+            1
+        ].split("      - name:", 1)[0]
+        command = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        result = subprocess.run(
+            ["/bin/bash", "--noprofile", "--norc", "-euo", "pipefail", "-c", command],
+            cwd=self.root,
+            env={
+                "PATH": os.defpath,
+                "BASH_FUNC_python3%%": function,
+                "PROBE_CONTRACT": str(contract),
+                "PROBE_MARKER": str(marker),
+                "GITHUB_ENV": str(self.root / "github-env"),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(marker.read_text(), "executed")
+        changed = source.replace(
+            "permissions:\n",
+            "env:\n  BASH_FUNC_python3%%: " + json.dumps(function) + "\npermissions:\n",
+            1,
+        )
+        self.assertFalse(gates.toolchain_data_loads_guarded(changed, require_load=True))
+
+    def test_toolchain_preload_environment_inheritance_is_data_only(self):
+        source = (self.root / ".github/workflows/security.yml").read_text()
+        for key in (
+            "BASH_FUNC_python3%%",
+            "BASH_FUNC_set%%",
+            "BASH_FUNC_read%%",
+            "BASH_FUNC_printf%%",
+            "BASH_FUNC_bash%%",
+            "BASH_FUNC_git%%",
+            "BASH_FUNC_python3()",
+            "LD_PRELOAD",
+            "LD_LIBRARY_PATH",
+            "PYTHONPATH",
+            "PATH",
+            "NODE_OPTIONS",
+            "CDPATH",
+            "GLOBIGNORE",
+            "FUTURE_INTERPRETER_HOOK",
+        ):
+            for scope, before, after in (
+                (
+                    "workflow",
+                    "permissions:\n",
+                    f"env:\n  {key}: injected\npermissions:\n",
+                ),
+                (
+                    "job",
+                    "    runs-on: ubuntu-24.04\n",
+                    f"    env:\n      {key}: injected\n    runs-on: ubuntu-24.04\n",
+                ),
+                (
+                    "step",
+                    "      - name: Install pinned Rust toolchain\n",
+                    "      - name: Install pinned Rust toolchain\n"
+                    f"        env:\n          {key}: injected\n",
+                ),
+            ):
+                with self.subTest(key=key, scope=scope):
+                    changed = source.replace(before, after, 1)
+                    self.assertNotEqual(changed, source)
+                    self.assertFalse(
+                        gates.toolchain_data_loads_guarded(changed, require_load=True)
+                    )
+
+    def test_toolchain_preload_environment_maps_cannot_hide_keys(self):
+        source = (self.root / ".github/workflows/security.yml").read_text()
+        for header in ("env:", "env :", "'env':", '"\\u0065nv":'):
+            for value in (
+                ' {"BASH_FUNC_python3%%": "() { :; }"}\n',
+                " ${{ fromJSON(inputs.environment) }}\n",
+                " &environment\n  SOURCE_SHA: literal\n",
+                " *environment\n",
+                "\n  'BASH_FUNC_python3%%': injected\n",
+                '\n  "BASH_FUNC_python3\\u0025\\u0025": injected\n',
+                "\n  <<: {BASH_FUNC_python3%%: injected}\n",
+                "\n  SOURCE_SHA: literal\n  SOURCE_SHA: duplicate\n",
+                "\n  SOURCE_SHA:\n    nested: value\n",
+                "\n  PATH : injected\n",
+                "\n  BASH_FUNC_python3%%: |\n    () { :; }\n",
+                "\n  ${{ matrix.variable }}: injected\n",
+            ):
+                with self.subTest(header=header, value=value):
+                    changed = source.replace(
+                        "permissions:\n", header + value + "permissions:\n", 1
+                    )
+                    self.assertFalse(
+                        gates.toolchain_data_loads_guarded(changed, require_load=True)
+                    )
+
+    def test_toolchain_preload_runner_cannot_replace_interpreter(self):
+        source = (self.root / ".github/workflows/security.yml").read_text()
+        for replacement in (
+            "    runs-on: self-hosted\n",
+            "    runs-on: ${{ inputs.runner }}\n",
+            "    runs-on: ubuntu-24.04\n    container: attacker/image\n",
+            "    runs-on: ubuntu-24.04\n    container : {image: attacker/image}\n",
+            "    runs-on: ubuntu-24.04\n    services:\n      unreviewed:\n        image: attacker/image\n",
+        ):
+            with self.subTest(replacement=replacement):
+                changed = source.replace("    runs-on: ubuntu-24.04\n", replacement, 1)
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(changed, require_load=True)
+                )
+
+    def test_toolchain_preload_environment_syntax_is_not_inferred_from_run_data(self):
+        source = (self.root / ".github/workflows/security.yml").read_text()
+        source += (
+            "      - name: Emit inert example\n"
+            "        run: |\n"
+            "          cat <<'DATA'\n"
+            "          env: {BASH_FUNC_python3%%: inert}\n"
+            "          DATA\n"
+        )
+        self.assertTrue(gates.toolchain_data_loads_guarded(source, require_load=True))
+        for workflow in gates.TOOLCHAIN_DATA_WORKFLOWS:
+            with self.subTest(workflow=workflow):
+                self.assertTrue(
+                    gates.toolchain_data_loads_guarded(
+                        (ROOT / workflow).read_text(), require_load=True
+                    )
+                )
+
+    def test_toolchain_preload_environment_mutations_reach_repository_gate(self):
+        path = self.root / ".github/workflows/security.yml"
+        original = path.read_text()
+        for before, after in (
+            ("permissions:\n", "env:\n  BASH_FUNC_python3%%: injected\npermissions:\n"),
+            ("permissions:\n", '"env":\n  LD_PRELOAD: injected\npermissions:\n'),
+            (
+                "    runs-on: ubuntu-24.04\n",
+                "    env: ${{ fromJSON(inputs.environment) }}\n"
+                "    runs-on: ubuntu-24.04\n",
+            ),
+            (
+                "      - name: Install pinned Rust toolchain\n",
+                "      - name: Install pinned Rust toolchain\n"
+                "        env:\n          BASH_FUNC_rustup%%: injected\n",
+            ),
+            (
+                "    runs-on: ubuntu-24.04\n",
+                "    runs-on: ubuntu-24.04\n    container: attacker/image\n",
+            ),
+        ):
+            with self.subTest(after=after):
+                path.write_text(original.replace(before, after, 1))
+                self.assertIn(
+                    ".github/workflows/security.yml: unsafe toolchain execution or missing validated data load",
+                    gates.check(self.root),
+                )
+        path.write_text(original)
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_toolchain_preload_prebootstrap_lanes_share_execution_context_guard(self):
+        for workflow, runner, diagnostic in (
+            (".github/workflows/codeql.yml", "ubuntu-latest", "analyze"),
+            (".github/workflows/codex-environment.yml", "ubuntu-24.04", "codex"),
+        ):
+            path = self.root / workflow
+            original = path.read_text()
+            for before, after in (
+                (
+                    f"    runs-on: {runner}\n",
+                    f"    runs-on: {runner}\n    container: attacker/image\n",
+                ),
+                (
+                    "permissions:\n",
+                    "env:\n  RUSTC_WRAPPER: injected\npermissions:\n",
+                ),
+            ):
+                with self.subTest(workflow=workflow, after=after):
+                    path.write_text(original.replace(before, after, 1))
+                    self.assertIn(
+                        diagnostic + ": unreviewed workflow execution context",
+                        gates.check(self.root),
+                    )
+            path.write_text(original)
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_toolchain_preload_unlisted_workflows_cannot_hide_non_shell_consumers(self):
+        workflow = self.root / ".github/workflows/unlisted-consumer.yml"
+        helper = self.root / "tools/load_contract.py"
+        helper.write_text(
+            "from pathlib import Path\n"
+            "exec(Path('tools/codex/versions.env').read_text())\n"
+        )
+        prefix = (
+            "name: Unlisted consumer\non:\n  pull_request:\njobs:\n"
+            "  consume:\n    runs-on: ubuntu-24.04\n    steps:\n"
+            "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
+        )
+        for command in (
+            "python3 tools/load_contract.py",
+            "python3 -m tools.load_contract",
+            "node tools/load-contract.mjs",
+            "ruby tools/load-contract.rb",
+            "./tools/load-contract",
+            "python3 -c 'print(1)'",
+        ):
+            with self.subTest(command=command):
+                workflow.write_text(prefix + "      - run: " + command + "\n")
+                self.assertIn(
+                    ".github/workflows/unlisted-consumer.yml: unguarded workflow job execution",
+                    gates.check(self.root),
+                )
+
+    def test_toolchain_preload_new_jobs_cannot_inherit_a_workflow_exception(self):
+        path = self.root / ".github/workflows/evidence-publication-checks.yml"
+        path.write_text(
+            path.read_text()
+            + "\n  new-consumer:\n    runs-on: ubuntu-24.04\n    steps:\n"
+            "      - run: python3 tools/load_contract.py\n"
+        )
+        self.assertIn(
+            ".github/workflows/evidence-publication-checks.yml: unguarded workflow job execution",
+            gates.check(self.root),
+        )
+
+    def test_toolchain_preload_checkout_free_exceptions_bind_complete_jobs(self):
+        path = self.root / ".github/workflows/release.yml"
+        original = path.read_text()
+        marker = "      - name: Publish exact proven wheel to PyPI\n"
+        self.assertIn(marker, original)
+        path.write_text(
+            original.replace(
+                marker,
+                "      - run: python3 tools/load_contract.py\n" + marker,
+                1,
+            )
+        )
+        self.assertIn(
+            ".github/workflows/release.yml: unguarded workflow job execution",
+            gates.check(self.root),
+        )
+
+    def test_toolchain_preload_validated_unlisted_job_is_accepted(self):
+        path = self.root / ".github/workflows/unlisted-consumer.yml"
+        source = (
+            "name: Validated consumer\non:\n  pull_request:\njobs:\n"
+            "  consume:\n    runs-on: ubuntu-24.04\n    steps:\n"
+            "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
+            "      - name: Validate repository toolchain data\n"
+            "        id: toolchain_data\n"
+            "        run: |\n"
+            "          set -euo pipefail\n"
+            "          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env\n"
+            "      - run: python3 tools/load_contract.py\n"
+        )
+        path.write_text(source)
+        self.assertEqual(gates.check(self.root), [])
+
+        # Input caching must be scoped to one check, never a previous verdict.
+        path.write_text(source.replace("set -euo pipefail", "true", 1))
+        self.assertIn(
+            ".github/workflows/unlisted-consumer.yml: unguarded workflow job execution",
+            gates.check(self.root),
+        )
+        path.write_text(source)
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_toolchain_preload_reviewed_prefixes_cannot_lose_source_authentication(
+        self,
+    ):
+        for relative, job in gates.REVIEWED_PREVALIDATION_PREFIXES:
+            with self.subTest(workflow=relative, job=job):
+                source = (self.root / relative).read_text()
+                header = "  " + job + ":\n"
+                start = source.index("    steps:\n", source.index(header))
+                validation = source.index(
+                    "      - name: Validate repository toolchain data", start
+                )
+                # Even a normally accepted checkout cannot replace an exact
+                # reviewed source-authentication/bootstrap prefix.
+                changed = (
+                    source[: start + len("    steps:\n")]
+                    + "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
+                    + source[validation:]
+                )
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(
+                        changed, require_load=True, workflow_name=relative
+                    )
+                )
+                changed = (
+                    source[:validation]
+                    + "      - run: python3 tools/load_contract.py\n"
+                    + source[validation:]
+                )
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(
+                        changed, require_load=True, workflow_name=relative
+                    )
+                )
+
+    def test_toolchain_preload_all_checkout_free_exceptions_are_closed(self):
+        for relative, job in gates.REVIEWED_CHECKOUT_FREE_JOBS:
+            with self.subTest(workflow=relative, job=job):
+                source = (self.root / relative).read_text()
+                header = "  " + job + ":\n"
+                start = source.index("    steps:\n", source.index(header))
+                changed = (
+                    source[: start + len("    steps:\n")]
+                    + "      - run: python3 tools/load_contract.py\n"
+                    + source[start + len("    steps:\n") :]
+                )
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(
+                        changed, require_load=True, workflow_name=relative
+                    )
+                )
+
+    def test_toolchain_preload_validation_only_step_cannot_be_weakened(self):
+        relative = ".github/workflows/evidence-publication-checks.yml"
+        source = (self.root / relative).read_text()
+        marker = "      - name: Validate repository toolchain data\n"
+        for replacement in (
+            marker + "        if: false\n",
+            marker + "        continue-on-error: true\n",
+            marker + "        env:\n          BASH_ENV: /tmp/startup.sh\n",
+            marker + "        working-directory: other\n",
+            marker + "        shell: bash {0}\n",
+        ):
+            with self.subTest(replacement=replacement):
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(
+                        source.replace(marker, replacement, 1),
+                        require_load=True,
+                        workflow_name=relative,
+                    )
+                )
+
+    def test_toolchain_preload_status_overrides_cannot_run_after_rejection(self):
+        relative = ".github/workflows/evidence-publication-checks.yml"
+        source = (self.root / relative).read_text()
+        for condition in (
+            "always()",
+            "${{ always() }}",
+            "${{ failure() }}",
+            "${{ !cancelled() }}",
+            "${{ !success() }}",
+            "${{ success() || true }}",
+            "${{ always() && steps.toolchain_data.outcome == 'success' || failure() }}",
+            ">-\n          ${{ always() }}",
+            "\n          ${{ always() }}",
+        ):
+            with self.subTest(condition=condition):
+                changed = source + (
+                    "\n      - name: Unreviewed failure helper\n"
+                    "        if: " + condition + "\n"
+                    "        run: python3 tools/load_contract.py\n"
+                )
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(
+                        changed, require_load=True, workflow_name=relative
+                    )
+                )
+                changed = source + (
+                    "\n      - if: " + condition + "\n"
+                    "        run: python3 tools/load_contract.py\n"
+                )
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(
+                        changed, require_load=True, workflow_name=relative
+                    )
+                )
+        for condition in gates.TOOLCHAIN_SUCCESS_CONDITIONS:
+            with self.subTest(condition=condition):
+                changed = source + (
+                    "\n      - name: Guarded failure helper\n"
+                    "        if: " + condition + "\n"
+                    "        run: python3 tools/load_contract.py\n"
+                )
+                self.assertTrue(
+                    gates.toolchain_data_loads_guarded(
+                        changed, require_load=True, workflow_name=relative
+                    )
+                )
+
+    def test_toolchain_preload_trailing_root_metadata_is_not_discarded(self):
+        for relative in (
+            ".github/workflows/evidence-publication-checks.yml",
+            ".github/workflows/release-closure-handoff.yml",
+        ):
+            source = (self.root / relative).read_text()
+            for metadata in (
+                "defaults:\n  run:\n    shell: bash --noprofile --norc {0}\n",
+                "env:\n  BASH_ENV: ./startup.sh\n",
+            ):
+                with self.subTest(workflow=relative, metadata=metadata):
+                    self.assertFalse(
+                        gates.toolchain_data_loads_guarded(
+                            source + "\n" + metadata,
+                            require_load=True,
+                            workflow_name=relative,
+                        )
+                    )
+
+    def test_toolchain_preload_later_checkouts_cannot_replace_validated_data(self):
+        relative = ".github/workflows/evidence-publication-checks.yml"
+        source = (self.root / relative).read_text()
+        for checkout in (
+            "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n",
+            "      - {uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1}\n",
+            '      - {"uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"}\n',
+            "      -\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n",
+        ):
+            with self.subTest(checkout=checkout):
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(
+                        source + "\n" + checkout,
+                        require_load=True,
+                        workflow_name=relative,
+                    )
+                )
+        relative = ".github/workflows/publish-qualification-evidence.yml"
+        source = (self.root / relative).read_text()
+        self.assertTrue(
+            gates.toolchain_data_loads_guarded(
+                source,
+                require_load=True,
+                workflow_name=relative,
+            )
+        )
+        self.assertFalse(
+            gates.toolchain_data_loads_guarded(
+                source.replace("          path: qualification-source\n", "", 1),
+                require_load=True,
+                workflow_name=relative,
+            )
+        )
+
+    def test_toolchain_preload_reusable_workflow_targets_are_validated(self):
+        caller = self.root / ".github/workflows/unlisted-caller.yml"
+        callee = self.root / ".github/workflows/unlisted-callee.yml"
+        caller.write_text(
+            "name: Caller\non:\n  pull_request:\njobs:\n"
+            "  call:\n    uses: ./.github/workflows/unlisted-callee.yml\n"
+        )
+        reason = (
+            ".github/workflows/unlisted-caller.yml: reusable workflow target "
+            "is missing or not callable"
+        )
+        self.assertIn(reason, gates.check(self.root))
+        callee.write_text(
+            "name: Callee\non:\n  workflow_call:\njobs:\n"
+            "  call:\n    uses: ./.github/workflows/unlisted-caller.yml\n"
+        )
+        self.assertIn("reusable workflow graph must be acyclic", gates.check(self.root))
+        callee.write_text(
+            "name: Callee\non:\n  workflow_call:\njobs:\n"
+            "  call:\n    uses: ./.github/workflows/ci.yml\n"
+        )
+        # ci.yml intentionally is not a reusable workflow.
+        self.assertTrue(
+            any(
+                "target is missing or not callable" in item
+                for item in gates.check(self.root)
+            )
+        )
+        callee.write_text(
+            "name: Callee\non:\n  workflow_call:\njobs:\n"
+            "  call:\n    uses: ./.github/workflows/v09-adversarial-security.yml\n"
+        )
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_toolchain_preload_validation_failure_stops_non_shell_helper(self):
+        relative = ".github/workflows/evidence-publication-checks.yml"
+        source = (self.root / relative).read_text()
+        jobs = gates.section(source, "jobs")
+        self.assertIsNotNone(jobs)
+        job = gates.section(jobs or "", "verify", 2)
+        self.assertIsNotNone(job)
+        step = gates.workflow_step(
+            job or "", 4, "name", "Validate repository toolchain data"
+        )
+        self.assertIsNotNone(step)
+        code = "\n".join(gates.executable_run_block(step, 4))
+        shutil.copyfile(
+            ROOT / "tools/check_toolchain_env.py",
+            self.root / "tools/check_toolchain_env.py",
+        )
+        contract = self.root / "tools/codex/versions.env"
+        marker = self.root / "helper-ran"
+        helper = (
+            "\npython3 -c \"from pathlib import Path; Path('helper-ran').touch()\"\n"
+        )
+        original = contract.read_text()
+        for content in (
+            original + "UNKNOWN_KEY=1\n",
+            original.replace("RUST_VERSION=", "RUST_VERSION=$(false)", 1),
+        ):
+            with self.subTest(content=content):
+                contract.write_text(content)
+                result = subprocess.run(
+                    ["bash", "--noprofile", "--norc", "-c", code + helper],
+                    cwd=self.root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse(marker.exists())
+        contract.write_text(original)
+        result = subprocess.run(
+            ["bash", "--noprofile", "--norc", "-c", code + helper],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(marker.is_file())
+
+    def test_toolchain_preload_checks_each_job_including_new_jobs(self):
+        original = (self.root / ".github/workflows/security.yml").read_text(
+            encoding="utf-8"
+        )
+        changed = original + (
+            "\n  unreviewed-job:\n    runs-on: ubuntu-24.04\n    steps:\n"
+            "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
+            "      - run: python3 tools/load_contract.py\n"
+        )
+        self.assertFalse(gates.toolchain_data_loads_guarded(changed, require_load=True))
+        for name in gates.TOOLCHAIN_DATA_WORKFLOWS:
+            with self.subTest(workflow=name):
+                source = (self.root / name).read_text(encoding="utf-8")
+                self.assertTrue(
+                    gates.toolchain_data_loads_guarded(source, require_load=True), name
+                )
+
+    def test_toolchain_preload_reported_python_helper_is_rejected(self):
+        helper = self.root / "tools/load_contract.py"
+        helper.write_text(
+            'from pathlib import Path\nexec(Path("tools/codex/versions.env").read_text())\n',
+            encoding="utf-8",
+        )
+        workflow = self.root / ".github/workflows/security.yml"
+        original = workflow.read_text(encoding="utf-8")
+        marker = "      - name: Load repository toolchain contract\n"
+        workflow.write_text(
+            original.replace(
+                marker,
+                "      - name: Unreviewed Python helper\n"
+                "        run: python3 tools/load_contract.py\n" + marker,
+                1,
+            ),
+            encoding="utf-8",
+        )
+        self.assertTrue(
+            any(
+                "security.yml: unsafe toolchain execution" in error
+                for error in gates.check(self.root)
+            )
+        )
+
+    def test_toolchain_preload_each_reusable_build_job_is_independent(self):
+        original = (
+            self.root / ".github/workflows/reusable-release-build.yml"
+        ).read_text(encoding="utf-8")
+        marker = "      - name: Load repository toolchain contract\n"
+        pieces = original.split(marker)
+        self.assertEqual(len(pieces), 3)
+        for index in (1, 2):
+            modified = list(pieces)
+            modified[index - 1] += (
+                "      - name: Unreviewed Python before this job's load\n"
+                "        run: python3 tools/load_contract.py\n"
+            )
+            self.assertFalse(
+                gates.toolchain_data_loads_guarded(
+                    marker.join(modified), require_load=True
+                )
+            )
+
+    def test_toolchain_preload_checkout_cannot_embed_execution(self):
+        original = (self.root / ".github/workflows/security.yml").read_text(
+            encoding="utf-8"
+        )
+        marker = "      - name: Load repository toolchain contract\n"
+        for added in (
+            "        run: python3 tools/load_contract.py\n",
+            "        env:\n          BASH_ENV: tools/startup\n",
+            "        if: false\n",
+            "        continue-on-error: true\n",
+            "        with:\n          path: alternate-checkout\n",
+        ):
+            with self.subTest(added=added):
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(
+                        original.replace(marker, added + marker, 1), require_load=True
+                    )
+                )
+
+    def test_toolchain_preload_publisher_prefix_is_exact_and_keeps_provenance(self):
+        original = (self.root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        checkout = original.index("      - uses: actions/checkout@")
+        publisher = original.index(
+            "      - name: Validate trusted qualification publisher"
+        )
+        loader = original.index("      - name: Load repository toolchain contract")
+        typing = original.index("      - name: Verify pinned Python basic-mode typing")
+        self.assertLess(checkout, publisher)
+        self.assertLess(publisher, loader)
+        self.assertLess(loader, typing)
+        changed = original.replace(
+            "          set -euo pipefail\n",
+            "          set -euo pipefail\n          python3 tools/load_contract.py\n",
+            1,
+        )
+        self.assertFalse(gates.toolchain_data_loads_guarded(changed, require_load=True))
+
+    def test_toolchain_preload_v08_evidence_initializes_after_validation(self):
+        source = (
+            self.root / ".github/workflows/v08-agent-qualification.yml"
+        ).read_text(encoding="utf-8")
+        job = (
+            gates.section(gates.section(source, "jobs") or "", "qualification", 2) or ""
+        )
+        environment_file = self.root / "job-environment"
+        source_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        environment = os.environ.copy()
+        environment.update(
+            GITHUB_ENV=str(environment_file),
+            SOURCE_SHA=source_sha,
+            GITHUB_REPOSITORY="fixture/linura",
+        )
+        for label in (
+            "Assert exact source and pinned toolchain",
+            "Initialize evidence directory",
+        ):
+            step = gates.workflow_step(job, 4, "name", label)
+            script = "\n".join(gates.executable_run_block(step, 4))
+            self.assertTrue(script)
+            script = script.replace("${{ runner.temp }}", str(self.root))
+            completed = subprocess.run(
+                ["bash", "-c", script],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=20,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            for line in environment_file.read_text(encoding="utf-8").splitlines():
+                key, value = line.split("=", 1)
+                self.assertIn(key, {"RUST_VERSION", "ARTIFACT_DIR"})
+                environment[key] = value
+        status = (
+            self.root / "linura-v08-agent-artifacts/qualification-status.txt"
+        ).read_text(encoding="utf-8")
+        self.assertIn("state=started\n", status)
+        self.assertIn(f"exact_source_sha={source_sha}\n", status)
+        self.assertIn("repository=fixture/linura\n", status)
+        self.assertIn(f"rust_version={environment['RUST_VERSION']}\n", status)
+
+    def test_remote_guest_shell_exceptions_are_exact(self):
+        relative = "scripts/qualification/v09-adversarial-guest.sh"
+        target = self.root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / relative, target)
+        original = target.read_text(encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+        for modified in (
+            original + '\ndash -c \'. "$1"\' _ "$contract"\n',
+            original.replace(
+                'remote "sudo -n bash -lc $quoted"',
+                'remote "sudo -n bash -lc $quoted"; :',
+                1,
+            ),
+        ):
+            with self.subTest(modified=modified != original):
+                self.assertNotEqual(modified, original)
+                target.write_text(modified, encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertIn(relative + ": unreviewed shell execution", errors)
+        target.unlink()
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_unlisted_shell_helpers_cannot_source_toolchain(self):
+        for relative in (
+            "tools/load-contract.sh",
+            "load-contract.sh",
+            "unlisted/nested/load-contract.sh",
+            "tools/launcher",
+        ):
+            with self.subTest(relative=relative):
+                helper = self.root / relative
+                helper.parent.mkdir(parents=True, exist_ok=True)
+                helper.write_text(
+                    "#!/usr/bin/env bash\n"
+                    "set -euo pipefail\n"
+                    "source tools/codex/versions.env\n",
+                    encoding="utf-8",
+                )
+                failures = gates.check(self.root)
+                self.assertTrue(
+                    any(
+                        relative + ": unreviewed local" in failure
+                        for failure in failures
+                    ),
+                    failures,
+                )
+                helper.unlink()
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_shell_shebang_is_scanned_for_arbitrary_suffixes(self):
+        for relative in (
+            "tools/load-contract.run",
+            "tools/load-contract.txt",
+            "nested/load-contract.custom",
+            "load-contract.python",
+        ):
+            with self.subTest(relative=relative):
+                helper = self.root / relative
+                helper.parent.mkdir(parents=True, exist_ok=True)
+                helper.write_text(
+                    "#!/usr/bin/env bash\nsource tools/codex/versions.env\n",
+                    encoding="utf-8",
+                )
+                failures = gates.check(self.root)
+                self.assertTrue(
+                    any(
+                        relative + ": unreviewed local" in failure
+                        for failure in failures
+                    ),
+                    failures,
+                )
+                helper.unlink()
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_executable_shebang_free_helpers_are_scanned(self):
+        helper = self.root / "tools/load-contract.md"
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        workflow = self.root / ".github/workflows/security.yml"
+        original = workflow.read_text(encoding="utf-8")
+        marker = "      - name: Load repository toolchain contract"
+        self.assertIn(marker, original)
+        try:
+            workflow.write_text(
+                original.replace(
+                    marker,
+                    "      - name: Run executable helper\n"
+                    "        run: ./tools/load-contract.md\n" + marker,
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            contract_prefix = 'prefix=tools/codex\ncontract="$prefix/versions.env"\n'
+            for command in (
+                'source "$contract"',
+                'case x in x) . "$contract" ;; esac',
+                'eval "source $contract"',
+                'cmd="source $contract"\ncase x in x) eval "$cmd" ;; esac',
+                'cmd="source $contract"\nif eval "$cmd"; then :; fi',
+            ):
+                with self.subTest(command=command):
+                    helper.write_text(f"{contract_prefix}{command}\n", encoding="utf-8")
+                    helper.chmod(0o755)
+                    failures = gates.check(self.root)
+                    self.assertTrue(
+                        any(
+                            "tools/load-contract.md: unreviewed local" in failure
+                            for failure in failures
+                        ),
+                        failures,
+                    )
+        finally:
+            workflow.write_text(original, encoding="utf-8")
+            helper.unlink(missing_ok=True)
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_executable_python_shebang_is_not_interpreted_as_shell(self):
+        helper = self.root / "tools/not-a-shell.py"
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            helper.write_text(
+                '#!/usr/bin/env python3\npayload = """\n'
+                'source tools/codex/versions.env\n"""\n',
+                encoding="utf-8",
+            )
+            helper.chmod(0o755)
+            self.assertEqual(gates.check(self.root), [])
+        finally:
+            helper.unlink(missing_ok=True)
+
+    def test_uninvoked_executable_helper_is_still_audited(self):
+        helper = self.root / "tools/unlisted.payload"
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            helper.write_text(
+                'prefix=tools/codex\ncontract="$prefix/versions.env"\n'
+                'source "$contract"\n',
+                encoding="utf-8",
+            )
+            helper.chmod(0o755)
+            failures = gates.check(self.root)
+            self.assertTrue(
+                any(
+                    "tools/unlisted.payload: unreviewed local" in failure
+                    for failure in failures
+                ),
+                failures,
+            )
+        finally:
+            helper.unlink(missing_ok=True)
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_conditional_shell_sources_are_rejected(self):
+        for command in (
+            'if source "$contract"; then',
+            'elif source "$contract"; then',
+            'while source "$contract"; do',
+            'until . "$contract"; do',
+            'if ! source "$contract"; then',
+            'if builtin source "$contract"; then',
+            'if command source "$contract"; then',
+        ):
+            with self.subTest(command=command):
+                helper = self.root / "tools/load-contract.run"
+                helper.parent.mkdir(parents=True, exist_ok=True)
+                helper.write_text(
+                    "#!/usr/bin/env bash\ncontract=tools/codex/versions.env\n"
+                    + command
+                    + "\n  :\nfi\n",
+                    encoding="utf-8",
+                )
+                failures = gates.check(self.root)
+                self.assertTrue(
+                    any(
+                        "tools/load-contract.run: unreviewed local" in failure
+                        for failure in failures
+                    ),
+                    failures,
+                )
+                helper.unlink()
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_workflow_cannot_hide_unguarded_helper_invocation(self):
+        helper = self.root / "tools/load-contract.sh"
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        helper.write_text(
+            "#!/usr/bin/env bash\nsource tools/codex/versions.env\n",
+            encoding="utf-8",
+        )
+        workflow = self.root / ".github/workflows/security.yml"
+        old = workflow.read_text(encoding="utf-8")
+        try:
+            workflow.write_text(
+                old.replace(
+                    "      - name: Load repository toolchain contract",
+                    "      - name: Execute untrusted helper\n"
+                    "        run: bash tools/load-contract.sh\n"
+                    "      - name: Load repository toolchain contract",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            failures = gates.check(self.root)
+            self.assertTrue(
+                any(
+                    "tools/load-contract.sh: unreviewed local" in failure
+                    for failure in failures
+                ),
+                failures,
+            )
+        finally:
+            workflow.write_text(old, encoding="utf-8")
+
+    def test_interpreter_invoked_shebang_free_files_are_scanned(self):
+        helper = self.root / "tools/load-contract.md"
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        helper.write_text(
+            'prefix=tools/codex\ncontract="$prefix/versions.env"\nsource "$contract"\n',
+            encoding="utf-8",
+        )
+        workflow = self.root / ".github/workflows/security.yml"
+        original = workflow.read_text(encoding="utf-8")
+        marker = "      - name: Load repository toolchain contract"
+        self.assertIn(marker, original)
+        commands = (
+            "bash tools/load-contract.md",
+            "/usr/bin/bash -e ./tools/load-contract.md",
+            "env dash 'tools/load-contract.md'",
+            'command sh "tools/load-contract.md"',
+            "bash --noprofile tools/load-contract.md",
+            "bash --noprofile --norc tools/load-contract.md",
+            "/usr/bin/bash -e --noprofile ./tools/load-contract.md",
+            "env dash --posix tools/load-contract.md",
+            "command sh -- tools/load-contract.md",
+            "bash -O extglob tools/load-contract.md",
+            "bash --rcfile tools/ignored.rc tools/load-contract.md",
+        )
+        try:
+            for command in commands:
+                with self.subTest(command=command):
+                    workflow.write_text(
+                        original.replace(
+                            marker,
+                            "      - name: Run unreviewed script\n"
+                            f"        run: {command}\n" + marker,
+                            1,
+                        ),
+                        encoding="utf-8",
+                    )
+                    failures = gates.check(self.root)
+                    self.assertTrue(
+                        any(
+                            "tools/load-contract.md: unreviewed local "
+                            "shell source/evaluation" in failure
+                            for failure in failures
+                        ),
+                        failures,
+                    )
+
+            relay = self.root / "tools/relay.custom"
+            relay.write_text("bash tools/load-contract.md\n", encoding="utf-8")
+            workflow.write_text(
+                original.replace(
+                    marker,
+                    "      - name: Run nested unreviewed script\n"
+                    "        run: bash tools/relay.custom\n" + marker,
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            failures = gates.check(self.root)
+            self.assertTrue(
+                any(
+                    "tools/load-contract.md: unreviewed local "
+                    "shell source/evaluation" in failure
+                    for failure in failures
+                ),
+                failures,
+            )
+        finally:
+            workflow.write_text(original, encoding="utf-8")
+            (self.root / "tools/relay.custom").unlink(missing_ok=True)
+            helper.unlink()
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_case_arm_sources_in_interpreter_invoked_helpers_are_rejected(self):
+        helper = self.root / "tools/load-contract.md"
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        workflow = self.root / ".github/workflows/security.yml"
+        original = workflow.read_text(encoding="utf-8")
+        marker = "      - name: Load repository toolchain contract"
+        self.assertIn(marker, original)
+        try:
+            workflow.write_text(
+                original.replace(
+                    marker,
+                    "      - name: Execute shell case helper\n"
+                    "        run: bash tools/load-contract.md\n" + marker,
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            for command in (
+                'case x in x) source "$contract" ;; esac',
+                'case x in x). "$contract" ;; esac',
+                'case x in x) command source "$contract" ;; esac',
+                'if false; then :; else source "$contract"; fi',
+                'if false; then :; else . "$contract"; fi',
+                'if false; then :; else eval "source $contract"; fi',
+            ):
+                with self.subTest(command=command):
+                    case_payload = (
+                        'prefix=tools/codex\ncontract="$prefix/versions.env"\n'
+                    )
+                    helper.write_text(f"{case_payload}{command}\n", encoding="utf-8")
+                    failures = gates.check(self.root)
+                    self.assertTrue(
+                        any(
+                            "tools/load-contract.md: unreviewed local" in failure
+                            for failure in failures
+                        ),
+                        failures,
+                    )
+        finally:
+            workflow.write_text(original, encoding="utf-8")
+            helper.unlink(missing_ok=True)
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_composite_action_cannot_hide_contract_source(self):
+        action = self.root / ".github/actions/unreviewed/action.yml"
+        action.parent.mkdir(parents=True, exist_ok=True)
+        for command in (
+            "source tools/codex/versions.env",
+            "'source \"$TOOLCHAIN\"'",
+            '"source $TOOLCHAIN"',
+            "'eval \"$TOOLCHAIN\"'",
+        ):
+            with self.subTest(command=command):
+                action.write_text(
+                    "name: unsafe\nruns:\n  using: composite\n  steps:\n"
+                    "    - shell: bash\n"
+                    f"      run: {command}\n",
+                    encoding="utf-8",
+                )
+                self.assertTrue(
+                    any("unreviewed local" in error for error in gates.check(self.root))
+                )
+        action.unlink()
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_reviewed_local_contract_loads_must_preserve_immediate_guards(self):
+        scripts = (
+            (
+                "scripts/preflight_codex_environment.sh",
+                'toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values "$VERSION_CONTRACT")"',
+            ),
+            (
+                "scripts/setup_codex_environment.sh",
+                'toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values "$VERSION_CONTRACT")"',
+            ),
+        )
+        for script, _ in scripts:
+            target = self.root / script
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / script, target)
+        self.assertEqual(gates.check(self.root), [])
+        for script, guard in scripts:
+            target = self.root / script
+            source = target.read_text(encoding="utf-8")
+            self.assertEqual(source.count(guard), 1)
+            try:
+                target.write_text(source.replace(guard, "true", 1), encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(
+                    any(
+                        "toolchain data load must immediately follow validation"
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+            finally:
+                target.write_text(source, encoding="utf-8")
+            self.assertEqual(gates.check(self.root), [])
+
+    def test_canonical_initializer_guard_precedes_package_imports(self):
+        path = self.root / ".github/workflows/ci.yml"
+        original = path.read_text(encoding="utf-8")
+        guard = (
+            "          if [ -e tools/__init__.py ] || [ -L tools/__init__.py ]; then\n"
+        )
+        self.assertEqual(original.count(guard), 1)
+        self.assertLess(
+            original.index(guard),
+            original.index(
+                "          /usr/bin/python3 -I -S tools/check_validation_gates.py"
+            ),
+        )
+        self.assertLess(
+            original.index(guard),
+            original.index("      - name: Check tracked format classification"),
+        )
+        self.assertEqual(gates.check(self.root), [])
+        path.write_text(original.replace(guard, "          :\n", 1), encoding="utf-8")
+        errors = gates.check(self.root)
+        self.assertTrue(
+            any(
+                "canonical CI missing mandatory publisher authority step" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_nonempty_validation_cannot_be_omitted(self):
+        path = self.root / ".github/workflows/ci.yml"
+        original = path.read_text(encoding="utf-8")
+        assert_line = "          " + gates.TOOLCHAIN_VALUES_NONEMPTY + "\n"
+        self.assertEqual(original.count(assert_line), 1)
+        path.write_text(
+            original.replace(assert_line, "          :\n", 1), encoding="utf-8"
+        )
+        errors = gates.check(self.root)
+        self.assertTrue(
+            any(
+                "unsafe toolchain execution or missing validated data load" in error
+                for error in errors
+            ),
+            errors,
+        )
+        path.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_variable_shell_invocations_cannot_preempt_toolchain_validation(self):
+        path = self.root / ".github/workflows/ci.yml"
+        original = path.read_text(encoding="utf-8")
+        marker = "      - name: Load repository toolchain contract\n"
+        self.assertIn(marker, original)
+        self.assertTrue(gates.toolchain_data_loads_guarded(original, require_load=True))
+        for command in (
+            'bash "$TOOLCHAIN"',
+            'sh "$TOOLCHAIN"',
+            'dash "$TOOLCHAIN"',
+            '/bin/dash "$TOOLCHAIN"',
+            'zsh "$TOOLCHAIN"',
+            'ksh "$TOOLCHAIN"',
+            'ash "$TOOLCHAIN"',
+            'mksh "$TOOLCHAIN"',
+            '/usr/bin/bash "$TOOLCHAIN"',
+            'command bash "$TOOLCHAIN"',
+            'env bash "$TOOLCHAIN"',
+            'bash -- "$TOOLCHAIN"',
+            'bash -e "$TOOLCHAIN"',
+            'bash "$(printf %s tools/codex/versions.env)"',
+            "bash tools/codex/versions.env",
+            'if bash "$TOOLCHAIN"; then echo unsafe; fi',
+        ):
+            with self.subTest(command=command):
+                injected = (
+                    "      - name: Attempt unchecked shell execution\n"
+                    "        env:\n"
+                    "          TOOLCHAIN: tools/codex/versions.env\n"
+                    "        run: |\n"
+                    f"          {command}\n"
+                )
+                changed = original.replace(marker, injected + marker, 1)
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(changed, require_load=True),
+                    command,
+                )
+                path.write_text(changed, encoding="utf-8")
+                self.assertTrue(
+                    any(
+                        "unsafe toolchain execution or missing validated data load"
+                        in error
+                        for error in gates.check(self.root)
+                    ),
+                    command,
+                )
+        path.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_continued_sources_and_direct_variable_execution_are_rejected(self):
+        path = self.root / ".github/workflows/security.yml"
+        original = path.read_text(encoding="utf-8")
+        marker = "      - name: Load repository toolchain contract\n"
+        self.assertEqual(original.count(marker), 1)
+        self.assertTrue(gates.toolchain_data_loads_guarded(original, require_load=True))
+        attacks = (
+            '          sour\\\n          ce "$TOOLCHAIN"\n',
+            '          sou\\\n          rce "$TOOLCHAIN"\n',
+            '          "$TOOLCHAIN"\n',
+            '          command "$TOOLCHAIN"\n',
+            '          exec "$TOOLCHAIN"\n',
+            '          true; "$TOOLCHAIN"\n',
+            '          if "$TOOLCHAIN"; then :; fi\n',
+        )
+        for attack in attacks:
+            with self.subTest(attack=attack):
+                injected = (
+                    "      - name: Attempt unchecked contract execution\n"
+                    "        env:\n"
+                    "          TOOLCHAIN: tools/codex/versions.env\n"
+                    "        run: |\n" + attack
+                )
+                changed = original.replace(marker, injected + marker, 1)
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(changed, require_load=True),
+                    attack,
+                )
+                path.write_text(changed, encoding="utf-8")
+                errors = gates.check(self.root)
+                self.assertTrue(
+                    any(
+                        "unsafe toolchain execution or missing validated data load" in x
+                        for x in errors
+                    ),
+                    errors,
+                )
+        path.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_quoted_inline_run_cannot_execute_before_toolchain_validation(self):
+        path = self.root / ".github/workflows/ci.yml"
+        original = path.read_text(encoding="utf-8")
+        marker = "      - name: Load repository toolchain contract\n"
+        self.assertEqual(original.count(marker), 1)
+        self.assertTrue(gates.toolchain_data_loads_guarded(original, require_load=True))
+        for run in (
+            "        run: 'source $TOOLCHAIN'",
+            '        run: "source $TOOLCHAIN"',
+            "        run: 'bash \"$TOOLCHAIN\"'",
+            "        run: 'printf harmless'",
+            "      - run: 'source $TOOLCHAIN'",
+        ):
+            with self.subTest(run=run):
+                if run.startswith("      - "):
+                    inserted = (
+                        f"{run}\n"
+                        "        env:\n"
+                        "          TOOLCHAIN: tools/codex/versions.env\n"
+                    )
+                else:
+                    inserted = (
+                        "      - name: Attempt quoted inline execution\n"
+                        "        env:\n"
+                        "          TOOLCHAIN: tools/codex/versions.env\n"
+                        f"{run}\n"
+                    )
+                changed = original.replace(marker, inserted + marker, 1)
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(changed, require_load=True),
+                    run,
+                )
+                path.write_text(changed, encoding="utf-8")
+                self.assertTrue(
+                    any(
+                        "unsafe toolchain execution or missing validated data load"
+                        in error
+                        for error in gates.check(self.root)
+                    ),
+                    run,
+                )
+        path.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_folded_run_cannot_preempt_toolchain_validation(self):
+        workflows = (
+            (
+                ".github/workflows/ci.yml",
+                "      - name: Load repository toolchain contract\n",
+            ),
+            (
+                ".github/workflows/v05-executor-verifier-vm.yml",
+                "      - name: Assert exact source and load toolchain contract\n",
+            ),
+        )
+        for workflow, marker in workflows:
+            path = self.root / workflow
+            original = path.read_text(encoding="utf-8")
+            self.assertEqual(original.count(marker), 1)
+            self.assertTrue(
+                gates.toolchain_data_loads_guarded(original, require_load=True)
+            )
+            for command in ("source", "bash"):
+                with self.subTest(workflow=workflow, command=command):
+                    injected = (
+                        "      - name: Unreviewed folded source\n"
+                        "        env:\n"
+                        "          TOOLCHAIN: tools/codex/versions.env\n"
+                        "        run: >-\n"
+                        f"          {command}\n"
+                        '          "$TOOLCHAIN"\n'
+                    )
+                    changed = original.replace(marker, injected + marker, 1)
+                    self.assertFalse(
+                        gates.toolchain_data_loads_guarded(changed, require_load=True)
+                    )
+
+                    path.write_text(changed, encoding="utf-8")
+                    self.assertTrue(
+                        any(
+                            "unsafe toolchain execution or missing validated data load"
+                            in error
+                            for error in gates.check(self.root)
+                        )
+                    )
+            path.write_text(original, encoding="utf-8")
+        path = self.root / workflows[1][0]
+        original = path.read_text(encoding="utf-8")
+        approved = "          -p linura-verifier-systemd\n"
+        self.assertEqual(original.count(approved), 1)
+        changed = original.replace(
+            approved, approved + '          source\n          "$TOOLCHAIN"\n', 1
+        )
+        path.write_text(changed, encoding="utf-8")
+        self.assertFalse(gates.toolchain_data_loads_guarded(changed, require_load=True))
+        path.write_text(original, encoding="utf-8")
+
+        relative = ".github/workflows/applicable-qualification.yml"
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / ".github/workflows/applicable-qualification.yml", path)
+        original = path.read_text(encoding="utf-8")
+        self.assertTrue(
+            gates.toolchain_data_loads_guarded(
+                original, require_load=True, workflow_name=relative
+            )
+        )
+        approved = "          --token-env GITHUB_TOKEN\n"
+        self.assertEqual(original.count(approved), 1)
+        changed = original.replace(
+            approved, approved + '          source\n          "$TOOLCHAIN"\n', 1
+        )
+        path.write_text(changed, encoding="utf-8")
+        self.assertFalse(
+            gates.toolchain_data_loads_guarded(
+                changed, require_load=True, workflow_name=relative
+            )
+        )
+        path.write_text(original, encoding="utf-8")
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_codex_initializer_guard_precedes_tooling_imports(self):
+        path = self.root / ".github/workflows/codex-environment.yml"
+        original = path.read_text(encoding="utf-8")
+        guard = (
+            "          if [ -e tools/__init__.py ] || [ -L tools/__init__.py ]; then\n"
+        )
+        imports = "          python3 -m unittest discover -s tests/tooling "
+        self.assertEqual(original.count(guard), 1)
+        self.assertLess(original.index(guard), original.index(imports))
+        self.assertEqual(gates.check(self.root), [])
+        path.write_text(original.replace(guard, "          :\n", 1), encoding="utf-8")
+        errors = gates.check(self.root)
+        self.assertTrue(
+            any("codex: pre-import tooling guard missing" in e for e in errors),
+            errors,
+        )
+
+    def test_tools_initializer_cannot_preempt_toolchain_validation(self):
+        target = self.root / "tools/__init__.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "raise RuntimeError('must never execute before validator')\n",
+            encoding="utf-8",
+        )
+        errors = gates.check(self.root)
+        self.assertTrue(
+            any("tools package initializer must not run" in error for error in errors),
+            errors,
+        )
+
+    def test_validation_gate_tests_run_before_heavy_bootstrap(self):
+        cases = (
+            (
+                ".github/workflows/ci.yml",
+                "Verify validation-gate tests before builds",
+                "Install pinned Rust toolchain",
+            ),
+            (
+                ".github/workflows/codex-environment.yml",
+                "Verify validation-gate tests before bootstrap",
+                "Prepare isolated environment",
+            ),
+        )
+        for workflow, label, later in cases:
+            with self.subTest(workflow=workflow):
+                source = (self.root / workflow).read_text(encoding="utf-8")
+                marker = f"      - name: {label}\n"
+                self.assertEqual(source.count(marker), 1)
+                step = source.split(marker, 1)[1].split("      - name:", 1)[0]
+                self.assertIn("        run: |\n", step)
+                self.assertIn("          set -euo pipefail\n", step)
+                self.assertIn(
+                    "python3 -m unittest discover -s tests/tooling "
+                    "-p 'test_validation_gates.py'",
+                    step,
+                )
+                for test_name in (
+                    "reviewed_local_contract_loads",
+                    "transitive_local_shell_sourcing",
+                    "dynamic_shell",
+                    "toolchain_preload",
+                    "composite_action_cannot_hide_contract_source",
+                    "checked_in_contract",
+                    "fixture_contract",
+                    "validation_gate_tests_run_before_heavy_bootstrap",
+                ):
+                    self.assertIn(f"-k {test_name}", step)
+                self.assertLess(
+                    source.index(marker), source.index(f"      - name: {later}")
+                )
+                self.assertEqual(gates.check(self.root), [])
 
     def test_checked_in_contract(self):
         self.assertEqual(gates.check(ROOT), [])
@@ -1586,10 +3384,19 @@ class ValidationGateTests(unittest.TestCase):
             "        shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}\n"
             "        run: |\n"
             "          set -euo pipefail\n"
+            "          if [ -e tools/__init__.py ] || [ -L tools/__init__.py ]; then\n"
+            "            printf '%s\\n' 'unsafe tools package initializer' >&2\n"
+            "            exit 1\n"
+            "          fi\n"
             "          /usr/bin/python3 -I -S - <<'PY'\n"
         )
         self.assertIn(guarded, original)
         for old, new in (
+            (
+                "          if [ -e tools/__init__.py ] || [ -L tools/__init__.py ]; then\n",
+                "",
+            ),
+            ("            exit 1\n", "            :\n"),
             ("          SHELLOPTS: ''\n", ""),
             ("          SHELLOPTS: ''", "          SHELLOPTS: noexec"),
             ("          BASHOPTS: ''\n", ""),
@@ -2474,17 +4281,26 @@ class ValidationGateTests(unittest.TestCase):
             assert first is not None
             marker = first.group(0) + "\n"
             self.assertIn(marker, original)
+            # Step labels may repeat across jobs (for example, each job's
+            # toolchain loader). Inject into the selected job, not the first
+            # matching label in the entire workflow.
+            job_start = original.index("  " + job + ":\n")
+            step_start = original.index(marker, job_start)
             for directive in (
                 "if: false",
                 "if: always()",
+                "if: ${{ always() && steps.toolchain_data.outcome == 'success' }}",
                 '"\\u0069f": false',
                 "continue-on-error: true",
             ):
                 with self.subTest(lane=name, job=job, directive=directive):
                     target.write_text(
-                        original.replace(
-                            marker, marker + "        " + directive + "\n", 1
-                        ),
+                        original[:step_start]
+                        + marker
+                        + "        "
+                        + directive
+                        + "\n"
+                        + original[step_start + len(marker) :],
                         encoding="utf-8",
                     )
                     errors = gates.check(self.root)

@@ -38,6 +38,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
 
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
+
       - name: Prove exact protected-main release-readiness source
         id: qualify
         run: |
@@ -197,6 +203,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.qualify.outputs.source_sha }}
 
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
+
       - name: Require dedicated Release App configuration
         env:
           RELEASE_APP_CLIENT_ID: ${{ vars.LINURA_RELEASE_APP_CLIENT_ID }}
@@ -352,13 +364,17 @@ jobs:
             else
               preparation_description="This PR changes exactly Cargo.toml and Cargo.lock to advance the workspace to $RELEASE_TAG."
             fi
-            cat > "$RUNNER_TEMP/body.md" <<EOF
+            {
+            cat <<EOF
           Deterministic mechanical preparation for reviewed release-readiness source \`$SOURCE_SHA\`.
 
-          $preparation_description Product claims, qualification narratives, authority boundaries and roadmap release state were already reviewed on the preceding \`release: ready\` source.
+          EOF
+            printf '%s %s\n' "$preparation_description" "Product claims, qualification narratives, authority boundaries and roadmap release state were already reviewed on the preceding \`release: ready\` source."
+            cat <<EOF
 
           Native PR CI/Security/CodeQL are the ruleset-authoritative gates. No conversational review is required for this structurally constrained mechanical handoff.
           EOF
+            } > "$RUNNER_TEMP/body.md"
             url="$(gh pr create --base main --head "$branch" --title "$title" --body-file "$RUNNER_TEMP/body.md")"
             pr_number="${url##*/}"
             verify_candidate "$pr_number" "$head_sha" "$branch" "$expected_changed_files"

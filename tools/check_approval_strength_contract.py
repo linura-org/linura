@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -59,10 +60,22 @@ MUTATIONS = (
 def _run_contract(worktree: Path) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.setdefault("CARGO_TERM_COLOR", "never")
+    # Mutants must never populate the caller's normal build cache. Isolate
+    # both final and intermediate artifacts, including inherited Cargo config.
+    target_dir = worktree / "target"
+    build_dir = target_dir / "build"
+    env["CARGO_TARGET_DIR"] = str(target_dir)
+    env["CARGO_BUILD_TARGET_DIR"] = str(target_dir)
+    env["CARGO_BUILD_BUILD_DIR"] = str(build_dir)
     return subprocess.run(
         [
             "cargo",
             "test",
+            "--locked",
+            "--target-dir",
+            str(target_dir),
+            "--config",
+            "build.build-dir=" + json.dumps(str(build_dir), ensure_ascii=False),
             "-p",
             "linura-policy",
             "--test",

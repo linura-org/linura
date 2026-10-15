@@ -664,6 +664,12 @@ jobs:
           fetch-depth: 1
           ref: ${{ github.event.repository.default_branch }}
 
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
+
       - name: Validate reviewed qualification policy
         run: python3 tools/applicable_qualification.py validate
 

@@ -62,6 +62,33 @@ Repository `GITHUB_TOKEN` remains appropriate for read-only qualification and su
 
 ## Mitigations
 
+### Repository configuration execution
+
+All executable workflow jobs validate `tools/codex/versions.env` as data before
+running arbitrary checked-out repository code, regardless of its language or
+whether the workflow was previously a known toolchain consumer. Validation is
+isolated, unconditional and fail-closed. Jobs that authenticate an artifact-selected
+source before repository execution retain that order; their complete pre-validation
+prefix is bound to the reviewed workflow/job identity. Changing that prefix cannot
+inherit the generic checkout exception. Main-source publication jobs also assert
+the triggering main SHA and checked-out source before executing the validator.
+Their `SOURCE_SHA` is explicitly bound to `inputs.source_sha` at job scope;
+absent, literal or differently rebound declarations are rejected by the checker.
+
+Checkout-free API handoffs and the minimal PyPI upload job retain their no-checkout
+boundary. Their complete job bodies are explicitly bound to reviewed digests;
+adding helper execution or changing metadata invalidates the exception. These are
+job-specific exceptions, never exemptions for a whole workflow or future jobs.
+Inherited execution environments are checked even for these jobs. Local reusable
+workflow targets must exist, declare `workflow_call`, and form an acyclic graph.
+This is a conservative pre-validation execution boundary, not a claim that static
+analysis proves arbitrary post-validation repository code safe.
+Status-override diagnostics and cleanup explicitly require successful validation,
+including when a later qualification step fails. Unreviewed later checkouts cannot
+replace the validated source; evidence admission's additional data-only checkout
+has an exact reviewed step and separate directory. Inherited run defaults remain
+forbidden regardless of where root metadata appears in the YAML document.
+
 ### Explicit semantic readiness
 
 Automation begins only from a reviewed protected-main commit whose exact subject is `release: ready vX.Y.Z — <implementation theme>`. The source must match roadmap `next_release` and milestone title, include the required release/qualification/security/review documents, pass publication-stability validation, map to a merged protected PR with zero unresolved review threads, and pass native main gates.

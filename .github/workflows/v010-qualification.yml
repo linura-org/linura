@@ -84,6 +84,8 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "tools/codex/versions.env"
+      - "tools/check_toolchain_env.py"
+      - "tests/tooling/test_toolchain_env.py"
       - "hardware/support-matrix.json"
       - "packaging/arch/archiso/packages.linura"
       - "qualification/v010/**"
@@ -146,6 +148,15 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Load repository toolchain contract
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
+          printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
 
       - name: Assert exact source
         run: |
@@ -258,13 +269,6 @@ jobs:
 
           [[ "$expected_source" =~ ^[0-9a-f]{40}$ ]]
           printf 'LINURA_EXPECTED_SOURCE_SHA=%s\n' "$expected_source" >> "$GITHUB_ENV"
-
-      - name: Load repository toolchain contract
-        run: |
-          set -euo pipefail
-          # shellcheck disable=SC1091
-          source tools/codex/versions.env
-          printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
 
       - name: Install pinned Rust toolchain
         run: rustup toolchain install "$RUST_VERSION" --profile minimal

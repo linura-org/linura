@@ -30,6 +30,8 @@ on:
       - "tests/acceptance/v05/**"
       - "tools/vm.py"
       - "tools/codex/versions.env"
+      - "tools/check_toolchain_env.py"
+      - "tests/tooling/test_toolchain_env.py"
       - "rust-toolchain.toml"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -59,20 +61,15 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Initialize exact-source evidence paths
-        run: |
-          set -euo pipefail
-          artifact_dir="$RUNNER_TEMP/linura-v05-executor-artifacts"
-          mkdir -p "$artifact_dir"
-          printf 'ARTIFACT_DIR=%s\n' "$artifact_dir" >> "$GITHUB_ENV"
-
       - name: Assert exact source and load toolchain contract
+        id: toolchain_data
         run: |
           set -euo pipefail
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          # shellcheck disable=SC1091
-          source tools/codex/versions.env
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
           : "${RUST_VERSION:?}"
           repo_rust_version="$(python3 - <<'PY'
           import pathlib
@@ -86,6 +83,13 @@ jobs:
           )"
           test "$repo_rust_version" = "$RUST_VERSION"
           printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
+
+      - name: Initialize exact-source evidence paths
+        run: |
+          set -euo pipefail
+          artifact_dir="$RUNNER_TEMP/linura-v05-executor-artifacts"
+          mkdir -p "$artifact_dir"
+          printf 'ARTIFACT_DIR=%s\n' "$artifact_dir" >> "$GITHUB_ENV"
 
       - name: Install pinned Rust toolchain
         run: |
@@ -187,7 +191,7 @@ jobs:
         run: bash tests/acceptance/v05/qualify-host.sh
 
       - name: Collect executor hardening evidence
-        if: always()
+        if: ${{ always() && steps.toolchain_data.outcome == 'success' }}
         run: |
           set -euo pipefail
           artifact_dir="${ARTIFACT_DIR:-$RUNNER_TEMP/linura-v05-executor-artifacts}"
@@ -299,7 +303,7 @@ jobs:
 
 
       - name: Stop disposable guest
-        if: always()
+        if: ${{ always() && steps.toolchain_data.outcome == 'success' }}
         run: |
           set +e
           if [[ -n "${VM_PID:-}" ]]; then
@@ -308,7 +312,7 @@ jobs:
           fi
 
       - name: Collect QEMU diagnostics
-        if: always()
+        if: ${{ always() && steps.toolchain_data.outcome == 'success' }}
         run: |
           set -euo pipefail
           artifact_dir="${ARTIFACT_DIR:-$RUNNER_TEMP/linura-v05-executor-artifacts}"
@@ -324,7 +328,7 @@ jobs:
           artifact-root: ${{ env.ARTIFACT_DIR }}
           artifact-name: linura-v05-executor-verifier-${{ github.event.pull_request.head.sha || github.sha }}
       - name: Upload unqualified v05-executor-verifier diagnostics
-        if: failure()
+        if: ${{ failure() && steps.toolchain_data.outcome == 'success' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linura-v05-executor-verifier-${{ github.event.pull_request.head.sha || github.sha }}-unqualified-diagnostics

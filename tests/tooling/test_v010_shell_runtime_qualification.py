@@ -277,6 +277,25 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
                 result.stderr,
             )
 
+    def test_prepared_substrate_package_targets_require_option_terminator(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            builder = root / "qualification/v010/shell-runtime/prepare-substrate.sh"
+            text = builder.read_text(encoding="utf-8")
+            marker = "--disable-download-timeout -- $RUNTIME_PACKAGES"
+            self.assertIn(marker, text)
+            builder.write_text(
+                text.replace(marker, "--disable-download-timeout $RUNTIME_PACKAGES", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "prepared substrate builder missing fail-closed invariant",
+                result.stderr,
+            )
+
     def test_runtime_package_evidence_must_include_pipewire_audio_support(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -44,6 +44,15 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.source_sha }}
 
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
+
       - name: Verify exact proof and release identity
         id: release
         run: |
@@ -121,6 +130,15 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
           ref: ${{ inputs.source_sha }}
+
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
 
       - name: Require dedicated Release App configuration
         env:
