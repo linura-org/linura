@@ -9,6 +9,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -274,6 +275,47 @@ class CodexEnvironmentContractTests(unittest.TestCase):
         self.assertIn("$1 == toolchain", preflight)
         self.assertIn('rustup which --toolchain "$RUST_TOOLCHAIN" rustc', preflight)
         self.assertIn('rustup which --toolchain "$RUST_TOOLCHAIN" cargo', preflight)
+
+    def test_isolated_preflight_fixture_tracks_toolchain_guard(self) -> None:
+        readiness = (ROOT / "tests/tooling/test_codex_readiness.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"tools/check_toolchain_env.py",', readiness)
+
+    def test_codex_workflow_paths_match_qualification_matrix(self) -> None:
+        workflow = (ROOT / ".github/workflows/codex-environment.yml").read_text(
+            encoding="utf-8"
+        )
+        matrix = tomllib.loads(
+            (ROOT / "contracts/qualification-gate-matrix.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        paths = next(
+            gate["paths"]
+            for gate in matrix["gate"]
+            if gate["id"] == "codex-environment"
+        )
+        for event in ("pull_request", "push"):
+            with self.subTest(event=event):
+                section = workflow.split(f"  {event}:\n", 1)[1]
+                values = section.split("    paths:\n", 1)[1]
+                entries = []
+                for line in values.splitlines():
+                    if not line.startswith('      - "'):
+                        break
+                    entries.append(line)
+                observed = [
+                    match.group(1)
+                    for line in entries
+                    if (match := re.fullmatch(r'      - "([^"]+)"', line))
+                ]
+                self.assertEqual(observed, paths)
+        for path in (
+            "tools/check_toolchain_env.py",
+            "tests/tooling/test_toolchain_env.py",
+        ):
+            self.assertIn(path, paths)
 
     def test_task_preflight_requires_exact_rustup_version(self) -> None:
         preflight = (ROOT / "scripts/preflight_codex_environment.sh").read_text(

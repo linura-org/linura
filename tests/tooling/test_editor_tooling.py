@@ -7,18 +7,13 @@ import stat
 import tomllib
 import unittest
 
+from tools.check_toolchain_env import validate
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def version_contract() -> dict[str, str]:
-    result: dict[str, str] = {}
-    for line in (
-        (ROOT / "tools/codex/versions.env").read_text(encoding="utf-8").splitlines()
-    ):
-        if line and not line.startswith("#"):
-            key, value = line.split("=", 1)
-            result[key] = value
-    return result
+    return validate(ROOT / "tools/codex/versions.env")
 
 
 class EditorToolingTests(unittest.TestCase):
@@ -95,7 +90,8 @@ class EditorToolingTests(unittest.TestCase):
         self.assertIn("verify_ruff_version()?;", xtask)
         self.assertIn('Command::new("ruff")', xtask)
         self.assertIn('.arg("--version")', xtask)
-        self.assertIn("pinned_ruff_version(&contract)?", xtask)
+        self.assertIn("pinned_ruff_version()?", xtask)
+        self.assertIn('"tools/check_toolchain_env.py", "--ruff-version"', xtask)
         self.assertIn("Ruff version mismatch", xtask)
         self.assertLess(
             xtask.index("verify_ruff_version()?;"),

@@ -28,6 +28,10 @@ npm dependencies are integrity-locked in `tools/source-format/package-lock.json`
 
 The exact formatter baseline must be reviewed against the tested QML/runtime and evidence/publication security contracts. CI refuses changes until the already-formatted baseline is committed; it does not silently modify worktrees. Formatters not applicable to a tracked file are not invoked. Markdown, workflow YAML, release metadata, vendored/generated snapshots and hashed evidence require separate review before activating broad normalization.
 
+## Tracked structured and document formats
+
+The canonical formatter step also runs `python3 -m tools.check_tracked_formats`. See [Tracked-format contract](tracked-format-contract.md) for the complete fail-closed inventory, explicit format classifications, parser-only versus formatter-enforced boundaries, and production verification commands. The additional checker never rewrites tracked files. Repository-owned toolchain pins are validated as non-executable data by `tools/check_toolchain_env.py`; shell and workflow consumers load only its fixed-order validated output and do not source or evaluate the contract. The exact-source workstation launcher has an updated, audited SHA-256 exception for this data-loading migration.
+
 ## Security-bound formatting exceptions
 
 Sixteen existing qualification and authority-sensitive source files intentionally retain their **exact original bytes** because the production qualification and shell/Qt contract validators bind specific source fragments, not merely runtime behavior. They are **not silently excluded**: `tools/check_multilanguage_formatting.py` requires their full SHA-256 digests to match the reviewed source in `FROZEN_FORMAT_INPUTS`. They remain under repository source hygiene, Rust/Python contract checks and all applicable qualification gates.

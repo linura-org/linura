@@ -15,28 +15,34 @@ fn run(program: &str, args: &[&str]) -> Result<(), String> {
     }
 }
 
-fn pinned_ruff_version(contract: &str) -> Result<&str, String> {
-    let mut matches = contract
-        .lines()
-        .filter_map(|line| line.strip_prefix("RUFF_VERSION="));
-    let version = matches
-        .next()
-        .ok_or("RUFF_VERSION missing from toolchain contract")?;
-    if matches.next().is_some()
-        || version.split('.').count() != 3
-        || !version
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || byte == b'.')
-    {
-        return Err("RUFF_VERSION must be a single pinned major.minor.patch".into());
+fn parse_ruff_validator_output(output: &[u8]) -> Result<&str, String> {
+    let value = std::str::from_utf8(output)
+        .map_err(|error| format!("toolchain validator emitted non-UTF-8: {error}"))?;
+    let version = value
+        .strip_suffix('\n')
+        .ok_or("toolchain validator did not emit a terminated Ruff version")?;
+    if version.is_empty() || version.contains('\n') || version.contains('\r') {
+        return Err("toolchain validator emitted malformed Ruff version".into());
     }
     Ok(version)
 }
 
+fn pinned_ruff_version() -> Result<String, String> {
+    let output = Command::new("python3")
+        .args(["-I", "-S", "tools/check_toolchain_env.py", "--ruff-version"])
+        .output()
+        .map_err(|error| format!("failed to run isolated toolchain validator: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "pinned toolchain validator rejected Ruff version: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(parse_ruff_validator_output(&output.stdout)?.to_owned())
+}
+
 fn verify_ruff_version() -> Result<(), String> {
-    let contract = std::fs::read_to_string("tools/codex/versions.env")
-        .map_err(|error| format!("failed to read pinned Ruff toolchain: {error}"))?;
-    let expected = pinned_ruff_version(&contract)?;
+    let expected = pinned_ruff_version()?;
     let output = Command::new("ruff")
         .arg("--version")
         .output()
@@ -173,22 +179,17 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::pinned_ruff_version;
+    use super::parse_ruff_validator_output;
 
     #[test]
-    fn ruff_pin_requires_one_exact_semver_assignment() {
-        assert_eq!(
-            pinned_ruff_version("RUST_VERSION=1.98.0\nRUFF_VERSION=0.16.10\n"),
-            Ok("0.16.10")
-        );
-        for invalid in [
-            "RUST_VERSION=1.98.0\n",
-            "RUFF_VERSION=\n",
-            "RUFF_VERSION=0.16\n",
-            "RUFF_VERSION=0.16.10\nRUFF_VERSION=0.15.12\n",
-            "RUFF_VERSION=0.16.10 --untrusted\n",
-        ] {
-            assert!(pinned_ruff_version(invalid).is_err(), "{invalid}");
+    fn isolated_ruff_validator_output_is_one_utf8_line() {
+        assert_eq!(parse_ruff_validator_output(b"0.16.10\n"), Ok("0.16.10"));
+        for invalid in ["", "0.16.10", "0.16.10\nextra\n", "0.16.10\r\n", "\n"] {
+            assert!(
+                parse_ruff_validator_output(invalid.as_bytes()).is_err(),
+                "{invalid:?}"
+            );
         }
+        assert!(parse_ruff_validator_output(&[0xff, b'\n']).is_err());
     }
 }

@@ -35,6 +35,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
 
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
+
       - name: Assert exact current-main candidate
         id: intent
         run: |
@@ -240,6 +246,12 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ github.sha }}
+
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
 
       - name: Materialize reviewed v0.10 qualification and prepared-release source trees
         if: ${{ needs.validate.outputs.tag == 'v0.10.0' }}

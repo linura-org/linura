@@ -60,8 +60,10 @@ python3 "$build_root/tools/workstation_acceptance.py" "${doctor_args[@]}"
 # Reproduce the exact-source release envelope used by the automated v0.10 runtime lane.
 # A caller-supplied authority binary is intentionally not accepted, and the build runs
 # from the immutable Git archive rather than the developer working tree.
-# shellcheck disable=SC1091
-source "$build_root/tools/codex/versions.env"
+toolchain_values="$(python3 -I -S "$build_root/tools/check_toolchain_env.py" --values "$build_root/tools/codex/versions.env")" \
+    || fail "exact-source toolchain contract rejected"
+read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+: "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
 release_target="x86_64-unknown-linux-gnu"
 rustup run "$RUST_VERSION" rustc --version >/dev/null 2>&1     || fail "repository-pinned Rust toolchain $RUST_VERSION is not installed"
 rustup target list --installed --toolchain "$RUST_VERSION" | grep -Fx "$release_target" >/dev/null     || fail "Rust target $release_target is not installed for $RUST_VERSION"

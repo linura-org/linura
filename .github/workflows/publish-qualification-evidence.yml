@@ -96,6 +96,13 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
+
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
+
       - name: Checkout exact qualification source for evidence verification
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -180,6 +187,13 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
+
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
+
       - name: Assert trusted publisher code
         run: |
           set -euo pipefail

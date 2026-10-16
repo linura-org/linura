@@ -335,6 +335,7 @@ class CodexPreflightExecutionTests(unittest.TestCase):
                 "scripts/preflight_codex_environment.sh",
                 "scripts/lib/codex_source_state.sh",
                 "tools/codex/versions.env",
+                "tools/check_toolchain_env.py",
                 "tools/python/ruff-requirements.lock",
                 "rust-toolchain.toml",
             ):

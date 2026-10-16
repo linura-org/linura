@@ -25,10 +25,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Load repository toolchain contract
+        id: toolchain_data
         run: |
           set -euo pipefail
-          # shellcheck disable=SC1091
-          source tools/codex/versions.env
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
           : "${RUST_VERSION:?}"
           : "${CARGO_AUDIT_VERSION:?}"
           {

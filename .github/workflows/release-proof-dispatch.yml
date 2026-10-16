@@ -29,6 +29,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.workflow_run.head_sha }}
 
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
+
       - name: Verify exact-main release intent and dispatch proof
         run: |
           set -euo pipefail

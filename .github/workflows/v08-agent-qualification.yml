@@ -41,6 +41,8 @@ on:
       - "contracts/layering.toml"
       - "scripts/check_repository.py"
       - "tools/codex/versions.env"
+      - "tools/check_toolchain_env.py"
+      - "tests/tooling/test_toolchain_env.py"
       - "rust-toolchain.toml"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -68,26 +70,16 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
 
-      - name: Initialize evidence directory
-        shell: bash
-        run: |
-          set -euo pipefail
-          artifact_dir="${{ runner.temp }}/linura-v08-agent-artifacts"
-          mkdir -p "$artifact_dir"
-          printf 'ARTIFACT_DIR=%s\n' "$artifact_dir" >> "$GITHUB_ENV"
-          {
-            printf 'state=started\n'
-            printf 'requested_source_sha=%s\n' "$SOURCE_SHA"
-          } > "$artifact_dir/qualification-status.txt"
-
       - name: Assert exact source and pinned toolchain
+        id: toolchain_data
         shell: bash
         run: |
           set -euo pipefail
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          # shellcheck disable=SC1091
-          source tools/codex/versions.env
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
           : "${RUST_VERSION:?}"
           repo_rust_version="$(python3 - <<'PY'
           import pathlib
@@ -101,11 +93,21 @@ jobs:
           )"
           test "$repo_rust_version" = "$RUST_VERSION"
           printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
+
+      - name: Initialize evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${{ runner.temp }}/linura-v08-agent-artifacts"
+          mkdir -p "$artifact_dir"
+          printf 'ARTIFACT_DIR=%s\n' "$artifact_dir" >> "$GITHUB_ENV"
           {
+            printf 'state=started\n'
+            printf 'requested_source_sha=%s\n' "$SOURCE_SHA"
             printf 'exact_source_sha=%s\n' "$SOURCE_SHA"
             printf 'repository=%s\n' "$GITHUB_REPOSITORY"
             printf 'rust_version=%s\n' "$RUST_VERSION"
-          } >> "$ARTIFACT_DIR/qualification-status.txt"
+          } > "$artifact_dir/qualification-status.txt"
 
       - name: Install pinned Rust toolchain
         shell: bash
@@ -265,7 +267,7 @@ jobs:
           artifact-root: ${{ env.ARTIFACT_DIR }}
           artifact-name: linura-v08-agent-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
       - name: Upload unqualified v0.8 diagnostics
-        if: failure()
+        if: ${{ failure() && steps.toolchain_data.outcome == 'success' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linura-v08-agent-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}-unqualified-diagnostics

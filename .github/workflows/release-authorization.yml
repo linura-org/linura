@@ -37,6 +37,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
 
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
+
       - name: Prove exact reviewed release-preparation source
         id: qualify
         run: |
@@ -195,6 +201,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.qualify.outputs.source_sha }}
 
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
+
       - name: Require dedicated Release App configuration
         env:
           RELEASE_APP_CLIENT_ID: ${{ vars.LINURA_RELEASE_APP_CLIENT_ID }}
@@ -251,8 +263,8 @@ jobs:
 
           title="release: authorize $RELEASE_TAG"
           authorization_subject="release: $RELEASE_TAG — $RELEASE_THEME"
-          message="$(cat <<EOF
-          $authorization_subject
+          message="$(printf '%s\n' "$authorization_subject"
+          cat <<EOF
 
           Authorize publication of the frozen $RELEASE_TAG release through Linura's protected proof-first, tag-last lifecycle. The reviewed release-preparation tree is unchanged.
 

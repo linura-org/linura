@@ -55,6 +55,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
+
       - name: Test admission, provenance, privacy and R2 publishing behavior
         run: python3 -m unittest -v tests.tooling.test_evidence_publication
 

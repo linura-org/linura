@@ -85,6 +85,12 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.source_sha || github.sha }}
 
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
+
       - name: Assert exact source
         run: |
           set -euo pipefail
@@ -164,6 +170,12 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ inputs.source_sha || github.sha }}
+
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
 
       - name: Assert exact source
         run: |

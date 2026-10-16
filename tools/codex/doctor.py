@@ -32,16 +32,13 @@ class Check:
 
 
 def versions() -> dict[str, str]:
-    # Parse data rather than executing a shell contract in the diagnostic tool.
-    result = {}
-    for line in (ROOT / "tools/codex/versions.env").read_text().splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        match = re.fullmatch(r"([A-Z_][A-Z0-9_]*)=([A-Za-z0-9_.-]+)", line)
-        if not match or match[1] in result:
-            raise ValueError("invalid or duplicate Codex version entry")
-        result[match[1]] = match[2]
-    return result
+    # Keep diagnostics on the same strict contract as CI and bootstrap.
+    # Executing this script by pathname does not automatically add ROOT to sys.path.
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tools.check_toolchain_env import validate
+
+    return validate(ROOT / "tools/codex/versions.env")
 
 
 PROBE_TIMEOUT_SECONDS = 30

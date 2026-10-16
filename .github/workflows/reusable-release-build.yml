@@ -46,10 +46,12 @@ jobs:
           python-version: "3.12.10"
 
       - name: Load repository toolchain contract
+        id: toolchain_data
         run: |
           set -euo pipefail
-          # shellcheck disable=SC1091
-          source tools/codex/versions.env
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
           : "${RUST_VERSION:?}"
           : "${RUFF_VERSION:?}"
           : "${PYTHON_RELEASE:?}"
@@ -359,10 +361,12 @@ jobs:
           python-version: "3.12.10"
 
       - name: Load repository toolchain contract
+        id: toolchain_data
         run: |
           set -euo pipefail
-          # shellcheck disable=SC1091
-          source tools/codex/versions.env
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
           : "${RUST_VERSION:?}"
           : "${RUFF_VERSION:?}"
           : "${PYTHON_RELEASE:?}"

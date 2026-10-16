@@ -5,9 +5,14 @@ from __future__ import annotations
 
 import argparse
 import ast
+from functools import lru_cache
+import hashlib
 import json
-from pathlib import Path
+import os
+from pathlib import Path, PurePosixPath
 import re
+import shlex
+import subprocess
 import sys
 import tomllib
 import textwrap
@@ -34,6 +39,9 @@ SPECIALIZED = {
             "scripts/lib/bootstrap_rustup.sh",
             "tools/codex/doctor.py",
             "tools/codex/versions.env",
+            "tools/check_toolchain_env.py",
+            "tests/tooling/test_toolchain_env.py",
+            "tests/tooling/test_codex_readiness.py",
             "bindings/python/build-requirements.lock",
             "rust-toolchain.toml",
             "Cargo.lock",
@@ -311,7 +319,16 @@ WORKFLOW_CONTROL_KEYS = frozenset(
         "shell",
         "uses",
         "with",
+        "env",
     )
+)
+
+_WORKFLOW_CONTROL_SPACING = re.compile(
+    r"^([ \t]*(?:-[ \t]+)?)((?:"
+    + "|".join(
+        re.escape(key) for key in sorted(WORKFLOW_CONTROL_KEYS, key=len, reverse=True)
+    )
+    + r"))[ \t]+:"
 )
 
 
@@ -423,16 +440,7 @@ def normalize_workflow_keys(source: str) -> str:
             # YAML permits spaces before a plain mapping key's colon. The
             # inspected job/step and checkout guards require canonical keys.
             # Normalize only audited keys, never values or literal run blocks.
-            control = "|".join(
-                re.escape(key)
-                for key in sorted(WORKFLOW_CONTROL_KEYS, key=len, reverse=True)
-            )
-            line = re.sub(
-                r"^([ \t]*(?:-[ \t]+)?)(" + control + r")[ \t]+:",
-                r"\1\2:",
-                line,
-                count=1,
-            )
+            line = _WORKFLOW_CONTROL_SPACING.sub(r"\1\2:", line, count=1)
         result.append(line)
     return "".join(result)
 
@@ -650,7 +658,8 @@ def executable_run_block(step: str | None, job_indent: int) -> tuple[str, ...]:
     return tuple(line[len(prefix) :] for line in code)
 
 
-def path_matches(path: str, pattern: str) -> bool:
+@lru_cache(maxsize=1024)
+def _compiled_path_pattern(pattern: str) -> re.Pattern[str]:
     tokens = []
     i = 0
     while i < len(pattern):
@@ -666,7 +675,11 @@ def path_matches(path: str, pattern: str) -> bool:
         else:
             tokens.append(re.escape(pattern[i]))
             i += 1
-    return re.fullmatch("".join(tokens), path) is not None
+    return re.compile("".join(tokens))
+
+
+def path_matches(path: str, pattern: str) -> bool:
+    return _compiled_path_pattern(pattern).fullmatch(path) is not None
 
 
 def path_selected(path: str, patterns: list[str]) -> bool:
@@ -704,36 +717,36 @@ SPECIALIZED_REQUIRED_JOBS = {
 # Qualification and exact-source steps otherwise execute unconditionally.
 REVIEWED_STEP_CONDITIONS = {
     ("vm", "vm"): {
-        "Stop disposable guest": "always()",
-        "Collect VM diagnostics": "always()",
-        "Upload unqualified VM diagnostics": "failure()",
+        "Stop disposable guest": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+        "Collect VM diagnostics": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+        "Upload unqualified VM diagnostics": "${{ failure() && steps.toolchain_data.outcome == 'success' }}",
     },
     ("v04-durability", "durability"): {
-        "Stop disposable guest": "always()",
-        "Upload unqualified v0.4 durability diagnostics": "failure()",
+        "Stop disposable guest": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+        "Upload unqualified v0.4 durability diagnostics": "${{ failure() && steps.toolchain_data.outcome == 'success' }}",
     },
     ("v04-enospc", "enospc"): {
-        "Record exact-source ENOSPC evidence": "always()",
-        "Stop disposable guest": "always()",
-        "Upload unqualified ENOSPC diagnostics": "failure()",
+        "Record exact-source ENOSPC evidence": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+        "Stop disposable guest": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+        "Upload unqualified ENOSPC diagnostics": "${{ failure() && steps.toolchain_data.outcome == 'success' }}",
     },
     ("v05", "qualification"): {
-        "Collect executor hardening evidence": "always()",
-        "Stop disposable guest": "always()",
-        "Collect QEMU diagnostics": "always()",
-        "Upload unqualified v05-executor-verifier diagnostics": "failure()",
+        "Collect executor hardening evidence": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+        "Stop disposable guest": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+        "Collect QEMU diagnostics": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+        "Upload unqualified v05-executor-verifier diagnostics": "${{ failure() && steps.toolchain_data.outcome == 'success' }}",
     },
     ("v06", "qualification"): {
-        "Collect authority and executor hardening evidence": "always()",
-        "Stop disposable guest": "always()",
-        "Collect QEMU diagnostics": "always()",
-        "Upload unqualified v06-managed-lifecycle diagnostics": "failure()",
+        "Collect authority and executor hardening evidence": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+        "Stop disposable guest": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+        "Collect QEMU diagnostics": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+        "Upload unqualified v06-managed-lifecycle diagnostics": "${{ failure() && steps.toolchain_data.outcome == 'success' }}",
     },
     ("v07", "qualification"): {
-        "Upload unqualified v0.7 diagnostics": "failure()",
+        "Upload unqualified v0.7 diagnostics": "${{ failure() && steps.toolchain_data.outcome == 'success' }}",
     },
     ("v08", "qualification"): {
-        "Upload unqualified v0.8 diagnostics": "failure()",
+        "Upload unqualified v0.8 diagnostics": "${{ failure() && steps.toolchain_data.outcome == 'success' }}",
     },
     ("v09", "contract"): {
         "Build exact-source adversarial qualification binaries": "needs.scope.outputs.full_qualification == 'true'",
@@ -747,9 +760,9 @@ REVIEWED_STEP_CONDITIONS = {
         "Save prepared runtime substrate": "steps.prepared-substrate.outputs.cache-hit != 'true'",
     },
     ("v010-reusable", "runtime"): {
-        "Stop disposable guest": "always()",
-        "Collect QEMU diagnostics": "always()",
-        "Upload unqualified v0.10 shell diagnostics": "failure()",
+        "Stop disposable guest": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+        "Collect QEMU diagnostics": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+        "Upload unqualified v0.10 shell diagnostics": "${{ failure() && steps.toolchain_data.outcome == 'success' }}",
     },
 }
 
@@ -1000,14 +1013,1448 @@ def v09_classifier_connected(workflow: str) -> bool:
         return False
 
 
+TOOLCHAIN_DATA_WORKFLOWS = (
+    ".github/workflows/ci.yml",
+    ".github/workflows/security.yml",
+    ".github/workflows/vm-acceptance.yml",
+    ".github/workflows/v04-durability-vm.yml",
+    ".github/workflows/v04-enospc-recovery-vm.yml",
+    ".github/workflows/v05-executor-verifier-vm.yml",
+    ".github/workflows/v06-managed-lifecycle-vm.yml",
+    ".github/workflows/v07-library-qualification.yml",
+    ".github/workflows/v08-agent-qualification.yml",
+    ".github/workflows/v09-qualification.yml",
+    ".github/workflows/v010-qualification.yml",
+    ".github/workflows/v010-shell-runtime-qualification.yml",
+    ".github/workflows/reusable-release-build.yml",
+)
+
+
+# Local shell scripts and composite actions are inspected as a superset of the
+# workflow invocation graph. A caller cannot hide a new toolchain source in an
+# intermediate helper, even when the helper is invoked before the workflow's
+# own guarded load.
+REVIEWED_LOCAL_SOURCES = {
+    # These commands execute via SSH on the isolated qualification guest,
+    # not in the repository checkout. Only the exact reviewed lines are exempt.
+    "scripts/qualification/v09-adversarial-guest.sh": {
+        (
+            'if result="$(remote "sudo -n sh -c \'test -s \\"$status_pa'
+            'th\\" && { cat \\"$status_path\\"; printf \\"__LINURA_Q8_OUT'
+            'PUT__\\\\n\\"; cat \\"$output_path\\"; }\'" 2>/dev/null)"; the'
+            "n"
+        ),
+        (
+            'if result="$(remote "sudo -n sh -c \'test -s \\"$status_pa'
+            'th\\" && { cat \\"$status_path\\"; printf \\"__LINURA_PUBLIC'
+            '_BOOTSTRAP_OUTPUT__\\\\n\\"; cat \\"$output_path\\"; }\'" 2>/d'
+            'ev/null)"; then'
+        ),
+        'remote "sudo -n bash -lc $quoted"',
+    },
+    ".github/actions/ubuntu-apt-input-cache/action.yml": {
+        'os_id="$(. /etc/os-release && printf \'%s\' "$ID")"',
+        'os_version="$(. /etc/os-release && printf \'%s\' "$VERSION_ID")"',
+    },
+    "scripts/setup_codex_environment.sh": {
+        "source scripts/lib/codex_source_state.sh",
+        'source "$RUSTUP_BOOTSTRAP_LIB"',
+    },
+    "scripts/preflight_codex_environment.sh": {
+        "source scripts/lib/codex_source_state.sh",
+    },
+    "qualification/v010/workstation-acceptance/launch-interactive.sh": {},
+    "tests/acceptance/v05/qualify-guest.sh": {
+        'source <(/usr/libexec/linura/v05-binding "$target")',
+    },
+}
+TOOLCHAIN_VALUES_READ = (
+    "read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION "
+    "HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE "
+    "RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION "
+    '<<<"$toolchain_values"'
+)
+TOOLCHAIN_VALUES_NONEMPTY = (
+    ': "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" '
+    '"${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" '
+    '"${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" '
+    '"${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"'
+)
+
+TOOLCHAIN_WORKFLOW_LOAD = (
+    'toolchain_values="$(python3 -I -S tools/check_toolchain_env.py '
+    '--values tools/codex/versions.env)"'
+)
+TOOLCHAIN_LOCAL_LOAD = (
+    'toolchain_values="$(python3 -I -S tools/check_toolchain_env.py '
+    '--values "$VERSION_CONTRACT")"'
+)
+TOOLCHAIN_WORKSTATION_LOAD = (
+    'toolchain_values="$(python3 -I -S "$build_root/tools/check_toolchain_env.py" '
+    '--values "$build_root/tools/codex/versions.env")" \\'
+)
+
+
+TOOLCHAIN_LOCAL_LOADS = {
+    "scripts/setup_codex_environment.sh": (
+        TOOLCHAIN_VALUES_READ,
+        TOOLCHAIN_LOCAL_LOAD,
+    ),
+    "scripts/preflight_codex_environment.sh": (
+        TOOLCHAIN_VALUES_READ,
+        TOOLCHAIN_LOCAL_LOAD,
+    ),
+    "qualification/v010/workstation-acceptance/launch-interactive.sh": (
+        TOOLCHAIN_VALUES_READ,
+        '|| fail "exact-source toolchain contract rejected"',
+    ),
+}
+
+
+def dynamic_shell_execution(
+    source: str, *, literal_sources: bool = False, literal_interpreters: bool = False
+) -> bool:
+    """Recognize execution requiring review without resolving shell inputs.
+
+    Inspect shell command boundaries, then tokenize the command prefix so
+    quoting, concatenated words, assignment prefixes and builtin wrappers do
+    not hide an executable expansion. This is a conservative static check,
+    not a general shell interpreter. Exact-file reviews cover existing
+    dynamic/nested launchers; an unchanged call after a new reassignment is
+    not an exception. Literal interpreter recognition deliberately ignores
+    arguments: every shell input mechanism requires the same review.
+    """
+    source = source.replace("\\\n", "")
+    boundary = re.compile(
+        r"(?:^|[\n;&|(]\s*|"
+        r"\b(?:if|elif|else|while|until|then|do|coproc)\s+|"
+        r"\btime\s+(?:-p\s+)?|(?<!\w)!\s+|\brun:\s*|"
+        r"\bcase\b[^;\n]*\bin\s+[^;\n]*\)\s*|"
+        r"(?m:^\s*(?:[A-Za-z0-9_*?|.\[\]-]+|\"[^\"\n]*\"|'[^'\n]*')\)\s*))"
+    )
+    wrappers = {"command", "builtin", "exec", "env", "sudo", "nohup", "time", "{"}
+    option_arguments = {
+        "env": {"-u", "--unset", "-C", "--chdir"},
+        "exec": {"-a"},
+        "sudo": {"-u", "-g", "-h", "-p", "-C", "-U", "--user", "--group", "--host"},
+        "time": {"-f", "-o", "--format", "--output"},
+    }
+    for match in boundary.finditer(source):
+        line_start = source.rfind("\n", 0, match.start()) + 1
+        before = source[line_start : match.start()]
+        context = source[line_start : match.end()]
+        if before.rfind("[[") > before.rfind("]]") and context.rfind(
+            "$("
+        ) < before.rfind("[["):
+            continue
+        if match.group().startswith("(") and re.search(
+            r"[A-Za-z_][A-Za-z0-9_]*=\s*$", before
+        ):
+            continue
+        tail = source[match.end() :].split("\n", 1)[0]
+        if not tail or tail.lstrip().startswith("#"):
+            continue
+        lexer = shlex.shlex(tail, posix=True, punctuation_chars=";&|()<>")
+        lexer.whitespace_split = True
+        wrapped = False
+        wrapper = ""
+        skip_argument = False
+        try:
+            for word in lexer:
+                if skip_argument:
+                    skip_argument = False
+                    continue
+                if word in {";", "&", "&&", "|", "||", "(", ")"}:
+                    break
+                if word in {"<", ">", ">>", "<<<", "<&", ">&", "<>"}:
+                    skip_argument = True
+                    continue
+                if word.isdecimal():
+                    continue
+                if re.match(r"[A-Za-z_][A-Za-z0-9_]*(?:\[[^]]*\])?\+?=", word):
+                    continue
+                # Quote removal concatenates e.g. "$load"er into one word.
+                # Treat even literal dollar-bearing executable names as
+                # unsupported rather than guessing at expansion semantics.
+                if "$" in word or "`" in word:
+                    if not literal_sources:
+                        return True
+                    break
+                if literal_sources and word in {"source", ".", "eval"}:
+                    return True
+                if (
+                    literal_interpreters
+                    and wrapped
+                    and wrapper == "env"
+                    and (word.startswith("-S") or word.startswith("--split-string"))
+                ):
+                    # env's command-string parser is outside this grammar.
+                    return True
+                if literal_interpreters and Path(word).name in {
+                    "bash",
+                    "dash",
+                    "zsh",
+                    "ksh",
+                    "ash",
+                    "mksh",
+                    "sh",
+                }:
+                    # A shell can execute stdin, a pipe, a descriptor, a
+                    # here-document or a script. Do not infer safety from
+                    # its option spelling or try to resolve the input path.
+                    return True
+                if literal_interpreters and Path(word).name in {"busybox", "toybox"}:
+                    wrapped = True
+                    wrapper = Path(word).name
+                    continue
+                if Path(word).name in wrappers:
+                    wrapped = True
+                    wrapper = Path(word).name
+                    continue
+                if wrapped and word.startswith("-"):
+                    if wrapper == "command" and word in {"-v", "-V"}:
+                        break
+                    skip_argument = word in option_arguments.get(wrapper, set())
+                    continue
+                break
+        except ValueError:
+            # A multiline or encoded command prefix with expansions is
+            # outside the reviewed grammar. Arguments of a known literal
+            # command were never requested from the lexer.
+            if (
+                not literal_sources
+                and not re.match(r"[A-Za-z_][A-Za-z0-9_]*=", tail)
+                and re.match(r"[^\s]*[$`]", tail)
+            ):
+                return True
+    return False
+
+
+# Digests bind exceptions to complete reviewed files, including every variable
+# definition. Adding an invocation or changing a variable invalidates review.
+REVIEWED_SHELL_EXECUTION = {
+    # Qualification entrypoints retain their exact reviewed guest commands,
+    # recorder paths and callback helpers. Here-doc data is conservatively
+    # included in the scan; the digest also binds those opaque bodies.
+    "qualification/v010/shell-runtime/prepare-substrate.sh": "c1bd44739755bb0d41efb26c7eebde98e2f8f642e4943c14ca0003c065e69a3b",
+    "qualification/v010/shell-runtime/run-shell-runtime.sh": "3533143a2a37fa733204daae9ba9177cffea726ce499e024d2968df433956b6b",
+    "qualification/v010/workstation-acceptance/capture-hardware-session.sh": "87c5b48938f9eae997a0a8e6c7bc75607ffd2c3c14f274e2ab9ec251dc242386",
+    "qualification/v010/workstation-acceptance/launch-interactive.sh": "26b0746581b3bcd32e93c986000975b79c8df052b243577ccb208c899ea35460",
+    "qualification/v010/workstation-acceptance/run-hardware-qualification.sh": "fa08f7a5cf050d9692de40227b8e40668859d54e801318dfa7dfe7181ed90b72",
+    "qualification/v010/workstation-acceptance/run-live-session.sh": "e8013a8b52a6eeac5b53e1bfa3861a2a4879e4b33978f3d22b08ce634e06360f",
+    "scripts/qualification/v09-adversarial-guest.sh": "4e68b9434f07c8df61f6ac636cd13f59800a3cc1bc7666a547f6c2ed0a3a03fd",
+    "tests/acceptance/v06/qualify-guest.sh": "503d93d0b70630679ff1a381b8f3731767f11eaac184d5fcb8d6e74ee70024ab",
+    # Development-only tools run at the caller's existing permissions.
+    "scripts/lib/bootstrap_rustup.sh": "60db235ffa3f448b1182665285dc3347f017cbcb5785f087f056c3b30e836ad8",
+    # This library executes before validation to protect source integrity even
+    # when the validator fails. Bind its entire body, not selected commands.
+    "scripts/lib/codex_source_state.sh": "3b27ccc177aeb948df5dd4620dcb5f18dd1a570c91511adc847951b295de6281",
+    "scripts/maintain_codex_environment.sh": "74f26eccb9362479490f5ad954d6c8570f116bddd75894fd647f783775e5bcf4",
+    "scripts/lint_github_workflows.sh": "ce5b656f70d742885521fd7d5fddc0fdd7f2e7f0db984f7fcfb17600142a8bd3",
+    "scripts/preflight_codex_environment.sh": "a9a9a81b5b09a9d96077ec5ca5b1c69ae3a1cfdc1b151196d704670a7a65c4ea",
+    "scripts/run_codex.sh": "970be5426b5b7e0417987f86331e361f244d35f562cd3cddc90540470bc6d574",
+    "scripts/setup_codex_environment.sh": "0d140a74a0ab077d1b89da1759c30d272b5dfa902afaa90c1fd790f941d95bd7",
+}
+
+PREVALIDATION_SHELL_FILES = (
+    "scripts/setup_codex_environment.sh",
+    "scripts/preflight_codex_environment.sh",
+    "scripts/maintain_codex_environment.sh",
+    "scripts/lib/codex_source_state.sh",
+)
+
+
+def repository_source_files(root: Path) -> list[Path] | None:
+    """Return tracked and non-ignored untracked files for a real checkout.
+
+    Temporary test fixtures are not Git repositories and intentionally fall
+    back to the filesystem walk below. In a checkout, Git's inventory avoids
+    treating ignored build outputs or nested worktrees as repository source
+    while still auditing new files before they are staged.
+    """
+    if not (root / ".git").exists():
+        return None
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+    }
+    environment.update(
+        {
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+        }
+    )
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.untrackedCache=false",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "-z",
+                "--",
+            ],
+            capture_output=True,
+            check=False,
+            env=environment,
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError("repository source inventory unavailable") from error
+    if result.returncode != 0:
+        raise ValueError("repository source inventory unavailable")
+    found: list[Path] = []
+    names: set[str] = set()
+    for raw_name in result.stdout.split(b"\0"):
+        if not raw_name:
+            continue
+        try:
+            name = raw_name.decode("utf-8")
+        except UnicodeError as error:
+            raise ValueError("non-UTF-8 repository source path") from error
+        relative = PurePosixPath(name)
+        if (
+            relative.is_absolute()
+            or ".." in relative.parts
+            or "." in relative.parts
+            or relative.as_posix() != name
+            or name in names
+        ):
+            raise ValueError("unsafe repository source path")
+        names.add(name)
+        found.append(root.joinpath(*relative.parts))
+    return found
+
+
+def local_shell_sources_guarded(root: Path) -> list[str]:
+    """Fail closed on source/evaluation added anywhere in local shell inputs."""
+    failures: list[str] = []
+    for relative in PREVALIDATION_SHELL_FILES:
+        path = root / relative
+        if not path.is_file() or any(
+            part.is_symlink() for part in (path, *path.parents)
+        ):
+            failures.append(
+                f"{relative}: missing or symlinked pre-validation bootstrap"
+            )
+    candidates: set[Path] = set()
+    # Scan the whole source tree, not a directory allowlist: workflows can
+    # invoke helpers from the repository root, tools/, or any new directory.
+    # Ignore generated dependency/build trees, which are not source inputs.
+    generated = {".git", "target", "node_modules", ".venv", "__pycache__"}
+    legacy_extensionless = {
+        "scripts",
+        "qualification",
+        "packaging",
+    }
+    try:
+        repository_files = repository_source_files(root)
+    except ValueError as error:
+        return [str(error)]
+    if repository_files is None:
+        repository_files = []
+        for directory, subdirectories, filenames in os.walk(root, followlinks=False):
+            subdirectories[:] = [
+                name for name in subdirectories if name not in generated
+            ]
+            repository_files.extend(Path(directory) / name for name in filenames)
+    for path in repository_files:
+        filename = path.name
+        if path.is_file() or path.is_symlink():
+            relative = path.relative_to(root)
+            is_action = relative.parts[:2] == (".github", "actions") and filename in {
+                "action.yml",
+                "action.yaml",
+            }
+            if path.suffix in {".sh", ".bash"} or is_action:
+                candidates.add(path)
+            else:
+                legacy = not path.suffix and (
+                    relative.parts[0] in legacy_extensionless
+                    or relative.parts[:2]
+                    in {
+                        ("tests", "acceptance"),
+                        (".github", "actions"),
+                    }
+                )
+                if legacy or (not path.suffix and path.is_symlink()):
+                    candidates.add(path)
+                    continue
+                # Git checkout preserves executable modes. A shebang-free
+                # executable with any extension can run as shell via ENOEXEC,
+                # so suffix and shebang classification alone are not enough.
+                if path.is_symlink():
+                    continue
+                try:
+                    with path.open("rb") as stream:
+                        shebang = stream.readline(256).strip()
+                    # An executable with a non-shell shebang runs through
+                    # that interpreter, not through Bash's ENOEXEC fallback.
+                    if path.stat().st_mode & 0o111 and not shebang.startswith(b"#!"):
+                        candidates.add(path)
+                        continue
+                except OSError:
+                    failures.append(
+                        f"{relative.as_posix()}: unreadable shell candidate"
+                    )
+                    continue
+                if shebang.startswith(b"#!") and re.search(
+                    rb"(?:/|[ \t])(?:bash|dash|ksh|zsh|ash|mksh|sh)(?:[ \t]|$)",
+                    shebang,
+                ):
+                    candidates.add(path)
+    # An explicit shell interpreter can execute a file with any suffix and
+    # without a shebang. Follow literal repository-local interpreter targets
+    # transitively, including invocations from workflow run blocks.
+    shell_invocation = re.compile(
+        r"(?<![A-Za-z0-9_./-])(?:/(?:usr/)?bin/)?"
+        r"(?:bash|dash|zsh|ksh|ash|mksh|sh)[ \t]+"
+        r"(?:(?:-(?![A-Za-z]*c(?=[ \t]))[A-Za-z]+|"
+        r"--[A-Za-z][A-Za-z0-9-]*|--)[ \t]+)*"
+        r"(?P<quote>['\"]?)(?P<path>(?!-)(?:\./)?[A-Za-z0-9_.+-]+"
+        r"(?:/[A-Za-z0-9_.+-]+)*)(?P=quote)(?=$|[ \t;&|)])"
+    )
+    # Audit literal path operands following the first apparent script as
+    # well: -O/-o and --rcfile/--init-file consume an argument before the
+    # actual script, and startup files themselves can execute shell code.
+    shell_path_operand = re.compile(
+        r"(?<![A-Za-z0-9_./-])(?P<quote>['\"]?)"
+        r"(?P<path>(?:\./)?[A-Za-z0-9_.+-]+"
+        r"(?:/[A-Za-z0-9_.+-]+)*)(?P=quote)(?=$|[ \t;&|)])"
+    )
+    pending = list(candidates)
+    pending.extend(sorted((root / ".github/workflows").glob("*.y*ml")))
+    inspected: set[Path] = set()
+    while pending:
+        caller = pending.pop()
+        if caller in inspected:
+            continue
+        inspected.add(caller)
+        if caller.is_symlink():
+            continue
+        try:
+            content = caller.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        for line in content.splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            for match in shell_invocation.finditer(line):
+                operands = [match.group("path")]
+                operands.extend(
+                    token.group("path")
+                    for token in shell_path_operand.finditer(line[match.end() :])
+                )
+                for operand in operands:
+                    relative = Path(operand)
+                    if ".." in relative.parts:
+                        continue
+                    invoked = root / relative
+                    if (
+                        invoked.is_file() or invoked.is_symlink()
+                    ) and invoked not in candidates:
+                        candidates.add(invoked)
+                        pending.append(invoked)
+    for path in sorted(candidates):
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            failures.append(f"{relative}: symlinked shell entrypoint")
+            continue
+        try:
+            raw = path.read_bytes()
+            content = raw.decode("utf-8")
+            lines = content.splitlines()
+        except (OSError, UnicodeError):
+            failures.append(f"{relative}: unreadable shell entrypoint")
+            continue
+        reviewed_digest = REVIEWED_SHELL_EXECUTION.get(relative)
+        if (
+            reviewed_digest is not None
+            and hashlib.sha256(raw).hexdigest() != reviewed_digest
+        ) or (
+            reviewed_digest is None
+            and dynamic_shell_execution(content, literal_interpreters=True)
+        ):
+            failures.append(f"{relative}: unreviewed shell execution")
+        active = [
+            line.strip()
+            for line in lines
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        approved = REVIEWED_LOCAL_SOURCES.get(relative, set())
+        for index, line in enumerate(active):
+            invokes_source = (
+                re.search(
+                    r"(?:^|[;&|({)]\s*|"
+                    r"\b(?:if|elif|else|while|until|then|do|coproc)\s+(?:!\s+)?|"
+                    r"\btime\s+(?:-p\s+)?(?:!\s+)?|"
+                    r"(?<!\w)!\s+)"
+                    r"(?:builtin\s+(?:--\s+)?|"
+                    r"command\s+(?:-[pVv]\s+)*(?:--\s+)?)?"
+                    r"(?:source|\.)\s+",
+                    line,
+                )
+                is not None
+            )
+            invokes_shell_eval = (
+                re.search(
+                    r"(?:^|[;&|({)]\s*|"
+                    r"\b(?:if|elif|else|while|until|then|do|coproc)\s+(?:!\s+)?|"
+                    r"\btime\s+(?:-p\s+)?(?:!\s+)?)"
+                    r"(?:builtin\s+(?:--\s+)?|"
+                    r"command\s+(?:-[pVv]\s+)*(?:--\s+)?)?"
+                    r"eval\s+",
+                    line,
+                )
+                is not None
+            )
+            # A composite action may execute the source in a run: scalar.
+            inline_source = (
+                re.search(r"""\brun:\s*(?:['"]\s*)?(?:source|\.|eval)\s+""", line)
+                is not None
+            )
+            if (
+                invokes_source
+                or invokes_shell_eval
+                or inline_source
+                or dynamic_shell_execution(line, literal_sources=True)
+            ):
+                if line not in approved:
+                    failures.append(
+                        f"{relative}: unreviewed local shell source/evaluation"
+                    )
+            if (
+                "tools/codex/versions.env" in line
+                and relative not in TOOLCHAIN_LOCAL_LOADS
+            ):
+                failures.append(f"{relative}: unreviewed local toolchain reference")
+        if relative not in TOOLCHAIN_LOCAL_LOADS:
+            continue
+        source, guard = TOOLCHAIN_LOCAL_LOADS[relative]
+        if active.count(source) != 1:
+            failures.append(
+                f"{relative}: missing or duplicated reviewed toolchain source"
+            )
+            continue
+        index = active.index(source)
+        if relative.startswith("scripts/"):
+            if (
+                'readonly VERSION_CONTRACT="tools/codex/versions.env"' not in active
+                or active.count(guard) != 1
+                or index == 0
+                or active[index - 1] != guard
+                or "set -euo pipefail" not in active[:index]
+            ):
+                failures.append(
+                    f"{relative}: toolchain data load must immediately follow validation"
+                )
+        elif (
+            index < 2
+            or active[index - 1] != guard
+            or active[index - 2] != TOOLCHAIN_WORKSTATION_LOAD
+            or "set -euo pipefail" not in active[:index]
+        ):
+            failures.append(f"{relative}: exact-source toolchain guard is missing")
+        if index + 1 >= len(active) or active[index + 1] != TOOLCHAIN_VALUES_NONEMPTY:
+            failures.append(f"{relative}: toolchain fields were not verified nonempty")
+    return failures
+
+
+REVIEWED_PREVALIDATION_PREFIXES: dict[tuple[str, str], str] = {
+    (
+        ".github/workflows/applicable-qualification.yml",
+        "shadow",
+    ): "49c2287f6bfc4b5f9d4b622de908b8f95c9f4c364f6948e6a47250e2ab26144e",
+    (
+        ".github/workflows/branch-hygiene.yml",
+        "cleanup",
+    ): "55c85bf2b2eb4c3e6c096a82946eb583b158593372337f58e53ff4991aeb4da5",
+    (
+        ".github/workflows/crates-io-publish.yml",
+        "bind-verification",
+    ): "08bcc0a34a59c73a2c0069caffa34d1d94e17cc6b392d715566076bc9b6c5288",
+    (
+        ".github/workflows/crates-io-publish.yml",
+        "qualify",
+    ): "2c68cb5ffe2682be317b731c5ca4cae843ee1736509b52dc4f932c5b722309ba",
+    (
+        ".github/workflows/crates-io-publish.yml",
+        "publish",
+    ): "2c68cb5ffe2682be317b731c5ca4cae843ee1736509b52dc4f932c5b722309ba",
+    (
+        ".github/workflows/post-release-cleanup.yml",
+        "cleanup",
+    ): "ff354c808feeeae976f7faea52f49e66d23dc853d70df23dd8aa61bdb101834f",
+    (
+        ".github/workflows/post-release-closure.yml",
+        "close",
+    ): "c4838db1a91f2f7ad890324a001a9ee479565972aab7fb26b34c9d5f0ec5a040",
+    (
+        ".github/workflows/publish-qualification-evidence.yml",
+        "admission",
+    ): "af493c046fce964bd29b3b42c4a684849ad6db26c5131b203b8d4a2a5cfa4c92",
+    (
+        ".github/workflows/publish-qualification-evidence.yml",
+        "archive",
+    ): "dd67be2797cb6789ff22431efab4b68ce3abd8ec5ed7d8f1c14491e78b43e90f",
+    (
+        ".github/workflows/release-authorization.yml",
+        "qualify",
+    ): "55c85bf2b2eb4c3e6c096a82946eb583b158593372337f58e53ff4991aeb4da5",
+    (
+        ".github/workflows/release-authorization.yml",
+        "authorize",
+    ): "018b13be4cde08c97c17fa29a2e50f5f48316284901f4cd1cc2937ec6a221c73",
+    (
+        ".github/workflows/release-preparation.yml",
+        "qualify",
+    ): "55c85bf2b2eb4c3e6c096a82946eb583b158593372337f58e53ff4991aeb4da5",
+    (
+        ".github/workflows/release-preparation.yml",
+        "prepare",
+    ): "018b13be4cde08c97c17fa29a2e50f5f48316284901f4cd1cc2937ec6a221c73",
+    (
+        ".github/workflows/release-promotion.yml",
+        "closure-readiness",
+    ): "3e58d636d234ad37905e5e5694286a00f95da48393253d93d7054e1125f09214",
+    (
+        ".github/workflows/release-proof-dispatch.yml",
+        "dispatch",
+    ): "ff354c808feeeae976f7faea52f49e66d23dc853d70df23dd8aa61bdb101834f",
+    (
+        ".github/workflows/release-verification.yml",
+        "verify",
+    ): "e1e740b0276cec5082cfde7c7fe74c8178d3a7f9abbe10265fbde69eca58d0a7",
+    (
+        ".github/workflows/release.yml",
+        "validate",
+    ): "1aec76767ae438244c7833c8b00753599e34afece7a62663302d867899f25948",
+    (
+        ".github/workflows/trusted-release-proof.yml",
+        "validate",
+    ): "55c85bf2b2eb4c3e6c096a82946eb583b158593372337f58e53ff4991aeb4da5",
+    (
+        ".github/workflows/trusted-release-proof.yml",
+        "aggregate-proof",
+    ): "8e29d459d72e94b0f412f73a21aa42f37c25330af9b1b7d8aa3049d8d3f9a0f3",
+}
+
+# These minimal API handoffs / sealed-artifact upload jobs deliberately have
+# no repository checkout or repository-code execution. Bind complete bodies,
+# not display names, so adding any local helper invalidates the exception.
+REVIEWED_CHECKOUT_FREE_JOBS: dict[tuple[str, str], str] = {
+    (
+        ".github/workflows/crates-io-publish.yml",
+        "dispatch-closure",
+    ): "03568e533ccc837c256321fa915f91f4f6de9cd66bc34ca25f20d77036b26de8",
+    (
+        ".github/workflows/publish-qualification-evidence.yml",
+        "preflight",
+    ): "606d24b652507f6701c4530124164be2223ab46a4ff428786f28f3c40873b415",
+    (
+        ".github/workflows/release-closure-handoff.yml",
+        "handoff",
+    ): "f56a9dee8e2fb1c9ffdcdd73cfa886ae60b1a44381a6d642a319537f5f85671a",
+    (
+        ".github/workflows/release-promotion.yml",
+        "dispatch",
+    ): "1f21e1cfc9c585667776ca3177f909f40e18b45fb4ca1cca5c2545532e72ec2e",
+    (
+        ".github/workflows/release.yml",
+        "publish-pypi",
+    ): "634bf38c9884d3e8b894f306edf92349ecef49c8f90146f93f6c4334ad165211",
+    (
+        ".github/workflows/release.yml",
+        "verification-dispatch",
+    ): "cc17d4287dca14b570371270399887f7b049f2671b89ea5ad2eefba45d02f043",
+    (
+        ".github/workflows/trusted-release-proof.yml",
+        "dispatch-promotion",
+    ): "8a5129641442d4e6110ee6e6f71316217bb15f801305e5c31463f8f50f85f187",
+}
+
+TOOLCHAIN_WORKFLOW_VALIDATE = (
+    "python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env"
+)
+
+TOOLCHAIN_SUCCESS_CONDITIONS = frozenset(
+    "${{ " + status + "() && steps.toolchain_data.outcome == 'success' }}"
+    for status in ("always", "failure")
+)
+
+# This second checkout is data-only evidence in a separate directory. It must
+# never replace the trusted admission code or become an executable worktree.
+REVIEWED_SECONDARY_CHECKOUTS = {
+    (
+        ".github/workflows/publish-qualification-evidence.yml",
+        "admission",
+    ): "1efb40ab0e23e823271ba92cf95d2b6ee9c5ec3a0102903a61d77b9225b7b0ed",
+}
+
+
+def _workflow_jobs(workflow: str, relative: str) -> tuple[str, bool] | None:
+    """Classify all jobs; only exact reviewed checkout-free bodies are omitted."""
+    jobs = section(workflow, "jobs")
+    headings = list(re.finditer(r"(?m)^jobs:[ \t]*\n", workflow))
+    if jobs is None or len(headings) != 1:
+        return None
+    headers = list(re.finditer(r"(?m)^  ([A-Za-z_][A-Za-z0-9_-]*):[ \t]*$", jobs))
+    names = [match[1] for match in headers]
+    if not names or len(names) != len(set(names)):
+        return None
+    if sum(
+        bool(line.strip())
+        and not line.lstrip().startswith("#")
+        and len(line) - len(line.lstrip(" ")) <= 2
+        for line in jobs.splitlines()
+    ) != len(headers):
+        return None
+    filtered = workflow[: headings[0].end()]
+    executable = False
+    for index, header in enumerate(headers):
+        ending = headers[index + 1].start() if index + 1 < len(headers) else len(jobs)
+        name = header[1]
+        body = jobs[header.end() + 1 : ending]
+        reviewed = REVIEWED_CHECKOUT_FREE_JOBS.get((relative, name))
+        if reviewed is not None:
+            if hashlib.sha256(body.encode("utf-8")).hexdigest() != reviewed:
+                return None
+            continue
+        steps = section(body, "steps", 4)
+        if steps is None:
+            uses = re.findall(r"(?m)^    uses: (.+)$", body)
+            if (
+                len(uses) != 1
+                or re.fullmatch(
+                    r"\./\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml", uses[0]
+                )
+                is None
+            ):
+                return None
+        else:
+            # A second checkout could replace already validated input. Status
+            # overrides may run after later failures, never after this guard
+            # fails. Default conditions retain GitHub's implicit success().
+            validation = workflow_step(
+                body, 4, "name", "Validate repository toolchain data"
+            )
+            if 'test "$GITHUB_SHA" = "$SOURCE_SHA"' in executable_run_block(
+                validation, 4
+            ):
+                if re.findall(
+                    r"(?m)^      SOURCE_SHA: (.+)$", section(body, "env", 4) or ""
+                ) != ["${{ inputs.source_sha }}"]:
+                    return None
+            if len(re.findall(r"(?m)^        id: toolchain_data$", steps)) != 1:
+                return None
+            checkouts = re.findall(r"(?m)^\s*(?:- )?uses: actions/checkout@", steps)
+            entries = list(re.finditer(r"(?m)^      - .+$", steps))
+            if any(
+                re.fullmatch(r"      - (?:name|uses|run|id|if):[ \t]+.+", entry[0])
+                is None
+                for entry in entries
+            ):
+                return None
+            if sum(
+                bool(line.strip())
+                and not line.lstrip().startswith("#")
+                and len(line) - len(line.lstrip(" ")) <= 6
+                for line in steps.splitlines()
+            ) != len(entries):
+                return None
+            checkout_bodies = [
+                steps[
+                    entry.start() : entries[pos + 1].start()
+                    if pos + 1 < len(entries)
+                    else len(steps)
+                ]
+                for pos, entry in enumerate(entries)
+                if re.search(
+                    r"(?m)^\s*(?:- )?uses: actions/checkout@",
+                    steps[
+                        entry.start() : entries[pos + 1].start()
+                        if pos + 1 < len(entries)
+                        else len(steps)
+                    ],
+                )
+            ]
+            if len(checkouts) != len(checkout_bodies) or not checkout_bodies:
+                return None
+            if len(checkout_bodies) > 1 and (
+                len(checkout_bodies) != 2
+                or hashlib.sha256(checkout_bodies[1].encode("utf-8")).hexdigest()
+                != REVIEWED_SECONDARY_CHECKOUTS.get((relative, name))
+            ):
+                return None
+            step_lines = steps.splitlines()
+            for index, line in enumerate(step_lines):
+                condition_match = re.fullmatch(
+                    r"(?:        |      - )if:[ \t]*(.*)", line
+                )
+                if condition_match is None:
+                    continue
+                condition = condition_match[1].strip()
+                if not condition or condition[0] in "#|>!&*{[":
+                    return None
+                following = next(
+                    (
+                        value
+                        for value in step_lines[index + 1 :]
+                        if value.strip() and not value.lstrip().startswith("#")
+                    ),
+                    "",
+                )
+                if following and len(following) - len(following.lstrip()) > 8:
+                    return None
+                if re.search(r"\b(?:always|failure|cancelled|success)\s*\(", condition):
+                    if condition not in TOOLCHAIN_SUCCESS_CONDITIONS | {
+                        "success()",
+                        "${{ success() }}",
+                    }:
+                        return None
+            executable = True
+        filtered += jobs[header.start() : ending]
+    # Do not discard root metadata that YAML permits after the jobs mapping.
+    filtered += workflow[headings[0].end() + len(jobs) :]
+    return filtered, executable
+
+
+def toolchain_load_follows_checkout(
+    lines: list[str], step_start: int, workflow_name: str | None = None
+) -> bool:
+    """Nothing executable may precede a job's validated configuration load.
+
+    Enumerating interpreters cannot prove what arbitrary repository code does.
+    Require a closed structural prefix instead: the pinned checkout action
+    followed by the loader. The only exceptions are immutable Python setup
+    and the exact publisher provenance/bootstrap prefix. Arbitrary helpers,
+    regardless of their interpreter, cannot acquire an exception by name.
+    """
+    steps_start = step_start - 1
+    while steps_start >= 0 and lines[steps_start].strip() != "steps:":
+        steps_start -= 1
+    if steps_start < 0 or lines[steps_start] != "    steps:":
+        return False
+    if workflow_name is not None:
+        job = next(
+            (
+                line.strip()[:-1]
+                for line in reversed(lines[:steps_start])
+                if re.fullmatch(r"  [A-Za-z_][A-Za-z0-9_-]*:", line)
+            ),
+            "",
+        )
+        reviewed = REVIEWED_PREVALIDATION_PREFIXES.get((workflow_name, job))
+        if reviewed is not None:
+            return (
+                hashlib.sha256(
+                    "\n".join(lines[steps_start + 1 : step_start]).encode("utf-8")
+                ).hexdigest()
+                == reviewed
+            )
+    prefix = [
+        line.split(" #", 1)[0].rstrip()
+        for line in lines[steps_start + 1 : step_start]
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if not prefix or prefix[0] != (
+        "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    ):
+        return False
+    # Preserve the publisher's existing source-attestation-before-repository-
+    # execution boundary. This binds checkout, pinned Node setup and the full
+    # exact provenance/publisher-test step, not just their display labels.
+    if hashlib.sha256(
+        "\n".join(lines[steps_start + 1 : step_start]).encode("utf-8")
+    ).hexdigest() == (
+        "9fcb7b997ee39578a055a2f4a7fae4c4c24a857aaa132e4eb22625a45df71c11"
+    ):
+        return True
+    next_step = next(
+        (
+            index
+            for index, line in enumerate(prefix[1:], 1)
+            if line.startswith("      - ")
+        ),
+        len(prefix),
+    )
+    if prefix[next_step:] not in (
+        [],
+        [
+            "      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+            "        with:",
+            '          python-version: "3.12.10"',
+        ],
+    ):
+        return False
+    prefix = prefix[:next_step]
+    if len(prefix) == 1:
+        return True
+    if prefix[1] != "        with:":
+        return False
+    if len(prefix) < 3:
+        return False
+    seen: set[str] = set()
+    for line in prefix[2:]:
+        match = re.fullmatch(
+            r"          (fetch-depth|persist-credentials|ref): (.+)", line
+        )
+        if match is None or match[1] in seen:
+            return False
+        seen.add(match[1])
+        if match[1] == "fetch-depth" and match[2] != "0":
+            return False
+        if match[1] == "persist-credentials" and match[2] != "false":
+            return False
+        if match[1] == "ref" and match[2] not in {
+            "${{ inputs.source_sha }}",
+            "${{ inputs.source_sha || github.sha }}",
+            "${{ github.event.pull_request.head.sha || github.sha }}",
+            "${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}",
+        }:
+            return False
+    return True
+
+
+WORKFLOW_EMPTY_STARTUP_ENV = frozenset(
+    ("BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "NODE_OPTIONS")
+)
+
+# Protected loader jobs accept only reviewed application data, never ambient
+# interpreter/executable selection. New names require an explicit review here;
+# extending a denylist of startup hooks cannot close this boundary.
+TOOLCHAIN_DATA_ENV_KEYS = frozenset(
+    (
+        "ACCEPTANCE_CONTRACT",
+        "ACCEPTANCE_SCENARIO",
+        "ADMISSION_SHA",
+        "ADVERSARIAL_ROOT",
+        "APPROVAL_REASON",
+        "ARCH_ARCHIVE_URL",
+        "ARTIFACT_DIR",
+        "ATTEMPT",
+        "AUTHORITY_SHA",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "BASE_IMAGE_CHECKSUM_URL",
+        "BASE_IMAGE_SHA256",
+        "BASE_IMAGE_URL",
+        "BASE_SHA",
+        "BRANCH",
+        "CARGO_REGISTRY_TOKEN",
+        "CATEGORY",
+        "CLOSURE_SHA",
+        "CONTRACT_ENVELOPE_ROOT",
+        "CRATES_IO_RUN_ID",
+        "CRATE_PACKAGE_SHA256",
+        "CRATE_VERSION",
+        "EVENT_NAME",
+        "EVIDENCE_ROOT",
+        "EXPECTED_CHANGED_FILES",
+        "GH_REPO",
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "HEAD_SHA",
+        "INPUT_CRATES_IO_RUN_ID",
+        "INPUT_TAG",
+        "INPUT_VERIFICATION_RUN_ID",
+        "LINURA_EXPECTED_SOURCE_SHA",
+        "LINURA_V07_EVIDENCE_DIR",
+        "PACKAGE_SHA256",
+        "PAYLOAD_DIR",
+        "PROMOTION_RUN_ID",
+        "PROOF_DIR",
+        "PROOF_ROOT",
+        "PROOF_RUN_ID",
+        "PR_NUMBER",
+        "PUBLISHED_AT",
+        "PYPI_DIR",
+        "PYTHON_WHEEL_SOURCE_DATE_EPOCH",
+        "QUALIFICATION_DISK_GIB",
+        "QUALIFICATION_ENVIRONMENT_ID",
+        "QUALIFICATION_GPU_DEVICE_ID",
+        "QUALIFICATION_GPU_PCI_BDF",
+        "QUALIFICATION_GPU_VENDOR_ID",
+        "QUALIFICATION_NIC_MAC",
+        "QUALIFICATION_ROOT",
+        "QUALIFICATION_SOURCE_SHA",
+        "QUALIFICATION_TREE_SHA",
+        "QUALIFICATION_UNIT",
+        "R2_BUCKET",
+        "R2_ENDPOINT",
+        "READINESS_HEAD_SHA",
+        "READINESS_PR_NUMBER",
+        "RECOVERY_REF",
+        "REGRESSION_ROOT",
+        "RELEASE_APP_CLIENT_ID",
+        "RELEASE_APP_PRIVATE_KEY",
+        "RELEASE_APP_SLUG",
+        "RELEASE_ID",
+        "RELEASE_RUN_ID",
+        "RELEASE_TAG",
+        "RELEASE_TARGET",
+        "RELEASE_THEME",
+        "RELEASE_VERSION",
+        "RUNTIME_CONTRACT",
+        "RUN_ID",
+        "RUST_VERSION",
+        "SHARD_ID",
+        "SHARD_ROOT",
+        "SOURCE_SHA",
+        "SSH_PORT",
+        "SUBSTRATE_CONTRACT",
+        "TREE_SHA",
+        "TRIGGER_EVENT",
+        "TRIGGER_HEAD_BRANCH",
+        "TRIGGER_HEAD_SHA",
+        "TRIGGER_RUN_ID",
+        "V010_PREPARED_RUNTIME_ROOT",
+        "V010_PREPARED_SOURCE_ROOT",
+        "V010_QUALIFICATION_RUNTIME_ROOT",
+        "V010_QUALIFICATION_SOURCE_ROOT",
+        "V09_BOUNDARY_END",
+        "V09_BOUNDARY_START",
+        "V09_FINAL_SHARD",
+        "V09_PRIMARY_SHARD",
+        "V09_QUALIFICATION_ROOT",
+        "V09_SHARD_ID",
+        "VERIFICATION_EVENT",
+        "VERIFICATION_REF",
+        "VERIFICATION_RUN_ID",
+        "VERIFIED_SOURCE_SHA",
+        "VM_ACCELERATION",
+        "WORKFLOW_REF",
+    )
+)
+
+
+def workflow_execution_context_guarded(
+    workflow: str,
+    *,
+    data_only: bool,
+    runner_labels: tuple[str, ...] = ("ubuntu-24.04", "ubuntu-latest"),
+) -> bool:
+    """Audit the runner and every env mapping before a shell can import it.
+
+    Only canonical block maps with literal variable names are inspectable.
+    Flow maps, whole-map expressions, aliases, nested maps and duplicate keys
+    fail closed. Run/block-scalar contents remain opaque data, not YAML keys.
+    """
+    try:
+        workflow = normalize_workflow_keys(workflow)
+    except ValueError:
+        return False
+    scalar_indent = None
+    env_indent = None
+    approved_runners = {"runs-on: " + label for label in runner_labels}
+    names: set[str] = set()
+    for line in workflow.splitlines():
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip(" "))
+        if scalar_indent is not None:
+            if not stripped or indent > scalar_indent:
+                continue
+            scalar_indent = None
+        if not stripped or stripped.startswith("#"):
+            continue
+        if env_indent is not None and indent <= env_indent:
+            if not names:
+                return False
+            env_indent = None
+        if env_indent is not None:
+            entry = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)[ \t]*:[ \t]*(.+)", stripped)
+            if indent != env_indent + 2 or entry is None:
+                return False
+            name, value = entry.groups()
+            if name in names or value[0] in "!&*{[":
+                return False
+            names.add(name)
+            if name in WORKFLOW_EMPTY_STARTUP_ENV:
+                if value not in {"''", '""'}:
+                    return False
+            elif data_only:
+                if name not in TOOLCHAIN_DATA_ENV_KEYS:
+                    return False
+            elif (
+                name in {"PATH", "CDPATH", "GLOBIGNORE", "IFS", "PS4", "BASH_XTRACEFD"}
+                or name.startswith(("BASH_FUNC_", "LD_", "DYLD_", "NODE_"))
+                or (
+                    name.startswith("PYTHON")
+                    and name != "PYTHON_WHEEL_SOURCE_DATE_EPOCH"
+                )
+            ):
+                return False
+        else:
+            if re.match(r"(?:-[ \t]+)?env:", stripped):
+                if stripped != "env:" and not re.fullmatch(r"env:[ \t]+#.*", stripped):
+                    return False
+                env_indent = indent
+                names = set()
+            if re.match(
+                r"(?:container|services|defaults|working-directory)[ \t]*:", stripped
+            ):
+                return False
+            if re.match(r"runs-on[ \t]*:", stripped):
+                if stripped.split(" #", 1)[0] not in approved_runners:
+                    return False
+        if re.search(r":[ \t]*[|>][-+]?[0-9]?[ \t]*(?:#.*)?$", line):
+            scalar_indent = indent
+    return env_indent is None or bool(names)
+
+
+def toolchain_data_loads_guarded(
+    workflow: str,
+    *,
+    require_load: bool = False,
+    workflow_name: str | None = None,
+) -> bool:
+    """Allow only exact, unconditional validated-data loads in reviewed steps."""
+    if not workflow_execution_context_guarded(
+        workflow,
+        data_only=require_load,
+        runner_labels=("ubuntu-24.04", "ubuntu-latest")
+        if not require_load or workflow_name == ".github/workflows/codeql.yml"
+        else ("ubuntu-24.04",),
+    ):
+        return False
+    if workflow_name is not None:
+        inspected = _workflow_jobs(workflow, workflow_name)
+        if inspected is None:
+            return False
+        workflow, executable = inspected
+        if not executable:
+            return True
+    loader = TOOLCHAIN_WORKFLOW_LOAD
+    values_read = TOOLCHAIN_VALUES_READ
+    exact_source_assertions = (
+        '[[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]',
+        'test "$(git rev-parse HEAD)" = "$SOURCE_SHA"',
+    )
+    allowed_prefixes = {
+        ("set -euo pipefail", loader),
+        ("set -euo pipefail", *exact_source_assertions, loader),
+    }
+    lines = workflow.splitlines()
+    # YAML strips scalar quotes before shell execution. Reject quoted inline
+    # run values rather than treating the quoted source as inert text.
+    if any(
+        re.match(r"""^[ \t]*(?:-[ \t]+)?run[ \t]*:[ \t]*['"]""", line) for line in lines
+    ):
+        return False
+    # YAML folds physical lines into executable commands. Only the reviewed
+    # v0.5 Cargo test is permitted to use folded run scalars.
+    reviewed_folded = (
+        (
+            "      - name: Run component and verifier contracts\n"
+            "        run: >-\n"
+            "          cargo test --locked\n"
+            "          -p linura-provider-sdk\n"
+            "          -p linura-executor-systemd\n"
+            "          -p linura-linux-observation\n"
+            "          -p linura-verifier-systemd"
+        ),
+        (
+            "      - name: Produce read-only advisory shadow decision\n"
+            "        if: steps.activation.outputs.shadow == 'true'\n"
+            "        env:\n"
+            "          GITHUB_TOKEN: ${{ github.token }}\n"
+            "          HEAD_SHA: ${{ inputs.head_sha }}\n"
+            "        run: >-\n"
+            "          python3 tools/applicable_qualification.py decision-head\n"
+            '          --repository "${{ github.repository }}"\n'
+            '          --head-sha "$HEAD_SHA"\n'
+            "          --token-env GITHUB_TOKEN"
+        ),
+    )
+    folded_count = 0
+    for index, line in enumerate(lines):
+        if re.match(r"^[ \t]*(?:-[ \t]+)?run[ \t]*:[ \t]*>", line) is None:
+            continue
+        folded_count += 1
+        start = index - 1
+        while start >= 0 and not lines[start].startswith("      - "):
+            start -= 1
+        end = index + 1
+        while end < len(lines) and not lines[end].startswith("      - "):
+            end += 1
+        if (
+            folded_count > 1
+            or start < 0
+            or "\n".join(lines[start:end]).rstrip() not in reviewed_folded
+        ):
+            return False
+    startup_keys = re.compile(r"\b(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS)\b")
+    empty_startup = re.compile(
+        r"""^[ \t]*(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS):[ \t]*(?:''|"")[ \t]*$"""
+    )
+    for line in lines:
+        if line.lstrip().startswith("#"):
+            continue
+        if startup_keys.search(line) and empty_startup.fullmatch(line) is None:
+            return False
+        if re.match(
+            r"^\s*(?:defaults|working-directory|PYTHONPATH|PYTHONHOME|PATH):",
+            line,
+        ):
+            return False
+
+    # Unknown sourcing, dynamic evaluation and nested shell execution are
+    # outside the reviewed direct-shell contract, even with variable paths.
+    source_command = re.compile(
+        r"""^(?:\\?source)(?![ \t]*=)(?:[ \t]+|\$\{|\$|\\)|^(?:\\?\.)[ \t]+"""
+    )
+    embedded_source = re.compile(
+        r"""(?:[;&|({][ \t]*|\b(?:then|do|run:|builtin|command)[ \t]+)(?:\\?source|\\?\.)[ \t]+"""
+    )
+    dynamic_execution = re.compile(
+        r"^(?:eval\b|alias\b|(?:command[ \t]+)?(?:bash|dash|zsh|ksh|ash|mksh|sh)[ \t]+-[a-z]*c\b)"
+    )
+
+    # A script filename supplied through shell expansion can alias the
+    # executable toolchain contract declared outside the run: block.
+    # Reject executable variable/command-substitution and contract paths;
+    # parsing-only bash -n is not executable.
+    indirect_shell_execution = re.compile(
+        r"""(?<![A-Za-z0-9_./-])(?:/(?:usr/)?bin/)?(?:bash|dash|zsh|ksh|ash|mksh|sh)[ \t]+
+        (?!-(?:[A-Za-z]*n[A-Za-z]*)[ \t]+)
+        (?:(?:-[A-Za-z]+|--)[ \t]+)*
+        ["']?(?:\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)
+        |tools/codex/versions\.env(?:["']|[ \t;&|)]|$)|\$\()""",
+        re.VERBOSE,
+    )
+
+    def possible_source(command: str) -> bool:
+        return (
+            source_command.search(command) is not None
+            or embedded_source.search(command) is not None
+            or dynamic_execution.search(command) is not None
+            or indirect_shell_execution.search(command) is not None
+            or (
+                "tools/codex/versions.env" in command
+                and ("source" in command or " ." in command)
+            )
+        )
+
+    # A YAML literal block removes indentation, then Bash removes escaped
+    # physical newlines before recognizing commands. Audit that reconstructed
+    # command as well as each physical line: "sour\" + "ce" is still "source".
+    # Neither the reviewed data loader nor the field read uses continuation.
+    direct_variable_execution = re.compile(
+        r"""^(?:(?:if|elif|else|then|do|while|until|coproc)\s+|[^;#\n]*;\s*)?
+        (?:(?:command|builtin|exec|env|time)\s+(?:--?\w*\s+)*|!\s+)*
+        (?:[A-Za-z_]\w*=[A-Za-z0-9_.-]+\s+)*
+        (?:[^\s/;=]*"[^"/\n]*\$[^"/\n]*"[^\s/;=]*
+        |\$(?:\{[^}\n]+\}|[A-Za-z_]\w*)
+        |\$\(|`)
+        (?=$|[\s;&|)])""",
+        re.VERBOSE,
+    )
+    audit_variables = require_load or "tools/codex/versions.env" in workflow
+    for start, line in enumerate(lines):
+        if line.lstrip().startswith("#"):
+            continue
+        if (
+            audit_variables
+            and direct_variable_execution.search(line.strip())
+            and (start == 0 or not lines[start - 1].endswith("\\"))
+        ):
+            return False
+        if not line.endswith("\\"):
+            continue
+        # A continued argument is part of the preceding command, not a new
+        # executable statement. Its full command is audited from its first line.
+        if start > 0 and lines[start - 1].endswith("\\"):
+            continue
+        fragments: list[str] = []
+        index = start
+        while index < len(lines):
+            physical = lines[index].strip()
+            continued = physical.endswith("\\")
+            fragments.append(physical[:-1] if continued else physical)
+            if not continued:
+                break
+            index += 1
+        reconstructed = "".join(fragments)
+        if possible_source(reconstructed) or (
+            audit_variables and direct_variable_execution.search(reconstructed)
+        ):
+            return False
+
+    sources = {
+        i
+        for i, line in enumerate(lines)
+        if (
+            (
+                possible_source(line.strip())
+                or line.strip() == values_read
+                or line.strip() == TOOLCHAIN_WORKFLOW_VALIDATE
+            )
+            and not line.lstrip().startswith("#")
+        )
+    }
+    # YAML shorthand steps can execute the toolchain before a guarded load.
+    # Only reviewed named steps with the exact validator/source sequence are
+    # permitted. Inspect shorthand multiline bodies as well as inline values.
+    for index, line in enumerate(lines):
+        if re.match(r"^[ ]*-[ ]+run[ ]*:", line):
+            indent = len(line) - len(line.lstrip())
+            block = [line]
+            for following in lines[index + 1 :]:
+                if (
+                    following.strip()
+                    and len(following) - len(following.lstrip()) <= indent
+                ):
+                    break
+                block.append(following)
+            if any(
+                "tools/codex/versions.env" in statement
+                or possible_source(statement.strip())
+                for statement in block
+                if not statement.lstrip().startswith("#")
+            ):
+                return False
+    # Also reject direct contract use in named inline shell steps at any
+    # indentation, rather than assuming a fixed workflow layout.
+    if any(
+        re.match(r"^[ ]*(?:-[ ]+)?run[ ]*:", line)
+        and "tools/codex/versions.env" in line
+        for line in lines
+    ):
+        return False
+    if not sources and require_load:
+        return False
+    matched: set[int] = set()
+    for i, line in enumerate(lines):
+        if re.fullmatch(r"        run: [>|][-+]?(?:[ \t]+#.*)?", line) is None:
+            continue
+        beginning = i + 1
+        ending = beginning
+        while ending < len(lines):
+            candidate = lines[ending]
+            if candidate.strip() and not candidate.startswith("          "):
+                break
+            ending += 1
+        code = [
+            (number, lines[number].strip())
+            for number in range(beginning, ending)
+            if lines[number].strip() and not lines[number].lstrip().startswith("#")
+        ]
+        run_sources = [
+            (pos, number) for pos, (number, _) in enumerate(code) if number in sources
+        ]
+        if line != "        run: |" and (
+            run_sources
+            or any("tools/codex/versions.env" in command for _, command in code)
+        ):
+            return False
+        # Unreviewed executable references to the contract are not validators.
+        # This also catches calls that hide sourcing behind an opaque function.
+        if any(
+            "tools/codex/versions.env" in command
+            and command not in {loader, TOOLCHAIN_WORKFLOW_VALIDATE}
+            for _, command in code
+        ):
+            return False
+        if not run_sources:
+            continue
+        # The actual step cannot have an if guard, ignored failure, or
+        # non-Bash shell. Check metadata before AND after the run block.
+        step_start = i - 1
+        while step_start >= 0 and not lines[step_start].startswith("      - "):
+            step_start -= 1
+        if step_start < 0:
+            return False
+        if not toolchain_load_follows_checkout(lines, step_start, workflow_name):
+            return False
+        step_end = ending
+        while step_end < len(lines) and not lines[step_end].startswith("      - "):
+            step_end += 1
+        metadata = [
+            value.strip()
+            for value in lines[step_start:step_end]
+            if value.startswith("        ") and not value.startswith("          ")
+        ]
+        if (
+            not lines[step_start].startswith("      - name: ")
+            or metadata.count("run: |") != 1
+            or metadata.count("shell: bash") > 1
+            or metadata.count("id: toolchain_data") != 1
+            or any(
+                value not in {"run: |", "shell: bash", "id: toolchain_data"}
+                for value in metadata
+            )
+        ):
+            return False
+        if tuple(command for _, command in code) in {
+            ("set -euo pipefail", TOOLCHAIN_WORKFLOW_VALIDATE),
+            (
+                "set -euo pipefail",
+                'test "$GITHUB_REF" = refs/heads/main',
+                'test "$GITHUB_SHA" = "$SOURCE_SHA"',
+                'test "$(git rev-parse HEAD)" = "$SOURCE_SHA"',
+                TOOLCHAIN_WORKFLOW_VALIDATE,
+            ),
+        }:
+            matched.add(code[-1][0])
+            continue
+        for pos, number in run_sources:
+            if lines[number] != "          " + values_read:
+                return False
+            prefix = tuple(command for _, command in code[:pos])
+            if prefix not in allowed_prefixes:
+                return False
+            if lines[code[pos - 1][0]] != "          " + loader:
+                return False
+            if (
+                pos + 1 >= len(code)
+                or code[pos + 1][1] != TOOLCHAIN_VALUES_NONEMPTY
+                or lines[code[pos + 1][0]] != "          " + TOOLCHAIN_VALUES_NONEMPTY
+            ):
+                return False
+            matched.add(number)
+    if require_load:
+        step_sections = [
+            index for index, value in enumerate(lines) if value == "    steps:"
+        ]
+        if not step_sections:
+            return False
+        for index in step_sections:
+            ending = index + 1
+            while ending < len(lines):
+                value = lines[ending]
+                if value.strip() and len(value) - len(value.lstrip()) <= 4:
+                    break
+                ending += 1
+            if not any(index < number < ending for number in matched):
+                return False
+    return matched == sources
+
+
 def check(root: Path = ROOT) -> list[str]:
     failures = []
+    # Cache only this invocation's input snapshot. A later check must reread
+    # every input so adversarial mutations cannot reuse a prior verdict.
+    inputs: dict[str, str] = {}
 
     def require(value: bool, reason: str) -> None:
         if not value:
             failures.append(reason)
 
+    # No package initializer may execute before the isolated validator.
+    require(
+        not (root / "tools/__init__.py").exists(),
+        "tools package initializer must not run before toolchain validation",
+    )
+
     def read(name: str) -> str:
+        if name in inputs:
+            return inputs[name]
         path = root / name
         if not path.is_file() or path.is_symlink():
             failures.append("missing or unsafe gate input: " + name)
@@ -1022,6 +2469,7 @@ def check(root: Path = ROOT) -> list[str]:
                         "unsafe workflow mapping syntax: " + name + ": " + str(exc)
                     )
                     return ""
+            inputs[name] = content
             return content
         except (OSError, UnicodeError):
             failures.append("unreadable gate input: " + name)
@@ -1030,6 +2478,18 @@ def check(root: Path = ROOT) -> list[str]:
     mandatory_bodies: dict[str, tuple[str, int] | None] = {}
     for job, path in MANDATORY.items():
         source = read(path)
+        # CodeQL has no toolchain-data step, but its native merge-authority
+        # job still cannot inherit interpreter selectors or replacement hosts.
+        # Keep its existing ubuntu-latest runner; loader jobs require 24.04.
+        if job == "analyze":
+            require(
+                workflow_execution_context_guarded(
+                    source,
+                    data_only=True,
+                    runner_labels=("ubuntu-latest",),
+                ),
+                "analyze: unreviewed workflow execution context",
+            )
         events = section(source, "on")
         require(events is not None, job + ": missing event map")
         pr = section(events or "", "pull_request", 2)
@@ -1173,6 +2633,70 @@ def check(root: Path = ROOT) -> list[str]:
                 and executable,
                 "canonical CI missing unconditional executable step: " + label,
             )
+    load_contract = (
+        workflow_step(
+            canonical[0], canonical[1], "name", "Load repository toolchain contract"
+        )
+        if canonical
+        else None
+    )
+    require(
+        load_contract is not None
+        and toolchain_data_loads_guarded(ci, require_load=True),
+        "canonical CI must validate toolchain data loading",
+    )
+    failures.extend(local_shell_sources_guarded(root))
+    workflow_files = sorted((root / ".github/workflows").glob("*.y*ml"))
+    workflow_names = {path.relative_to(root).as_posix() for path in workflow_files}
+    for relative in TOOLCHAIN_DATA_WORKFLOWS:
+        require(relative in workflow_names, relative + ": required workflow is missing")
+    reusable_edges: dict[str, tuple[str, ...]] = {}
+    for workflow_file in workflow_files:
+        relative = workflow_file.relative_to(root).as_posix()
+        source = read(relative)
+        guarded = toolchain_data_loads_guarded(
+            source, require_load=True, workflow_name=relative
+        )
+        require(guarded, relative + ": unguarded workflow job execution")
+        if relative in TOOLCHAIN_DATA_WORKFLOWS:
+            require(
+                guarded,
+                relative
+                + ": unsafe toolchain execution or missing validated data load",
+            )
+        targets = tuple(
+            target[2:]
+            for target in re.findall(
+                r"(?m)^    uses: (\./\.github/workflows/\S+)$", source
+            )
+        )
+        reusable_edges[relative] = targets
+        for target in targets:
+            require(
+                target in workflow_names
+                and section(section(read(target), "on") or "", "workflow_call", 2)
+                is not None,
+                relative + ": reusable workflow target is missing or not callable",
+            )
+
+    visiting: set[str] = set()
+    finished: set[str] = set()
+
+    def acyclic(name: str) -> bool:
+        if name in visiting:
+            return False
+        if name in finished:
+            return True
+        visiting.add(name)
+        result = all(acyclic(target) for target in reusable_edges.get(name, ()))
+        visiting.remove(name)
+        finished.add(name)
+        return result
+
+    require(
+        all(acyclic(name) for name in reusable_edges),
+        "reusable workflow graph must be acyclic",
+    )
     # There is no reviewed workflow- or job-level environment mapping in
     # canonical CI. Such mappings can inject readonly Bash startup flags
     # (SHELLOPTS=noexec) across otherwise exact native qualification commands.
@@ -1204,6 +2728,10 @@ def check(root: Path = ROOT) -> list[str]:
             "        shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}\n"
             "        run: |\n"
             "          set -euo pipefail\n"
+            "          if [ -e tools/__init__.py ] || [ -L tools/__init__.py ]; then\n"
+            "            printf '%s\\n' 'unsafe tools package initializer' >&2\n"
+            "            exit 1\n"
+            "          fi\n"
             "          /usr/bin/python3 -I -S - <<'PY'\n"
             "          import hashlib\n"
             "          import os\n"
@@ -1442,6 +2970,12 @@ def check(root: Path = ROOT) -> list[str]:
             "CodeQL init/analyze actions must share the same immutable revision",
         )
     codex = read(SPECIALIZED["codex"][0])
+    require(
+        workflow_execution_context_guarded(
+            codex, data_only=True, runner_labels=("ubuntu-24.04",)
+        ),
+        "codex: unreviewed workflow execution context",
+    )
     # Workflow- and job-level run defaults override the effective shell of
     # every otherwise reviewed command. Ban inherited defaults, including
     # inline YAML mappings, so a successful no-op shell cannot fake evidence.
@@ -1451,6 +2985,32 @@ def check(root: Path = ROOT) -> list[str]:
     )
     codex_jobs = section(codex, "jobs") or ""
     codex_job = section(codex_jobs, "fresh-environment", 2)
+    # The test module imports tools before setup/preflight run. Keep this
+    # initializer rejection independent of imports and preceding every test.
+    prebootstrap_tests = workflow_step(
+        codex_job or "", 4, "name", "Verify validation-gate tests before bootstrap"
+    )
+    require(
+        step_is_unconditional(prebootstrap_tests, 4)
+        and executable_run_block(prebootstrap_tests, 4)
+        == (
+            "set -euo pipefail",
+            "if [ -e tools/__init__.py ] || [ -L tools/__init__.py ]; then",
+            "  printf '%s\\n' 'unsafe tools package initializer' >&2",
+            "  exit 1",
+            "fi",
+            "python3 -m unittest discover -s tests/tooling -p 'test_validation_gates.py' \\",
+            "  -k reviewed_local_contract_loads \\",
+            "  -k transitive_local_shell_sourcing \\",
+            "  -k dynamic_shell \\",
+            "  -k toolchain_preload \\",
+            "  -k composite_action_cannot_hide_contract_source \\",
+            "  -k checked_in_contract \\",
+            "  -k fixture_contract \\",
+            "  -k validation_gate_tests_run_before_heavy_bootstrap",
+        ),
+        "codex: pre-import tooling guard missing or modified",
+    )
     # An unconditional job is insufficient: each required step must execute,
     # rather than leaving its command as dead text in the workflow.
     for label, tokens in CODEX_REQUIRED_STEPS:

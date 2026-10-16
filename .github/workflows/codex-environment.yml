@@ -14,6 +14,8 @@ on:
       - "scripts/lib/*.sh"
       - "scripts/lint_github_workflows.sh"
       - "tools/codex/**"
+      - "tools/check_toolchain_env.py"
+      - "tests/tooling/test_toolchain_env.py"
       - "ruff.toml"
       - "tools/python/ruff-requirements.lock"
       - "tests/tooling/test_editor_tooling.py"
@@ -42,6 +44,8 @@ on:
       - "scripts/lib/*.sh"
       - "scripts/lint_github_workflows.sh"
       - "tools/codex/**"
+      - "tools/check_toolchain_env.py"
+      - "tests/tooling/test_toolchain_env.py"
       - "ruff.toml"
       - "tools/python/ruff-requirements.lock"
       - "tests/tooling/test_editor_tooling.py"
@@ -69,8 +73,31 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate repository toolchain data
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          python3 -I -S tools/check_toolchain_env.py tools/codex/versions.env
+
       - name: Validate qualification Python syntax before bootstrap
         run: python3 -m py_compile tools/applicable_qualification.py
+      - name: Verify validation-gate tests before bootstrap
+        run: |
+          set -euo pipefail
+          if [ -e tools/__init__.py ] || [ -L tools/__init__.py ]; then
+            printf '%s\n' 'unsafe tools package initializer' >&2
+            exit 1
+          fi
+          python3 -m unittest discover -s tests/tooling -p 'test_validation_gates.py' \
+            -k reviewed_local_contract_loads \
+            -k transitive_local_shell_sourcing \
+            -k dynamic_shell \
+            -k toolchain_preload \
+            -k composite_action_cannot_hide_contract_source \
+            -k checked_in_contract \
+            -k fixture_contract \
+            -k validation_gate_tests_run_before_heavy_bootstrap
       - name: Prepare isolated environment
         run: |
           set -euo pipefail

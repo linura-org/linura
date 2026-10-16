@@ -99,6 +99,8 @@ on:
       - "tools/check_validation_gates.py"
       - "tests/tooling/test_validation_gates.py"
       - "tools/codex/versions.env"
+      - "tools/check_toolchain_env.py"
+      - "tests/tooling/test_toolchain_env.py"
       - "rust-toolchain.toml"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -152,6 +154,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Load repository toolchain contract
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
 
       - name: Resolve exact-source qualification lane
         id: route
@@ -213,12 +223,14 @@ jobs:
           ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
 
       - name: Assert exact source and load toolchain contract
+        id: toolchain_data
         run: |
           set -euo pipefail
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          # shellcheck disable=SC1091
-          source tools/codex/versions.env
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
           : "${RUST_VERSION:?}"
           printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
 
@@ -350,6 +362,14 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
 
+      - name: Load repository toolchain contract
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
+
       - name: Confirm bounded regression lane
         run: |
           set -euo pipefail
@@ -468,6 +488,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Load repository toolchain contract
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
 
       - name: Download exact-source contract execution envelope
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -823,7 +851,7 @@ jobs:
           artifact-root: /tmp/linura-v09-qualification
           artifact-name: linura-v09-qualification-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
       - name: Upload unqualified v0.9 diagnostics
-        if: failure()
+        if: ${{ failure() && steps.toolchain_data.outcome == 'success' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linura-v09-qualification-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}-unqualified-diagnostics

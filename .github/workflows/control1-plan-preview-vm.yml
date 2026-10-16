@@ -33,6 +33,8 @@ on:
       - "tools/acceptance.py"
       - "tools/vm.py"
       - "tools/codex/versions.env"
+      - "tools/check_toolchain_env.py"
+      - "tests/tooling/test_toolchain_env.py"
       - "rust-toolchain.toml"
       - "Cargo.toml"
       - "Cargo.lock"

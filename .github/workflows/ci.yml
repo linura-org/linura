@@ -44,6 +44,10 @@ jobs:
         shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}
         run: |
           set -euo pipefail
+          if [ -e tools/__init__.py ] || [ -L tools/__init__.py ]; then
+            printf '%s\n' 'unsafe tools package initializer' >&2
+            exit 1
+          fi
           /usr/bin/python3 -I -S - <<'PY'
           import hashlib
           import os
@@ -123,6 +127,23 @@ jobs:
           /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --check services/qualification-publisher/publisher.mjs
           /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --check services/qualification-publisher/server.mjs
           /usr/bin/env -i PATH="$PATH" LANG=C.UTF-8 node --test services/qualification-publisher/test/*.test.mjs
+      - name: Load repository toolchain contract
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
+          {
+            printf 'RUST_VERSION=%s\n' "$RUST_VERSION"
+            printf 'CARGO_AUDIT_VERSION=%s\n' "$CARGO_AUDIT_VERSION"
+            printf 'ACTIONLINT_VERSION=%s\n' "$ACTIONLINT_VERSION"
+            printf 'ACTIONLINT_SHA256=%s\n' "$ACTIONLINT_SHA256"
+            printf 'RUFF_VERSION=%s\n' "$RUFF_VERSION"
+            printf 'PYTHON_MAJOR_MINOR=%s\n' "$PYTHON_MAJOR_MINOR"
+            printf 'HOST_OS=%s\n' "$HOST_OS"
+            printf 'HOST_ARCH=%s\n' "$HOST_ARCH"
+          } >> "$GITHUB_ENV"
       - name: Verify pinned Python basic-mode typing
         shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}
         env:
@@ -141,23 +162,22 @@ jobs:
           node "$typing_root/node_modules/pyright/index.js" --project pyrightconfig.json
       - name: Validate Python tooling syntax before builds
         run: python3 -m compileall -q scripts tools tests/tooling
-      - name: Validate CI dependency cache policy before builds
-        run: python3 tools/check_ci_cache_policy.py
-      - name: Load repository toolchain contract
+      - name: Check tracked format classification and adversarial tests before builds
+        run: python3 -m unittest discover -s tests/tooling -p 'test_tracked_formats.py'
+      - name: Verify validation-gate tests before builds
         run: |
           set -euo pipefail
-          # shellcheck disable=SC1091
-          source tools/codex/versions.env
-          {
-            printf 'RUST_VERSION=%s\n' "$RUST_VERSION"
-            printf 'CARGO_AUDIT_VERSION=%s\n' "$CARGO_AUDIT_VERSION"
-            printf 'ACTIONLINT_VERSION=%s\n' "$ACTIONLINT_VERSION"
-            printf 'ACTIONLINT_SHA256=%s\n' "$ACTIONLINT_SHA256"
-            printf 'RUFF_VERSION=%s\n' "$RUFF_VERSION"
-            printf 'PYTHON_MAJOR_MINOR=%s\n' "$PYTHON_MAJOR_MINOR"
-            printf 'HOST_OS=%s\n' "$HOST_OS"
-            printf 'HOST_ARCH=%s\n' "$HOST_ARCH"
-          } >> "$GITHUB_ENV"
+          python3 -m unittest discover -s tests/tooling -p 'test_validation_gates.py' \
+            -k reviewed_local_contract_loads \
+            -k transitive_local_shell_sourcing \
+            -k dynamic_shell \
+            -k toolchain_preload \
+            -k composite_action_cannot_hide_contract_source \
+            -k checked_in_contract \
+            -k fixture_contract \
+            -k validation_gate_tests_run_before_heavy_bootstrap
+      - name: Validate CI dependency cache policy before builds
+        run: python3 tools/check_ci_cache_policy.py
       - name: Verify canonical host contract
         run: |
           set -euo pipefail
@@ -257,6 +277,7 @@ jobs:
             qt6-declarative-dev-tools=6.4.2+dfsg-4build3
           export PATH="$format_root/clang/bin:$format_root/bin:$format_root/npm/node_modules/.bin:/usr/lib/qt6/bin:$PATH"
           python3 tools/check_multilanguage_formatting.py
+          python3 -m tools.check_tracked_formats
       - name: Build and install Linura Shell QML modules
         run: |
           set -euo pipefail

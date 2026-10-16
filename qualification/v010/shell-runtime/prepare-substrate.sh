@@ -20,33 +20,46 @@ for command_name in cloud-localds qemu-img qemu-system-x86_64 ssh ssh-keygen pyt
     command -v "$command_name" >/dev/null || fail "required host command is missing: $command_name"
 done
 
-eval "$(
-    python3 - "$contract_path" <<'PY'
-import pathlib
-import shlex
+contract_values="$(
+    python3 -I -S - "$contract_path" <<'PY'
+from pathlib import Path
+import re
 import sys
 import tomllib
 
-path = pathlib.Path(sys.argv[1])
-contract = tomllib.loads(path.read_text(encoding="utf-8"))
-required = (
-    "base_image_url",
-    "arch_archive_url",
-    "vm_disk_size_gib",
-    "runtime_packages",
-)
-for key in required:
-    if key not in contract:
-        raise SystemExit(f"substrate contract missing {key}")
+contract_file = Path(sys.argv[1])
+if any(part.is_symlink() for part in (contract_file, *contract_file.parents)):
+    raise SystemExit("symlinked substrate contract")
+contract = tomllib.loads(contract_file.read_text(encoding="utf-8"))
+required = ("base_image_url", "arch_archive_url", "vm_disk_size_gib", "runtime_packages")
+if any(key not in contract for key in required):
+    raise SystemExit("substrate contract missing required field")
+
+url_pattern = re.compile(r"https://[A-Za-z0-9.-]+(?:/[A-Za-z0-9._~/$%-]+)*")
+urls = (contract["base_image_url"], contract["arch_archive_url"])
+if any(not isinstance(url, str) or not url_pattern.fullmatch(url) for url in urls):
+    raise SystemExit("substrate URL contains unsafe shell or transport characters")
+disk = contract["vm_disk_size_gib"]
+if type(disk) is not int or not 1 <= disk <= 512:
+    raise SystemExit("substrate disk size is invalid")
 packages = contract["runtime_packages"]
-if not isinstance(packages, list) or not packages or any(not isinstance(item, str) or not item for item in packages):
-    raise SystemExit("substrate runtime_packages must be a non-empty string list")
-print("BASE_IMAGE_URL_CONTRACT=" + shlex.quote(contract["base_image_url"]))
-print("ARCH_ARCHIVE_URL_CONTRACT=" + shlex.quote(contract["arch_archive_url"]))
-print("QUALIFICATION_DISK_GIB_CONTRACT=" + shlex.quote(str(contract["vm_disk_size_gib"])))
-print("RUNTIME_PACKAGES=" + shlex.quote(" ".join(packages)))
+if (
+    not isinstance(packages, list)
+    or not packages
+    or len(packages) > 100
+    or any(
+        not isinstance(package, str)
+        or re.fullmatch(r"[a-z0-9@_+][a-z0-9@._+-]*", package) is None
+        for package in packages
+    )
+    or len(set(packages)) != len(packages)
+):
+    raise SystemExit("unsafe substrate package declaration")
+print("\t".join((urls[0], urls[1], str(disk), " ".join(packages))))
 PY
-)"
+)" || fail "substrate contract rejected before data loading"
+IFS=$'\t' read -r BASE_IMAGE_URL_CONTRACT ARCH_ARCHIVE_URL_CONTRACT QUALIFICATION_DISK_GIB_CONTRACT RUNTIME_PACKAGES <<<"$contract_values"
+: "${BASE_IMAGE_URL_CONTRACT:?}" "${ARCH_ARCHIVE_URL_CONTRACT:?}" "${QUALIFICATION_DISK_GIB_CONTRACT:?}" "${RUNTIME_PACKAGES:?}"
 
 : "${BASE_IMAGE_URL:?}"
 : "${BASE_IMAGE_SHA256:?}"
@@ -173,7 +186,7 @@ install_succeeded=0
 for attempt in 1 2 3; do
     echo "prepared substrate package install attempt $attempt/3"
     if ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
-        "timeout --signal=TERM --kill-after=10s 720 sudo -n pacman -Syu --noconfirm --needed --disable-download-timeout $RUNTIME_PACKAGES"; then
+        "timeout --signal=TERM --kill-after=10s 720 sudo -n pacman -Syu --noconfirm --needed --disable-download-timeout -- $RUNTIME_PACKAGES"; then
         install_succeeded=1
         break
     fi
