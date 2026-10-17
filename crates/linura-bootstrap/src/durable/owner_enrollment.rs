@@ -219,7 +219,7 @@ fn hmac_sha256(key: &[u8; OWNER_ENROLLMENT_AUTH_KEY_BYTES], payload: &[u8]) -> S
     let mut outer = Sha256::new();
     outer.update(outer_pad);
     outer.update(inner_digest);
-    format!("{:x}", outer.finalize())
+    hex::encode(outer.finalize())
 }
 
 fn authenticated_receipt_bytes(

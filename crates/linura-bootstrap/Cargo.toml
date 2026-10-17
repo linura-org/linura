@@ -18,7 +18,8 @@ test-support = []
 qualification-harness = []
 
 [dependencies]
-sha2 = "0.10"
+hex = "0.4"
+sha2 = "0.11"
 
 [dev-dependencies]
 tempfile = "3.27"

@@ -1340,7 +1340,7 @@ fn trusted_machine_id() -> Result<String, String> {
     hasher.update(machine_id.as_bytes());
     hasher.update(b"\0");
     hasher.update(hardware_id.as_bytes());
-    Ok(format!("linura-machine-{:x}", hasher.finalize()))
+    Ok(format!("linura-machine-{}", hex::encode(hasher.finalize())))
 }
 
 fn load_or_create_bootstrap_session_id(root: &Path) -> Result<String, String> {
@@ -1503,13 +1503,13 @@ fn file_sha256(path: &Path) -> Result<String, String> {
         }
         hasher.update(&buffer[..read]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex::encode(hasher.finalize()))
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 fn validate_sha256(value: &str) -> Result<(), String> {
