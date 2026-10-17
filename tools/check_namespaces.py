@@ -32,7 +32,10 @@ SYSTEMD_SUFFIXES = {
 RUST_CONST_PATTERN = re.compile(
     r'\b(?:pub\s+)?const\s+([A-Z][A-Z0-9_]*)\s*:\s*&str\s*=\s*"([^"]+)"\s*;'
 )
-RUST_SERVE_AT_PATTERN = re.compile(r'\.serve_at\s*\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*,')
+RUST_SERVE_AT_PATTERN = re.compile(
+    r"(?:\.serve_at|\.object_server\s*\(\s*\)\s*\.at)\s*"
+    r'\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*,'
+)
 RUST_BUS_NAME_PATTERN = re.compile(r'\.name\s*\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*\)')
 RUST_ZBUS_INTERFACE_PATTERN = re.compile(
     r"#\s*\[\s*(?:zbus::)?interface\s*\((.*?)\)\s*\]",
@@ -46,6 +49,9 @@ RUST_AUTHORIZE_CALL_PATTERN = re.compile(
 RUST_ACTION_ARG_PATTERN = re.compile(
     r'"--action-id"(?:\s*\.to_owned\(\))?\s*,\s*([A-Z][A-Z0-9_]*|"[^"]+")'
 )
+RUST_NATIVE_APPROVAL_ACTION_PATTERN = re.compile(
+    r'\bNativeApprovalPurpose::[A-Z][A-Za-z0-9_]*\s*=>\s*(?:\{\s*)?("org\.linura\.authority\.[^"]+")'
+)
 CMAKE_QML_MODULE_PATTERN = re.compile(r"\bqt_add_qml_module\s*\((.*?)\)", re.DOTALL)
 CMAKE_URI_PATTERN = re.compile(r"(?:^|\s)URI\s+([A-Za-z0-9_.]+)(?=\s|$)")
 SYSTEMD_BUS_NAME_PATTERN = re.compile(
@@ -57,7 +63,8 @@ DBUS_ACTIVATION_NAME_PATTERN = re.compile(
 )
 SYSTEMD_ALIAS_PATTERN = re.compile(r"(?m)^\s*Alias\s*=\s*([^#\n]*)")
 RUST_SERVE_AT_BINDING_PATTERN = re.compile(
-    r'\.serve_at\s*\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*,\s*([A-Za-z_][A-Za-z0-9_:]*)\s*\)'
+    r"(?:\.serve_at|\.object_server\s*\(\s*\)\s*\.at)\s*"
+    r'\(\s*([A-Z][A-Z0-9_]*|"[^"]+")\s*,\s*([A-Za-z_][A-Za-z0-9_:]*)\s*\)'
 )
 
 
@@ -449,6 +456,7 @@ def _rust_polkit_actions(root: Path) -> tuple[set[str], list[str]]:
         local = local_constants[path]
         tokens = list(RUST_AUTHORIZE_CALL_PATTERN.findall(text))
         tokens.extend(RUST_ACTION_ARG_PATTERN.findall(text))
+        tokens.extend(RUST_NATIVE_APPROVAL_ACTION_PATTERN.findall(text))
         for token in tokens:
             if token.startswith('"'):
                 action = token[1:-1]
@@ -496,6 +504,8 @@ def _runtime_binding_surfaces(
             polkit_calls.add((relative, "authorize-caller", token))
         for token in RUST_ACTION_ARG_PATTERN.findall(text):
             polkit_calls.add((relative, "action-arg", token))
+        for token in RUST_NATIVE_APPROVAL_ACTION_PATTERN.findall(text):
+            polkit_calls.add((relative, "native-approval-action", token))
 
     return (
         dbus_registrations,
@@ -1103,7 +1113,7 @@ def check(root: Path) -> list[str]:
         ):
             failures.append(f"polkit_binding #{index} has invalid fields")
             continue
-        if usage not in {"authorize-caller", "action-arg"}:
+        if usage not in {"authorize-caller", "action-arg", "native-approval-action"}:
             failures.append(f"polkit_binding #{index} has unsupported usage {usage!r}")
             continue
         key = (source, usage, token)

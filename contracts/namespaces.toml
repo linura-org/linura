@@ -17,6 +17,61 @@ share = "/usr/share/linura"
 xdg_subdir = "linura"
 
 [[identifier]]
+id = "org.linura.SleepGate1"
+kind = "dbus-interface"
+status = "active"
+object_path = "/org/linura/SleepGate1"
+
+[[dbus_registration]]
+source = "crates/linura-dbus/src/sleep_gate.rs"
+path_token = "SLEEP_GATE_OBJECT_PATH"
+object_token = "service"
+interface = "org.linura.SleepGate1"
+
+[[identifier]]
+id = "org.linura.SecurityOwner1"
+kind = "dbus-interface"
+status = "active"
+object_path = "/org/linura/SecurityOwner1"
+
+[[identifier]]
+id = "org.linura.Executor.Session1"
+kind = "dbus-service"
+status = "active"
+primary_interface = "org.linura.Executor.Session1"
+
+[[identifier]]
+id = "org.linura.Executor.Session1"
+kind = "dbus-interface"
+status = "active"
+object_path = "/org/linura/Executor/Session1"
+
+[[identifier]]
+id = "org.linura.executor.session.set-secure"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.executor.session.execute-transition"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "linura-executor-session.service"
+kind = "systemd-unit"
+status = "active"
+
+[[identifier]]
+id = "linura-security-owner@.service"
+kind = "systemd-unit"
+status = "active"
+
+[[identifier]]
+id = "linura-security-owner@.path"
+kind = "systemd-unit"
+status = "active"
+
+[[identifier]]
 id = "org.linura.Control1"
 kind = "dbus-service"
 status = "active"
@@ -89,6 +144,41 @@ kind = "polkit-action"
 status = "active"
 
 [[identifier]]
+id = "org.linura.authority.unlock-session"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.authority.enable-protective-lock"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.authority.revoke-protective-lock"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.authority.suspend-session"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.authority.logout-session"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.authority.reboot-session"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.authority.power-off-session"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
 id = "org.linura.executor.systemd.qualify-restart"
 kind = "polkit-action"
 status = "active"
@@ -135,12 +225,40 @@ service = "org.linura.Control1"
 bus = "session"
 
 [[dbus_name_binding]]
-source = "crates/linura-dbus/src/authority.rs"
-token = "AUTHORITY_SERVICE_NAME"
+source = "crates/linura-linux-session/src/bus.rs"
+token = "CONTROL_SERVICE"
 service = "org.linura.Authority1"
 bus = "system"
 policy = "packaging/dbus-1/system.d/org.linura.Authority1.conf"
 systemd_unit = "packaging/systemd/system/linura-authorityd.service"
+
+[[dbus_name_binding]]
+source = "crates/linura-linux-session/src/bus.rs"
+token = "EXECUTOR_SERVICE"
+service = "org.linura.Executor.Session1"
+bus = "system"
+policy = "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf"
+systemd_unit = "packaging/systemd/system/linura-executor-session.service"
+
+[[dbus_registration]]
+source = "executors/linura-executor-session/src/lib.rs"
+path_token = "OBJECT_PATH"
+object_token = "service"
+interface = "org.linura.Executor.Session1"
+
+[[polkit_binding]]
+source = "executors/linura-executor-session/src/lib.rs"
+usage = "action-arg"
+token = "ACTION"
+action = "org.linura.executor.session.set-secure"
+policy = "packaging/polkit-1/actions/org.linura.executor.session.policy"
+
+[[polkit_binding]]
+source = "executors/linura-executor-session/src/lib.rs"
+usage = "action-arg"
+token = "TRANSITION_ACTION"
+action = "org.linura.executor.session.execute-transition"
+policy = "packaging/polkit-1/actions/org.linura.executor.session.policy"
 
 [[dbus_name_binding]]
 source = "executors/linura-executor-systemd/src/lib.rs"
@@ -188,11 +306,67 @@ action = "org.linura.authority.manage-systemd-active-state"
 policy = "packaging/polkit-1/actions/org.linura.authority.policy"
 
 [[polkit_binding]]
+source = "crates/linura-dbus/src/authority.rs"
+usage = "action-arg"
+token = "UNLOCK_SESSION_ACTION"
+action = "org.linura.authority.unlock-session"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
 source = "executors/linura-executor-systemd/src/lib.rs"
 usage = "authorize-caller"
 token = "QUALIFICATION_ACTION_ID"
 action = "org.linura.executor.systemd.qualify-restart"
 policy = "packaging/polkit-1/actions/org.linura.executor.systemd.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.unlock-session"'
+action = "org.linura.authority.unlock-session"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.enable-protective-lock"'
+action = "org.linura.authority.enable-protective-lock"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.revoke-protective-lock"'
+action = "org.linura.authority.revoke-protective-lock"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.suspend-session"'
+action = "org.linura.authority.suspend-session"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.logout-session"'
+action = "org.linura.authority.logout-session"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.reboot-session"'
+action = "org.linura.authority.reboot-session"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.power-off-session"'
+action = "org.linura.authority.power-off-session"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
 
 [[polkit_binding]]
 source = "executors/linura-executor-systemd/src/lib.rs"

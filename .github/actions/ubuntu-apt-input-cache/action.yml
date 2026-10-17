@@ -5,7 +5,7 @@ inputs:
     description: Stable repository-owned cache namespace.
     required: true
   packages:
-    description: Whitespace-separated Ubuntu package names.
+    description: Whitespace-separated Ubuntu package names or exact name=version selectors.
     required: true
 outputs:
   cache-hit:
@@ -37,8 +37,12 @@ runs:
             LC_ALL=C sort -u
         )
         test "${#packages[@]}" -gt 0
-        for package in "${packages[@]}"; do
+        for spec in "${packages[@]}"; do
+          package="${spec%%=*}"
           [[ "$package" =~ ^[a-z0-9][a-z0-9+.-]*(:[a-z0-9-]+)?$ ]]
+          if [[ "$spec" == *=* ]]; then
+            [[ "${spec#*=}" =~ ^[0-9][0-9A-Za-z.+:~_-]*$ ]]
+          fi
         done
 
         sudo apt-get update
@@ -54,10 +58,16 @@ runs:
         action_sha256="$(sha256sum "$GITHUB_ACTION_PATH/action.yml" | awk '{print $1}')"
 
         requested="$(
-          for package in "${packages[@]}"; do
-            candidate="$(apt-cache policy "$package" | awk '/Candidate:/ {print $2; exit}')"
-            test -n "$candidate"
-            test "$candidate" != "(none)"
+          for spec in "${packages[@]}"; do
+            package="${spec%%=*}"
+            candidate="$(apt-cache policy "$package" | awk '/Candidate:/ {print $2; exit}')" || exit 1
+            # Command substitution clears errexit in Bash by default. Deny
+            # explicitly before producing any cache identity or installing.
+            test -n "$candidate" || exit 1
+            test "$candidate" != "(none)" || exit 1
+            if [[ "$spec" == *=* ]]; then
+              test "${spec#*=}" = "$candidate" || exit 1
+            fi
             printf '%s=%s\n' "$package" "$candidate"
           done |
             LC_ALL=C sort
@@ -122,12 +132,17 @@ runs:
           -o "Dir::Cache::archives=$LINURA_APT_CACHE_DIR" \
           "${packages[@]}"
 
-        for package in "${packages[@]}"; do
+        for spec in "${packages[@]}"; do
+          package="${spec%%=*}"
           candidate="$(apt-cache policy "$package" | awk '/Candidate:/ {print $2; exit}')"
           installed="$(dpkg-query -W -f='${Version}' "$package")"
           test -n "$candidate"
           test "$candidate" != "(none)"
+          if [[ "$spec" == *=* ]]; then
+            test "${spec#*=}" = "$candidate"
+          fi
           test "$installed" = "$candidate"
+          test "$(dpkg-query -W -f='${Status}' "$package")" = 'install ok installed'
         done
 
         sudo rm -rf "$LINURA_APT_CACHE_DIR/partial" "$LINURA_APT_CACHE_DIR/lock"

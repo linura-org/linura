@@ -30,10 +30,15 @@ Scope {
         id: lifecycleFeedback
     }
 
+    SessionController {
+        id: managedSessionController
+    }
+
     QuickSettings.QuickSettingsPanel {
         id: quickSettings
         opened: root.opened
         controller: audioController
+        sessionController: managedSessionController
         onCloseRequested: root.opened = false
         onControlCenterRequested: root.opened = false
     }
