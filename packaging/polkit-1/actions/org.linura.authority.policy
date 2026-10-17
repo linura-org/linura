@@ -16,4 +16,50 @@
       <allow_active>auth_admin</allow_active>
     </defaults>
   </action>
+  <action id="org.linura.authority.unlock-session">
+    <description>Authenticate the owner to unlock this exact native lock generation</description>
+    <message>Authenticate as the session owner to unlock this session</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self</allow_active>
+    </defaults>
+  </action>
+  <action id="org.linura.authority.suspend-session">
+    <description>Authorize this exact reviewed secure suspend</description>
+    <message>Administrator authentication authorizes suspending this computer while keeping the session locked</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+  </action>
+  <action id="org.linura.authority.logout-session">
+    <description>Authorize ending this exact graphical session</description>
+    <message>Administrator authentication authorizes ending this session; unsaved work may be lost</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+  </action>
+  <action id="org.linura.authority.reboot-session">
+    <description>Authorize this exact reviewed computer restart</description>
+    <message>Administrator authentication authorizes restarting this computer; unsaved work may be lost</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+  </action>
+  <action id="org.linura.authority.power-off-session">
+    <description>Authorize this exact reviewed computer shutdown</description>
+    <message>Administrator authentication authorizes shutting down this computer; unsaved work may be lost</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+  </action>
+  <action id="org.linura.authority.enable-protective-lock">
+    <description>Approve protective locking before native sleep for this login</description>
+    <message>Authenticate as the session owner to allow protective locking during this login; this never unlocks or authorizes power actions, and protection failure may prevent sleep</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_self</allow_active></defaults>
+  </action>
+  <action id="org.linura.authority.revoke-protective-lock">
+    <description>Revoke protective-lock permission for this login</description>
+    <message>Authenticate as the session owner to revoke protective locking; this does not unlock or authorize sleep</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_self</allow_active></defaults>
+  </action>
 </policyconfig>

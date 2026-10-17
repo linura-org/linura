@@ -1,0 +1,38 @@
+[Unit]
+Description=Linura protected native security owner for UID %i
+After=dbus.service polkit.service systemd-logind.service user@%i.service
+Requires=dbus.service polkit.service systemd-logind.service
+BindsTo=user@%i.service
+StartLimitIntervalSec=120s
+StartLimitBurst=5
+
+[Service]
+Type=exec
+ExecStart=/usr/lib/linura/linura-security-owner
+# systemd resolves this numeric UID's local primary group, not an assumed GID=UID.
+User=%i
+UMask=0077
+LimitCORE=0
+LimitMEMLOCK=768M
+MemoryMax=768M
+MemorySwapMax=0
+TasksMax=64
+TimeoutStartSec=15s
+TimeoutStopSec=5s
+Restart=no
+AmbientCapabilities=
+# Required: exec-time file capability establishes AT_SECURE. The owner drops
+# CAP_IPC_LOCK before Qt/input. The official setuid Polkit/PAM helper still needs
+# its normal authentication privileges: NNP or an IPC_LOCK-only bounding set
+# would silently break native PAM. Never replace the helper with a shell bridge.
+NoNewPrivileges=no
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+# These are cgroup/mount protections, not per-process seccomp settings. systemd
+# implicitly enables NNP for an unprivileged service using seccomp-based options
+# (including PrivateDevices, LockPersonality and ProtectKernelTunables).
+DevicePolicy=closed
+ReadOnlyPaths=/proc/sys /sys /proc/sysrq-trigger /proc/irq /proc/bus
+InaccessiblePaths=-/proc/kcore -/proc/kallsyms -/dev/mem -/dev/kmem
+ProtectControlGroups=yes

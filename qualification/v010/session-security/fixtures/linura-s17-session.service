@@ -1,0 +1,35 @@
+[Unit]
+Description=Disposable S17 native PAM/Wayland qualification session
+After=systemd-logind.service seatd.service
+Requires=systemd-logind.service seatd.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=exec
+User=linura
+PAMName=linura-s17-qualification
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+TTYReset=yes
+TTYVHangup=yes
+Environment=XDG_SESSION_TYPE=wayland
+Environment=XDG_SESSION_CLASS=user
+Environment=XDG_SEAT=seat0
+Environment=XDG_VTNR=1
+Environment=XDG_CURRENT_DESKTOP=Hyprland
+Environment=XDG_SESSION_DESKTOP=Hyprland
+Environment=LIBSEAT_BACKEND=seatd
+Environment=AQ_NO_KMS_REQUIREMENT=1
+Environment=LIBGL_ALWAYS_SOFTWARE=1
+Environment=WLR_RENDERER_ALLOW_SOFTWARE=1
+Environment=QT_QUICK_BACKEND=software
+ExecStart=/usr/bin/Hyprland --config /etc/linura-qualification/s17-hyprland.conf
+Restart=no
+TimeoutStartSec=20s
+TimeoutStopSec=10s
+LimitCORE=0
+# Exec directly: the compositor must be logind's actual session leader. An
+# SSH shell, lingering user manager, wrapper PID, or invented session label is
+# not acceptable to the unchanged production native bootstrap.
