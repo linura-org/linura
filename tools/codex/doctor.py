@@ -19,7 +19,7 @@ import time
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ("core", "shell", "bindings", "vm", "image", "visual")
+PROFILES = ("core", "shell", "editor", "bindings", "vm", "image", "visual")
 QT_MODULES = ("Qt6Core", "Qt6DBus", "Qt6Qml", "Qt6Quick", "Qt6QuickControls2")
 
 
@@ -286,7 +286,7 @@ def inventory(selected: set[str]) -> list[Check]:
         "Run maintenance at the selected checkout to warm its locked Cargo graph.",
     )
 
-    if "shell" in selected or "image" in selected:
+    if "shell" in selected or "editor" in selected or "image" in selected:
         commands("shell", ("cmake", "ninja", "pkg-config", "c++"))
         cmake = probe(["cmake", "--version"], env)
         match = re.search(r"cmake version (\d+)\.(\d+)", cmake or "")
@@ -302,6 +302,43 @@ def inventory(selected: set[str]) -> list[Check]:
             probe(["pkg-config", "--atleast-version=6.4", *QT_MODULES], env)
             is not None,
             "Provide Qt >= 6.4 Core/DBus/Qml/Quick/QuickControls2 development packages.",
+        )
+    if "editor" in selected:
+        qtpaths = shutil.which("qtpaths6", path=env["PATH"])
+        if qtpaths is None and Path("/usr/lib/qt6/bin/qtpaths").is_file():
+            qtpaths = "/usr/lib/qt6/bin/qtpaths"
+        query = probe([qtpaths, "--query"], env) if qtpaths else None
+        sdk: dict[str, str] = {}
+        if query is not None:
+            for line in query.splitlines():
+                key, separator, value = line.partition(":")
+                if not separator or not key or key in sdk:
+                    sdk = {}
+                    break
+                sdk[key] = value
+        qml_root = Path(sdk.get("QT_INSTALL_QML", "/nonexistent"))
+        imports_ready = all(
+            (qml_root.joinpath(*module.split(".")) / "qmldir").is_file()
+            for module in ("QtQuick", "QtQuick.Controls", "QtQuick.Layouts")
+        )
+        add(
+            "editor",
+            "qt6-qml-runtime-imports",
+            imports_ready,
+            "Use the prepared editor environment with QtQuick, Controls and Layouts runtime imports.",
+        )
+        bins = Path(sdk.get("QT_INSTALL_BINS", "/nonexistent"))
+        qmlls = bins / "qmlls"
+        help_text = probe([str(qmlls), "--help"], env) if qmlls.is_file() else None
+        add(
+            "editor",
+            "sdk-qmlls-runtime",
+            bool(
+                help_text
+                and "--build-dir" in help_text
+                and "--ignore-settings" in help_text
+            ),
+            "Use the selected SDK's executable qmlls with all runtime libraries; do not use the extension-downloaded substitute.",
         )
     if "bindings" in selected:
         python = tool_root / "python/bin/python3"

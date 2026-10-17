@@ -11,9 +11,19 @@ persistent=0
 mode="automated"
 display_backend="none"
 vnc_display=0
+run_id="${LINURA_RUN_ID:-}"
+source_root="${LINURA_SOURCE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --run-id)
+            run_id="$2"
+            shift 2
+            ;;
+        --source-root)
+            source_root="$2"
+            shift 2
+            ;;
         --image)
             image="$2"
             shift 2
@@ -123,6 +133,17 @@ snapshot_args=(-snapshot)
 if [[ "$persistent" -eq 1 ]]; then
     snapshot_args=()
 fi
+
+storage_environment="arch-hyprland-runtime"
+[[ "$mode" != interactive ]] || storage_environment="arch-hyprland-interactive"
+storage_args=(--source-root "$source_root" --environment "$storage_environment" --run "$run_id"
+    vm --image "$image" --seed "$seed")
+[[ "$persistent" -eq 0 ]] || storage_args+=(--persistent)
+TMPDIR="$(python3 "$source_root/tools/development_storage.py" "${storage_args[@]}")" || {
+    echo "native VM dedicated storage is unavailable or unsafe" >&2
+    exit 2
+}
+export TMPDIR
 
 exec qemu-system-x86_64 \
     -machine q35,accel=tcg \

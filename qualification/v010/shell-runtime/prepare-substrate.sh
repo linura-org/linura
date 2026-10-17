@@ -5,7 +5,8 @@ contract_path="${1:-contracts/v010-shell-runtime-substrate.toml}"
 base_image="${2:-}"
 output_image="${3:-}"
 output_manifest="${4:-}"
-work_root="${5:-${RUNNER_TEMP:-/tmp}/linura-v010-substrate-build}"
+work_root="${5:?a dedicated-storage substrate workspace is required}"
+source_root="${LINURA_SOURCE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 
 fail() {
     printf 'FAIL: %s\n' "$*" >&2
@@ -70,11 +71,31 @@ IFS=$'\t' read -r BASE_IMAGE_URL_CONTRACT ARCH_ARCHIVE_URL_CONTRACT QUALIFICATIO
 printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$base_image" | sha256sum --check --strict
 [[ "$QUALIFICATION_DISK_GIB_CONTRACT" =~ ^[0-9]+$ ]] || fail "substrate disk size is invalid"
 
-rm -rf "$work_root"
-mkdir -p "$work_root" "$(dirname "$output_image")" "$(dirname "$output_manifest")"
+storage_args=(--source-root "$source_root" --environment arch-hyprland-runtime --run "${LINURA_RUN_ID:?}")
+python3 "$source_root/tools/development_storage.py" "${storage_args[@]}" \
+    check --role temporary --path "$work_root" --fresh >/dev/null ||
+    fail "substrate scratch must be fresh dedicated-storage output"
+python3 "$source_root/tools/development_storage.py" "${storage_args[@]}" \
+    check --role vm --path "$(dirname "$base_image")" >/dev/null ||
+    fail "substrate input must use checked VM storage"
+for destination in "$output_image" "$output_manifest"; do
+    python3 "$source_root/tools/development_storage.py" "${storage_args[@]}" \
+        check --role vm --path "$(dirname "$destination")" >/dev/null ||
+        fail "substrate output must use checked VM storage"
+    [[ ! -e "$destination" && ! -L "$destination" ]] || fail "substrate output already exists; retain it and use a fresh run"
+done
+vm_root="$(dirname "$output_image")"
+guest_image="$vm_root/substrate-guest.qcow2"
+seed_image="$vm_root/substrate-seed.img"
+for destination in "$guest_image" "$seed_image"; do
+    [[ ! -e "$destination" && ! -L "$destination" ]] || fail "substrate VM input already exists; retain it and use a fresh run"
+done
+TMPDIR="$(python3 "$source_root/tools/development_storage.py" "${storage_args[@]}" scratch)" ||
+    fail "substrate scratch is unavailable"
+export TMPDIR
+umask 077
+mkdir "$work_root"
 
-guest_image="$work_root/substrate-guest.qcow2"
-seed_image="$work_root/substrate-seed.img"
 ssh_key="$work_root/substrate-key"
 vm_log="$work_root/substrate-qemu.log"
 user_data="$work_root/user-data"

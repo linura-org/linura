@@ -891,6 +891,14 @@ impl std::error::Error for BootstrapError {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn private_tempdir() -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .permissions(fs::Permissions::from_mode(0o700))
+            .tempdir()
+            .unwrap_or_else(|error| unreachable!("{error}"))
+    }
 
     fn stage_trusted_recovery_fixture(
         root: &Path,
@@ -906,11 +914,17 @@ mod tests {
         let receipts = root.join("receipts");
         for directory in [&checkpoints, &restored_root, &receipts] {
             fs::create_dir_all(directory).unwrap_or_else(|error| unreachable!("{error}"));
+            fs::set_permissions(directory, fs::Permissions::from_mode(0o700))
+                .unwrap_or_else(|error| unreachable!("{error}"));
         }
         let checkpoint = checkpoints.join(format!("{checkpoint_id}.bin"));
         let restored = restored_root.join(format!("{checkpoint_id}.bin"));
         fs::write(&checkpoint, checkpoint_bytes).unwrap_or_else(|error| unreachable!("{error}"));
         fs::write(&restored, restored_bytes).unwrap_or_else(|error| unreachable!("{error}"));
+        for artifact in [&checkpoint, &restored] {
+            fs::set_permissions(artifact, fs::Permissions::from_mode(0o600))
+                .unwrap_or_else(|error| unreachable!("{error}"));
+        }
         let (checkpoint_digest, _) =
             sha256_file(&checkpoint).unwrap_or_else(|error| unreachable!("{error}"));
         let (restored_digest, _) =
@@ -919,13 +933,15 @@ mod tests {
             "schema={V09_RECOVERY_RECEIPT_SCHEMA}\nproducer={V09_RECOVERY_PRODUCER_ID}\nsession_id={session}\nplan_id={}\ncheckpoint_id={checkpoint_id}\ncheckpoint_sha256={checkpoint_digest}\nrestored_sha256={restored_digest}\nresult=restored\n",
             receipt_plan.unwrap_or(plan),
         );
-        fs::write(receipts.join(format!("{checkpoint_id}.receipt")), receipt)
+        let receipt_path = receipts.join(format!("{checkpoint_id}.receipt"));
+        fs::write(&receipt_path, receipt).unwrap_or_else(|error| unreachable!("{error}"));
+        fs::set_permissions(&receipt_path, fs::Permissions::from_mode(0o600))
             .unwrap_or_else(|error| unreachable!("{error}"));
         (checkpoint, restored, checkpoint_digest)
     }
 
     fn recovery_evidence(session: &str, plan: &str) -> RecoveryCheckpointEvidence {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let checkpoint_id = "snapshot-1";
         let (checkpoint, restored, digest) = stage_trusted_recovery_fixture(
             dir.path(),
@@ -1064,8 +1080,8 @@ mod tests {
 
     #[test]
     fn recovery_verifier_rejects_caller_created_copies_outside_producer_root() {
-        let producer = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
-        let external = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let producer = private_tempdir();
+        let external = private_tempdir();
         let checkpoint_id = "snapshot-path-bound";
         let (_, _, digest) = stage_trusted_recovery_fixture(
             producer.path(),
@@ -1102,23 +1118,29 @@ mod tests {
 
     #[test]
     fn recovery_verifier_rejects_checkpoint_reused_as_restored_copy() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let checkpoint_id = "snapshot-hard-link";
         let checkpoints = dir.path().join("checkpoints");
         let restored_root = dir.path().join("restored");
         let receipts = dir.path().join("receipts");
         for directory in [&checkpoints, &restored_root, &receipts] {
             fs::create_dir_all(directory).unwrap_or_else(|error| unreachable!("{error}"));
+            fs::set_permissions(directory, fs::Permissions::from_mode(0o700))
+                .unwrap_or_else(|error| unreachable!("{error}"));
         }
         let checkpoint = checkpoints.join(format!("{checkpoint_id}.bin"));
         let restored = restored_root.join(format!("{checkpoint_id}.bin"));
         fs::write(&checkpoint, b"checkpoint").unwrap_or_else(|error| unreachable!("{error}"));
+        fs::set_permissions(&checkpoint, fs::Permissions::from_mode(0o600))
+            .unwrap_or_else(|error| unreachable!("{error}"));
         fs::hard_link(&checkpoint, &restored).unwrap_or_else(|error| unreachable!("{error}"));
         let (digest, _) = sha256_file(&checkpoint).unwrap_or_else(|error| unreachable!("{error}"));
         let receipt = format!(
             "schema={V09_RECOVERY_RECEIPT_SCHEMA}\nproducer={V09_RECOVERY_PRODUCER_ID}\nsession_id=session\nplan_id=plan\ncheckpoint_id={checkpoint_id}\ncheckpoint_sha256={digest}\nrestored_sha256={digest}\nresult=restored\n"
         );
-        fs::write(receipts.join(format!("{checkpoint_id}.receipt")), receipt)
+        let receipt_path = receipts.join(format!("{checkpoint_id}.receipt"));
+        fs::write(&receipt_path, receipt).unwrap_or_else(|error| unreachable!("{error}"));
+        fs::set_permissions(&receipt_path, fs::Permissions::from_mode(0o600))
             .unwrap_or_else(|error| unreachable!("{error}"));
 
         assert!(matches!(
@@ -1140,7 +1162,7 @@ mod tests {
 
     #[test]
     fn recovery_verifier_rejects_substituted_restored_copy() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let checkpoint_id = "snapshot-substituted";
         let (checkpoint, restored, digest) = stage_trusted_recovery_fixture(
             dir.path(),
@@ -1170,7 +1192,7 @@ mod tests {
 
     #[test]
     fn recovery_verifier_rejects_receipt_bound_to_another_plan() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let checkpoint_id = "snapshot-plan-bound";
         let (checkpoint, restored, digest) = stage_trusted_recovery_fixture(
             dir.path(),
@@ -1200,7 +1222,7 @@ mod tests {
 
     #[test]
     fn recovery_verifier_rejects_checkpoint_path_traversal_identity() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         assert_eq!(
             verify_v09_from_trusted_root(
                 "session",
@@ -1220,7 +1242,7 @@ mod tests {
 
     #[test]
     fn recovery_verifier_rejects_writable_producer_root() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o777))
             .unwrap_or_else(|error| unreachable!("{error}"));
         assert!(matches!(
@@ -1252,7 +1274,7 @@ mod tests {
 
     #[test]
     fn test_support_fixture_still_checks_byte_equality_when_enabled() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let checkpoint = dir.path().join("checkpoint.bin");
         let restored = dir.path().join("restored.bin");
         let mut file =

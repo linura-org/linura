@@ -77,7 +77,7 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
         self.assertIn("Bind executing shard qualification envelope", source)
         self.assertIn("lane: v09-adversarial-security-shard", source)
         self.assertIn(
-            "execution-subject-file: ${{ runner.temp }}/linura-v09-adversarial-artifacts/guest-execution-identity.json",
+            "execution-subject-file: ${{ env.ARTIFACT_DIR }}/guest-execution-identity.json",
             source,
         )
         self.assertIn(
@@ -97,6 +97,47 @@ class V09AdversarialShardingContractTests(unittest.TestCase):
             '"execution_envelopes": {"sha256": component_envelope_set_sha256, "components": component_envelopes}',
             source,
         )
+
+    def test_every_guest_uses_verified_per_run_storage(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        source = SCRIPT.read_text(encoding="utf-8")
+        contract_step = workflow.index("Validate repository toolchain data")
+        source_step = workflow.index("Assert exact source", contract_step)
+        storage_step = workflow.index(
+            "Prepare guarded qualification storage", source_step
+        )
+        guest_step = workflow.index(
+            "Exercise assigned restart, identity, security, migration and update boundaries",
+            storage_step,
+        )
+        self.assertLess(contract_step, source_step)
+        self.assertLess(source_step, storage_step)
+        self.assertLess(storage_step, guest_step)
+        self.assertIn(
+            "run: bash scripts/prepare_qualification_storage.sh generic-vm",
+            workflow,
+        )
+        self.assertIn('image="$LINURA_VM_DIR/ubuntu-noble-base.qcow2"', workflow)
+        self.assertIn('VM_IMAGE="$LINURA_VM_DIR/', source)
+        self.assertIn('SEED_IMAGE="$LINURA_VM_DIR/', source)
+        self.assertIn('SSH_KEY="$LINURA_WORK_DIR/', source)
+        self.assertIn('VM_LOG="$LINURA_WORK_DIR/', source)
+        self.assertIn("ARTIFACT_DIR: ${{ env.ARTIFACT_DIR }}", workflow)
+        self.assertIn('--run "$LINURA_RUN_ID"', source)
+        self.assertIn(': "${LINURA_RUN_ID:?LINURA_RUN_ID is required}"', source)
+        self.assertIn(
+            ': "${LINURA_STORAGE_CLASS:?LINURA_STORAGE_CLASS is required}"', source
+        )
+        self.assertIn(
+            'dedicated) : "${LINURA_STORAGE_ID:?dedicated storage UUID is required}"',
+            source,
+        )
+        storage_validation = source.index("storage_args=(")
+        first_write = source.index('mkdir -p "$ARTIFACT_DIR"')
+        self.assertLess(storage_validation, first_write)
+        for role in ("vm", "temporary", "evidence"):
+            self.assertIn(f"check --role {role}", source)
+        self.assertNotIn("RUNNER_TEMP", source)
 
     def test_each_shard_captures_guest_execution_identity_before_shutdown(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")

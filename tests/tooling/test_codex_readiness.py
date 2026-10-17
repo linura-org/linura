@@ -42,6 +42,8 @@ class CodexReadinessTests(unittest.TestCase):
                 "actionlint-version",
                 "locked-offline-cargo-graph",
                 "qt6-development-modules",
+                "qt6-qml-runtime-imports",
+                "sdk-qmlls-runtime",
                 "hash-locked-build-environment",
                 "qemu-system-x86_64",
                 "mkarchiso",
@@ -57,6 +59,43 @@ class CodexReadinessTests(unittest.TestCase):
         )
         self.assertTrue(calls)
         self.assertFalse(any("install" in argv or "fetch" in argv for argv in calls))
+
+    def test_editor_profile_requires_sdk_runtime_imports_and_working_qmlls(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bins = root / "bin"
+            qml = root / "qml"
+            bins.mkdir()
+            server = bins / "qmlls"
+            server.write_text("fixture", encoding="utf-8")
+            for module in ("QtQuick", "QtQuick.Controls", "QtQuick.Layouts"):
+                imported = qml.joinpath(*module.split("."))
+                imported.mkdir(parents=True)
+                (imported / "qmldir").write_text(f"module {module}\n", encoding="utf-8")
+            query = f"QT_INSTALL_BINS:{bins}\nQT_INSTALL_QML:{qml}\nQT_VERSION:6.4.2"
+
+            def fake_probe(argv, _env):
+                if argv[-1] == "--query":
+                    return query
+                if argv[0] == str(server):
+                    return "--build-dir --ignore-settings"
+                return None
+
+            def fake_which(name, path=None):
+                del path
+                return str(root / name)
+
+            with (
+                patch.object(doctor, "probe", side_effect=fake_probe),
+                patch.object(doctor, "probe_status", return_value=False),
+                patch.object(doctor.shutil, "which", side_effect=fake_which),
+            ):
+                checks = doctor.inventory({"core", "editor"})
+            status = {check.name: check.ready for check in checks}
+            self.assertTrue(status["qt6-qml-runtime-imports"])
+            self.assertTrue(status["sdk-qmlls-runtime"])
 
     def test_guidance_changes_trigger_both_pr_and_main_environment_checks(self) -> None:
         workflow = (ROOT / ".github/workflows/codex-environment.yml").read_text()
@@ -388,6 +427,9 @@ class CodexPreflightExecutionTests(unittest.TestCase):
 esac
 """,
             )
+            python_shim = home / ".local/linura-tools/python312/bin/python3"
+            python_shim.parent.mkdir(parents=True, mode=0o700)
+            python_shim.symlink_to(fake_bin / "python3")
             # Model the isolated, hash-locked tool and published PATH entry.
             ruff_home = home / ".local/linura-tools/ruff"
             ruff_binary = ruff_home / "bin/ruff"
@@ -500,6 +542,18 @@ if [[ "$*" == '-color' && "${{VALIDATOR_FAIL:-0}}" == 1 ]]; then exit 67; fi
         self.assertEqual(result.returncode, 67, result.stderr)
         self.assertNotIn("changed tracked source or index state", result.stderr)
 
+    def test_wrapper_denies_missing_prepared_python_without_running_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                ["bash", str(ROOT / "scripts/run_codex.sh"), "python3", "--version"],
+                env=dict(os.environ, HOME=directory),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Python 3.12 selection is missing", result.stderr)
+
     def test_wrapper_preserves_literal_arguments_and_custom_cargo_home(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
@@ -510,6 +564,9 @@ if [[ "$*" == '-color' && "${{VALIDATOR_FAIL:-0}}" == 1 ]]; then exit 67; fi
                 '#!/usr/bin/env python3\nimport json, os, sys\nprint(json.dumps([os.getcwd(), os.environ["CARGO_HOME"], os.environ["RUSTUP_AUTO_INSTALL"], sys.argv[1:]]))\n'
             )
             command.chmod(0o755)
+            python_shim = home / ".local/linura-tools/python312/bin/python3"
+            python_shim.parent.mkdir(parents=True, mode=0o700)
+            python_shim.symlink_to(sys.executable)
             literal = "$(touch should-not-exist) ; space"
             env = dict(
                 os.environ,

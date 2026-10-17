@@ -6,10 +6,12 @@ fixture_contract="/etc/linura/qualification-fixture.json"
 evidence_root=""
 output_name=""
 record=0
+run_id="${LINURA_RUN_ID:-}"
 source_root="${LINURA_SOURCE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --run-id) run_id="$2"; shift 2 ;;
         --fixture-id) fixture_id="$2"; shift 2 ;;
         --fixture-contract) fixture_contract="$2"; shift 2 ;;
         --evidence-root) evidence_root="$2"; shift 2 ;;
@@ -50,6 +52,14 @@ source_checkout_matches() {
 source_sha="$(git -C "$source_root" rev-parse HEAD)"
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || fail "source HEAD is not an exact Git SHA"
 source_checkout_matches || fail "Level C evidence requires a fully clean exact-source checkout"
+storage_args=(--source-root "$source_root" --environment arch-hyprland-hardware --run "$run_id")
+evidence_root="$(python3 "$source_root/tools/development_storage.py" "${storage_args[@]}" \
+    check --role evidence --path "$evidence_root" --fresh)" \
+    || fail "Level C requires fresh private evidence on verified dedicated storage"
+TMPDIR="$(python3 "$source_root/tools/development_storage.py" "${storage_args[@]}" scratch)" \
+    || fail "Level C requires prepared private scratch on verified dedicated storage"
+export TMPDIR
+export LINURA_RUN_ID="$run_id"
 fixture_check="$(python3 "$source_root/tools/workstation_acceptance.py" fixture-check \
     --fixture-contract "$fixture_contract" \
     --fixture-id "$fixture_id")"
@@ -136,14 +146,14 @@ safe_snapshot_destination() {
             || fail "Level C snapshot destination is not a regular file: $destination"
         [[ "$(stat -c %h -- "$destination")" -eq 1 ]] \
             || fail "Level C snapshot destination has multiple hard links: $destination"
+        fail "retained Level C snapshot exists: choose a fresh destination"
     fi
 }
 for snapshot_name in "${snapshot_names[@]}"; do
     safe_snapshot_destination "$evidence_root/$snapshot_name"
 done
-# One evidence root describes exactly one current fixture. Purge all fixture-keyed
-# recordings and sidecars before replacing its globally named snapshots, even
-# when the new capture is not recorded. Unlinking never opens a stale artifact.
+# One fresh evidence destination describes one capture. Refuse all retained
+# fixture recordings/sidecars; a new run never authorizes purging an earlier one.
 stale_recordings=()
 for stale_recording in "$evidence_root"/hardware-*.mkv \
         "$evidence_root"/hardware-*.metadata.json \
@@ -152,9 +162,9 @@ for stale_recording in "$evidence_root"/hardware-*.mkv \
     [[ ! -d "$stale_recording" ]] || fail "stale Level C artifact is a directory: $stale_recording"
     stale_recordings+=("$stale_recording")
 done
-# Preflight every destination before unlinking any of them.
+# Retain every destination and refuse reuse before publishing any snapshot.
 for stale_recording in "${stale_recordings[@]}"; do
-    rm -f -- "$stale_recording" || fail "could not purge stale Level C evidence"
+    fail "retained Level C evidence exists: choose a fresh destination"
 done
 # Generate all snapshot data in fresh private files; never redirect into reused outputs.
 snapshot_temporary_dir="$(mktemp -d "$evidence_root/.linura-snapshot.XXXXXXXX")"
@@ -224,8 +234,11 @@ PY
 )"
 [[ "$recording_duration_budget" =~ ^[1-9][0-9]*$ ]] \
     || fail "Level C recording duration budget is invalid"
-recording="$capture_state_dir/hardware-$fixture_id.mkv"
-rm -f "$recording" "${recording%.mkv}.metadata.json" "${recording%.mkv}.sha256"
+recording="$TMPDIR/hardware-$fixture_id.mkv"
+for retained_recording in "$recording" "${recording%.mkv}.metadata.json" "${recording%.mkv}.sha256"; do
+    [[ ! -e "$retained_recording" && ! -L "$retained_recording" ]] \
+        || fail "retained recorder output exists: choose a fresh run"
+done
 recorder="$source_root/qualification/v010/workstation-acceptance/record-session.sh"
 recording_started=0
 verified_recording_sha256=""

@@ -116,6 +116,10 @@ RUNTIME_FILES = (
     "qualification/v010/workstation-acceptance/capture-hardware-session.sh",
     "qualification/v010/workstation-acceptance/run-hardware-qualification.sh",
     "tools/workstation_acceptance.py",
+    "tools/development_workspace.py",
+    "tools/development_storage.py",
+    "scripts/prepare_qualification_storage.sh",
+    "tools/codex/doctor.py",
     "tools/workstation_capture_lock.py",
     "tools/workstation_q11_runner.py",
     "contracts/v010-workstation-acceptance.toml",
@@ -525,7 +529,7 @@ def validate(root: Path) -> list[str]:
         "LC_ALL=C.UTF-8",
         "RUSTFLAGS=--remap-path-prefix=%s=/workspace",
         'cargo build --workspace --release --locked --target "$RELEASE_TARGET"',
-        "target/$RELEASE_TARGET/release/linurad",
+        "$LINURA_CARGO_TARGET/$RELEASE_TARGET/release/linurad",
         "LINURAD_SHA256=%s",
         "SESSION_AUDIO_HELPER_SHA256=%s",
         "bash qualification/v010/shell-runtime/start-vm.sh",
@@ -674,9 +678,32 @@ def validate(root: Path) -> list[str]:
             "prepared substrate cache miss must invoke the repository-owned builder"
         )
 
+    base_cache_step = workflow_step_block(
+        workflow, "Restore official Arch base-image cache"
+    )
+    if (
+        "path: ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell.qcow2"
+        not in base_cache_step
+        or "path: ${{ env.LINURA_VM_DIR }}" in base_cache_step
+    ):
+        failures.append("official base-image cache must use a stable prerequisite path")
     base_image_step = workflow_step_block(
         workflow, "Download and verify official Arch base image"
     )
+    for fragment in (
+        'image="$LINURA_VM_BASE_DIR/arch-v010-shell.qcow2"',
+        'destination="$LINURA_VM_DIR/arch-v010-shell.qcow2"',
+        '[[ -f "$image" && ! -L "$image" ]]',
+        'test "$(stat -c %h "$image")" = 1',
+        '[[ ! -e "$destination" && ! -L "$destination" ]]',
+        'cp -- "$image" "$destination"',
+        'printf \'%s  %s\\n\' "$digest" "$destination" | sha256sum --check --strict',
+    ):
+        if fragment not in base_image_step:
+            failures.append(
+                "official base image must be verified and copied into a fresh private run: "
+                + fragment
+            )
     cached_base_check = (
         'if [[ -f "$image" ]] && ! printf \'%s  %s\\n\' "$digest" "$image" '
         "| sha256sum --check --strict; then"
@@ -1167,7 +1194,9 @@ def validate(root: Path) -> list[str]:
         stale_preflight = hardware_capture_text.find(
             'stale_recordings+=("$stale_recording")'
         )
-        stale_purge = hardware_capture_text.find('rm -f -- "$stale_recording"')
+        stale_purge = hardware_capture_text.find(
+            'fail "retained Level C evidence exists: choose a fresh destination"'
+        )
         snapshot_validation = hardware_capture_text.find(
             'safe_snapshot_destination "$evidence_root/$snapshot_name"'
         )
@@ -1184,7 +1213,7 @@ def validate(root: Path) -> list[str]:
             'mv -fT -- "$snapshot_temporary_dir/$snapshot_name" "$evidence_root/$snapshot_name"'
         )
         recording_path = hardware_capture_text.find(
-            'recording="$capture_state_dir/hardware-$fixture_id.mkv"'
+            'recording="$TMPDIR/hardware-$fixture_id.mkv"'
         )
         recorder_start = hardware_capture_text.find(
             '"$recorder" start "$recording" "$output_name"'
@@ -1269,7 +1298,7 @@ def validate(root: Path) -> list[str]:
             )
         ):
             failures.append(
-                "Level C capture must preflight and clear every fixture recording and sidecar"
+                "Level C capture must preflight and refuse every retained fixture recording and sidecar"
             )
 
         if (
@@ -1302,7 +1331,7 @@ def validate(root: Path) -> list[str]:
             )
         ):
             failures.append(
-                "Level C capture must clear stale recording evidence before safely publishing a new snapshot"
+                "Level C capture must refuse stale recording evidence before safely publishing a new snapshot"
             )
 
         if any(
@@ -1442,6 +1471,9 @@ def validate(root: Path) -> list[str]:
             "--persistent",
             "--mode automated",
             "--display none",
+            'vm_root="$(dirname "$output_image")"',
+            'guest_image="$vm_root/substrate-guest.qcow2"',
+            'seed_image="$vm_root/substrate-seed.img"',
             "pacman -Syu",
             "timeout --signal=TERM --kill-after=10s 720",
             "--disable-download-timeout -- $RUNTIME_PACKAGES",

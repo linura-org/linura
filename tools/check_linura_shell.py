@@ -203,11 +203,11 @@ REQUIRED_IMAGE_ASSETS = {
 }
 
 REQUIRED_IMAGE = (
-    "build_shell_bridge(STAGED)",
+    "build_shell_bridge(paths.staged, paths.bridge)",
     'UI_SDK_SOURCE = ROOT / "apps/linura-shell/ui"',
     'UI_SDK_BUILD = ROOT / ".artifacts/linura-ui-build"',
-    "build_ui_sdk(STAGED)",
-    'shutil.copytree(OVERLAY / "airootfs", STAGED / "airootfs", dirs_exist_ok=True)',
+    "build_ui_sdk(paths.staged, paths.ui)",
+    'shutil.copytree(OVERLAY / "airootfs", paths.staged / "airootfs", dirs_exist_ok=True)',
     'SHELL_BRIDGE_QT_MODULES = ("Qt6Core", "Qt6DBus", "Qt6Qml")',
     'UI_SDK_QT_MODULES = ("Qt6Core", "Qt6Qml", "Qt6Quick", "Qt6QuickControls2")',
     "DOCTOR_QT_MODULES = tuple(dict.fromkeys(SHELL_BRIDGE_QT_MODULES + UI_SDK_QT_MODULES))",

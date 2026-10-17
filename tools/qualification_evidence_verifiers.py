@@ -222,7 +222,14 @@ def _common_primary(primary: dict[str, Any], envelope: dict[str, Any]) -> None:
     )
 
 
-def _artifact_digest_record(root: Path, record: object, label: str) -> None:
+def _artifact_digest_record(
+    root: Path,
+    record: object,
+    label: str,
+    *,
+    bundle: Path | None = None,
+    expected_path: str | None = None,
+) -> None:
     record = _required_object(record, f"{label} artifact binding is missing")
     _require(
         set(record) == {"path", "sha256", "size"},
@@ -230,13 +237,23 @@ def _artifact_digest_record(root: Path, record: object, label: str) -> None:
     )
     path_value = record["path"]
     _require(isinstance(path_value, str), f"{label} path is invalid")
-    path = _repo_file(root, path_value)
-    data = _stable_repository_bytes(path)
+    if expected_path is not None:
+        _require(path_value == expected_path, f"{label} artifact path mismatch")
+    if path_value.startswith("retained:"):
+        if bundle is None or expected_path != path_value:
+            raise VerificationError(
+                f"{label} retained artifact was not explicitly authorized"
+            )
+        data = _stable_bytes(_bundle_file(bundle, path_value.removeprefix("retained:")))
+        kind = "retained"
+    else:
+        data = _stable_repository_bytes(_repo_file(root, path_value))
+        kind = "repository"
     _require(
         record["sha256"] == hashlib.sha256(data).hexdigest(),
-        f"{label} repository digest mismatch",
+        f"{label} {kind} digest mismatch",
     )
-    _require(record["size"] == len(data), f"{label} repository size mismatch")
+    _require(record["size"] == len(data), f"{label} {kind} size mismatch")
 
 
 def _require_markers(text: str, markers: list[str], label: str) -> None:
@@ -820,8 +837,25 @@ def _verify_v05(
         bool(artifacts),
         "v0.5 repository artifact bindings are missing",
     )
+    expected = {
+        "executor": "retained:v05-executor-systemd.bin",
+        "linurad": "retained:v05-linurad.bin",
+        "linuractl": "retained:v05-linuractl.bin",
+        "binding_helper": "retained:v05-binding-helper.bin",
+        "verifier_helper": "retained:v05-verifier-helper.bin",
+        "dbus_policy": "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
+        "polkit_policy": "packaging/polkit-1/actions/org.linura.executor.systemd.policy",
+        "systemd_unit": "packaging/systemd/system/linura-executor-systemd.service",
+        "fixture": "tests/acceptance/v05/linura-v05-qualification-restart.service",
+        "qualification_rule": "tests/acceptance/v05/49-linura-v05-qualification.rules",
+        "host_protocol": "tests/acceptance/v05/qualify-host.sh",
+        "guest_protocol": "tests/acceptance/v05/qualify-guest.sh",
+    }
+    _require(set(artifacts) == set(expected), "v0.5 artifact inventory drifted")
     for name, record in artifacts.items():
-        _artifact_digest_record(root, record, f"v0.5 {name}")
+        _artifact_digest_record(
+            root, record, f"v0.5 {name}", bundle=bundle, expected_path=expected[name]
+        )
     pre = _required_match(pre, "v0.5 pre-activation witness missing")
     post = _required_match(post, "v0.5 post-activation witness missing")
     return _outcome(
@@ -894,8 +928,30 @@ def _verify_v06(
         bool(artifacts),
         "v0.6 repository artifact bindings are missing",
     )
+    expected = {
+        "authority_runtime": "retained:v06-authorityd.bin",
+        "executor": "retained:v06-executor-systemd.bin",
+        "fault_matrix": "retained:v06-qualification-matrix.bin",
+        "authority_dbus_contract": "interfaces/dbus/org.linura.Authority1.xml",
+        "executor_dbus_contract": "interfaces/dbus/org.linura.Executor.Systemd1.xml",
+        "authority_dbus_policy": "packaging/dbus-1/system.d/org.linura.Authority1.conf",
+        "executor_dbus_policy": "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
+        "authority_polkit_policy": "packaging/polkit-1/actions/org.linura.authority.policy",
+        "executor_polkit_policy": "packaging/polkit-1/actions/org.linura.executor.systemd.policy",
+        "executor_product_rule": "packaging/polkit-1/rules.d/50-linura-executor-systemd.rules",
+        "authority_systemd_unit": "packaging/systemd/system/linura-authorityd.service",
+        "executor_systemd_unit": "packaging/systemd/system/linura-executor-systemd.service",
+        "qualification_rule": "tests/acceptance/v06/49-linura-v06-qualification.rules",
+        "managed_fixture": "tests/acceptance/v06/linura-managed-v06-qualification.service",
+        "not_satisfied_fixture": "tests/acceptance/v06/linura-managed-v06-notsatisfied.service",
+        "host_protocol": "tests/acceptance/v06/qualify-host.sh",
+        "guest_protocol": "tests/acceptance/v06/qualify-guest.sh",
+    }
+    _require(set(artifacts) == set(expected), "v0.6 artifact inventory drifted")
     for name, record in artifacts.items():
-        _artifact_digest_record(root, record, f"v0.6 {name}")
+        _artifact_digest_record(
+            root, record, f"v0.6 {name}", bundle=bundle, expected_path=expected[name]
+        )
     return _outcome(
         adapter="v06-managed-lifecycle-semantic-v1",
         test_ids=["qualification/v0.6/managed-lifecycle/result-v1"],

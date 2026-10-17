@@ -7,11 +7,33 @@ set -euo pipefail
 : "${QUALIFICATION_ENVIRONMENT_ID:?QUALIFICATION_ENVIRONMENT_ID is required}"
 : "${SOURCE_SHA:?SOURCE_SHA is required}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
+: "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
 : "${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
 : "${GITHUB_RUN_ATTEMPT:?GITHUB_RUN_ATTEMPT is required}"
-: "${RUNNER_TEMP:?RUNNER_TEMP is required}"
+: "${LINURA_RUN_ID:?LINURA_RUN_ID is required}"
+: "${LINURA_VM_DIR:?LINURA_VM_DIR is required}"
+: "${LINURA_WORK_DIR:?LINURA_WORK_DIR is required}"
+: "${ARTIFACT_DIR:?ARTIFACT_DIR is required}"
+: "${LINURA_STORAGE_ROOT:?LINURA_STORAGE_ROOT is required}"
+: "${LINURA_STORAGE_CLASS:?LINURA_STORAGE_CLASS is required}"
 : "${VM_ACCELERATION:?VM_ACCELERATION is required}"
 [[ "$VM_ACCELERATION" == tcg ]] || { echo "v0.9 adversarial qualification requires tcg" >&2; exit 2; }
+case "$LINURA_STORAGE_CLASS" in
+  dedicated) : "${LINURA_STORAGE_ID:?dedicated storage UUID is required}" ;;
+  github-hosted-ephemeral) [[ -z "${LINURA_STORAGE_ID:-}" ]] || { echo "provider-ephemeral storage must not carry a filesystem UUID" >&2; exit 2; } ;;
+  *) echo "unsupported qualification storage class" >&2; exit 2 ;;
+esac
+
+storage_args=(--source-root "$GITHUB_WORKSPACE" --environment generic-vm --run "$LINURA_RUN_ID")
+python3 tools/development_storage.py "${storage_args[@]}" \
+  check --role vm --path "$LINURA_VM_DIR" >/dev/null \
+  || { echo "v0.9 VM storage namespace is invalid" >&2; exit 2; }
+python3 tools/development_storage.py "${storage_args[@]}" \
+  check --role temporary --path "$LINURA_WORK_DIR" >/dev/null \
+  || { echo "v0.9 scratch storage namespace is invalid" >&2; exit 2; }
+python3 tools/development_storage.py "${storage_args[@]}" \
+  check --role evidence --path "$ARTIFACT_DIR" >/dev/null \
+  || { echo "v0.9 evidence storage namespace is invalid" >&2; exit 2; }
 
 V09_SHARD_ID="${V09_SHARD_ID:-full}"
 V09_BOUNDARY_START="${V09_BOUNDARY_START:-1}"
@@ -49,11 +71,10 @@ QUALIFICATION_SSH_GUEST_PORT=2222
 SSH_USER=linura-qualification
 PREPARER_SSH_USER=linura-preparer
 PREPARER_ACTIVE=true
-VM_IMAGE="$RUNNER_TEMP/linura-v09-adversarial-${V09_SHARD_ID}.qcow2"
-SEED_IMAGE="$RUNNER_TEMP/linura-v09-adversarial-${V09_SHARD_ID}-seed.img"
-SSH_KEY="$RUNNER_TEMP/linura-v09-adversarial-${V09_SHARD_ID}-key"
-VM_LOG="$RUNNER_TEMP/linura-v09-adversarial-${V09_SHARD_ID}.log"
-ARTIFACT_DIR="$RUNNER_TEMP/linura-v09-adversarial-artifacts"
+VM_IMAGE="$LINURA_VM_DIR/linura-v09-adversarial-${V09_SHARD_ID}.qcow2"
+SEED_IMAGE="$LINURA_VM_DIR/linura-v09-adversarial-${V09_SHARD_ID}-seed.img"
+SSH_KEY="$LINURA_WORK_DIR/linura-v09-adversarial-${V09_SHARD_ID}-key"
+VM_LOG="$LINURA_WORK_DIR/linura-v09-adversarial-${V09_SHARD_ID}.log"
 TRANSCRIPT="$ARTIFACT_DIR/guest-qualification-${V09_SHARD_ID}.txt"
 ENVIRONMENT="$ARTIFACT_DIR/guest-environment-${V09_SHARD_ID}.env"
 GUEST_IDENTITY="$ARTIFACT_DIR/guest-execution-identity.json"
@@ -199,6 +220,7 @@ start_guest() {
   python3 tools/vm.py start \
     --image "$VM_IMAGE" \
     --seed "$SEED_IMAGE" \
+    --run "$LINURA_RUN_ID" \
     --ssh-port "$SSH_PORT" \
     --ssh-guest-port "$SSH_GUEST_PORT" \
     --accel "$VM_ACCELERATION" \
@@ -338,7 +360,7 @@ ssh-keygen -q -t ed25519 -N '' -f "$SSH_KEY"
 public_key="$(cat "$SSH_KEY.pub")"
 cp --reflink=auto "$BASE_IMAGE" "$VM_IMAGE"
 
-cat > "$RUNNER_TEMP/user-data-${V09_SHARD_ID}" <<EOF
+cat > "$LINURA_WORK_DIR/user-data-${V09_SHARD_ID}" <<EOF
 #cloud-config
 users:
   - default
@@ -358,11 +380,11 @@ ssh_pwauth: false
 disable_root: true
 package_update: false
 EOF
-cat > "$RUNNER_TEMP/meta-data-${V09_SHARD_ID}" <<EOF
+cat > "$LINURA_WORK_DIR/meta-data-${V09_SHARD_ID}" <<EOF
 instance-id: linura-v09-adversarial-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${V09_SHARD_ID}
 local-hostname: linura-v09-adversarial
 EOF
-cat > "$RUNNER_TEMP/network-config-${V09_SHARD_ID}" <<'EOF'
+cat > "$LINURA_WORK_DIR/network-config-${V09_SHARD_ID}" <<'EOF'
 version: 2
 ethernets:
   primary:
@@ -370,8 +392,8 @@ ethernets:
       name: "en*"
     dhcp4: true
 EOF
-cloud-localds --network-config="$RUNNER_TEMP/network-config-${V09_SHARD_ID}" \
-  "$SEED_IMAGE" "$RUNNER_TEMP/user-data-${V09_SHARD_ID}" "$RUNNER_TEMP/meta-data-${V09_SHARD_ID}"
+cloud-localds --network-config="$LINURA_WORK_DIR/network-config-${V09_SHARD_ID}" \
+  "$SEED_IMAGE" "$LINURA_WORK_DIR/user-data-${V09_SHARD_ID}" "$LINURA_WORK_DIR/meta-data-${V09_SHARD_ID}"
 
 start_guest "$VM_UUID" initial
 remote 'cloud-init status --wait --long'

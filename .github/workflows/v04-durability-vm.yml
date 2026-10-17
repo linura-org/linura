@@ -22,6 +22,12 @@ on:
       - "crates/linura-persistence-sqlite/**"
       - "crates/linura-control/**"
       - "tools/vm.py"
+      - "tools/development_workspace.py"
+      - "tools/development_storage.py"
+      - "scripts/prepare_qualification_storage.sh"
+      - "tools/codex/doctor.py"
+      - "tests/tooling/test_development_workspace.py"
+      - "tests/tooling/test_development_storage.py"
       - "tools/codex/versions.env"
       - "tools/check_toolchain_env.py"
       - "tests/tooling/test_toolchain_env.py"
@@ -64,6 +70,12 @@ jobs:
           : "${RUST_VERSION:?}"
           printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
 
+      - name: Prepare guarded qualification storage
+        env:
+          LINURA_STORAGE_ROOT: ${{ vars.LINURA_STORAGE_ROOT }}
+          LINURA_STORAGE_ID: ${{ vars.LINURA_STORAGE_ID }}
+        run: bash scripts/prepare_qualification_storage.sh generic-vm
+
       - name: Install pinned Rust toolchain
         run: |
           set -euo pipefail
@@ -71,10 +83,10 @@ jobs:
           rustup default "$RUST_VERSION"
 
       - name: Qualify deterministic write-denial behavior
-        run: cargo test --locked -p linura-persistence-sqlite --test write_failure
+        run: cargo test --locked -p linura-persistence-sqlite --test write_failure --target-dir "$LINURA_CARGO_TARGET"
 
       - name: Build exact-source fault probe
-        run: cargo build --release --locked -p linura-persistence-sqlite --example v04_fault_probe
+        run: cargo build --release --locked -p linura-persistence-sqlite --example v04_fault_probe --target-dir "$LINURA_CARGO_TARGET"
 
       - name: Install disposable VM harness dependencies
         run: |
@@ -94,7 +106,7 @@ jobs:
             *) echo "base image must come from the pinned Ubuntu cloud-image origin" >&2; exit 2 ;;
           esac
           [[ "$BASE_IMAGE_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          base_image="$RUNNER_TEMP/ubuntu-noble-base.qcow2"
+          base_image="$LINURA_VM_DIR/ubuntu-noble-base.qcow2"
           curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
             --output "$base_image" "$BASE_IMAGE_URL"
           printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$base_image" | sha256sum --check --strict
@@ -104,13 +116,13 @@ jobs:
       - name: Create persistent disposable guest and cloud-init identity
         run: |
           set -euo pipefail
-          vm_image="$RUNNER_TEMP/linura-v04-durability.qcow2"
-          seed_image="$RUNNER_TEMP/linura-v04-durability-seed.img"
-          ssh_key="$RUNNER_TEMP/linura-v04-durability-key"
-          artifact_dir="$RUNNER_TEMP/linura-v04-durability-artifacts"
-          user_data="$RUNNER_TEMP/v04-user-data"
-          meta_data="$RUNNER_TEMP/v04-meta-data"
-          network_config="$RUNNER_TEMP/v04-network-config"
+          vm_image="$LINURA_VM_DIR/linura-v04-durability.qcow2"
+          seed_image="$LINURA_VM_DIR/linura-v04-durability-seed.img"
+          ssh_key="$LINURA_WORK_DIR/linura-v04-durability-key"
+          artifact_dir="$ARTIFACT_DIR"
+          user_data="$LINURA_WORK_DIR/v04-user-data"
+          meta_data="$LINURA_WORK_DIR/v04-meta-data"
+          network_config="$LINURA_WORK_DIR/v04-network-config"
 
           cp --reflink=auto "$BASE_IMAGE" "$vm_image"
           ssh-keygen -q -t ed25519 -N '' -f "$ssh_key"
@@ -195,7 +207,7 @@ jobs:
           test "$ready" -eq 1
           ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 'cloud-init status --wait --long'
           scp "${ssh_common[@]}" -P 2222 \
-            target/release/examples/v04_fault_probe \
+            "$LINURA_CARGO_TARGET/release/examples/v04_fault_probe" \
             linura@127.0.0.1:/tmp/linura-v04-fault-probe
           ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 \
             'sudo -n install -o root -g root -m 0755 /tmp/linura-v04-fault-probe /usr/local/bin/linura-v04-fault-probe && sudo -n install -d -o linura -g linura -m 0700 /var/lib/linura-v04 && rm -f /tmp/linura-v04-fault-probe'
@@ -328,7 +340,7 @@ jobs:
           root = pathlib.Path.cwd()
           artifact_dir = pathlib.Path(os.environ["ARTIFACT_DIR"])
           probe_source = root / "crates/linura-persistence-sqlite/examples/v04_fault_probe.rs"
-          probe_executable = root / "target/release/examples/v04_fault_probe"
+          probe_executable = pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release/examples/v04_fault_probe"
           retained_probe = artifact_dir / "v04-fault-probe.bin"
           shutil.copyfile(probe_executable, retained_probe)
           retained_probe.chmod(0o444)
@@ -445,6 +457,6 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linura-v04-durability-${{ github.event.pull_request.head.sha || github.sha }}-unqualified-diagnostics
-          path: ${{ runner.temp }}/linura-v04-durability-artifacts/
+          path: ${{ env.ARTIFACT_DIR }}
           if-no-files-found: warn
           retention-days: 7

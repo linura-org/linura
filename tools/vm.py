@@ -7,9 +7,14 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import stat
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(ROOT))
+from tools import development_workspace as storage  # noqa: E402
+
 DEFAULT_IMAGE = ROOT / ".artifacts/linura-dev.qcow2"
 ACCELERATORS = ("auto", "kvm", "tcg")
 UUID_PATTERN = re.compile(
@@ -114,6 +119,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("plan", "start"):
         command = sub.add_parser(name)
+        storage.add_storage_options(command)
         command.add_argument("--image", type=Path, default=DEFAULT_IMAGE)
         command.add_argument("--seed", type=Path)
         command.add_argument("--memory", type=int, default=4096)
@@ -190,8 +196,8 @@ def main() -> int:
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 2
-    print(shlex.join(command), flush=True)
     if args.command == "plan":
+        print(shlex.join(command), flush=True)
         return 0
     if shutil.which("qemu-system-x86_64") is None:
         print(
@@ -205,10 +211,45 @@ def main() -> int:
         print(f"cloud-init seed not found: {args.seed}", file=sys.stderr)
         return 2
 
+    try:
+        paths = storage.execution_layout(ROOT, args, "generic-vm", args.image)
+        data_root = storage.directory(args.storage_root)
+        image_root = (
+            Path(paths["generated"]["vm-disposable"])
+            if args.persistent
+            else data_root / "qualification/vm-images"
+        )
+        args.image = storage.regular_storage_input(args.image, image_root)
+        if args.seed is not None:
+            args.seed = storage.regular_storage_input(
+                args.seed, data_root / "qualification/vm-images"
+            )
+        # QEMU snapshot scratch must also stay on the checked volume. Require an
+        # operator-created private directory; do not provision, clean or fall back.
+        scratch = storage.directory(Path(paths["generated"]["temporary"]))
+        info = scratch.stat()
+        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+            raise storage.WorkspaceError("VM scratch must be private and caller-owned")
+        command = qemu_command(
+            args.image,
+            args.memory,
+            args.cpus,
+            args.ssh_port,
+            args.seed,
+            args.accel,
+            args.persistent,
+            args.hardware_uuid,
+            args.ssh_guest_port,
+        )
+    except (OSError, ValueError) as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
     # Replace the harness process with QEMU so callers can supervise and terminate
     # one PID without leaving an orphaned guest process behind.
+    print(shlex.join(command), flush=True)
     try:
-        os.execvp(command[0], command)
+        os.execvpe(command[0], command, {**os.environ, "TMPDIR": str(scratch)})
     except OSError as error:
         print(f"failed to execute {command[0]}: {error}", file=sys.stderr)
         return 2

@@ -9,6 +9,7 @@
     "ms-vscode.cpptools",
     "rust-lang.rust-analyzer",
     "streetsidesoftware.code-spell-checker",
+    "theqtcompany.qt-core",
     "theqtcompany.qt-qml",
     "xaver.clang-format"
   ]

@@ -18,12 +18,34 @@ safe_recording_path() {
     [[ "$candidate" == *.mkv ]] || fail "recording path must end in .mkv"
     local canonical
     canonical="$(realpath -m "$candidate")"
-    case "$canonical" in
+    # Classify by the original path, not realpath's target: an alias from
+    # dedicated scratch into a legacy root must never bypass the storage guard.
+    case "$candidate" in
         /tmp/linura-shell-runtime/evidence/*.mkv|/tmp/linura-workstation-live/*.mkv|"$HOME"/.local/state/linura/acceptance/*.mkv)
+            case "$canonical" in
+                /tmp/linura-shell-runtime/evidence/*.mkv|/tmp/linura-workstation-live/*.mkv|"$HOME"/.local/state/linura/acceptance/*.mkv) ;;
+                *) fail "recording path escaped its bounded legacy evidence root" ;;
+            esac
             printf '%s\n' "$canonical"
             ;;
         *)
-            fail "recording path is outside the bounded acceptance evidence roots"
+            [[ "$candidate" == "$canonical" ]] \
+                || fail "guarded recorder path must not traverse or follow symlinks"
+            [[ -n "${LINURA_RUN_ID:-}" && -n "${TMPDIR:-}" ]] \
+                || fail "guarded Level C recording requires a prepared run identity and scratch"
+            [[ "$(dirname -- "$canonical")" == "$TMPDIR" ]] \
+                || fail "Level C recording must be directly under its prepared scratch"
+            local checked_scratch
+            if ! checked_scratch="$(python3 "$source_root/tools/development_storage.py" \
+                --source-root "$source_root" \
+                --environment arch-hyprland-hardware \
+                --run "$LINURA_RUN_ID" \
+                check --role temporary --path "$TMPDIR")"; then
+                fail "Level C recording scratch failed independent storage validation"
+            fi
+            [[ "$checked_scratch" == "$TMPDIR" ]] \
+                || fail "Level C recording scratch did not match the canonical namespace"
+            printf '%s\n' "$canonical"
             ;;
     esac
 }

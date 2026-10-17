@@ -2113,10 +2113,10 @@ class LinuraShellContractTests(unittest.TestCase):
             self._copy_fixture(root)
             image = root / "tools/image.py"
             text = image.read_text(encoding="utf-8")
-            marker = "build_ui_sdk(STAGED)"
+            marker = "build_ui_sdk(paths.staged, paths.ui)"
             self.assertIn(marker, text)
             image.write_text(
-                text.replace(marker, "missing_ui_sdk(STAGED)", 1),
+                text.replace(marker, "missing_ui_sdk(paths.staged, paths.ui)", 1),
                 encoding="utf-8",
             )
             failures = check_linura_shell.validate(root)

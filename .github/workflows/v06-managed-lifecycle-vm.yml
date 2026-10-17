@@ -51,6 +51,13 @@ on:
       - "packaging/systemd/system/linura-executor-systemd.service"
       - "tests/acceptance/v06/**"
       - "tools/vm.py"
+      - "tools/development_workspace.py"
+      - "tools/development_storage.py"
+      - "tools/qualification_build_artifacts.py"
+      - "scripts/prepare_qualification_storage.sh"
+      - "tools/codex/doctor.py"
+      - "tests/tooling/test_development_workspace.py"
+      - "tests/tooling/test_development_storage.py"
       - "tools/codex/versions.env"
       - "tools/check_toolchain_env.py"
       - "tests/tooling/test_toolchain_env.py"
@@ -107,12 +114,11 @@ jobs:
           test "$repo_rust_version" = "$RUST_VERSION"
           printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
 
-      - name: Initialize exact-source evidence paths
-        run: |
-          set -euo pipefail
-          artifact_dir="$RUNNER_TEMP/linura-v06-managed-lifecycle-artifacts"
-          mkdir -p "$artifact_dir"
-          printf 'ARTIFACT_DIR=%s\n' "$artifact_dir" >> "$GITHUB_ENV"
+      - name: Prepare guarded qualification storage
+        env:
+          LINURA_STORAGE_ROOT: ${{ vars.LINURA_STORAGE_ROOT }}
+          LINURA_STORAGE_ID: ${{ vars.LINURA_STORAGE_ID }}
+        run: bash scripts/prepare_qualification_storage.sh generic-vm
 
       - name: Install pinned Rust toolchain
         run: |
@@ -121,19 +127,19 @@ jobs:
           rustup default "$RUST_VERSION"
 
       - name: Run deterministic v0.6 fault matrix on exact source
-        run: cargo test --locked -p linura-authorityd --test v06_qualification -- --test-threads=1
+        run: cargo test --locked -p linura-authorityd --test v06_qualification --target-dir "$LINURA_CARGO_TARGET" -- --test-threads=1
 
       - name: Build exact-source runtime and guest matrix binaries
         run: |
           set -euo pipefail
-          cargo build --release --locked -p linura-authorityd -p linura-executor-systemd
-          cargo test --release --locked -p linura-authorityd --test v06_qualification --no-run --message-format=json > "$RUNNER_TEMP/v06-test-build.jsonl"
+          cargo build --release --locked -p linura-authorityd -p linura-executor-systemd --target-dir "$LINURA_CARGO_TARGET"
+          cargo test --release --locked -p linura-authorityd --test v06_qualification --no-run --message-format=json --target-dir "$LINURA_CARGO_TARGET" > "$LINURA_WORK_DIR/v06-test-build.jsonl"
           test_executable="$(python3 - <<'PY'
           import json
           import os
           import pathlib
 
-          path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'v06-test-build.jsonl'
+          path = pathlib.Path(os.environ['LINURA_WORK_DIR']) / 'v06-test-build.jsonl'
           candidates = []
           for line in path.read_text(encoding='utf-8').splitlines():
               try:
@@ -151,7 +157,7 @@ jobs:
           print(candidates[0])
           PY
           )"
-          install -m 0755 "$test_executable" target/release/v06-qualification-matrix
+          install -m 0755 "$test_executable" "$LINURA_CARGO_TARGET/release/v06-qualification-matrix"
 
       - name: Install disposable VM dependencies
         run: |
@@ -167,7 +173,7 @@ jobs:
             *) echo "base image must come from the pinned Ubuntu cloud-image origin" >&2; exit 2 ;;
           esac
           [[ "$BASE_IMAGE_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          base_image="$RUNNER_TEMP/ubuntu-noble-v06-base.qcow2"
+          base_image="$LINURA_VM_DIR/ubuntu-noble-v06-base.qcow2"
           curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --output "$base_image" "$BASE_IMAGE_URL"
           printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$base_image" | sha256sum --check --strict
           qemu-img info "$base_image"
@@ -176,13 +182,13 @@ jobs:
       - name: Create disposable guest identity
         run: |
           set -euo pipefail
-          vm_image="$RUNNER_TEMP/linura-v06-managed.qcow2"
-          seed_image="$RUNNER_TEMP/linura-v06-managed-seed.img"
-          ssh_key="$RUNNER_TEMP/linura-v06-managed-key"
-          vm_log="$RUNNER_TEMP/linura-v06-managed-qemu.log"
-          user_data="$RUNNER_TEMP/v06-user-data"
-          meta_data="$RUNNER_TEMP/v06-meta-data"
-          network_config="$RUNNER_TEMP/v06-network-config"
+          vm_image="$LINURA_VM_DIR/linura-v06-managed.qcow2"
+          seed_image="$LINURA_VM_DIR/linura-v06-managed-seed.img"
+          ssh_key="$LINURA_WORK_DIR/linura-v06-managed-key"
+          vm_log="$LINURA_WORK_DIR/linura-v06-managed-qemu.log"
+          user_data="$LINURA_WORK_DIR/v06-user-data"
+          meta_data="$LINURA_WORK_DIR/v06-meta-data"
+          network_config="$LINURA_WORK_DIR/v06-network-config"
 
           cp --reflink=auto "$BASE_IMAGE" "$vm_image"
           ssh-keygen -q -t ed25519 -N '' -f "$ssh_key"
@@ -235,7 +241,7 @@ jobs:
         if: ${{ always() && steps.toolchain_data.outcome == 'success' }}
         run: |
           set -euo pipefail
-          artifact_dir="${ARTIFACT_DIR:-$RUNNER_TEMP/linura-v06-managed-lifecycle-artifacts}"
+          artifact_dir="${ARTIFACT_DIR:?dedicated evidence storage is required}"
           mkdir -p "$artifact_dir"
           if [[ -z "${SSH_KEY:-}" || ! -f "${SSH_KEY:-/nonexistent}" ]]; then
             printf '%s\n' 'guest was not provisioned; hardening evidence unavailable because an earlier phase failed' > "$artifact_dir/service-hardening.txt"
@@ -267,18 +273,19 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib
           import json
           import os
           import pathlib
           import subprocess
 
+          from tools.qualification_build_artifacts import bind_artifacts
+
           root = pathlib.Path.cwd()
           artifact_dir = pathlib.Path(os.environ["ARTIFACT_DIR"])
           files = {
-              "authority_runtime": root / "target/release/linura-authorityd",
-              "executor": root / "target/release/linura-executor-systemd",
-              "fault_matrix": root / "target/release/v06-qualification-matrix",
+              "authority_runtime": pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release/linura-authorityd",
+              "executor": pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release/linura-executor-systemd",
+              "fault_matrix": pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release/v06-qualification-matrix",
               "authority_dbus_contract": root / "interfaces/dbus/org.linura.Authority1.xml",
               "executor_dbus_contract": root / "interfaces/dbus/org.linura.Executor.Systemd1.xml",
               "authority_dbus_policy": root / "packaging/dbus-1/system.d/org.linura.Authority1.conf",
@@ -294,8 +301,6 @@ jobs:
               "host_protocol": root / "tests/acceptance/v06/qualify-host.sh",
               "guest_protocol": root / "tests/acceptance/v06/qualify-guest.sh",
           }
-          def digest(path: pathlib.Path) -> str:
-              return hashlib.sha256(path.read_bytes()).hexdigest()
           evidence = {
               "schema_version": 1,
               "repository": os.environ["GITHUB_REPOSITORY"],
@@ -346,14 +351,16 @@ jobs:
                   "sha256": os.environ["BASE_IMAGE_SHA256"],
               },
               "virtualization": {"acceleration": os.environ["VM_ACCELERATION"]},
-              "artifacts": {
-                  name: {
-                      "path": path.relative_to(root).as_posix(),
-                      "sha256": digest(path),
-                      "size": path.stat().st_size,
-                  }
-                  for name, path in files.items()
-              },
+              "artifacts": bind_artifacts(
+                  root,
+                  artifact_dir,
+                  files,
+                  {
+                      "authority_runtime": "v06-authorityd.bin",
+                      "executor": "v06-executor-systemd.bin",
+                      "fault_matrix": "v06-qualification-matrix.bin",
+                  },
+              ),
               "toolchain": {
                   "rustc": subprocess.check_output(["rustc", "-Vv"], text=True).strip(),
                   "qemu": subprocess.check_output(["qemu-system-x86_64", "--version"], text=True).splitlines()[0],
@@ -391,7 +398,7 @@ jobs:
         if: ${{ always() && steps.toolchain_data.outcome == 'success' }}
         run: |
           set -euo pipefail
-          artifact_dir="${ARTIFACT_DIR:-$RUNNER_TEMP/linura-v06-managed-lifecycle-artifacts}"
+          artifact_dir="${ARTIFACT_DIR:?dedicated evidence storage is required}"
           mkdir -p "$artifact_dir"
           if [[ -n "${VM_LOG:-}" && -f "$VM_LOG" ]]; then
             cp "$VM_LOG" "$artifact_dir/qemu.log"
@@ -408,6 +415,6 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linura-v06-managed-lifecycle-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}-unqualified-diagnostics
-          path: ${{ runner.temp }}/linura-v06-managed-lifecycle-artifacts/
+          path: ${{ env.ARTIFACT_DIR }}
           if-no-files-found: warn
           retention-days: 7

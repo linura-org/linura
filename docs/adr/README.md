@@ -64,3 +64,4 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0039 — Isolate qualification publication under an independent GitHub App](0039-external-qualification-publisher.md)
 - [0040 — Centralize PR qualification routing and exact-head gate admission](0040-applicable-qualification-summary.md)
 - [0041 — Explicit activation of independent applicable qualification](0041-applicable-qualification-activation.md)
+- [0043 — Separate lightweight development from dedicated qualification storage](0043-dedicated-development-and-qualification-storage.md)

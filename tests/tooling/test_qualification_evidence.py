@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 from tools import qualification_envelope as envelopes  # noqa: E402
 from tools import qualification_evidence as evidence  # noqa: E402
 from tools import qualification_evidence_verifiers as semantic_verifier  # noqa: E402
+from tools import qualification_build_artifacts as build_artifacts  # noqa: E402
 
 RUNNER_ENV = {
     "RUNNER_OS": "Linux",
@@ -331,6 +332,113 @@ class QualificationEvidenceTests(unittest.TestCase):
                 semantic_verifier._artifact_digest_record(
                     root, tampered, "cargo-style hardlinked output"
                 )
+
+    def test_generated_build_outputs_are_retained_and_reverified(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            root = base / "source"
+            root.mkdir()
+            bundle = base / "evidence"
+            bundle.mkdir()
+            build = base / "build"
+            build.mkdir()
+            source_file = root / "protocol.xml"
+            source_file.write_bytes(b"pinned-source")
+            binary = build / "linura-executor"
+            binary.write_bytes(b"exact-build-output")
+            os.link(binary, build / "cargo-hardlink")
+            records = build_artifacts.bind_artifacts(
+                root,
+                bundle,
+                {"protocol": source_file, "executor": binary},
+                {"executor": "qualified-executor.bin"},
+            )
+            self.assertEqual(records["protocol"]["path"], "protocol.xml")
+            self.assertEqual(
+                records["executor"]["path"], "retained:qualified-executor.bin"
+            )
+            retained = bundle / "qualified-executor.bin"
+            self.assertEqual(retained.read_bytes(), binary.read_bytes())
+            self.assertEqual(retained.stat().st_mode & 0o777, 0o600)
+            semantic_verifier._artifact_digest_record(
+                root,
+                records["executor"],
+                "retained executor",
+                bundle=bundle,
+                expected_path="retained:qualified-executor.bin",
+            )
+            with self.assertRaises(FileExistsError):
+                build_artifacts.bind_artifacts(
+                    root,
+                    bundle,
+                    {"executor": binary},
+                    {"executor": "qualified-executor.bin"},
+                )
+            with self.assertRaisesRegex(
+                semantic_verifier.VerificationError,
+                "retained artifact was not explicitly authorized",
+            ):
+                semantic_verifier._artifact_digest_record(
+                    root, records["executor"], "executor"
+                )
+            changed = dict(records["executor"])
+            changed["sha256"] = "0" * 64
+            with self.assertRaisesRegex(
+                semantic_verifier.VerificationError, "retained digest mismatch"
+            ):
+                semantic_verifier._artifact_digest_record(
+                    root,
+                    changed,
+                    "executor",
+                    bundle=bundle,
+                    expected_path="retained:qualified-executor.bin",
+                )
+            with self.assertRaisesRegex(
+                semantic_verifier.VerificationError, "artifact path mismatch"
+            ):
+                semantic_verifier._artifact_digest_record(
+                    root,
+                    records["executor"],
+                    "executor",
+                    bundle=bundle,
+                    expected_path="retained:unrelated.bin",
+                )
+            retained.unlink()
+            retained.symlink_to(binary)
+            with self.assertRaises(semantic_verifier.VerificationError):
+                semantic_verifier._artifact_digest_record(
+                    root,
+                    records["executor"],
+                    "executor",
+                    bundle=bundle,
+                    expected_path="retained:qualified-executor.bin",
+                )
+
+    def test_generated_artifact_copy_rejects_external_or_symlink_source(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            source = base / "source"
+            source.mkdir()
+            bundle = base / "evidence"
+            bundle.mkdir()
+            external = base / "external"
+            external.write_bytes(b"not a repository file")
+            with self.assertRaises(ValueError):
+                build_artifacts.bind_artifacts(source, bundle, {"source": external}, {})
+            symlink = base / "binary"
+            symlink.symlink_to(external)
+            with self.assertRaises(OSError):
+                build_artifacts.bind_artifacts(
+                    source, bundle, {"binary": symlink}, {"binary": "copy.bin"}
+                )
+            self.assertFalse((bundle / "copy.bin").exists())
+            fifo = base / "fifo"
+            os.mkfifo(fifo)
+            with self.assertRaises(ValueError):
+                build_artifacts.bind_artifacts(
+                    source, bundle, {"binary": fifo}, {"binary": "fifo.bin"}
+                )
+            self.assertFalse((bundle / "fifo.bin").exists())
 
     def test_trusted_release_separates_preseal_and_prepared_v010_source_roots(self):
         workflow = (ROOT / ".github/workflows/trusted-release-proof.yml").read_text(

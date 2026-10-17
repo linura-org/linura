@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools import workstation_acceptance  # noqa: E402
+from tools import development_storage  # noqa: E402
 
 STATE_ARTIFACT_TYPE = "linura-v010-q11-run-state"
 FINALIZATION_ARTIFACT_TYPE = "linura-v010-q11-candidate-finalization"
@@ -505,7 +506,19 @@ def begin_run(
         raise RunnerError(
             "Level C physical prerequisites failed: " + "; ".join(failures)
         )
-    state_root = _state_root(state_root, source_root, create=True)
+    selected_state = development_storage.require_destination(
+        source_root,
+        "arch-hyprland-hardware",
+        state_root,
+        "evidence",
+        fresh=True,
+    )
+    storage_root = development_storage.workspace.directory(
+        development_storage.arguments(None).storage_root
+    )
+    # Private creation includes every newly missing identity parent at umask 022.
+    development_storage.private_tree(storage_root, selected_state)
+    state_root = _state_root(selected_state, source_root, create=True)
     bundle_fixture = state_root / "bundle" / FIXTURE_EVIDENCE
     fixture_bytes = _read_regular(fixture_contract)
     if _sha_bytes(fixture_bytes) != fixture_digest:
@@ -667,6 +680,9 @@ def _validate_case(
 def record_case(
     source_root: Path, state_root: Path, case_id: str, attestation: Path
 ) -> dict[str, Any]:
+    development_storage.require_destination(
+        source_root, "arch-hyprland-hardware", state_root, "evidence"
+    )
     state_root = _state_root(state_root, source_root, create=False)
     with _locked_state(state_root):
         state = _load_state(state_root)
@@ -771,6 +787,9 @@ def _manifest_cases(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def finalize_run(source_root: Path, state_root: Path) -> dict[str, Any]:
+    development_storage.require_destination(
+        source_root, "arch-hyprland-hardware", state_root, "evidence"
+    )
     state_root = _state_root(state_root, source_root, create=False)
     with _locked_state(state_root):
         state = _load_state(state_root)
@@ -786,7 +805,9 @@ def finalize_run(source_root: Path, state_root: Path) -> dict[str, Any]:
                 + ", ".join(missing)
             )
         bundle = state_root / "bundle"
-        with tempfile.TemporaryDirectory(prefix="linura-q11-frozen-") as frozen_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="linura-q11-frozen-", dir=state_root
+        ) as frozen_dir:
             frozen_bundle = Path(frozen_dir) / "bundle"
             _freeze_bundle(bundle, frozen_bundle)
             bundle_digest = _bundle_snapshot_digest(frozen_bundle)
@@ -838,7 +859,7 @@ def finalize_run(source_root: Path, state_root: Path) -> dict[str, Any]:
                     )
 
             with tempfile.TemporaryDirectory(
-                prefix="linura-q11-candidate-"
+                prefix="linura-q11-candidate-", dir=state_root
             ) as temporary:
                 verification = Path(temporary) / "root"
                 _extract_source(source_root, state["source_commit_sha"], verification)
@@ -1055,6 +1076,7 @@ def main(argv: list[str]) -> int:
         return 0
     except (
         RunnerError,
+        development_storage.workspace.WorkspaceError,
         workstation_acceptance.AcceptanceError,
         OSError,
         subprocess.TimeoutExpired,

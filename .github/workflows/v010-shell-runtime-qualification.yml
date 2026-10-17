@@ -57,6 +57,12 @@ jobs:
           read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
           : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
 
+      - name: Prepare guarded qualification storage
+        env:
+          LINURA_STORAGE_ROOT: ${{ vars.LINURA_STORAGE_ROOT }}
+          LINURA_STORAGE_ID: ${{ vars.LINURA_STORAGE_ID }}
+        run: bash scripts/prepare_qualification_storage.sh arch-hyprland-runtime
+
       - name: Assert exact source and substrate contract
         run: |
           set -euo pipefail
@@ -69,11 +75,24 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ${{ runner.temp }}/arch-v010-shell-prepared.qcow2
-            ${{ runner.temp }}/arch-v010-shell-prepared.qcow2.sha256
-            ${{ runner.temp }}/arch-v010-shell-prepared.json
+            ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.qcow2
+            ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.qcow2.sha256
+            ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.json
           key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh') }}
 
+      - name: Stage restored prepared substrate into private run
+        if: steps.prepared-substrate.outputs.cache-hit == 'true'
+        run: |
+          set -euo pipefail
+          for name in arch-v010-shell-prepared.qcow2 arch-v010-shell-prepared.qcow2.sha256 arch-v010-shell-prepared.json; do
+            cached="$LINURA_VM_BASE_DIR/$name"
+            destination="$LINURA_VM_DIR/$name"
+            [[ -f "$cached" && ! -L "$cached" ]]
+            test "$(stat -c %h "$cached")" = 1
+            test "$(stat -c %d "$cached")" = "$(stat -c %d "$LINURA_VM_BASE_DIR")"
+            [[ ! -e "$destination" && ! -L "$destination" ]]
+            cp -- "$cached" "$destination"
+          done
       - name: Install disposable substrate builder dependencies
         if: steps.prepared-substrate.outputs.cache-hit != 'true'
         run: |
@@ -89,15 +108,21 @@ jobs:
         if: steps.prepared-substrate.outputs.cache-hit != 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ runner.temp }}/arch-v010-shell.qcow2
+          path: ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell.qcow2
           key: linura-v010-arch-base-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml') }}
 
       - name: Download and verify official Arch base image
         if: steps.prepared-substrate.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          image="$RUNNER_TEMP/arch-v010-shell.qcow2"
-          checksum="$RUNNER_TEMP/arch-v010-shell.qcow2.SHA256"
+          image="$LINURA_VM_BASE_DIR/arch-v010-shell.qcow2"
+          destination="$LINURA_VM_DIR/arch-v010-shell.qcow2"
+          checksum="$LINURA_WORK_DIR/arch-v010-shell.qcow2.SHA256"
+          if [[ -e "$image" || -L "$image" ]]; then
+            [[ -f "$image" && ! -L "$image" ]]
+            test "$(stat -c %h "$image")" = 1
+            test "$(stat -c %d "$image")" = "$(stat -c %d "$LINURA_VM_BASE_DIR")"
+          fi
           curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
             --output "$checksum" "$BASE_IMAGE_CHECKSUM_URL"
           expected_name="$(basename "$BASE_IMAGE_URL")"
@@ -111,6 +136,9 @@ jobs:
               --output "$image" "$BASE_IMAGE_URL"
           fi
           printf '%s  %s\n' "$digest" "$image" | sha256sum --check --strict
+          [[ ! -e "$destination" && ! -L "$destination" ]]
+          cp -- "$image" "$destination"
+          printf '%s  %s\n' "$digest" "$destination" | sha256sum --check --strict
           printf 'BASE_IMAGE_SHA256=%s\n' "$digest" >> "$GITHUB_ENV"
 
       - name: Build sanitized prepared runtime substrate
@@ -119,33 +147,47 @@ jobs:
           set -euo pipefail
           bash qualification/v010/shell-runtime/prepare-substrate.sh \
             "$SUBSTRATE_CONTRACT" \
-            "$RUNNER_TEMP/arch-v010-shell.qcow2" \
-            "$RUNNER_TEMP/arch-v010-shell-prepared.qcow2" \
-            "$RUNNER_TEMP/arch-v010-shell-prepared.json" \
-            "$RUNNER_TEMP/linura-v010-substrate-build"
-
-      - name: Save prepared runtime substrate
-        if: steps.prepared-substrate.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ${{ runner.temp }}/arch-v010-shell-prepared.qcow2
-            ${{ runner.temp }}/arch-v010-shell-prepared.qcow2.sha256
-            ${{ runner.temp }}/arch-v010-shell-prepared.json
-          key: ${{ steps.prepared-substrate.outputs.cache-primary-key }}
+            "$LINURA_VM_DIR/arch-v010-shell.qcow2" \
+            "$LINURA_VM_DIR/arch-v010-shell-prepared.qcow2" \
+            "$LINURA_VM_DIR/arch-v010-shell-prepared.json" \
+            "$LINURA_WORK_DIR/linura-v010-substrate-build"
 
       - name: Verify prepared runtime substrate
         run: |
           set -euo pipefail
-          image="$RUNNER_TEMP/arch-v010-shell-prepared.qcow2"
-          manifest="$RUNNER_TEMP/arch-v010-shell-prepared.json"
+          image="$LINURA_VM_DIR/arch-v010-shell-prepared.qcow2"
+          manifest="$LINURA_VM_DIR/arch-v010-shell-prepared.json"
           python3 qualification/v010/shell-runtime/verify-substrate.py \
             "$SUBSTRATE_CONTRACT" \
             qualification/v010/shell-runtime/prepare-substrate.sh \
             "$image" \
             "$manifest"
-          expected="$(cut -d' ' -f1 "$RUNNER_TEMP/arch-v010-shell-prepared.qcow2.sha256")"
+          expected="$(cut -d' ' -f1 "$LINURA_VM_DIR/arch-v010-shell-prepared.qcow2.sha256")"
           printf '%s  %s\n' "$expected" "$image" | sha256sum --check --strict
+
+      - name: Stage verified prepared substrate in stable prerequisite cache
+        if: steps.prepared-substrate.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          for name in arch-v010-shell-prepared.qcow2 arch-v010-shell-prepared.qcow2.sha256 arch-v010-shell-prepared.json; do
+            source="$LINURA_VM_DIR/$name"
+            destination="$LINURA_VM_BASE_DIR/$name"
+            [[ -f "$source" && ! -L "$source" ]]
+            test "$(stat -c %h "$source")" = 1
+            test "$(stat -c %d "$source")" = "$(stat -c %d "$LINURA_VM_BASE_DIR")"
+            [[ ! -e "$destination" && ! -L "$destination" ]]
+            cp -- "$source" "$destination"
+          done
+      - name: Save prepared runtime substrate
+        if: steps.prepared-substrate.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.qcow2
+            ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.qcow2.sha256
+            ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.json
+          key: ${{ steps.prepared-substrate.outputs.cache-primary-key }}
+
 
   runtime:
     name: exact-source Arch/Hyprland/Quickshell runtime
@@ -167,6 +209,12 @@ jobs:
           read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
           : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
           printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
+
+      - name: Prepare guarded qualification storage
+        env:
+          LINURA_STORAGE_ROOT: ${{ vars.LINURA_STORAGE_ROOT }}
+          LINURA_STORAGE_ID: ${{ vars.LINURA_STORAGE_ID }}
+        run: bash scripts/prepare_qualification_storage.sh arch-hyprland-runtime
 
       - name: Assert exact source and runtime contract
         run: |
@@ -208,8 +256,8 @@ jobs:
       - name: Build exact-source Linura session authority with release envelope
         run: |
           set -euo pipefail
-          cargo build --workspace --release --locked --target "$RELEASE_TARGET"
-          linurad_binary="$GITHUB_WORKSPACE/target/$RELEASE_TARGET/release/linurad"
+          cargo build --workspace --release --locked --target "$RELEASE_TARGET" --target-dir "$LINURA_CARGO_TARGET"
+          linurad_binary="$LINURA_CARGO_TARGET/$RELEASE_TARGET/release/linurad"
           test -x "$linurad_binary"
           linurad_sha256="$(sha256sum "$linurad_binary" | awk '{print $1}')"
           helper_sha256="$(sha256sum packaging/wireplumber/linura-session-audio.lua | awk '{print $1}')"
@@ -231,23 +279,35 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ${{ runner.temp }}/arch-v010-shell-prepared.qcow2
-            ${{ runner.temp }}/arch-v010-shell-prepared.qcow2.sha256
-            ${{ runner.temp }}/arch-v010-shell-prepared.json
+            ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.qcow2
+            ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.qcow2.sha256
+            ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell-prepared.json
           key: linura-v010-prepared-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('contracts/v010-shell-runtime-substrate.toml', 'qualification/v010/shell-runtime/prepare-substrate.sh') }}
           fail-on-cache-miss: true
 
+      - name: Stage prepared substrate into private runtime namespace
+        run: |
+          set -euo pipefail
+          for name in arch-v010-shell-prepared.qcow2 arch-v010-shell-prepared.qcow2.sha256 arch-v010-shell-prepared.json; do
+            cached="$LINURA_VM_BASE_DIR/$name"
+            destination="$LINURA_VM_DIR/$name"
+            [[ -f "$cached" && ! -L "$cached" ]]
+            test "$(stat -c %h "$cached")" = 1
+            test "$(stat -c %d "$cached")" = "$(stat -c %d "$LINURA_VM_BASE_DIR")"
+            [[ ! -e "$destination" && ! -L "$destination" ]]
+            cp -- "$cached" "$destination"
+          done
       - name: Verify prepared runtime substrate before boot
         run: |
           set -euo pipefail
-          image="$RUNNER_TEMP/arch-v010-shell-prepared.qcow2"
-          manifest="$RUNNER_TEMP/arch-v010-shell-prepared.json"
+          image="$LINURA_VM_DIR/arch-v010-shell-prepared.qcow2"
+          manifest="$LINURA_VM_DIR/arch-v010-shell-prepared.json"
           prepared_sha="$(python3 qualification/v010/shell-runtime/verify-substrate.py \
             "$SUBSTRATE_CONTRACT" \
             qualification/v010/shell-runtime/prepare-substrate.sh \
             "$image" \
             "$manifest")"
-          expected="$(cut -d' ' -f1 "$RUNNER_TEMP/arch-v010-shell-prepared.qcow2.sha256")"
+          expected="$(cut -d' ' -f1 "$LINURA_VM_DIR/arch-v010-shell-prepared.qcow2.sha256")"
           [[ "$prepared_sha" == "$expected" ]]
           printf '%s  %s\n' "$prepared_sha" "$image" | sha256sum --check --strict
           base_sha="$(python3 - "$manifest" <<'PY'
@@ -283,14 +343,14 @@ jobs:
       - name: Create disposable Arch cloud-init guest
         run: |
           set -euo pipefail
-          vm_image="$RUNNER_TEMP/linura-v010-shell.qcow2"
-          seed_image="$RUNNER_TEMP/linura-v010-shell-seed.img"
-          ssh_key="$RUNNER_TEMP/linura-v010-shell-key"
-          vm_log="$RUNNER_TEMP/linura-v010-shell-qemu.log"
-          artifact_dir="$RUNNER_TEMP/linura-v010-shell-artifacts"
-          user_data="$RUNNER_TEMP/v010-shell-user-data"
-          meta_data="$RUNNER_TEMP/v010-shell-meta-data"
-          network_config="$RUNNER_TEMP/v010-shell-network-config"
+          vm_image="$LINURA_VM_DIR/linura-v010-shell.qcow2"
+          seed_image="$LINURA_VM_DIR/linura-v010-shell-seed.img"
+          ssh_key="$LINURA_WORK_DIR/linura-v010-shell-key"
+          vm_log="$LINURA_WORK_DIR/linura-v010-shell-qemu.log"
+          artifact_dir="$ARTIFACT_DIR"
+          user_data="$LINURA_WORK_DIR/v010-shell-user-data"
+          meta_data="$LINURA_WORK_DIR/v010-shell-meta-data"
+          network_config="$LINURA_WORK_DIR/v010-shell-network-config"
 
           cp --reflink=auto "$PREPARED_IMAGE" "$vm_image"
           qemu-img resize "$vm_image" "${QUALIFICATION_DISK_GIB}G"
@@ -544,8 +604,8 @@ jobs:
             exit "$seat_setup_tee_status"
           fi
 
-          git archive --format=tar.gz --output="$RUNNER_TEMP/linura-source.tar.gz" "$SOURCE_SHA"
-          scp "${ssh_common[@]}" -P 2223             "$RUNNER_TEMP/linura-source.tar.gz"             linura@127.0.0.1:/tmp/linura-source.tar.gz
+          git archive --format=tar.gz --output="$LINURA_WORK_DIR/linura-source.tar.gz" "$SOURCE_SHA"
+          scp "${ssh_common[@]}" -P 2223             "$LINURA_WORK_DIR/linura-source.tar.gz"             linura@127.0.0.1:/tmp/linura-source.tar.gz
           scp "${ssh_common[@]}" -P 2223             "$LINURAD_BINARY"             linura@127.0.0.1:/tmp/linurad-qualification
           ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'sudo -n rm -rf /opt/linura-source && sudo -n install -d -o root -g root -m 0755 /opt/linura-source && sudo -n tar -xzf /tmp/linura-source.tar.gz -C /opt/linura-source && rm -f /tmp/linura-source.tar.gz && sudo -n bash /opt/linura-source/qualification/v010/shell-runtime/provision-shell-runtime.sh linura /opt/linura-source /tmp/linurad-qualification && rm -f /tmp/linurad-qualification'
 
@@ -955,7 +1015,7 @@ jobs:
         if: ${{ always() && steps.toolchain_data.outcome == 'success' }}
         run: |
           set -euo pipefail
-          artifact_dir="${ARTIFACT_DIR:-$RUNNER_TEMP/linura-v010-shell-artifacts}"
+          artifact_dir="${ARTIFACT_DIR:?dedicated evidence storage is required}"
           mkdir -p "$artifact_dir"
           if [[ -f "${VM_LOG:-}" ]]; then
             cp "$VM_LOG" "$artifact_dir/qemu.log"
@@ -973,7 +1033,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linura-v010-shell-runtime-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}-unqualified-diagnostics
-          path: ${{ runner.temp }}/linura-v010-shell-artifacts/
+          path: ${{ env.ARTIFACT_DIR }}
           if-no-files-found: warn
           retention-days: 7
           compression-level: 0
