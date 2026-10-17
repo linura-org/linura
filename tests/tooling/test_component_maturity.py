@@ -187,8 +187,49 @@ class ComponentMaturityContractTests(unittest.TestCase):
                 contract, "linura-shell", restore_future_shell
             )
 
+            # An integrated S17 executor must fail against the old v0.9
+            # candidate. Reconstruct that historical binary/workspace set,
+            # rather than weakening the future-artifact rule to fit today's tree.
+            future = self._run_checker(root)
+            self.assertNotEqual(future.returncode, 0)
+            self.assertIn(
+                "linura-executor-session: future component for v0.10.0 cannot ship in candidate v0.9.0",
+                future.stderr,
+            )
+            self._replace_component_block(
+                contract, "linura-executor-session", lambda _: ""
+            )
+            for relative, line in (
+                ("Cargo.toml", '  "executors/linura-executor-session",\n'),
+                (
+                    "tools/image.py",
+                    '    "linura-executor-session": "usr/lib/linura/linura-executor-session",\n',
+                ),
+            ):
+                path = root / relative
+                text = path.read_text(encoding="utf-8")
+                self.assertEqual(text.count(line), 1)
+                path.write_text(text.replace(line, "", 1), encoding="utf-8")
+
             result = self._run_checker(root)
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_s17_session_executor_is_integrated_experimental_not_qualified_stable(
+        self,
+    ) -> None:
+        contract = tomllib.loads(
+            (ROOT / "contracts/components.toml").read_text(encoding="utf-8")
+        )
+        executor = next(
+            item
+            for item in contract["component"]
+            if item["id"] == "linura-executor-session"
+        )
+        self.assertEqual(executor["maturity"], "integrated-experimental")
+        self.assertEqual(executor["activation_milestone"], "v0.10.0")
+        self.assertTrue(executor["release_artifact"])
+        self.assertEqual(executor["authority_role"], "privileged-executor")
+        self.assertIn("qualification remains pending", executor["scope"])
 
     def test_v08_agent_component_maturity_matches_shipped_scope(self) -> None:
         contract = tomllib.loads(

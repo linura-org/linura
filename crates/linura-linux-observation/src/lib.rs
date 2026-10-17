@@ -1,6 +1,11 @@
 #![forbid(unsafe_code)]
 
+mod logind;
 pub mod platform_discovery;
+pub use logind::{
+    LOGIND_POWER_CAPABILITY, LOGIND_POWER_CONDITIONS_CAPABILITY, LOGIND_SESSION_CAPABILITY,
+    LOGIND_SESSION_PROVIDER, LOGIND_TRANSITION_CAPABILITY, LogindSessionObserver,
+};
 
 use std::collections::{BTreeMap, HashMap};
 use std::env;

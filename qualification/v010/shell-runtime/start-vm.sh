@@ -13,6 +13,7 @@ display_backend="none"
 vnc_display=0
 run_id="${LINURA_RUN_ID:-}"
 source_root="${LINURA_SOURCE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+qmp_socket=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -62,6 +63,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --vnc-display)
             vnc_display="$2"
+            shift 2
+            ;;
+        --qmp-socket)
+            qmp_socket="$2"
             shift 2
             ;;
         *)
@@ -130,6 +135,26 @@ case "$mode:$display_backend" in
 esac
 
 snapshot_args=(-snapshot)
+qmp_args=()
+if [[ -n "$qmp_socket" ]]; then
+    # Optional qualification input transport, never TCP or an existing socket.
+    # Restrict QEMU's control channel to the invoking runner's private directory.
+    [[ "$qmp_socket" =~ ^/[a-zA-Z0-9_./-]+$ && ${#qmp_socket} -le 100 ]] || {
+        echo "invalid private QMP socket path" >&2
+        exit 2
+    }
+    qmp_parent="$(dirname -- "$qmp_socket")"
+    [[ "$(realpath -e -- "$qmp_parent")" == "$qmp_parent" &&
+    "$(stat -c '%u:%a' -- "$qmp_parent")" == "$EUID:700" &&
+    ! -e "$qmp_socket" && ! -L "$qmp_socket" ]] || {
+        echo "QMP requires an unused socket in an owned private directory" >&2
+        exit 2
+    }
+    umask 077
+    qmp_args=(-qmp "unix:$qmp_socket,server=on,wait=off"
+        -device qemu-xhci,id=linura-s17-input-usb
+        -device usb-tablet,bus=linura-s17-input-usb.0)
+fi
 if [[ "$persistent" -eq 1 ]]; then
     snapshot_args=()
 fi
@@ -156,5 +181,6 @@ exec qemu-system-x86_64 \
     -device virtio-gpu-pci,id=linura-qualification-gpu,bus=pcie.0,addr=0x2 \
     -nic "user,model=virtio-net-pci,mac=$nic_mac,hostfwd=tcp:127.0.0.1:$ssh_port-:22" \
     "${display_args[@]}" \
+    "${qmp_args[@]}" \
     -serial mon:stdio \
     "${snapshot_args[@]}"

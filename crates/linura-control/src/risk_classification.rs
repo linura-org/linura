@@ -4,6 +4,7 @@ use linura_core::RiskClass;
 use linura_planner::{PlanStatus, ReconciliationPlan};
 
 pub(crate) const BASELINE_RISK_POLICY_REVISION: &str = "risk-policy:v0.3:1";
+const SESSION_LOCK_RISK_POLICY_REVISION: &str = "risk-policy:v0.10:session-lock:1";
 pub(crate) const REGISTERED_OPERATION_RISK_POLICY_REVISION: &str =
     "risk-policy:v0.10:registered-operation-floor";
 pub(crate) const REGISTERED_TRANSIENT_RISK_POLICY_REVISION: &str =
@@ -194,6 +195,41 @@ impl RiskPolicy {
 }
 
 pub(crate) fn classify_plan_risk(plan: &ReconciliationPlan) -> RiskClassification {
+    if plan.provider.as_str() == crate::operation_registry::MANAGED_SESSION_TRANSITION_PROVIDER
+        && plan.observation_capability.as_str()
+            == crate::operation_registry::MANAGED_SESSION_TRANSITION_CAPABILITY
+    {
+        let rules = crate::operation_registry::SESSION_TRANSITION_ROUTES
+            .into_iter()
+            .map(|(_, _, resource_prefix, id, risk)| RiskRule {
+                id,
+                provider: "logind",
+                capability: "session.transition.observe",
+                resource_prefix,
+                change_keys: &["completed"],
+                risk,
+            })
+            .collect();
+        return RiskPolicy {
+            revision: "risk-policy:v0.10:session-transition:1",
+            rules,
+        }
+        .classify(plan);
+    }
+    if plan.provider.as_str() == "session-locker" {
+        return RiskPolicy {
+            revision: SESSION_LOCK_RISK_POLICY_REVISION,
+            rules: vec![RiskRule {
+                id: "session.native-lock.security-sensitive",
+                provider: "session-locker",
+                capability: "session.secure-lock.observe",
+                resource_prefix: "session:lock:",
+                change_keys: &["secure"],
+                risk: RiskClass::SecuritySensitive,
+            }],
+        }
+        .classify(plan);
+    }
     RiskPolicy::baseline().classify(plan)
 }
 

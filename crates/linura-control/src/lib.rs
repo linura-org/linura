@@ -24,13 +24,29 @@ mod operation_semantics;
 mod plan_preview;
 mod platform_compatibility;
 mod policy_review;
+mod protective_lock_execution;
+mod protective_sleep_gate;
+pub use protective_sleep_gate::{
+    NativeSleepCoveragePort, NativeSleepGateAttempt, NativeSleepGateMonitor,
+    coordinate_native_sleep_coverage,
+};
+mod protective_lock_safety;
+mod protective_lock_settings;
+pub use protective_lock_settings::{
+    PROTECTIVE_LOCK_SETTING_REQUEST_PREFIX, ProtectiveLockConfigurationReceipt,
+    ProtectiveLockConfigurationRequest, ProtectiveLockSettingsControl,
+};
 #[path = "proposal_acceptance_secure.rs"]
 mod proposal_acceptance;
 mod proposal_authority;
+mod retained_request;
 mod review_projection;
 mod risk_classification;
 mod secure_agent_interpretation;
 mod secure_proposal_acceptance;
+mod session_power_plan;
+mod session_safety;
+mod session_transition;
 mod transient_effect;
 
 pub use agent_interpretation::{
@@ -58,12 +74,16 @@ pub use managed_lifecycle::{
     AuthorizedEffect, AuthorizedEffectExecutor, IndependentManagedVerifier,
     MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_INTENT_ORIGIN, MANAGED_SYSTEMD_OPERATION,
     MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
-    ManagedApprovalAuthorizer, ManagedApprovalChallenge, ManagedLifecycleControl,
-    ManagedLifecycleError, ManagedMutationReceipt, TrustedHumanApproval, managed_request_id,
+    ManagedApprovalAuthorizer, ManagedApprovalChallenge, ManagedApprovalClass,
+    ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt, TrustedHumanApproval,
+    managed_request_id,
 };
 pub use operation_registry::{
-    TRANSIENT_AUDIO_CAPABILITY, TRANSIENT_AUDIO_PROVIDER, TRANSIENT_AUDIO_RESOURCE_PREFIX,
-    TRANSIENT_AUDIO_VOLUME_CHANGE_KEY, TRANSIENT_AUDIO_VOLUME_OPERATION_ID,
+    MANAGED_SESSION_LOCK_CAPABILITY, MANAGED_SESSION_LOCK_OPERATION_ID,
+    MANAGED_SESSION_LOCK_PROVIDER, MANAGED_SESSION_TRANSITION_CAPABILITY,
+    MANAGED_SESSION_TRANSITION_PROVIDER, TRANSIENT_AUDIO_CAPABILITY, TRANSIENT_AUDIO_PROVIDER,
+    TRANSIENT_AUDIO_RESOURCE_PREFIX, TRANSIENT_AUDIO_VOLUME_CHANGE_KEY,
+    TRANSIENT_AUDIO_VOLUME_OPERATION_ID,
 };
 pub use operation_semantics::{
     OperationPlanBindingMismatch, OperationSemanticsControl, OperationSemanticsError,
@@ -82,8 +102,15 @@ pub use proposal_acceptance::{
     ProposalAcceptanceDecision,
 };
 pub use proposal_authority::{ControlProposalAuthority, ProposalDecisionIssueRequest};
+pub use protective_lock_safety::{ProtectiveLockSafetyError, ProtectiveLockSafetyReview};
 pub use secure_agent_interpretation::{AdapterHealth, ControlInterpretationEngine};
 pub use secure_proposal_acceptance::ProposalAcceptanceControl;
+pub use session_safety::{
+    SessionAction, SessionPowerSafetyReview, SessionSafetyError, SessionSafetyReview,
+};
+pub use session_transition::{
+    SessionTransitionPostcondition, review_session_transition_postcondition,
+};
 pub use transient_effect::{
     AuthorizedTransientEffect, TransientEffectAuditDisposition, TransientEffectAuditError,
     TransientEffectAuditFailureCode, TransientEffectAuditRecord, TransientEffectAuditSink,
