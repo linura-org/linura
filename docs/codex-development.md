@@ -62,6 +62,12 @@ or fleet credentials to an ordinary coding environment.
 
 ## Inspect capabilities before work
 
+For a separate local instance, the repository-defined
+[isolated development base](../tools/codex/container/README.md) supplies
+snapshot-pinned prerequisites and uses the same canonical setup/tool locks.
+Create it explicitly rather than repairing a host or an active task environment.
+Its readiness and builds are development checks, not qualification evidence.
+
 ```bash
 python3 tools/codex/doctor.py --profile core
 python3 tools/codex/doctor.py --profile editor --json
@@ -125,6 +131,17 @@ QEMU topologies, FFmpeg codecs, GPU drivers, C++ features, running compositors,
 Quickshell imports or session services. Those are proved by the applicable real
 builds and qualification workflows. Never install a second unpinned desktop stack
 in a coding container as a substitute for the pinned graphical guest substrate.
+
+S17's official native Polkit/GLib adapter has a separate repository-defined
+[authentication development builder](../tools/codex/native-auth/README.md).
+Explicit image creation uses a digest-pinned Ubuntu-based image, signed HTTPS
+archive snapshot, full installed-package graph digest and exact capability pins.
+The named development container leaves the host and any existing environment
+unchanged, mounts source read-only, drops all capabilities and has no network or
+host/session sockets. Its readiness checks and component builds are **not native
+qualification evidence**; it neither replaces the Codex Rust preflight nor
+qualifies the Qt/Wayland/PAM/session runtime. Canonical CI builds and tests these
+components with authentication enabled from the same repository recipe.
 
 Build the Python wheel offline after `--bindings` setup:
 

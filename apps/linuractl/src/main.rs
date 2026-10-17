@@ -5,9 +5,12 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 use linura_sdk::{
-    ActorKind, CapabilityId, IntentId, LocalControlClient, LocalSessionClient,
-    LocalSessionEffectReceipt, PlanDesiredStateRequest, PlanId, PlanPreview, PlanReview,
-    ProtocolVersion, ProviderId, RequestId, RequirementId, ResourceId, RiskClass, SemanticReason,
+    ActorKind, CapabilityId, IntentId, LocalAuthorityClient, LocalControlClient,
+    LocalSessionClient, LocalSessionEffectReceipt, PlanDesiredStateRequest, PlanId, PlanPreview,
+    PlanReview, ProtectiveLockSettingReceipt, ProtectiveLockSettingRequest, ProtocolVersion,
+    ProviderId, RequestId, RequirementId, ResourceId, RiskClass, SemanticReason, SessionEpoch,
+    SessionLockId, SessionLockReceipt, SessionLockRequest, SessionTransitionCompletion,
+    SessionTransitionReceipt, SessionTransitionRequest,
 };
 
 #[derive(Clone, Copy)]
@@ -18,6 +21,81 @@ struct CommandInfo {
 }
 
 const COMMANDS: &[CommandInfo] = &[
+    CommandInfo {
+        name: "native-sleep-gate-status",
+        summary: "Read own-login sleep diagnostics, never current protection or successful sleep",
+        offline: false,
+    },
+    CommandInfo {
+        name: "configure-protective-lock",
+        summary: "Authenticate exact login-scoped protective-lock consent; does not lock or sleep",
+        offline: false,
+    },
+    CommandInfo {
+        name: "protective-lock-setting",
+        summary: "Read retained consent for an exact own-login epoch, not native protection",
+        offline: false,
+    },
+    CommandInfo {
+        name: "protective-lock-setting-status",
+        summary: "Inspect a lost-reply consent request without reapplying or reenabling it",
+        offline: false,
+    },
+    CommandInfo {
+        name: "own-session-transition",
+        summary: "Query an exact power target with a native suspend baseline",
+        offline: false,
+    },
+    CommandInfo {
+        name: "transition-session",
+        summary: "Request a managed suspend/logout/reboot/power-off from a secure lock",
+        offline: false,
+    },
+    CommandInfo {
+        name: "session-transition-status",
+        summary: "Read historical durable power status, not current machine state",
+        offline: false,
+    },
+    CommandInfo {
+        name: "recover-session-transition",
+        summary: "Observe-only power recovery; never replay a transition",
+        offline: false,
+    },
+    CommandInfo {
+        name: "acknowledge-session-transition",
+        summary: "Acknowledge a committed suspend without another effect or unlock",
+        offline: false,
+    },
+    CommandInfo {
+        name: "own-session-lock",
+        summary: "Query the exact native own-session lock generation",
+        offline: false,
+    },
+    CommandInfo {
+        name: "lock-session",
+        summary: "Request a managed lock after native purpose-bound confirmation",
+        offline: false,
+    },
+    CommandInfo {
+        name: "unlock-session",
+        summary: "Request a managed release after native owner authentication",
+        offline: false,
+    },
+    CommandInfo {
+        name: "session-lock-status",
+        summary: "Read historical durable request status, not current coverage",
+        offline: false,
+    },
+    CommandInfo {
+        name: "recover-session-lock",
+        summary: "Observe-only managed recovery; never replay the effect",
+        offline: false,
+    },
+    CommandInfo {
+        name: "acknowledge-session-release",
+        summary: "Acknowledge a committed verified release without another effect",
+        offline: false,
+    },
     CommandInfo {
         name: "version",
         summary: "Show Linura and protocol version",
@@ -100,6 +178,155 @@ fn main() {
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("native-sleep-gate-status") => {
+            require_arity(&args, 1, "native-sleep-gate-status")?;
+            let status = LocalAuthorityClient::connect()?.own_native_sleep_gate_status()?;
+            field("own_login", status.epoch.resource_id()?.as_str());
+            field("process_retained_native_sleep_gate", status.state.as_str());
+            field("current_native_protection", "not-queried");
+            field("successful_sleep", "not-claimed");
+        }
+        Some("configure-protective-lock") => {
+            require_arity(
+                &args,
+                4,
+                "configure-protective-lock <enable|revoke> <operation-id> <exact-lock-resource>",
+            )?;
+            let enabled = protective_lock_decision(&args[1])?;
+            let lock = SessionLockId::from_resource(&ResourceId::new(&args[3])?)?;
+            let receipt = LocalAuthorityClient::connect()?.configure_protective_lock(
+                &ProtectiveLockSettingRequest {
+                    operation_id: args[2].clone(),
+                    lock,
+                    enabled,
+                },
+            )?;
+            print_protective_lock_setting(&receipt)?;
+        }
+        Some("protective-lock-setting") => {
+            require_arity(
+                &args,
+                2,
+                "protective-lock-setting <exact-session-epoch-resource>",
+            )?;
+            let epoch = SessionEpoch::from_resource(&ResourceId::new(&args[1])?)?;
+            let receipt =
+                LocalAuthorityClient::connect()?.recorded_protective_lock_setting(&epoch)?;
+            if let Some(receipt) = receipt {
+                print_protective_lock_setting(&receipt)?;
+            } else {
+                field("retained_consent", "absent-default-deny");
+                field("current_native_protection", "not-queried");
+            }
+        }
+        Some("protective-lock-setting-status") => {
+            require_arity(&args, 2, "protective-lock-setting-status <request-id>")?;
+            let receipt = LocalAuthorityClient::connect()?
+                .protective_lock_setting_request_status(&RequestId::new(&args[1])?)?;
+            print_protective_lock_setting(&receipt)?;
+        }
+        Some("own-session-transition") => {
+            require_arity(
+                &args,
+                2,
+                "own-session-transition <suspend|logout|reboot|power-off>",
+            )?;
+            let action = transition_action(&args[1])?;
+            let target = LocalAuthorityClient::connect()?.own_session_transition(action)?;
+            field("resource", target.resource_id()?.as_str());
+        }
+        Some("transition-session") => {
+            require_arity(
+                &args,
+                4,
+                "transition-session <suspend|logout|reboot|power-off> <operation-id> <reason>",
+            )?;
+            let action = transition_action(&args[1])?;
+            let client = LocalAuthorityClient::connect()?;
+            let receipt = client.converge_session_transition(&SessionTransitionRequest {
+                operation_id: args[2].clone(),
+                target: client.own_session_transition(action)?,
+                reason: args[3].clone(),
+            })?;
+            print_transition_receipt(&receipt)?;
+        }
+        Some("session-transition-status") => {
+            require_arity(&args, 2, "session-transition-status <request-id>")?;
+            let status = LocalAuthorityClient::connect()?
+                .session_transition_request_status(&RequestId::new(&args[1])?)?;
+            field("request_id", status.request_id.as_str());
+            field("transaction_id", &status.transaction_id);
+            field("resource", status.target.resource_id()?.as_str());
+            field("historical_transaction_state", &status.state);
+            field("current_native_power_state", "not-queried");
+        }
+        Some("recover-session-transition") => {
+            require_arity(&args, 2, "recover-session-transition <request-id>")?;
+            let receipt = LocalAuthorityClient::connect()?
+                .recover_session_transition(&RequestId::new(&args[1])?)?;
+            print_transition_receipt(&receipt)?;
+        }
+        Some("acknowledge-session-transition") => {
+            require_arity(&args, 2, "acknowledge-session-transition <request-id>")?;
+            let acknowledged = LocalAuthorityClient::connect()?
+                .acknowledge_session_transition(&RequestId::new(&args[1])?)?;
+            field(
+                "native_transition_acknowledged",
+                if acknowledged { "true" } else { "false" },
+            );
+            field("effect_replayed", "false");
+        }
+        Some("own-session-lock") => {
+            require_arity(&args, 1, "own-session-lock")?;
+            let lock = LocalAuthorityClient::connect()?.own_session_lock()?;
+            field("resource", lock.resource_id()?.as_str());
+        }
+        Some("lock-session" | "unlock-session") => {
+            require_arity(
+                &args,
+                3,
+                "lock-session|unlock-session <operation-id> <reason>",
+            )?;
+            let client = LocalAuthorityClient::connect()?;
+            let request = SessionLockRequest {
+                operation_id: args[1].clone(),
+                lock: client.own_session_lock()?,
+                secure: args[0] == "lock-session",
+                reason: args[2].clone(),
+            };
+            let receipt = client.converge_session_lock(&request)?;
+            print_lock_receipt(&receipt)?;
+        }
+        Some("session-lock-status") => {
+            require_arity(&args, 2, "session-lock-status <request-id>")?;
+            let request = RequestId::new(&args[1])?;
+            let status = LocalAuthorityClient::connect()?.session_lock_request_status(&request)?;
+            field("request_id", status.request_id.as_str());
+            field("transaction_id", &status.transaction_id);
+            field("resource", status.lock.resource_id()?.as_str());
+            field(
+                "desired_secure",
+                if status.secure { "true" } else { "false" },
+            );
+            field("historical_transaction_state", &status.state);
+            field("current_native_coverage", "not-queried");
+        }
+        Some("recover-session-lock") => {
+            require_arity(&args, 2, "recover-session-lock <request-id>")?;
+            let receipt = LocalAuthorityClient::connect()?
+                .recover_session_lock(&RequestId::new(&args[1])?)?;
+            print_lock_receipt(&receipt)?;
+        }
+        Some("acknowledge-session-release") => {
+            require_arity(&args, 2, "acknowledge-session-release <request-id>")?;
+            let acknowledged = LocalAuthorityClient::connect()?
+                .acknowledge_session_lock_release(&RequestId::new(&args[1])?)?;
+            field(
+                "native_release_acknowledged",
+                if acknowledged { "true" } else { "false" },
+            );
+            field("effect_replayed", "false");
+        }
         Some("version") => {
             require_arity(&args, 1, "version")?;
             let version = ProtocolVersion::default();
@@ -281,6 +508,94 @@ fn parse_observe_args(args: &[String]) -> Result<(&str, &str, &str), Box<dyn Err
                 .into(),
         ))),
     }
+}
+
+fn protective_lock_decision(value: &str) -> Result<bool, Box<dyn Error>> {
+    match value {
+        "enable" => Ok(true),
+        "revoke" => Ok(false),
+        _ => Err("protective-lock decision must be enable or revoke".into()),
+    }
+}
+
+fn print_protective_lock_setting(
+    receipt: &ProtectiveLockSettingReceipt,
+) -> Result<(), Box<dyn Error>> {
+    field("request_id", receipt.request_id.as_str());
+    field(
+        "confirmation_lock",
+        receipt.confirmed_lock.resource_id()?.as_str(),
+    );
+    field(
+        "recorded_consent",
+        if receipt.enabled {
+            "enabled"
+        } else {
+            "revoked"
+        },
+    );
+    field("intent_id", receipt.intent_id.as_str());
+    field("revision_id", receipt.revision_id.as_str());
+    field(
+        "confirmed_at_unix_ms",
+        &receipt.confirmed_at_unix_ms.to_string(),
+    );
+    field(
+        "latest_for_recorded_epoch",
+        &receipt.latest_for_epoch.to_string(),
+    );
+    field("current_native_protection", "not-queried");
+    Ok(())
+}
+
+fn print_lock_receipt(receipt: &SessionLockReceipt) -> Result<(), Box<dyn Error>> {
+    field("request_id", receipt.request_id.as_str());
+    field("transaction_id", &receipt.transaction_id);
+    field("resource", receipt.lock.resource_id()?.as_str());
+    field(
+        "desired_secure",
+        if receipt.secure { "true" } else { "false" },
+    );
+    field("completion", "verified-committed-reconciled");
+    field(
+        "recovered",
+        if receipt.recovered { "true" } else { "false" },
+    );
+    field("effect_digest", &receipt.effect_digest);
+    field("stages", &receipt.stages.join(","));
+    Ok(())
+}
+
+fn transition_action(action: &str) -> Result<&str, CliError> {
+    match action {
+        "suspend" | "logout" | "reboot" | "power-off" => Ok(action),
+        _ => Err(CliError(
+            "unsupported session transition; no force/skip/ambient action is accepted".into(),
+        )),
+    }
+}
+
+fn print_transition_receipt(receipt: &SessionTransitionReceipt) -> Result<(), Box<dyn Error>> {
+    field("request_id", receipt.request_id.as_str());
+    field("transaction_id", &receipt.transaction_id);
+    field("resource", receipt.target.resource_id()?.as_str());
+    field("completion", "verified-committed-reconciled");
+    field(
+        "postcondition",
+        match receipt.completion {
+            SessionTransitionCompletion::ResumedSecurely => "resumed-securely",
+            SessionTransitionCompletion::OriginalSessionEnded => "original-session-ended",
+            SessionTransitionCompletion::OriginalBootEnded => "original-boot-ended",
+        },
+    );
+    field("current_native_power_state", "not-inferred");
+    field(
+        "recovered",
+        if receipt.recovered { "true" } else { "false" },
+    );
+    field("effect_digest", &receipt.effect_digest);
+    field("stages", &receipt.stages.join(","));
+    Ok(())
 }
 
 fn parse_plan_preview_args(args: &[String]) -> Result<PlanDesiredStateRequest, Box<dyn Error>> {
@@ -641,7 +956,9 @@ fn escaped(value: &str) -> String {
 
 fn print_help() {
     println!("linuractl {}", env!("CARGO_PKG_VERSION"));
-    println!("Authenticated Linura observation and non-executable planning client.");
+    println!(
+        "Authenticated Linura control client; sensitive effects require native managed authority."
+    );
     println!();
     println!("Commands:");
     println!("  version");
@@ -660,9 +977,33 @@ fn print_help() {
     println!("  review-plan <plan-id>");
     println!("  explain-plan-review <plan-id>");
     println!("  set-audio-output-volume <request-id> <node-id> <volume-percent> <reason>");
+    println!("  own-session-lock");
+    println!("  native-sleep-gate-status");
+    println!("  configure-protective-lock <enable|revoke> <operation-id> <exact-lock-resource>");
+    println!("  protective-lock-setting <exact-session-epoch-resource>");
+    println!("  protective-lock-setting-status <request-id>");
+    println!("  lock-session <operation-id> <reason>");
+    println!("  unlock-session <operation-id> <reason>");
+    println!("  session-lock-status <request-id>");
+    println!("  recover-session-lock <request-id>");
+    println!("  acknowledge-session-release <request-id>");
+    println!("  own-session-transition <suspend|logout|reboot|power-off>");
+    println!("  transition-session <suspend|logout|reboot|power-off> <operation-id> <reason>");
+    println!("  session-transition-status <request-id>");
+    println!("  recover-session-transition <request-id>");
+    println!("  acknowledge-session-transition <request-id>");
     println!("  help");
     println!();
     println!("Plan preview origin flags: --intent, --requirement, --capability-origin");
+    println!(
+        "Session operation IDs are stable lowercase slugs. Never put credentials in arguments or reasons."
+    );
+    println!(
+        "After an uncertain session result, inspect request:v010:session-lock:<operation-id> status; recovery never replays the effect."
+    );
+    println!(
+        "Power requires a verified secure lock first. Track request:v010:session-transition:<operation-id>; a dispatch reply never proves completion."
+    );
 }
 
 #[derive(Debug)]
@@ -779,6 +1120,24 @@ mod tests {
     }
 
     #[test]
+    fn protective_consent_parser_has_no_automatic_or_force_mode() {
+        assert!(protective_lock_decision("enable").unwrap_or_else(|e| unreachable!("{e}")));
+        assert!(!protective_lock_decision("revoke").unwrap_or_else(|e| unreachable!("{e}")));
+        for value in [
+            "",
+            "true",
+            "false",
+            "Enable",
+            "force",
+            "automatic",
+            "sleep",
+            "unlock",
+        ] {
+            assert!(protective_lock_decision(value).is_err());
+        }
+    }
+
+    #[test]
     fn command_catalog_is_unique_and_keeps_json_introspection() {
         let names: BTreeSet<_> = COMMANDS.iter().map(|command| command.name).collect();
         assert_eq!(names.len(), COMMANDS.len());
@@ -788,6 +1147,30 @@ mod tests {
         assert!(names.contains("get-plan-preview"));
         assert!(names.contains("explain-plan-preview"));
         assert!(names.contains("set-audio-output-volume"));
+        for name in [
+            "native-sleep-gate-status",
+            "configure-protective-lock",
+            "protective-lock-setting",
+            "protective-lock-setting-status",
+            "own-session-lock",
+            "lock-session",
+            "unlock-session",
+            "session-lock-status",
+            "recover-session-lock",
+            "acknowledge-session-release",
+            "own-session-transition",
+            "transition-session",
+            "session-transition-status",
+            "recover-session-transition",
+            "acknowledge-session-transition",
+        ] {
+            assert!(names.contains(name));
+            assert!(
+                COMMANDS
+                    .iter()
+                    .any(|command| command.name == name && !command.offline)
+            );
+        }
 
         let json = commands_json();
         assert!(json.starts_with('['));
@@ -803,5 +1186,25 @@ mod tests {
     #[test]
     fn json_strings_escape_control_characters() {
         assert_eq!(json_string("a\n\"b\\c\t"), "\"a\\n\\\"b\\\\c\\t\"");
+    }
+
+    #[test]
+    fn transition_actions_are_fixed_without_shell_aliases_or_force_modes() {
+        for action in ["suspend", "logout", "reboot", "power-off"] {
+            assert_eq!(transition_action(action).ok(), Some(action));
+        }
+        for action in [
+            "",
+            "shutdown",
+            "hibernate",
+            "force",
+            "--force",
+            "reboot --force",
+            "suspend\n",
+            "poweroff",
+            "Reboot",
+        ] {
+            assert!(transition_action(action).is_err());
+        }
     }
 }

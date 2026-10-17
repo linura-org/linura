@@ -4,6 +4,11 @@ All notable changes to Linura will be documented here. Version entries stay conc
 
 ## [Unreleased]
 
+### Added
+
+- Experimental S17 vertical implementation: protected native locker/PAM, managed lock/unlock and session/power operations, durable observe-only recovery, and typed first-party controls.
+- Explicit login-scoped protective pre-sleep locking, nonsecret native assistive metadata, offline recovery guidance, and guarded exact-source Arch/Hyprland qualification runners. S17 remains planned pending complete native/interaction evidence and exact-head gates; this is not a production-support claim.
+
 ## [0.8.0] - 2026-09-10
 
 Experimental proposal-only agent interpretation and typed `IntentProposal`. Full release contract: [`docs/releases/v0.8.0.md`](docs/releases/v0.8.0.md).

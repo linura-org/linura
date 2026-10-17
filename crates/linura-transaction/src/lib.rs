@@ -1,5 +1,15 @@
 #![forbid(unsafe_code)]
 
+mod approved_request;
+mod protective_lock_setting;
+pub use approved_request::{
+    ApprovedRequestJournal, MAX_RETAINED_REQUEST_BYTES, RETAINED_REQUEST_FORMAT, RetainedRequest,
+};
+pub use protective_lock_setting::{
+    MAX_PROTECTIVE_LOCK_SETTING_BYTES, ProtectiveLockSettingRecord, ProtectiveLockSettingStore,
+    ProtectiveLockSettingUpdate,
+};
+
 use std::fmt::{Display, Formatter};
 
 use hmac::{Hmac, Mac};

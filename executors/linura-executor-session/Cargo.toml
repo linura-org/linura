@@ -1,0 +1,20 @@
+[package]
+name = "linura-executor-session"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+linura-core = { path = "../../crates/linura-core" }
+linura-linux-session = { path = "../../crates/linura-linux-session" }
+linura-provider-sdk = { path = "../../crates/linura-provider-sdk" }
+zbus = { version = "=5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
+blocking = "1.6"
+
+[dev-dependencies]
+async-io = "2.6"
+
+[lints]
+workspace = true

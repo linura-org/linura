@@ -14,4 +14,6 @@ airootfs_image_type="squashfs"
 airootfs_image_tool_options=("-comp" "zstd" "-Xcompression-level" "15")
 file_permissions=(
     ["/usr/lib/linura/linura-session-audio.lua"]="0:0:0644"
+    ["/usr/lib/linura/linura-security-owner"]="0:0:0755"
+    ["/usr/lib/linura/linura-security-owner-install-capability"]="0:0:0755"
 )

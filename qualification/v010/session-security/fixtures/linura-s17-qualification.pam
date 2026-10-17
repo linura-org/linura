@@ -1,0 +1,8 @@
+#%PAM-1.0
+# Disposable VM fixture only. PID 1 opens the session for the fixed user; this
+# service cannot authenticate a login or change a password. Preserve the real
+# distribution account and session stacks, including pam_systemd/logind.
+auth required pam_deny.so
+account include system-local-login
+password required pam_deny.so
+session include system-local-login
