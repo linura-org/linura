@@ -1443,7 +1443,7 @@ pass_case "workstation-visual-recording"
     quickshell --version
 } > "$evidence_root/runtime-versions.txt"
 
-pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite ffmpeg wf-recorder wayland \
+pacman -Q systemd base-devel cmake ninja pkgconf dbus seatd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast pipewire pipewire-audio wireplumber networkmanager sqlite ffmpeg wf-recorder wayland wayland-protocols polkit at-spi2-core libcap libxkbcommon libx11 fontconfig ttf-dejavu \
     | LC_ALL=C sort > "$evidence_root/package-versions.txt"
 
 expected_cases=21

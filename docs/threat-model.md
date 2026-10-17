@@ -387,6 +387,192 @@ A provider or agent runtime emits malformed typed data, authority claims, hidden
 - deterministic Linura Control acceptance independently re-establishes authenticated principal, current authority context/freshness, capability-registry resolution and the exact-bound acceptance decision;
 - negative qualification covers escalation, malformed/oversized output and provider/runtime failure paths.
 
+## S17 native session-security threats (implementation in progress)
+
+These are required boundaries, not completed native qualification or a production
+support claim. See proposed [ADR 0042](adr/0042-s17-session-security-and-power-authority.md)
+for the current implementation status.
+
+- Session-id/PID/UID reuse cannot inherit approval: bind kernel boot, session
+  creation generation, attested security-owner invocation and native lock
+  generation in typed resource identity. Counter reset after owner restart does
+  not recreate an old approval target.
+- A logind hint, cached observation, client boolean, PAM/agent success signal or
+  executor acknowledgement cannot prove secure compositor coverage or completion.
+- Protective locking is an explicit, login-scoped, revocable owner policy, not
+  an implicit root/service exemption. Separate enable/revoke owner-authentication
+  purposes bind the exact lock, request, desired setting, previous revision and
+  evidence. Wrong-owner PAM identities, manual/unlock/power proof substitution,
+  lost coverage and policy drift during interaction cannot enroll a grant.
+  Configuration is security-sensitive Linura-owned state with no privileged
+  effect. Its separate keyed FULL-sync WAL journal authenticates bounded immutable
+  history and the global tip; atomic CAS and read-only historic receipts prevent
+  a retried enable from undoing revocation. Missing/corrupt/expired/unknown state
+  denies use, and full storage rollback remains a separate recovery assumption.
+  Fresh authenticated current consent must be re-read at every managed prepare
+  and handoff; a stored record or constructed policy value is not a credential.
+- A protective sleep initiator must be attested as the exact root-supervised
+  pre-start helper of the current native suspend invocation, including immutable
+  configuration/image/argv, live PID generation and not-yet-started kernel entry.
+  Root UID, service Actor text and `PrepareForSleep` alone prove neither this gate
+  nor a physical lid event. The initiating principal must remain the protective
+  service, distinct from approved owner-intent provenance. Canonical managed lock
+  risk and durable recovery are unchanged; the exception never unlocks or requests
+  power. Event identity is stable across retries/owner restarts. Revocation,
+  stale/other invocation and owner generation changes invalidate new authority.
+  Observe-only crash recovery cannot reconstruct dispatch permission.
+  The protective managed entry point derives the fixed actor/request internally;
+  neither manual mutation nor public planning can select its private policy
+  context. Fresh canonical preconditions are rebuilt at prepare and handoff,
+  while the original observation deadline still bounds dispatch. Current-store
+  failure, revocation, seat/generation drift or event loss stops before execution.
+  Recovery authenticates the retained service namespace and exact transaction
+  anchor without consulting consent or recreating a live event credential.
+  A concrete exclusive received-helper scope re-attests each native probe;
+  cleanup cannot clear a later binding, and sequence/scope exhaustion fails closed.
+- Delay inhibitors expire and cannot be claimed as sleep-denial enforcement.
+  Native entry must refuse continuation without fresh verified coverage and fence
+  it against concurrent unlock. Already-secured managed suspend must not require
+  automatic-lock enrollment. Unsupported native paths require coverage or denial;
+  root/kernel bypasses have no universal prevention claim. Protection failure may
+  leave a closed laptop awake, with a visible battery/heat tradeoff. The private
+  no-argument `SleepGate1` route uses actual received-helper metadata and separate
+  bounded coverage coordination; root bus admission is never policy. Already-secure
+  coverage does not wait on the managed mutation mutex or require protective
+  enrollment. Uncovered sessions still enter the single durable managed lifecycle;
+  busy/poisoned admission denies, never creates parallel authority. The owner's
+  independent native fence denies concurrent unlock until exact job completion or
+  freshly authenticated native unit absence. Counters/timeouts/Control replies
+  alone cannot clear it. Sanitized bounded diagnostics are published only after
+  native received-helper attestation; early error/unwind records denial. A
+  no-input own-login query independently checks current native identity and never
+  waits behind managed execution. Unknown, busy, restart and invalid replies
+  cannot become cached protection claims. The shell warns of failed sleep and
+  ventilation risk without exposing raw errors, other owners, event IDs or an
+  authentication/action interface. Historical fenced coverage is never evidence
+  of current security or a successful sleep cycle. Missing initial helper admission
+  cannot be inferred from process-local reporting; native qualification remains
+  required. The image disables unqualified hibernation modes rather
+  than accepting an uncovered alternative entry. Native deployment, recovery and
+  real qualification remain unfinished. The owner-authenticated setting endpoint and owner-scoped historical
+  queries expose consent provenance only. No seal/permit is returned; stale
+  receipts cannot reenroll, and latest-in-epoch history is not active-session or
+  native protection evidence. These routes do not activate automatic locking.
+- Unlock uses a purpose-scoped session-owner class. It cannot authorize another
+  owner, a later lock, administrator work, destructive actions, or agent approval.
+  General baseline protected approval strength remains actor-invariant.
+- Raw PAM questions may themselves contain sensitive/provider-controlled text.
+  Only a bounded closed prompt kind, step and official native authentication UID
+  become fixed presentation labels; unknown/localized questions stay generic.
+  Response echo remains masked irrespective of the native echo flag. Cancellation
+  or visibility loss during response delivery defers teardown until the protected
+  buffer's borrowed pointer has returned and been wiped, then denies completion.
+  Accessibility exposes fixed names and password-field/focus/availability metadata
+  only: no text, editable-text, value or action interface, response contents,
+  selection, cursor or response length. Offscreen Qt coordinates are not native
+  multi-monitor geometry. Real AT-SPI traversal/input qualification is still due.
+- Suspend, logout, reboot and power-off have distinct transition identities and
+  native authentication purposes. Only the exact canonical challenge can consume
+  its fresh one-use proof. Power authentication uses separate non-retained admin
+  actions, not session-owner unlock permission, and leaves secure coverage intact.
+  Control alone derives completion; provider-supplied `completed`, dispatch
+  acknowledgement, reply loss and idle/awake snapshots cannot prove a transition.
+  Retained S17 transition recovery is observe-only and cannot reprepare or replay.
+- Native owner authentication must come from the trusted system authentication
+  boundary for the exact canonical challenge. Fixed non-retained Polkit actions
+  are checked through a scrubbed environment on the canonical system bus; raw
+  authorization-process diagnostics and credentials are not logged or forwarded.
+- Control freshly checks native active-session facts and binds their predicates
+  in the canonical plan. Fresh locker evidence cannot refresh expired ownership.
+  Native adapters must attest the security-owner process and revalidate the same
+  epoch/generation at dispatch; an ordinary shell/plugin cannot forge that owner.
+- Native peer checks bind named service ownership to the root-supervised main PID
+  and service invocation plus exact native launch record/image/argv, not just a
+  local/root UID, text service name or unrelated root-owned executable. Native
+  Polkit registration/conversation remains separate from privileged dispatch.
+  Neither a native PAM completion signal nor a consumed confirmation releases the
+  compositor lock. Password input has no QML property, transport payload, clipboard
+  or debug formatter; bounded storage must be locked, non-dumpable and wiped.
+- Unlock verification retains the old lock identity until Control's durable
+  verified commit acknowledgement; no new effects cross that fence. Authentication
+  binding rotates exactly one generation, with no outstanding proof or cooldown
+  bypass. Independent compositor release uses one bounded native query with the
+  connected kernel peer bound to the original compositor, not a client boolean
+  or an unlock acknowledgement. Its runtime/canonical-evidence integration and
+  native positive qualification remain required.
+- Startup protection must precede a large UI runtime. The proposed private runtime
+  uses a single memory-lock file capability for secure-exec entry, verifies the
+  kernel's `AT_SECURE` marker and rejects saved-user/group identity escapes,
+  drops the capability before input and refuses unexpected privilege/dumpability.
+  Its own bootstrap binds the current executable inode and exact root-systemd
+  launch, then rechecks active session/service facts rather than trusting PID
+  continuity alone. The actual
+  connected Wayland peer, not another pathname probe, must bind the qualified
+  native session leader. Deployment, reload, ptrace and helper behavior still need
+  native qualification; component tests do not prove these operating-system facts.
+- Native keyboard input goes directly from a wiped bounded UTF-8 temporary into
+  protected storage. Malformed encodings and capacity overflow leave no partial
+  edit. An exclusively bound entry rejects generic Qt key-event injection; typed
+  response data never traverses Qt/QML input filters. Layout/focus/keyboard loss
+  cancels and wipes. Compose data is fixed root-owned system data without user
+  include lookup. Embedded first-party rendering imports no user/network scene
+  and never receives response text. Pre-lock confirmation uses the same exclusive
+  connection's fixed private xdg-shell surface. It accepts only a fresh
+  unmodified native Enter/Escape press or bounded native primary-button click,
+  never Qt/QML synthetic input, text,
+  held/repeated keys or an effect. Close, focus/keymap/device loss and
+  suspend-inclusive expiry deny it. The private native runtime creates the
+  backend after secure startup/session attestation; received system-bus metadata
+  selects the freshly supervised Control or executor caller. The XML/Qt wire
+  contract exposes separate approval, observation, prepared dispatch and durable
+  commit acknowledgements, with no preclaimable per-user service name. Toolkit,
+  import, compose, font and bus overrides are removed before GUI initialization;
+  user QML disk caches and font configuration are not imported. Positive native
+  deployment, pointer/accessibility, production Control/executor/recovery and
+  visual qualification remain unfinished; component tests are not that evidence.
+- Native pointer events use the same exclusive seat and configured owned
+  surfaces. Press and release must hit the same enabled presentation target and
+  interaction revision within one suspend-inclusive second. Drag-away, duplicate
+  press, unmatched release, focus/device loss, changed prompt/state, wrong button
+  and out-of-bounds coordinates cannot migrate a click into authentication.
+  Submission still requires native keyboard focus and secure coverage; an unlock
+  request is typed intent, not authentication or effect authority. No generic Qt
+  mouse event can focus or submit protected input. A fixed software cursor is
+  painted in opaque owned buffers without loading a user cursor theme. Native
+  pointer and assistive-technology qualification remain required.
+- Offscreen Qt metadata factories alone do not export a native screen-reader
+  tree. S17's dedicated AT-SPI adapter uses fixed own-runtime Unix routes and
+  kernel peer UID checks, but still treats assistive bus peers as untrusted
+  presentation readers. Its bounded metadata projection has no response bytes,
+  length, cursor, selection, raw PAM question or effect/security fact. Standard
+  text/value/editable-text/action/geometry interfaces are absent. The sole
+  writable registry ID is unused bookkeeping, never approval or input. Bounded
+  worker dispatch and cancellable original connection/registration budgets keep
+  those peers off native keyboard dispatch. Transport/registry loss retires the
+  export; read-only reconnection cannot release coverage, recreate authority or
+  replay effects. Real discovery, announcements and denial still require native
+  qualification. Local metadata availability is not authentication evidence.
+- Power availability is not policy or OS execution authority. Unknown inhibitors,
+  another user session or in-flight transitions fail closed. Root must respect
+  both regular and weak blocking inhibitors; suspend also requires exact native
+  secure-lock coverage and bounded native delay-inhibitor coordination.
+- Session/boot-ending effects retain durable ambiguity; acknowledgement is not
+  verified success and restart cannot blindly repeat a one-shot power action.
+- Digest-only transactions cannot reconstruct approved intent on restart. S17
+  retains canonical structured requests, including provenance, before prepare
+  in an independently authenticated, bounded, write-once FULL-sync WAL journal.
+  Recovery checks the exact principal/request namespace, canonical codec and
+  transaction anchor. Missing/corrupt/substituted material denies recovery;
+  journal failure denies new prepare/dispatch. Orphan records grant nothing,
+  and historical request retrieval cannot approve, reprepare or execute. An
+  internally consistent rollback of all storage still requires the separate
+  recovery/rollback trust assumptions; the journal is not a trusted clock or
+  anti-rollback oracle. No raw request bytes enter diagnostics or audit payloads.
+- Security-owner crash must leave conformant native compositor coverage closed;
+  ordinary shell reload/dismissal must never own an unlock path. Native recovery,
+  multi-output/hotplug, authentication/account denial and visual/interaction
+  evidence are required before activation or final review.
+
 ## Deferred threats
 
 Fleet/remote orchestration and hosted/shared Library services receive dedicated threat-model extensions before any network control plane or trusted shared catalog is enabled.

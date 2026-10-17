@@ -1,0 +1,70 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN" "https://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <!-- Private native adapter; no public client mutation/authentication API. -->
+  <interface name="org.linura.SecurityOwner1">
+    <annotation name="org.linura.ContractId" value="dbus.org.linura.SecurityOwner1"/>
+    <annotation name="org.linura.ContractVersion" value="1"/>
+    <annotation name="org.linura.Stability" value="experimental"/>
+    <!-- Approval scope: exact resource, authenticated principal, request, plan,
+         request/evidence/review digests, and purpose (0 lock, 1 unlock,
+         2 suspend, 3 logout, 4 reboot, 5 power-off, 6 enable protective locking,
+         7 revoke protective locking). Lock/unlock/settings require a
+         SessionLockId; only purposes 2..5 require the matching SessionTransitionId.
+         Each authentication proves only this scope; it never dispatches an
+         effect or releases a lock. Power authentication requires secure coverage. -->
+    <method name="ArmApproval">
+      <arg name="scope" type="(sssssssu)" direction="in"/>
+      <arg name="armed" type="b" direction="out"/>
+    </method>
+    <method name="ConsumeApproval">
+      <arg name="scope" type="(sssssssu)" direction="in"/>
+      <arg name="consumed" type="b" direction="out"/>
+    </method>
+    <method name="CancelApproval"/>
+    <method name="ObserveLock">
+      <arg name="observation" type="(sbt)" direction="out"/>
+    </method>
+    <method name="ObservePowerPermission">
+      <arg name="resource" type="s" direction="in"/>
+      <arg name="observation" type="(sst)" direction="out"/>
+    </method>
+    <!-- Coverage fence, not dispatch or approval. Only the attested executor
+         may arm/cancel-before-OS-dispatch. Control's verified commit also needs
+         the owner's own fresh kernel suspend-cycle and coverage observation. -->
+    <method name="FencePreparedTransition">
+      <arg name="resource" type="s" direction="in"/>
+      <arg name="fenced" type="b" direction="out"/>
+    </method>
+    <method name="CancelUndispatchedTransition">
+      <arg name="resource" type="s" direction="in"/>
+      <arg name="cancelled" type="b" direction="out"/>
+    </method>
+    <method name="CommitVerifiedTransition">
+      <arg name="resource" type="s" direction="in"/>
+      <arg name="committed" type="b" direction="out"/>
+    </method>
+    <!-- Attested Control only; checks the fixed native pre-start invocation,
+         fresh independent coverage and native kernel baseline. No dispatch or
+         approval. Retired by the owner only after the exact job has ended;
+         no public/client cancellation or timeout-release endpoint exists. -->
+    <method name="FenceSleepEntry">
+      <arg name="event" type="s" direction="in"/>
+      <arg name="lock" type="s" direction="in"/>
+      <arg name="fenced" type="b" direction="out"/>
+    </method>
+    <method name="DispatchPreparedLock">
+      <arg name="resource" type="s" direction="in"/>
+      <arg name="secure" type="b" direction="in"/>
+      <arg name="dispatched" type="b" direction="out"/>
+    </method>
+    <method name="VerifyReleased">
+      <arg name="resource" type="s" direction="in"/>
+      <arg name="verified" type="b" direction="out"/>
+    </method>
+    <method name="CommitVerifiedRelease">
+      <arg name="resource" type="s" direction="in"/>
+      <arg name="committed" type="b" direction="out"/>
+    </method>
+    <signal name="ApprovalInteractionCompleted"/>
+  </interface>
+</node>

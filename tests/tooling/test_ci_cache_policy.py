@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 
@@ -30,6 +32,151 @@ class CiCachePolicyTests(unittest.TestCase):
 
     def test_repository_policy_passes(self) -> None:
         self.assertEqual(policy.check(ROOT), [])
+
+    def test_pinned_apt_package_selector_preflight(self) -> None:
+        action = (ROOT / ".github/actions/ubuntu-apt-input-cache/action.yml").read_text(
+            encoding="utf-8"
+        )
+        resolver = action.split("    - id: resolve\n", 1)[1]
+        preflight = resolver.split("      run: |\n", 1)[1].split(
+            "        sudo apt-get update\n", 1
+        )[0]
+        script = "\n".join(
+            line.removeprefix("        ") for line in preflight.splitlines()
+        )
+        for selector, valid in (
+            ("qt6-base-dev", True),
+            ("qml6-module-qtqml=6.4.2+dfsg-4build3", True),
+            ("libexample:amd64=1:2.0~stable-1", True),
+            ("qml6-module-qtqml=", False),
+            ("qml6-module-qtqml=../bad", False),
+            ("qml6-module-qtqml=1;printf", False),
+            ("qml6-module-qtqml=1=2", False),
+        ):
+            with self.subTest(selector=selector):
+                result = subprocess.run(
+                    ["bash", "-c", script],
+                    env={
+                        **os.environ,
+                        "LINURA_APT_NAMESPACE": "canonical-ci-shell",
+                        "LINURA_APT_PACKAGES": selector,
+                    },
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode == 0, valid, result.stderr)
+
+    def test_exact_apt_selectors_reject_candidate_and_installed_drift(self) -> None:
+        action = (ROOT / policy.APT_ACTION).read_text(encoding="utf-8")
+        steps = policy._canonical_composite_steps(action, "APT")
+
+        def literal_body(index: int) -> str:
+            raw = steps[index]["run_lines"]
+            assert isinstance(raw, list)
+            lines: list[str] = []
+            for line in raw:
+                assert isinstance(line, str)
+                lines.append(line)
+            return "\n".join(lines)
+
+        resolver = literal_body(0)
+        requested = resolver.split('requested="$(\n', 1)[1].split('\n)"', 1)[0]
+        installed = (
+            literal_body(2)
+            .split('for spec in "${packages[@]}"; do', 1)[1]
+            .split("\ndone", 1)[0]
+        )
+        mocks = """set -euo pipefail
+apt-cache() { printf '  Candidate: %s\\n' "$LINURA_TEST_CANDIDATE"; return "${LINURA_TEST_QUERY_EXIT:-0}"; }
+dpkg-query() {
+    if [[ "$2" == '-f=${Status}' ]]; then
+        printf '%s' "$LINURA_TEST_STATUS"
+    else
+        printf '%s' "$LINURA_TEST_INSTALLED"
+    fi
+}
+packages=('qml6-module-qtqml=6.4.2+dfsg-4build3')
+"""
+        pinned = "6.4.2+dfsg-4build3"
+        for candidate, version, status, valid in (
+            (pinned, pinned, "install ok installed", True),
+            ("6.4.2+dfsg-4build4", pinned, "install ok installed", False),
+            ("6.4.2+dfsg-4build4", "6.4.2+dfsg-4build4", "install ok installed", False),
+            ("(none)", pinned, "install ok installed", False),
+            ("", pinned, "install ok installed", False),
+            (pinned, "6.4.2+dfsg-4build4", "install ok installed", False),
+            (pinned, "", "install ok installed", False),
+            (pinned, pinned, "deinstall ok config-files", False),
+            (pinned, pinned, "install ok unpacked", False),
+        ):
+            with self.subTest(candidate=candidate, installed=version, status=status):
+                for phase, body, allowed in (
+                    (
+                        "resolve",
+                        'requested="$(\n' + requested + '\n)"\n',
+                        candidate == pinned,
+                    ),
+                    (
+                        "installed",
+                        'for spec in "${packages[@]}"; do\n' + installed + "\ndone\n",
+                        valid,
+                    ),
+                ):
+                    with self.subTest(phase=phase):
+                        result = subprocess.run(
+                            ["bash", "-c", mocks + body],
+                            env={
+                                **os.environ,
+                                "LINURA_TEST_CANDIDATE": candidate,
+                                "LINURA_TEST_INSTALLED": version,
+                                "LINURA_TEST_STATUS": status,
+                            },
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            timeout=5,
+                        )
+                        self.assertEqual(result.returncode == 0, allowed, result.stderr)
+        # Even plausible output from a failed query cannot authorize identity
+        # resolution. Exercise the actual command-substitution error behavior.
+        result = subprocess.run(
+            ["bash", "-c", mocks + 'requested="$(\n' + requested + '\n)"\n'],
+            env={
+                **os.environ,
+                "LINURA_TEST_CANDIDATE": pinned,
+                "LINURA_TEST_QUERY_EXIT": "1",
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_exact_pin_checks_cannot_be_inert_or_weakened(self) -> None:
+        for old, new in (
+            ('test "${spec#*=}" = "$candidate"', "true"),
+            ('test "$installed" = "$candidate"', "true"),
+            (
+                "test \"$(dpkg-query -W -f='${Status}' \"$package\")\" = 'install ok installed'",
+                "true",
+            ),
+            ('test "${spec#*=}" = "$candidate"', '# test "${spec#*=}" = "$candidate"'),
+            (
+                'test "${spec#*=}" = "$candidate"',
+                'if false; then\n              test "${spec#*=}" = "$candidate"\n            fi',
+            ),
+        ):
+            with self.subTest(old=old, new=new):
+                root = self.copy_root()
+                action = root / policy.APT_ACTION
+                source = action.read_text(encoding="utf-8")
+                self.assertIn(old, source)
+                action.write_text(source.replace(old, new, 1), encoding="utf-8")
+                self.assertTrue(
+                    any("reviewed SHA-256" in failure for failure in policy.check(root))
+                )
 
     def test_contract_cannot_authorize_build_output_caching(self) -> None:
         root = self.copy_root()
@@ -427,6 +574,37 @@ class CiCachePolicyTests(unittest.TestCase):
         self.assertTrue(
             any("APT cache input step drifted" in x for x in failures), failures
         )
+
+    def test_component_test_qml_inputs_remain_pinned(self) -> None:
+        for package in (
+            "qtqml",
+            "qtqml-models",
+            "qtqml-workerscript",
+            "qtquick",
+            "qtquick-controls",
+            "qtquick-layouts",
+            "qtquick-templates",
+            "qtquick-window",
+        ):
+            with self.subTest(package=package):
+                failures = self.mutate_ci(
+                    f"qml6-module-{package}=6.4.2+dfsg-4build3",
+                    f"qml6-module-{package}",
+                )
+                self.assertTrue(
+                    any("APT cache input step drifted" in x for x in failures), failures
+                )
+
+    def test_component_tests_cannot_be_disabled_or_use_ambient_modules(self) -> None:
+        for old, new in (
+            ('ctest --test-dir "$build_dir" --output-on-failure', "true"),
+            ('QML_IMPORT_PATH="$install_dir/lib/qt6/qml"', "QML_IMPORT_PATH=/tmp"),
+        ):
+            with self.subTest(command=old):
+                failures = self.mutate_ci(old, new)
+                self.assertTrue(
+                    any("QML build differs" in x for x in failures), failures
+                )
 
     def test_shadow_jobs_mapping_cannot_bypass_ci(self) -> None:
         failures = self.mutate_ci(

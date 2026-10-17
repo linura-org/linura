@@ -64,6 +64,47 @@ class V010SlicePREvidenceTests(unittest.TestCase):
             with self.subTest(path=stale_path):
                 self.assertFalse(verifier.path_matches_slice("S15", stale_path))
 
+    def test_s17_scope_covers_the_authority_and_native_vertical_slice(self) -> None:
+        for path in (
+            "apps/linura-shell/security-owner/native_runtime.cpp",
+            "apps/linura-authorityd/src/session_adapter.rs",
+            "apps/linura-authorityd/src/sleep_gate.rs",
+            "apps/linura-authorityd/tests/s17/managed_session.rs",
+            "crates/linura-linux-session/src/observer.rs",
+            "crates/linura-linux-observation/src/logind.rs",
+            "crates/linura-control/src/session_safety.rs",
+            "crates/linura-control/src/protective_sleep_gate.rs",
+            "crates/linura-control/src/protective_lock_execution.rs",
+            "crates/linura-control/src/protective_lock_safety.rs",
+            "crates/linura-control/src/protective_lock_settings.rs",
+            "crates/linura-core/src/sleep_invocation.rs",
+            "crates/linura-dbus/src/sleep_gate.rs",
+            "crates/linura-policy/src/session_lock.rs",
+            "crates/linura-policy/src/protective_lock.rs",
+            "crates/linura-persistence-sqlite/src/protective_lock_settings.rs",
+            "crates/linura-persistence-sqlite/src/request_journal.rs",
+            "crates/linura-transaction/src/protective_lock_setting.rs",
+            "executors/linura-executor-session/src/main.rs",
+            "interfaces/dbus/org.linura.SecurityOwner1.xml",
+            "interfaces/dbus/org.linura.SleepGate1.xml",
+            "packaging/systemd/system/user@.service.d/50-linura-security-owner.conf",
+            "packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf",
+            "packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(verifier.path_matches_slice("S17", path))
+                self.assertFalse(verifier.path_matches_slice("S21", path))
+        for unrelated in (
+            "apps/linura-shell/integrations/logind/Legacy.qml",
+            "crates/linura-linux-observation/src/networkmanager.rs",
+            "apps/linura-authorityd/src/main.rs",
+            "crates/linura-control/src/managed_lifecycle.rs",
+            "packaging/systemd/system/user@.service.d/unrelated.conf",
+            "docs/roadmap.md",
+        ):
+            with self.subTest(path=unrelated):
+                self.assertFalse(verifier.path_matches_slice("S17", unrelated))
+
     def test_evidence_seal_paths_allow_only_retained_artifact_surfaces(self) -> None:
         self.assertTrue(
             verifier.evidence_seal_path_allowed(
