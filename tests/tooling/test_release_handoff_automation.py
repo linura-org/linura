@@ -154,7 +154,7 @@ version = "9.9.9"
         )
         for workflow in (preparation, authorization, closure):
             self.assertIn(
-                "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+                "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
                 workflow,
             )
             self.assertIn("LINURA_RELEASE_APP_CLIENT_ID", workflow)

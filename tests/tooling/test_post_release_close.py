@@ -496,7 +496,7 @@ No widened claim.
             '--crates-io-run-id "$CRATES_IO_RUN_ID"',
             '--crate-version "$CRATE_VERSION"',
             '--crate-package-sha256 "$CRATE_PACKAGE_SHA256"',
-            "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+            "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
             "--credential-source github-app",
             "tools/release_native_gates.py",
             "pulls/$PR_NUMBER/merge",
