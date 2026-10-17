@@ -254,6 +254,10 @@ The exact Ruff version and hash-locked wheel are declared in `tools/codex/versio
 
 The canonical development, VM, image, visual, qualification, and release paths are repository-owned. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for a first contribution or [`docs/development-infrastructure.md`](docs/development-infrastructure.md) for system-level development.
 
+For persistent task worktrees, C/C++ and Qt/QML editor setup, isolated build
+storage and safe cleanup/recovery, see
+[Development workspaces and storage](docs/development-workspaces.md).
+
 ## Repository layout
 
 ```text

@@ -124,6 +124,36 @@ fi
 
 glibc_version="$(require_supported_glibc)"
 
+# Select existing Python 3.12 even when the default python3 is newer.
+# Setup may write a private PATH shim but never replaces system Python.
+python_candidate="$(command -v python3.12 || true)"
+if [[ -z "$python_candidate" ]]; then
+    python_candidate="$(command -v python3)"
+fi
+python_candidate="$(readlink -f -- "$python_candidate")"
+if [[ ! -x "$python_candidate" ]] ||
+    [[ "$("$python_candidate" -I -S -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" != "$PYTHON_MAJOR_MINOR" ]]; then
+    printf 'Python %s must already exist in the prepared host environment\n' "$PYTHON_MAJOR_MINOR" >&2
+    exit 1
+fi
+python_bin="${HOME}/.local/linura-tools/python312/bin"
+(
+    umask 077
+    mkdir -p "$python_bin"
+)
+if [[ -L "$python_bin" || "$(stat -c %u:%a -- "$python_bin")" != "$(id -u):700" ]]; then
+    echo 'Linura Python PATH directory must be private and caller-owned' >&2
+    exit 1
+fi
+if [[ -e "$python_bin/python3" || -L "$python_bin/python3" ]]; then
+    if [[ ! -L "$python_bin/python3" || "$(readlink -f -- "$python_bin/python3")" != "$python_candidate" ]]; then
+        echo 'Linura Python PATH entry drifted; inspect it during environment maintenance' >&2
+        exit 1
+    fi
+else
+    ln -s -- "$python_candidate" "$python_bin/python3"
+fi
+export PATH="$python_bin:${PATH}"
 actual_python="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
 if [[ "$actual_python" != "$PYTHON_MAJOR_MINOR" ]]; then
     printf 'unsupported Python major/minor: %s; expected %s.x\n' "$actual_python" "$PYTHON_MAJOR_MINOR" >&2

@@ -1119,7 +1119,9 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         lock_check = capture.index("coproc capture_lock_holder {")
         lock_ack = capture.index('case "$capture_lock_state" in', lock_check)
         retained_purge = capture.index("for stale_recording in", lock_ack)
-        old_recording_purge = capture.index('rm -f "$recording"', lock_ack)
+        old_recording_purge = capture.index(
+            'for retained_recording in "$recording"', lock_ack
+        )
         recorder_preflight = capture.index(
             'recorder_unit="linura-workstation-recorder.service"'
         )
@@ -1247,7 +1249,9 @@ class WorkstationAcceptanceTests(unittest.TestCase):
             self.assertNotEqual(wrong_directory.returncode, 0)
             self.assertEqual(wrong_directory.stdout.strip(), "UNSAFE")
 
-    def test_level_c_reused_evidence_root_clears_every_fixture_bundle(self) -> None:
+    def test_level_c_reused_evidence_root_refuses_and_preserves_every_fixture_bundle(
+        self,
+    ) -> None:
         capture = (
             ROOT
             / "qualification/v010/workstation-acceptance/capture-hardware-session.sh"
@@ -1286,8 +1290,10 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 timeout=5,
                 check=False,
             )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(list(evidence.glob("hardware-*")), [])
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("retained Level C evidence", result.stderr)
+            self.assertEqual(len(list(evidence.glob("hardware-*"))), 7)
+            self.assertEqual((evidence / "hardware-A.mkv").read_bytes(), b"stale")
             self.assertEqual(preserved.read_bytes(), b"must stay intact")
 
             # An unsafe directory must not cause partial deletion of other
@@ -1409,7 +1415,7 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         launcher = (
             ROOT / "qualification/v010/workstation-acceptance/launch-interactive.sh"
         ).read_text(encoding="utf-8")
-        start = launcher.index('if [[ -z "$evidence_dir" ]]; then')
+        start = launcher.index('if [[ -L "$evidence_dir" ]]; then')
         purge = launcher.index('rm -f -- "$evidence_dir/live-session.txt"', start)
         guest = launcher.index(
             'bash "$build_root/qualification/v010/shell-runtime/start-vm.sh"',
@@ -1425,7 +1431,7 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         )
 
         # Exercise the exact preflight and purge, without starting a VM. Both
-        # the default SHA path and an explicit alias must contend on the inode.
+        # the validated run destination and its alias must contend on the inode.
         fragment = launcher[start : launcher.index("\ncleanup() {", start)]
         script = (
             "set -euo pipefail\n"
@@ -1457,7 +1463,7 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                 stack.callback(os.close, holder)
                 fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 for supplied_dir, port in (
-                    ("", 2224),
+                    (str(destination), 2224),
                     (str(destination.parent / "." / destination.name), 2225),
                 ):
                     with self.subTest(supplied_dir=supplied_dir, port=port):
@@ -1486,7 +1492,7 @@ class WorkstationAcceptanceTests(unittest.TestCase):
                         self.assertTrue(old_session.exists())
                         self.assertTrue(old_log.exists())
             success = subprocess.run(
-                ["bash", "-c", script, "bash", str(root), "", "2224"],
+                ["bash", "-c", script, "bash", str(root), str(destination), "2224"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -1536,7 +1542,7 @@ class WorkstationAcceptanceTests(unittest.TestCase):
         launcher = (
             ROOT / "qualification/v010/workstation-acceptance/launch-interactive.sh"
         ).read_text(encoding="utf-8")
-        start = launcher.index('if [[ -z "$evidence_dir" ]]; then')
+        start = launcher.index('if [[ -L "$evidence_dir" ]]; then')
         fragment = launcher[start : launcher.index("\ncleanup() {", start)]
         script = (
             "set -euo pipefail\n"

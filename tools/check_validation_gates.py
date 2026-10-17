@@ -136,6 +136,12 @@ SPECIALIZED = {
             "tests/tooling/test_native_keyboard.py",
             ".github/workflows/v010-shell-runtime-qualification.yml",
             "tools/qualification_guest_identity.py",
+            "tools/development_workspace.py",
+            "tools/development_storage.py",
+            "scripts/prepare_qualification_storage.sh",
+            "tools/codex/doctor.py",
+            "tests/tooling/test_development_workspace.py",
+            "tests/tooling/test_development_storage.py",
         ),
     ),
     "evidence-publication": (
@@ -173,6 +179,12 @@ V09_ROUTING_GUARD_EXACT = (
 # the TOML allowlist: deleting a protected route from the contract must not
 # make the validator forget that the route is mandatory.
 V09_REQUIRED_FULL_EXACT = (
+    "tools/development_workspace.py",
+    "tools/development_storage.py",
+    "scripts/prepare_qualification_storage.sh",
+    "tools/codex/doctor.py",
+    "tests/tooling/test_development_workspace.py",
+    "tests/tooling/test_development_storage.py",
     ".github/workflows/v09-qualification.yml",
     ".github/workflows/v09-adversarial-security.yml",
     ".github/workflows/vm-acceptance.yml",
@@ -753,6 +765,8 @@ REVIEWED_STEP_CONDITIONS = {
         "Upload exact-source adversarial qualification binaries": "needs.scope.outputs.full_qualification == 'true'",
     },
     ("v010-reusable", "substrate"): {
+        "Stage restored prepared substrate into private run": "steps.prepared-substrate.outputs.cache-hit == 'true'",
+        "Stage verified prepared substrate in stable prerequisite cache": "steps.prepared-substrate.outputs.cache-hit != 'true'",
         "Install disposable substrate builder dependencies": "steps.prepared-substrate.outputs.cache-hit != 'true'",
         "Restore official Arch base-image cache": "steps.prepared-substrate.outputs.cache-hit != 'true'",
         "Download and verify official Arch base image": "steps.prepared-substrate.outputs.cache-hit != 'true'",
@@ -1236,13 +1250,14 @@ REVIEWED_SHELL_EXECUTION = {
     # Qualification entrypoints retain their exact reviewed guest commands,
     # recorder paths and callback helpers. Here-doc data is conservatively
     # included in the scan; the digest also binds those opaque bodies.
-    "qualification/v010/shell-runtime/prepare-substrate.sh": "c1bd44739755bb0d41efb26c7eebde98e2f8f642e4943c14ca0003c065e69a3b",
+    "scripts/prepare_qualification_storage.sh": "4967e7217aeb4644fb645f47e1f47c4983785e4a134c146ab1dbea770bd55546",
+    "qualification/v010/shell-runtime/prepare-substrate.sh": "3343b0bb022e493a9cba6f28d22aa2c31625d2fd43d7671d96edba3afccda3b9",
     "qualification/v010/shell-runtime/run-shell-runtime.sh": "3533143a2a37fa733204daae9ba9177cffea726ce499e024d2968df433956b6b",
-    "qualification/v010/workstation-acceptance/capture-hardware-session.sh": "87c5b48938f9eae997a0a8e6c7bc75607ffd2c3c14f274e2ab9ec251dc242386",
-    "qualification/v010/workstation-acceptance/launch-interactive.sh": "26b0746581b3bcd32e93c986000975b79c8df052b243577ccb208c899ea35460",
+    "qualification/v010/workstation-acceptance/capture-hardware-session.sh": "ce2257338be8b6b1f9b07248102f28808bbbecf83277f886163127e244d11ad3",
+    "qualification/v010/workstation-acceptance/launch-interactive.sh": "1c8ed5fc180526a8176e7a88635fae9b122daa0b64090e826ec3e3c6af957dd6",
     "qualification/v010/workstation-acceptance/run-hardware-qualification.sh": "fa08f7a5cf050d9692de40227b8e40668859d54e801318dfa7dfe7181ed90b72",
     "qualification/v010/workstation-acceptance/run-live-session.sh": "e8013a8b52a6eeac5b53e1bfa3861a2a4879e4b33978f3d22b08ce634e06360f",
-    "scripts/qualification/v09-adversarial-guest.sh": "4e68b9434f07c8df61f6ac636cd13f59800a3cc1bc7666a547f6c2ed0a3a03fd",
+    "scripts/qualification/v09-adversarial-guest.sh": "f4a12a53b830ceffb7c8ea3c30ab67f3bed9c84de763c8db205d48e75aaa9c9f",
     "tests/acceptance/v06/qualify-guest.sh": "503d93d0b70630679ff1a381b8f3731767f11eaac184d5fcb8d6e74ee70024ab",
     # Development-only tools run at the caller's existing permissions.
     "scripts/lib/bootstrap_rustup.sh": "60db235ffa3f448b1182665285dc3347f017cbcb5785f087f056c3b30e836ad8",
@@ -1251,9 +1266,9 @@ REVIEWED_SHELL_EXECUTION = {
     "scripts/lib/codex_source_state.sh": "3b27ccc177aeb948df5dd4620dcb5f18dd1a570c91511adc847951b295de6281",
     "scripts/maintain_codex_environment.sh": "74f26eccb9362479490f5ad954d6c8570f116bddd75894fd647f783775e5bcf4",
     "scripts/lint_github_workflows.sh": "ce5b656f70d742885521fd7d5fddc0fdd7f2e7f0db984f7fcfb17600142a8bd3",
-    "scripts/preflight_codex_environment.sh": "a9a9a81b5b09a9d96077ec5ca5b1c69ae3a1cfdc1b151196d704670a7a65c4ea",
-    "scripts/run_codex.sh": "970be5426b5b7e0417987f86331e361f244d35f562cd3cddc90540470bc6d574",
-    "scripts/setup_codex_environment.sh": "0d140a74a0ab077d1b89da1759c30d272b5dfa902afaa90c1fd790f941d95bd7",
+    "scripts/preflight_codex_environment.sh": "18d48028b461ada8691cb5abab14d045cce9993034e2bee7009d36012fac07c0",
+    "scripts/run_codex.sh": "b6928e621faea0581ab6d91e55624d1572216f7b95e2d31b2cfe4495188dd54c",
+    "scripts/setup_codex_environment.sh": "8cf16b8ae854b19988a50d2cee6bb70e8bb56500dceaefceef7814c3f745d38a",
 }
 
 PREVALIDATION_SHELL_FILES = (
@@ -1965,6 +1980,9 @@ TOOLCHAIN_DATA_ENV_KEYS = frozenset(
         "INPUT_TAG",
         "INPUT_VERIFICATION_RUN_ID",
         "LINURA_EXPECTED_SOURCE_SHA",
+        "LINURA_STORAGE_ID",
+        "LINURA_STORAGE_ROOT",
+        "LINURA_STORAGE_CLASS",
         "LINURA_V07_EVIDENCE_DIR",
         "PACKAGE_SHA256",
         "PAYLOAD_DIR",
@@ -2153,7 +2171,7 @@ def toolchain_data_loads_guarded(
         (
             "      - name: Run component and verifier contracts\n"
             "        run: >-\n"
-            "          cargo test --locked\n"
+            '          cargo test --locked --target-dir "$LINURA_CARGO_TARGET"\n'
             "          -p linura-provider-sdk\n"
             "          -p linura-executor-systemd\n"
             "          -p linura-linux-observation\n"
@@ -3396,13 +3414,13 @@ def check(root: Path = ROOT) -> list[str]:
         and build_lines[:2]
         == (
             "set -euo pipefail",
-            "cargo build --release --locked -p linurad -p linuractl -p linura-firstboot",
+            'cargo build --release --locked -p linurad -p linuractl -p linura-firstboot --target-dir "$LINURA_CARGO_TARGET"',
         )
         and build_lines[2:]
         == (
             'if [[ "$ACCEPTANCE_SCENARIO" == firstboot-offline ]]; then',
-            "  cargo test --locked -p linura-authorityd --bin linura-authorityd",
-            "  cargo build --release --locked -p linura-authorityd --bin linura-authorityd",
+            '  cargo test --locked -p linura-authorityd --bin linura-authorityd --target-dir "$LINURA_CARGO_TARGET"',
+            '  cargo build --release --locked -p linura-authorityd --bin linura-authorityd --target-dir "$LINURA_CARGO_TARGET"',
             "fi",
         ),
         "v0.9: production authority build and unit checks missing from full VM lane",
@@ -3416,7 +3434,7 @@ def check(root: Path = ROOT) -> list[str]:
         step_is_unconditional(install_step, 4)
         and 'if [[ "$ACCEPTANCE_SCENARIO" == firstboot-offline ]]; then'
         in install_lines
-        and '  scp "${ssh_common[@]}" -P 2222 target/release/linura-authorityd linura@127.0.0.1:/tmp/'
+        and '  scp "${ssh_common[@]}" -P 2222 "$LINURA_CARGO_TARGET/release/linura-authorityd" linura@127.0.0.1:/tmp/'
         in install_lines
         and "'sudo -n install -o root -g root -m 0755 /tmp/linura-authorityd /usr/local/bin/linura-authorityd && rm -f /tmp/linura-authorityd'"
         in install_text
@@ -3540,6 +3558,42 @@ def check(root: Path = ROOT) -> list[str]:
             "v0.10 shell-runtime "
             + job_name
             + ": missing exact-source executable binding",
+        )
+    for filename, job, environment in (
+        ("vm-acceptance.yml", "vm", "generic-vm"),
+        ("v04-durability-vm.yml", "durability", "generic-vm"),
+        ("v04-enospc-recovery-vm.yml", "enospc", "generic-vm"),
+        ("v05-executor-verifier-vm.yml", "qualification", "generic-vm"),
+        ("v06-managed-lifecycle-vm.yml", "qualification", "generic-vm"),
+        ("v09-adversarial-security.yml", "exact-guest", "generic-vm"),
+        ("v010-shell-runtime-qualification.yml", "substrate", "arch-hyprland-runtime"),
+        ("v010-shell-runtime-qualification.yml", "runtime", "arch-hyprland-runtime"),
+    ):
+        text = read(".github/workflows/" + filename)
+        body = section(text, job, 2) or ""
+        step = workflow_step(body, 4, "name", "Prepare guarded qualification storage")
+        expected = (
+            "      - name: Prepare guarded qualification storage\n"
+            "        env:\n"
+            "          LINURA_STORAGE_ROOT: ${{ vars.LINURA_STORAGE_ROOT }}\n"
+            "          LINURA_STORAGE_ID: ${{ vars.LINURA_STORAGE_ID }}\n"
+            "        run: bash scripts/prepare_qualification_storage.sh " + environment
+        )
+        require(
+            step_is_unconditional(step, 4)
+            and (step or "").strip() == expected.strip()
+            and 0
+            <= body.find("id: toolchain_data")
+            < body.find("Prepare guarded qualification storage"),
+            filename
+            + ": missing unconditional reviewed storage preparation for "
+            + job,
+        )
+        require(
+            "$RUNNER_TEMP/" not in body
+            and "${ARTIFACT_DIR:-" not in body
+            and "path: ${{ env.ARTIFACT_DIR }}/" not in body,
+            filename + ": root-backed or empty-root artifact fallback is forbidden",
         )
     return failures
 

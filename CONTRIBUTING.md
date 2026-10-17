@@ -26,6 +26,11 @@ You do **not** need to read every architecture document before fixing a typo, im
 
 Codex contributors should also follow [Codex development](docs/codex-development.md) for environment preparation, capability diagnostics and task commands.
 
+For parallel tasks and large builds, follow
+[Development workspaces and storage](docs/development-workspaces.md): open the
+assigned persistent worktree, reuse repository-owned environment pins, isolate
+generated outputs and preserve local-only work/evidence before cleanup.
+
 Useful discovery commands:
 
 ```bash

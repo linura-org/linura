@@ -39,8 +39,8 @@ Sixteen existing qualification and authority-sensitive source files intentionall
 - `packaging/wireplumber/linura-session-audio.lua` — identity-bound WirePlumber/Audio Sink rule.
 - `qualification/v010/shell-runtime/run-shell-runtime.sh` — exact runtime/evidence commands, redirections and negative-proof fragments.
 - `qualification/v010/workstation-acceptance/record-session.sh` — recorder helper provenance, global lock and fail-closed abort ordering proof.
-- `qualification/v010/workstation-acceptance/launch-interactive.sh` — exact-source interactive VM binary provenance and argument rejection proof.
-- `qualification/v010/workstation-acceptance/capture-hardware-session.sh` — fail-closed physical-machine capture and recording identity.
+- `qualification/v010/workstation-acceptance/launch-interactive.sh` — exact-source interactive VM binary provenance, argument rejection, dedicated-storage/fresh-run guard and inode-lock proof. The workspace storage change deliberately updates its reviewed exact-source fingerprint; it does not exempt new source from hygiene or qualification.
+- `qualification/v010/workstation-acceptance/capture-hardware-session.sh` — fail-closed physical-machine capture, checked volume/scratch, fresh retained-evidence refusal and recording identity. The storage rollout deliberately updates its reviewed fingerprint without removing exact-source, fixture, lock, source hygiene or recording checks.
 - `scripts/qualification/v09-adversarial-guest.sh` — exact adversarial transport/power-cycle bootstrap and source-bound test fixtures.
 - `apps/linura-shell/panel/WorkstationPanel.qml` — keyboard focus and keyboard-release UI authority contract.
 - `apps/linura-shell/tray/SystemTrayView.qml` — tray popup interaction, seat/keyboard ownership, and dismissal contract.

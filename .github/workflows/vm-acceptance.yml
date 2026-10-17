@@ -58,6 +58,12 @@ on:
       - "tests/acceptance/**"
       - "tools/acceptance.py"
       - "tools/vm.py"
+      - "tools/development_workspace.py"
+      - "tools/development_storage.py"
+      - "scripts/prepare_qualification_storage.sh"
+      - "tools/codex/doctor.py"
+      - "tests/tooling/test_development_workspace.py"
+      - "tests/tooling/test_development_storage.py"
       - "tools/codex/versions.env"
       - "tools/check_toolchain_env.py"
       - "tests/tooling/test_toolchain_env.py"
@@ -118,6 +124,12 @@ jobs:
           test "$repo_rust_version" = "$RUST_VERSION"
           printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
 
+      - name: Prepare guarded qualification storage
+        env:
+          LINURA_STORAGE_ROOT: ${{ vars.LINURA_STORAGE_ROOT }}
+          LINURA_STORAGE_ID: ${{ vars.LINURA_STORAGE_ID }}
+        run: bash scripts/prepare_qualification_storage.sh generic-vm
+
       - name: Install pinned Rust toolchain
         run: |
           set -euo pipefail
@@ -127,10 +139,10 @@ jobs:
       - name: Build exact-source acceptance clients
         run: |
           set -euo pipefail
-          cargo build --release --locked -p linurad -p linuractl -p linura-firstboot
+          cargo build --release --locked -p linurad -p linuractl -p linura-firstboot --target-dir "$LINURA_CARGO_TARGET"
           if [[ "$ACCEPTANCE_SCENARIO" == firstboot-offline ]]; then
-            cargo test --locked -p linura-authorityd --bin linura-authorityd
-            cargo build --release --locked -p linura-authorityd --bin linura-authorityd
+            cargo test --locked -p linura-authorityd --bin linura-authorityd --target-dir "$LINURA_CARGO_TARGET"
+            cargo build --release --locked -p linura-authorityd --bin linura-authorityd --target-dir "$LINURA_CARGO_TARGET"
           fi
 
       - name: Install disposable VM harness dependencies
@@ -151,7 +163,7 @@ jobs:
             *) echo "base image must come from the pinned Ubuntu cloud-image origin" >&2; exit 2 ;;
           esac
           [[ "$BASE_IMAGE_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          base_image="$RUNNER_TEMP/ubuntu-noble-base.qcow2"
+          base_image="$LINURA_VM_DIR/ubuntu-noble-base.qcow2"
           curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
             --output "$base_image" "$BASE_IMAGE_URL"
           printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$base_image" | sha256sum --check --strict
@@ -161,14 +173,14 @@ jobs:
       - name: Create ephemeral cloud-init identity and guest
         run: |
           set -euo pipefail
-          vm_image="$RUNNER_TEMP/linura-acceptance.qcow2"
-          seed_image="$RUNNER_TEMP/linura-acceptance-seed.img"
-          ssh_key="$RUNNER_TEMP/linura-acceptance-key"
-          vm_log="$RUNNER_TEMP/linura-vm.log"
-          artifact_dir="$RUNNER_TEMP/linura-vm-artifacts"
-          user_data="$RUNNER_TEMP/user-data"
-          meta_data="$RUNNER_TEMP/meta-data"
-          network_config="$RUNNER_TEMP/network-config"
+          vm_image="$LINURA_VM_DIR/linura-acceptance.qcow2"
+          seed_image="$LINURA_VM_DIR/linura-acceptance-seed.img"
+          ssh_key="$LINURA_WORK_DIR/linura-acceptance-key"
+          vm_log="$LINURA_WORK_DIR/linura-vm.log"
+          artifact_dir="$ARTIFACT_DIR"
+          user_data="$LINURA_WORK_DIR/user-data"
+          meta_data="$LINURA_WORK_DIR/meta-data"
+          network_config="$LINURA_WORK_DIR/network-config"
 
           cp --reflink=auto "$BASE_IMAGE" "$vm_image"
           ssh-keygen -q -t ed25519 -N '' -f "$ssh_key"
@@ -258,12 +270,12 @@ jobs:
           ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 \
             'cloud-init status --wait --long'
           scp "${ssh_common[@]}" -P 2222 \
-            target/release/linurad target/release/linuractl target/release/linura-firstboot \
+            "$LINURA_CARGO_TARGET/release/linurad" "$LINURA_CARGO_TARGET/release/linuractl" "$LINURA_CARGO_TARGET/release/linura-firstboot" \
             linura@127.0.0.1:/tmp/
           ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 \
             'sudo -n install -o root -g root -m 0755 /tmp/linurad /usr/local/bin/linurad && sudo -n install -o root -g root -m 0755 /tmp/linuractl /usr/local/bin/linuractl && sudo -n install -o root -g root -m 0755 /tmp/linura-firstboot /usr/local/bin/linura-firstboot && rm -f /tmp/linurad /tmp/linuractl /tmp/linura-firstboot'
           if [[ "$ACCEPTANCE_SCENARIO" == firstboot-offline ]]; then
-            scp "${ssh_common[@]}" -P 2222 target/release/linura-authorityd linura@127.0.0.1:/tmp/
+            scp "${ssh_common[@]}" -P 2222 "$LINURA_CARGO_TARGET/release/linura-authorityd" linura@127.0.0.1:/tmp/
             ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 \
               'sudo -n install -o root -g root -m 0755 /tmp/linura-authorityd /usr/local/bin/linura-authorityd && rm -f /tmp/linura-authorityd'
           fi
@@ -277,7 +289,7 @@ jobs:
             binaries+=(linura-authorityd)
           fi
           for name in "${binaries[@]}"; do
-            host_path="target/release/$name"
+            host_path="$LINURA_CARGO_TARGET/release/$name"
             host_sha="$(sha256sum "$host_path" | cut -c1-64)"
             host_size="$(stat -c %s "$host_path")"
             guest_sha="$(ssh "${ssh_common[@]}" -p 2222 linura@127.0.0.1 "sha256sum /usr/local/bin/$name | cut -c1-64")"
@@ -354,7 +366,7 @@ jobs:
               name, host_sha, host_size, guest_sha, guest_size = line.split("\t")
               if host_sha != guest_sha or int(host_size) != int(guest_size):
                   raise SystemExit(f"installed binary identity mismatch for {name}")
-              host_path = root / "target/release" / name
+              host_path = pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release" / name
               if digest(host_path) != host_sha or host_path.stat().st_size != int(host_size):
                   raise SystemExit(f"host binary changed after guest identity proof for {name}")
               binaries[name] = {
@@ -482,7 +494,7 @@ jobs:
         if: ${{ always() && steps.toolchain_data.outcome == 'success' }}
         run: |
           set -euo pipefail
-          artifact_dir="${ARTIFACT_DIR:-$RUNNER_TEMP/linura-vm-artifacts}"
+          artifact_dir="${ARTIFACT_DIR:?dedicated evidence storage is required}"
           mkdir -p "$artifact_dir"
           if [[ -f "${VM_LOG:-}" ]]; then
             cp "$VM_LOG" "$artifact_dir/qemu.log"
@@ -499,6 +511,6 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linura-vm-acceptance-${{ inputs.scenario || 'authoritative-observation' }}-${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}-unqualified-diagnostics
-          path: ${{ runner.temp }}/linura-vm-artifacts/
+          path: ${{ env.ARTIFACT_DIR }}
           if-no-files-found: warn
           retention-days: 7

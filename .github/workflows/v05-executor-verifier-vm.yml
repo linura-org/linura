@@ -29,6 +29,13 @@ on:
       - "packaging/systemd/system/linura-executor-systemd.service"
       - "tests/acceptance/v05/**"
       - "tools/vm.py"
+      - "tools/development_workspace.py"
+      - "tools/development_storage.py"
+      - "tools/qualification_build_artifacts.py"
+      - "scripts/prepare_qualification_storage.sh"
+      - "tools/codex/doctor.py"
+      - "tests/tooling/test_development_workspace.py"
+      - "tests/tooling/test_development_storage.py"
       - "tools/codex/versions.env"
       - "tools/check_toolchain_env.py"
       - "tests/tooling/test_toolchain_env.py"
@@ -84,12 +91,11 @@ jobs:
           test "$repo_rust_version" = "$RUST_VERSION"
           printf 'RUST_VERSION=%s\n' "$RUST_VERSION" >> "$GITHUB_ENV"
 
-      - name: Initialize exact-source evidence paths
-        run: |
-          set -euo pipefail
-          artifact_dir="$RUNNER_TEMP/linura-v05-executor-artifacts"
-          mkdir -p "$artifact_dir"
-          printf 'ARTIFACT_DIR=%s\n' "$artifact_dir" >> "$GITHUB_ENV"
+      - name: Prepare guarded qualification storage
+        env:
+          LINURA_STORAGE_ROOT: ${{ vars.LINURA_STORAGE_ROOT }}
+          LINURA_STORAGE_ID: ${{ vars.LINURA_STORAGE_ID }}
+        run: bash scripts/prepare_qualification_storage.sh generic-vm
 
       - name: Install pinned Rust toolchain
         run: |
@@ -99,7 +105,7 @@ jobs:
 
       - name: Run component and verifier contracts
         run: >-
-          cargo test --locked
+          cargo test --locked --target-dir "$LINURA_CARGO_TARGET"
           -p linura-provider-sdk
           -p linura-executor-systemd
           -p linura-linux-observation
@@ -108,9 +114,9 @@ jobs:
       - name: Build exact-source qualification binaries
         run: |
           set -euo pipefail
-          cargo build --release --locked -p linurad -p linuractl -p linura-executor-systemd
-          cargo build --release --locked -p linura-executor-systemd --example v05_binding
-          cargo build --release --locked -p linura-verifier-systemd --example v05_verify
+          cargo build --release --locked -p linurad -p linuractl -p linura-executor-systemd --target-dir "$LINURA_CARGO_TARGET"
+          cargo build --release --locked -p linura-executor-systemd --example v05_binding --target-dir "$LINURA_CARGO_TARGET"
+          cargo build --release --locked -p linura-verifier-systemd --example v05_verify --target-dir "$LINURA_CARGO_TARGET"
 
       - name: Install disposable VM dependencies
         run: |
@@ -126,7 +132,7 @@ jobs:
             *) echo "base image must come from the pinned Ubuntu cloud-image origin" >&2; exit 2 ;;
           esac
           [[ "$BASE_IMAGE_SHA256" =~ ^[0-9a-f]{64}$ ]]
-          base_image="$RUNNER_TEMP/ubuntu-noble-base.qcow2"
+          base_image="$LINURA_VM_DIR/ubuntu-noble-base.qcow2"
           curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --output "$base_image" "$BASE_IMAGE_URL"
           printf '%s  %s\n' "$BASE_IMAGE_SHA256" "$base_image" | sha256sum --check --strict
           qemu-img info "$base_image"
@@ -135,13 +141,13 @@ jobs:
       - name: Create disposable guest identity
         run: |
           set -euo pipefail
-          vm_image="$RUNNER_TEMP/linura-v05-executor.qcow2"
-          seed_image="$RUNNER_TEMP/linura-v05-executor-seed.img"
-          ssh_key="$RUNNER_TEMP/linura-v05-executor-key"
-          vm_log="$RUNNER_TEMP/linura-v05-executor-qemu.log"
-          user_data="$RUNNER_TEMP/v05-user-data"
-          meta_data="$RUNNER_TEMP/v05-meta-data"
-          network_config="$RUNNER_TEMP/v05-network-config"
+          vm_image="$LINURA_VM_DIR/linura-v05-executor.qcow2"
+          seed_image="$LINURA_VM_DIR/linura-v05-executor-seed.img"
+          ssh_key="$LINURA_WORK_DIR/linura-v05-executor-key"
+          vm_log="$LINURA_WORK_DIR/linura-v05-executor-qemu.log"
+          user_data="$LINURA_WORK_DIR/v05-user-data"
+          meta_data="$LINURA_WORK_DIR/v05-meta-data"
+          network_config="$LINURA_WORK_DIR/v05-network-config"
 
           cp --reflink=auto "$BASE_IMAGE" "$vm_image"
           ssh-keygen -q -t ed25519 -N '' -f "$ssh_key"
@@ -194,7 +200,7 @@ jobs:
         if: ${{ always() && steps.toolchain_data.outcome == 'success' }}
         run: |
           set -euo pipefail
-          artifact_dir="${ARTIFACT_DIR:-$RUNNER_TEMP/linura-v05-executor-artifacts}"
+          artifact_dir="${ARTIFACT_DIR:?dedicated evidence storage is required}"
           mkdir -p "$artifact_dir"
           output="$artifact_dir/executor-systemd-properties.txt"
           if [[ -z "${SSH_KEY:-}" || ! -f "${SSH_KEY:-/nonexistent}" ]]; then
@@ -224,20 +230,21 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib
           import json
           import os
           import pathlib
           import subprocess
 
+          from tools.qualification_build_artifacts import bind_artifacts
+
           root = pathlib.Path.cwd()
           artifact_dir = pathlib.Path(os.environ["ARTIFACT_DIR"])
           files = {
-              "executor": root / "target/release/linura-executor-systemd",
-              "linurad": root / "target/release/linurad",
-              "linuractl": root / "target/release/linuractl",
-              "binding_helper": root / "target/release/examples/v05_binding",
-              "verifier_helper": root / "target/release/examples/v05_verify",
+              "executor": pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release/linura-executor-systemd",
+              "linurad": pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release/linurad",
+              "linuractl": pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release/linuractl",
+              "binding_helper": pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release/examples/v05_binding",
+              "verifier_helper": pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release/examples/v05_verify",
               "dbus_policy": root / "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
               "polkit_policy": root / "packaging/polkit-1/actions/org.linura.executor.systemd.policy",
               "systemd_unit": root / "packaging/systemd/system/linura-executor-systemd.service",
@@ -246,8 +253,6 @@ jobs:
               "host_protocol": root / "tests/acceptance/v05/qualify-host.sh",
               "guest_protocol": root / "tests/acceptance/v05/qualify-guest.sh",
           }
-          def digest(path):
-              return hashlib.sha256(path.read_bytes()).hexdigest()
           evidence = {
               "schema_version": 1,
               "repository": os.environ["GITHUB_REPOSITORY"],
@@ -274,10 +279,18 @@ jobs:
               ],
               "base_image": {"url": os.environ["BASE_IMAGE_URL"], "sha256": os.environ["BASE_IMAGE_SHA256"]},
               "virtualization": {"acceleration": os.environ["VM_ACCELERATION"]},
-              "artifacts": {
-                  name: {"path": path.relative_to(root).as_posix(), "sha256": digest(path), "size": path.stat().st_size}
-                  for name, path in files.items()
-              },
+              "artifacts": bind_artifacts(
+                  root,
+                  artifact_dir,
+                  files,
+                  {
+                      "executor": "v05-executor-systemd.bin",
+                      "linurad": "v05-linurad.bin",
+                      "linuractl": "v05-linuractl.bin",
+                      "binding_helper": "v05-binding-helper.bin",
+                      "verifier_helper": "v05-verifier-helper.bin",
+                  },
+              ),
               "toolchain": {
                   "rustc": subprocess.check_output(["rustc", "-Vv"], text=True).strip(),
                   "qemu": subprocess.check_output(["qemu-system-x86_64", "--version"], text=True).splitlines()[0],
@@ -315,7 +328,7 @@ jobs:
         if: ${{ always() && steps.toolchain_data.outcome == 'success' }}
         run: |
           set -euo pipefail
-          artifact_dir="${ARTIFACT_DIR:-$RUNNER_TEMP/linura-v05-executor-artifacts}"
+          artifact_dir="${ARTIFACT_DIR:?dedicated evidence storage is required}"
           mkdir -p "$artifact_dir"
           if [[ -n "${VM_LOG:-}" && -f "$VM_LOG" ]]; then
             cp "$VM_LOG" "$artifact_dir/qemu.log"
@@ -332,6 +345,6 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linura-v05-executor-verifier-${{ github.event.pull_request.head.sha || github.sha }}-unqualified-diagnostics
-          path: ${{ runner.temp }}/linura-v05-executor-artifacts/
+          path: ${{ env.ARTIFACT_DIR }}
           if-no-files-found: warn
           retention-days: 7

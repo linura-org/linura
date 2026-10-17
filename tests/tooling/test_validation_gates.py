@@ -48,6 +48,54 @@ class ValidationGateTests(unittest.TestCase):
         self.assertIn(before, source)
         file.write_text(source.replace(before, after, 1))
 
+    def test_heavy_ci_storage_cannot_be_skipped_or_replaced_by_an_inert_command(self):
+        workflow = self.root / ".github/workflows/vm-acceptance.yml"
+        original = workflow.read_text()
+        marker = "      - name: Prepare guarded qualification storage"
+        for replacement in (
+            marker + "\n        if: false",
+            marker + "\n        continue-on-error: true",
+            marker + "\n        shell: sh",
+        ):
+            with self.subTest(replacement=replacement):
+                workflow.write_text(original.replace(marker, replacement, 1))
+                self.assertTrue(
+                    any(
+                        "storage preparation" in error
+                        for error in gates.check(self.root)
+                    )
+                )
+        workflow.write_text(
+            original.replace(
+                "run: bash scripts/prepare_qualification_storage.sh generic-vm",
+                "run: echo 'bash scripts/prepare_qualification_storage.sh generic-vm'",
+                1,
+            )
+        )
+        self.assertTrue(
+            any("storage preparation" in error for error in gates.check(self.root))
+        )
+
+    def test_heavy_ci_root_and_empty_artifact_fallbacks_are_denied(self):
+        workflow = self.root / ".github/workflows/vm-acceptance.yml"
+        original = workflow.read_text()
+        for before, after in (
+            (
+                "$LINURA_VM_DIR/linura-acceptance.qcow2",
+                "$RUNNER_TEMP/linura-acceptance.qcow2",
+            ),
+            ("path: ${{ env.ARTIFACT_DIR }}", "path: ${{ env.ARTIFACT_DIR }}/"),
+        ):
+            with self.subTest(after=after):
+                self.assertIn(before, original)
+                workflow.write_text(original.replace(before, after, 1))
+                self.assertTrue(
+                    any(
+                        "fallback is forbidden" in error
+                        for error in gates.check(self.root)
+                    )
+                )
+
     def test_evidence_publication_lane_protects_critical_paths_in_pr_and_main(self):
         workflow = gates.SPECIALIZED["evidence-publication"][0]
         paths = (
@@ -4294,6 +4342,10 @@ class ValidationGateTests(unittest.TestCase):
                 "continue-on-error: true",
             ):
                 with self.subTest(lane=name, job=job, directive=directive):
+                    # Step names may legitimately repeat across jobs. Mutate
+                    # the selected job, not the first same-named step elsewhere.
+                    assert body is not None
+                    self.assertIn(body, original)
                     target.write_text(
                         original[:step_start]
                         + marker

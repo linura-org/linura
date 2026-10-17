@@ -44,7 +44,12 @@ readonly MIN_GLIBC_MINOR=17
 readonly CARGO_ROOT="${CARGO_HOME:-${HOME}/.cargo}"
 
 export CARGO_HOME="$CARGO_ROOT"
-export PATH="${CARGO_ROOT}/bin:${HOME}/.local/bin:${PATH}"
+readonly PYTHON_BIN="${HOME}/.local/linura-tools/python312/bin"
+if [[ ! -L "$PYTHON_BIN/python3" || ! -x "$PYTHON_BIN/python3" ]]; then
+    echo 'Linura Python PATH entry is missing; run environment setup' >&2
+    exit 1
+fi
+export PATH="$PYTHON_BIN:${CARGO_ROOT}/bin:${HOME}/.local/bin:${PATH}"
 
 require_command() {
     local command_name="$1"

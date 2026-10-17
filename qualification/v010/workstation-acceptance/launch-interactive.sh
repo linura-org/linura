@@ -9,6 +9,9 @@ ssh_port=2224
 record=0
 source_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 evidence_dir=""
+storage_root="${LINURA_STORAGE_ROOT:-/mnt/linura-data}"
+storage_id="${LINURA_STORAGE_ID:-}"
+run_id=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -20,6 +23,9 @@ while [[ $# -gt 0 ]]; do
         --ssh-port) ssh_port="$2"; shift 2 ;;
         --record) record=1; shift ;;
         --evidence-dir) evidence_dir="$2"; shift 2 ;;
+        --storage-root) storage_root="$2"; shift 2 ;;
+        --storage-id) storage_id="$2"; shift 2 ;;
+        --run-id) run_id="$2"; shift 2 ;;
         *) echo "unsupported argument: $1" >&2; exit 2 ;;
     esac
 done
@@ -40,10 +46,41 @@ source_sha="$(git -C "$source_root" rev-parse HEAD)"
 [[ -f "$prepared_image" && ! -L "$prepared_image" ]] || fail "prepared image is missing or unsafe"
 [[ -f "$prepared_manifest" && ! -L "$prepared_manifest" ]] || fail "prepared manifest is missing or unsafe"
 
+# Heavy local qualification has no root-disk fallback. Validate the actual host
+# mount and this run's namespace before mkdir, archive, build, VM or recording.
+# These diagnostics do not accept evidence or replace native qualification.
+[[ -n "$run_id" ]] || fail "--run-id is required for dedicated qualification storage"
+storage_args=(storage --storage-root "$storage_root" --storage-id "$storage_id"
+    --environment arch-hyprland-interactive --run "$run_id"
+    --min-free-gib 12 --max-parallel-builds 1 --vm-image "$prepared_image" --fresh-run)
+if [[ -n "$evidence_dir" ]]; then
+    storage_args+=(--evidence-dir "$evidence_dir")
+fi
+temporary_root="$(python3 "$source_root/tools/development_workspace.py" "${storage_args[@]}" --field temporary)" \
+    || fail "dedicated qualification storage is unavailable or mismatched"
+evidence_dir="$(python3 "$source_root/tools/development_workspace.py" "${storage_args[@]}" --field evidence)" \
+    || fail "protected evidence storage is unavailable or mismatched"
+umask 077
+LINURA_STORAGE_ROOT="$storage_root" LINURA_STORAGE_ID="$storage_id" \
+    python3 "$source_root/tools/development_storage.py" \
+    --source-root "$source_root" --environment arch-hyprland-interactive --run "$run_id" \
+    prepare --source-sha "$source_sha" >/dev/null \
+    || fail "cannot prepare a fresh dedicated-storage qualification run"
+vm_disposable="$(python3 "$source_root/tools/development_workspace.py" "${storage_args[@]}" --field vm-disposable)" \
+    || fail "cannot select checked disposable VM storage"
+export LINURA_SOURCE_ROOT="$source_root" LINURA_RUN_ID="$run_id"
+export LINURA_STORAGE_ROOT="$storage_root" LINURA_STORAGE_ID="$storage_id"
+exec {storage_run_lock_fd}<"$temporary_root" || fail "cannot reserve qualification run"
+flock -n "$storage_run_lock_fd" || fail "qualification run already in progress"
+export TMPDIR="$temporary_root"
+export CARGO_BUILD_JOBS=1
+# Do not inherit another worktree's output directories into the Git archive.
+unset CARGO_TARGET_DIR CARGO_BUILD_TARGET_DIR CARGO_BUILD_BUILD_DIR
+
 for command_name in qemu-img cloud-localds ssh scp ssh-keygen git python3 cargo rustup tar flock; do
     command -v "$command_name" >/dev/null || fail "required host command is missing: $command_name"
 done
-work_root="$(mktemp -d -t linura-workstation-live.XXXXXX)"
+work_root="$(mktemp -d -p "$temporary_root" linura-workstation-live.XXXXXX)"
 trap 'rm -rf "$work_root"' EXIT
 source_archive="$work_root/source.tar.gz"
 build_root="$work_root/source"
@@ -87,16 +124,13 @@ substrate_contract="$build_root/contracts/v010-shell-runtime-substrate.toml"
 prepared_sha="$(python3 "$build_root/qualification/v010/shell-runtime/verify-substrate.py"     "$substrate_contract"     "$build_root/qualification/v010/shell-runtime/prepare-substrate.sh"     "$prepared_image"     "$prepared_manifest")"
 [[ "$prepared_sha" =~ ^[0-9a-f]{64}$ ]] || fail "prepared substrate verification did not return a digest"
 
-vm_image="$work_root/workstation.qcow2"
-seed_image="$work_root/seed.img"
+vm_image="$vm_disposable/workstation.qcow2"
+seed_image="$vm_disposable/seed.img"
 ssh_key="$work_root/id_ed25519"
 vm_log="$work_root/qemu.log"
 nic_mac="52:54:00:12:34:56"
 vm_pid=""
 
-if [[ -z "$evidence_dir" ]]; then
-    evidence_dir="$source_root/.artifacts/workstation-live-$source_sha"
-fi
 if [[ -L "$evidence_dir" ]]; then
     fail "interactive evidence directory must not be a symlink"
 fi

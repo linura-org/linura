@@ -1821,6 +1821,12 @@ mod tests {
         }
     }
 
+    fn write_private(path: &Path, bytes: impl AsRef<[u8]>) {
+        fs::write(path, bytes).unwrap_or_else(|error| unreachable!("{error}"));
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+    }
+
     fn coordinator(label: &str) -> (TestDir, UpdateCoordinator) {
         coordinator_with_policy(label, UpdatePolicy::default())
     }
@@ -2469,8 +2475,7 @@ mod tests {
                 recovery_reason: None,
                 external_effect: ExternalEffectState::None,
             };
-            fs::write(&journal, serialize_journal(&invalid))
-                .unwrap_or_else(|error| unreachable!("{error}"));
+            write_private(&journal, serialize_journal(&invalid));
             assert!(matches!(
                 UpdateJournalStore::new(&journal).load(),
                 Err(UpdateError::CorruptJournal(_))
@@ -2553,8 +2558,7 @@ mod tests {
             recovery_reason: None,
             external_effect: ExternalEffectState::DispatchStarted,
         };
-        fs::write(&journal, serialize_journal(&invalid))
-            .unwrap_or_else(|error| unreachable!("{error}"));
+        write_private(&journal, serialize_journal(&invalid));
         assert!(matches!(
             UpdateJournalStore::new(journal).load(),
             Err(UpdateError::CorruptJournal(_))

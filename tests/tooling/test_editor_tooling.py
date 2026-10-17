@@ -20,6 +20,7 @@ class EditorToolingTests(unittest.TestCase):
     def test_cli_entrypoints_retain_executable_modes(self) -> None:
         for relative in (
             "scripts/preflight_codex_environment.sh",
+            "tests/acceptance/v05/qualify-host.sh",
             "tools/make_checksums.py",
             "tools/visual.py",
             "tools/vm.py",
@@ -40,6 +41,8 @@ class EditorToolingTests(unittest.TestCase):
             "ms-python.vscode-pylance",
             "charliermarsh.ruff",
             "streetsidesoftware.code-spell-checker",
+            "theqtcompany.qt-core",
+            "theqtcompany.qt-qml",
         }
         self.assertTrue(required.issubset(set(data["recommendations"])))
 
@@ -54,7 +57,16 @@ class EditorToolingTests(unittest.TestCase):
         self.assertEqual(
             data["python.analysis.extraPaths"], ["./tools", "./bindings/python/src"]
         )
-        self.assertNotIn("python.defaultInterpreterPath", data)
+        self.assertEqual(
+            data["python.defaultInterpreterPath"],
+            "${userHome}/.local/linura-tools/python312/bin/python3",
+        )
+        self.assertEqual(
+            data["terminal.integrated.env.linux"]["PATH"],
+            "${userHome}/.local/linura-tools/python312/bin:${env:PATH}",
+        )
+        self.assertFalse(data["qt-qml.qmlls.enabled"])
+        self.assertTrue(data["qt-qml.doNotAskForQmllsDownload"])
         words = data["cSpell.words"]
         self.assertEqual(words, sorted(set(words)))
         self.assertTrue(

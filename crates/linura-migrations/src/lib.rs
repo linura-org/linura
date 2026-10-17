@@ -1536,6 +1536,12 @@ mod tests {
         }
     }
 
+    fn copy_private(source: &Path, destination: &Path) {
+        fs::copy(source, destination).unwrap_or_else(|error| unreachable!("{error}"));
+        fs::set_permissions(destination, fs::Permissions::from_mode(0o600))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+    }
+
     #[derive(Debug)]
     struct TestMigration {
         descriptor: MigrationDescriptor,
@@ -1700,7 +1706,7 @@ mod tests {
         let source = dir.path().join("state.db");
         let backup = dir.path().join("state.db.backup");
         fs::write(&source, b"durable-state").unwrap_or_else(|error| unreachable!("{error}"));
-        fs::copy(&source, &backup).unwrap_or_else(|error| unreachable!("{error}"));
+        copy_private(&source, &backup);
         let evidence = ValidatedBackup::verify(&source, &backup)
             .unwrap_or_else(|error| unreachable!("{error}"));
         let migration = TestMigration::new("0002-risky", true).with_recovery_target(source.clone());
@@ -1722,7 +1728,7 @@ mod tests {
         let source = dir.path().join("state.db");
         let backup = dir.path().join("state.db.backup");
         fs::write(&source, b"state").unwrap_or_else(|error| unreachable!("{error}"));
-        fs::copy(&source, &backup).unwrap_or_else(|error| unreachable!("{error}"));
+        copy_private(&source, &backup);
         fs::set_permissions(&backup, fs::Permissions::from_mode(0o666))
             .unwrap_or_else(|error| unreachable!("{error}"));
         assert_eq!(
@@ -1737,7 +1743,7 @@ mod tests {
         let source = dir.path().join("state.db");
         let backup = dir.path().join("state.db.backup");
         fs::write(&source, b"state").unwrap_or_else(|error| unreachable!("{error}"));
-        fs::copy(&source, &backup).unwrap_or_else(|error| unreachable!("{error}"));
+        copy_private(&source, &backup);
         let evidence = ValidatedBackup::verify(&source, &backup)
             .unwrap_or_else(|error| unreachable!("{error}"));
         let migration = TestMigration::new("0002-target-required", true);
@@ -1756,7 +1762,7 @@ mod tests {
         let backup = dir.path().join("unrelated.db.backup");
         let actual_target = dir.path().join("state.db");
         fs::write(&backed_up_source, b"same-bytes").unwrap_or_else(|error| unreachable!("{error}"));
-        fs::copy(&backed_up_source, &backup).unwrap_or_else(|error| unreachable!("{error}"));
+        copy_private(&backed_up_source, &backup);
         fs::write(&actual_target, b"same-bytes").unwrap_or_else(|error| unreachable!("{error}"));
         let evidence = ValidatedBackup::verify(&backed_up_source, &backup)
             .unwrap_or_else(|error| unreachable!("{error}"));
@@ -1789,7 +1795,7 @@ mod tests {
         let source = dir.path().join("state.db");
         let backup = dir.path().join("state.db.backup");
         fs::write(&source, b"state-v1").unwrap_or_else(|error| unreachable!("{error}"));
-        fs::copy(&source, &backup).unwrap_or_else(|error| unreachable!("{error}"));
+        copy_private(&source, &backup);
         let evidence = ValidatedBackup::verify(&source, &backup)
             .unwrap_or_else(|error| unreachable!("{error}"));
         fs::write(&source, b"state-v2").unwrap_or_else(|error| unreachable!("{error}"));
@@ -1809,7 +1815,7 @@ mod tests {
         let source = dir.path().join("state.db");
         let backup = dir.path().join("state.db.backup");
         fs::write(&source, b"state-v1").unwrap_or_else(|error| unreachable!("{error}"));
-        fs::copy(&source, &backup).unwrap_or_else(|error| unreachable!("{error}"));
+        copy_private(&source, &backup);
         let evidence = ValidatedBackup::verify(&source, &backup)
             .unwrap_or_else(|error| unreachable!("{error}"));
         let guard = evidence
@@ -1826,7 +1832,7 @@ mod tests {
         let source = dir.path().join("state.db");
         let backup = dir.path().join("state.db.backup");
         fs::write(&source, b"pre-migration-state").unwrap_or_else(|error| unreachable!("{error}"));
-        fs::copy(&source, &backup).unwrap_or_else(|error| unreachable!("{error}"));
+        copy_private(&source, &backup);
         let evidence = ValidatedBackup::verify(&source, &backup)
             .unwrap_or_else(|error| unreachable!("{error}"));
         let store = MigrationLedgerStore::new(dir.path().join("migration.ledger"));

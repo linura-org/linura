@@ -32,10 +32,10 @@ FROZEN_FORMAT_INPUTS = {
     "apps/linura-shell/bridge/audio_session_controller.h": "ad34a06d80726946c583c0bab2db3e9aa7fecb49aa2900d29584f87b5b1cffae",
     "packaging/wireplumber/linura-session-audio.lua": "a63caddb8df6cd8584c355f7fb289b08abe09eca8b46521d274d84a408100d10",
     "qualification/v010/shell-runtime/run-shell-runtime.sh": "3533143a2a37fa733204daae9ba9177cffea726ce499e024d2968df433956b6b",
-    "qualification/v010/workstation-acceptance/record-session.sh": "97fee418e4d144e9500b86907cea18dd716e877fa7b981ae2c12b2684850d318",
-    "qualification/v010/workstation-acceptance/launch-interactive.sh": "26b0746581b3bcd32e93c986000975b79c8df052b243577ccb208c899ea35460",
-    "qualification/v010/workstation-acceptance/capture-hardware-session.sh": "87c5b48938f9eae997a0a8e6c7bc75607ffd2c3c14f274e2ab9ec251dc242386",
-    "scripts/qualification/v09-adversarial-guest.sh": "4e68b9434f07c8df61f6ac636cd13f59800a3cc1bc7666a547f6c2ed0a3a03fd",
+    "qualification/v010/workstation-acceptance/record-session.sh": "b9e90e16aea31a6e87e1d901c0ae7b0a22c45d8d9b7b99d7e16939555ea0e9fc",
+    "qualification/v010/workstation-acceptance/launch-interactive.sh": "1c8ed5fc180526a8176e7a88635fae9b122daa0b64090e826ec3e3c6af957dd6",
+    "qualification/v010/workstation-acceptance/capture-hardware-session.sh": "ce2257338be8b6b1f9b07248102f28808bbbecf83277f886163127e244d11ad3",
+    "scripts/qualification/v09-adversarial-guest.sh": "f4a12a53b830ceffb7c8ea3c30ab67f3bed9c84de763c8db205d48e75aaa9c9f",
     "apps/linura-shell/panel/WorkstationPanel.qml": "cb93655f4ea5d86d3d76a5fe17c217a51d681010750e56bb1b4524c041d4a055",
 }
 REQUIRED_VERSION = {

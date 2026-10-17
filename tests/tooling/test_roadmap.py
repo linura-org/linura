@@ -287,7 +287,11 @@ class RoadmapContractTests(unittest.TestCase):
             release_build,
         )
         self.assertIn(
-            "target/$RELEASE_TARGET/release/linurad",
+            'cargo build --workspace --release --locked --target "$RELEASE_TARGET" --target-dir "$LINURA_CARGO_TARGET"',
+            runtime,
+        )
+        self.assertIn(
+            "$LINURA_CARGO_TARGET/$RELEASE_TARGET/release/linurad",
             runtime,
         )
 

@@ -27,6 +27,10 @@
   "ruff.path": [
     "${userHome}/.local/bin/ruff"
   ],
+  "python.defaultInterpreterPath": "${userHome}/.local/linura-tools/python312/bin/python3",
+  "terminal.integrated.env.linux": {
+    "PATH": "${userHome}/.local/linura-tools/python312/bin:${env:PATH}"
+  },
   "python.analysis.typeCheckingMode": "basic",
   "python.analysis.diagnosticMode": "workspace",
   "python.analysis.autoImportCompletions": true,
@@ -34,6 +38,8 @@
     "./tools",
     "./bindings/python/src"
   ],
+  "qt-qml.qmlls.enabled": false,
+  "qt-qml.doNotAskForQmllsDownload": true,
   "cSpell.words": [
     "airootfs",
     "appstream",

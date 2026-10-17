@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -71,6 +74,10 @@ FIXTURE_PATHS = (
     "qualification/v010/workstation-acceptance/run-hardware-qualification.sh",
     "schemas/v010-maintained-workstation-fixture.v1.schema.json",
     "tools/workstation_acceptance.py",
+    "tools/development_workspace.py",
+    "tools/development_storage.py",
+    "scripts/prepare_qualification_storage.sh",
+    "tools/codex/doctor.py",
     "tools/workstation_capture_lock.py",
     "tools/workstation_q11_runner.py",
     "qualification/v010/shell-runtime/prepare-substrate.sh",
@@ -245,6 +252,159 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("digest-verify a restored official base image", result.stderr)
 
+    def test_official_base_image_cache_requires_stable_prerequisite_paths(self) -> None:
+        for marker in (
+            "path: ${{ env.LINURA_VM_BASE_DIR }}/arch-v010-shell.qcow2",
+            'image="$LINURA_VM_BASE_DIR/arch-v010-shell.qcow2"',
+        ):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                workflow = (
+                    root / ".github/workflows/v010-shell-runtime-qualification.yml"
+                )
+                text = workflow.read_text(encoding="utf-8")
+                self.assertIn(marker, text)
+                workflow.write_text(
+                    text.replace(
+                        marker, marker.replace("LINURA_VM_BASE_DIR", "LINURA_VM_DIR"), 1
+                    ),
+                    encoding="utf-8",
+                )
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "base image" if marker.startswith("image=") else "base-image",
+                    result.stderr,
+                )
+
+    def test_official_base_cache_verifies_bytes_and_preserves_run_isolation(
+        self,
+    ) -> None:
+        workflow = (
+            ROOT / ".github/workflows/v010-shell-runtime-qualification.yml"
+        ).read_text(encoding="utf-8")
+        step = workflow.split(
+            "- name: Download and verify official Arch base image", 1
+        )[1].split("\n      - name:", 1)[0]
+        script = textwrap.dedent(step.split("run: |\n", 1)[1])
+        payload = b"verified official base image"
+        digest = hashlib.sha256(payload).hexdigest()
+        for state in ("hit", "miss", "corrupt", "symlink", "retained", "bad-download"):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                cache, run, work, commands = (
+                    root / name for name in ("cache", "run", "work", "bin")
+                )
+                for path in (cache, run, work, commands):
+                    path.mkdir(mode=0o700)
+                cached = cache / "arch-v010-shell.qcow2"
+                destination = run / cached.name
+                image_fixture = root / "official.qcow2"
+                image_fixture.write_bytes(
+                    b"invalid download" if state == "bad-download" else payload
+                )
+                checksum_fixture = root / "official.SHA256"
+                checksum_fixture.write_text(
+                    f"{digest}  official.qcow2\n", encoding="utf-8"
+                )
+                if state == "symlink":
+                    cached.symlink_to(image_fixture)
+                elif state not in ("miss", "bad-download"):
+                    cached.write_bytes(
+                        b"corrupt cache" if state == "corrupt" else payload
+                    )
+                if state == "retained":
+                    destination.write_bytes(b"retained guest")
+                curl = commands / "curl"
+                curl.write_text(
+                    f"#!{sys.executable}\n"
+                    "import os, pathlib, shutil, sys\n"
+                    "kind = 'CHECKSUM' if sys.argv[-1] == os.environ['BASE_IMAGE_CHECKSUM_URL'] else 'IMAGE'\n"
+                    "shutil.copyfile(os.environ['MOCK_' + kind], sys.argv[sys.argv.index('--output') + 1])\n"
+                    "with pathlib.Path(os.environ['MOCK_CALLS']).open('a') as log:\n"
+                    "    log.write(kind + '\\n')\n",
+                    encoding="utf-8",
+                )
+                curl.chmod(0o700)
+                calls = root / "calls"
+                result = subprocess.run(
+                    ["bash", "-c", script],
+                    env={
+                        **os.environ,
+                        "PATH": f"{commands}:{os.environ['PATH']}",
+                        "LINURA_VM_BASE_DIR": str(cache),
+                        "LINURA_VM_DIR": str(run),
+                        "LINURA_WORK_DIR": str(work),
+                        "GITHUB_ENV": str(root / "env"),
+                        "BASE_IMAGE_URL": "https://fixture.invalid/official.qcow2",
+                        "BASE_IMAGE_CHECKSUM_URL": "https://fixture.invalid/official.SHA256",
+                        "MOCK_IMAGE": str(image_fixture),
+                        "MOCK_CHECKSUM": str(checksum_fixture),
+                        "MOCK_CALLS": str(calls),
+                    },
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                if state in ("symlink", "retained", "bad-download"):
+                    self.assertNotEqual(result.returncode, 0)
+                    if state == "retained":
+                        self.assertEqual(destination.read_bytes(), b"retained guest")
+                    else:
+                        self.assertFalse(destination.exists())
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(destination.read_bytes(), payload)
+                    self.assertEqual(cached.read_bytes(), payload)
+                    self.assertNotEqual(destination.stat().st_ino, cached.stat().st_ino)
+                    self.assertEqual(
+                        "IMAGE" in calls.read_text().splitlines(), state != "hit"
+                    )
+
+    def test_prepared_substrate_copy_steps_preserve_existing_destinations(self) -> None:
+        workflow = (
+            ROOT / ".github/workflows/v010-shell-runtime-qualification.yml"
+        ).read_text(encoding="utf-8")
+        for step_name in (
+            "Stage restored prepared substrate into private run",
+            "Stage verified prepared substrate in stable prerequisite cache",
+            "Stage prepared substrate into private runtime namespace",
+        ):
+            with (
+                self.subTest(step=step_name),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
+                root = Path(temp_dir)
+                base, run = root / "base", root / "run"
+                base.mkdir()
+                run.mkdir()
+                source, destination = (
+                    (run, base) if "stable prerequisite" in step_name else (base, run)
+                )
+                name = "arch-v010-shell-prepared.qcow2"
+                (source / name).write_bytes(b"verified prerequisite")
+                (destination / name).write_bytes(b"retained output")
+                step = workflow.split(f"- name: {step_name}", 1)[1].split(
+                    "\n      - name:", 1
+                )[0]
+                script = textwrap.dedent(step.split("run: |\n", 1)[1])
+                result = subprocess.run(
+                    ["bash", "-c", script],
+                    env={
+                        **os.environ,
+                        "LINURA_VM_BASE_DIR": str(base),
+                        "LINURA_VM_DIR": str(run),
+                    },
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual((destination / name).read_bytes(), b"retained output")
+
     def test_substrate_must_include_pipewire_audio_support(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -398,6 +558,27 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertIn(marker, text)
             builder.write_text(
                 text.replace(marker, "cloud-init clean", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "prepared substrate builder missing fail-closed invariant",
+                result.stderr,
+            )
+
+    def test_prepared_substrate_vm_inputs_stay_in_vm_storage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            builder = root / "qualification/v010/shell-runtime/prepare-substrate.sh"
+            text = builder.read_text(encoding="utf-8")
+            marker = 'guest_image="$vm_root/substrate-guest.qcow2"'
+            self.assertIn(marker, text)
+            builder.write_text(
+                text.replace(
+                    marker, 'guest_image="$work_root/substrate-guest.qcow2"', 1
+                ),
                 encoding="utf-8",
             )
             result = self._run(root)
@@ -2936,7 +3117,7 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("lock the fixture", result.stderr)
 
-    def test_level_c_non_recorded_capture_clears_stale_recording_first(self) -> None:
+    def test_level_c_non_recorded_capture_refuses_stale_recording_first(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
@@ -2953,7 +3134,7 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             )
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("clear stale recording evidence", result.stderr)
+            self.assertIn("refuse stale recording evidence", result.stderr)
 
     def test_level_c_lock_helper_must_keep_no_follow_and_single_link_guards(
         self,
@@ -2980,7 +3161,7 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
                     "capture lock helper missing safety boundary", result.stderr
                 )
 
-    def test_level_c_stale_evidence_purge_must_cover_other_fixtures(self) -> None:
+    def test_level_c_stale_evidence_refusal_must_cover_other_fixtures(self) -> None:
         for marker in (
             '"$evidence_root"/hardware-*.mkv',
             '"$evidence_root"/hardware-*.metadata.json',
@@ -3002,7 +3183,9 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
                 )
                 result = self._run(root)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("preflight and clear every fixture", result.stderr)
+                self.assertIn(
+                    "preflight and refuse every retained fixture", result.stderr
+                )
 
     def test_level_c_snapshot_symlink_guard_cannot_be_removed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

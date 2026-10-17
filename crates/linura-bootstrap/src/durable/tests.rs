@@ -3,6 +3,13 @@ mod tests {
     use super::*;
     use std::os::unix::fs::{symlink, PermissionsExt};
 
+    fn private_tempdir() -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .permissions(fs::Permissions::from_mode(0o700))
+            .tempdir()
+            .unwrap_or_else(|error| unreachable!("{error}"))
+    }
+
     fn manifest_bytes(
         manifest_id: &str,
         session_id: &str,
@@ -275,7 +282,7 @@ mod tests {
 
     #[test]
     fn durable_stage_restart_never_blindly_replays_started_effect() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let store = BootstrapStateStore::new(dir.path().join("bootstrap.state"));
         let mut coordinator = DurableBootstrapCoordinator::open(
             store.clone(),
@@ -309,7 +316,7 @@ mod tests {
 
     #[test]
     fn effectful_stage_requires_started_boundary_and_fresh_evidence() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let store = BootstrapStateStore::new(dir.path().join("bootstrap.state"));
         let mut coordinator =
             DurableBootstrapCoordinator::open(store.clone(), "session-1", "machine-1")
@@ -380,7 +387,7 @@ mod tests {
 
     #[test]
     fn verified_stage_resumes_at_first_incomplete_stage() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let store = BootstrapStateStore::new(dir.path().join("bootstrap.state"));
         let mut coordinator = DurableBootstrapCoordinator::open(
             store.clone(),
@@ -405,7 +412,7 @@ mod tests {
 
     #[test]
     fn stale_coordinator_cannot_rollback_durable_progress() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let store = BootstrapStateStore::new(dir.path().join("bootstrap.state"));
         let mut current = DurableBootstrapCoordinator::open(
             store.clone(),
@@ -431,7 +438,7 @@ mod tests {
 
     #[test]
     fn reopening_rejects_a_previous_valid_ledger_generation() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let store = BootstrapStateStore::new(dir.path().join("bootstrap.state"));
         let mut coordinator = DurableBootstrapCoordinator::open(
             store.clone(),
@@ -455,7 +462,7 @@ mod tests {
 
     #[test]
     fn provisioning_selection_is_bound_to_its_canonical_stage() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let store = BootstrapStateStore::new(dir.path().join("bootstrap.state"));
         let mut coordinator = DurableBootstrapCoordinator::open(store, "session-1", "machine-1")
             .unwrap_or_else(|error| unreachable!("{error}"));
@@ -469,7 +476,7 @@ mod tests {
 
     #[test]
     fn prepare_for_another_owner_persists_stable_pending_then_mints_fresh_owner_evidence() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let store = BootstrapStateStore::new(dir.path().join("bootstrap.state"));
         let mut coordinator = DurableBootstrapCoordinator::open(
             store.clone(),
@@ -555,7 +562,7 @@ mod tests {
 
     #[test]
     fn interactive_owner_is_enrolled_only_inside_owner_resolution_stage() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let store = BootstrapStateStore::new(dir.path().join("bootstrap.state"));
         let mut coordinator = DurableBootstrapCoordinator::open(store, "session-1", "machine-1")
             .unwrap_or_else(|error| unreachable!("{error}"));
@@ -587,7 +594,7 @@ mod tests {
 
     #[test]
     fn recovery_mode_resolves_owner_stage_without_inventing_authority() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let store = BootstrapStateStore::new(dir.path().join("bootstrap.state"));
         let mut coordinator = DurableBootstrapCoordinator::open(store, "session-1", "machine-1")
             .unwrap_or_else(|error| unreachable!("{error}"));
@@ -618,7 +625,7 @@ mod tests {
 
     #[test]
     fn unattended_local_requires_exact_bound_manifest_and_stable_pending() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let store = BootstrapStateStore::new(dir.path().join("bootstrap.state"));
         let mut coordinator = DurableBootstrapCoordinator::open(
             store.clone(),
@@ -687,7 +694,7 @@ mod tests {
 
     #[test]
     fn group_writable_state_parent_fails_closed() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let parent = dir.path().join("untrusted");
         fs::create_dir(&parent).unwrap_or_else(|error| unreachable!("{error}"));
         fs::set_permissions(&parent, fs::Permissions::from_mode(0o770))
@@ -701,7 +708,7 @@ mod tests {
 
     #[test]
     fn state_corruption_and_newer_schema_fail_closed() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let path = dir.path().join("bootstrap.state");
         let store = BootstrapStateStore::new(&path);
         let coordinator = DurableBootstrapCoordinator::open(
@@ -735,7 +742,7 @@ mod tests {
 
     #[test]
     fn symlink_state_path_fails_closed() {
-        let dir = tempfile::tempdir().unwrap_or_else(|error| unreachable!("{error}"));
+        let dir = private_tempdir();
         let target = dir.path().join("target");
         let state = dir.path().join("bootstrap.state");
         fs::write(&target, b"not-state").unwrap_or_else(|error| unreachable!("{error}"));

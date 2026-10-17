@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
@@ -13,7 +14,44 @@ from unittest import mock
 from tools import workstation_q11_runner
 
 
+class PhysicalStorageDenialTests(unittest.TestCase):
+    def test_actual_case_recording_and_finalization_deny_missing_volume_before_state_writes(
+        self,
+    ) -> None:
+        source = Path(workstation_q11_runner.ROOT)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            state = root / "state"
+            for operation in (
+                lambda: workstation_q11_runner.record_case(
+                    source, state, "case", root / "attestation.json"
+                ),
+                lambda: workstation_q11_runner.finalize_run(source, state),
+            ):
+                with (
+                    mock.patch.dict(
+                        workstation_q11_runner.os.environ,
+                        {"LINURA_STORAGE_ROOT": str(root / "missing-volume")},
+                    ),
+                    self.assertRaises(OSError),
+                ):
+                    operation()
+                self.assertEqual(list(root.iterdir()), [])
+
+
 class WorkstationQ11RunnerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # These existing component tests use synthetic source/physical fixtures,
+        # not a mounted qualification runner. Test the new storage prerequisite
+        # separately; preserve all source, enrollment, denial and lifecycle cases.
+        prerequisite = mock.patch.object(
+            workstation_q11_runner.development_storage,
+            "require_destination",
+            side_effect=lambda *args, **_kwargs: args[2],
+        )
+        prerequisite.start()
+        self.addCleanup(prerequisite.stop)
+
     def test_candidate_contract_patch_is_temporary_readiness_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "qualification.toml"
@@ -44,7 +82,15 @@ evidence_ready = false
             root = Path(temp_dir)
             source_root = root / "source"
             source_root.mkdir()
-            state_root = root / "private-q11-run"
+            state_root = (
+                root
+                / "evidence"
+                / "identity"
+                / "arch-hyprland-hardware"
+                / "physical-001"
+                / "source"
+                / "q11-run"
+            )
             fixture_contract = root / "maintained-fixture.json"
             fixture_contract.write_text(
                 '{"fixture_id": "linura-workstation-01"}\n', encoding="utf-8"
@@ -62,6 +108,11 @@ evidence_ready = false
             with (
                 mock.patch.object(
                     workstation_q11_runner, "_exact_source", return_value=source_root
+                ),
+                mock.patch.object(
+                    workstation_q11_runner.development_storage,
+                    "arguments",
+                    return_value=argparse.Namespace(storage_root=root),
                 ),
                 mock.patch.object(
                     workstation_q11_runner.workstation_acceptance,
@@ -93,6 +144,10 @@ evidence_ready = false
                     fixture_contract,
                 )
 
+            for parent in (state_root, *state_root.parents):
+                if parent == root:
+                    break
+                self.assertEqual(parent.stat().st_mode & 0o777, 0o700)
             self.assertEqual(enrolled["status"], "collecting")
             self.assertFalse(enrolled["evidence_ready"])
             self.assertFalse(enrolled["release_support_promotion"])

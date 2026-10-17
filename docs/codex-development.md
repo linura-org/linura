@@ -5,6 +5,21 @@ and canonical gates as other contributors. Repository preparation makes the tool
 discoverable; it does not grant production access, publish evidence, certify a
 physical workstation, or increase an agent's authority.
 
+Use [Development workspaces and storage](development-workspaces.md) for persistent
+per-task checkouts, editor extension hosts, build-output isolation and safe
+retirement. Keep source worktrees and useful handoff/recovery records outside
+ephemeral `/tmp` storage; do not share one globally inherited Cargo target across
+independent tasks or nested snapshot checks.
+
+The shared [editor tasks](../.vscode/tasks.json) invoke the existing commands
+without installing tools. The canonical task is gated on preflight, the
+non-mutating `python3 tools/development_workspace.py outputs` check and an
+authority-test host check that reports UID-remapped ownership before running the
+test suite. Tasks remove inherited Cargo output overrides only for their child
+processes; they do not repair the parent editor/container. Volume inspection and
+any physical migration remain separate operator work, never native qualification
+evidence.
+
 ## Prepare the environment
 
 Configure these commands in the environment's setup and maintenance fields:
@@ -19,7 +34,7 @@ idempotent pinned setup for the selected checkout, fetching its locked Cargo
 graph. Core setup also provisions the repository-pinned, hash-locked Ruff
 environment used by the canonical gate. The optional `--bindings` additionally
 installs the existing hash-locked Python build requirements, including pip, into
-`$HOME/.local/linura-tools/python`; neither environment changes the host Python.
+`$HOME/.local/linura-tools/python`; neither environment changes the host Python. Core setup publishes a private, verified `$HOME/.local/linura-tools/python312/bin/python3` symlink to an existing Python 3.12. Task wrappers and preflight select it first on `PATH`; no task-time installation, global system Python replacement or silent fallback to a newer interpreter occurs.
 Every bindings setup/maintenance pass clears and recreates that isolated build
 environment before installing from the hash-locked requirements.
 This intentionally discards undeclared packages and partially installed caches;
@@ -48,18 +63,23 @@ or fleet credentials to an ordinary coding environment.
 ## Inspect capabilities before work
 
 ```bash
-python3 tools/codex/doctor.py --all
-python3 tools/codex/doctor.py --profile shell --profile bindings --json
+python3 tools/codex/doctor.py --profile core
+python3 tools/codex/doctor.py --profile editor --json
+python3 tools/codex/doctor.py --all  # complete inventory, not default readiness
 bash scripts/preflight_codex_environment.sh
+python3 tools/development_workspace.py authority-host
 ```
 
 The doctor aggregates missing and incompatible prerequisites instead of stopping
 at the first missing tool. It performs bounded, non-installing probes and emits
 only named check results and fixed remediation text. It always includes the core
 profile. Nonzero status means the selected readiness profile is incomplete.
-`--all` inventories all profiles, including the separate Arch image-builder
-requirements; an Ubuntu coding container is not expected to be an Arch builder.
-The JSON report explicitly sets `qualification_evidence` to false.
+`--all` inventories all profiles, including editor, VM, visual and the separate
+Arch image-builder requirements; an ordinary coding container is not expected to
+satisfy all of them. The editor profile validates QML runtime imports and actually
+starts the selected SDK's `qmlls --help`, exposing unresolved shared-library
+failures that file-presence checks miss. The JSON report explicitly sets
+`qualification_evidence` to false.
 
 The strict preflight also validates workflow semantics, exact active GNU Rust
 toolchain, rustfmt/Clippy availability, and the locked offline dependency graph.
@@ -93,6 +113,7 @@ task guides; root instructions and explicit user scope still apply.
 | Rust domain/control, adapters, SDK, executors, verifiers | `core` | `cargo xtask check`; affected crate tests and authority/adversarial guides |
 | Tooling, contracts, schemas, documentation, workflows | `core` | Repository validators, tooling tests and pinned actionlint; Security and CodeQL remain separate CI gates |
 | Qt/QML shell and shared UI | `shell` | CMake >= 3.24, C++20 compiler and Qt >= 6.4 Core/DBus/Qml/Quick/QuickControls2 development packages; build both CMake projects, then the graphical qualification lane |
+| Qt/QML language intelligence | `editor` | Shell prerequisites plus QtQuick/Controls/Layouts runtime imports and a runnable matching SDK `qmlls`; apply the inspector's namespace-local settings and verify actual editor activation |
 | Python binding/build | `bindings` | Binding tests with `PYTHONPATH=bindings/python/src`; hash-locked isolated wheel build below |
 | Disposable guests | `vm` | Preserve `python3 tools/vm.py doctor`; QEMU/SSH and exact image/profile/source evidence; KVM optional where the lane permits TCG |
 | ArchISO packaging | `image` | Separately provisioned Arch builder, mkarchiso/releng and shell build dependencies; `python3 tools/image.py doctor` before real builds |

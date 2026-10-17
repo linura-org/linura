@@ -5,6 +5,12 @@ set -euo pipefail
 : "${VM_PID:?VM_PID is required}"
 : "${VM_LOG:?VM_LOG is required}"
 : "${ARTIFACT_DIR:?ARTIFACT_DIR is required}"
+: "${LINURA_CARGO_TARGET:?LINURA_CARGO_TARGET is required}"
+: "${LINURA_RUN_ID:?LINURA_RUN_ID is required}"
+
+python3 tools/development_storage.py --source-root "$PWD" \
+    --environment generic-vm --run "$LINURA_RUN_ID" \
+    check --role cargo --path "$LINURA_CARGO_TARGET" >/dev/null
 
 ssh_port="${SSH_PORT:-2222}"
 ssh_common=(
@@ -39,9 +45,9 @@ ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 \
     'sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends dbus polkitd sqlite3'
 
 scp "${ssh_common[@]}" -P "$ssh_port" \
-    target/release/linura-authorityd \
-    target/release/linura-executor-systemd \
-    target/release/v06-qualification-matrix \
+    "$LINURA_CARGO_TARGET"/release/linura-authorityd \
+    "$LINURA_CARGO_TARGET"/release/linura-executor-systemd \
+    "$LINURA_CARGO_TARGET"/release/v06-qualification-matrix \
     packaging/dbus-1/system.d/org.linura.Authority1.conf \
     packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf \
     packaging/polkit-1/actions/org.linura.authority.policy \

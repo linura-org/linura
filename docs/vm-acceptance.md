@@ -159,8 +159,21 @@ qualification/v010/workstation-acceptance/run-hardware-qualification.sh case-req
   --run-id q11-example \
   --fixture-id linura-workstation-01 \
   --source-sha "$(git rev-parse HEAD)"
-qualification/v010/workstation-acceptance/run-hardware-qualification.sh capture --fixture-id linura-workstation-01 --evidence-root /path/to/evidence
-qualification/v010/workstation-acceptance/run-hardware-qualification.sh capture --fixture-id linura-workstation-01 --evidence-root /path/to/evidence --record
+# On maintained physical hardware, first provision independently verified storage.
+export LINURA_STORAGE_ROOT=/mnt/linura-data
+export LINURA_STORAGE_ID="<verified-filesystem-uuid>"
+export LINURA_RUN_ID=physical-001
+python3 tools/development_storage.py --environment arch-hyprland-hardware \
+  --run "$LINURA_RUN_ID" prepare --source-sha "$(git rev-parse HEAD)"
+evidence_root="$(python3 tools/development_workspace.py storage \
+  --environment arch-hyprland-hardware --run "$LINURA_RUN_ID" \
+  --storage-id "$LINURA_STORAGE_ID" --field evidence)"
+qualification/v010/workstation-acceptance/run-hardware-qualification.sh capture \
+  --fixture-id linura-workstation-01 --run-id "$LINURA_RUN_ID" \
+  --evidence-root "$evidence_root/capture-unrecorded"
+qualification/v010/workstation-acceptance/run-hardware-qualification.sh capture \
+  --fixture-id linura-workstation-01 --run-id "$LINURA_RUN_ID" \
+  --evidence-root "$evidence_root/capture-recorded" --record
 ```
 
 For Level B, prepare/verify the pinned Arch substrate using the existing v0.10 substrate tooling, ensure the repository-pinned Rust toolchain/target is installed, then launch the disposable interactive guest with `qualification/v010/workstation-acceptance/launch-interactive.sh`. The launcher requires a fully clean Git checkout, snapshots the selected SHA with `git archive`, builds `linurad` from that immutable archived tree using the pinned toolchain, locked workspace and the same release-envelope variables as CI, re-verifies the prepared image with helpers from the archived tree, provisions the guest from the same source archive, verifies the installed daemon digest against that archived-tree build, and then enters the live workstation session. `--display gtk` opens a local QEMU window; `--display vnc --vnc-display N` exposes QEMU only on loopback at VNC display N.

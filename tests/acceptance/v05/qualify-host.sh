@@ -5,6 +5,12 @@ set -euo pipefail
 : "${VM_PID:?VM_PID is required}"
 : "${VM_LOG:?VM_LOG is required}"
 : "${ARTIFACT_DIR:?ARTIFACT_DIR is required}"
+: "${LINURA_CARGO_TARGET:?LINURA_CARGO_TARGET is required}"
+: "${LINURA_RUN_ID:?LINURA_RUN_ID is required}"
+
+python3 tools/development_storage.py --source-root "$PWD" \
+    --environment generic-vm --run "$LINURA_RUN_ID" \
+    check --role cargo --path "$LINURA_CARGO_TARGET" >/dev/null
 
 ssh_port="${SSH_PORT:-2222}"
 ssh_common=(
@@ -39,11 +45,11 @@ ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 \
     'sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends dbus polkitd'
 
 scp "${ssh_common[@]}" -P "$ssh_port" \
-    target/release/linurad \
-    target/release/linuractl \
-    target/release/linura-executor-systemd \
-    target/release/examples/v05_binding \
-    target/release/examples/v05_verify \
+    "$LINURA_CARGO_TARGET"/release/linurad \
+    "$LINURA_CARGO_TARGET"/release/linuractl \
+    "$LINURA_CARGO_TARGET"/release/linura-executor-systemd \
+    "$LINURA_CARGO_TARGET"/release/examples/v05_binding \
+    "$LINURA_CARGO_TARGET"/release/examples/v05_verify \
     packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf \
     packaging/polkit-1/actions/org.linura.executor.systemd.policy \
     packaging/systemd/system/linura-executor-systemd.service \

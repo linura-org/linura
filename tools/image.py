@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
+import os
 from pathlib import Path
 import shlex
 import shutil
@@ -9,6 +11,11 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(ROOT))
+from tools import development_workspace as storage  # noqa: E402
+from tools import development_storage as storage_execution  # noqa: E402
+
 OVERLAY = ROOT / "packaging/arch/archiso"
 RELENG = Path("/usr/share/archiso/configs/releng")
 OUT = ROOT / ".artifacts/iso"
@@ -19,6 +26,32 @@ SHELL_BRIDGE_SOURCE = ROOT / "apps/linura-shell/bridge"
 SHELL_BRIDGE_BUILD = ROOT / ".artifacts/linura-shell-bridge-build"
 UI_SDK_SOURCE = ROOT / "apps/linura-shell/ui"
 UI_SDK_BUILD = ROOT / ".artifacts/linura-ui-build"
+
+
+@dataclass(frozen=True)
+class ImagePaths:
+    output: Path
+    work: Path
+    staged: Path
+    bridge: Path
+    ui: Path
+
+
+def reserve_image_paths(args: argparse.Namespace) -> ImagePaths:
+    """Create only a new disposable image workspace on verified storage.
+
+    Directory-relative, no-follow opens keep creation inside the selected tree.
+    An existing image workspace is retained, never implicitly overwritten/purged.
+    """
+    paths = storage.execution_layout(ROOT, args, "archiso-build")
+    parent = Path(paths["generated"]["cmake-build"])
+    selected_root = storage.directory(args.storage_root)
+    image = parent / "image"
+    storage_execution.private_tree(selected_root, image, exclusive=True)
+    return ImagePaths(
+        image / "iso", image / "work", image / "profile", image / "bridge", image / "ui"
+    )
+
 
 SHELL_BRIDGE_QT_MODULES = ("Qt6Core", "Qt6DBus", "Qt6Qml")
 UI_SDK_QT_MODULES = ("Qt6Core", "Qt6Qml", "Qt6Quick", "Qt6QuickControls2")
@@ -76,8 +109,16 @@ RUNTIME_ASSETS = {
 }
 
 
-def mkarchiso_command(profile: Path = STAGED) -> list[str]:
-    return ["mkarchiso", "-v", "-w", str(WORK), "-o", str(OUT), str(profile)]
+def mkarchiso_command(paths: ImagePaths) -> list[str]:
+    return [
+        "mkarchiso",
+        "-v",
+        "-w",
+        str(paths.work),
+        "-o",
+        str(paths.output),
+        str(paths.staged),
+    ]
 
 
 def have_qt_modules(modules: tuple[str, ...]) -> bool:
@@ -90,7 +131,7 @@ def have_qt_modules(modules: tuple[str, ...]) -> bool:
     )
 
 
-def build_shell_bridge(profile: Path) -> None:
+def build_shell_bridge(profile: Path, build: Path) -> None:
     required_tools = ("cmake", "ninja", "pkg-config")
     missing_tools = [name for name in required_tools if shutil.which(name) is None]
     if missing_tools:
@@ -103,16 +144,13 @@ def build_shell_bridge(profile: Path) -> None:
             "Qt6Core/Qt6DBus/Qt6Qml development metadata is required to build Linura Shell bridge"
         )
 
-    if SHELL_BRIDGE_BUILD.exists():
-        shutil.rmtree(SHELL_BRIDGE_BUILD)
-
     subprocess.run(
         [
             "cmake",
             "-S",
             str(SHELL_BRIDGE_SOURCE),
             "-B",
-            str(SHELL_BRIDGE_BUILD),
+            str(build),
             "-G",
             "Ninja",
             "-DCMAKE_BUILD_TYPE=Release",
@@ -120,14 +158,14 @@ def build_shell_bridge(profile: Path) -> None:
         check=True,
     )
     subprocess.run(
-        ["cmake", "--build", str(SHELL_BRIDGE_BUILD), "--parallel", "2"],
+        ["cmake", "--build", str(build), "--parallel", "1"],
         check=True,
     )
     subprocess.run(
         [
             "cmake",
             "--install",
-            str(SHELL_BRIDGE_BUILD),
+            str(build),
             "--prefix",
             str(profile / "airootfs/usr"),
         ],
@@ -135,7 +173,7 @@ def build_shell_bridge(profile: Path) -> None:
     )
 
 
-def build_ui_sdk(profile: Path) -> None:
+def build_ui_sdk(profile: Path, build: Path) -> None:
     required_tools = ("cmake", "ninja", "pkg-config")
     missing_tools = [name for name in required_tools if shutil.which(name) is None]
     if missing_tools:
@@ -149,16 +187,13 @@ def build_ui_sdk(profile: Path) -> None:
             "is required to build the Linura UI SDK"
         )
 
-    if UI_SDK_BUILD.exists():
-        shutil.rmtree(UI_SDK_BUILD)
-
     subprocess.run(
         [
             "cmake",
             "-S",
             str(UI_SDK_SOURCE),
             "-B",
-            str(UI_SDK_BUILD),
+            str(build),
             "-G",
             "Ninja",
             "-DCMAKE_BUILD_TYPE=Release",
@@ -166,14 +201,14 @@ def build_ui_sdk(profile: Path) -> None:
         check=True,
     )
     subprocess.run(
-        ["cmake", "--build", str(UI_SDK_BUILD), "--parallel", "2"],
+        ["cmake", "--build", str(build), "--parallel", "1"],
         check=True,
     )
     subprocess.run(
         [
             "cmake",
             "--install",
-            str(UI_SDK_BUILD),
+            str(build),
             "--prefix",
             str(profile / "airootfs/usr"),
         ],
@@ -222,16 +257,14 @@ def install_binaries(profile: Path, binaries_dir: Path) -> None:
     )
 
 
-def stage_profile(binaries_dir: Path) -> None:
+def stage_profile(binaries_dir: Path, paths: ImagePaths) -> None:
     if not RELENG.is_dir():
         raise RuntimeError(f"ArchISO releng profile missing: {RELENG}")
-    if STAGED.exists():
-        shutil.rmtree(STAGED)
-    shutil.copytree(RELENG, STAGED, symlinks=True)
+    shutil.copytree(RELENG, paths.staged, symlinks=True)
 
     for name in ("profiledef.sh", "pacman.conf"):
-        shutil.copy2(OVERLAY / name, STAGED / name)
-    shutil.copytree(OVERLAY / "airootfs", STAGED / "airootfs", dirs_exist_ok=True)
+        shutil.copy2(OVERLAY / name, paths.staged / name)
+    shutil.copytree(OVERLAY / "airootfs", paths.staged / "airootfs", dirs_exist_ok=True)
 
     additions = [
         line.strip()
@@ -240,7 +273,7 @@ def stage_profile(binaries_dir: Path) -> None:
         .splitlines()
         if line.strip() and not line.startswith("#")
     ]
-    package_file = STAGED / "packages.x86_64"
+    package_file = paths.staged / "packages.x86_64"
     existing = [
         line.rstrip() for line in package_file.read_text(encoding="utf-8").splitlines()
     ]
@@ -249,15 +282,16 @@ def stage_profile(binaries_dir: Path) -> None:
     }
     merged = existing + [package for package in additions if package not in names]
     package_file.write_text("\n".join(merged).rstrip() + "\n", encoding="utf-8")
-    install_binaries(STAGED, binaries_dir)
-    build_shell_bridge(STAGED)
-    build_ui_sdk(STAGED)
+    install_binaries(paths.staged, binaries_dir)
+    build_shell_bridge(paths.staged, paths.bridge)
+    build_ui_sdk(paths.staged, paths.ui)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Linura Arch image harness")
     parser.add_argument("command", choices=["plan", "stage", "build", "doctor"])
     parser.add_argument("--binaries-dir", type=Path, default=DEFAULT_BINARIES)
+    storage.add_storage_options(parser)
     args = parser.parse_args()
     if args.command == "doctor":
         path = shutil.which("mkarchiso")
@@ -303,7 +337,11 @@ def main() -> int:
         print(
             "7. build and install the first-party org.linura.UI QML module into the staged image"
         )
-        print(f"8. {shlex.join(mkarchiso_command())}")
+        planned = ImagePaths(OUT, WORK, STAGED, SHELL_BRIDGE_BUILD, UI_SDK_BUILD)
+        print(f"8. {shlex.join(mkarchiso_command(planned))}")
+        print(
+            "Execution requires dedicated storage and a new --run; these are preview paths only."
+        )
         return 0
     if shutil.which("mkarchiso") is None:
         print(
@@ -312,17 +350,25 @@ def main() -> int:
         )
         return 2
     try:
-        stage_profile(args.binaries_dir)
-    except RuntimeError as error:
+        paths = reserve_image_paths(args)
+        paths.work.mkdir(mode=0o700)
+        # Private process environment only: image/CMake/compiler temporary work
+        # cannot inherit a root-backed scratch directory from the invoking shell.
+        os.environ["TMPDIR"] = str(paths.work)
+        stage_profile(args.binaries_dir, paths)
+    except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
         print(error, file=sys.stderr)
         return 2
-    print(f"staged profile: {STAGED}")
+    print(f"staged profile: {paths.staged}")
     if args.command == "stage":
         return 0
-    OUT.mkdir(parents=True, exist_ok=True)
-    WORK.mkdir(parents=True, exist_ok=True)
-    print(shlex.join(mkarchiso_command()))
-    return subprocess.run(mkarchiso_command(), check=False).returncode
+    try:
+        paths.output.mkdir(mode=0o700)
+        print(shlex.join(mkarchiso_command(paths)))
+        return subprocess.run(mkarchiso_command(paths), check=False).returncode
+    except (OSError, subprocess.SubprocessError) as error:
+        print(error, file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
