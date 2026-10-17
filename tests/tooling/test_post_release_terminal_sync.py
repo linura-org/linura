@@ -272,7 +272,7 @@ none
         self.assertIn("tools/post_release_terminal_sync.py", closure)
         self.assertIn("--credential-source github-app", closure)
         self.assertIn(
-            "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+            "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
             closure,
         )
         self.assertIn("tools/release_native_gates.py", closure)
@@ -290,7 +290,7 @@ none
         self.assertIn("permission-pull-requests: read", cleanup)
 
         self.assertIn(
-            "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+            "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
             promotion,
         )
         self.assertIn("--credential-source github-app", promotion)
