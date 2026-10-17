@@ -1,0 +1,19 @@
+[Unit]
+Description=Linura native compositor availability for UID %i
+After=user@%i.service
+BindsTo=user@%i.service
+
+[Path]
+# Watch the immediate, already-supervised runtime directory. A glob inside
+# a dynamically created Hyprland instance directory can miss first login.
+# Exclude Wayland's .lock sidecar; the native owner independently attests
+# compositor sockets, kernel peers, and the PAM/logind session before serving.
+# Neither path match grants identity, authorization, or execution authority.
+PathExistsGlob=/run/user/%i/wayland-[0-9]
+PathExistsGlob=/run/user/%i/wayland-[0-9]*[0-9]
+Unit=linura-security-owner@%i.service
+TriggerLimitIntervalSec=120s
+TriggerLimitBurst=5
+
+[Install]
+WantedBy=user@%i.service

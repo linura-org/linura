@@ -1,0 +1,458 @@
+#include "session_controller.h"
+#include "session_receipt.h"
+
+#include <QDBusArgument>
+#include <QDBusPendingCallWatcher>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QRegularExpression>
+#include <QSaveFile>
+#include <QStandardPaths>
+#include <QTimer>
+#include <QUuid>
+#include <algorithm>
+
+namespace {
+constexpr auto service = "org.linura.Authority1";
+constexpr auto endpoint = "/org/linura/Authority1";
+constexpr auto interface = "org.linura.Authority1";
+
+bool slug(const QString &value)
+{
+    static const QRegularExpression expression(QStringLiteral("^[a-z0-9]+(?:-[a-z0-9]+)*$"));
+    return value.size() <= 64 && expression.match(value).hasMatch();
+}
+
+bool bounded(const QString &value, qsizetype maximum)
+{
+    return !value.isEmpty() && value.size() <= maximum &&
+           std::none_of(value.cbegin(), value.cend(),
+                        [](QChar c) { return c.isSpace() || c.isNull(); });
+}
+
+QString replyString(const QDBusMessage &message)
+{
+    if (message.type() != QDBusMessage::ReplyMessage ||
+        message.signature() != QStringLiteral("s") || message.arguments().size() != 1)
+        return {};
+    const auto result = message.arguments().front().toString();
+    return bounded(result, 512) ? result : QString{};
+}
+} // namespace
+
+SessionController::SessionController(QObject *parent)
+    : QObject(parent),
+      bus_(QDBusConnection::connectToBus(QStringLiteral("unix:path=/run/dbus/system_bus_socket"),
+                                         QStringLiteral("linura-shell-session-client"))),
+      trackingPath_(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) +
+                    QStringLiteral("/session-request.json")),
+      status_(tr("Session controls require Linura Control. Authentication appears only in the "
+                 "secure locker."))
+{
+    loadTracking();
+    nativeSleepStatus_ = tr("Sleep protection is not verified. Checking read-only diagnostics…");
+    auto *timer = new QTimer(this);
+    timer->setInterval(5000);
+    connect(timer, &QTimer::timeout, this, &SessionController::refreshNativeSleepStatus);
+    timer->start();
+    QTimer::singleShot(0, this, &SessionController::refreshNativeSleepStatus);
+}
+
+void SessionController::refreshNativeSleepStatus()
+{
+    if (nativeSleepQueryPending_)
+        return;
+    nativeSleepQueryPending_ = true;
+    call(
+        QStringLiteral("GetOwnNativeSleepGateStatus"), {},
+        [this](const QDBusMessage &reply) {
+            nativeSleepQueryPending_ = false;
+            QString text = tr("Sleep diagnostics are unavailable. Do not assume this computer is "
+                              "asleep or protected. Keep a closed laptop ventilated.");
+            if (reply.type() == QDBusMessage::ReplyMessage &&
+                reply.signature() == QStringLiteral("(ss)") && reply.arguments().size() == 1 &&
+                reply.arguments().front().canConvert<QDBusArgument>()) {
+                const auto wire = reply.arguments().front().value<QDBusArgument>();
+                QString epoch, state;
+                wire.beginStructure();
+                wire >> epoch >> state;
+                const bool end = wire.atEnd();
+                wire.endStructure();
+                if (end && Linura::ShellClient::validNativeSleepGateStatus(epoch, state)) {
+                    if (state == QStringLiteral("denied"))
+                        text = tr("Sleep protection failed at the last observed native entry. This "
+                                  "computer may still be running. Keep a closed laptop ventilated; "
+                                  "resolve the problem before relying on lid-close sleep.");
+                    else if (state == QStringLiteral("checking"))
+                        text = tr("The observed native sleep entry is checking session coverage. "
+                                  "Sleep and current protection are not verified.");
+                    else if (state == QStringLiteral("coverage-fenced"))
+                        text = tr("Coverage was fenced at the last observed native entry. This is "
+                                  "not proof of successful sleep or current protection.");
+                    else
+                        text = tr("No native sleep entry has been observed by this Control "
+                                  "process. Sleep protection is not verified.");
+                }
+            }
+            if (nativeSleepStatus_ != text) {
+                nativeSleepStatus_ = text;
+                emit nativeSleepStatusChanged();
+            }
+        },
+        2000);
+}
+
+QString SessionController::requestId() const
+{
+    if (operation_.isEmpty())
+        return {};
+    return (kind_ == ProtectiveSettingRequest
+                ? QStringLiteral("request:v010:protective-lock-setting:")
+            : kind_ == TransitionRequest ? QStringLiteral("request:v010:session-transition:")
+                                         : QStringLiteral("request:v010:session-lock:")) +
+           operation_;
+}
+
+QString SessionController::actionName(Action action)
+{
+    switch (action) {
+    case Suspend:
+        return QStringLiteral("suspend");
+    case Logout:
+        return QStringLiteral("logout");
+    case Reboot:
+        return QStringLiteral("reboot");
+    case PowerOff:
+        return QStringLiteral("power-off");
+    case Lock:
+    case EnableProtectiveLock:
+    case RevokeProtectiveLock:
+        return {};
+    }
+    return {};
+}
+
+void SessionController::loadTracking()
+{
+    QFile file(trackingPath_);
+    if (!QFileInfo::exists(trackingPath_))
+        return;
+    invalidRecord_ = true;
+    status_ = tr("Unresolved local request tracking. Recovery never replays an effect.");
+    if (QFileInfo(trackingPath_).isSymLink() || !file.open(QIODevice::ReadOnly) ||
+        file.size() > 1024)
+        return;
+    const auto document = QJsonDocument::fromJson(file.read(1025));
+    if (!document.isObject())
+        return;
+    const auto record = document.object();
+    if (record.value("version") != QJsonValue(2) || !record.value("kind").isString() ||
+        !record.value("operation").isString() || !slug(record.value("operation").toString()))
+        return;
+    const auto kind = record.value("kind").toString();
+    if (kind == QStringLiteral("protective-setting")) {
+        if (record.size() != 5 || !record.value("resource").isString() ||
+            !record.value("enabled").isBool() ||
+            !Linura::ShellClient::validSessionLockResource(record.value("resource").toString()))
+            return;
+        kind_ = ProtectiveSettingRequest;
+        protectiveResource_ = record.value("resource").toString();
+        protectiveEnabled_ = record.value("enabled").toBool();
+    } else {
+        if (record.size() != 3 ||
+            (kind != QStringLiteral("lock") && kind != QStringLiteral("transition")))
+            return;
+        kind_ = kind == QStringLiteral("transition") ? TransitionRequest : LockRequest;
+    }
+    operation_ = record.value("operation").toString();
+    invalidRecord_ = false;
+    // Do not restart any workflow, prompt, lock or power effect on reload.
+}
+
+bool SessionController::retain(const QString &operation, RequestKind kind, const QString &resource,
+                               bool enabled)
+{
+    if (!slug(operation) ||
+        (kind == ProtectiveSettingRequest &&
+         !Linura::ShellClient::validSessionLockResource(resource)) ||
+        !QDir().mkpath(QFileInfo(trackingPath_).absolutePath()))
+        return false;
+    QSaveFile file(trackingPath_);
+    file.setDirectWriteFallback(false);
+    if (!file.open(QIODevice::WriteOnly) ||
+        !file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner))
+        return false;
+    QJsonObject record{{"version", 2},
+                       {"operation", operation},
+                       {"kind", kind == ProtectiveSettingRequest ? "protective-setting"
+                                : kind == TransitionRequest      ? "transition"
+                                                                 : "lock"}};
+    if (kind == ProtectiveSettingRequest) {
+        record.insert("resource", resource);
+        record.insert("enabled", enabled);
+    }
+    const auto bytes = QJsonDocument(record).toJson(QJsonDocument::Compact);
+    if (file.write(bytes) != bytes.size() || !file.commit())
+        return false;
+    operation_ = operation;
+    kind_ = kind;
+    protectiveResource_ = kind == ProtectiveSettingRequest ? resource : QString{};
+    protectiveEnabled_ = kind == ProtectiveSettingRequest && enabled;
+    invalidRecord_ = false;
+    emit changed();
+    return true;
+}
+
+void SessionController::call(const QString &method, const QVariantList &arguments,
+                             std::function<void(const QDBusMessage &)> finished, int timeoutMs)
+{
+    auto message =
+        QDBusMessage::createMethodCall(QString::fromLatin1(service), QString::fromLatin1(endpoint),
+                                       QString::fromLatin1(interface), method);
+    message.setArguments(arguments);
+    auto *watcher = new QDBusPendingCallWatcher(bus_.asyncCall(message, timeoutMs), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this,
+            [watcher, finished = std::move(finished)] {
+                const auto reply = watcher->reply();
+                watcher->deleteLater();
+                finished(reply);
+            });
+}
+
+void SessionController::finish(const QString &message, bool clear)
+{
+    busy_ = false;
+    status_ = message;
+    if (clear) {
+        if (QFile::remove(trackingPath_) || !QFileInfo::exists(trackingPath_)) {
+            operation_.clear();
+            protectiveResource_.clear();
+            protectiveEnabled_ = false;
+            kind_ = LockRequest;
+            invalidRecord_ = false;
+        } else {
+            status_ += tr(" Local tracking could not be cleared; use observe-only recovery.");
+        }
+    }
+    emit changed();
+}
+
+void SessionController::consumeReceipt(const QDBusMessage &message, const QString &expectedResource,
+                                       std::function<void()> success)
+{
+    // This is presentation validation of the public typed completion report,
+    // never execution authority or authoritative current machine state.
+    if (message.type() != QDBusMessage::ReplyMessage ||
+        message.signature() != QStringLiteral("(sssssssssbas)") ||
+        message.arguments().size() != 1 ||
+        !message.arguments().front().canConvert<QDBusArgument>()) {
+        finish(tr("Result unavailable or uncertain. Keep the request ID and check recovery; do not "
+                  "repeat the action."),
+               false);
+        return;
+    }
+    const auto wire = message.arguments().front().value<QDBusArgument>();
+    Linura::ShellClient::SessionReceipt receipt;
+    wire.beginStructure();
+    wire >> receipt.transaction >> receipt.request >> receipt.resource >> receipt.desired >>
+        receipt.effect >> receipt.dispatch >> receipt.disposition >> receipt.verification >>
+        receipt.state >> receipt.recovered >> receipt.stages;
+    const bool end = wire.atEnd();
+    wire.endStructure();
+    if (!end || !Linura::ShellClient::validSessionReceipt(receipt, requestId(), expectedResource,
+                                                          kind_ == TransitionRequest)) {
+        finish(tr("Control returned an invalid or incomplete receipt. No completion is claimed; "
+                  "check recovery."),
+               false);
+        return;
+    }
+    success();
+}
+
+void SessionController::request(Action action)
+{
+    if (busy_ || hasPending() ||
+        (action != Lock && action != EnableProtectiveLock && action != RevokeProtectiveLock &&
+         actionName(action).isEmpty()))
+        return;
+    busy_ = true;
+    status_ = tr("Preparing a secure lock. Confirm the exact request in the native locker; no "
+                 "credentials belong in this panel.");
+    emit changed();
+    convergeLock(action);
+}
+
+void SessionController::convergeLock(Action action)
+{
+    call(QStringLiteral("GetOwnSessionLock"), {}, [this, action](const QDBusMessage &reply) {
+        const auto resource = replyString(reply);
+        if (!Linura::ShellClient::validSessionLockResource(resource)) {
+            finish(tr("The native own-session locker is unavailable. No action was dispatched."),
+                   false);
+            return;
+        }
+        const auto operation =
+            QStringLiteral("shell-lock-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+        if (!retain(operation, LockRequest)) {
+            finish(tr("Cannot preserve the request ID. No action was dispatched."), false);
+            return;
+        }
+        call(QStringLiteral("ConvergeSessionLock"),
+             {operation, resource, true,
+              QStringLiteral("Linura Shell session controls: secure the own session")},
+             [this, action, resource](const QDBusMessage &result) {
+                 consumeReceipt(result, resource, [this, action, resource] {
+                     if (action == Lock) {
+                         finish(tr("Secure lock completion was verified and durably committed."),
+                                true);
+                     } else if (action == EnableProtectiveLock || action == RevokeProtectiveLock) {
+                         configureProtectiveLock(action == EnableProtectiveLock, resource);
+                     } else {
+                         convergeTransition(action);
+                     }
+                 });
+             });
+    });
+}
+
+void SessionController::convergeTransition(Action action)
+{
+    const auto name = actionName(action);
+    if (name.isEmpty()) {
+        finish(tr("Unsupported power action."), false);
+        return;
+    }
+    status_ = tr("The session is secured. The native locker will display the exact power action "
+                 "and administrator authentication.");
+    emit changed();
+    call(QStringLiteral("GetOwnSessionTransition"), {name},
+         [this, name](const QDBusMessage &reply) {
+             const auto resource = replyString(reply);
+             if (!resource.startsWith(QStringLiteral("session:transition:") + name +
+                                      QLatin1Char(':'))) {
+                 finish(tr("The power target is unavailable. The session remains secured; no power "
+                           "effect was dispatched."),
+                        false);
+                 return;
+             }
+             const auto operation = QStringLiteral("shell-power-") +
+                                    QUuid::createUuid().toString(QUuid::WithoutBraces);
+             if (!retain(operation, TransitionRequest)) {
+                 finish(tr("Cannot preserve the power request ID. The session remains secured; no "
+                           "power effect was dispatched."),
+                        false);
+                 return;
+             }
+             call(QStringLiteral("ConvergeSessionTransition"),
+                  {operation, resource, QStringLiteral("Linura Shell session controls: ") + name},
+                  [this, resource](const QDBusMessage &result) {
+                      consumeReceipt(result, resource, [this] {
+                          finish(
+                              tr("The requested postcondition was verified and durably committed. "
+                                 "This is not a claim about current machine power or causation."),
+                              true);
+                      });
+                  });
+         });
+}
+
+void SessionController::recover()
+{
+    if (busy_ || operation_.isEmpty() || invalidRecord_)
+        return;
+    busy_ = true;
+    status_ = tr(
+        "Checking durable recovery without replaying, reauthorizing, or starting another action.");
+    emit changed();
+    if (kind_ == ProtectiveSettingRequest) {
+        // Lookup history only: never repeat a configuration write or enroll a
+        // newer generation after losing a reply or restarting the shell.
+        call(QStringLiteral("GetProtectiveLockSettingRequestStatus"), {requestId()},
+             [this](const QDBusMessage &reply) { consumeProtectiveReceipt(reply, true); });
+        return;
+    }
+    call(kind_ == TransitionRequest ? QStringLiteral("RecoverSessionTransition")
+                                    : QStringLiteral("RecoverSessionLock"),
+         {requestId()}, [this](const QDBusMessage &reply) {
+             consumeReceipt(reply, {}, [this] {
+                 // A recovered lock never resumes the abandoned power workflow.
+                 finish(tr("Recovered completion was verified. No effect was replayed and no "
+                           "subsequent action was started."),
+                        true);
+             });
+         });
+}
+
+void SessionController::configureProtectiveLock(bool enabled, const QString &resource)
+{
+    const auto operation =
+        QStringLiteral("shell-protection-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    if (!retain(operation, ProtectiveSettingRequest, resource, enabled)) {
+        finish(tr("Cannot preserve the exact consent request. The session stays locked; no policy "
+                  "change was sent."),
+               false);
+        return;
+    }
+    status_ = enabled
+                  ? tr("Authenticate as the owner in the secure locker to allow protective "
+                       "pre-sleep locking for this login. This never unlocks or authorizes sleep; "
+                       "failure may leave a closed laptop running.")
+                  : tr("Authenticate as the owner in the secure locker to revoke protective "
+                       "pre-sleep locking for this login. This never unlocks or authorizes sleep.");
+    emit changed();
+    call(QStringLiteral("ConfigureProtectiveLock"), {operation, resource, enabled},
+         [this](const QDBusMessage &reply) { consumeProtectiveReceipt(reply, false); });
+}
+
+void SessionController::consumeProtectiveReceipt(const QDBusMessage &message, bool recovering)
+{
+    if (kind_ != ProtectiveSettingRequest || message.type() != QDBusMessage::ReplyMessage ||
+        message.signature() != QStringLiteral("(ssbsstb)") || message.arguments().size() != 1 ||
+        !message.arguments().front().canConvert<QDBusArgument>()) {
+        finish(tr("Consent result unavailable or uncertain. Keep the request ID and inspect "
+                  "history; do not repeat the write."),
+               false);
+        return;
+    }
+    const auto wire = message.arguments().front().value<QDBusArgument>();
+    Linura::ShellClient::ProtectiveLockSettingReceipt receipt;
+    wire.beginStructure();
+    wire >> receipt.request >> receipt.resource >> receipt.enabled >> receipt.intent >>
+        receipt.revision >> receipt.confirmedAt >> receipt.latest;
+    const bool end = wire.atEnd();
+    wire.endStructure();
+    if (!end || !Linura::ShellClient::validProtectiveLockSettingReceipt(
+                    receipt, requestId(), protectiveResource_, protectiveEnabled_)) {
+        finish(tr("Invalid or substituted consent history. No policy completion or protection is "
+                  "claimed; keep the request ID."),
+               false);
+        return;
+    }
+    QString text;
+    if (!receipt.latest)
+        text = tr("This consent request exists in history but was superseded. It was not "
+                  "reapplied; current protection is not verified.");
+    else if (receipt.enabled)
+        text = tr("Protective-lock permission was enabled for this login. This is not evidence of "
+                  "current lock coverage, sleep protection or successful sleep. This "
+                  "configuration did not request an unlock or sleep.");
+    else
+        text =
+            tr("Protective-lock permission was revoked for this login. This configuration did "
+               "not request an unlock or authorize sleep. Current lock coverage is not claimed.");
+    if (recovering)
+        text += tr(" History lookup did not authenticate, change policy or replay any effect.");
+    finish(text, true);
+}
+
+void SessionController::forgetTracking()
+{
+    if (busy_)
+        return;
+    finish(tr("Local tracking forgotten only. This does not cancel any durable request, unlock the "
+              "session, or retire a native power fence."),
+           true);
+}

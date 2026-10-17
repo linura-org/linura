@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import Quickshell
 import Quickshell.Wayland
 import org.linura.UI 1.0
+import "../session" as Session
 
 PanelWindow {
     id: root
@@ -11,6 +12,7 @@ PanelWindow {
     screen: root.targetScreen
 
     required property var controller
+    required property var sessionController
     property int topInset: 0
     readonly property int availableOverlayHeight: root.targetScreen
         ? Math.max(theme.controlMd, root.targetScreen.height - root.topInset - theme.spacingLg * 2)
@@ -323,6 +325,12 @@ PanelWindow {
                     Accessible.name: qsTr("Open Control Center details")
                     onActiveFocusChanged: root.ensureVisible(controlCenterButton)
                 }
+            }
+
+            Session.SessionControls {
+                Layout.fillWidth: true
+                controller: root.sessionController
+                onFocusEntered: item => root.ensureVisible(item)
             }
 
             LinuraText {

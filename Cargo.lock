@@ -499,10 +499,12 @@ dependencies = [
  "linura-control",
  "linura-core",
  "linura-dbus",
+ "linura-executor-session",
  "linura-executor-systemd",
  "linura-intent",
  "linura-library",
  "linura-linux-observation",
+ "linura-linux-session",
  "linura-migrations",
  "linura-observation",
  "linura-observation-control",
@@ -564,12 +566,29 @@ version = "0.9.0"
 name = "linura-dbus"
 version = "0.9.0"
 dependencies = [
+ "async-io",
  "blocking",
+ "futures-lite",
  "linura-control",
  "linura-core",
  "linura-graph",
+ "linura-lifecycle",
  "linura-observation-control",
  "linura-protocol",
+ "rustix",
+ "serde",
+ "zbus",
+]
+
+[[package]]
+name = "linura-executor-session"
+version = "0.9.0"
+dependencies = [
+ "async-io",
+ "blocking",
+ "linura-core",
+ "linura-linux-session",
+ "linura-provider-sdk",
  "zbus",
 ]
 
@@ -651,6 +670,20 @@ dependencies = [
  "linura-observation",
  "linura-provider-sdk",
  "rustix",
+ "zbus",
+]
+
+[[package]]
+name = "linura-linux-session"
+version = "0.9.0"
+dependencies = [
+ "async-io",
+ "futures-lite",
+ "linura-core",
+ "linura-observation",
+ "linura-provider-sdk",
+ "rustix",
+ "serde",
  "zbus",
 ]
 
@@ -813,8 +846,8 @@ dependencies = [
  "linura-observation-control",
  "linura-protocol",
  "linura-provider-sdk",
- "rustix",
  "rusqlite",
+ "rustix",
 ]
 
 [[package]]
