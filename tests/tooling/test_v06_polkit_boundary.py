@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import subprocess
+import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -17,6 +20,120 @@ READ_ONLY_INTERFACES = {
 
 
 class V06PolkitBoundaryTests(unittest.TestCase):
+    def test_expanded_guest_matrix_preserves_all_cases_and_legacy_projection(
+        self,
+    ) -> None:
+        source = (ROOT / "tests/acceptance/v06/qualify-guest.sh").read_text(
+            encoding="utf-8"
+        )
+        script = source.split(
+            "stage deterministic-fault-matrix-inside-disposable-guest\n", 1
+        )[1].split('\necho "real-authority1-success=qualified"', 1)[0]
+        self.assertIn("--skip s17_managed_", script)
+        self.assertIn("tee /tmp/v06-complete-matrix.log", script)
+        self.assertIn("tee /tmp/v06-matrix.log", script)
+        mock = """set -euo pipefail
+matrix() {
+    if [[ "$*" == *--skip* ]]; then
+        printf 'test result: ok. %s passed; 0 failed; 0 ignored\\n' "$LINURA_TEST_BASELINE"
+    else
+        printf 'test result: ok. %s passed; 0 failed; %s ignored\\n' "$LINURA_TEST_FULL" "$LINURA_TEST_IGNORED"
+        return "$LINURA_TEST_EXIT"
+    fi
+}
+"""
+        for full, baseline, ignored, code, valid in (
+            (49, 11, 0, 0, True),
+            (48, 11, 0, 0, False),
+            (50, 11, 0, 0, False),
+            (49, 10, 0, 0, False),
+            (49, 11, 1, 0, False),
+            (49, 11, 0, 1, False),
+        ):
+            with (
+                self.subTest(full=full, baseline=baseline, ignored=ignored, code=code),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                scoped = script.replace(
+                    "/usr/libexec/linura/v06-qualification-matrix", "matrix"
+                ).replace("/tmp/v06-", directory + "/v06-")
+                result = subprocess.run(
+                    ["bash", "-c", mock + scoped],
+                    env={
+                        **os.environ,
+                        "LINURA_TEST_FULL": str(full),
+                        "LINURA_TEST_BASELINE": str(baseline),
+                        "LINURA_TEST_IGNORED": str(ignored),
+                        "LINURA_TEST_EXIT": str(code),
+                    },
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                self.assertEqual(result.returncode == 0, valid, result.stderr)
+        host = (ROOT / "tests/acceptance/v06/qualify-host.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"$ARTIFACT_DIR/v06-complete-matrix.log"', host)
+
+    def test_session_power_requires_separate_nonretained_admin_authentication(
+        self,
+    ) -> None:
+        root = ET.fromstring(
+            (ROOT / "packaging/polkit-1/actions/org.linura.authority.policy").read_text(
+                encoding="utf-8"
+            )
+        )
+        for operation in ("suspend", "logout", "reboot", "power-off"):
+            action_id = f"org.linura.authority.{operation}-session"
+            actions = [
+                action
+                for action in root.findall("action")
+                if action.get("id") == action_id
+            ]
+            self.assertEqual(len(actions), 1)
+            action = actions[0]
+            self.assertEqual(
+                action.findtext("annotate[@key='org.freedesktop.policykit.owner']"),
+                ACTION_OWNER,
+            )
+            self.assertEqual(action.findtext("defaults/allow_any"), "no")
+            self.assertEqual(action.findtext("defaults/allow_inactive"), "no")
+            self.assertEqual(action.findtext("defaults/allow_active"), "auth_admin")
+            self.assertNotIn("_keep", ET.tostring(action, encoding="unicode"))
+
+    def test_session_owner_unlock_is_native_self_authentication_without_reusable_grants(
+        self,
+    ) -> None:
+        root = ET.fromstring(
+            (ROOT / "packaging/polkit-1/actions/org.linura.authority.policy").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertFalse(
+            any(
+                action.get("id") == "org.linura.authority.lock-session"
+                for action in root.findall("action")
+            )
+        )
+        for action_id, active in [("org.linura.authority.unlock-session", "auth_self")]:
+            actions = [
+                action
+                for action in root.findall("action")
+                if action.get("id") == action_id
+            ]
+            self.assertEqual(len(actions), 1)
+            action = actions[0]
+            self.assertEqual(
+                action.findtext("annotate[@key='org.freedesktop.policykit.owner']"),
+                ACTION_OWNER,
+            )
+            self.assertEqual(action.findtext("defaults/allow_any"), "no")
+            self.assertEqual(action.findtext("defaults/allow_inactive"), "no")
+            self.assertEqual(action.findtext("defaults/allow_active"), active)
+            self.assertNotIn("_keep", ET.tostring(action, encoding="unicode"))
+
     def test_authority_action_owner_matches_unprivileged_service_identity(self) -> None:
         policy_path = ROOT / "packaging/polkit-1/actions/org.linura.authority.policy"
         root = ET.fromstring(policy_path.read_text(encoding="utf-8"))

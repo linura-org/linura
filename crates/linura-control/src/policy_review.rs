@@ -3,7 +3,7 @@ use linura_planner::{PlanFindingLevel, PlanStatus, ReconciliationPlan};
 use linura_policy::{
     BaselinePolicy, PolicyDecision, PolicyEngine, PolicyEvaluation, PolicySubject,
     PolicySubjectValidationError, ReviewBinding, ReviewFindingLevel, ReviewPlanStatus,
-    ReviewedChange, ReviewedFinding,
+    ReviewedChange, ReviewedFinding, SessionLockPolicy,
 };
 
 use crate::AuthenticatedPrincipal;
@@ -95,8 +95,32 @@ pub(crate) fn review_plan_with_classification(
 
 pub(crate) fn review_subject_for_control(subject: PolicySubject) -> TrustedPolicyReview {
     TrustedPolicyReview {
-        evaluation: BaselinePolicy::default().evaluate(&subject),
+        evaluation: if subject.provider().as_str() == "session-locker" {
+            SessionLockPolicy::default().evaluate(&subject)
+        } else {
+            BaselinePolicy::default().evaluate(&subject)
+        },
     }
+}
+
+/// Only the private protective lifecycle may select this rule after reading the
+/// current durable setting and validating native facts. Public previews retain
+/// the ordinary policy, even if a caller supplies the service principal text.
+pub(crate) fn review_protective_plan(
+    principal: &AuthenticatedPrincipal,
+    plan: &ReconciliationPlan,
+    classification: RiskClassification,
+    context: &crate::protective_lock_execution::ProtectiveLockContext,
+) -> Result<TrustedPolicyReview, PolicySubjectError> {
+    let subject = policy_subject_from_plan_with_classification(principal, plan, classification)?;
+    Ok(TrustedPolicyReview {
+        evaluation: linura_policy::ProtectiveLockPolicy::new(
+            &context.setting,
+            &context.event,
+            &context.lock,
+        )
+        .evaluate(&subject),
+    })
 }
 
 fn policy_subject_from_plan_with_classification(

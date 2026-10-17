@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import shutil
 import tempfile
 import unittest
@@ -33,6 +34,154 @@ class LinuraShellContractTests(unittest.TestCase):
 
     def test_repository_shell_contract_is_valid(self) -> None:
         self.assertEqual(check_linura_shell.validate(ROOT), [])
+
+    def test_session_client_components_are_mandatory_with_real_qml_dependencies(
+        self,
+    ) -> None:
+        for original in (
+            'ctest --test-dir "$build_dir" --output-on-failure',
+            "qml6-module-qtquick-controls=6.4.2+dfsg-4build3",
+            "qml6-module-qtquick-layouts=6.4.2+dfsg-4build3",
+        ):
+            with (
+                self.subTest(original=original),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                self._copy_fixture(root)
+                workflow = root / ".github/workflows/ci.yml"
+                source = workflow.read_text(encoding="utf-8")
+                self.assertIn(original, source)
+                workflow.write_text(
+                    source.replace(original, "removed-s17-component-check", 1),
+                    encoding="utf-8",
+                )
+                self.assertIn(
+                    f"Linura Shell CI contract missing: {original}",
+                    check_linura_shell.validate(root),
+                )
+
+    def test_image_doctor_cannot_omit_the_security_owner_native_modules(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_fixture(root)
+            image = root / "tools/image.py"
+            source = image.read_text(encoding="utf-8")
+            original = "dict.fromkeys(SHELL_BRIDGE_QT_MODULES + UI_SDK_QT_MODULES + SECURITY_OWNER_MODULES)"
+            self.assertIn(original, source)
+            image.write_text(
+                source.replace(
+                    original,
+                    "dict.fromkeys(SHELL_BRIDGE_QT_MODULES + UI_SDK_QT_MODULES)",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertIn(
+                f"Arch image shell integration missing: {original}",
+                check_linura_shell.validate(root),
+            )
+
+    def test_s17_recovery_reload_and_receipts_cannot_gain_effect_authority(
+        self,
+    ) -> None:
+        for relative, original, weakened, expected in (
+            (
+                "bridge/session_controller.cpp",
+                "void SessionController::refreshNativeSleepStatus()\n{",
+                "void SessionController::refreshNativeSleepStatus()\n{\n    convergeTransition(Reboot);",
+                "S17 sleep diagnostics must never initiate or acknowledge effects",
+            ),
+            (
+                "bridge/session_controller.cpp",
+                "if (nativeSleepQueryPending_)",
+                "if (false)",
+                "S17 sleep diagnostics safety contract missing: if (nativeSleepQueryPending_)",
+            ),
+            (
+                "bridge/session_controller.cpp",
+                "timer->setInterval(5000)",
+                "timer->setInterval(1)",
+                "S17 sleep diagnostics must retain the bounded polling interval",
+            ),
+            (
+                "bridge/session_controller.cpp",
+                "void SessionController::loadTracking()\n{",
+                "void SessionController::loadTracking()\n{\n    convergeTransition(Reboot);",
+                "S17 shell reload must never resume or replay effects",
+            ),
+            (
+                "bridge/session_controller.cpp",
+                "void SessionController::recover()\n{",
+                "void SessionController::recover()\n{\n    convergeLock(Lock);",
+                "S17 shell recovery must never resume or replay effects",
+            ),
+            (
+                "bridge/session_controller.cpp",
+                "void SessionController::recover()\n{",
+                'void SessionController::recover()\n{\n    call(QStringLiteral("ConfigureProtectiveLock"), {}, [](const QDBusMessage &) {});',
+                "S17 shell recovery must never resume or replay effects",
+            ),
+            (
+                "bridge/session_controller.cpp",
+                "if (!retain(operation, ProtectiveSettingRequest, resource, enabled))",
+                "if (false)",
+                "S17 consent must retain exact request material before its write",
+            ),
+            (
+                "bridge/session_controller.cpp",
+                "if (!retain(operation, TransitionRequest))",
+                "if (false)",
+                "S17 shell client safety contract missing: if (!retain(operation, TransitionRequest))",
+            ),
+            (
+                "bridge/session_receipt.cpp",
+                'r.verification == QStringLiteral("satisfied")',
+                "true",
+                'S17 shell completion contract missing: r.verification == QStringLiteral("satisfied")',
+            ),
+            (
+                "bridge/session_receipt.cpp",
+                "r.stages == stages",
+                "true",
+                "S17 shell completion contract missing: r.stages == stages",
+            ),
+        ):
+            with (
+                self.subTest(original=original),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                self._copy_fixture(root)
+                path = root / "apps/linura-shell" / relative
+                source = path.read_text(encoding="utf-8")
+                self.assertIn(original, source)
+                path.write_text(source.replace(original, weakened, 1), encoding="utf-8")
+                self.assertIn(expected, check_linura_shell.validate(root))
+
+    def test_s17_receipt_guard_is_format_invariant_but_cannot_be_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_fixture(root)
+            path = root / "apps/linura-shell/bridge/session_controller.cpp"
+            source = path.read_text(encoding="utf-8")
+            source, count = re.subn(
+                r"validSessionReceipt\(receipt, requestId\(\), expectedResource,\s*kind_ == TransitionRequest\)",
+                "validSessionReceipt(receipt, requestId(), expectedResource,\n    kind_ == TransitionRequest)",
+                source,
+            )
+            self.assertEqual(count, 1)
+            path.write_text(source, encoding="utf-8")
+            self.assertEqual(check_linura_shell.validate(root), [])
+            path.write_text(
+                source.replace("validSessionReceipt", "removedReceiptCheck", 1),
+                encoding="utf-8",
+            )
+            self.assertIn(
+                "S17 shell client safety contract missing: "
+                "validSessionReceipt(receipt, requestId(), expectedResource, kind_ == TransitionRequest)",
+                check_linura_shell.validate(root),
+            )
 
     def test_workspace_focus_waits_for_native_popup_activation(self) -> None:
         relative = "apps/linura-shell/panel/WorkstationPanel.qml"
@@ -1187,7 +1336,9 @@ class LinuraShellContractTests(unittest.TestCase):
         markers = (
             "root.overflowKeyboardReturnPending = returnKeyboardFocus === true",
             "if (!root.overflowKeyboardReturnPending)\n                    root.interactionStarted()",
-            "if (root.overflowKeyboardReturnPending && !overflowWindow.visible)",
+            "function restoreKeyboardAfterNativeUnmap()",
+            "if (root.overflowKeyboardReturnPending\n                && !overflowWindow.visible\n                && !overflowWindow.backingWindowVisible)",
+            "Qt.callLater(root.restoreKeyboardAfterNativeUnmap)",
             "return overflowButton.activeFocus && overflowButton.Window.active",
             "if (hostWindow === overflowWindow)\n            root.popupInteractionStarted()",
         )

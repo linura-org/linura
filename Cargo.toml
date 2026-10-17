@@ -15,6 +15,7 @@ members = [
   "crates/linura-observation",
   "crates/linura-observation-control",
   "crates/linura-linux-observation",
+  "crates/linura-linux-session",
   "crates/linura-dbus",
   "crates/linura-planner",
   "crates/linura-policy",
@@ -35,6 +36,7 @@ members = [
   "apps/linura-update-guard",
   "tools/xtask",
   "executors/linura-executor-systemd",
+  "executors/linura-executor-session",
   "verifiers/linura-verifier-systemd",
 ]
 

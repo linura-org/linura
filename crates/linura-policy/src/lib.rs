@@ -1,5 +1,12 @@
 #![forbid(unsafe_code)]
 
+mod session_lock;
+pub use session_lock::SessionLockPolicy;
+mod protective_lock;
+pub use protective_lock::{
+    PROTECTIVE_SLEEP_ACTOR, PROTECTIVE_SLEEP_PRINCIPAL, ProtectiveLockPolicy, ProtectiveLockSetting,
+};
+
 use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
 
@@ -15,6 +22,9 @@ const MAX_REVIEW_FINDINGS: usize = 256;
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ApprovalClass {
     InteractiveUser,
+    /// Native authentication of the owner of one exact session-lock generation.
+    /// This is neither administrator approval nor a destructive-action grant.
+    SessionOwnerAuthentication,
     Administrator,
     DestructiveAction,
 }
