@@ -82,6 +82,45 @@ class MultilanguageFormattingTests(unittest.TestCase):
         self.assertNotIn("        if:", step)
         self.assertIn("npm ci --prefix", step)
 
+    def test_reviewed_tray_exception_cannot_hide_native_unmap_guard_drift(self):
+        path = "apps/linura-shell/tray/SystemTrayView.qml"
+        reviewed = (ROOT / path).read_text(encoding="utf-8")
+        for original, changed in (
+            ("&& !overflowWindow.backingWindowVisible", ""),
+            (
+                "root.overflowKeyboardReturnPending = false",
+                "root.overflowKeyboardReturnPending = true",
+            ),
+            (
+                "Qt.callLater(root.restoreKeyboardAfterNativeUnmap)",
+                "Qt.callLater(root.focusFirstOverflowEntry)",
+            ),
+        ):
+            with (
+                self.subTest(original=original),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory)
+                source = root / path
+                source.parent.mkdir(parents=True)
+                self.assertIn(original, reviewed)
+                source.write_text(
+                    reviewed.replace(original, changed, 1), encoding="utf-8"
+                )
+                with (
+                    mock.patch.object(
+                        formatting, "tracked_paths", return_value=[Path(path)]
+                    ),
+                    mock.patch.object(formatting.shutil, "which", return_value=None),
+                ):
+                    errors = formatting.check(root)
+                self.assertTrue(
+                    any(
+                        "protected format-exception source digest changed" in error
+                        for error in errors
+                    )
+                )
+
     def test_tracked_language_variants_and_shell_shebangs(self):
         with tempfile.TemporaryDirectory() as path:
             root = Path(path)

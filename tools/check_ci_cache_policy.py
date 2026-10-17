@@ -23,7 +23,7 @@ CONTRACT = ".github/actions/dependency-input-cache-policy.toml"
 # explicit adversarial review and a deliberate fingerprint update here.
 REVIEWED_ACTION_SHA256 = {
     CARGO_ACTION: "87ff8a5e51554c1118e30467f11762c9e1a7cf2479f04124bd2e0773909d973b",
-    APT_ACTION: "dcd0f4929a51b111d6d5c7263d7a4aba2f64e1b6865e848bdf17c55cb2d7e968",
+    APT_ACTION: "2e9923f6656ce64cde1e4563f135f6061b0e12191755da906ec4540eb3961a39",
 }
 
 CARGO_ALLOWED_PATHS = (
@@ -200,8 +200,11 @@ def _effective_shell_lines(steps: list[dict[str, object]]) -> list[str]:
 
 # The QML and bridge build recipe is reviewed independently of unrelated CI
 # steps, which may evolve without changing this execution-critical script.
+# S17 adds pinned runtime QML inputs and executes bridge component tests against
+# the freshly installed modules. No compiled outputs or test results are cached;
+# missing imports and failed tests retain their nonzero failure semantics.
 REVIEWED_QML_BUILD_SHA256 = (
-    "724cd2b69e22bedd8531f48f2583a7d0ad2b6ac0fa4084ac52155e53f1d773a4"
+    "2392449a56adf7c4010d17739f452a26cdc3cfb8046d77f65f84676a125a835c"
 )
 
 
@@ -361,6 +364,14 @@ def _verify_ci_execution_steps(source: str) -> None:
         "  pkg-config",
         "  qt6-base-dev",
         "  qt6-declarative-dev",
+        "  qml6-module-qtqml=6.4.2+dfsg-4build3",
+        "  qml6-module-qtqml-models=6.4.2+dfsg-4build3",
+        "  qml6-module-qtqml-workerscript=6.4.2+dfsg-4build3",
+        "  qml6-module-qtquick=6.4.2+dfsg-4build3",
+        "  qml6-module-qtquick-controls=6.4.2+dfsg-4build3",
+        "  qml6-module-qtquick-layouts=6.4.2+dfsg-4build3",
+        "  qml6-module-qtquick-templates=6.4.2+dfsg-4build3",
+        "  qml6-module-qtquick-window=6.4.2+dfsg-4build3",
     ]:
         raise ValueError("canonical CI APT cache input step drifted")
 

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Linura</vendor>
+  <vendor_url>https://linura.org</vendor_url>
+  <action id="org.linura.executor.session.set-secure">
+    <description>Dispatch an exact durably prepared native session-lock effect</description>
+    <message>This operation is reserved for the Linura authority service</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>no</allow_active>
+    </defaults>
+  </action>
+  <action id="org.linura.executor.session.execute-transition">
+    <description>Dispatch one exact durably prepared native session transition</description>
+    <message>This operation is reserved for the Linura authority service</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>no</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

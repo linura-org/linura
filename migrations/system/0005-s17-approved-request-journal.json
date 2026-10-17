@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "v010-s17-approved-request-journal",
+  "introduced_in": "0.10.0",
+  "scope": "system",
+  "reversible": false,
+  "requires_snapshot": true,
+  "preconditions": [
+    "the existing transaction authority database and its released schema version 2 are preserved unchanged",
+    "the new journal is empty or already has authenticated LNRQ schema version 1 and the exact canonical schema fingerprint",
+    "the composition root provides a protected directory and an independently provisioned non-zero integrity key that is retained across restarts",
+    "validate the exact schema, integrity identity, capacity bounds and every retained request before admitting use; a failed verification does not record successful application",
+    "never synthesize historical request material or approval from transaction digests; an existing S17 transaction without authentic retained material remains unavailable for execution",
+    "journal records are write-once and cannot be deleted as rollback while any transaction may reference them"
+  ]
+}

@@ -1,0 +1,28 @@
+#pragma once
+
+#include "session_bootstrap.h"
+
+#include <QByteArrayView>
+#include <QString>
+
+#include <optional>
+
+namespace Linura::SecurityOwner {
+
+// Adapter-local postcondition, not a portable observation envelope, policy
+// approval, or authority. The production adapter emits canonical evidence only
+// after revalidating its original native session/actual Wayland connection.
+enum class NativeCompositorLockState { Locked, Unlocked };
+
+[[nodiscard]] std::optional<NativeCompositorLockState>
+decodeNativeHyprlandLock(QByteArrayView reply);
+
+// The private runtime obtains this route from its qualified native launch
+// configuration; no public client/QML/model supplies a socket path. Even a
+// substituted pathname cannot supply evidence: the actual connected fd's peer
+// must be the same compositor UID/PID as the actual Wayland session binding.
+// One read-only j/locked request, fixed 500ms total deadline, at most 64 bytes.
+[[nodiscard]] std::optional<NativeCompositorLockState>
+observeNativeHyprlandLock(const QString &nativeSocketPath, const NativeSessionBinding &binding);
+
+} // namespace Linura::SecurityOwner

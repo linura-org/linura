@@ -13,11 +13,13 @@ pub use linura_capability_sdk::{
 pub use linura_core::{
     Actor, ActorId, ActorKind, AuthorityClass, Capability, CapabilityId, IntentId, PlanId,
     PolicyId, PolicyRevisionId, PrincipalId, ProfileId, ProviderId, RequestId, RequirementId,
-    ResourceId, RiskClass, SemanticReason, SetupId, SupportLevel, ValidationError, WorkflowId,
+    ResourceId, RiskClass, SemanticReason, SessionEpoch, SessionLockId, SessionTransition,
+    SessionTransitionId, SetupId, SupportLevel, ValidationError, WorkflowId,
 };
 pub use linura_dbus::{
-    Control1Client as LocalControlClient, Session1Client as LocalSessionClient,
-    SessionEffectReceipt as LocalSessionEffectReceipt, TransportError as LocalControlError,
+    Authority1Client as LocalAuthorityClient, Control1Client as LocalControlClient,
+    Session1Client as LocalSessionClient, SessionEffectReceipt as LocalSessionEffectReceipt,
+    TransportError as LocalControlError,
 };
 pub use linura_graph::{
     Edge, EdgeKind, Node, NodeId, ObservationRecordOutcome, RemovalImpact, SystemGraph,
@@ -46,12 +48,15 @@ pub use linura_observation::{
     ObservedValue, ProviderAvailability, ProviderHealth,
 };
 pub use linura_protocol::{
-    CapabilitySnapshot, ExplainResponse, ExplainTarget, IntentCommand, ObservationExplanation,
-    ObservationRequest, ObservationResponse, ObservationSystemSnapshot, PROTOCOL_MAJOR,
-    PlanDesiredStateRequest, PlanPreview, PlanPreviewChange, PlanPreviewFinding,
-    PlanPreviewFindingLevel, PlanPreviewStatus, PlanReview, PlanReviewApprovalClass,
-    PlanReviewDecision, PortableProfileExport, PortableSetupExport, ProfileAdoptionRequest,
-    ProfileAdoptionResponse, ProtocolVersion, ProviderSnapshot, SetupAdoptionRequest,
-    SetupAdoptionResponse, SystemSnapshot,
+    CapabilitySnapshot, ExplainResponse, ExplainTarget, IntentCommand, NativeSleepGateState,
+    NativeSleepGateStatus, ObservationExplanation, ObservationRequest, ObservationResponse,
+    ObservationSystemSnapshot, PROTOCOL_MAJOR, PlanDesiredStateRequest, PlanPreview,
+    PlanPreviewChange, PlanPreviewFinding, PlanPreviewFindingLevel, PlanPreviewStatus, PlanReview,
+    PlanReviewApprovalClass, PlanReviewDecision, PortableProfileExport, PortableSetupExport,
+    ProfileAdoptionRequest, ProfileAdoptionResponse, ProtectiveLockSettingReceipt,
+    ProtectiveLockSettingRequest, ProtocolVersion, ProviderSnapshot, SessionLockReceipt,
+    SessionLockRequest, SessionLockRequestStatus, SessionTransitionCompletion,
+    SessionTransitionReceipt, SessionTransitionRequest, SessionTransitionRequestStatus,
+    SetupAdoptionRequest, SetupAdoptionResponse, SystemSnapshot,
 };
 pub use linura_provenance::{ProvenanceKind, ProvenanceRecord, WhyChain};
