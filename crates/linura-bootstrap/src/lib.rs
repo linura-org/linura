@@ -533,7 +533,7 @@ fn verify_v09_test_support(
         checkpoint_size,
         restored_copy_sha256,
         producer_identity: V09_RECOVERY_PRODUCER_ID,
-        restore_receipt_sha256: format!("{:x}", receipt_hasher.finalize()),
+        restore_receipt_sha256: hex::encode(receipt_hasher.finalize()),
         native_recovery_identity: V09_NATIVE_RECOVERY_IDENTITY,
     })
 }
@@ -725,7 +725,7 @@ fn verify_native_recovery_program(path: &Path) -> Result<(), BootstrapError> {
 fn sha256_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 fn sha256_file(path: &Path) -> Result<(String, u64), BootstrapError> {
@@ -743,7 +743,7 @@ fn sha256_file(path: &Path) -> Result<(String, u64), BootstrapError> {
             .checked_add(read as u64)
             .ok_or(BootstrapError::RecoveryArtifactTooLarge)?;
     }
-    Ok((format!("{:x}", hasher.finalize()), total))
+    Ok((hex::encode(hasher.finalize()), total))
 }
 
 #[derive(Debug)]

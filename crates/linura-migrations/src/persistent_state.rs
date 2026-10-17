@@ -378,7 +378,7 @@ fn semantic_fingerprint(path: &Path, kind: V08SqliteStoreKind) -> Result<String,
     hasher.update(kind.migration_id().as_bytes());
     hasher.update([0]);
     hasher.update(&canonical);
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex::encode(hasher.finalize()))
 }
 
 fn fingerprint_library(
@@ -553,7 +553,7 @@ fn append_query_rows(
                 }
                 rusqlite::types::ValueRef::Blob(value) => {
                     canonical.extend_from_slice(b"B:");
-                    canonical.extend_from_slice(format!("{:x}", Sha256::digest(value)).as_bytes());
+                    canonical.extend_from_slice(hex::encode(Sha256::digest(value)).as_bytes());
                 }
             }
             canonical.push(0x1f);

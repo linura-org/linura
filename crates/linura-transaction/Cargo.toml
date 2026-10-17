@@ -7,9 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+hex = "0.4"
 linura-core = { path = "../linura-core" }
-hmac = "0.12"
-sha2 = "0.10"
+hmac = "0.13"
+sha2 = "0.11"
 zeroize = "1.8"
 
 [lints]

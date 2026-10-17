@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+hex = "0.4"
 linura-agent-runtime = { path = "../linura-agent-runtime" }
 linura-capability-sdk = { path = "../linura-capability-sdk" }
 linura-core = { path = "../linura-core" }
@@ -22,7 +23,7 @@ linura-policy = { path = "../linura-policy" }
 linura-protocol = { path = "../linura-protocol" }
 linura-provider-sdk = { path = "../linura-provider-sdk" }
 linura-transaction = { path = "../linura-transaction" }
-sha2 = "0.10"
+sha2 = "0.11"
 
 [lints]
 workspace = true

@@ -1492,7 +1492,7 @@ fn hmac_sha256(key: &[u8; EVIDENCE_AUTH_KEY_BYTES], payload: &[u8]) -> String {
     let mut outer = Sha256::new();
     outer.update(outer_pad);
     outer.update(inner_digest);
-    format!("{:x}", outer.finalize())
+    hex::encode(outer.finalize())
 }
 
 fn constant_time_hex_eq(left: &str, right: &str) -> bool {

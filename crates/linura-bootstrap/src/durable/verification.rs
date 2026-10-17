@@ -288,7 +288,7 @@ fn protected_regular_file_sha256(path: &Path) -> Result<String, DurableBootstrap
         }
         hasher.update(&buffer[..count]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex::encode(hasher.finalize()))
 }
 
 fn protected_regular_file_bytes(

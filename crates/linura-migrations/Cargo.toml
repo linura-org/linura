@@ -14,8 +14,9 @@ default = []
 qualification-harness = []
 
 [dependencies]
+hex = "0.4"
 rusqlite = { version = "0.37", features = ["bundled"] }
-sha2 = "0.10"
+sha2 = "0.11"
 
 [lints]
 workspace = true
