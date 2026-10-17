@@ -97,6 +97,15 @@ RowLayout {
         overflowWindow.visible = true
     }
 
+    function restoreKeyboardAfterNativeUnmap() {
+        if (root.overflowKeyboardReturnPending
+                && !overflowWindow.visible
+                && !overflowWindow.backingWindowVisible) {
+            root.overflowKeyboardReturnPending = false
+            root.keyboardReturnRequested(overflowButton)
+        }
+    }
+
     function dismissOverflow(returnKeyboardFocus) {
         root.overflowKeyboardReturnPending = returnKeyboardFocus === true
         overflowWindow.visible = false
@@ -106,12 +115,7 @@ RowLayout {
             root.interactionStarted()
             return
         }
-        Qt.callLater(function() {
-            if (root.overflowKeyboardReturnPending && !overflowWindow.visible) {
-                root.overflowKeyboardReturnPending = false
-                root.keyboardReturnRequested(overflowButton)
-            }
-        })
+        Qt.callLater(root.restoreKeyboardAfterNativeUnmap)
     }
 
     function activateInlineControl(index) {
@@ -451,6 +455,7 @@ RowLayout {
                 Qt.callLater(root.focusFirstOverflowEntry)
             } else {
                 overflowFocusRetry.stop()
+                Qt.callLater(root.restoreKeyboardAfterNativeUnmap)
             }
         }
 

@@ -1,5 +1,14 @@
 #![forbid(unsafe_code)]
 
+mod session_epoch;
+pub use session_epoch::{
+    BootId, SecurityOwnerInvocationId, SessionEpoch, SessionEpochError, SessionLockId,
+};
+mod session_transition;
+pub use session_transition::{SessionTransition, SessionTransitionError, SessionTransitionId};
+mod sleep_invocation;
+pub use sleep_invocation::{SleepInvocationError, SleepInvocationId};
+
 use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
 

@@ -67,6 +67,66 @@ observation_capability = "audio.session.observe"
 resource_prefix = "audio:session:output:"
 change_keys = ["volume_percent"]
 
+[registered_operations.managed-session-lock]
+operation_id = "operation:session.lock.set-secure"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+risk_floor_rule_id = "operation-registry.managed-session-lock.risk-floor"
+provider = "session-locker"
+observation_capability = "session.secure-lock.observe"
+resource_prefix = "session:lock:"
+change_keys = ["secure"]
+
+[registered_operations.managed-session-suspend]
+operation_id = "operation:session.suspend"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+risk_floor_rule_id = "operation-registry.managed-session-suspend.risk-floor"
+provider = "logind"
+observation_capability = "session.transition.observe"
+resource_prefix = "session:transition:suspend:"
+change_keys = ["completed"]
+
+[registered_operations.managed-session-logout]
+operation_id = "operation:session.logout"
+class = "managed-external-effect"
+risk_floor = "destructive"
+risk_floor_rule_id = "operation-registry.managed-session-logout.risk-floor"
+provider = "logind"
+observation_capability = "session.transition.observe"
+resource_prefix = "session:transition:logout:"
+change_keys = ["completed"]
+
+[registered_operations.managed-session-reboot]
+operation_id = "operation:session.reboot"
+class = "managed-external-effect"
+risk_floor = "destructive"
+risk_floor_rule_id = "operation-registry.managed-session-reboot.risk-floor"
+provider = "logind"
+observation_capability = "session.transition.observe"
+resource_prefix = "session:transition:reboot:"
+change_keys = ["completed"]
+
+[registered_operations.managed-session-power-off]
+operation_id = "operation:session.power-off"
+class = "managed-external-effect"
+risk_floor = "destructive"
+risk_floor_rule_id = "operation-registry.managed-session-power-off.risk-floor"
+provider = "logind"
+observation_capability = "session.transition.observe"
+resource_prefix = "session:transition:power-off:"
+change_keys = ["completed"]
+
+[local_operations.session-protective-lock-setting]
+operation_id = "operation:session.protective-lock.configure"
+class = "linura-owned-state"
+risk_floor = "security-sensitive"
+control_type = "linura_control::ProtectiveLockSettingsControl"
+approval_class = "session-owner-authentication"
+privileged_executor_allowed = false
+external_effect = false
+durable_format = "LNRP:1"
+
 [classes.experience-ephemeral]
 rust_variant = "ExperienceEphemeral"
 changes_external_state = true

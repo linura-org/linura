@@ -37,8 +37,10 @@ EXPECTED_RULE_PACKAGES = {
     "linura-control",
     "linura-sdk",
     "linura-linux-observation",
+    "linura-linux-session",
     "linura-dbus",
     "linura-executor-systemd",
+    "linura-executor-session",
     "linura-verifier-systemd",
 }
 RETIRED_RULE_PACKAGES = {"linura-control-token"}
@@ -58,6 +60,10 @@ TRANSACTION_CONSUMERS = {
 }
 PERSISTENCE_PACKAGE = "linura-persistence-sqlite"
 PERSISTENCE_CONSUMERS = {"linura-authorityd"}
+NATIVE_SESSION_PACKAGE = "linura-linux-session"
+# Native handles stay in these concrete composition roots. Expanding this
+# allowlist is an explicit authority-boundary change, not a convenient SDK API.
+NATIVE_SESSION_CONSUMERS = {"linura-authorityd", "linura-executor-session"}
 
 
 def resolved_dependency_name(
@@ -216,6 +222,18 @@ def validate(root: Path) -> list[str]:
         failures.append(
             "linura-persistence-sqlite may be consumed directly only by the trusted authority "
             f"runtime; expected {sorted(PERSISTENCE_CONSUMERS)}, found {sorted(persistence_consumers)}"
+        )
+
+    native_session_consumers = {
+        package
+        for package, dependencies in all_dependencies.items()
+        if NATIVE_SESSION_PACKAGE in dependencies
+    }
+    unexpected_native_consumers = native_session_consumers - NATIVE_SESSION_CONSUMERS
+    if unexpected_native_consumers:
+        failures.append(
+            "linura-linux-session may be consumed only by trusted session composition roots; "
+            f"unexpected {sorted(unexpected_native_consumers)}"
         )
 
     rules = contract.get("rules", [])

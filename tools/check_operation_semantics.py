@@ -116,7 +116,30 @@ EXPECTED_CLASSES = {
         "path": "canonical-managed-mutation",
     },
 }
+
+EXPECTED_LOCAL_OPERATIONS = {
+    "session-protective-lock-setting": {
+        "operation_id": "operation:session.protective-lock.configure",
+        "class": "linura-owned-state",
+        "risk_floor": "security-sensitive",
+        "control_type": "linura_control::ProtectiveLockSettingsControl",
+        "approval_class": "session-owner-authentication",
+        "privileged_executor_allowed": False,
+        "external_effect": False,
+        "durable_format": "LNRP:1",
+    }
+}
 EXPECTED_REGISTERED_OPERATIONS = {
+    "managed-session-lock": {
+        "operation_id": "operation:session.lock.set-secure",
+        "class": "managed-external-effect",
+        "risk_floor": "security-sensitive",
+        "risk_floor_rule_id": "operation-registry.managed-session-lock.risk-floor",
+        "provider": "session-locker",
+        "observation_capability": "session.secure-lock.observe",
+        "resource_prefix": "session:lock:",
+        "change_keys": ["secure"],
+    },
     "managed-systemd-active-state": {
         "operation_id": "operation:systemd.unit.set-active-state",
         "class": "managed-external-effect",
@@ -139,6 +162,17 @@ EXPECTED_REGISTERED_OPERATIONS = {
     },
 }
 EXPECTED_RUST_VARIANTS = [value["rust_variant"] for value in EXPECTED_CLASSES.values()]
+for _action in ("suspend", "logout", "reboot", "power-off"):
+    EXPECTED_REGISTERED_OPERATIONS[f"managed-session-{_action}"] = {
+        "operation_id": f"operation:session.{_action}",
+        "class": "managed-external-effect",
+        "risk_floor": "security-sensitive" if _action == "suspend" else "destructive",
+        "risk_floor_rule_id": f"operation-registry.managed-session-{_action}.risk-floor",
+        "provider": "logind",
+        "observation_capability": "session.transition.observe",
+        "resource_prefix": f"session:transition:{_action}:",
+        "change_keys": ["completed"],
+    }
 ENUM_RE = re.compile(r"pub enum OperationClass\s*\{(?P<body>[^}]*)\}", re.DOTALL)
 
 
@@ -239,6 +273,10 @@ def validate(root: Path) -> list[str]:
             "operation-semantics classes drifted from the canonical contract"
         )
     registered_operations = contract.get("registered_operations")
+    if contract.get("local_operations") != EXPECTED_LOCAL_OPERATIONS:
+        failures.append(
+            "operation-semantics local_operations drifted from the canonical contract"
+        )
     if not isinstance(registered_operations, dict):
         failures.append("operation-semantics contract missing registered_operations")
     elif registered_operations != EXPECTED_REGISTERED_OPERATIONS:
@@ -278,6 +316,11 @@ def validate(root: Path) -> list[str]:
             failures.append(f"missing or non-regular {label}: {path}")
 
     required_markers = {
+        DOC_PATH: (
+            "operation:session.lock.set-secure",
+            "operation-registry.managed-session-lock.risk-floor",
+            "Secure-lock registration is not production activation.",
+        ),
         ADR_PATH: (
             "### Registered semantics are authority input",
             "A registered risk floor is applied **before policy review**.",
@@ -447,14 +490,14 @@ def validate(root: Path) -> list[str]:
         for fragment in (
             "trusted_builtin_operation_registry()",
             "validate_managed_systemd_registration(&operation_semantics)",
-            "self.validate_registered_managed_systemd_candidate(&candidate)?",
-            "self.validate_registered_managed_systemd_candidate(&refreshed)?",
-            "self.handoff_registered_managed_systemd(&principal, &mut prepared)?",
-            "self.handoff_registered_managed_systemd(&principal, prepared.as_mut())?",
+            "self.validate_registered_managed_candidate(&candidate)?",
+            "self.validate_registered_managed_candidate(&refreshed)?",
+            "self.handoff_registered_managed(&principal, &mut prepared)?",
+            "self.handoff_registered_managed(&principal, prepared.as_mut())?",
             "candidate_with_risk_floor",
             "recover_indeterminate_with_risk_floor",
             "recover_indeterminate_with_approver_and_risk_floor",
-            "registered_managed_systemd_risk_floor",
+            "registered_managed_risk_floor",
             "prepared.binding().trusted_risk()",
             "semantics.risk() != bound_risk",
         ):

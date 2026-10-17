@@ -1,0 +1,12 @@
+# ArchISO installs the profile overlay before its package transaction. Applying
+# the capability in that transaction avoids losing it to the final chown/copy.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = libcap
+
+[Action]
+Description = Establish the fixed Linura native-owner secure-exec capability
+When = PostTransaction
+Exec = /usr/lib/linura/linura-security-owner-install-capability
