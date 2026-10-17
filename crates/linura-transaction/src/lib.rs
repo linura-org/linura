@@ -2,7 +2,7 @@
 
 use std::fmt::{Display, Formatter};
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use linura_core::{
     ApprovalEvidenceId, ApprovalRequestId, CapabilityId, PlanId, PolicyId, PolicyRevisionId,
     PrincipalId, ProviderId, RequestId, ResourceId, RiskClass, ValidationError,
@@ -96,7 +96,7 @@ pub fn digest_parts<'a>(domain: &str, parts: impl IntoIterator<Item = &'a [u8]>)
         put_len_bytes(&mut hasher, part);
     }
     let digest = hasher.finalize();
-    ContentDigest(format!("{DIGEST_PREFIX}{digest:x}"))
+    ContentDigest(format!("{DIGEST_PREFIX}{}", hex::encode(digest)))
 }
 
 fn put_len_bytes(hasher: &mut Sha256, bytes: &[u8]) {

@@ -203,7 +203,7 @@ impl SourceSelection {
                 .unwrap_or_default(),
         );
         hash_field(&mut hasher, self.source_sha256.as_deref().unwrap_or(""));
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 }
 
@@ -741,7 +741,7 @@ fn canonical_plan_request_id(
     for value in &desired.reason.capability_ids {
         hash_field(&mut hasher, value.as_str());
     }
-    let digest = format!("{:x}", hasher.finalize());
+    let digest = hex::encode(hasher.finalize());
     RequestId::new(format!("firstboot-plan:{digest}"))
         .map_err(|error| FirstBootError::CanonicalLineage(error.to_string()))
 }

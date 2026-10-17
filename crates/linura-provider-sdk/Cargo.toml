@@ -11,7 +11,7 @@ linura-core = { path = "../linura-core" }
 linura-intent = { path = "../linura-intent" }
 linura-observation = { path = "../linura-observation" }
 linura-protocol = { path = "../linura-protocol" }
-sha2 = "0.10.9"
+sha2 = "0.11.1"
 
 [lints]
 workspace = true

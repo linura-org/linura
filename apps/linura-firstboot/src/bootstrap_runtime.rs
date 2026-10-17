@@ -140,7 +140,7 @@ pub(crate) fn derive_and_bind_first_boot_plan(
     if setup_ref.is_none() && profile_ref.is_none() {
         hash_plan_field(&mut plan_hasher, "no-declarative-resource-selected");
         return coordinator
-            .bind_first_boot_plan(format!("{:x}", plan_hasher.finalize()), 0)
+            .bind_first_boot_plan(hex::encode(plan_hasher.finalize()), 0)
             .map_err(|error| error.to_string());
     }
 
@@ -262,7 +262,7 @@ pub(crate) fn derive_and_bind_first_boot_plan(
     let plan_count =
         u32::try_from(plans.len()).map_err(|_| "First Boot plan count exceeds u32".to_owned())?;
     coordinator
-        .bind_first_boot_plan(format!("{:x}", plan_hasher.finalize()), plan_count)
+        .bind_first_boot_plan(hex::encode(plan_hasher.finalize()), plan_count)
         .map_err(|error| error.to_string())
 }
 
@@ -319,8 +319,11 @@ fn canonical_durable_plan_request_id(
     ] {
         hash_plan_field(&mut hasher, field);
     }
-    RequestId::new(format!("request:v09:firstboot:{:x}", hasher.finalize()))
-        .map_err(|error| format!("invalid canonical First Boot request id: {error}"))
+    RequestId::new(format!(
+        "request:v09:firstboot:{}",
+        hex::encode(hasher.finalize())
+    ))
+    .map_err(|error| format!("invalid canonical First Boot request id: {error}"))
 }
 
 fn hash_reconciliation_plan(hasher: &mut Sha256, plan: &ReconciliationPlan) {

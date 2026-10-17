@@ -119,7 +119,7 @@ fn bind_qualification_planning_fixture(
         hasher.update(field.as_bytes());
     }
     coordinator
-        .bind_first_boot_plan(format!("{:x}", hasher.finalize()), selected_plan_count)
+        .bind_first_boot_plan(hex::encode(hasher.finalize()), selected_plan_count)
         .map_err(display_string)
 }
 
@@ -724,7 +724,7 @@ fn manifest_bytes(
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 fn io_string(error: std::io::Error) -> String {

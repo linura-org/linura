@@ -314,7 +314,7 @@ fn parse_stage(value: &str) -> Result<BootstrapStage, DurableBootstrapError> {
 fn sha256(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    hex::encode(hasher.finalize())
 }
 
 fn validate_sha256(value: &str) -> Result<(), DurableBootstrapError> {

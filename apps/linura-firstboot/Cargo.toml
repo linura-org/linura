@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+hex = "0.4"
 linura-bootstrap = { path = "../../crates/linura-bootstrap" }
 linura-core = { path = "../../crates/linura-core" }
 linura-hardware = { path = "../../crates/linura-hardware" }
@@ -16,7 +17,7 @@ linura-observation = { path = "../../crates/linura-observation" }
 linura-observation-control = { path = "../../crates/linura-observation-control" }
 linura-planner = { path = "../../crates/linura-planner" }
 linura-protocol = { path = "../../crates/linura-protocol" }
-sha2 = "0.10"
+sha2 = "0.11"
 
 [dev-dependencies]
 # Unit tests may synthesize recovery artifacts, but production dependencies never

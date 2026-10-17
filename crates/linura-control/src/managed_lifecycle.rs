@@ -1476,7 +1476,7 @@ impl ApprovalCanonicalHasher {
     }
 
     fn finish(self) -> String {
-        format!("sha256:{:x}", self.hasher.finalize())
+        format!("sha256:{}", hex::encode(self.hasher.finalize()))
     }
 }
 

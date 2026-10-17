@@ -1162,7 +1162,8 @@ impl CanonicalHasher {
     }
 
     fn finish(self) -> Result<ContentDigest, DurableAuthorityError> {
-        ContentDigest::new(format!("sha256:{:x}", self.hasher.finalize())).map_err(Into::into)
+        ContentDigest::new(format!("sha256:{}", hex::encode(self.hasher.finalize())))
+            .map_err(Into::into)
     }
 }
 
