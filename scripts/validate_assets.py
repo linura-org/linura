@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,66 +22,138 @@ def load_json(path: Path):
         ) from error
 
 
-def validate(value, schema, where: str) -> None:
+def _valid_type(value, kind: str) -> bool:
+    if kind == "object":
+        return isinstance(value, dict)
+    if kind == "array":
+        return isinstance(value, list)
+    if kind == "string":
+        return isinstance(value, str)
+    if kind == "boolean":
+        return isinstance(value, bool)
+    if kind == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if kind == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if kind == "null":
+        return value is None
+    raise ValueError(f"unsupported schema type {kind!r}")
+
+
+def validate(value, schema, where: str, *, root_schema=None) -> None:
+    if root_schema is None:
+        root_schema = schema
+    if not isinstance(schema, dict):
+        raise ValueError(f"{where}: invalid JSON schema")
+
+    reference = schema.get("$ref")
+    if reference is not None:
+        if not isinstance(reference, str) or not reference.startswith("#/"):
+            raise ValueError(f"{where}: unsupported schema reference {reference!r}")
+        target = root_schema
+        for component in reference[2:].split("/"):
+            key = component.replace("~1", "/").replace("~0", "~")
+            if not isinstance(target, dict) or key not in target:
+                raise ValueError(f"{where}: unresolved schema reference {reference!r}")
+            target = target[key]
+        validate(value, target, where, root_schema=root_schema)
+
     expected = schema.get("type")
-    if isinstance(expected, list):
-        valid = False
-        for item in expected:
-            try:
-                validate(value, {**schema, "type": item}, where)
-            except ValidationError:
-                continue
-            valid = True
-            break
-        if not valid:
-            raise ValidationError(
-                f"{where}: value does not match any allowed type {expected}"
-            )
-        return
-    if expected == "object":
-        if not isinstance(value, dict):
-            raise ValidationError(f"{where}: expected object")
+    if expected is not None:
+        alternatives = expected if isinstance(expected, list) else [expected]
+        if not alternatives or not all(isinstance(x, str) for x in alternatives):
+            raise ValueError(f"{where}: malformed schema type {expected!r}")
+        if not any(_valid_type(value, kind) for kind in alternatives):
+            raise ValidationError(f"{where}: expected type {expected!r}")
+
+    if isinstance(value, dict):
         for key in schema.get("required", []):
             if key not in value:
                 raise ValidationError(f"{where}: missing required key {key!r}")
         properties = schema.get("properties", {})
         for key, item in value.items():
             if key in properties:
-                validate(item, properties[key], f"{where}.{key}")
+                validate(
+                    item, properties[key], f"{where}.{key}", root_schema=root_schema
+                )
             elif schema.get("additionalProperties") is False:
                 raise ValidationError(f"{where}: unexpected key {key!r}")
-    elif expected == "array":
-        if not isinstance(value, list):
-            raise ValidationError(f"{where}: expected array")
+    elif isinstance(value, list):
         if len(value) < schema.get("minItems", 0):
             raise ValidationError(f"{where}: too few items")
+        if "maxItems" in schema and len(value) > schema["maxItems"]:
+            raise ValidationError(f"{where}: too many items")
         if schema.get("uniqueItems") and len(
             {json.dumps(item, sort_keys=True) for item in value}
         ) != len(value):
             raise ValidationError(f"{where}: expected unique items")
-        item_schema = schema.get("items")
-        if item_schema:
+        if "items" in schema:
             for index, item in enumerate(value):
-                validate(item, item_schema, f"{where}[{index}]")
-    elif expected == "string":
-        if not isinstance(value, str):
-            raise ValidationError(f"{where}: expected string")
+                validate(
+                    item, schema["items"], f"{where}[{index}]", root_schema=root_schema
+                )
+        if "contains" in schema:
+            matches = 0
+            for index, item in enumerate(value):
+                try:
+                    validate(
+                        item,
+                        schema["contains"],
+                        f"{where}[{index}]",
+                        root_schema=root_schema,
+                    )
+                except ValidationError:
+                    continue
+                matches += 1
+            if matches < schema.get("minContains", 1):
+                raise ValidationError(f"{where}: too few matching items")
+            if "maxContains" in schema and matches > schema["maxContains"]:
+                raise ValidationError(f"{where}: too many matching items")
+    elif isinstance(value, str):
         if len(value) < schema.get("minLength", 0):
             raise ValidationError(f"{where}: string too short")
-    elif expected == "boolean":
-        if not isinstance(value, bool):
-            raise ValidationError(f"{where}: expected boolean")
-    elif expected == "integer":
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise ValidationError(f"{where}: expected integer")
-    elif expected == "null":
-        if value is not None:
-            raise ValidationError(f"{where}: expected null")
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            raise ValidationError(f"{where}: string too long")
+        if "pattern" in schema and re.search(schema["pattern"], value) is None:
+            raise ValidationError(f"{where}: string does not match required pattern")
 
     if "const" in schema and value != schema["const"]:
         raise ValidationError(f"{where}: expected constant {schema['const']!r}")
     if "enum" in schema and value not in schema["enum"]:
         raise ValidationError(f"{where}: expected one of {schema['enum']!r}")
+
+    for part in schema.get("allOf", []):
+        validate(value, part, where, root_schema=root_schema)
+    for keyword in ("anyOf", "oneOf"):
+        if keyword not in schema:
+            continue
+        matches = 0
+        for part in schema[keyword]:
+            try:
+                validate(value, part, where, root_schema=root_schema)
+            except ValidationError:
+                continue
+            matches += 1
+        if keyword == "anyOf" and matches == 0:
+            raise ValidationError(f"{where}: no matching schema alternative")
+        if keyword == "oneOf" and matches != 1:
+            raise ValidationError(f"{where}: expected exactly one schema alternative")
+    if "if" in schema:
+        try:
+            validate(value, schema["if"], where, root_schema=root_schema)
+        except ValidationError:
+            branch = schema.get("else")
+        else:
+            branch = schema.get("then")
+        if branch is not None:
+            validate(value, branch, where, root_schema=root_schema)
+    if "not" in schema:
+        try:
+            validate(value, schema["not"], where, root_schema=root_schema)
+        except ValidationError:
+            pass
+        else:
+            raise ValidationError(f"{where}: matched prohibited schema")
 
 
 def validate_against(asset: str, schema: str) -> None:

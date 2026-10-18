@@ -1,1 +1,20 @@
-{"schema_version":1,"id":"intent-retirement","description":"Retiring an intent does not remove resources still owned by another active intent.","requires":["linurad"],"steps":[{"name":"control-daemon-present","command":"command -v linurad >/dev/null"},{"name":"cli-present","command":"command -v linuractl >/dev/null"}]}
+{
+  "schema_version": 1,
+  "id": "intent-retirement",
+  "description": "Retiring an intent does not remove resources still owned by another active intent.",
+  "requires": [
+    "linurad"
+  ],
+  "steps": [
+    {
+      "name": "control-daemon-present",
+      "command": "command -v linurad >/dev/null"
+    },
+    {
+      "name": "cli-present",
+      "command": "command -v linuractl >/dev/null"
+    }
+  ],
+  "execution_status": "reserved",
+  "reservation_reason": "Executable-presence checks do not prove shared-resource ownership or non-destructive retirement."
+}
