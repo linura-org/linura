@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 import tomllib
 
+from check_changelog import ChangelogClosureError, finalize_release
+
 TAG_RE = re.compile(r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY_URL = "https://github.com/linura-org/linura"
@@ -507,6 +509,13 @@ def sync(args: argparse.Namespace) -> list[str]:
         )
 
     contract, milestone, next_release = _roadmap(root, args.tag)
+    changelog_path = root / "CHANGELOG.md"
+    try:
+        completed_changelog = finalize_release(
+            read(changelog_path), args.tag, args.published_at
+        )
+    except ChangelogClosureError as error:
+        raise TerminalSyncError(f"changelog closure failed: {error}") from error
     changed: list[str] = []
     sync_release_qualified_environments(root, contract, milestone, changed)
     milestone_path_value = milestone.get("milestone_contract")
@@ -559,6 +568,7 @@ def sync(args: argparse.Namespace) -> list[str]:
         changed,
         root,
     )
+    write_if_changed(changelog_path, completed_changelog, changed, root)
     return changed
 
 

@@ -53,6 +53,8 @@ A native run ending `action_required` is a hard release-control failure. A separ
 
 For event-driven transitions after a protected merge, the controller waits for exact native `push` CI/Security/CodeQL on the resulting protected-main SHA. The canonical CI workflow does not cancel in-progress `main` runs when later main commits appear, so exact-source transition evidence remains durable.
 
+The repository changelog distinguishes dated, released version entries from `Unreleased` development notes. The canonical roadmap and release contracts define what is actually supported. The roadmap quality gate rejects released milestones missing a dated changelog entry, and release preparation requires milestone-linked, substantive Unreleased notes. After independent publication verification, the terminal closure synchronizes those notes into a dated version entry using the verified publication timestamp; no pre-publication commit may assert the new version is already released.
+
 ## Release Preparation
 
 `Release Preparation` starts automatically when the exact reviewed readiness merge reaches `main`.
