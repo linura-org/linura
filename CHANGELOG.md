@@ -4,6 +4,29 @@ All notable changes to Linura will be documented here. Version entries stay conc
 
 ## [Unreleased]
 
+Target milestone: [v0.10.0](docs/milestones/v0.10.0.md) — work in progress, not released.
+
+### Changes since v0.9.0
+- Continue the Experimental Arch Linux/Hyprland workstation work, including typed shell, session, power, and desktop interaction contracts.
+- Expand automated and interactive VM qualification, physical workstation acceptance, and evidence provenance. Qualification and platform support remain bounded by the explicit version-scoped contract.
+- Strengthen isolated development workspaces, qualification infrastructure, deterministic validation, and CI dependency-input caching.
+
+## [0.9.0] - 2026-09-17
+
+Experimental First Boot and supported reference QualificationEnvironment. Full release contract: [`docs/releases/v0.9.0.md`](docs/releases/v0.9.0.md); terminal publication record: [`docs/releases/published-v0.9.0.md`](docs/releases/published-v0.9.0.md).
+
+### Added
+- Restart-safe First Boot and machine-adoption state machine on the exact Ubuntu 24.04 LTS/amd64/QEMU TCG headless QualificationEnvironment.
+- Bounded deferred-owner bootstrap via `linura-firstboot --bootstrap <absolute-state-root>`, including security-baseline verification, persistent source and plan identity, recovery checkpoints, and authenticated preparer-authority revocation.
+
+### Changed
+- Promotion of the explicitly qualified reference environment only, with independently verified immutable release evidence.
+- Preservation of inherited deterministic authority, proposal-only agents, and narrow managed systemd active-state convergence.
+
+### Boundaries
+- v0.9 remains Experimental. It does not qualify generic host installation, broad Linux distribution or hardware support, interactive workstations, arbitrary privileged execution, or unrestricted agent mutation authority.
+- Internal interactive/unattended/recovery provisioning contracts are not release-exposed production mode selectors.
+
 ## [0.8.0] - 2026-09-10
 
 Experimental proposal-only agent interpretation and typed `IntentProposal`. Full release contract: [`docs/releases/v0.8.0.md`](docs/releases/v0.8.0.md).

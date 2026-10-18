@@ -64,6 +64,7 @@ class RoadmapContractTests(unittest.TestCase):
             (ROOT / "contracts/roadmap.toml").read_text(encoding="utf-8")
         )
         paths = {
+            "CHANGELOG.md",
             "contracts/roadmap.toml",
             "contracts/v010-workstation-slices.toml",
             "contracts/v010-workstation-qualification.toml",

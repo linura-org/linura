@@ -90,6 +90,8 @@ REQUIRED = [
     "contracts/roadmap.toml",
     "contracts/v010-workstation-slices.toml",
     "tools/check_roadmap.py",
+    "tools/check_changelog.py",
+    "tests/tooling/test_changelog.py",
     "tools/v010_slice_graph.py",
     "tests/tooling/test_roadmap.py",
     "tools/check_validation_gates.py",

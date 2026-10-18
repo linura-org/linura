@@ -9,6 +9,7 @@ import re
 import sys
 import tomllib
 
+from check_changelog import validate as validate_changelog
 from check_v010_workstation_qualification import (
     validate as validate_v010_workstation_qualification,
 )
@@ -441,6 +442,10 @@ def validate(root: Path, *, release_candidate: str | None = None) -> list[str]:
         contract = tomllib.loads(contract_path.read_text(encoding="utf-8"))
     except Exception as error:
         return [f"invalid contracts/roadmap.toml: {error}"]
+
+    failures.extend(
+        validate_changelog(root, contract, release_candidate=release_candidate)
+    )
 
     if contract.get("schema_version") != 1:
         failures.append("roadmap schema_version must be 1")
