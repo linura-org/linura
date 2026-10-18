@@ -8,7 +8,8 @@
     "id",
     "description",
     "requires",
-    "steps"
+    "steps",
+    "execution_status"
   ],
   "properties": {
     "schema_version": {
@@ -47,9 +48,59 @@
         },
         "additionalProperties": false
       }
+    },
+    "execution_status": {
+      "type": "string",
+      "enum": [
+        "executable",
+        "reserved"
+      ]
+    },
+    "reservation_reason": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
     }
   },
   "additionalProperties": false,
   "x-linura-contract-id": "schema.acceptance-scenario.v1",
-  "x-linura-stability": "experimental"
+  "x-linura-stability": "experimental",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "execution_status": {
+            "const": "reserved"
+          }
+        },
+        "required": [
+          "execution_status"
+        ]
+      },
+      "then": {
+        "required": [
+          "reservation_reason"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "execution_status": {
+            "const": "executable"
+          }
+        },
+        "required": [
+          "execution_status"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "reservation_reason"
+          ]
+        }
+      }
+    }
+  ]
 }

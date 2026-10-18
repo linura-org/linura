@@ -17,6 +17,14 @@ def scenarios() -> list[dict]:
     result = []
     for path in sorted(SCENARIOS.glob("*.json")):
         item = json.loads(path.read_text(encoding="utf-8"))
+        status = item.get("execution_status")
+        if status not in ("executable", "reserved"):
+            raise SystemExit(f"scenario has invalid execution status: {path}")
+        reason = item.get("reservation_reason")
+        if status == "reserved" and (not isinstance(reason, str) or not reason.strip()):
+            raise SystemExit(f"reserved scenario needs a reason: {path}")
+        if status == "executable" and reason is not None:
+            raise SystemExit(f"executable scenario cannot carry a reservation: {path}")
         item["_path"] = path
         result.append(item)
     return result
@@ -54,7 +62,8 @@ def main() -> int:
         description="Linura disposable-machine acceptance runner"
     )
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("list")
+    listing = sub.add_parser("list")
+    listing.add_argument("--json", action="store_true")
     run = sub.add_parser("run")
     run.add_argument("scenario")
     run.add_argument("--host", default="127.0.0.1")
@@ -67,23 +76,53 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.command == "list":
-        for item in scenarios():
-            print(f"{item['id']}: {item['description']}")
+        items = scenarios()
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "scenarios": [
+                            {
+                                "id": item["id"],
+                                "path": item["_path"].relative_to(ROOT).as_posix(),
+                                "description": item["description"],
+                                "execution_status": item["execution_status"],
+                                "requires": item["requires"],
+                            }
+                            for item in items
+                        ],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        else:
+            for item in items:
+                print(
+                    f"{item['id']} [{item['execution_status']}]: {item['description']}"
+                )
         return 0
 
     scenario = find_scenario(args.scenario)
+    if scenario["execution_status"] != "executable":
+        raise SystemExit(
+            f"scenario {scenario['id']} is reserved: {scenario['reservation_reason']}"
+        )
+    if args.dry_run and args.result_file is not None:
+        raise SystemExit("--dry-run cannot produce acceptance result evidence")
+    if args.result_file is not None and (
+        args.source_sha is None
+        or len(args.source_sha) != 40
+        or any(ch not in "0123456789abcdef" for ch in args.source_sha)
+    ):
+        raise SystemExit("--result-file requires a full lowercase --source-sha")
     print(f"scenario: {scenario['id']} — {scenario['description']}")
     result_steps: list[dict[str, object]] = []
 
     def write_result(result: str) -> None:
         if args.result_file is None:
             return
-        if (
-            args.source_sha is None
-            or len(args.source_sha) != 40
-            or any(ch not in "0123456789abcdef" for ch in args.source_sha)
-        ):
-            raise SystemExit("--result-file requires a full lowercase --source-sha")
         scenario_path = scenario["_path"]
         payload = {
             "schema_version": 1,

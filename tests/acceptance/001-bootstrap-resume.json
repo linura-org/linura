@@ -1,1 +1,20 @@
-{"schema_version":1,"id":"bootstrap-resume","description":"Interrupted bootstrap resumes from the first incomplete checkpoint.","requires":["linura-os-image"],"steps":[{"name":"show-bootstrap-state","command":"linuractl bootstrap status --json"},{"name":"verify-recovery-available","command":"test -x /usr/bin/linuractl"}]}
+{
+  "schema_version": 1,
+  "id": "bootstrap-resume",
+  "description": "Interrupted bootstrap resumes from the first incomplete checkpoint.",
+  "requires": [
+    "linura-os-image"
+  ],
+  "steps": [
+    {
+      "name": "show-bootstrap-state",
+      "command": "linuractl bootstrap status --json"
+    },
+    {
+      "name": "verify-recovery-available",
+      "command": "test -x /usr/bin/linuractl"
+    }
+  ],
+  "execution_status": "reserved",
+  "reservation_reason": "Presence/status checks do not exercise interruption, checkpoint recovery, or convergence; use versioned First Boot qualification."
+}

@@ -1,1 +1,20 @@
-{"schema_version":1,"id":"recovery-native-path","description":"Recovery does not require a healthy model provider or Linura UI.","requires":["recovery"],"steps":[{"name":"shell-present","command":"test -x /bin/sh"},{"name":"native-package-manager-present","command":"command -v pacman >/dev/null"}]}
+{
+  "schema_version": 1,
+  "id": "recovery-native-path",
+  "description": "Recovery does not require a healthy model provider or Linura UI.",
+  "requires": [
+    "recovery"
+  ],
+  "steps": [
+    {
+      "name": "shell-present",
+      "command": "test -x /bin/sh"
+    },
+    {
+      "name": "native-package-manager-present",
+      "command": "command -v pacman >/dev/null"
+    }
+  ],
+  "execution_status": "reserved",
+  "reservation_reason": "Checking /bin/sh and pacman availability does not exercise a recovery action; use environment-specific recovery qualification."
+}
