@@ -48,6 +48,30 @@ docker exec --workdir /workspace/linura linura-s17-development \
   bash scripts/run_codex.sh python3 tools/codex/doctor.py --all
 ```
 
+## Host-sensitive authority tests
+
+The prepared image deliberately retains its native root-owned `/`, recovery
+executables (`/usr/bin/bash` and `/usr/bin/apt`) and sticky `/tmp`. Check that
+topology before running authority tests, then use the same prepared checkout and
+repository tool wrapper:
+
+```sh
+docker exec --workdir /workspace/linura linura-s17-development \
+  bash scripts/run_codex.sh python3 tools/development_workspace.py authority-host
+docker exec --workdir /workspace/linura linura-s17-development \
+  bash scripts/run_codex.sh cargo test --locked -p linura-bootstrap
+docker exec --workdir /workspace/linura linura-s17-development \
+  bash scripts/run_codex.sh cargo xtask check
+```
+
+Do not add a user-owned `/tmp` bind mount or a tmpfs declared with `uid=1000` to
+make temporary storage writable. A world-writable temporary root is trusted only
+when it is root-owned and sticky; changing its owner recreates the same unsafe-host
+failure as a UID-remapped outer sandbox. Do not `chown` or `chmod` host system
+paths. A failed authority-host inspection means these host-sensitive tests remain
+blocked in that namespace; it does not authorize skipping them or treating the
+container result as qualification evidence.
+
 Keep each task's clone, tools, caches and outputs private to its instance. Check
 resources again before large builds. Source synchronization is explicit; run
 preflight again on the actual task checkout, then affected tests and canonical

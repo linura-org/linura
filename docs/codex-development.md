@@ -87,6 +87,14 @@ starts the selected SDK's `qmlls --help`, exposing unresolved shared-library
 failures that file-presence checks miss. The JSON report explicitly sets
 `qualification_evidence` to false.
 
+If `authority-host` reports UID-remapped system files or an unsafe temporary
+root, do not repair the active host or weaken the Rust checks. Run the affected
+tests in the repository's [isolated development
+base](../tools/codex/container/README.md#host-sensitive-authority-tests), whose
+native root-owned sticky `/tmp` and system executable ownership are checked before
+the test command. Do not replace that `/tmp` with a user-owned bind mount or
+tmpfs.
+
 The strict preflight also validates workflow semantics, exact active GNU Rust
 toolchain, rustfmt/Clippy availability, and the locked offline dependency graph.
 It compares tracked source, index entries and HEAD before and after verification.

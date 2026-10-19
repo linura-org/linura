@@ -94,6 +94,26 @@ class CodexContainerTests(unittest.TestCase):
             self.assertIn(boundary, guide)
         self.assertNotRegex(guide, r"--privileged|docker\.sock|--network host")
 
+    def test_authority_tests_preserve_native_root_owned_tmp(self):
+        guide = (RECIPE / "README.md").read_text()
+        profile, _, later_profiles = guide.partition(
+            "## Optional source-analysis creation profile"
+        )
+        self.assertIn("## Host-sensitive authority tests", profile)
+        for command in (
+            "tools/development_workspace.py authority-host",
+            "cargo test --locked -p linura-bootstrap",
+            "cargo xtask check",
+        ):
+            self.assertIn(command, profile)
+        self.assertIn(
+            "native root-owned `/`, recovery\nexecutables (`/usr/bin/bash` and `/usr/bin/apt`) and sticky `/tmp`",
+            profile,
+        )
+        self.assertIn("tmpfs declared with `uid=1000`", profile)
+        self.assertNotIn("--tmpfs /tmp", profile)
+        self.assertTrue(later_profiles)
+
     def test_source_checks_use_main_locks_and_a_fresh_isolated_instance(self):
         guide = (RECIPE / "README.md").read_text()
         profile = guide.split("## Optional source-analysis creation profile", 1)[1]

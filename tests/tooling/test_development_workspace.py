@@ -765,6 +765,51 @@ class DevelopmentWorkspaceTests(unittest.TestCase):
                 workspace.trusted_native_recovery_program(Path("/usr/bin/bash"))
             )
 
+    def test_authority_host_remedies_preserve_production_ownership_checks(
+        self,
+    ) -> None:
+        with (
+            patch.object(
+                workspace,
+                "trusted_native_recovery_program",
+                return_value=False,
+            ),
+            patch.object(
+                workspace,
+                "trusted_authority_test_directory",
+                return_value=False,
+            ),
+        ):
+            report = workspace.inspect_authority_host()
+
+        self.assertFalse(report["layout_ready"])
+        remedies = "\n".join(check["remedy"] for check in report["checks"])
+        self.assertIn("tools/codex/container/README.md", remedies)
+        self.assertIn("rather than changing host binary ownership", remedies)
+        self.assertIn("native root-owned sticky /tmp", remedies)
+        self.assertIn("do not replace /tmp with a user-owned shared mount", remedies)
+
+    def test_authority_host_checks_both_native_recovery_executables(self) -> None:
+        with (
+            patch.object(
+                workspace,
+                "trusted_native_recovery_program",
+                side_effect=lambda path: path == Path("/usr/bin/bash"),
+            ),
+            patch.object(
+                workspace,
+                "trusted_authority_test_directory",
+                return_value=True,
+            ),
+        ):
+            report = workspace.inspect_authority_host()
+
+        checks = {check["name"]: check["ready"] for check in report["checks"]}
+        self.assertTrue(checks["authority_host.native_recovery_program"])
+        self.assertFalse(checks["authority_host.native_recovery_package_manager"])
+        self.assertTrue(checks["authority_host.temporary_root"])
+        self.assertFalse(report["layout_ready"])
+
     def test_interactive_launcher_without_mount_creates_no_scratch_or_evidence(
         self,
     ) -> None:

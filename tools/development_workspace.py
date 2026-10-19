@@ -677,12 +677,17 @@ def inspect_authority_host() -> WorkspaceReport:
         Check(
             "authority_host.native_recovery_program",
             trusted_native_recovery_program(Path("/usr/bin/bash")),
-            "Use a host namespace where /usr/bin/bash is a root-owned regular executable; UID-remapped roots are unsupported for authority tests.",
+            "Run authority-sensitive tests in a prepared host namespace where /usr/bin/bash is a root-owned regular executable; UID-remapped roots are unsupported. Use tools/codex/container/README.md rather than changing host binary ownership.",
+        ),
+        Check(
+            "authority_host.native_recovery_package_manager",
+            trusted_native_recovery_program(Path("/usr/bin/apt")),
+            "Run authority-sensitive tests in a prepared host namespace where /usr/bin/apt is a root-owned regular executable; UID-remapped roots are unsupported. Use tools/codex/container/README.md rather than changing host binary ownership.",
         ),
         Check(
             "authority_host.temporary_root",
             trusted_authority_test_directory(temporary_root, expected_uid),
-            "Select an absolute trusted TMPDIR whose directory chain is root/process-owned and not writable by other users except for a root-owned sticky shared root.",
+            "Use the prepared container's native root-owned sticky /tmp, or select an absolute trusted TMPDIR whose directory chain is root/process-owned and not writable by other users except for a root-owned sticky shared root; do not replace /tmp with a user-owned shared mount.",
         ),
     ]
     return WorkspaceReport(
