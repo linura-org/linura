@@ -21,17 +21,20 @@ PRETTIER_CONFIG = (
     "tools/source-format/package-lock.json",
 )
 FROZEN_FORMAT_INPUTS = {
-    "apps/linura-shell/tray/SystemTrayView.qml": "d3b91127319c67c050deb14269db702d22d7b1ba2a9d876d84eca69f5323ee91",
+    # Existing byte-sensitive QML contract exception from #219. S17 reviews the
+    # exact native-unmap change and its stronger removal/callback-count tests;
+    # no additional file or pattern is exempted from pinned formatting.
+    "apps/linura-shell/tray/SystemTrayView.qml": "e58bba825d7a73ed1668f31bf6db1c5ac3f08d9f22107d25f09b0ae2eb6ff38e",
     "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml": "6edc749d07c6b1f22bc5915665dc17c2c2c66b4d6d6ec32b1893a92ef171fe78",
-    "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml": "c90e79db68f3a87af8a83f2d3fce6a9afd6906b262774eebe904c49d0ad81268",
+    "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml": "154ac33fa33424e630b181c0fb5cb28df07d4fd347e635d76e1eebcdc95b83ef",
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml": "86b7300c6763d2101cf1e5dcd56147b4d9ca5afd8f352db0aabcfbb2e6229631",
     "apps/linura-shell/integrations/hyprland/WorkspaceNavigationController.qml": "79ea195e5a03ef9f3e27d30ec7e49e7d2d8b79d97a9786175180468d6664e964",
-    "apps/linura-shell/shell.qml": "f202e58e4abca5842970955a91d2d5a985c8d6674e6643501a2bf62b3951b9e9",
+    "apps/linura-shell/shell.qml": "5ae841bb1899ecb5bc60468bf6ce7fb85e9c850debdc726d4b29e64521765507",
     "apps/linura-shell/ui/LinuraDialog.qml": "38eea04373ee6e529d4caaf8d8b9f2bd5a87429cd794a93dbba88b006d461196",
-    "apps/linura-shell/bridge/audio_session_controller.cpp": "8d2ccee988dfff9b55f690954fff0a4628967580be21dbadd2d4bb0b9b4229b5",
+    "apps/linura-shell/bridge/audio_session_controller.cpp": "31fd3d5dc81e1c063364eedd4f414b866fae445971efb15e9a689e090f8e6490",
     "apps/linura-shell/bridge/audio_session_controller.h": "ad34a06d80726946c583c0bab2db3e9aa7fecb49aa2900d29584f87b5b1cffae",
     "packaging/wireplumber/linura-session-audio.lua": "a63caddb8df6cd8584c355f7fb289b08abe09eca8b46521d274d84a408100d10",
-    "qualification/v010/shell-runtime/run-shell-runtime.sh": "3533143a2a37fa733204daae9ba9177cffea726ce499e024d2968df433956b6b",
+    "qualification/v010/shell-runtime/run-shell-runtime.sh": "e0186785ce005dcce767c77cf860e3f0bb8e75767c2d76d224204a3af737ce7d",
     "qualification/v010/workstation-acceptance/record-session.sh": "b9e90e16aea31a6e87e1d901c0ae7b0a22c45d8d9b7b99d7e16939555ea0e9fc",
     "qualification/v010/workstation-acceptance/launch-interactive.sh": "1c8ed5fc180526a8176e7a88635fae9b122daa0b64090e826ec3e3c6af957dd6",
     "qualification/v010/workstation-acceptance/capture-hardware-session.sh": "ce2257338be8b6b1f9b07248102f28808bbbecf83277f886163127e244d11ad3",

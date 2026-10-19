@@ -889,13 +889,7 @@ void AudioSessionController::dispatchEffect()
         return;
     }
 
-    QDBusInterface session(
-        QString::fromLatin1(kServiceName),
-        QString::fromLatin1(kSessionPath),
-        QString::fromLatin1(kSessionInterface),
-        sessionBus_);
-    session.setTimeout(kEffectTimeoutMs);
-    if (!session.isValid()) {
+    if (!sessionBus_.isConnected()) {
         const qint32 presentationGeneration = pending_->presentationGeneration;
         pending_.reset();
         publishLifecycleFeedback(
@@ -923,12 +917,18 @@ void AudioSessionController::dispatchEffect()
         QStringLiteral("applying"),
         QStringLiteral("Dispatching the exact-node Session1 transient effect…"));
 
-    QDBusPendingCall call = session.asyncCall(
-        QStringLiteral("SetAudioOutputVolume"),
+    auto request = QDBusMessage::createMethodCall(
+        QString::fromLatin1(kServiceName),
+        QString::fromLatin1(kSessionPath),
+        QString::fromLatin1(kSessionInterface),
+        QStringLiteral("SetAudioOutputVolume"));
+    request.setArguments({
         pending.requestId,
         QVariant::fromValue(pending.displayed.nodeId),
         QVariant::fromValue(quint16(pending.requestedVolume)),
-        QString::fromLatin1(kReason));
+        QString::fromLatin1(kReason),
+    });
+    QDBusPendingCall call = sessionBus_.asyncCall(request, kEffectTimeoutMs);
     auto *watcher = new QDBusPendingCallWatcher(call, this);
     connect(
         watcher,
