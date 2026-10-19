@@ -353,14 +353,88 @@ impl PlanPreviewControl {
         request: PlanDesiredStateRequest,
     ) -> Result<(ReconciliationPlan, ObservationEnvelope), PlanPreviewControlError> {
         let input = NormalizedPlanInput::new(principal, request)?;
+        self.build_fresh_plan(&input, actor)
+    }
+
+    pub(crate) fn protective_authority_candidate(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: PlanDesiredStateRequest,
+        context: &crate::protective_lock_execution::ProtectiveLockContext,
+    ) -> Result<(ReconciliationPlan, ObservationEnvelope), PlanPreviewControlError> {
+        context
+            .require_request(&principal, &actor, &request)
+            .map_err(|reason| PlanPreviewControlError::Planning { reason })?;
+        let input = NormalizedPlanInput::new(principal, request)?;
+        self.build_fresh_plan_with_context(&input, actor, Some(context), false)
+    }
+
+    /// No event/consent reconstruction. Only exact retained service requests
+    /// can use this factual planning path, and its caller may never reprepare.
+    pub(crate) fn protective_recovery_candidate(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: PlanDesiredStateRequest,
+    ) -> Result<(ReconciliationPlan, ObservationEnvelope), PlanPreviewControlError> {
+        if !crate::protective_lock_execution::retained_protective_request(&principal, &request)
+            || actor
+                != crate::protective_lock_execution::protective_actor()
+                    .map_err(|reason| PlanPreviewControlError::Planning { reason })?
+        {
+            return Err(PlanPreviewControlError::Planning {
+                reason: "invalid protective observe-only scope".into(),
+            });
+        }
+        let input = NormalizedPlanInput::new(principal, request)?;
+        self.build_fresh_plan_with_context(&input, actor, None, true)
+    }
+
+    /// Both public review previews and managed prepare use this same canonical
+    /// derivation. A preview remains non-executable, but must not omit native
+    /// session prerequisites that change the reviewed scope or eligibility.
+    fn build_fresh_plan(
+        &mut self,
+        input: &NormalizedPlanInput,
+        actor: Actor,
+    ) -> Result<(ReconciliationPlan, ObservationEnvelope), PlanPreviewControlError> {
+        self.build_fresh_plan_with_context(input, actor, None, false)
+    }
+
+    fn build_fresh_plan_with_context(
+        &mut self,
+        input: &NormalizedPlanInput,
+        actor: Actor,
+        protective: Option<&crate::protective_lock_execution::ProtectiveLockContext>,
+        observe_only_protective: bool,
+    ) -> Result<(ReconciliationPlan, ObservationEnvelope), PlanPreviewControlError> {
         let observation_request = ObservationRequest {
             provider: input.request.provider.clone(),
             resource: input.request.resource.clone(),
             capability: input.request.observation_capability.clone(),
         };
-        let response = self.coordinator.observe(&observation_request)?;
-        let observation = planning_observation(&response);
-        let plan = DeterministicPlanner
+        let mut response = self.coordinator.observe(&observation_request)?;
+        let prerequisite = self.validate_session_lock_facts(
+            input,
+            &mut response.observation,
+            protective,
+            observe_only_protective,
+        )?;
+        let power = self.session_power_plan_facts(
+            &input.principal,
+            &input.request,
+            &mut response.observation,
+        )?;
+        let mut observation = planning_observation(&response);
+        if let Some(power) = &power {
+            // Completion is a Control derivation over independent native facts,
+            // never a provider-authored mutable attribute or executor receipt.
+            observation
+                .attributes
+                .insert("completed".into(), power.completed.to_string());
+        }
+        let mut plan = DeterministicPlanner
             .plan_resource(
                 input.request.request_id.clone(),
                 actor,
@@ -370,7 +444,131 @@ impl PlanPreviewControl {
             .map_err(|error| PlanPreviewControlError::Planning {
                 reason: error.to_string(),
             })?;
+        if let Some(prerequisite) = prerequisite {
+            plan.findings.push(prerequisite);
+        }
+        if let Some(context) = protective {
+            plan.findings.push(linura_planner::PlanFinding {
+                code: "protective-native-sleep-precondition".into(), level: PlanFindingLevel::Pass,
+                message: format!("exact authenticated pre-kernel native event={} owner-intent={} current-policy={}", context.event.resource_id().map_err(|e| PlanPreviewControlError::Planning { reason: e.to_string() })?.as_str(), context.setting.intent().as_str(), context.setting.revision().as_str()),
+            });
+        }
+        if let Some(power) = power {
+            plan.findings.extend(power.findings);
+        }
         Ok((plan, response.observation))
+    }
+
+    fn validate_session_lock_facts(
+        &mut self,
+        input: &NormalizedPlanInput,
+        observation: &mut ObservationEnvelope,
+        protective: Option<&crate::protective_lock_execution::ProtectiveLockContext>,
+        observe_only_protective: bool,
+    ) -> Result<Option<linura_planner::PlanFinding>, PlanPreviewControlError> {
+        if input.request.provider.as_str() != "session-locker" {
+            return Ok(None);
+        }
+        let fail = |reason: String| PlanPreviewControlError::Planning { reason };
+        let lock = linura_core::SessionLockId::from_resource(&input.request.resource)
+            .map_err(|error| fail(error.to_string()))?;
+        let session = self.coordinator.observe(&ObservationRequest {
+            provider: linura_core::ProviderId::new("logind")
+                .map_err(|error| fail(error.to_string()))?,
+            capability: linura_core::CapabilityId::new("session.epoch.observe")
+                .map_err(|error| fail(error.to_string()))?,
+            resource: lock
+                .epoch()
+                .resource_id()
+                .map_err(|error| fail(error.to_string()))?,
+        })?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| fail("session authority clock unavailable".into()))?;
+        let now = u64::try_from(now.as_millis())
+            .map_err(|_| fail("session authority clock overflow".into()))?;
+        let action = match input
+            .request
+            .desired_state
+            .get("secure")
+            .map(String::as_str)
+        {
+            Some("true") => crate::SessionAction::Lock,
+            Some("false") => crate::SessionAction::Unlock,
+            _ => return Err(fail("session-lock desired state is unsupported".into())),
+        };
+        // Validate owner predicates without changing the initiating principal.
+        // The service remains the principal in planning/policy/prepare/audit.
+        let owner_facts_principal = if protective.is_some() || observe_only_protective {
+            AuthenticatedPrincipal::new(format!("unix:uid:{}", lock.epoch().uid()))
+                .map_err(|e| fail(e.to_string()))?
+        } else {
+            input.principal.clone()
+        };
+        crate::SessionSafetyReview::review(
+            &owner_facts_principal,
+            lock.epoch(),
+            action,
+            &session.observation,
+            now,
+        )
+        .map_err(|error| fail(error.to_string()))?;
+        let _ = crate::session_safety::validate_native_lock(&lock, observation, now)
+            .map_err(|error| fail(error.to_string()))?;
+        // A newer locker sample must not extend the native session precondition
+        // through prepare/handoff. Only narrow the original validity window;
+        // never invent a new observation timestamp or promote cached facts.
+        restrict_session_validity(observation, &session.observation, now)?;
+        if let Some(context) = protective {
+            let event = context.observe_entry(self).map_err(fail)?;
+            let now = u64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|_| fail("session authority clock unavailable".into()))?
+                    .as_millis(),
+            )
+            .map_err(|_| fail("session authority clock overflow".into()))?;
+            context
+                .review_facts(
+                    &input.principal,
+                    &event,
+                    &session.observation,
+                    observation,
+                    now,
+                )
+                .map_err(fail)?;
+            restrict_session_validity(observation, &event, now)?;
+            observation.attributes.insert(
+                "protective_sleep_entry_digest".into(),
+                linura_observation::ObservedValue::Text(
+                    crate::durable_authority::digest_observation(&event)
+                        .map_err(|e| fail(e.to_string()))?
+                        .as_str()
+                        .into(),
+                ),
+            );
+            observation.attributes.insert(
+                "protective_policy_revision".into(),
+                linura_observation::ObservedValue::Text(context.setting.revision().as_str().into()),
+            );
+        }
+        // Bind every approval-relevant predicate into the canonical plan, not a
+        // provider-authored secondary plan. Fresh sequence/time are intentionally
+        // not transferable approval semantics; the narrowed fresh window above
+        // remains bound into durable observation authority independently.
+        let seat = match session.observation.attributes.get("seat") {
+            Some(linura_observation::ObservedValue::Text(seat)) => seat,
+            _ => return Err(fail("native session seat is missing".into())),
+        };
+        Ok(Some(linura_planner::PlanFinding {
+            code: "native-session-lock-precondition".into(),
+            level: PlanFindingLevel::Pass,
+            message: format!(
+                "NativeApi logind/session.epoch.observe {}: owner={} type=wayland class=user state=active active=true remote=false seat={seat} leader_present=true",
+                session.observation.resource.as_str(),
+                lock.epoch().uid()
+            ),
+        }))
     }
 
     pub fn provider_snapshot(&self) -> Result<ProviderSnapshot, ObservationControlError> {
@@ -406,23 +604,7 @@ impl PlanPreviewControl {
             return Ok(preview_from_plan(&retained));
         }
 
-        let observation_request = ObservationRequest {
-            provider: input.request.provider.clone(),
-            resource: input.request.resource.clone(),
-            capability: input.request.observation_capability.clone(),
-        };
-        let response = self.coordinator.observe(&observation_request)?;
-        let observation = planning_observation(&response);
-        let plan = DeterministicPlanner
-            .plan_resource(
-                input.request.request_id.clone(),
-                actor,
-                input.desired_resource(),
-                &observation,
-            )
-            .map_err(|error| PlanPreviewControlError::Planning {
-                reason: error.to_string(),
-            })?;
+        let (plan, _) = self.build_fresh_plan(&input, actor)?;
         self.previews.insert(input, plan.clone())?;
         Ok(preview_from_plan(&plan))
     }
@@ -459,6 +641,40 @@ impl PlanPreviewControl {
     ) -> Result<PlanPreview, PlanPreviewControlError> {
         self.get_plan_preview(principal, plan_id)
     }
+}
+
+/// Translate the two native exclusive deadlines into the canonical envelope's
+/// inclusive last-valid endpoint. Do not refresh either contributor's timestamp.
+pub(crate) fn restrict_session_validity(
+    locker: &mut ObservationEnvelope,
+    session: &ObservationEnvelope,
+    now_unix_ms: u64,
+) -> Result<(), PlanPreviewControlError> {
+    let fail = |reason: &str| PlanPreviewControlError::Planning {
+        reason: reason.into(),
+    };
+    let last_valid = |observation: &ObservationEnvelope| {
+        if observation.valid_for_ms == 0 {
+            return Err(fail("native session validity is empty"));
+        }
+        observation
+            .observed_at_unix_ms
+            .checked_add(observation.valid_for_ms)
+            .and_then(|first_invalid| first_invalid.checked_sub(1))
+            .ok_or_else(|| fail("native session validity overflow"))
+    };
+    let deadline = last_valid(locker)?.min(last_valid(session)?);
+    let window = deadline
+        .checked_sub(locker.observed_at_unix_ms)
+        .filter(|window| *window > 0)
+        .ok_or_else(|| fail("native session prerequisite validity is exhausted"))?;
+    if now_unix_ms < session.observed_at_unix_ms {
+        return Err(fail("native session prerequisite is in the future"));
+    }
+    locker.valid_for_ms = window;
+    locker
+        .require_current(now_unix_ms)
+        .map_err(|error| fail(&error.to_string()))
 }
 
 fn validate_request(request: &PlanDesiredStateRequest) -> Result<(), PlanPreviewControlError> {
@@ -784,6 +1000,51 @@ mod tests {
         assert!(AuthenticatedPrincipal::new("").is_err());
         assert!(AuthenticatedPrincipal::new("unix:uid:1000\nspoof").is_err());
         assert!(AuthenticatedPrincipal::new("x".repeat(MAX_PRINCIPAL_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn native_session_validity_keeps_exclusive_endpoints_and_never_refreshes_evidence() {
+        let input = input(principal("unix:uid:1000"), "request:validity", "active");
+        let make = |at, ttl| ObservationEnvelope {
+            provider: input.request.provider.clone(),
+            resource: input.request.resource.clone(),
+            capability: input.request.observation_capability.clone(),
+            authority: ObservationAuthority::NativeApi,
+            observed_at_unix_ms: at,
+            valid_for_ms: ttl,
+            sequence: 1,
+            attributes: BTreeMap::new(),
+        };
+        for (locker_at, locker_ttl, session_at, session_ttl, last_valid) in [
+            (1000, 2000, 1100, 2000, 2999),
+            (1100, 2000, 1000, 2000, 2999),
+            (1000, 2000, 1100, 100, 1199),
+        ] {
+            let session = make(session_at, session_ttl);
+            let mut locker = make(locker_at, locker_ttl);
+            assert!(restrict_session_validity(&mut locker, &session, last_valid).is_ok());
+            assert_eq!(locker.observed_at_unix_ms, locker_at);
+            assert_eq!(locker.observed_at_unix_ms + locker.valid_for_ms, last_valid);
+            assert!(locker.require_current(last_valid).is_ok());
+            assert!(locker.require_current(last_valid + 1).is_err());
+        }
+        for (locker_at, locker_ttl, session_at, session_ttl, now) in [
+            (1000, 2000, 1000, 2000, 3000),
+            (1000, 0, 1000, 2000, 1000),
+            (1000, 2000, 1000, 0, 1000),
+            (1000, 2000, 1100, 2000, 1099),
+            (1100, 2000, 1000, 100, 1100),
+            (u64::MAX - 1, 2000, 1000, 2000, u64::MAX),
+        ] {
+            assert!(
+                restrict_session_validity(
+                    &mut make(locker_at, locker_ttl),
+                    &make(session_at, session_ttl),
+                    now
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]

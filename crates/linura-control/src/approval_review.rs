@@ -649,6 +649,30 @@ mod tests {
     }
 
     #[test]
+    fn session_owner_authentication_is_not_an_administrator_or_destructive_grant() {
+        let owner = PolicyAuthenticatedApprover::new(
+            id(PrincipalId::new("unix:uid:1000")),
+            ActorKind::Human,
+            BTreeSet::from([ApprovalClass::SessionOwnerAuthentication]),
+        );
+        assert!(owner.can_satisfy(ApprovalClass::SessionOwnerAuthentication));
+        for class in [
+            ApprovalClass::Administrator,
+            ApprovalClass::DestructiveAction,
+            ApprovalClass::InteractiveUser,
+        ] {
+            assert!(!owner.can_satisfy(class));
+        }
+        assert!(!admin().can_satisfy(ApprovalClass::SessionOwnerAuthentication));
+        let agent = PolicyAuthenticatedApprover::new(
+            id(PrincipalId::new("unix:uid:1000")),
+            ActorKind::Agent,
+            BTreeSet::from([ApprovalClass::SessionOwnerAuthentication]),
+        );
+        assert!(!agent.can_satisfy(ApprovalClass::SessionOwnerAuthentication));
+    }
+
+    #[test]
     fn exact_trusted_review_is_the_approval_binding() {
         let review = review(RiskClass::SecuritySensitive);
         let changed = review_with(

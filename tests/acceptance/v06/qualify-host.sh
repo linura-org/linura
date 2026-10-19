@@ -71,6 +71,8 @@ set -e
 
 scp "${ssh_common[@]}" -P "$ssh_port" \
     linura@127.0.0.1:/tmp/v06-matrix.log "$ARTIFACT_DIR/v06-matrix.log" >/dev/null 2>&1 || true
+scp "${ssh_common[@]}" -P "$ssh_port" \
+    linura@127.0.0.1:/tmp/v06-complete-matrix.log "$ARTIFACT_DIR/v06-complete-matrix.log" >/dev/null 2>&1 || true
 
 if [[ "$guest_rc" -ne 0 ]]; then
     {

@@ -34,6 +34,14 @@ runtime_packages = [
   "ffmpeg",
   "wf-recorder",
   "wayland",
+  "wayland-protocols",
+  "polkit",
+  "at-spi2-core",
+  "libcap",
+  "libxkbcommon",
+  "libx11",
+  "fontconfig",
+  "ttf-dejavu",
 ]
 
 [cache_policy]

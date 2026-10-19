@@ -504,7 +504,48 @@ pub(crate) fn plan_review_from_wire(wire: PlanReviewWire) -> Result<PlanReview, 
     };
     let planner_risk_floor = parse_risk(&planner_risk_floor)?;
     let reviewed_risk = parse_risk(&reviewed_risk)?;
-    let required_approval_class = required_approval_class_for_reviewed_risk(reviewed_risk);
+    let required_approval_class = if policy_id == "policy:session-lock" {
+        if policy_revision_id != "policy:session-lock:v1"
+            || preview.provider.as_str() != "session-locker"
+            || preview.observation_capability.as_str() != "session.secure-lock.observe"
+            || preview.actor.kind != ActorKind::Human
+            || !preview.actor.interactive
+        {
+            return Err("session-lock review has invalid purpose scope".into());
+        }
+        let lock = linura_core::SessionLockId::from_resource(&preview.resource)
+            .map_err(|_| "session-lock review has invalid native generation")?;
+        if lock.epoch().uid() == 0 || principal != format!("unix:uid:{}", lock.epoch().uid()) {
+            return Err("session-lock review has a different owner".into());
+        }
+        if preview.status == PlanPreviewStatus::NoChange
+            && reviewed_risk == RiskClass::ReadOnly
+            && preview.changes.is_empty()
+        {
+            None
+        } else if reviewed_risk == RiskClass::SecuritySensitive
+            && preview.changes.len() == 1
+            && preview.changes[0].key == "secure"
+        {
+            let change = &preview.changes[0];
+            match (change.current.as_deref(), change.desired.as_str()) {
+                (Some("false"), "true") => Some(PlanReviewApprovalClass::InteractiveUser),
+                (Some("true"), "false") => {
+                    Some(PlanReviewApprovalClass::SessionOwnerAuthentication)
+                }
+                _ => return Err("session-lock review has an unsupported transition".into()),
+            }
+        } else if matches!(
+            decision,
+            PlanReviewDecision::Deny | PlanReviewDecision::Blocked
+        ) {
+            None
+        } else {
+            return Err("session-lock review has invalid risk or material changes".into());
+        }
+    } else {
+        required_approval_class_for_reviewed_risk(reviewed_risk)
+    };
     match decision {
         PlanReviewDecision::RequireApproval => {
             if approval_class != required_approval_class || decision_reason.trim().is_empty() {
@@ -569,6 +610,7 @@ fn parse_review_decision(value: &str) -> Result<PlanReviewDecision, String> {
 fn parse_review_approval_class(value: &str) -> Result<PlanReviewApprovalClass, String> {
     match value {
         "interactive-user" => Ok(PlanReviewApprovalClass::InteractiveUser),
+        "session-owner-authentication" => Ok(PlanReviewApprovalClass::SessionOwnerAuthentication),
         "administrator" => Ok(PlanReviewApprovalClass::Administrator),
         "destructive-action" => Ok(PlanReviewApprovalClass::DestructiveAction),
         _ => Err(format!("unknown plan review approval class {value:?}")),
@@ -743,6 +785,57 @@ mod tests {
             preview_wire.8,
             preview_wire.9,
         )
+    }
+
+    #[test]
+    fn owner_authentication_wire_class_is_accepted_only_for_exact_native_unlock_scope() {
+        let mut wire = protected_review_wire("security-sensitive", "session-owner-authentication");
+        wire.1 = "unix:uid:1000".into();
+        wire.2.1 = "human".into();
+        wire.2.2 = true;
+        wire.3 = (
+            "session-locker".into(),
+            "session:lock:abcd1234-1234-4567-89ab-0123456789ab:1000:c2:42:98765432-1234-4567-89ab-0123456789ab:7".into(),
+            "session.secure-lock.observe".into(),
+        );
+        wire.6.3 = "policy:session-lock".into();
+        wire.6.4 = "policy:session-lock:v1".into();
+        wire.8 = vec![("secure".into(), true, "true".into(), "false".into())];
+        let review =
+            plan_review_from_wire(wire.clone()).unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(
+            review.approval_class,
+            Some(PlanReviewApprovalClass::SessionOwnerAuthentication)
+        );
+        assert!(!review.execution_authorized);
+        let mut invalid = wire.clone();
+        invalid.1 = "unix:uid:0".into();
+        assert!(plan_review_from_wire(invalid).is_err());
+        let mut invalid = wire.clone();
+        invalid.2.1 = "agent".into();
+        assert!(plan_review_from_wire(invalid).is_err());
+        let mut invalid = wire.clone();
+        invalid.3.0 = "systemd".into();
+        assert!(plan_review_from_wire(invalid).is_err());
+        let mut invalid = wire.clone();
+        invalid.6.4 = "policy:session-lock:v2".into();
+        assert!(plan_review_from_wire(invalid).is_err());
+        let mut invalid = wire.clone();
+        invalid.7.2 = "administrator".into();
+        assert!(plan_review_from_wire(invalid).is_err());
+        let mut invalid = wire.clone();
+        invalid.8[0].0 = "active_state".into();
+        assert!(plan_review_from_wire(invalid).is_err());
+        let mut invalid = wire;
+        invalid.8[0].3 = "true".into();
+        assert!(plan_review_from_wire(invalid).is_err());
+        assert!(
+            plan_review_from_wire(protected_review_wire(
+                "security-sensitive",
+                "session-owner-authentication"
+            ))
+            .is_err()
+        );
     }
 
     #[test]

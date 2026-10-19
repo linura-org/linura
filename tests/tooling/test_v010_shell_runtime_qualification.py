@@ -55,6 +55,12 @@ FIXTURE_PATHS = (
     "apps/linura-shell/bridge/CMakeLists.txt",
     "apps/linura-shell/bridge/audio_session_controller.h",
     "apps/linura-shell/bridge/audio_session_controller.cpp",
+    "apps/linura-shell/bridge/session_controller.h",
+    "apps/linura-shell/bridge/session_controller.cpp",
+    "apps/linura-shell/bridge/session_receipt.h",
+    "apps/linura-shell/bridge/session_receipt.cpp",
+    "apps/linura-shell/plugins/session/SessionControls.qml",
+    "apps/linura-shell/plugins/power/PowerControls.qml",
     "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml",
     "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml",
     "apps/linura-shell/plugins/notifications-osd/manifest.json",
@@ -114,6 +120,20 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             capture_output=True,
             text=True,
             check=False,
+        )
+
+    def test_tray_keyboard_return_waits_for_native_popup_unmap(self) -> None:
+        source = (ROOT / "apps/linura-shell/tray/SystemTrayView.qml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("function restoreKeyboardAfterNativeUnmap()", source)
+        self.assertIn("&& !overflowWindow.backingWindowVisible", source)
+        self.assertEqual(
+            source.count("Qt.callLater(root.restoreKeyboardAfterNativeUnmap)"), 2
+        )
+        self.assertNotIn(
+            "if (root.overflowKeyboardReturnPending && !overflowWindow.visible)",
+            source,
         )
 
     def test_runtime_qualification_contract_is_valid(self) -> None:
@@ -462,11 +482,13 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self._copy_fixture(root)
             script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
             text = script.read_text(encoding="utf-8")
-            marker = "seatd pipewire pipewire-audio wireplumber networkmanager sqlite"
+            marker = "vulkan-swrast pipewire pipewire-audio wireplumber networkmanager sqlite"
             self.assertIn(marker, text)
             script.write_text(
                 text.replace(
-                    marker, "seatd pipewire wireplumber networkmanager sqlite", 1
+                    marker,
+                    "vulkan-swrast pipewire wireplumber networkmanager sqlite",
+                    1,
                 ),
                 encoding="utf-8",
             )
@@ -852,6 +874,81 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("shared disposable VM harness", result.stderr)
+
+    def test_native_authentication_cases_and_private_hardware_input_cannot_be_skipped(
+        self,
+    ) -> None:
+        for marker in (
+            '--qmp-socket "$native_input_socket"',
+            "timeout --signal=TERM --kill-after=5s 900 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-auth.py",
+            '--bootstrap "$ARTIFACT_DIR/s17-native-bootstrap.json"',
+            '"$ARTIFACT_DIR/s17-native-case-digests.sha256"',
+            "'sha256sum /usr/lib/linura/qualification/linura-s17-assistive-probe'",
+            '> "$ARTIFACT_DIR/s17-native-assistive-binary.sha256"',
+            '"$ARTIFACT_DIR/s17-native-assistive-binary.sha256" \\',
+            "qualification/v010/session-security/native-assistive-fixture.py \\",
+            "qualification/v010/session-security/native-assistive-probe.cpp \\",
+            "qualification/v010/session-security/native-assistive-denial.h \\",
+            "qualification/v010/session-security/native-assistive-denial-test.cpp \\",
+            "qualification/v010/session-security/CMakeLists.txt \\",
+            "timeout --signal=TERM --kill-after=5s 360 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-suspend.py",
+            '"$ARTIFACT_DIR/s17-native-suspend-digests.sha256"',
+            "start-vm.sh --persistent             --mode automated",
+            "for purpose in logout reboot power-off; do",
+            "timeout --signal=TERM --kill-after=5s 180 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-transition.py",
+            "timeout --signal=TERM --kill-after=5s 600 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-transition.py",
+            '"$ARTIFACT_DIR/s17-native-terminating-digests.sha256"',
+            'vm_directory="$(mktemp -d "$LINURA_VM_DIR/linura-s17-disk.XXXXXX")"',
+            'vm_image="$vm_directory/guest.qcow2"',
+            'source_archive="$LINURA_WORK_DIR/linura-source.tar.gz"',
+            "install -d -o root -g root -m 0700 /run/linura-source-stage",
+            "install -o root -g root -m 0600 /dev/null /run/linura-source-stage/source.tar.gz",
+            "test \"$(stat -c '%u:%g:%a:%h:%F' \"$archive\")\" = '0:0:600:1:regular file'",
+            'printf \'%s  %s\\n\' "$expected_sha256" "$archive" | sha256sum --check --strict',
+            "--no-same-owner --no-same-permissions",
+            'test -z "$(find "$source_root" -xdev \\( -type d -o -type f \\) -perm /022 -print -quit)"',
+            'test -z "$(find "$source_root" -xdev \\( -type d -o -type f \\) ! -user root -print -quit)"',
+            'test -z "$(find "$source_root" -xdev \\( -type d -o -type f \\) ! -group root -print -quit)"',
+            'test -z "$(find "$source_root" -xdev -type l -print -quit)"',
+            '--expected-source-sha "$PREPARED_IMAGE_SHA256" --phase before',
+            '--expected-source-sha "$PREPARED_IMAGE_SHA256" --phase after',
+        ):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                workflow = (
+                    root / ".github/workflows/v010-shell-runtime-qualification.yml"
+                )
+                source = workflow.read_text(encoding="utf-8")
+                self.assertIn(marker, source)
+                workflow.write_text(
+                    source.replace(marker, "removed-native-case", 1), encoding="utf-8"
+                )
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("workflow missing", result.stderr)
+
+    def test_permission_preserving_source_extraction_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            source = workflow.read_text(encoding="utf-8")
+            marker = (
+                'tar --extract --gzip --file "$archive" --directory '
+                '"$source_root" \\\n'
+                "            --no-same-owner --no-same-permissions"
+            )
+            self.assertIn(marker, source)
+            workflow.write_text(
+                source.replace(marker, "tar -xzf /tmp/linura-source.tar.gz", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "must not preserve archive ownership or permissions", result.stderr
+            )
 
     def test_shell_sandbox_cannot_be_weakened(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2060,6 +2157,23 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             runtime_text = text[runtime_index:]
             runtime_text = runtime_text.replace(marker, "--persistent " + marker, 1)
             workflow.write_text(text[:runtime_index] + runtime_text, encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("snapshot/disposable", result.stderr)
+
+    def test_s17_persistent_boot_cannot_substitute_the_cached_prepared_image(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            source = workflow.read_text(encoding="utf-8")
+            marker = '--image "$VM_IMAGE"'
+            self.assertEqual(source.count(marker), 2)
+            workflow.write_text(
+                source.replace(marker, '--image "$PREPARED_IMAGE"', 1), encoding="utf-8"
+            )
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("snapshot/disposable", result.stderr)
