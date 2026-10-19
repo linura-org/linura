@@ -4,12 +4,84 @@
     <annotation name="org.linura.ContractId" value="dbus.org.linura.Authority1"/>
     <annotation name="org.linura.ContractVersion" value="1"/>
     <annotation name="org.linura.Stability" value="experimental"/>
+    <!-- Read-only process-retained diagnostic, scoped to a freshly observed own
+         login. No current protection or successful sleep assertion. No inputs. -->
+    <method name="GetOwnNativeSleepGateStatus">
+      <arg name="status" type="(ss)" direction="out"/>
+    </method>
+    <!-- Local owner-authenticated consent, not a lock/sleep operation or proof
+         that protection is available. Exact retry returns history, never reenables. -->
+    <method name="ConfigureProtectiveLock">
+      <arg name="operation_id" type="s" direction="in"/>
+      <arg name="resource" type="s" direction="in"/>
+      <arg name="enabled" type="b" direction="in"/>
+      <arg name="receipt" type="(ssbsstb)" direction="out"/>
+    </method>
+    <!-- Zero or one latest retained record for the supplied own-login epoch.
+         No active-session/native protection assertion is made. -->
+    <method name="GetProtectiveLockSetting">
+      <arg name="epoch" type="s" direction="in"/>
+      <arg name="records" type="a(ssbsstb)" direction="out"/>
+    </method>
+    <method name="GetProtectiveLockSettingRequestStatus">
+      <arg name="request_id" type="s" direction="in"/>
+      <arg name="receipt" type="(ssbsstb)" direction="out"/>
+    </method>
+    <method name="GetOwnSessionLock">
+      <arg name="resource" type="s" direction="out"/>
+    </method>
+    <!-- Historical durable status, not current lock coverage or replay permission. -->
+    <method name="GetSessionLockRequestStatus">
+      <arg name="request_id" type="s" direction="in"/>
+      <arg name="status" type="(sssbs)" direction="out"/>
+    </method>
+    <method name="AcknowledgeSessionLockRelease">
+      <arg name="request_id" type="s" direction="in"/>
+      <arg name="acknowledged" type="b" direction="out"/>
+    </method>
+    <method name="ConvergeSessionLock">
+      <arg name="operation_id" type="s" direction="in"/>
+      <arg name="resource" type="s" direction="in"/>
+      <arg name="secure" type="b" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="receipt" type="(sssssssssbas)" direction="out"/>
+    </method>
+    <method name="RecoverSessionLock">
+      <arg name="request_id" type="s" direction="in"/>
+      <arg name="receipt" type="(sssssssssbas)" direction="out"/>
+    </method>
     <method name="ConvergeSystemdActiveState">
       <arg name="operation_id" type="s" direction="in"/>
       <arg name="unit" type="s" direction="in"/>
       <arg name="desired_active_state" type="s" direction="in"/>
       <arg name="reason" type="s" direction="in"/>
       <arg name="receipt" type="(sssssssssbas)" direction="out"/>
+    </method>
+    <!-- Read-only own-session identity. Action is exactly suspend/logout/reboot/power-off;
+         the native adapter acquires the suspend baseline, not the caller. -->
+    <method name="GetOwnSessionTransition">
+      <arg name="action" type="s" direction="in"/>
+      <arg name="resource" type="s" direction="out"/>
+    </method>
+    <method name="ConvergeSessionTransition">
+      <arg name="operation_id" type="s" direction="in"/>
+      <arg name="resource" type="s" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="receipt" type="(sssssssssbas)" direction="out"/>
+    </method>
+    <!-- Observe-only recovery. No authentication/executor/reprepare port. -->
+    <method name="RecoverSessionTransition">
+      <arg name="request_id" type="s" direction="in"/>
+      <arg name="receipt" type="(sssssssssbas)" direction="out"/>
+    </method>
+    <method name="GetSessionTransitionRequestStatus">
+      <arg name="request_id" type="s" direction="in"/>
+      <arg name="status" type="(ssss)" direction="out"/>
+    </method>
+    <!-- Bookkeeping after committed suspend only. Does not dispatch or unlock. -->
+    <method name="AcknowledgeSessionTransition">
+      <arg name="request_id" type="s" direction="in"/>
+      <arg name="acknowledged" type="b" direction="out"/>
     </method>
   </interface>
 </node>

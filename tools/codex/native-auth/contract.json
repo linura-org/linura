@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "purpose": "development-build-only",
+  "qualification_evidence": false,
+  "base_image": "docker.io/library/buildpack-deps@sha256:af40ae792b5ee49c4fd176078d6947ee1ba44f92daebf1b4db79d482b9bd7c12",
+  "platform": "linux/amd64",
+  "ubuntu_version": "24.04",
+  "snapshot": "20261006T000000Z",
+  "python_version": "3.12.3",
+  "qml_runtime_version": "6.4.2+dfsg-4build3",
+  "installed_packages_sha256": "a29babff0a655474418eca7f0066a448be5a47ac5b364979e719ccb686550fe5",
+  "tools": {
+    "c++": "13.3.0",
+    "cmake": "3.28.3",
+    "ninja": "1.11.1",
+    "pkg-config": "1.8.1",
+    "wayland-scanner": "1.22.0"
+  },
+  "modules": {
+    "Qt6Core": "6.4.2",
+    "Qt6DBus": "6.4.2",
+    "Qt6Gui": "6.4.2",
+    "Qt6Qml": "6.4.2",
+    "Qt6Quick": "6.4.2",
+    "Qt6QuickControls2": "6.4.2",
+    "glib-2.0": "2.80.0",
+    "polkit-agent-1": "124",
+    "wayland-client": "1.22.0",
+    "wayland-server": "1.22.0",
+    "wayland-protocols": "1.45",
+    "xkbcommon": "1.6.0"
+  }
+}

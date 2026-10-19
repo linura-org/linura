@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "linura.power",
+  "name": "Linura Power Controls",
+  "kind": "panel",
+  "entry_point": "PowerControls.qml",
+  "trust": "first-party",
+  "authority": "none",
+  "interaction_scope": "bounded-managed-own-session-client",
+  "registered_operations": [
+    "operation:session.suspend",
+    "operation:session.logout",
+    "operation:session.reboot",
+    "operation:session.power-off"
+  ],
+  "protocol_requirements": ["org.linura.Authority1.ConvergeSessionTransition", "org.linura.Authority1.RecoverSessionTransition"]
+}
