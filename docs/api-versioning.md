@@ -93,6 +93,14 @@ The v0.6 method `ConvergeSystemdActiveState` is deliberately narrower than the i
 
 Any later widening to new mutation domains requires an explicit architecture/contract decision and must not be smuggled into generation 1 merely because an internal executor gains a new method.
 
+The in-progress S17 decision is recorded in ADR 0042. Its distinct
+`ConfigureProtectiveLock` method changes only owner-authenticated Linura-local
+consent, not external session/power state. Its epoch and request-status queries
+return retained provenance only; they expose no policy/executor credential or
+native protection assertion. The method is not a generic configuration/apply
+surface, does not activate automatic locking, and remains Experimental pending
+completion of S17's managed protective route and native qualification.
+
 ### Executor.Systemd1
 
 `org.linura.Executor.Systemd1` is Experimental but is a privileged internal/executor contract, not the public policy authority surface. Its stability entry permits coherent pre-1.0 evolution, subject to privilege/security review and live-introspection/checked-XML consistency.
@@ -136,6 +144,20 @@ The released milestone makes no Stable compatibility promise for:
 - internal durable implementation details beyond their documented persistence/migration safety obligations.
 
 The existence of a successful v0.6 managed effect does not authorize broadening `Control1`, `Authority1` or the SDK into generic Linux apply surfaces. Any later Stable promotion requires the normal registry/compatibility process and evidence appropriate to the promoted scope.
+
+### Private native security owner
+
+`org.linura.SecurityOwner1` is an Experimental private system-bus adapter for the
+S17 security-owning process, not a public client apply/authentication API. It
+separates exact-scoped approval interaction/consumption, independent native lock
+observation, prepared session-executor dispatch, verified release and Control's
+durable commit acknowledgement. It exports on the owner's authenticated unique
+connection; there is no caller-preclaimable per-user well-known service name.
+Callers are freshly checked against supervised Control/session-executor identity,
+not a supplied principal or a root UID alone. Its canonical XML, compiled Qt
+metadata and typed codecs are checked together. Production composition and native
+qualification remain required before S17 activation; the interface's generation
+does not establish support or a Stable compatibility obligation.
 
 ## Coherent-change requirement
 

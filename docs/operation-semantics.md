@@ -27,7 +27,7 @@ The trusted operation registry/domain contract owns classification. The concrete
 
 ## Built-in registered external operations
 
-The registry now contains two deliberately narrow external-operation descriptors. Registration is an authority contract, not by itself a release-support claim.
+The registry contains the following deliberately narrow external-operation descriptors. Registration is an authority contract, not by itself a release-support claim.
 
 The already-qualified v0.6 managed systemd active-state effect remains:
 
@@ -39,6 +39,63 @@ The already-qualified v0.6 managed systemd active-state effect remains:
 - observation capability: `systemd.unit.observe`;
 - resource scope: exact trusted prefix/suffix match `systemd:unit:linura-managed-*.service` (both `systemd:unit:linura-managed-` and `.service` are encoded in the registered effect binding);
 - allowed material change key: `active_state`.
+
+The S17 secure-lock implementation registers:
+
+- operation ID: `operation:session.lock.set-secure`;
+- class: `ManagedExternalEffect`;
+- trusted risk floor: `SecuritySensitive`;
+- trusted risk-floor provenance: `operation-registry.managed-session-lock.risk-floor`;
+- provider: `session-locker`;
+- observation capability: `session.secure-lock.observe`;
+- resource scope: `SessionLockId`, binding boot, owning UID, native session and
+  creation epoch, supervised security-owner invocation and native lock generation;
+- allowed material change key: `secure`.
+
+Secure-lock registration is not production activation. Its scoped policy keeps
+owner authentication distinct from administrator approval, and every lock/unlock
+effect still requires the canonical managed lifecycle. The native runtime,
+Authority1 endpoint, narrow executor and durable no-replay recovery are composed
+in the branch. Repository-owned packaging defines activation, but positive
+deployment and pinned Arch/Hyprland qualification remain unexecuted; see proposed
+[ADR 0042](adr/0042-s17-session-security-and-power-authority.md). The registration
+does not qualify logout, suspend, reboot, power-off or S21 operations.
+
+S17 also registers four distinct managed transition candidates:
+`operation:session.suspend`, `operation:session.logout`, `operation:session.reboot`
+and `operation:session.power-off`. Their observation route is
+`logind/session.transition.observe`, their action-specific resource is
+`SessionTransitionId`, and their sole desired attribute is `completed=true`.
+Suspend is `SecuritySensitive`; session termination and machine power actions
+are `Destructive`. Control derives completion from fresh native facts, never
+from a provider's `completed` attribute or a dispatch acknowledgement. A native
+successful suspend cycle plus exact secure coverage proves resume; disappearance
+of the original session proves logout; a new boot proves only that the original
+boot ended, not that a machine is currently off or which actor caused it.
+The branch composes these registrations through fixed native logind execution,
+purpose-bound administrator approval, independent verification, typed Authority1
+and SDK/CLI contracts, first-party shell controls and durable observe-only
+recovery. Suspend uses a native coverage fence until verified durable commit;
+power calls check strong and weak inhibitors even as root, never skip or force.
+These implementations do not establish production support. Real native failure,
+authentication, interaction/accessibility and retained qualification evidence,
+whole-slice internal review and exact-head gates remain required.
+
+Protective-lock opt-in/revocation is separately classified as security-sensitive
+`LinuraOwnedState` (`operation:session.protective-lock.configure`). It changes
+only authenticated local policy state, never external lock state or power.
+`ProtectiveLockSettingsControl` binds a distinct native owner-authentication
+purpose to the structured setting and previous revision, re-observes owner/secure
+coverage after interaction, and seals a bounded atomic LNRP:1 journal update.
+Historic retries are read-only; revocation is not undone. This local transaction
+has no executor or managed-effect permit. The later protective lock itself still
+uses the registered `ManagedExternalEffect` secure-lock route; configuration is
+not an operation-class downgrade or shortcut around its durable lifecycle.
+The typed Authority1/SDK/CLI configuration and historical-query routes now
+compose this local store under distinct protected keys. Their receipts contain
+consent lineage only, never a policy decision, store seal or proof of protection.
+Protective managed-lifecycle and native gate integration remain pending; these
+configuration routes alone do not activate automatic locking.
 
 The first concrete v0.10 transient candidate is current-session output volume:
 

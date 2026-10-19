@@ -15,6 +15,7 @@ vm_gpu_pci_bdf = "0000:00:02.0"
 vm_gpu_vendor_id = "0x1af4"
 vm_gpu_device_id = "0x1050"
 vm_disk_size_gib = 16
+runtime_disk_mode = "verified-private-disposable-persistent-copy"
 base_image_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2"
 base_image_checksum_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2.SHA256"
 arch_archive_snapshot = "2026-09-16"

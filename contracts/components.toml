@@ -174,6 +174,17 @@ authority_role = "observer-adapter"
 scope = "native Linux observation adapters plus narrow bounded platform fact probes that emit canonical ObservationEnvelope evidence; no cross-provider compatibility aggregation or support-promotion authority"
 
 [[component]]
+id = "linura-linux-session"
+path = "crates/linura-linux-session"
+kind = "crate"
+workspace_member = true
+maturity = "foundation"
+activation_milestone = "v0.10.0"
+release_artifact = false
+authority_role = "observer-adapter"
+scope = "bounded native session-owner attestation, canonical lock observation and private mechanism transport for trusted composition roots; no policy, planning, durable orchestration or public transport handles"
+
+[[component]]
 id = "linura-dbus"
 path = "crates/linura-dbus"
 kind = "crate"
@@ -381,6 +392,18 @@ activation_milestone = "v0.0.0"
 release_artifact = false
 authority_role = "development-tool"
 scope = "canonical local and CI validation orchestrator"
+
+[[component]]
+id = "linura-executor-session"
+path = "executors/linura-executor-session"
+kind = "executor"
+workspace_member = true
+maturity = "integrated-experimental"
+activation_milestone = "v0.10.0"
+release_artifact = true
+binary = "linura-executor-session"
+authority_role = "privileged-executor"
+scope = "integrated narrow prepared native session-lock and power mechanisms; supervised Control caller plus native policy and exact effect/binding validation; no policy or durable orchestration; S17 native qualification remains pending"
 
 [[component]]
 id = "linura-executor-systemd"
