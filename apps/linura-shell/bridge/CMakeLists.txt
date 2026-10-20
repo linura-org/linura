@@ -18,6 +18,10 @@ qt_add_qml_module(linura-shell-bridge
     SOURCES
         audio_session_controller.h
         audio_session_controller.cpp
+        session_controller.h
+        session_controller.cpp
+        session_receipt.h
+        session_receipt.cpp
 )
 
 target_link_libraries(linura-shell-bridge PRIVATE
@@ -29,6 +33,34 @@ target_link_libraries(linura-shell-bridge PRIVATE
 target_include_directories(linura-shell-bridge PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
 )
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(linura-session-client-tests tests/session_receipt.cpp session_receipt.cpp)
+    target_include_directories(linura-session-client-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(linura-session-client-tests PRIVATE Qt6::Core)
+    target_compile_options(linura-session-client-tests PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME session-client-receipt COMMAND linura-session-client-tests)
+    set_tests_properties(session-client-receipt PROPERTIES TIMEOUT 20)
+    add_executable(linura-session-tracking-tests tests/session_tracking.cpp
+        session_controller.h session_controller.cpp session_receipt.cpp)
+    target_include_directories(linura-session-tracking-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(linura-session-tracking-tests PRIVATE Qt6::Core Qt6::DBus Qt6::Qml)
+    target_compile_definitions(linura-session-tracking-tests PRIVATE LINURA_SESSION_TRACKING_TESTS)
+    target_compile_options(linura-session-tracking-tests PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME session-client-tracking COMMAND linura-session-tracking-tests)
+    set_tests_properties(session-client-tracking PROPERTIES TIMEOUT 20)
+    find_package(Qt6 6.4 REQUIRED COMPONENTS Gui Quick)
+    add_executable(linura-session-surface-tests tests/session_surface.cpp)
+    target_link_libraries(linura-session-surface-tests PRIVATE Qt6::Gui Qt6::Qml Qt6::Quick)
+    target_compile_options(linura-session-surface-tests PRIVATE -Wall -Wextra -Werror)
+    # Install/build both modules before running. This CPU component fixture is
+    # not native Wayland pointer, accessibility-runner or visual evidence.
+    add_test(NAME session-client-surface COMMAND linura-session-surface-tests
+        "${CMAKE_CURRENT_SOURCE_DIR}/../plugins/session/SessionControls.qml")
+    set_tests_properties(session-client-surface PROPERTIES TIMEOUT 30
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
+endif()
 
 set(LINURA_SHELL_BRIDGE_QML_INSTALL_DIR "lib/qt6/qml/org/linura/ShellBridge")
 

@@ -31,8 +31,188 @@ class LinuraShellContractTests(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
 
+    def test_native_session_client_tests_must_execute_in_canonical_ci(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/ci.yml"
+            source = workflow.read_text(encoding="utf-8")
+            command = 'ctest --test-dir "$build_dir" --output-on-failure'
+            self.assertIn(command, source)
+            workflow.write_text(source.replace(command, "true", 1), encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            self.assertIn(f"Linura Shell CI contract missing: {command}", failures)
+
+        for name in (
+            "session-client-receipt",
+            "session-client-tracking",
+            "session-client-surface",
+        ):
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    root = Path(temp_dir)
+                    self._copy_fixture(root)
+                    cmake = root / "apps/linura-shell/bridge/CMakeLists.txt"
+                    source = cmake.read_text(encoding="utf-8")
+                    marker = f"add_test(NAME {name} "
+                    self.assertIn(marker, source)
+                    cmake.write_text(
+                        source.replace(marker, "add_test(NAME removed ", 1),
+                        encoding="utf-8",
+                    )
+                    failures = check_linura_shell.validate(root)
+                    self.assertTrue(
+                        any(
+                            "Linura Shell bridge CMake contract missing:" in failure
+                            and marker in failure
+                            for failure in failures
+                        ),
+                        failures,
+                    )
+
     def test_repository_shell_contract_is_valid(self) -> None:
         self.assertEqual(check_linura_shell.validate(ROOT), [])
+
+    def test_shell_state_directory_contract_rejects_widening(self) -> None:
+        unit = "packaging/systemd/user/linura-shell.service"
+        for original, replacement in (
+            ("StateDirectory=linura-shell", ""),
+            ("StateDirectoryMode=0700", "StateDirectoryMode=0755"),
+            ("ProtectSystem=strict", "ProtectSystem=full"),
+            ("StateDirectory=linura-shell", "StateDirectory=other"),
+            (
+                "StateDirectory=linura-shell",
+                "StateDirectory=linura-shell\nReadWritePaths=/home",
+            ),
+        ):
+            with self.subTest(original=original, replacement=replacement):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self._copy_fixture(root)
+                    service = root / unit
+                    contents = service.read_text(encoding="utf-8")
+                    self.assertIn(original, contents)
+                    service.write_text(
+                        contents.replace(original, replacement, 1),
+                        encoding="utf-8",
+                    )
+                    self.assertTrue(
+                        any(
+                            "Linura Shell service" in failure
+                            for failure in check_linura_shell.validate(root)
+                        )
+                    )
+
+    def test_packaged_session_and_power_dependencies_are_complete(self) -> None:
+        assets = check_linura_shell.REQUIRED_IMAGE_ASSETS
+        for plugin, qml in (
+            ("session", "SessionControls.qml"),
+            ("power", "PowerControls.qml"),
+        ):
+            for name in (qml, "manifest.json"):
+                path = f"apps/linura-shell/plugins/{plugin}/{name}"
+                self.assertEqual(
+                    assets[path],
+                    f"usr/share/linura/shell/plugins/{plugin}/{name}",
+                )
+                self.assertIn(path, check_linura_shell.REQUIRED)
+
+        for plugin, name in (
+            ("session", "SessionControls.qml"),
+            ("session", "manifest.json"),
+            ("power", "PowerControls.qml"),
+            ("power", "manifest.json"),
+        ):
+            with self.subTest(plugin=plugin, name=name):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self._copy_fixture(root)
+                    image = root / "tools/image.py"
+                    source = image.read_text(encoding="utf-8")
+                    entry = (
+                        f'    ROOT\n    / "apps/linura-shell/plugins/{plugin}/{name}": '
+                        f'"usr/share/linura/shell/plugins/{plugin}/{name}",\n'
+                    )
+                    self.assertIn(entry, source)
+                    image.write_text(source.replace(entry, "", 1), encoding="utf-8")
+                    self.assertIn(
+                        "Arch image shell integration missing: ROOT / "
+                        f"'apps/linura-shell/plugins/{plugin}/{name}' -> "
+                        f"'usr/share/linura/shell/plugins/{plugin}/{name}'",
+                        check_linura_shell.validate(root),
+                    )
+
+    def test_session_power_protocol_manifest_tracks_exact_client_surface(self) -> None:
+        for plugin, required in (
+            (
+                "session",
+                "org.linura.Authority1.GetProtectiveLockSettingRequestStatus",
+            ),
+            (
+                "power",
+                "org.linura.Authority1.GetOwnSessionTransition",
+            ),
+        ):
+            with self.subTest(plugin=plugin):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self._copy_fixture(root)
+                    path = root / f"apps/linura-shell/plugins/{plugin}/manifest.json"
+                    source = path.read_text(encoding="utf-8")
+                    self.assertIn(required, source)
+                    path.write_text(
+                        source.replace(required, "org.linura.Authority1.Invalid", 1),
+                        encoding="utf-8",
+                    )
+                    self.assertIn(
+                        f"Linura {plugin} plugin manifest must remain exact, "
+                        "first-party and authority-free",
+                        check_linura_shell.validate(root),
+                    )
+
+    def test_session_power_manifest_and_import_boundaries_fail_closed(self) -> None:
+        for plugin in ("session", "power"):
+            with self.subTest(plugin=plugin):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self._copy_fixture(root)
+                    path = root / f"apps/linura-shell/plugins/{plugin}/manifest.json"
+                    source = path.read_text(encoding="utf-8")
+                    self.assertIn('"authority": "none"', source)
+                    path.write_text(
+                        source.replace(
+                            '"authority": "none"',
+                            '"authority": "root", "capabilities": ["system.admin"]',
+                        ),
+                        encoding="utf-8",
+                    )
+                    self.assertIn(
+                        f"Linura {plugin} plugin manifest must remain exact, "
+                        "first-party and authority-free",
+                        check_linura_shell.validate(root),
+                    )
+        for relative, marker in (
+            (
+                "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml",
+                'import "../session" as Session',
+            ),
+            (
+                "apps/linura-shell/plugins/session/SessionControls.qml",
+                'import "../power" as Power',
+            ),
+        ):
+            with self.subTest(relative=relative):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self._copy_fixture(root)
+                    path = root / relative
+                    source = path.read_text(encoding="utf-8")
+                    self.assertIn(marker, source)
+                    path.write_text(source.replace(marker, "", 1), encoding="utf-8")
+                    self.assertIn(
+                        f"packaged session/power QML relative import missing: {marker}",
+                        check_linura_shell.validate(root),
+                    )
 
     def test_workspace_focus_waits_for_native_popup_activation(self) -> None:
         relative = "apps/linura-shell/panel/WorkstationPanel.qml"

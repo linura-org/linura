@@ -84,6 +84,14 @@ RUNTIME_ASSETS = {
     ROOT
     / "apps/linura-shell/plugins/quick-settings/manifest.json": "usr/share/linura/shell/plugins/quick-settings/manifest.json",
     ROOT
+    / "apps/linura-shell/plugins/session/SessionControls.qml": "usr/share/linura/shell/plugins/session/SessionControls.qml",
+    ROOT
+    / "apps/linura-shell/plugins/session/manifest.json": "usr/share/linura/shell/plugins/session/manifest.json",
+    ROOT
+    / "apps/linura-shell/plugins/power/PowerControls.qml": "usr/share/linura/shell/plugins/power/PowerControls.qml",
+    ROOT
+    / "apps/linura-shell/plugins/power/manifest.json": "usr/share/linura/shell/plugins/power/manifest.json",
+    ROOT
     / "apps/linura-shell/plugins/command-palette/CommandPalette.qml": "usr/share/linura/shell/plugins/command-palette/CommandPalette.qml",
     ROOT
     / "apps/linura-shell/plugins/command-palette/manifest.json": "usr/share/linura/shell/plugins/command-palette/manifest.json",

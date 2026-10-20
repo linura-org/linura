@@ -123,6 +123,10 @@ ShellRoot {
             shell.showCommandPaletteOnScreen(shell.defaultOverlayScreen())
     }
 
+    SessionController {
+        id: managedSessionController
+    }
+
     AudioSessionController {
         id: audioController
         active: shell.controlCenterOpen || shell.quickSettingsOpen
@@ -239,6 +243,7 @@ ShellRoot {
         topInset: workstationPanel.panelHeight
         opened: shell.quickSettingsOpen
         controller: audioController
+        sessionController: managedSessionController
         onCloseRequested: shell.hideQuickSettings()
         onControlCenterRequested: shell.showControlCenterOnScreen(shell.overlayScreen)
     }

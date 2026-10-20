@@ -366,6 +366,27 @@ class CiCachePolicyTests(unittest.TestCase):
         path.write_text(source.replace(before, after, 1), encoding="utf-8")
         return policy.check(root)
 
+    def test_required_qml_runtime_module_inputs_cannot_be_omitted(self) -> None:
+        for package in (
+            "qml6-module-qtqml",
+            "qml6-module-qtqml-models",
+            "qml6-module-qtqml-workerscript",
+            "qml6-module-qtquick",
+            "qml6-module-qtquick-controls",
+            "qml6-module-qtquick-layouts",
+            "qml6-module-qtquick-templates",
+            "qml6-module-qtquick-window",
+        ):
+            with self.subTest(package=package):
+                failures = self.mutate_ci(f"            {package}\n", "")
+                self.assertTrue(
+                    any(
+                        "canonical CI APT cache input step drifted" in failure
+                        for failure in failures
+                    ),
+                    failures,
+                )
+
     def test_qml_step_if_false_cannot_bypass_exact_source(self) -> None:
         failures = self.mutate_ci(
             "      - name: Build and install Linura Shell QML modules\n",

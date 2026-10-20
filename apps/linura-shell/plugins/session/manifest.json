@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "linura.session",
+  "name": "Linura Session Controls",
+  "kind": "panel",
+  "entry_point": "SessionControls.qml",
+  "trust": "first-party",
+  "authority": "none",
+  "interaction_scope": "bounded-managed-own-session-client",
+  "registered_operations": [
+    "operation:session.lock.set-secure"
+  ],
+  "protocol_requirements": [
+    "org.linura.Authority1.GetOwnNativeSleepGateStatus",
+    "org.linura.Authority1.GetOwnSessionLock",
+    "org.linura.Authority1.ConvergeSessionLock",
+    "org.linura.Authority1.RecoverSessionLock",
+    "org.linura.Authority1.ConfigureProtectiveLock",
+    "org.linura.Authority1.GetProtectiveLockSettingRequestStatus"
+  ],
+  "local_operations": [
+    "operation:session.protective-lock.configure"
+  ]
+}
