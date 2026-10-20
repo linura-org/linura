@@ -1,8 +1,8 @@
 [Unit]
 Description=Linura managed mutation authority
-After=dbus.service linura-executor-systemd.service
+After=dbus.service linura-executor-systemd.service linura-executor-session.service
 Requires=dbus.service
-Wants=linura-executor-systemd.service
+Wants=linura-executor-systemd.service linura-executor-session.service
 
 [Service]
 Type=dbus

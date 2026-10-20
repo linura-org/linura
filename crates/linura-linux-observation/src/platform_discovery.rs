@@ -359,7 +359,7 @@ fn connect_system_bus() -> Result<Connection, PlatformProbeError> {
     build_dbus_connection_with_deadline(builder, "system D-Bus")
 }
 
-fn build_dbus_connection_with_deadline(
+pub(super) fn build_dbus_connection_with_deadline(
     builder: AsyncConnectionBuilder<'_>,
     label: &str,
 ) -> Result<Connection, PlatformProbeError> {
@@ -849,7 +849,7 @@ fn verify_hyprland_ipc(
     Ok(())
 }
 
-fn connect_unix_with_deadline(
+pub(super) fn connect_unix_with_deadline(
     path: &Path,
     timeout: Duration,
     label: &str,

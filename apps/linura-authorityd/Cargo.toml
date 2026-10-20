@@ -23,7 +23,10 @@ linura-library = { path = "../../crates/linura-library", optional = true }
 linura-migrations = { path = "../../crates/linura-migrations", optional = true, features = ["qualification-harness"] }
 linura-dbus = { path = "../../crates/linura-dbus" }
 linura-executor-systemd = { path = "../../executors/linura-executor-systemd" }
+linura-executor-session = { path = "../../executors/linura-executor-session" }
+linura-observation = { path = "../../crates/linura-observation" }
 linura-linux-observation = { path = "../../crates/linura-linux-observation" }
+linura-linux-session = { path = "../../crates/linura-linux-session" }
 linura-observation-control = { path = "../../crates/linura-observation-control" }
 linura-persistence-sqlite = { path = "../../crates/linura-persistence-sqlite" }
 linura-planner = { path = "../../crates/linura-planner", optional = true }
@@ -32,9 +35,6 @@ linura-provider-sdk = { path = "../../crates/linura-provider-sdk" }
 linura-transaction = { path = "../../crates/linura-transaction" }
 linura-verifier-systemd = { path = "../../verifiers/linura-verifier-systemd" }
 zbus = { version = "=5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
-
-[dev-dependencies]
-linura-observation = { path = "../../crates/linura-observation" }
 
 [[bin]]
 name = "linura-migrations-qualification"
