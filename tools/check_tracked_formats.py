@@ -32,9 +32,23 @@ PLAIN = frozenset(
         ".github/CODEOWNERS",
         "LICENSE",
         "bindings/python/LICENSE",
+        "qualification/v010/session-security/fixtures/linura-s17-qualification.pam",
+        "tools/codex/container/.dockerignore",
+        "tools/codex/container/ubuntu-snapshot.list",
         "tools/codex/native-auth/.dockerignore",
         "tools/codex/native-auth/packages.txt",
         "tools/codex/native-auth/ubuntu-snapshot.list",
+    }
+)
+BUILD_INPUTS = frozenset(
+    {
+        "Makefile",
+        "apps/linura-shell/ui/CMakeLists.txt",
+        "apps/linura-shell/bridge/CMakeLists.txt",
+        "apps/linura-shell/security-owner/CMakeLists.txt",
+        "qualification/v010/session-security/CMakeLists.txt",
+        "tools/codex/container/Dockerfile",
+        "tools/codex/native-auth/Dockerfile",
     }
 )
 REQUIREMENT_LOCKS = frozenset(
@@ -55,21 +69,22 @@ PARSER_SUFFIXES = {
     ".policy": "xml",
     ".desktop": "ini",
     ".service": "ini",
-    ".path": "ini",
     ".hook": "arch-hook",
     ".ini": "ini",
+    ".path": "ini",
     ".sql": "text",
 }
 CONF_KINDS = {
-    "apps/linura-shell/security-owner/fonts.conf": "xml",
     "packaging/arch/archiso/pacman.conf": "pacman",
-    "packaging/security-owner/fonts.conf": "xml",
-    "packaging/systemd/system/user@.service.d/50-linura-security-owner.conf": "ini",
     "packaging/dbus-1/system.d/org.linura.Authority1.conf": "xml",
     "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf": "xml",
+    "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf": "xml",
+    "apps/linura-shell/security-owner/fonts.conf": "xml",
+    "packaging/security-owner/fonts.conf": "xml",
     "packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf": "ini",
     "packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf": "ini",
-    "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf": "xml",
+    "packaging/systemd/system/user@.service.d/50-linura-security-owner.conf": "ini",
+    "qualification/v010/session-security/fixtures/s17-hyprland.conf": "text",
     "packaging/sysusers.d/linura-authority.conf": "sysusers",
     "tests/acceptance/v05/49-linura-v05-qualification-dbus.conf": "xml",
 }
@@ -144,13 +159,7 @@ def classify(path: Path, content: bytes) -> str:
         return "requirements-lock"
     if name == "Cargo.lock":
         return "toml"
-    if name in {
-        "Makefile",
-        "apps/linura-shell/ui/CMakeLists.txt",
-        "apps/linura-shell/bridge/CMakeLists.txt",
-        "apps/linura-shell/security-owner/CMakeLists.txt",
-        "tools/codex/native-auth/Dockerfile",
-    }:
+    if name in BUILD_INPUTS:
         return "build"
     if name == ".clang-format" or name == "CITATION.cff":
         return "yaml"

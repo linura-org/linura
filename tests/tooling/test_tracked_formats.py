@@ -142,6 +142,21 @@ class TrackedFormatsTests(unittest.TestCase):
                     formats.format_errors(Path("example.service"), invalid, "ini")
                 )
 
+    def test_systemd_path_globs_repeat_without_relaxing_other_directives(self) -> None:
+        valid = (
+            b"[Path]\nPathExistsGlob=/run/user/%i/wayland-[0-9]\n"
+            b"PathExistsGlob=/run/user/%i/wayland-[0-9]*[0-9]\n"
+            b"Unit=linura-security-owner@%i.service\n"
+        )
+        self.assertEqual(formats.format_errors(Path("native.path"), valid, "ini"), [])
+        for field in ("Unit", "TriggerLimitBurst", "PathExists"):
+            with self.subTest(field=field):
+                invalid = valid + f"{field}=first\n{field}=second\n".encode()
+                self.assertTrue(
+                    formats.format_errors(Path("native.path"), invalid, "ini")
+                )
+        self.assertTrue(formats.format_errors(Path("native.service"), valid, "ini"))
+
     def test_pacman_only_allows_explicit_valueless_options(self) -> None:
         content = b"[options]\nColor\nArchitecture = auto\n"
         self.assertEqual(
@@ -150,13 +165,22 @@ class TrackedFormatsTests(unittest.TestCase):
         self.assertTrue(formats.format_errors(Path("example.service"), content, "ini"))
 
     def test_arch_hook_allows_only_reviewed_bare_directive(self) -> None:
-        valid = b"[Trigger]\nOperation = Upgrade\n[Action]\nAbortOnFail\n"
+        valid = (
+            b"[Trigger]\nOperation = Install\nOperation = Upgrade\n"
+            b"Target = one\nTarget = two\n[Action]\nAbortOnFail\n"
+        )
         self.assertEqual(
             formats.format_errors(Path("upgrade.hook"), valid, "arch-hook"), []
         )
         corrupt = valid.replace(b"AbortOnFail", b"Exec /bin/true")
         self.assertTrue(
             formats.format_errors(Path("upgrade.hook"), corrupt, "arch-hook")
+        )
+        duplicate_action = valid.replace(
+            b"[Action]\n", b"[Action]\nExec = /bin/true\nExec = /bin/false\n"
+        )
+        self.assertTrue(
+            formats.format_errors(Path("upgrade.hook"), duplicate_action, "arch-hook")
         )
 
     def test_existing_policy_and_conf_formats_are_explicit(self) -> None:
@@ -185,22 +209,30 @@ class TrackedFormatsTests(unittest.TestCase):
             "unclassified",
         )
 
-    def test_sql_schema_inputs_are_explicit_text(self) -> None:
-        for path in [
-            "crates/linura-persistence-sqlite/src/protective_lock_settings_schema.sql",
-            "crates/linura-persistence-sqlite/src/request_journal_schema.sql",
-        ]:
-            with self.subTest(path=path):
+    def test_s17_nonstandard_inputs_have_explicit_narrow_classifications(self) -> None:
+        expected = {
+            **dict.fromkeys(formats.BUILD_INPUTS, "build"),
+            "crates/linura-persistence-sqlite/src/protective_lock_settings_schema.sql": "text",
+            "crates/linura-persistence-sqlite/src/request_journal_schema.sql": "text",
+            "packaging/systemd/system/linura-security-owner@.path": "ini",
+            "qualification/v010/session-security/fixtures/linura-s17-qualification.pam": "text",
+            "tools/codex/container/.dockerignore": "text",
+            "tools/codex/native-auth/.dockerignore": "text",
+            "tools/codex/native-auth/packages.txt": "text",
+        }
+        for name, kind in expected.items():
+            with self.subTest(path=name):
                 self.assertEqual(
-                    formats.classify(Path(path), (ROOT / path).read_bytes()),
-                    "text",
+                    formats.classify(Path(name), (ROOT / name).read_bytes()), kind
                 )
 
-    def test_security_owner_foundation_build_input_is_explicit(self) -> None:
-        path = "apps/linura-shell/security-owner/CMakeLists.txt"
         self.assertEqual(
-            formats.classify(Path(path), (ROOT / path).read_bytes()),
-            "build",
+            formats.classify(Path("unreviewed/CMakeLists.txt"), b"project(fake)\n"),
+            "unclassified",
+        )
+        self.assertEqual(
+            formats.classify(Path("unreviewed/Dockerfile"), b"FROM scratch\n"),
+            "unclassified",
         )
 
     def test_sysusers_identity_is_policy_bound(self) -> None:
