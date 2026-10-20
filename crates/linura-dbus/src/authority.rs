@@ -1,5 +1,5 @@
 use std::fmt::{Debug, Formatter};
-use std::process::{Child, Command, ExitStatus};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -8,7 +8,9 @@ use linura_control::{
     AuthenticatedPrincipal, ManagedApprovalAuthorizer, ManagedApprovalChallenge,
     ManagedMutationReceipt, TrustedHumanApproval,
 };
-use linura_core::{Actor, ActorId, ActorKind, PrincipalId};
+use linura_core::{
+    Actor, ActorId, ActorKind, PrincipalId, ResourceId, SessionLockId, SessionTransitionId,
+};
 use zbus::message::Header;
 
 use super::{
@@ -24,6 +26,7 @@ pub const AUTHORITY_CONTRACT_VERSION: &str = "1";
 pub const AUTHORITY_CONTRACT_STABILITY: &str = "experimental";
 pub const MANAGE_SYSTEMD_ACTIVE_STATE_ACTION: &str =
     "org.linura.authority.manage-systemd-active-state";
+pub const UNLOCK_SESSION_ACTION: &str = "org.linura.authority.unlock-session";
 
 const POLKIT_AUTHORIZATION_TIMEOUT: Duration = Duration::from_secs(60);
 const POLKIT_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -47,6 +50,45 @@ pub type AuthorityReceiptWire = (
     bool,
     Vec<String>,
 );
+pub type SessionLockStatusWire = (String, String, String, bool, String);
+pub type SessionTransitionStatusWire = (String, String, String, String);
+pub(crate) type ProtectiveLockSettingWire = (String, String, bool, String, String, u64, bool);
+
+fn protective_setting_wire(
+    receipt: linura_protocol::ProtectiveLockSettingReceipt,
+) -> Result<ProtectiveLockSettingWire, String> {
+    Ok((
+        receipt.request_id.as_str().into(),
+        receipt
+            .confirmed_lock
+            .resource_id()
+            .map_err(|e| e.to_string())?
+            .as_str()
+            .into(),
+        receipt.enabled,
+        receipt.intent_id.as_str().into(),
+        receipt.revision_id.as_str().into(),
+        receipt.confirmed_at_unix_ms,
+        receipt.latest_for_epoch,
+    ))
+}
+
+fn session_status_wire(
+    status: linura_protocol::SessionLockRequestStatus,
+) -> Result<SessionLockStatusWire, String> {
+    Ok((
+        status.request_id.as_str().into(),
+        status.transaction_id,
+        status
+            .lock
+            .resource_id()
+            .map_err(|error| error.to_string())?
+            .as_str()
+            .into(),
+        status.secure,
+        status.state,
+    ))
+}
 
 pub struct Authority1Context {
     pub principal: AuthenticatedPrincipal,
@@ -73,7 +115,78 @@ pub struct Authority1ManagedRequest {
     pub reason: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Authority1SessionContext {
+    pub principal: AuthenticatedPrincipal,
+    pub actor: Actor,
+}
+
 pub trait Authority1Handler: Send + 'static {
+    fn own_native_sleep_gate_status(
+        &mut self,
+        context: Authority1SessionContext,
+    ) -> Result<linura_protocol::NativeSleepGateStatus, String>;
+    fn configure_protective_lock(
+        &mut self,
+        context: Authority1SessionContext,
+        request: linura_protocol::ProtectiveLockSettingRequest,
+    ) -> Result<linura_protocol::ProtectiveLockSettingReceipt, String>;
+    fn recorded_protective_lock_setting(
+        &mut self,
+        context: Authority1SessionContext,
+        epoch: linura_core::SessionEpoch,
+    ) -> Result<Option<linura_protocol::ProtectiveLockSettingReceipt>, String>;
+    fn protective_lock_setting_request_status(
+        &mut self,
+        context: Authority1SessionContext,
+        request: linura_core::RequestId,
+    ) -> Result<linura_protocol::ProtectiveLockSettingReceipt, String>;
+    fn own_session_transition(
+        &mut self,
+        context: Authority1SessionContext,
+        action: String,
+    ) -> Result<String, String>;
+    fn converge_session_transition(
+        &mut self,
+        context: Authority1SessionContext,
+        request: linura_protocol::SessionTransitionRequest,
+    ) -> Result<ManagedMutationReceipt, String>;
+    fn recover_session_transition(
+        &mut self,
+        context: Authority1SessionContext,
+        request_id: linura_core::RequestId,
+    ) -> Result<ManagedMutationReceipt, String>;
+    fn session_transition_request_status(
+        &mut self,
+        context: Authority1SessionContext,
+        request_id: linura_core::RequestId,
+    ) -> Result<linura_protocol::SessionTransitionRequestStatus, String>;
+    fn acknowledge_session_transition(
+        &mut self,
+        context: Authority1SessionContext,
+        request_id: linura_core::RequestId,
+    ) -> Result<bool, String>;
+    fn own_session_lock(&mut self, context: Authority1SessionContext) -> Result<String, String>;
+    fn converge_session_lock(
+        &mut self,
+        context: Authority1SessionContext,
+        request: linura_protocol::SessionLockRequest,
+    ) -> Result<ManagedMutationReceipt, String>;
+    fn recover_session_lock(
+        &mut self,
+        context: Authority1SessionContext,
+        request_id: linura_core::RequestId,
+    ) -> Result<ManagedMutationReceipt, String>;
+    fn session_lock_request_status(
+        &mut self,
+        context: Authority1SessionContext,
+        request_id: linura_core::RequestId,
+    ) -> Result<linura_protocol::SessionLockRequestStatus, String>;
+    fn acknowledge_session_lock_release(
+        &mut self,
+        context: Authority1SessionContext,
+        request_id: linura_core::RequestId,
+    ) -> Result<bool, String>;
     fn converge_systemd_active_state(
         &mut self,
         context: Authority1Context,
@@ -147,8 +260,357 @@ impl Authority1Service {
     }
 }
 
+async fn session_context(
+    connection: &zbus::Connection,
+    header: &Header<'_>,
+) -> zbus::fdo::Result<Authority1SessionContext> {
+    let caller = authenticated_caller(connection, header).await?;
+    if caller.uid == 0 {
+        return Err(fdo_failed("root graphical sessions are unsupported"));
+    }
+    let principal = principal_from_caller(&caller)?;
+    let mut actor = caller.actor;
+    // This marks an interaction request, not proof of human approval. The
+    // native owner must independently confirm/authenticate the exact challenge.
+    actor.kind = ActorKind::Human;
+    actor.interactive = true;
+    Ok(Authority1SessionContext { principal, actor })
+}
+
 #[zbus::interface(name = "org.linura.Authority1")]
 impl Authority1Service {
+    #[zbus(out_args("status"))]
+    async fn get_own_native_sleep_gate_status(
+        &self,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<((String, String),)> {
+        let context = session_context(connection, &header).await?;
+        let handler = self.handler.clone();
+        // Status reads must not queue behind a native authentication or managed
+        // suspend. Busy means unavailable, never cached "protected" success.
+        blocking::unblock(move || {
+            let mut handler = handler
+                .try_lock()
+                .map_err(|_| fdo_failed("sleep diagnostics busy or unavailable"))?;
+            let status = handler
+                .own_native_sleep_gate_status(context)
+                .map_err(fdo_failed)?;
+            Ok(((
+                status
+                    .epoch
+                    .resource_id()
+                    .map_err(|e| fdo_failed(e.to_string()))?
+                    .as_str()
+                    .into(),
+                status.state.as_str().into(),
+            ),))
+        })
+        .await
+    }
+
+    #[zbus(out_args("receipt"))]
+    async fn configure_protective_lock(
+        &self,
+        operation_id: &str,
+        resource: &str,
+        enabled: bool,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(ProtectiveLockSettingWire,)> {
+        let context = session_context(connection, &header).await?;
+        super::authority_client::protective_setting_request_identity(operation_id)
+            .map_err(|e| fdo_failed(e.to_string()))?;
+        if resource.len() > 256 {
+            return Err(fdo_failed("protective-lock resource exceeds its bound"));
+        }
+        let lock = SessionLockId::from_resource(
+            &ResourceId::new(resource).map_err(|e| fdo_failed(e.to_string()))?,
+        )
+        .map_err(|e| fdo_failed(e.to_string()))?;
+        if context.principal.as_str() != format!("unix:uid:{}", lock.epoch().uid()) {
+            return Err(fdo_failed(
+                "protective-lock policy belongs to another principal",
+            ));
+        }
+        let request = linura_protocol::ProtectiveLockSettingRequest {
+            operation_id: operation_id.into(),
+            lock,
+            enabled,
+        };
+        self.with_handler(move |handler| {
+            protective_setting_wire(handler.configure_protective_lock(context, request)?)
+                .map(|receipt| (receipt,))
+        })
+        .await
+    }
+
+    #[zbus(out_args("records"))]
+    async fn get_protective_lock_setting(
+        &self,
+        epoch: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<Vec<ProtectiveLockSettingWire>> {
+        let context = session_context(connection, &header).await?;
+        if epoch.len() > 256 {
+            return Err(fdo_failed("protective-lock epoch exceeds its bound"));
+        }
+        let epoch = linura_core::SessionEpoch::from_resource(
+            &ResourceId::new(epoch).map_err(|e| fdo_failed(e.to_string()))?,
+        )
+        .map_err(|e| fdo_failed(e.to_string()))?;
+        if context.principal.as_str() != format!("unix:uid:{}", epoch.uid()) {
+            return Err(fdo_failed(
+                "protective-lock history belongs to another principal",
+            ));
+        }
+        self.with_handler(move |handler| {
+            handler
+                .recorded_protective_lock_setting(context, epoch)?
+                .map(protective_setting_wire)
+                .transpose()
+                .map(|record| record.into_iter().collect())
+        })
+        .await
+    }
+
+    #[zbus(out_args("receipt"))]
+    async fn get_protective_lock_setting_request_status(
+        &self,
+        request_id: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(ProtectiveLockSettingWire,)> {
+        let context = session_context(connection, &header).await?;
+        if request_id.len() > 128 {
+            return Err(fdo_failed("protective-lock request exceeds its bound"));
+        }
+        let request =
+            linura_core::RequestId::new(request_id).map_err(|e| fdo_failed(e.to_string()))?;
+        super::authority_client::validate_protective_setting_request_id(&request)
+            .map_err(|e| fdo_failed(e.to_string()))?;
+        self.with_handler(move |handler| {
+            protective_setting_wire(
+                handler.protective_lock_setting_request_status(context, request)?,
+            )
+            .map(|receipt| (receipt,))
+        })
+        .await
+    }
+
+    #[zbus(out_args("resource"))]
+    async fn get_own_session_transition(
+        &self,
+        action: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<String> {
+        let context = session_context(connection, &header).await?;
+        if !matches!(action, "suspend" | "logout" | "reboot" | "power-off") {
+            return Err(fdo_failed("session transition action is unsupported"));
+        }
+        let action = action.to_owned();
+        self.with_handler(move |handler| handler.own_session_transition(context, action))
+            .await
+    }
+
+    #[zbus(out_args("receipt"))]
+    async fn converge_session_transition(
+        &self,
+        operation_id: &str,
+        resource: &str,
+        reason: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(AuthorityReceiptWire,)> {
+        let context = session_context(connection, &header).await?;
+        if operation_id.len() > 64 || resource.len() > 256 || reason.len() > 1024 {
+            return Err(fdo_failed("session transition request exceeds its bound"));
+        }
+        let target = SessionTransitionId::from_resource(
+            &ResourceId::new(resource).map_err(|e| fdo_failed(e.to_string()))?,
+        )
+        .map_err(|e| fdo_failed(e.to_string()))?;
+        if context.principal.as_str() != format!("unix:uid:{}", target.lock().epoch().uid()) {
+            return Err(fdo_failed(
+                "session transition belongs to another principal",
+            ));
+        }
+        let request = linura_protocol::SessionTransitionRequest {
+            operation_id: operation_id.into(),
+            target,
+            reason: reason.into(),
+        };
+        self.with_handler(move |handler| {
+            handler
+                .converge_session_transition(context, request)
+                .map(|receipt| (receipt_wire(receipt),))
+        })
+        .await
+    }
+
+    #[zbus(out_args("receipt"))]
+    async fn recover_session_transition(
+        &self,
+        request_id: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(AuthorityReceiptWire,)> {
+        let context = session_context(connection, &header).await?;
+        let request_id = transition_request_identity(request_id)?;
+        self.with_handler(move |handler| {
+            handler
+                .recover_session_transition(context, request_id)
+                .map(|receipt| (receipt_wire(receipt),))
+        })
+        .await
+    }
+
+    #[zbus(out_args("status"))]
+    async fn get_session_transition_request_status(
+        &self,
+        request_id: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(SessionTransitionStatusWire,)> {
+        let context = session_context(connection, &header).await?;
+        let request_id = transition_request_identity(request_id)?;
+        self.with_handler(move |handler| {
+            let status = handler.session_transition_request_status(context, request_id)?;
+            Ok(((
+                status.request_id.as_str().into(),
+                status.transaction_id,
+                status
+                    .target
+                    .resource_id()
+                    .map_err(|e| e.to_string())?
+                    .as_str()
+                    .into(),
+                status.state,
+            ),))
+        })
+        .await
+    }
+
+    #[zbus(out_args("acknowledged"))]
+    async fn acknowledge_session_transition(
+        &self,
+        request_id: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let context = session_context(connection, &header).await?;
+        let request_id = transition_request_identity(request_id)?;
+        self.with_handler(move |handler| {
+            handler.acknowledge_session_transition(context, request_id)
+        })
+        .await
+    }
+
+    #[zbus(out_args("status"))]
+    async fn get_session_lock_request_status(
+        &self,
+        request_id: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(SessionLockStatusWire,)> {
+        let context = session_context(connection, &header).await?;
+        if request_id.len() > 128 {
+            return Err(fdo_failed("session request id exceeds its bound"));
+        }
+        let request_id = linura_core::RequestId::new(request_id)
+            .map_err(|error| fdo_failed(error.to_string()))?;
+        self.with_handler(move |handler| {
+            session_status_wire(handler.session_lock_request_status(context, request_id)?)
+                .map(|status| (status,))
+        })
+        .await
+    }
+
+    #[zbus(out_args("acknowledged"))]
+    async fn acknowledge_session_lock_release(
+        &self,
+        request_id: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<bool> {
+        let context = session_context(connection, &header).await?;
+        if request_id.len() > 128 {
+            return Err(fdo_failed("session request id exceeds its bound"));
+        }
+        let request_id = linura_core::RequestId::new(request_id)
+            .map_err(|error| fdo_failed(error.to_string()))?;
+        self.with_handler(move |handler| {
+            handler.acknowledge_session_lock_release(context, request_id)
+        })
+        .await
+    }
+
+    #[zbus(out_args("resource"))]
+    async fn get_own_session_lock(
+        &self,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<String> {
+        let context = session_context(connection, &header).await?;
+        self.with_handler(move |handler| handler.own_session_lock(context))
+            .await
+    }
+
+    #[zbus(out_args("receipt"))]
+    async fn converge_session_lock(
+        &self,
+        operation_id: &str,
+        resource: &str,
+        secure: bool,
+        reason: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(AuthorityReceiptWire,)> {
+        let context = session_context(connection, &header).await?;
+        if operation_id.len() > 64 || resource.len() > 256 || reason.len() > 1024 {
+            return Err(fdo_failed("session lock request exceeds its bound"));
+        }
+        let lock = SessionLockId::from_resource(
+            &ResourceId::new(resource).map_err(|e| fdo_failed(e.to_string()))?,
+        )
+        .map_err(|e| fdo_failed(e.to_string()))?;
+        if context.principal.as_str() != format!("unix:uid:{}", lock.epoch().uid()) {
+            return Err(fdo_failed("session lock belongs to a different principal"));
+        }
+        let request = linura_protocol::SessionLockRequest {
+            operation_id: operation_id.into(),
+            lock,
+            secure,
+            reason: reason.into(),
+        };
+        self.with_handler(move |handler| {
+            handler
+                .converge_session_lock(context, request)
+                .map(|receipt| (receipt_wire(receipt),))
+        })
+        .await
+    }
+
+    #[zbus(out_args("receipt"))]
+    async fn recover_session_lock(
+        &self,
+        request_id: &str,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(AuthorityReceiptWire,)> {
+        let context = session_context(connection, &header).await?;
+        let request_id =
+            linura_core::RequestId::new(request_id).map_err(|e| fdo_failed(e.to_string()))?;
+        self.with_handler(move |handler| {
+            handler
+                .recover_session_lock(context, request_id)
+                .map(|receipt| (receipt_wire(receipt),))
+        })
+        .await
+    }
+
     async fn converge_systemd_active_state(
         &self,
         operation_id: &str,
@@ -197,7 +659,7 @@ impl Authority1Service {
         self.with_handler(move |handler| {
             handler
                 .converge_systemd_active_state(context, request)
-                .and_then(receipt_wire)
+                .and_then(systemd_receipt_wire)
         })
         .await
     }
@@ -207,21 +669,25 @@ fn authorize_human_candidate(
     sender: &str,
     challenge: &ManagedApprovalChallenge,
 ) -> Result<(), String> {
-    if challenge.change_key() != "active_state"
-        || !matches!(challenge.desired_value(), "active" | "inactive")
-    {
-        return Err("systemd approval challenge has a non-systemd desired state".into());
-    }
-    let arguments = polkit_arguments(sender, challenge);
+    let arguments = polkit_arguments(sender, challenge)?;
     let mut child = Command::new("/usr/bin/pkcheck")
         .args(arguments)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env(
+            "DBUS_SYSTEM_BUS_ADDRESS",
+            "unix:path=/run/dbus/system_bus_socket",
+        )
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .map_err(|error| format!("Polkit authorization service is unavailable: {error}"))?;
     let status = wait_for_polkit(&mut child, POLKIT_AUTHORIZATION_TIMEOUT)?;
     if status.success() {
         Ok(())
     } else {
-        Err("administrator approval was denied or unavailable".into())
+        Err("native purpose-scoped approval was denied or unavailable".into())
     }
 }
 
@@ -252,10 +718,20 @@ fn wait_for_polkit(child: &mut Child, timeout: Duration) -> Result<ExitStatus, S
     }
 }
 
-fn polkit_arguments(sender: &str, challenge: &ManagedApprovalChallenge) -> Vec<String> {
+fn polkit_arguments(
+    sender: &str,
+    challenge: &ManagedApprovalChallenge,
+) -> Result<Vec<String>, String> {
+    let action = polkit_action_for(
+        challenge.resource(),
+        challenge.change_key(),
+        challenge.desired_value(),
+        challenge.principal(),
+    )?;
     let summary = format!(
-        "{} -> active_state={} (plan {})",
+        "{} -> {}={} (plan {})",
         challenge.resource().as_str(),
+        challenge.change_key(),
         challenge.desired_value(),
         challenge.plan_id().as_str()
     );
@@ -279,34 +755,94 @@ fn polkit_arguments(sender: &str, challenge: &ManagedApprovalChallenge) -> Vec<S
         ),
         ("linura.review_digest", challenge.review_digest().to_owned()),
         ("linura.resource", challenge.resource().as_str().to_owned()),
-        (
-            "linura.desired_active_state",
-            challenge.desired_value().to_owned(),
-        ),
+        ("linura.change_key", challenge.change_key().to_owned()),
+        ("linura.desired_value", challenge.desired_value().to_owned()),
     ];
 
-    let mut arguments = vec![
-        "--action-id".to_owned(),
-        MANAGE_SYSTEMD_ACTIVE_STATE_ACTION.to_owned(),
+    // Keep the closed native action selection explicit at the argv boundary.
+    // Neither an action string from a caller nor a dynamically resolved action
+    // can reach pkcheck; the namespace anti-substitution guard checks both arms.
+    let mut arguments = match action {
+        NativeApprovalAction::ManageSystemd => vec![
+            "--action-id".to_owned(),
+            MANAGE_SYSTEMD_ACTIVE_STATE_ACTION.to_owned(),
+        ],
+        NativeApprovalAction::UnlockSession => {
+            vec!["--action-id".to_owned(), UNLOCK_SESSION_ACTION.to_owned()]
+        }
+    };
+    arguments.extend([
         "--system-bus-name".to_owned(),
         sender.to_owned(),
         "--allow-user-interaction".to_owned(),
-    ];
+    ]);
     for (key, value) in details {
         arguments.push("--detail".to_owned());
         arguments.push(key.to_owned());
         arguments.push(value);
     }
-    arguments
+    Ok(arguments)
 }
 
-fn receipt_wire(receipt: ManagedMutationReceipt) -> Result<AuthorityReceiptWire, String> {
+/// Map a sealed Control-owned challenge to a fixed native authorization action.
+/// This is not policy evaluation and cannot manufacture an approval class. The
+/// private challenge constructor has already checked the reviewed requirement.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NativeApprovalAction {
+    ManageSystemd,
+    UnlockSession,
+}
+
+fn polkit_action_for(
+    resource: &ResourceId,
+    key: &str,
+    desired: &str,
+    principal: &PrincipalId,
+) -> Result<NativeApprovalAction, String> {
+    if key == "active_state"
+        && matches!(desired, "active" | "inactive")
+        && resource
+            .as_str()
+            .starts_with("systemd:unit:linura-managed-")
+        && resource.as_str().ends_with(".service")
+    {
+        return Ok(NativeApprovalAction::ManageSystemd);
+    }
+    let lock = SessionLockId::from_resource(resource)
+        .map_err(|_| "approval challenge has no qualified native purpose".to_owned())?;
+    if lock.epoch().uid() == 0
+        || key != "secure"
+        || principal.as_str() != format!("unix:uid:{}", lock.epoch().uid())
+    {
+        return Err("approval challenge has a different native session owner or purpose".into());
+    }
+    match desired {
+        "true" => Err("locking requires native candidate-bound human confirmation; Polkit active-user permission is not confirmation".into()),
+        "false" => Ok(NativeApprovalAction::UnlockSession),
+        _ => Err("approval challenge has an unsupported native lock state".into()),
+    }
+}
+
+fn transition_request_identity(value: &str) -> zbus::fdo::Result<linura_core::RequestId> {
+    if value.len() > 128 || !value.starts_with("request:v010:session-transition:") {
+        return Err(fdo_failed(
+            "request is outside the S17 transition namespace",
+        ));
+    }
+    linura_core::RequestId::new(value).map_err(|e| fdo_failed(e.to_string()))
+}
+
+fn systemd_receipt_wire(receipt: ManagedMutationReceipt) -> Result<AuthorityReceiptWire, String> {
     if receipt.change_key != "active_state"
         || !matches!(receipt.desired_value.as_str(), "active" | "inactive")
     {
         return Err("systemd receipt has a non-systemd desired state".into());
     }
-    Ok((
+    Ok(receipt_wire(receipt))
+}
+
+fn receipt_wire(receipt: ManagedMutationReceipt) -> AuthorityReceiptWire {
+    (
         receipt.transaction_id,
         receipt.plan_id,
         receipt.resource,
@@ -318,7 +854,7 @@ fn receipt_wire(receipt: ManagedMutationReceipt) -> Result<AuthorityReceiptWire,
         receipt.final_state,
         receipt.recovered,
         receipt.stages,
-    ))
+    )
 }
 
 fn authority1_service(
@@ -330,12 +866,33 @@ fn authority1_service(
     )
 }
 
-pub fn serve_authority1(handler: impl Authority1Handler) -> Result<(), TransportError> {
+pub fn serve_authority1(
+    connection: zbus::blocking::Connection,
+    handler: impl Authority1Handler,
+) -> Result<(), TransportError> {
+    // The composition root establishes/authenticates this connection and owns
+    // the fixed service name before constructing native integrations. Keeping
+    // this exact connection is essential: peer identity is a unique bus sender,
+    // not merely the daemon's PID/UID. Do not reconnect inside this adapter.
+    let owner: String = zbus::blocking::Proxy::new(
+        &connection,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+    )?
+    .call("GetNameOwner", &(AUTHORITY_SERVICE_NAME,))?;
+    if connection
+        .unique_name()
+        .is_none_or(|name| name.as_str() != owner)
+    {
+        return Err(TransportError::new(
+            "Authority1 connection does not own its canonical name",
+        ));
+    }
     let service = authority1_service(handler);
-    let _connection = zbus::blocking::connection::Builder::system()?
-        .name(AUTHORITY_SERVICE_NAME)?
-        .serve_at(AUTHORITY_OBJECT_PATH, service)?
-        .build()?;
+    connection
+        .object_server()
+        .at(AUTHORITY_OBJECT_PATH, service)?;
     loop {
         thread::park();
     }
@@ -350,6 +907,99 @@ mod tests {
     struct NeverCalled;
 
     impl Authority1Handler for NeverCalled {
+        fn own_native_sleep_gate_status(
+            &mut self,
+            _: Authority1SessionContext,
+        ) -> Result<linura_protocol::NativeSleepGateStatus, String> {
+            Err("introspection must not query sleep diagnostics".into())
+        }
+        fn configure_protective_lock(
+            &mut self,
+            _: Authority1SessionContext,
+            _: linura_protocol::ProtectiveLockSettingRequest,
+        ) -> Result<linura_protocol::ProtectiveLockSettingReceipt, String> {
+            Err("introspection must not change protective policy".into())
+        }
+        fn recorded_protective_lock_setting(
+            &mut self,
+            _: Authority1SessionContext,
+            _: linura_core::SessionEpoch,
+        ) -> Result<Option<linura_protocol::ProtectiveLockSettingReceipt>, String> {
+            Err("introspection must not query protective policy".into())
+        }
+        fn protective_lock_setting_request_status(
+            &mut self,
+            _: Authority1SessionContext,
+            _: linura_core::RequestId,
+        ) -> Result<linura_protocol::ProtectiveLockSettingReceipt, String> {
+            Err("introspection must not query protective history".into())
+        }
+        fn own_session_transition(
+            &mut self,
+            _: Authority1SessionContext,
+            _: String,
+        ) -> Result<String, String> {
+            Err("introspection must not query native transitions".into())
+        }
+        fn converge_session_transition(
+            &mut self,
+            _: Authority1SessionContext,
+            _: linura_protocol::SessionTransitionRequest,
+        ) -> Result<ManagedMutationReceipt, String> {
+            Err("introspection must not dispatch transitions".into())
+        }
+        fn recover_session_transition(
+            &mut self,
+            _: Authority1SessionContext,
+            _: linura_core::RequestId,
+        ) -> Result<ManagedMutationReceipt, String> {
+            Err("introspection must not recover transitions".into())
+        }
+        fn session_transition_request_status(
+            &mut self,
+            _: Authority1SessionContext,
+            _: linura_core::RequestId,
+        ) -> Result<linura_protocol::SessionTransitionRequestStatus, String> {
+            Err("introspection must not query historical transitions".into())
+        }
+        fn acknowledge_session_transition(
+            &mut self,
+            _: Authority1SessionContext,
+            _: linura_core::RequestId,
+        ) -> Result<bool, String> {
+            Err("introspection must not acknowledge transitions".into())
+        }
+        fn session_lock_request_status(
+            &mut self,
+            _: Authority1SessionContext,
+            _: linura_core::RequestId,
+        ) -> Result<linura_protocol::SessionLockRequestStatus, String> {
+            Err("introspection must not query retained state".into())
+        }
+        fn acknowledge_session_lock_release(
+            &mut self,
+            _: Authority1SessionContext,
+            _: linura_core::RequestId,
+        ) -> Result<bool, String> {
+            Err("introspection must not acknowledge".into())
+        }
+        fn own_session_lock(&mut self, _: Authority1SessionContext) -> Result<String, String> {
+            Err("introspection must not query native state".into())
+        }
+        fn converge_session_lock(
+            &mut self,
+            _: Authority1SessionContext,
+            _: linura_protocol::SessionLockRequest,
+        ) -> Result<ManagedMutationReceipt, String> {
+            Err("introspection must not mutate".into())
+        }
+        fn recover_session_lock(
+            &mut self,
+            _: Authority1SessionContext,
+            _: linura_core::RequestId,
+        ) -> Result<ManagedMutationReceipt, String> {
+            Err("introspection must not recover".into())
+        }
         fn converge_systemd_active_state(
             &mut self,
             _context: Authority1Context,
@@ -369,12 +1019,60 @@ mod tests {
     }
 
     #[test]
+    fn systemd_receipt_wire_rejects_cross_route_state() {
+        let receipt = ManagedMutationReceipt {
+            transaction_id: "transaction:1".into(),
+            plan_id: "plan:1".into(),
+            resource: "systemd:unit:linura-managed-example.service".into(),
+            change_key: "active_state".into(),
+            desired_value: "active".into(),
+            effect_digest: "digest".into(),
+            dispatch_digest: None,
+            execution_disposition: None,
+            verification_disposition: "verified".into(),
+            final_state: "complete".into(),
+            recovered: false,
+            stages: Vec::new(),
+        };
+        assert!(systemd_receipt_wire(receipt.clone()).is_ok());
+        let mut wrong_route = receipt.clone();
+        wrong_route.change_key = "secure".into();
+        assert!(systemd_receipt_wire(wrong_route).is_err());
+        let mut wrong_state = receipt;
+        wrong_state.desired_value = "true".into();
+        assert!(systemd_receipt_wire(wrong_state).is_err());
+    }
+
+    #[test]
     fn authority_contract_is_explicitly_experimental() {
         assert_eq!(AUTHORITY_SERVICE_NAME, "org.linura.Authority1");
         assert_eq!(AUTHORITY_INTERFACE_NAME, "org.linura.Authority1");
         assert_eq!(AUTHORITY_CONTRACT_ID, "dbus.org.linura.Authority1");
         assert_eq!(AUTHORITY_CONTRACT_VERSION, "1");
         assert_eq!(AUTHORITY_CONTRACT_STABILITY, "experimental");
+    }
+
+    #[test]
+    fn native_approval_actions_never_promote_owner_unlock_to_administrator() {
+        let owner =
+            PrincipalId::new("unix:uid:1000").unwrap_or_else(|error| unreachable!("{error}"));
+        let lock =
+            ResourceId::new("session:lock:abcd1234-1234-4567-89ab-0123456789ab:1000:c2:42:98765432-1234-4567-89ab-0123456789ab:7")
+                .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(polkit_action_for(&lock, "secure", "true", &owner).is_err());
+        assert_eq!(
+            polkit_action_for(&lock, "secure", "false", &owner),
+            Ok(NativeApprovalAction::UnlockSession)
+        );
+        let root = PrincipalId::new("unix:uid:0").unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(polkit_action_for(&lock, "secure", "false", &root).is_err());
+        for (key, desired) in [
+            ("active_state", "active"),
+            ("secure", "FALSE"),
+            ("power", "reboot"),
+        ] {
+            assert!(polkit_action_for(&lock, key, desired, &owner).is_err());
+        }
     }
 
     #[test]
@@ -398,33 +1096,53 @@ mod tests {
             assert!(live.contains(&marker), "live {argument}");
         }
         let receipt = "type=\"(sssssssssbas)\" direction=\"out\"";
-        assert_eq!(canonical.matches(receipt).count(), 1, "canonical receipt");
-        assert_eq!(live.matches(receipt).count(), 1, "live receipt");
-    }
-
-    #[test]
-    fn systemd_receipt_wire_rejects_cross_route_state() {
-        let receipt = ManagedMutationReceipt {
-            transaction_id: "transaction:1".into(),
-            plan_id: "plan:1".into(),
-            resource: "systemd:unit:example.service".into(),
-            change_key: "active_state".into(),
-            desired_value: "active".into(),
-            effect_digest: "digest".into(),
-            dispatch_digest: None,
-            execution_disposition: None,
-            verification_disposition: "verified".into(),
-            final_state: "complete".into(),
-            recovered: false,
-            stages: Vec::new(),
-        };
-        assert!(receipt_wire(receipt.clone()).is_ok());
-        let mut wrong_route = receipt.clone();
-        wrong_route.change_key = "secure".into();
-        assert!(receipt_wire(wrong_route).is_err());
-        let mut wrong_state = receipt;
-        wrong_state.desired_value = "true".into();
-        assert!(receipt_wire(wrong_state).is_err());
+        assert_eq!(canonical.matches(receipt).count(), 5, "canonical receipts");
+        assert_eq!(live.matches(receipt).count(), 5, "live receipts");
+        for method in [
+            "GetOwnNativeSleepGateStatus",
+            "ConfigureProtectiveLock",
+            "GetProtectiveLockSetting",
+            "GetProtectiveLockSettingRequestStatus",
+            "GetOwnSessionLock",
+            "ConvergeSessionLock",
+            "RecoverSessionLock",
+            "GetOwnSessionTransition",
+            "ConvergeSessionTransition",
+            "RecoverSessionTransition",
+            "GetSessionTransitionRequestStatus",
+            "AcknowledgeSessionTransition",
+        ] {
+            let marker = format!("<method name=\"{method}\">");
+            assert!(canonical.contains(&marker), "canonical {method}");
+            assert!(live.contains(&marker), "live {method}");
+        }
+        for (method, shape) in [
+            ("GetOwnNativeSleepGateStatus", "(ss)"),
+            ("ConfigureProtectiveLock", "(ssbsstb)"),
+            ("GetProtectiveLockSetting", "a(ssbsstb)"),
+            ("GetProtectiveLockSettingRequestStatus", "(ssbsstb)"),
+        ] {
+            for (label, xml) in [("canonical", canonical), ("live", live.as_str())] {
+                let marker = format!("<method name=\"{method}\">");
+                let method_xml = xml
+                    .split_once(&marker)
+                    .unwrap_or_else(|| unreachable!())
+                    .1
+                    .split_once("</method>")
+                    .unwrap_or_else(|| unreachable!())
+                    .0;
+                assert!(
+                    method_xml.contains(&format!("type=\"{shape}\" direction=\"out\"")),
+                    "{label} {method}"
+                );
+                if method == "GetOwnNativeSleepGateStatus" {
+                    assert!(
+                        !method_xml.contains("direction=\"in\""),
+                        "{label} diagnostic identity is transport-derived"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

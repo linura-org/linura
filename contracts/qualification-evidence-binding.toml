@@ -217,6 +217,14 @@ kind = "file"
 role = "fault_matrix_transcript"
 filename = "v06-matrix.log"
 kind = "file"
+[[profile.artifact]]
+role = "legacy_fault_matrix_transcript"
+filename = "v06-legacy-matrix.log"
+kind = "file"
+[[profile.artifact]]
+role = "native_session_boundary_transcript"
+filename = "v06-native-session.log"
+kind = "file"
 
 [[profile]]
 id = "v07-library"

@@ -47,37 +47,55 @@ ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 \
 scp "${ssh_common[@]}" -P "$ssh_port" \
     "$LINURA_CARGO_TARGET"/release/linura-authorityd \
     "$LINURA_CARGO_TARGET"/release/linura-executor-systemd \
+    "$LINURA_CARGO_TARGET"/release/linura-executor-session \
     "$LINURA_CARGO_TARGET"/release/v06-qualification-matrix \
     packaging/dbus-1/system.d/org.linura.Authority1.conf \
     packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf \
+    packaging/dbus-1/system.d/org.linura.Executor.Session1.conf \
     packaging/polkit-1/actions/org.linura.authority.policy \
     packaging/polkit-1/actions/org.linura.executor.systemd.policy \
+    packaging/polkit-1/actions/org.linura.executor.session.policy \
     packaging/polkit-1/rules.d/50-linura-executor-systemd.rules \
+    packaging/polkit-1/rules.d/50-linura-executor-session.rules \
     packaging/systemd/system/linura-authorityd.service \
     packaging/systemd/system/linura-executor-systemd.service \
+    packaging/systemd/system/linura-executor-session.service \
+    packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf \
+    packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf \
     tests/acceptance/v06/49-linura-v06-qualification.rules \
     tests/acceptance/v06/linura-managed-v06-qualification.service \
     tests/acceptance/v06/linura-managed-v06-notsatisfied.service \
     tests/acceptance/v06/qualify-guest.sh \
+    tests/acceptance/v06/qualify-native-session.sh \
     linura@127.0.0.1:/tmp/
 
 qualification_log="$ARTIFACT_DIR/qualification.log"
 failure_log="$ARTIFACT_DIR/qualification-failure.txt"
 set +e
 ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 \
-    'bash /tmp/qualify-guest.sh' 2>&1 | tee "$qualification_log"
+    'bash -euo pipefail -c '\''bash /tmp/qualify-guest.sh && bash /tmp/qualify-native-session.sh 2>&1 | tee /tmp/v06-native-session.log'\''' 2>&1 | tee "$qualification_log"
 guest_rc=${PIPESTATUS[0]}
 set -e
 
-scp "${ssh_common[@]}" -P "$ssh_port" \
-    linura@127.0.0.1:/tmp/v06-matrix.log "$ARTIFACT_DIR/v06-matrix.log" >/dev/null 2>&1 || true
+matrix_evidence_rc=0
+for matrix_log in v06-matrix.log v06-legacy-matrix.log v06-native-session.log; do
+    if ! scp "${ssh_common[@]}" -P "$ssh_port" \
+        "linura@127.0.0.1:/tmp/$matrix_log" "$ARTIFACT_DIR/$matrix_log" >/dev/null 2>&1; then
+        printf 'missing retained guest matrix evidence: %s\n' "$matrix_log" >&2
+        matrix_evidence_rc=1
+    fi
+done
 
-if [[ "$guest_rc" -ne 0 ]]; then
+if [[ "$guest_rc" -ne 0 || "$matrix_evidence_rc" -ne 0 ]]; then
     {
         printf 'guest_rc=%s\n' "$guest_rc"
+        printf 'matrix_evidence_rc=%s\n' "$matrix_evidence_rc"
         echo '--- authority status ---'
         ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 \
             'sudo -n systemctl status linura-authorityd.service --no-pager -l || true'
+        echo '--- session executor status ---'
+        ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 \
+            'sudo -n systemctl status linura-executor-session.service --no-pager -l || true'
         echo '--- executor status ---'
         ssh "${ssh_common[@]}" -p "$ssh_port" linura@127.0.0.1 \
             'sudo -n systemctl status linura-executor-systemd.service --no-pager -l || true'
@@ -110,5 +128,8 @@ if [[ "$guest_rc" -ne 0 ]]; then
             'sudo -n cat /run/linura-v06-qualification/dispatch.log || true'
     } >"$failure_log" 2>&1 || true
     cat "$failure_log" >&2 || true
-    exit "$guest_rc"
+    if [[ "$guest_rc" -ne 0 ]]; then
+        exit "$guest_rc"
+    fi
+    exit "$matrix_evidence_rc"
 fi

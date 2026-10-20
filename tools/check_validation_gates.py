@@ -1258,7 +1258,9 @@ REVIEWED_SHELL_EXECUTION = {
     "qualification/v010/workstation-acceptance/run-hardware-qualification.sh": "fa08f7a5cf050d9692de40227b8e40668859d54e801318dfa7dfe7181ed90b72",
     "qualification/v010/workstation-acceptance/run-live-session.sh": "e8013a8b52a6eeac5b53e1bfa3861a2a4879e4b33978f3d22b08ce634e06360f",
     "scripts/qualification/v09-adversarial-guest.sh": "f4a12a53b830ceffb7c8ea3c30ab67f3bed9c84de763c8db205d48e75aaa9c9f",
-    "tests/acceptance/v06/qualify-guest.sh": "503d93d0b70630679ff1a381b8f3731767f11eaac184d5fcb8d6e74ee70024ab",
+    "tests/acceptance/v06/qualify-guest.sh": "44031433394771a32cb85f8875ed1f88e90deab3f263de7e15a54ec0dc305126",
+    "tests/acceptance/v06/qualify-host.sh": "ff3f2282b2ca8b6674f6eb6cea65f09dcaaa53088ea3f3515bba0ea2807222d8",
+    "tests/acceptance/v06/qualify-native-session.sh": "203a7a695ef7fe4e9268477e60861d9eef611f429075ee91fefb6b29705de777",
     # Development-only tools run at the caller's existing permissions.
     "scripts/lib/bootstrap_rustup.sh": "60db235ffa3f448b1182665285dc3347f017cbcb5785f087f056c3b30e836ad8",
     # This library executes before validation to protect source integrity even

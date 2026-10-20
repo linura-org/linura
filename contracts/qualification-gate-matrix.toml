@@ -178,6 +178,7 @@ paths = [
   "crates/linura-hardware/**",
   "crates/linura-dbus/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-linux-session/**",
   "crates/linura-observation/**",
   "crates/linura-observation-control/**",
   "crates/linura-sdk/**",
@@ -233,6 +234,7 @@ paths = [
   "crates/linura-dbus/**",
   "crates/linura-graph/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-linux-session/**",
   "crates/linura-observation/**",
   "crates/linura-observation-control/**",
   "crates/linura-planner/**",
@@ -362,9 +364,12 @@ paths = [
   "tests/tooling/test_qualification_evidence.py",
   ".github/workflows/trusted-release-proof.yml",
   "crates/linura-linux-observation/**",
+  "crates/linura-linux-session/**",
   "crates/linura-observation/**",
   "crates/linura-provider-sdk/**",
   "executors/linura-executor-systemd/**",
+  "executors/linura-executor-session/**",
+  "interfaces/dbus/org.linura.Executor.Session1.xml",
   "verifiers/linura-verifier-systemd/**",
   "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
   "packaging/polkit-1/actions/org.linura.executor.systemd.policy",
@@ -415,21 +420,31 @@ paths = [
   "crates/linura-dbus/**",
   "crates/linura-lifecycle/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-linux-session/**",
   "crates/linura-observation/**",
   "crates/linura-observation-control/**",
   "crates/linura-persistence-sqlite/**",
   "crates/linura-transaction/**",
   "executors/linura-executor-systemd/**",
+  "executors/linura-executor-session/**",
   "verifiers/linura-verifier-systemd/**",
   "interfaces/dbus/org.linura.Authority1.xml",
+  "interfaces/dbus/org.linura.SleepGate1.xml",
+  "interfaces/dbus/org.linura.Executor.Session1.xml",
   "interfaces/dbus/org.linura.Executor.Systemd1.xml",
   "packaging/dbus-1/system.d/org.linura.Authority1.conf",
+  "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf",
   "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
   "packaging/polkit-1/actions/org.linura.authority.policy",
+  "packaging/polkit-1/actions/org.linura.executor.session.policy",
   "packaging/polkit-1/actions/org.linura.executor.systemd.policy",
   "packaging/polkit-1/rules.d/50-linura-executor-systemd.rules",
+  "packaging/polkit-1/rules.d/50-linura-executor-session.rules",
   "packaging/systemd/system/linura-authorityd.service",
   "packaging/systemd/system/linura-executor-systemd.service",
+  "packaging/systemd/system/linura-executor-session.service",
+  "packaging/systemd/sleep.conf.d/**",
+  "packaging/systemd/system/systemd-suspend.service.d/**",
   "tests/acceptance/v06/**",
   "tools/vm.py",
   "tools/development_workspace.py",
@@ -602,6 +617,7 @@ paths = [
   "crates/linura-core/**",
   "crates/linura-hardware/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-linux-session/**",
   "crates/linura-migrations/**",
   "crates/linura-observation/**",
   "crates/linura-observation-control/**",
@@ -756,6 +772,8 @@ paths = [
   "crates/linura-library/**",
   "crates/linura-lifecycle/**",
   "crates/linura-linux-observation/**",
+  "crates/linura-linux-session/**",
+  "executors/linura-executor-session/**",
   "crates/linura-observation/**",
   "crates/linura-observation-control/**",
   "crates/linura-planner/**",
@@ -1013,6 +1031,11 @@ path = "crates/linura-linux-observation"
 gates = ["vm-acceptance","control1-plan-preview","v05-executor-verifier","v06-managed-lifecycle","v09-qualification","v010-workstation"]
 
 [[component]]
+id = "linura-linux-session"
+path = "crates/linura-linux-session"
+gates = ["vm-acceptance","control1-plan-preview","v05-executor-verifier","v06-managed-lifecycle","v09-qualification","v010-workstation"]
+
+[[component]]
 id = "linura-dbus"
 path = "crates/linura-dbus"
 gates = ["vm-acceptance","control1-plan-preview","v06-managed-lifecycle","v09-qualification","v010-workstation"]
@@ -1111,6 +1134,11 @@ gates = []
 id = "linura-executor-systemd"
 path = "executors/linura-executor-systemd"
 gates = ["v05-executor-verifier","v06-managed-lifecycle","v09-qualification"]
+
+[[component]]
+id = "linura-executor-session"
+path = "executors/linura-executor-session"
+gates = ["v05-executor-verifier","v06-managed-lifecycle","v09-qualification","v010-workstation"]
 
 [[component]]
 id = "linura-verifier-systemd"
@@ -1326,6 +1354,14 @@ gates = ["v010-workstation"]
 [[contract]]
 path = "schemas/workflow.v1.schema.json"
 gates = ["v06-managed-lifecycle","v09-qualification","v010-workstation"]
+
+[[contract]]
+path = "interfaces/dbus/org.linura.Executor.Session1.xml"
+gates = ["control1-plan-preview","v05-executor-verifier","v06-managed-lifecycle","v09-qualification"]
+
+[[contract]]
+path = "interfaces/dbus/org.linura.SleepGate1.xml"
+gates = ["control1-plan-preview","v06-managed-lifecycle","v09-qualification"]
 
 [[contract]]
 path = "interfaces/dbus/org.linura.Executor.Systemd1.xml"

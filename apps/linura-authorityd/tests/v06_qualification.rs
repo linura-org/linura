@@ -28,6 +28,12 @@ use linura_control::{
 };
 
 const RESOURCE: &str = "systemd:unit:linura-managed-qualification.service";
+#[path = "s17/managed_lock.rs"]
+mod s17_managed_lock;
+#[path = "s17/managed_power.rs"]
+mod s17_managed_power;
+#[path = "s17/managed_protective_lock.rs"]
+mod s17_managed_protective_lock;
 static NEXT_DB: AtomicU64 = AtomicU64::new(1);
 
 fn value<T, E: Debug>(result: Result<T, E>) -> T {
@@ -111,6 +117,15 @@ impl QueueObserver {
     fn new(observations: Vec<ObservationEnvelope>) -> Self {
         let provider = provider();
         let capability_id = capability_id();
+        Self::for_route(observations, provider, capability_id, resource(RESOURCE))
+    }
+
+    fn for_route(
+        observations: Vec<ObservationEnvelope>,
+        provider: ProviderId,
+        capability_id: CapabilityId,
+        resource: ResourceId,
+    ) -> Self {
         Self {
             capability: Capability {
                 id: capability_id,
@@ -124,7 +139,7 @@ impl QueueObserver {
                 reason: None,
             },
             provider,
-            resource: resource(RESOURCE),
+            resource,
             observations: Mutex::new(observations.into()),
         }
     }

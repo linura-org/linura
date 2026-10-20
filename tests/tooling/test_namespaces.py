@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -30,6 +31,10 @@ class NamespaceContractTests(unittest.TestCase):
             "crates/linura-dbus/src/lib.rs",
             "crates/linura-dbus/src/authority.rs",
             "crates/linura-dbus/src/session.rs",
+            "crates/linura-dbus/src/sleep_gate.rs",
+            "crates/linura-linux-session/src/bus.rs",
+            "crates/linura-linux-session/src/owner.rs",
+            "executors/linura-executor-session/src/lib.rs",
             "executors/linura-executor-systemd/src/lib.rs",
             "apps/linura-shell/org.linura.ControlCenter.desktop",
             "apps/linura-shell/org.linura.CommandPalette.desktop",
@@ -51,6 +56,89 @@ class NamespaceContractTests(unittest.TestCase):
     def test_repository_namespace_contract_is_valid(self) -> None:
         result = self._run_checker(ROOT)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_private_sleep_gate_cannot_lose_its_registered_object_or_interface(self):
+        for old, new in (
+            (
+                ".at(SLEEP_GATE_OBJECT_PATH, service)?",
+                '.at("/org/linura/WrongGate", service)?',
+            ),
+            (
+                '#[zbus::interface(name = "org.linura.SleepGate1")]',
+                '#[zbus::interface(name = "org.linura.Authority1")]',
+            ),
+        ):
+            with self.subTest(binding=old), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._copy_fixture(root)
+                path = root / "crates/linura-dbus/src/sleep_gate.rs"
+                source = path.read_text(encoding="utf-8")
+                self.assertIn(old, source)
+                path.write_text(source.replace(old, new, 1), encoding="utf-8")
+                self.assertNotEqual(self._run_checker(root).returncode, 0)
+
+    def test_native_power_approval_cannot_swap_two_declared_action_purposes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            source = root / "crates/linura-linux-session/src/owner.rs"
+            original = source.read_text(encoding="utf-8")
+            changed = original.replace(
+                'NativeApprovalPurpose::Suspend => "org.linura.authority.suspend-session"',
+                'NativeApprovalPurpose::Suspend => "org.linura.authority.reboot-session"',
+            )
+            self.assertNotEqual(original, changed)
+            source.write_text(changed, encoding="utf-8")
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("runtime", result.stderr)
+            self.assertIn("org.linura.authority.suspend-session", result.stderr)
+
+    def test_native_approval_action_without_registered_binding_is_rejected(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            source = root / "crates/linura-linux-session/src/owner.rs"
+            with source.open("a", encoding="utf-8") as stream:
+                stream.write(
+                    '\nfn undeclared() { match purpose { NativeApprovalPurpose::Suspend => "org.linura.authority.other-session" } }\n'
+                )
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("org.linura.authority.other-session", result.stderr)
+
+    def test_protective_actions_are_detected_in_block_and_scalar_arms(self) -> None:
+        for purpose, action in (
+            ("EnableProtectiveLock", "enable-protective-lock"),
+            ("RevokeProtectiveLock", "revoke-protective-lock"),
+        ):
+            for block in (False, True):
+                with self.subTest(purpose=purpose, block=block):
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        root = Path(temp_dir)
+                        self._copy_fixture(root)
+                        source = root / "crates/linura-linux-session/src/owner.rs"
+                        original = source.read_text(encoding="utf-8")
+                        expression = f'"org.linura.authority.{action}"'
+                        old = rf"NativeApprovalPurpose::{purpose}\s*=>\s*\{{\s*{re.escape(expression)}\s*\}}"
+                        replacement = f'"org.linura.authority.unregistered-{action}"'
+                        if block:
+                            replacement = "{\n" + replacement + "\n}"
+                        changed, count = re.subn(
+                            old,
+                            f"NativeApprovalPurpose::{purpose} => {replacement}",
+                            original,
+                        )
+                        self.assertEqual(count, 1)
+                        source.write_text(changed, encoding="utf-8")
+                        result = self._run_checker(root)
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn(f"unregistered-{action}", result.stderr)
+                        self.assertIn("runtime binding", result.stderr)
 
     def test_undeclared_dbus_interface_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -571,6 +659,55 @@ class NamespaceContractTests(unittest.TestCase):
                 result.stderr,
             )
 
+    def test_existing_connection_registration_remains_exact_and_cannot_be_commented_out(
+        self,
+    ) -> None:
+        for change in ("object", "path", "comment"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                runtime = root / "crates/linura-dbus/src/authority.rs"
+                text = runtime.read_text(encoding="utf-8")
+                match = re.search(
+                    r"\.object_server\s*\(\s*\)\s*\.at\s*\(\s*AUTHORITY_OBJECT_PATH\s*,\s*service\s*\)",
+                    text,
+                )
+                self.assertIsNotNone(match)
+                assert match is not None
+                active = match.group(0)
+                replacement = {
+                    "object": ".object_server().at(AUTHORITY_OBJECT_PATH, impostor)",
+                    "path": '.object_server().at("/org/linura/Unallocated1", service)',
+                    "comment": "/* " + active + " */",
+                }[change]
+                runtime.write_text(
+                    text.replace(active, replacement, 1), encoding="utf-8"
+                )
+                result = self._run_checker(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "missing D-Bus runtime registration crates/linura-dbus/src/authority.rs",
+                    result.stderr,
+                )
+
+    def test_existing_connection_does_not_hide_undeclared_object_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            runtime = root / "crates/linura-dbus/src/existing_connection_fixture.rs"
+            runtime.write_text(
+                'pub const INTERFACE_NAME: &str = "org.linura.Control1";\n'
+                "fn register(connection: zbus::Connection, service: ()) {\n"
+                ' connection.object_server().at("/org/linura/Wrong1", service);\n}\n',
+                encoding="utf-8",
+            )
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                'undeclared D-Bus runtime registration crates/linura-dbus/src/existing_connection_fixture.rs: serve_at("/org/linura/Wrong1", service)',
+                result.stderr,
+            )
+
     def test_session_bus_policy_is_scanned(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -748,19 +885,16 @@ class NamespaceContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             self._copy_fixture(root)
-            runtime = root / "crates/linura-dbus/src/authority.rs"
+            runtime = root / "crates/linura-linux-session/src/bus.rs"
+            text = runtime.read_text(encoding="utf-8")
+            self.assertIn(".name(CONTROL_SERVICE)", text)
             runtime.write_text(
-                runtime.read_text(encoding="utf-8").replace(
-                    ".name(AUTHORITY_SERVICE_NAME)?",
-                    "",
-                    1,
-                ),
-                encoding="utf-8",
+                text.replace(".name(CONTROL_SERVICE)", "", 1), encoding="utf-8"
             )
             result = self._run_checker(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
-                "missing D-Bus runtime name acquisition crates/linura-dbus/src/authority.rs: .name(AUTHORITY_SERVICE_NAME)",
+                "missing D-Bus runtime name acquisition crates/linura-linux-session/src/bus.rs: .name(CONTROL_SERVICE)",
                 result.stderr,
             )
 

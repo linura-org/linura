@@ -134,6 +134,16 @@ pub struct ProtectiveLockSettingReceipt {
     pub latest_for_epoch: bool,
 }
 
+/// S17 requests carry typed intent only. The transport supplies principal and
+/// Actor; Control derives the canonical plan, risk and native approval purpose.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionLockRequest {
+    pub operation_id: String,
+    pub lock: linura_core::SessionLockId,
+    pub secure: bool,
+    pub reason: String,
+}
+
 /// Historical durable transaction state. This is NOT current compositor
 /// evidence, a replay instruction, or an execution credential.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -145,6 +155,30 @@ pub struct SessionLockRequestStatus {
     pub state: String,
 }
 
+/// Successful managed session-lock completion received from Authority1. This
+/// is a report, never authority to execute or proof of future/current coverage.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionLockReceipt {
+    pub transaction_id: String,
+    pub request_id: RequestId,
+    pub lock: linura_core::SessionLockId,
+    pub secure: bool,
+    pub effect_digest: String,
+    pub dispatch_digest: Option<String>,
+    pub execution_disposition: Option<String>,
+    pub recovered: bool,
+    pub stages: Vec<String>,
+}
+
+/// Exact S17 power/session intent. No principal, executable plan, force flag,
+/// native service handle or authentication assertion is client selectable.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionTransitionRequest {
+    pub operation_id: String,
+    pub target: linura_core::SessionTransitionId,
+    pub reason: String,
+}
+
 /// Historical durable state only; not native completion or replay permission.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionTransitionRequestStatus {
@@ -152,6 +186,29 @@ pub struct SessionTransitionRequestStatus {
     pub transaction_id: String,
     pub target: linura_core::SessionTransitionId,
     pub state: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionTransitionCompletion {
+    ResumedSecurely,
+    OriginalSessionEnded,
+    /// Does not prove causation, a particular boot mechanism, or that the host
+    /// is currently powered off. Never present it as any of those claims.
+    OriginalBootEnded,
+}
+
+/// Verified durable completion report, never future/current-state authority.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionTransitionReceipt {
+    pub transaction_id: String,
+    pub request_id: RequestId,
+    pub target: linura_core::SessionTransitionId,
+    pub completion: SessionTransitionCompletion,
+    pub effect_digest: String,
+    pub dispatch_digest: Option<String>,
+    pub execution_disposition: Option<String>,
+    pub recovered: bool,
+    pub stages: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
