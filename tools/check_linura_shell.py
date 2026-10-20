@@ -34,6 +34,10 @@ REQUIRED = (
     "apps/linura-shell/plugins/control-center/ControlCenterPanel.qml",
     "apps/linura-shell/plugins/quick-settings/manifest.json",
     "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml",
+    "apps/linura-shell/plugins/session/SessionControls.qml",
+    "apps/linura-shell/plugins/session/manifest.json",
+    "apps/linura-shell/plugins/power/PowerControls.qml",
+    "apps/linura-shell/plugins/power/manifest.json",
     "apps/linura-shell/plugins/command-palette/manifest.json",
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml",
     "apps/linura-shell/plugins/notifications-osd/manifest.json",
@@ -179,6 +183,9 @@ REQUIRED_CI = (
     'ui_linkage="$(ldd "$ui_plugin")"',
     "Linura UI QML plugin has unresolved installed dependencies",
     'grep -Fq "liblinura-ui.so => $ui_backing" <<<"$ui_linkage"',
+    'QT_QML_IMPORT_PATH="$install_dir/lib/qt6/qml"',
+    'QML_IMPORT_PATH="$install_dir/lib/qt6/qml"',
+    'ctest --test-dir "$build_dir" --output-on-failure',
 )
 
 REQUIRED_IMAGE_ASSETS = {
@@ -188,6 +195,10 @@ REQUIRED_IMAGE_ASSETS = {
     "apps/linura-shell/plugins/control-center/manifest.json": "usr/share/linura/shell/plugins/control-center/manifest.json",
     "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml": "usr/share/linura/shell/plugins/quick-settings/QuickSettingsPanel.qml",
     "apps/linura-shell/plugins/quick-settings/manifest.json": "usr/share/linura/shell/plugins/quick-settings/manifest.json",
+    "apps/linura-shell/plugins/session/SessionControls.qml": "usr/share/linura/shell/plugins/session/SessionControls.qml",
+    "apps/linura-shell/plugins/session/manifest.json": "usr/share/linura/shell/plugins/session/manifest.json",
+    "apps/linura-shell/plugins/power/PowerControls.qml": "usr/share/linura/shell/plugins/power/PowerControls.qml",
+    "apps/linura-shell/plugins/power/manifest.json": "usr/share/linura/shell/plugins/power/manifest.json",
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml": "usr/share/linura/shell/plugins/command-palette/CommandPalette.qml",
     "apps/linura-shell/plugins/command-palette/manifest.json": "usr/share/linura/shell/plugins/command-palette/manifest.json",
     "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml": "usr/share/linura/shell/plugins/notifications-osd/LifecycleFeedback.qml",
@@ -1814,6 +1825,94 @@ def validate(root: Path) -> list[str]:
     if "capabilities" in quick_settings_manifest:
         failures.append("Quick Settings manifest must not become a capability grant")
 
+    for name, expected in (
+        (
+            "session",
+            {
+                "schema_version": 1,
+                "id": "linura.session",
+                "name": "Linura Session Controls",
+                "kind": "panel",
+                "entry_point": "SessionControls.qml",
+                "trust": "first-party",
+                "authority": "none",
+                "interaction_scope": "bounded-managed-own-session-client",
+                "registered_operations": ["operation:session.lock.set-secure"],
+                "local_operations": ["operation:session.protective-lock.configure"],
+                "protocol_requirements": [
+                    "org.linura.Authority1.GetOwnNativeSleepGateStatus",
+                    "org.linura.Authority1.GetOwnSessionLock",
+                    "org.linura.Authority1.ConvergeSessionLock",
+                    "org.linura.Authority1.RecoverSessionLock",
+                    "org.linura.Authority1.ConfigureProtectiveLock",
+                    "org.linura.Authority1.GetProtectiveLockSettingRequestStatus",
+                ],
+            },
+        ),
+        (
+            "power",
+            {
+                "schema_version": 1,
+                "id": "linura.power",
+                "name": "Linura Power Controls",
+                "kind": "panel",
+                "entry_point": "PowerControls.qml",
+                "trust": "first-party",
+                "authority": "none",
+                "interaction_scope": "bounded-managed-own-session-client",
+                "registered_operations": [
+                    "operation:session.suspend",
+                    "operation:session.logout",
+                    "operation:session.reboot",
+                    "operation:session.power-off",
+                ],
+                "protocol_requirements": [
+                    "org.linura.Authority1.GetOwnSessionLock",
+                    "org.linura.Authority1.ConvergeSessionLock",
+                    "org.linura.Authority1.GetOwnSessionTransition",
+                    "org.linura.Authority1.ConvergeSessionTransition",
+                    "org.linura.Authority1.RecoverSessionTransition",
+                ],
+            },
+        ),
+    ):
+        manifest_path = root / f"apps/linura-shell/plugins/{name}/manifest.json"
+        if json.loads(manifest_path.read_text(encoding="utf-8")) != expected:
+            failures.append(
+                f"Linura {name} plugin manifest must remain exact, "
+                "first-party and authority-free"
+            )
+
+    session_qml = (
+        root / "apps/linura-shell/plugins/session/SessionControls.qml"
+    ).read_text(encoding="utf-8")
+    power_qml = (root / "apps/linura-shell/plugins/power/PowerControls.qml").read_text(
+        encoding="utf-8"
+    )
+    for source, expected in (
+        (quick_settings_qml, 'import "../session" as Session'),
+        (quick_settings_qml, "Session.SessionControls {"),
+        (session_qml, 'import "../power" as Power'),
+        (session_qml, "Power.PowerControls {"),
+    ):
+        if expected not in source:
+            failures.append(
+                f"packaged session/power QML relative import missing: {expected}"
+            )
+    for name, source in (("session", session_qml), ("power", power_qml)):
+        if any(
+            marker in source
+            for marker in (
+                "import Quickshell.Io",
+                "Process {",
+                "Qt.createQmlObject(",
+                "Qt.createComponent(",
+            )
+        ):
+            failures.append(
+                f"first-party {name} plugin must not acquire process or dynamic-code authority"
+            )
+
     lifecycle_manifest = json.loads(
         (root / "apps/linura-shell/plugins/notifications-osd/manifest.json").read_text(
             encoding="utf-8"
@@ -2044,6 +2143,9 @@ def validate(root: Path) -> list[str]:
         'LIBRARY DESTINATION "${LINURA_SHELL_BRIDGE_QML_INSTALL_DIR}"',
         'RUNTIME DESTINATION "${LINURA_SHELL_BRIDGE_QML_INSTALL_DIR}"',
         'ARCHIVE DESTINATION "${LINURA_SHELL_BRIDGE_QML_INSTALL_DIR}"',
+        "add_test(NAME session-client-receipt COMMAND linura-session-client-tests)",
+        "add_test(NAME session-client-tracking COMMAND linura-session-tracking-tests)",
+        "add_test(NAME session-client-surface COMMAND linura-session-surface-tests",
     ):
         if fragment not in cmake:
             failures.append(f"Linura Shell bridge CMake contract missing: {fragment}")
@@ -2159,10 +2261,32 @@ def validate(root: Path) -> list[str]:
         "WantedBy=graphical-session.target",
         "NoNewPrivileges=yes",
         "ProtectSystem=strict",
+        "StateDirectory=linura-shell",
+        "StateDirectoryMode=0700",
         "RestrictAddressFamilies=AF_UNIX",
     ):
         if fragment not in service:
             failures.append(f"Linura Shell user-service contract missing: {fragment}")
+    for setting in ("ProtectSystem", "StateDirectory", "StateDirectoryMode"):
+        lines = [
+            line for line in service.splitlines() if line.startswith(f"{setting}=")
+        ]
+        expected = {
+            "ProtectSystem": "ProtectSystem=strict",
+            "StateDirectory": "StateDirectory=linura-shell",
+            "StateDirectoryMode": "StateDirectoryMode=0700",
+        }[setting]
+        if lines != [expected]:
+            failures.append(
+                f"Linura Shell service must preserve exact {setting} boundary"
+            )
+    if any(
+        line.startswith(("ReadWritePaths=", "Environment=STATE_DIRECTORY="))
+        for line in service.splitlines()
+    ):
+        failures.append(
+            "Linura Shell service may not widen or forge its state boundary"
+        )
     for fragment in ("/bin/sh", "/bin/bash", "sudo", "pkexec"):
         if fragment in service:
             failures.append(

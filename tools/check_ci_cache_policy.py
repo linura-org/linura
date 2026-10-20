@@ -201,7 +201,7 @@ def _effective_shell_lines(steps: list[dict[str, object]]) -> list[str]:
 # The QML and bridge build recipe is reviewed independently of unrelated CI
 # steps, which may evolve without changing this execution-critical script.
 REVIEWED_QML_BUILD_SHA256 = (
-    "724cd2b69e22bedd8531f48f2583a7d0ad2b6ac0fa4084ac52155e53f1d773a4"
+    "c9445166ee5d903888373ab80c363983de7d259b28a293654858050fe6ed3cc0"
 )
 
 
@@ -361,6 +361,14 @@ def _verify_ci_execution_steps(source: str) -> None:
         "  pkg-config",
         "  qt6-base-dev",
         "  qt6-declarative-dev",
+        "  qml6-module-qtqml",
+        "  qml6-module-qtqml-models",
+        "  qml6-module-qtqml-workerscript",
+        "  qml6-module-qtquick",
+        "  qml6-module-qtquick-controls",
+        "  qml6-module-qtquick-layouts",
+        "  qml6-module-qtquick-templates",
+        "  qml6-module-qtquick-window",
     ]:
         raise ValueError("canonical CI APT cache input step drifted")
 
