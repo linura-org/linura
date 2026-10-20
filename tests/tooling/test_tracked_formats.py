@@ -34,6 +34,19 @@ class TrackedFormatsTests(unittest.TestCase):
                     "unclassified",
                 )
 
+    def test_native_security_owner_build_classified_without_generic_exception(
+        self,
+    ) -> None:
+        path = Path("apps/linura-shell/security-owner/CMakeLists.txt")
+        self.assertEqual(formats.classify(path, (ROOT / path).read_bytes()), "build")
+        self.assertEqual(
+            formats.classify(
+                Path("apps/unknown/CMakeLists.txt"),
+                b"cmake_minimum_required(VERSION 3.24)\n",
+            ),
+            "unclassified",
+        )
+
     def test_unknown_extension_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

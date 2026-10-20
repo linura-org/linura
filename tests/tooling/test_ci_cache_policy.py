@@ -31,6 +31,25 @@ class CiCachePolicyTests(unittest.TestCase):
     def test_repository_policy_passes(self) -> None:
         self.assertEqual(policy.check(ROOT), [])
 
+    def test_native_security_owner_build_must_execute_ctest(self) -> None:
+        root = self.copy_root()
+        path = root / ".github/workflows/ci.yml"
+        source = path.read_text(encoding="utf-8")
+        self.assertIn("cmake -S apps/linura-shell/security-owner", source)
+        path.write_text(
+            source.replace(
+                "cmake -S apps/linura-shell/security-owner",
+                "echo security-owner-build-skipped",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        failures = policy.check(root)
+        self.assertTrue(
+            any("security-owner build recipe drifted" in item for item in failures),
+            failures,
+        )
+
     def test_contract_cannot_authorize_build_output_caching(self) -> None:
         root = self.copy_root()
         path = root / ".github/actions/dependency-input-cache-policy.toml"

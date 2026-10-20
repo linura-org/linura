@@ -31,6 +31,28 @@ class LinuraShellContractTests(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
 
+    def test_other_native_ctest_cannot_mask_shell(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/ci.yml"
+            source = workflow.read_text(encoding="utf-8")
+            boundary = "      - name: Build and install Linura Shell QML modules\n"
+            self.assertEqual(source.count(boundary), 1)
+            source = source.replace(
+                boundary, "      - name: Unexpected renamed shell build\n", 1
+            )
+            # Keep the other native CTest unchanged; a global text search
+            # would incorrectly accept it as the shell's qualification.
+            self.assertIn('ctest --test-dir "$build_dir" --output-on-failure', source)
+            workflow.write_text(source, encoding="utf-8")
+            failures = check_linura_shell.validate(root)
+            missing = (
+                "Linura Shell CI contract missing: "
+                'ctest --test-dir "$build_dir" --output-on-failure'
+            )
+            self.assertIn(missing, failures)
+
     def test_native_session_client_tests_must_execute_in_canonical_ci(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

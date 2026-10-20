@@ -255,6 +255,7 @@ jobs:
           namespace: canonical-ci-shell
           packages: |
             cmake
+            libwayland-dev
             ninja-build
             pkg-config
             qt6-base-dev
@@ -336,6 +337,14 @@ jobs:
           # Installed modules must resolve through the same QML import root as deployment.
           QT_QML_IMPORT_PATH="$install_dir/lib/qt6/qml" \
           QML_IMPORT_PATH="$install_dir/lib/qt6/qml" \
+          ctest --test-dir "$build_dir" --output-on-failure
+      - name: Build and test native security-owner foundation
+        run: |
+          set -euo pipefail
+          build_dir="$RUNNER_TEMP/linura-security-owner-foundation-build"
+          cmake -S apps/linura-shell/security-owner -B "$build_dir" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$build_dir" --parallel 2
           ctest --test-dir "$build_dir" --output-on-failure
       - name: Run canonical Linura checks
         run: cargo xtask check
