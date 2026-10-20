@@ -816,6 +816,51 @@ jobs:
         self.assertIn("enospc-qualification.log", enospc_files)
         self.assertIn("enospc-verifier.log", enospc_files)
 
+    def test_v06_evidence_requires_full_and_original_matrix_results(self):
+        contract = evidence.load_contract(ROOT)
+        profile = evidence.profile_for_lane(contract, "v06-managed-lifecycle")
+        required = {item["filename"] for item in profile["artifact"]}
+        self.assertIn("v06-matrix.log", required)
+        self.assertIn("v06-legacy-matrix.log", required)
+        self.assertIn("v06-native-session.log", required)
+        workflow = (ROOT / ".github/workflows/v06-managed-lifecycle-vm.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"fault_matrix": {\n                  "cases": 11,', workflow)
+        self.assertIn(
+            '"expanded_fault_matrix": {\n                  "cases": 49,', workflow
+        )
+
+        for count, filtered in ((49, 0), (11, 38)):
+            with self.subTest(count=count, filtered=filtered):
+                good = (
+                    f"running {count} tests\n"
+                    f"test result: ok. {count} passed; 0 failed; 0 ignored; "
+                    f"0 measured; {filtered} filtered out; finished in 0.01s\n"
+                )
+                semantic_verifier._require_v06_matrix_result(
+                    good, count, "v0.6 matrix", filtered_out=filtered
+                )
+                rejected = [
+                    good.replace(f"running {count} tests", "running 1 test"),
+                    good.replace(f"{count} passed", f"{count - 1} passed"),
+                    good.replace("0 failed;", "1 failed;"),
+                    good.replace("0 ignored;", "1 ignored;"),
+                    good.replace(
+                        f"{filtered} filtered out;", f"{filtered + 1} filtered out;"
+                    ),
+                    good + "test result: ok. 1 passed; 0 failed; 0 ignored; "
+                    "0 measured; 0 filtered out; finished in 0.01s\n",
+                    good.replace("test result: ok.", "test result: FAILED."),
+                    good + "\nFAILED\n",
+                ]
+                for invalid in rejected:
+                    with self.subTest(invalid=invalid):
+                        with self.assertRaises(semantic_verifier.VerificationError):
+                            semantic_verifier._require_v06_matrix_result(
+                                invalid, count, "v0.6 matrix", filtered_out=filtered
+                            )
+
     def test_non_evidence_lanes_cannot_self_promote(self):
         contract = evidence.load_contract(ROOT)
         for lane in contract["non_evidence_lanes"]:

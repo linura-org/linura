@@ -4,6 +4,20 @@ default_contract_stability = "experimental"
 policy_document = "docs/api-versioning.md"
 
 [[contract]]
+id = "dbus.org.linura.SleepGate1"
+kind = "dbus-interface"
+path = "interfaces/dbus/org.linura.SleepGate1.xml"
+version = "1"
+stability = "experimental"
+
+[[contract]]
+id = "dbus.org.linura.Executor.Session1"
+kind = "dbus-interface"
+path = "interfaces/dbus/org.linura.Executor.Session1.xml"
+version = "1"
+stability = "experimental"
+
+[[contract]]
 id = "dbus.org.linura.Control1"
 kind = "dbus-interface"
 path = "interfaces/dbus/org.linura.Control1.xml"

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import fnmatch
+import os
 from pathlib import Path
+import re
+import subprocess
+import tempfile
+import tomllib
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -17,6 +23,264 @@ READ_ONLY_INTERFACES = {
 
 
 class V06PolkitBoundaryTests(unittest.TestCase):
+    def test_expanded_guest_matrix_preserves_all_cases_and_legacy_projection(
+        self,
+    ) -> None:
+        source = (ROOT / "tests/acceptance/v06/qualify-guest.sh").read_text(
+            encoding="utf-8"
+        )
+        script = source.split(
+            "stage deterministic-fault-matrix-inside-disposable-guest\n", 1
+        )[1].split('\necho "real-authority1-success=qualified"', 1)[0]
+        self.assertIn(
+            "--test-threads=1 --nocapture 2>&1 | tee /tmp/v06-matrix.log",
+            script,
+        )
+        self.assertIn(
+            "--test-threads=1 --nocapture --skip s17_managed_ 2>&1 "
+            "| tee /tmp/v06-legacy-matrix.log",
+            script,
+        )
+        self.assertIn("49 passed; 0 failed; 0 ignored;", script)
+        self.assertIn("11 passed; 0 failed; 0 ignored;", script)
+
+        mock = """set -euo pipefail
+matrix() {
+    if [[ " $* " == *" --skip s17_managed_ "* ]]; then
+        printf 'test result: ok. %s passed; 0 failed; %s ignored;\\n' "$LINURA_TEST_BASELINE" "$LINURA_BASELINE_IGNORED"
+        return "$LINURA_BASELINE_EXIT"
+    fi
+    printf 'test result: ok. %s passed; 0 failed; %s ignored;\\n' "$LINURA_TEST_FULL" "$LINURA_TEST_IGNORED"
+    return "$LINURA_TEST_EXIT"
+}
+"""
+        for full, baseline, ignored, baseline_ignored, code, baseline_code, valid in (
+            (49, 11, 0, 0, 0, 0, True),
+            (48, 11, 0, 0, 0, 0, False),
+            (50, 11, 0, 0, 0, 0, False),
+            (49, 10, 0, 0, 0, 0, False),
+            (49, 12, 0, 0, 0, 0, False),
+            (49, 11, 1, 0, 0, 0, False),
+            (49, 11, 0, 1, 0, 0, False),
+            (49, 11, 0, 0, 1, 0, False),
+            (49, 11, 0, 0, 0, 1, False),
+        ):
+            with (
+                self.subTest(
+                    full=full,
+                    baseline=baseline,
+                    ignored=ignored,
+                    baseline_ignored=baseline_ignored,
+                    code=code,
+                    baseline_code=baseline_code,
+                ),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                scoped = script.replace(
+                    "/usr/libexec/linura/v06-qualification-matrix", "matrix"
+                ).replace("/tmp/v06-", directory + "/v06-")
+                result = subprocess.run(
+                    ["bash", "-c", mock + scoped],
+                    env={
+                        **os.environ,
+                        "LINURA_TEST_FULL": str(full),
+                        "LINURA_TEST_BASELINE": str(baseline),
+                        "LINURA_TEST_IGNORED": str(ignored),
+                        "LINURA_BASELINE_IGNORED": str(baseline_ignored),
+                        "LINURA_TEST_EXIT": str(code),
+                        "LINURA_BASELINE_EXIT": str(baseline_code),
+                    },
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                self.assertEqual(result.returncode == 0, valid, result.stderr)
+
+        host = (ROOT / "tests/acceptance/v06/qualify-host.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"$ARTIFACT_DIR/$matrix_log"', host)
+        self.assertIn("v06-matrix.log v06-legacy-matrix.log", host)
+        self.assertIn(
+            'if [[ "$guest_rc" -ne 0 || "$matrix_evidence_rc" -ne 0 ]]; then',
+            host,
+        )
+        self.assertIn('exit "$matrix_evidence_rc"', host)
+
+    def test_v06_guest_qualifies_live_native_session_packaging(self) -> None:
+        host = (ROOT / "tests/acceptance/v06/qualify-host.sh").read_text(
+            encoding="utf-8"
+        )
+        guest = (ROOT / "tests/acceptance/v06/qualify-native-session.sh").read_text(
+            encoding="utf-8"
+        )
+        workflow = (ROOT / ".github/workflows/v06-managed-lifecycle-vm.yml").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "linura-executor-session",
+            "org.linura.Executor.Session1.conf",
+            "org.linura.executor.session.policy",
+            "50-linura-executor-session.rules",
+            "50-linura-qualified-sleep.conf",
+            "50-linura-protective-lock.conf",
+            "linura-executor-session.service",
+            "qualify-native-session.sh",
+        ):
+            self.assertIn(required, host)
+        self.assertIn("v06-native-session.log", host)
+        self.assertIn("-p linura-executor-session", workflow)
+        self.assertIn('"session_executor": "v06-executor-session.bin"', workflow)
+        for expected in (
+            "stage active-native-session-executor",
+            "systemctl is-active --quiet",
+            "busctl --system introspect",
+            "SetSecure sbsttssss",
+            "native-session-root-denied",
+            "native-session-polkit-ordinary-denied",
+            'LAST_FAILURE_OUTPUT="$output"',
+            '--process "$$"',
+            "pkaction --action-id org.linura.executor.session",
+            "access.*denied|permission.*denied",
+            "native-session-ordinary-denied",
+            "systemd-suspend.service --value -p ExecStartPre",
+            "non-supervised-sleep-helper",
+            "native-session-live-boundary=qualified",
+        ):
+            self.assertIn(expected, guest)
+        self.assertNotIn("systemctl suspend", guest)
+        self.assertNotIn("systemctl reboot", guest)
+        self.assertNotIn("systemctl poweroff", guest)
+
+    def test_native_denial_capture_rejects_unrelated_failures(self) -> None:
+        guest = (ROOT / "tests/acceptance/v06/qualify-native-session.sh").read_text(
+            encoding="utf-8"
+        )
+        prelude = guest.split('\nservice="', 1)[0]
+        probe = (
+            "\nfail() { printf '%s\\n' \"$TEST_DIAGNOSTIC\" >&2; return 1; }\n"
+            "expect_failure test-denial fail\n"
+            "grep -Eiq 'access.*denied|permission.*denied' "
+            '<<<"$LAST_FAILURE_OUTPUT"\n'
+        )
+        for diagnostic, accepted in (
+            ("Call failed: Access denied", True),
+            ("Call failed: Invalid arguments", False),
+            ("Call failed: Service not found", False),
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                result = subprocess.run(
+                    ["bash", "-c", prelude + probe],
+                    env={**os.environ, "TEST_DIAGNOSTIC": diagnostic},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=5,
+                )
+                self.assertEqual(result.returncode == 0, accepted, result.stderr)
+
+    def test_session_security_assets_route_to_v06_qualification(self) -> None:
+        workflow = (ROOT / ".github/workflows/v06-managed-lifecycle-vm.yml").read_text(
+            encoding="utf-8"
+        )
+        routes = workflow.split("  pull_request:\n    paths:\n", 1)[1].split(
+            "\npermissions:", 1
+        )[0]
+        workflow_paths = re.findall(r'(?m)^      - "([^"]+)"$', routes)
+        contract = tomllib.loads(
+            (ROOT / "contracts/qualification-gate-matrix.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        gate = next(
+            gate for gate in contract["gate"] if gate["id"] == "v06-managed-lifecycle"
+        )
+        assets = (
+            "interfaces/dbus/org.linura.Executor.Session1.xml",
+            "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf",
+            "packaging/polkit-1/actions/org.linura.executor.session.policy",
+            "packaging/polkit-1/rules.d/50-linura-executor-session.rules",
+            "packaging/systemd/system/linura-executor-session.service",
+            "packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf",
+            "packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf",
+            "packaging/systemd/sleep.conf.d/future-sleep-policy.conf",
+            "packaging/systemd/system/systemd-suspend.service.d/future-protective-gate.conf",
+        )
+        session_contract = next(
+            item
+            for item in contract["contract"]
+            if item["path"] == "interfaces/dbus/org.linura.Executor.Session1.xml"
+        )
+        self.assertIn("v06-managed-lifecycle", session_contract["gates"])
+        for asset in assets:
+            with self.subTest(asset=asset):
+                self.assertTrue(
+                    any(fnmatch.fnmatchcase(asset, path) for path in workflow_paths),
+                    f"GitHub workflow does not route {asset}",
+                )
+                self.assertTrue(
+                    any(fnmatch.fnmatchcase(asset, path) for path in gate["paths"]),
+                    f"qualification matrix does not route {asset}",
+                )
+
+    def test_session_power_requires_separate_nonretained_admin_authentication(
+        self,
+    ) -> None:
+        root = ET.fromstring(
+            (ROOT / "packaging/polkit-1/actions/org.linura.authority.policy").read_text(
+                encoding="utf-8"
+            )
+        )
+        for operation in ("suspend", "logout", "reboot", "power-off"):
+            action_id = f"org.linura.authority.{operation}-session"
+            actions = [
+                action
+                for action in root.findall("action")
+                if action.get("id") == action_id
+            ]
+            self.assertEqual(len(actions), 1)
+            action = actions[0]
+            self.assertEqual(
+                action.findtext("annotate[@key='org.freedesktop.policykit.owner']"),
+                ACTION_OWNER,
+            )
+            self.assertEqual(action.findtext("defaults/allow_any"), "no")
+            self.assertEqual(action.findtext("defaults/allow_inactive"), "no")
+            self.assertEqual(action.findtext("defaults/allow_active"), "auth_admin")
+            self.assertNotIn("_keep", ET.tostring(action, encoding="unicode"))
+
+    def test_session_owner_unlock_is_native_self_authentication_without_reusable_grants(
+        self,
+    ) -> None:
+        root = ET.fromstring(
+            (ROOT / "packaging/polkit-1/actions/org.linura.authority.policy").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertFalse(
+            any(
+                action.get("id") == "org.linura.authority.lock-session"
+                for action in root.findall("action")
+            )
+        )
+        for action_id, active in [("org.linura.authority.unlock-session", "auth_self")]:
+            actions = [
+                action
+                for action in root.findall("action")
+                if action.get("id") == action_id
+            ]
+            self.assertEqual(len(actions), 1)
+            action = actions[0]
+            self.assertEqual(
+                action.findtext("annotate[@key='org.freedesktop.policykit.owner']"),
+                ACTION_OWNER,
+            )
+            self.assertEqual(action.findtext("defaults/allow_any"), "no")
+            self.assertEqual(action.findtext("defaults/allow_inactive"), "no")
+            self.assertEqual(action.findtext("defaults/allow_active"), active)
+            self.assertNotIn("_keep", ET.tostring(action, encoding="unicode"))
+
     def test_authority_action_owner_matches_unprivileged_service_identity(self) -> None:
         policy_path = ROOT / "packaging/polkit-1/actions/org.linura.authority.policy"
         root = ET.fromstring(policy_path.read_text(encoding="utf-8"))

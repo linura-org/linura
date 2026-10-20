@@ -61,6 +61,54 @@ class OperationSemanticsContractTests(unittest.TestCase):
     def test_repository_contract_is_valid(self) -> None:
         self.assertEqual(check_operation_semantics.validate(ROOT), [])
 
+    def test_protective_policy_configuration_cannot_downgrade_or_gain_an_executor(
+        self,
+    ) -> None:
+        for old, new in (
+            ('class = "linura-owned-state"', 'class = "experience-ephemeral"'),
+            (
+                'approval_class = "session-owner-authentication"',
+                'approval_class = "none"',
+            ),
+            ('durable_format = "LNRP:1"', 'durable_format = "LNRT:2"'),
+            (
+                'approval_class = "session-owner-authentication"\nprivileged_executor_allowed = false',
+                'approval_class = "session-owner-authentication"\nprivileged_executor_allowed = true',
+            ),
+            (
+                'risk_floor = "security-sensitive"\ncontrol_type = "linura_control::ProtectiveLockSettingsControl"',
+                'risk_floor = "user-state"\ncontrol_type = "linura_control::ProtectiveLockSettingsControl"',
+            ),
+        ):
+            with self.subTest(old=old), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                self._rewrite_contract(root, old, new)
+                self.assertIn(
+                    "operation-semantics local_operations drifted from the canonical contract",
+                    check_operation_semantics.validate(root),
+                )
+
+    def test_session_lock_registration_cannot_imply_production_activation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            document = root / "docs/operation-semantics.md"
+            source = document.read_text(encoding="utf-8")
+            boundary = "Secure-lock registration is not production activation."
+            self.assertEqual(source.count(boundary), 1)
+            document.write_text(
+                source.replace(boundary, "Secure locking is qualified."),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "docs/operation-semantics.md missing operation-semantics marker"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
     def test_empty_operation_semantics_contract_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -409,8 +457,8 @@ class OperationSemanticsContractTests(unittest.TestCase):
             self._copy_fixture(root)
             self._rewrite_contract(
                 root,
-                'risk_floor = "security-sensitive"',
-                'risk_floor = "user-state"',
+                '[registered_operations.managed-systemd-active-state]\noperation_id = "operation:systemd.unit.set-active-state"\nclass = "managed-external-effect"\nrisk_floor = "security-sensitive"',
+                '[registered_operations.managed-systemd-active-state]\noperation_id = "operation:systemd.unit.set-active-state"\nclass = "managed-external-effect"\nrisk_floor = "user-state"',
             )
             self.assertTrue(
                 any(

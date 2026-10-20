@@ -59,12 +59,16 @@ PARSER_SUFFIXES = {
 CONF_KINDS = {
     "packaging/arch/archiso/pacman.conf": "pacman",
     "packaging/dbus-1/system.d/org.linura.Authority1.conf": "xml",
+    "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf": "xml",
+    "packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf": "ini",
+    "packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf": "ini",
     "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf": "xml",
     "packaging/sysusers.d/linura-authority.conf": "sysusers",
     "tests/acceptance/v05/49-linura-v05-qualification-dbus.conf": "xml",
 }
 POLKIT_RULES = frozenset(
     {
+        "packaging/polkit-1/rules.d/50-linura-executor-session.rules",
         "packaging/polkit-1/rules.d/50-linura-executor-systemd.rules",
         "tests/acceptance/v05/49-linura-v05-qualification.rules",
         "tests/acceptance/v06/49-linura-v06-qualification.rules",

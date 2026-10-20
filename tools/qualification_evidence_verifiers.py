@@ -877,6 +877,27 @@ def _verify_v05(
     )
 
 
+def _require_v06_matrix_result(
+    text: str, cases: int, label: str, *, filtered_out: int
+) -> None:
+    _require(
+        re.search(rf"(?m)^running {cases} tests?$", text) is not None,
+        f"{label} did not run the exact declared test set",
+    )
+    summaries = re.findall(r"(?m)^test result: ([^\r\n]+)$", text)
+    _require(len(summaries) == 1, f"{label} has no unique test result")
+    _require(
+        re.fullmatch(
+            rf"ok\. {cases} passed; 0 failed; 0 ignored; 0 measured; "
+            rf"{filtered_out} filtered out; finished in [0-9]+(?:\.[0-9]+)?s",
+            summaries[0],
+        )
+        is not None
+        and "FAILED" not in text,
+        f"{label} did not independently pass all {cases} cases",
+    )
+
+
 def _verify_v06(
     root: Path, bundle: Path, primary: dict[str, Any], envelope: dict[str, Any]
 ) -> dict[str, Any]:
@@ -896,6 +917,8 @@ def _verify_v06(
     _require_base_image_binding(primary, envelope)
     transcript = _text(_bundle_file(bundle, "qualification.log"))
     matrix = _text(_bundle_file(bundle, "v06-matrix.log"))
+    legacy_matrix = _text(_bundle_file(bundle, "v06-legacy-matrix.log"))
+    session = _text(_bundle_file(bundle, "v06-native-session.log"))
     _require_markers(
         transcript,
         [
@@ -907,19 +930,53 @@ def _verify_v06(
             "real-idempotency=qualified",
             "real-verification-not-satisfied-explicit-recovery=qualified",
             "real-crash-restart-explicit-no-effect-recovery=qualified",
-            "deterministic-fault-matrix=11/11",
+            "deterministic-fault-matrix=49/49",
         ],
         "v0.6 qualification transcript",
     )
     _require("guest-error " not in transcript, "v0.6 transcript contains guest error")
+    _require_markers(
+        session,
+        [
+            "native-stage=active-native-session-executor",
+            "native-session-live-executor=qualified",
+            "native-session-ordinary-denied-rc=",
+            "native-session-root-denied-rc=",
+            "native-session-polkit-ordinary-denied-rc=",
+            "native-session-direct-denial=qualified",
+            "native-session-pre-kernel-gate=qualified",
+            "non-supervised-sleep-helper-rc=",
+            "native-session-live-boundary=qualified",
+        ],
+        "v0.6 live native session transcript",
+    )
     _require(
-        "test result: ok. 11 passed" in matrix and "FAILED" not in matrix,
-        "v0.6 retained fault matrix did not independently pass 11 cases",
+        "native-guest-error " not in session,
+        "v0.6 live native session transcript contains a guest error",
+    )
+    _require(
+        primary.get("native_session_boundary")
+        == {
+            "scope": "live-disposable-guest-denial-and-pre-kernel-configuration",
+            "destructive_transition_performed": False,
+        },
+        "v0.6 native session boundary claim drifted",
+    )
+    _require_v06_matrix_result(matrix, 49, "v0.6 complete fault matrix", filtered_out=0)
+    _require_v06_matrix_result(
+        legacy_matrix, 11, "v0.6 original fault matrix", filtered_out=38
     )
     fault_matrix = primary.get("fault_matrix")
     _require(
         isinstance(fault_matrix, dict) and fault_matrix.get("cases") == 11,
-        "v0.6 primary fault-matrix cardinality mismatch",
+        "v0.6 original fault-matrix cardinality mismatch",
+    )
+    expanded_matrix = primary.get("expanded_fault_matrix")
+    _require(
+        isinstance(expanded_matrix, dict)
+        and expanded_matrix.get("cases") == 49
+        and expanded_matrix.get("includes_original_cases") == 11,
+        "v0.6 expanded fault-matrix cardinality mismatch",
     )
     artifacts = _required_object(
         primary.get("artifacts"), "v0.6 repository artifact bindings are missing"
@@ -931,21 +988,30 @@ def _verify_v06(
     expected = {
         "authority_runtime": "retained:v06-authorityd.bin",
         "executor": "retained:v06-executor-systemd.bin",
+        "session_executor": "retained:v06-executor-session.bin",
         "fault_matrix": "retained:v06-qualification-matrix.bin",
         "authority_dbus_contract": "interfaces/dbus/org.linura.Authority1.xml",
         "executor_dbus_contract": "interfaces/dbus/org.linura.Executor.Systemd1.xml",
+        "session_executor_dbus_contract": "interfaces/dbus/org.linura.Executor.Session1.xml",
         "authority_dbus_policy": "packaging/dbus-1/system.d/org.linura.Authority1.conf",
         "executor_dbus_policy": "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
+        "session_executor_dbus_policy": "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf",
         "authority_polkit_policy": "packaging/polkit-1/actions/org.linura.authority.policy",
         "executor_polkit_policy": "packaging/polkit-1/actions/org.linura.executor.systemd.policy",
+        "session_executor_polkit_policy": "packaging/polkit-1/actions/org.linura.executor.session.policy",
         "executor_product_rule": "packaging/polkit-1/rules.d/50-linura-executor-systemd.rules",
+        "session_executor_product_rule": "packaging/polkit-1/rules.d/50-linura-executor-session.rules",
         "authority_systemd_unit": "packaging/systemd/system/linura-authorityd.service",
         "executor_systemd_unit": "packaging/systemd/system/linura-executor-systemd.service",
+        "session_executor_systemd_unit": "packaging/systemd/system/linura-executor-session.service",
         "qualification_rule": "tests/acceptance/v06/49-linura-v06-qualification.rules",
         "managed_fixture": "tests/acceptance/v06/linura-managed-v06-qualification.service",
         "not_satisfied_fixture": "tests/acceptance/v06/linura-managed-v06-notsatisfied.service",
+        "suspend_dropin": "packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf",
+        "sleep_config": "packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf",
         "host_protocol": "tests/acceptance/v06/qualify-host.sh",
         "guest_protocol": "tests/acceptance/v06/qualify-guest.sh",
+        "session_guest_protocol": "tests/acceptance/v06/qualify-native-session.sh",
     }
     _require(set(artifacts) == set(expected), "v0.6 artifact inventory drifted")
     for name, record in artifacts.items():
@@ -964,9 +1030,15 @@ def _verify_v06(
             "crash-restart-no-blind-replay-proved",
             "sqlite-integrity-proved",
             "fault-matrix-11-of-11-passed",
+            "expanded-fault-matrix-49-of-49-passed",
+            "native-session-live-denial-and-pre-kernel-configuration-proved",
         ],
         environment_verified=_machine_environment_verified(primary, envelope),
-        details={"fault_matrix_cases": 11, "repository_artifacts": len(artifacts)},
+        details={
+            "fault_matrix_cases": 11,
+            "expanded_fault_matrix_cases": 49,
+            "repository_artifacts": len(artifacts),
+        },
     )
 
 

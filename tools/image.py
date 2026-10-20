@@ -63,6 +63,7 @@ BINARIES = {
     "linura-firstboot": "usr/bin/linura-firstboot",
     "linura-update-guard": "usr/lib/linura/linura-update-guard",
     "linura-executor-systemd": "usr/lib/linura/linura-executor-systemd",
+    "linura-executor-session": "usr/lib/linura/linura-executor-session",
     "linura-authorityd": "usr/lib/linura/linura-authorityd",
 }
 

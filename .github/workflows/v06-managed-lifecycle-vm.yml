@@ -34,21 +34,31 @@ on:
       - "crates/linura-dbus/**"
       - "crates/linura-lifecycle/**"
       - "crates/linura-linux-observation/**"
+      - "crates/linura-linux-session/**"
       - "crates/linura-observation/**"
       - "crates/linura-observation-control/**"
       - "crates/linura-persistence-sqlite/**"
       - "crates/linura-transaction/**"
       - "executors/linura-executor-systemd/**"
+      - "executors/linura-executor-session/**"
       - "verifiers/linura-verifier-systemd/**"
       - "interfaces/dbus/org.linura.Authority1.xml"
+      - "interfaces/dbus/org.linura.SleepGate1.xml"
+      - "interfaces/dbus/org.linura.Executor.Session1.xml"
       - "interfaces/dbus/org.linura.Executor.Systemd1.xml"
       - "packaging/dbus-1/system.d/org.linura.Authority1.conf"
+      - "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf"
       - "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf"
       - "packaging/polkit-1/actions/org.linura.authority.policy"
+      - "packaging/polkit-1/actions/org.linura.executor.session.policy"
       - "packaging/polkit-1/actions/org.linura.executor.systemd.policy"
       - "packaging/polkit-1/rules.d/50-linura-executor-systemd.rules"
+      - "packaging/polkit-1/rules.d/50-linura-executor-session.rules"
       - "packaging/systemd/system/linura-authorityd.service"
       - "packaging/systemd/system/linura-executor-systemd.service"
+      - "packaging/systemd/system/linura-executor-session.service"
+      - "packaging/systemd/sleep.conf.d/**"
+      - "packaging/systemd/system/systemd-suspend.service.d/**"
       - "tests/acceptance/v06/**"
       - "tools/vm.py"
       - "tools/development_workspace.py"
@@ -132,7 +142,7 @@ jobs:
       - name: Build exact-source runtime and guest matrix binaries
         run: |
           set -euo pipefail
-          cargo build --release --locked -p linura-authorityd -p linura-executor-systemd --target-dir "$LINURA_CARGO_TARGET"
+          cargo build --release --locked -p linura-authorityd -p linura-executor-systemd -p linura-executor-session --target-dir "$LINURA_CARGO_TARGET"
           cargo test --release --locked -p linura-authorityd --test v06_qualification --no-run --message-format=json --target-dir "$LINURA_CARGO_TARGET" > "$LINURA_WORK_DIR/v06-test-build.jsonl"
           test_executable="$(python3 - <<'PY'
           import json
@@ -285,21 +295,30 @@ jobs:
           files = {
               "authority_runtime": pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release/linura-authorityd",
               "executor": pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release/linura-executor-systemd",
+              "session_executor": pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release/linura-executor-session",
               "fault_matrix": pathlib.Path(os.environ["LINURA_CARGO_TARGET"]) / "release/v06-qualification-matrix",
               "authority_dbus_contract": root / "interfaces/dbus/org.linura.Authority1.xml",
               "executor_dbus_contract": root / "interfaces/dbus/org.linura.Executor.Systemd1.xml",
+              "session_executor_dbus_contract": root / "interfaces/dbus/org.linura.Executor.Session1.xml",
               "authority_dbus_policy": root / "packaging/dbus-1/system.d/org.linura.Authority1.conf",
               "executor_dbus_policy": root / "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf",
+              "session_executor_dbus_policy": root / "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf",
               "authority_polkit_policy": root / "packaging/polkit-1/actions/org.linura.authority.policy",
               "executor_polkit_policy": root / "packaging/polkit-1/actions/org.linura.executor.systemd.policy",
+              "session_executor_polkit_policy": root / "packaging/polkit-1/actions/org.linura.executor.session.policy",
               "executor_product_rule": root / "packaging/polkit-1/rules.d/50-linura-executor-systemd.rules",
+              "session_executor_product_rule": root / "packaging/polkit-1/rules.d/50-linura-executor-session.rules",
               "authority_systemd_unit": root / "packaging/systemd/system/linura-authorityd.service",
               "executor_systemd_unit": root / "packaging/systemd/system/linura-executor-systemd.service",
+              "session_executor_systemd_unit": root / "packaging/systemd/system/linura-executor-session.service",
               "qualification_rule": root / "tests/acceptance/v06/49-linura-v06-qualification.rules",
               "managed_fixture": root / "tests/acceptance/v06/linura-managed-v06-qualification.service",
               "not_satisfied_fixture": root / "tests/acceptance/v06/linura-managed-v06-notsatisfied.service",
+              "suspend_dropin": root / "packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf",
+              "sleep_config": root / "packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf",
               "host_protocol": root / "tests/acceptance/v06/qualify-host.sh",
               "guest_protocol": root / "tests/acceptance/v06/qualify-guest.sh",
+              "session_guest_protocol": root / "tests/acceptance/v06/qualify-native-session.sh",
           }
           evidence = {
               "schema_version": 1,
@@ -321,6 +340,8 @@ jobs:
                   "separate root executor",
                   "independent native-systemd verifier",
                   "SQLite/WAL durable transaction store",
+                  "systemd-supervised root session executor with narrow D-Bus/Polkit policy",
+                  "installed pre-kernel suspend protection without executing suspend",
               ],
               "qualified_scenarios": [
                   "inactive-to-active complete lifecycle",
@@ -335,7 +356,11 @@ jobs:
                   "process restart does not reconstruct or blindly replay dispatch authority",
                   "already-satisfied new request performs no external effect",
                   "SQLite journal mode is WAL and SQLite integrity_check is clean",
-                  "11-case deterministic stale/failure/recovery/reconciliation matrix passes inside guest",
+                  "native session executor is installed and running inside the guest",
+                  "native session D-Bus and Polkit boundary denies direct ordinary/root callers",
+                  "native pre-kernel suspend drop-in is effective and unsupervised helper invocation fails closed",
+                  "49-case complete deterministic stale/failure/recovery/reconciliation matrix passes inside guest",
+                  "11-case original managed-lifecycle matrix passes separately inside guest without exclusions beyond S17",
               ],
               "fault_matrix": {
                   "cases": 11,
@@ -345,6 +370,14 @@ jobs:
                       "NotSatisfied reprepare", "conflicting recovery", "reconciliation",
                       "durable exact-retry/request-substitution",
                   ],
+              },
+              "native_session_boundary": {
+                  "scope": "live-disposable-guest-denial-and-pre-kernel-configuration",
+                  "destructive_transition_performed": False,
+              },
+              "expanded_fault_matrix": {
+                  "cases": 49,
+                  "includes_original_cases": 11,
               },
               "base_image": {
                   "url": os.environ["BASE_IMAGE_URL"],
@@ -358,6 +391,7 @@ jobs:
                   {
                       "authority_runtime": "v06-authorityd.bin",
                       "executor": "v06-executor-systemd.bin",
+                  "session_executor": "v06-executor-session.bin",
                       "fault_matrix": "v06-qualification-matrix.bin",
                   },
               ),
