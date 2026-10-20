@@ -114,6 +114,9 @@ const fn map_finding_level(level: ReviewFindingLevel) -> PlanPreviewFindingLevel
 const fn map_approval_class(class: ApprovalClass) -> PlanReviewApprovalClass {
     match class {
         ApprovalClass::InteractiveUser => PlanReviewApprovalClass::InteractiveUser,
+        ApprovalClass::SessionOwnerAuthentication => {
+            PlanReviewApprovalClass::SessionOwnerAuthentication
+        }
         ApprovalClass::Administrator => PlanReviewApprovalClass::Administrator,
         ApprovalClass::DestructiveAction => PlanReviewApprovalClass::DestructiveAction,
     }

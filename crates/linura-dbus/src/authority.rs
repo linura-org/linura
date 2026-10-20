@@ -197,7 +197,7 @@ impl Authority1Service {
         self.with_handler(move |handler| {
             handler
                 .converge_systemd_active_state(context, request)
-                .map(receipt_wire)
+                .and_then(receipt_wire)
         })
         .await
     }
@@ -207,6 +207,11 @@ fn authorize_human_candidate(
     sender: &str,
     challenge: &ManagedApprovalChallenge,
 ) -> Result<(), String> {
+    if challenge.change_key() != "active_state"
+        || !matches!(challenge.desired_value(), "active" | "inactive")
+    {
+        return Err("systemd approval challenge has a non-systemd desired state".into());
+    }
     let arguments = polkit_arguments(sender, challenge);
     let mut child = Command::new("/usr/bin/pkcheck")
         .args(arguments)
@@ -251,7 +256,7 @@ fn polkit_arguments(sender: &str, challenge: &ManagedApprovalChallenge) -> Vec<S
     let summary = format!(
         "{} -> active_state={} (plan {})",
         challenge.resource().as_str(),
-        challenge.desired_active_state(),
+        challenge.desired_value(),
         challenge.plan_id().as_str()
     );
     // Never place free-form human prose on a process command line. The request
@@ -276,7 +281,7 @@ fn polkit_arguments(sender: &str, challenge: &ManagedApprovalChallenge) -> Vec<S
         ("linura.resource", challenge.resource().as_str().to_owned()),
         (
             "linura.desired_active_state",
-            challenge.desired_active_state().to_owned(),
+            challenge.desired_value().to_owned(),
         ),
     ];
 
@@ -295,12 +300,17 @@ fn polkit_arguments(sender: &str, challenge: &ManagedApprovalChallenge) -> Vec<S
     arguments
 }
 
-fn receipt_wire(receipt: ManagedMutationReceipt) -> AuthorityReceiptWire {
-    (
+fn receipt_wire(receipt: ManagedMutationReceipt) -> Result<AuthorityReceiptWire, String> {
+    if receipt.change_key != "active_state"
+        || !matches!(receipt.desired_value.as_str(), "active" | "inactive")
+    {
+        return Err("systemd receipt has a non-systemd desired state".into());
+    }
+    Ok((
         receipt.transaction_id,
         receipt.plan_id,
         receipt.resource,
-        receipt.desired_active_state,
+        receipt.desired_value,
         receipt.effect_digest,
         receipt.dispatch_digest.unwrap_or_default(),
         receipt.execution_disposition.unwrap_or_default(),
@@ -308,7 +318,7 @@ fn receipt_wire(receipt: ManagedMutationReceipt) -> AuthorityReceiptWire {
         receipt.final_state,
         receipt.recovered,
         receipt.stages,
-    )
+    ))
 }
 
 fn authority1_service(
@@ -390,6 +400,31 @@ mod tests {
         let receipt = "type=\"(sssssssssbas)\" direction=\"out\"";
         assert_eq!(canonical.matches(receipt).count(), 1, "canonical receipt");
         assert_eq!(live.matches(receipt).count(), 1, "live receipt");
+    }
+
+    #[test]
+    fn systemd_receipt_wire_rejects_cross_route_state() {
+        let receipt = ManagedMutationReceipt {
+            transaction_id: "transaction:1".into(),
+            plan_id: "plan:1".into(),
+            resource: "systemd:unit:example.service".into(),
+            change_key: "active_state".into(),
+            desired_value: "active".into(),
+            effect_digest: "digest".into(),
+            dispatch_digest: None,
+            execution_disposition: None,
+            verification_disposition: "verified".into(),
+            final_state: "complete".into(),
+            recovered: false,
+            stages: Vec::new(),
+        };
+        assert!(receipt_wire(receipt.clone()).is_ok());
+        let mut wrong_route = receipt.clone();
+        wrong_route.change_key = "secure".into();
+        assert!(receipt_wire(wrong_route).is_err());
+        let mut wrong_state = receipt;
+        wrong_state.desired_value = "true".into();
+        assert!(receipt_wire(wrong_state).is_err());
     }
 
     #[test]

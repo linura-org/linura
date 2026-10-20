@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "v010-s17-protective-lock-settings",
+  "introduced_in": "0.10.0",
+  "scope": "system",
+  "reversible": false,
+  "requires_snapshot": true,
+  "preconditions": [
+    "preserve the released LNRT transaction schema version 2 and the independent LNRQ approved-request journal unchanged",
+    "the new local policy store is empty or already has authenticated LNRP schema version 1 with the exact schema fingerprint",
+    "provision a protected directory plus independent non-zero local-policy authority and integrity keys retained across restarts; persistence receives only the authority verifier",
+    "missing state is disabled; never import or synthesize owner consent, settings, authentication proof or historical policy from chat, profiles or transaction digests",
+    "verify exact schema, identity, bounded history, authenticated chain tip and every record before use or successful application; preserve unknown or corrupt databases rather than reinitializing them",
+    "records are append-only owner-and-login-epoch scoped compare-and-swap updates; an exact historical retry is read-only and must not restore a superseded or revoked grant",
+    "full database and key rollback remains a protected filesystem recovery boundary; record authentication alone does not supply an external anti-rollback oracle",
+    "do not erase history or roll back configuration records as cleanup while intent or authority provenance may reference them; capacity exhaustion fails closed"
+  ]
+}

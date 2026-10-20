@@ -447,16 +447,23 @@ def validate(root: Path) -> list[str]:
         for fragment in (
             "trusted_builtin_operation_registry()",
             "validate_managed_systemd_registration(&operation_semantics)",
-            "self.validate_registered_managed_systemd_candidate(&candidate)?",
-            "self.validate_registered_managed_systemd_candidate(&refreshed)?",
-            "self.handoff_registered_managed_systemd(&principal, &mut prepared)?",
-            "self.handoff_registered_managed_systemd(&principal, prepared.as_mut())?",
+            "self.validate_registered_managed_candidate(&candidate)?",
+            "self.validate_registered_managed_candidate(&refreshed)?",
+            "self.handoff_registered_managed(&principal, &mut prepared)?",
+            "self.handoff_registered_managed(&principal, prepared.as_mut())?",
             "candidate_with_risk_floor",
             "recover_indeterminate_with_risk_floor",
             "recover_indeterminate_with_approver_and_risk_floor",
-            "registered_managed_systemd_risk_floor",
+            "registered_managed_risk_floor",
             "prepared.binding().trusted_risk()",
             "semantics.risk() != bound_risk",
+            "registered_route(",
+            "self.validate_registered_managed_plan(",
+            "self.validate_registered_managed_plan(prepared.plan(), prepared.binding().trusted_risk())?;",
+            "self.registered_managed_risk_floor(&request)?",
+            ".resolve_external(&operation_id, plan)",
+            "semantics.requires_durable_managed_lifecycle()",
+            "semantics.permits_privileged_executor()",
         ):
             if fragment not in managed_text:
                 failures.append(

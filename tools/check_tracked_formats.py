@@ -54,6 +54,7 @@ PARSER_SUFFIXES = {
     ".service": "ini",
     ".hook": "arch-hook",
     ".ini": "ini",
+    ".sql": "text",
 }
 CONF_KINDS = {
     "packaging/arch/archiso/pacman.conf": "pacman",

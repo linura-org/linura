@@ -5,7 +5,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use linura_core::{
     Actor, ActorKind, ApprovalRequestId, OperationClass, OperationId, PlanId, PrincipalId,
-    ProviderId, RequestId, ResourceId, RiskClass,
+    ProviderId, RequestId, ResourceId, RiskClass, SessionLockId, SessionTransition,
+    SessionTransitionId,
 };
 use linura_lifecycle::{MutationProgress, MutationStage};
 use linura_policy::{ApprovalClass, PolicyDecision};
@@ -14,18 +15,23 @@ use linura_provider_sdk::{
     ComponentDigest, EffectDescriptor, ExecutionBinding, ExecutionDisposition, ExecutionOutcome,
     VerificationDisposition, VerificationOutcome,
 };
-use linura_transaction::{TransactionId, TransactionState, TransactionStore};
-use sha2::{Digest, Sha256};
+use linura_transaction::{
+    ApprovedRequestJournal, TransactionId, TransactionState, TransactionStore,
+};
 
 use crate::approval_review::PolicyAuthenticatedApprover;
 use crate::durable_authority::TrustedRiskFloor;
 pub use crate::operation_registry::{
-    MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_REGISTERED_OPERATION_ID,
-    MANAGED_SYSTEMD_UNIT_PREFIX,
+    MANAGED_SESSION_LOCK_CAPABILITY, MANAGED_SESSION_LOCK_OPERATION_ID,
+    MANAGED_SESSION_LOCK_PROVIDER, MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_PROVIDER,
+    MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
 };
 use crate::operation_registry::{
-    MANAGED_SYSTEMD_CHANGE_KEY, MANAGED_SYSTEMD_RESOURCE_PREFIX, MANAGED_SYSTEMD_RESOURCE_SUFFIX,
-    MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID, trusted_builtin_operation_registry,
+    MANAGED_SESSION_LOCK_RISK_FLOOR_RULE_ID, MANAGED_SESSION_TRANSITION_CAPABILITY,
+    MANAGED_SESSION_TRANSITION_PROVIDER, MANAGED_SYSTEMD_CHANGE_KEY,
+    MANAGED_SYSTEMD_RESOURCE_PREFIX, MANAGED_SYSTEMD_RESOURCE_SUFFIX,
+    MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID, SESSION_TRANSITION_ROUTES,
+    trusted_builtin_operation_registry,
 };
 use crate::policy_review::TrustedPolicyReview;
 use crate::{
@@ -38,8 +44,9 @@ pub const MANAGED_SYSTEMD_OPERATION: &str = "set-active-state";
 pub const MANAGED_SYSTEMD_INTENT_ORIGIN: &str = "intent:v06:managed-systemd-active-state";
 const MANAGED_APPROVAL_TTL_SECONDS: u64 = 300;
 const MANAGED_REQUEST_PREFIX: &str = "request:v06:";
+const SESSION_REQUEST_PREFIX: &str = "request:v010:session-lock:";
+const TRANSITION_REQUEST_PREFIX: &str = "request:v010:session-transition:";
 const MAX_OPERATION_ID_BYTES: usize = 64;
-const MAX_CANONICAL_DIGEST_FIELD_BYTES: usize = 256 * 1024;
 const MAX_POST_DISPATCH_VERIFY_ATTEMPTS: usize = 64;
 const MAX_POST_DISPATCH_VERIFY_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -51,6 +58,28 @@ struct ManagedApprovalBinding {
     review_digest: String,
 }
 
+/// Interaction requested by Control after policy review. This projection is
+/// neither a policy decision nor proof of approval; adapters cannot manufacture
+/// a challenge by selecting one of these values.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ManagedApprovalClass {
+    InteractiveUser,
+    SessionOwnerAuthentication,
+    Administrator,
+    DestructiveAction,
+}
+
+impl From<ApprovalClass> for ManagedApprovalClass {
+    fn from(class: ApprovalClass) -> Self {
+        match class {
+            ApprovalClass::InteractiveUser => Self::InteractiveUser,
+            ApprovalClass::SessionOwnerAuthentication => Self::SessionOwnerAuthentication,
+            ApprovalClass::Administrator => Self::Administrator,
+            ApprovalClass::DestructiveAction => Self::DestructiveAction,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ManagedApprovalChallenge {
     principal: PrincipalId,
@@ -60,11 +89,41 @@ pub struct ManagedApprovalChallenge {
     observation_digest: String,
     review_digest: String,
     resource: ResourceId,
-    desired_active_state: String,
+    change_key: String,
+    approval_class: ApprovalClass,
+    desired_value: String,
     reason: String,
 }
 
 impl ManagedApprovalChallenge {
+    /// Linura-owned policy enrollment, NOT an external-effect plan or permit.
+    /// The caller is the S17 settings controller after fresh owner/coverage
+    /// validation; the distinct purpose cannot reuse lock/unlock/power proof.
+    pub(crate) fn protective_setting(
+        principal: PrincipalId,
+        request: RequestId,
+        lock: &SessionLockId,
+        enabled: bool,
+        digests: (&str, &str, &str),
+    ) -> Result<Self, String> {
+        Ok(Self {
+            principal,
+            plan_id: PlanId::new(request.as_str()).map_err(|e| e.to_string())?,
+            request_id: request,
+            request_digest: digests.0.into(),
+            observation_digest: digests.1.into(),
+            review_digest: digests.2.into(),
+            resource: lock.resource_id().map_err(|e| e.to_string())?,
+            change_key: "protective_lock.enabled".into(),
+            approval_class: ApprovalClass::SessionOwnerAuthentication,
+            desired_value: enabled.to_string(),
+            reason: if enabled {
+                "Allow protective locking before trusted native suspend during this login. Does not allow unlock or power actions. Protection failure may prevent sleep."
+            } else {
+                "Revoke protective-lock permission for this login. This does not unlock the session or authorize sleep."
+            }.into(),
+        })
+    }
     fn from_candidate(
         candidate: &DurableAuthorityCandidate,
         request: &PlanDesiredStateRequest,
@@ -76,11 +135,14 @@ impl ManagedApprovalChallenge {
                 "canonical planner changed the request-derived plan identity".into(),
             ));
         }
-        let desired_active_state = request
-            .desired_state
-            .get("active_state")
-            .cloned()
-            .ok_or_else(|| ManagedLifecycleError::Contract("active_state is missing".into()))?;
+        let (change_key, desired_value) = managed_desired_attribute(request)?;
+        let approval_class = required_approval_for_request(request)?;
+        if !matches!(candidate.review().decision(), PolicyDecision::RequireApproval { class, .. } if *class == approval_class)
+        {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "registered effect review has an unexpected approval purpose".into(),
+            ));
+        }
         Ok(Self {
             principal,
             request_id: request.request_id.clone(),
@@ -89,7 +151,9 @@ impl ManagedApprovalChallenge {
             observation_digest: candidate.observation_digest().as_str().to_owned(),
             review_digest: candidate.review_digest().as_str().to_owned(),
             resource: request.resource.clone(),
-            desired_active_state,
+            change_key,
+            approval_class,
+            desired_value,
             reason: request.reason.summary.clone(),
         })
     }
@@ -106,11 +170,8 @@ impl ManagedApprovalChallenge {
                 "durable recovery plan identity differs from the stable request identity".into(),
             ));
         }
-        let desired_active_state = request
-            .desired_state
-            .get("active_state")
-            .cloned()
-            .ok_or_else(|| ManagedLifecycleError::Contract("active_state is missing".into()))?;
+        let (change_key, desired_value) = managed_desired_attribute(request)?;
+        let approval_class = required_approval_for_request(request)?;
         Ok(Self {
             principal,
             request_id: request.request_id.clone(),
@@ -119,7 +180,9 @@ impl ManagedApprovalChallenge {
             observation_digest: "recovery:fresh-control-revalidation-required".into(),
             review_digest: "recovery:fresh-policy-revalidation-required".into(),
             resource: request.resource.clone(),
-            desired_active_state,
+            change_key,
+            approval_class,
+            desired_value,
             reason: request.reason.summary.clone(),
         })
     }
@@ -169,8 +232,18 @@ impl ManagedApprovalChallenge {
     }
 
     #[must_use]
-    pub fn desired_active_state(&self) -> &str {
-        &self.desired_active_state
+    pub fn desired_value(&self) -> &str {
+        &self.desired_value
+    }
+
+    #[must_use]
+    pub fn change_key(&self) -> &str {
+        &self.change_key
+    }
+
+    #[must_use]
+    pub fn approval_class(&self) -> ManagedApprovalClass {
+        self.approval_class.into()
     }
 
     #[must_use]
@@ -213,7 +286,7 @@ impl TrustedHumanApproval {
         &self.principal
     }
 
-    fn matches_challenge(&self, challenge: &ManagedApprovalChallenge) -> bool {
+    pub(crate) fn matches_challenge(&self, challenge: &ManagedApprovalChallenge) -> bool {
         self.principal == *challenge.principal()
             && self.binding.as_ref() == Some(&challenge.binding())
     }
@@ -300,7 +373,8 @@ pub struct ManagedMutationReceipt {
     pub transaction_id: String,
     pub plan_id: String,
     pub resource: String,
-    pub desired_active_state: String,
+    pub change_key: String,
+    pub desired_value: String,
     pub effect_digest: String,
     pub dispatch_digest: Option<String>,
     pub execution_disposition: Option<String>,
@@ -378,10 +452,17 @@ impl From<DurableAuthorityError> for ManagedLifecycleError {
 
 pub fn managed_request_id(
     operation_id: &str,
-    _request: &PlanDesiredStateRequest,
+    request: &PlanDesiredStateRequest,
 ) -> Result<RequestId, ManagedLifecycleError> {
     validate_operation_id(operation_id)?;
-    RequestId::new(format!("{MANAGED_REQUEST_PREFIX}{operation_id}"))
+    let prefix = if request.provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER {
+        SESSION_REQUEST_PREFIX
+    } else if is_session_transition(request) {
+        TRANSITION_REQUEST_PREFIX
+    } else {
+        MANAGED_REQUEST_PREFIX
+    };
+    RequestId::new(format!("{prefix}{operation_id}"))
         .map_err(|error| ManagedLifecycleError::InvalidRequestIdentity(error.to_string()))
 }
 
@@ -393,6 +474,8 @@ where
     previews: PlanPreviewControl,
     operation_semantics: OperationSemanticsControl,
     authority: DurableAuthorityControl<S>,
+    request_journal: Option<Box<dyn ApprovedRequestJournal>>,
+    protective_settings: Option<crate::ProtectiveLockSettingsControl>,
 }
 
 impl<S> ManagedLifecycleControl<S>
@@ -413,7 +496,288 @@ where
             previews,
             operation_semantics,
             authority: DurableAuthorityControl::new(store, authority_signer)?,
+            request_journal: None,
+            protective_settings: None,
         })
+    }
+
+    /// Install a validated request-retention port at the trusted composition
+    /// root. Required for S17; this does not alter released v0.6 recovery state.
+    pub fn with_request_journal(
+        mut self,
+        journal: Box<dyn ApprovedRequestJournal>,
+    ) -> Result<Self, ManagedLifecycleError> {
+        journal
+            .integrity_check()
+            .map_err(|error| ManagedLifecycleError::Authority(error.to_string()))?;
+        self.request_journal = Some(journal);
+        Ok(self)
+    }
+
+    /// Trusted composition installs the separate owner-policy store. Merely
+    /// installing it does not activate protective locking or bypass manual policy.
+    #[must_use]
+    pub fn with_protective_lock_settings(
+        mut self,
+        settings: crate::ProtectiveLockSettingsControl,
+    ) -> Self {
+        self.protective_settings = Some(settings);
+        self
+    }
+
+    pub fn configure_protective_lock(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        request: &linura_protocol::ProtectiveLockSettingRequest,
+        authorizer: &dyn ManagedApprovalAuthorizer,
+    ) -> Result<linura_protocol::ProtectiveLockSettingReceipt, String> {
+        self.protective_settings
+            .as_mut()
+            .ok_or("protective-lock policy store is unavailable")?
+            .configure(
+                &mut self.previews,
+                principal,
+                &crate::ProtectiveLockConfigurationRequest {
+                    operation_id: request.operation_id.clone(),
+                    lock: request.lock.clone(),
+                    enabled: request.enabled,
+                },
+                authorizer,
+            )?
+            .public_receipt()
+    }
+
+    pub fn recorded_protective_lock_setting(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        epoch: &linura_core::SessionEpoch,
+    ) -> Result<Option<linura_protocol::ProtectiveLockSettingReceipt>, String> {
+        self.protective_settings
+            .as_ref()
+            .ok_or("protective-lock policy store is unavailable")?
+            .recorded_for_epoch(principal, epoch)?
+            .map(|receipt| receipt.public_receipt())
+            .transpose()
+    }
+
+    pub fn protective_lock_setting_request_status(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: &RequestId,
+    ) -> Result<linura_protocol::ProtectiveLockSettingReceipt, String> {
+        self.protective_settings
+            .as_ref()
+            .ok_or("protective-lock policy store is unavailable")?
+            .request_status(principal, request)?
+            .public_receipt()
+    }
+
+    /// Read historical structured intent only after authenticating both the
+    /// journal record and its exact transaction anchor. This method observes
+    /// no current state, creates no approval and cannot dispatch or reprepare.
+    pub fn retained_session_request(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+    ) -> Result<PlanDesiredStateRequest, ManagedLifecycleError> {
+        let principal_id = PrincipalId::new(principal.as_str().to_owned())
+            .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
+        let journal = self.request_journal.as_ref().ok_or_else(|| {
+            ManagedLifecycleError::Authority(
+                "S17 requires a durable approved structured request journal".into(),
+            )
+        })?;
+        let record = journal
+            .load(&principal_id, request_id)
+            .map_err(|error| ManagedLifecycleError::Authority(error.to_string()))?;
+        if record.principal() != &principal_id || record.request_id() != request_id {
+            return Err(ManagedLifecycleError::Authority(
+                "retained request namespace mismatch".into(),
+            ));
+        }
+        let request = crate::retained_request::decode(&record)?;
+        validate_public_request(&request)?;
+        let protective =
+            crate::protective_lock_execution::retained_protective_request(principal, &request);
+        if !protective {
+            validate_request_identity(&request)?;
+        }
+        let lock = if is_session_transition(&request) {
+            SessionTransitionId::from_resource(&request.resource)
+                .map(|target| target.lock().clone())
+                .map_err(|error| ManagedLifecycleError::Authority(error.to_string()))?
+        } else if request.provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER {
+            SessionLockId::from_resource(&request.resource)
+                .map_err(|error| ManagedLifecycleError::Authority(error.to_string()))?
+        } else {
+            return Err(ManagedLifecycleError::Authority(
+                "retained request is not an S17 request".into(),
+            ));
+        };
+        if !protective && principal.as_str() != format!("unix:uid:{}", lock.epoch().uid()) {
+            return Err(ManagedLifecycleError::Authority(
+                "retained request is not owned by this session principal".into(),
+            ));
+        }
+        self.authority.assert_request_matches(principal, &request)?;
+        Ok(request)
+    }
+
+    /// Historical status remains readable after native generation rotation or
+    /// owner/session replacement. No observer, approver, verifier or executor
+    /// is accepted. Never report this as fresh completion/reconciliation.
+    pub fn session_lock_request_status(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+    ) -> Result<linura_protocol::SessionLockRequestStatus, ManagedLifecycleError> {
+        let request = self.retained_session_request(principal, request_id)?;
+        self.authority.integrity_check()?;
+        self.request_journal
+            .as_ref()
+            .ok_or_else(|| ManagedLifecycleError::Authority("S17 journal is unavailable".into()))?
+            .integrity_check()
+            .map_err(|error| ManagedLifecycleError::Authority(error.to_string()))?;
+        let principal_id = PrincipalId::new(principal.as_str())
+            .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
+        let transaction_id = TransactionId::for_namespace(&principal_id, request_id);
+        let snapshot = self.authority.snapshot(&transaction_id)?;
+        let (_, desired) = managed_desired_attribute(&request)?;
+        Ok(linura_protocol::SessionLockRequestStatus {
+            request_id: request_id.clone(),
+            transaction_id: transaction_id.as_str().into(),
+            lock: SessionLockId::from_resource(&request.resource)
+                .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?,
+            secure: match desired.as_str() {
+                "true" => true,
+                "false" => false,
+                _ => {
+                    return Err(ManagedLifecycleError::Contract(
+                        "retained session desired state is unsupported".into(),
+                    ));
+                }
+            },
+            state: snapshot.state.as_str().into(),
+        })
+    }
+
+    /// Read authenticated historical power/session intent and transaction state.
+    /// No live observer or executor is invoked and no completion is inferred.
+    pub fn session_transition_request_status(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request_id: &RequestId,
+    ) -> Result<linura_protocol::SessionTransitionRequestStatus, ManagedLifecycleError> {
+        let request = self.retained_session_request(principal, request_id)?;
+        if !is_session_transition(&request) {
+            return Err(ManagedLifecycleError::Contract(
+                "retained request is not a session transition".into(),
+            ));
+        }
+        self.authority.integrity_check()?;
+        self.request_journal
+            .as_ref()
+            .ok_or_else(|| ManagedLifecycleError::Authority("S17 journal is unavailable".into()))?
+            .integrity_check()
+            .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+        let principal_id = PrincipalId::new(principal.as_str())
+            .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
+        let transaction_id = TransactionId::for_namespace(&principal_id, request_id);
+        let snapshot = self.authority.snapshot(&transaction_id)?;
+        Ok(linura_protocol::SessionTransitionRequestStatus {
+            request_id: request_id.clone(),
+            transaction_id: transaction_id.as_str().into(),
+            target: SessionTransitionId::from_resource(&request.resource)
+                .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?,
+            state: snapshot.state.as_str().into(),
+        })
+    }
+
+    /// Finish an already-dispatched S17 request from authenticated retained
+    /// material and fresh independent native observations only. No approval or
+    /// executor port is accepted. Absent/unknown state stays indeterminate; it
+    /// can never turn into an automatic request retry or recovered credential.
+    pub fn recover_session_request_without_replay<V: IndependentManagedVerifier>(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request_id: &RequestId,
+        verifier: &mut V,
+    ) -> Result<ManagedMutationReceipt, ManagedLifecycleError> {
+        let request = self.retained_session_request(&principal, request_id)?;
+        let principal_id = PrincipalId::new(principal.as_str().to_owned())
+            .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
+        let transaction_id = TransactionId::for_namespace(&principal_id, request_id);
+        let snapshot = self.authority.snapshot(&transaction_id)?;
+        if matches!(snapshot.state, TransactionState::Prepared) {
+            return Err(ManagedLifecycleError::Indeterminate(
+                "prepared request must be retired by trusted restart recovery; it cannot be dispatched".into()));
+        }
+        if matches!(
+            snapshot.state,
+            TransactionState::Aborted | TransactionState::RecoveryBlocked
+        ) {
+            return Err(ManagedLifecycleError::TerminalState(
+                "retained request is terminal; no replay is permitted".into(),
+            ));
+        }
+        let effect = effect_from_request(&request)?;
+        let verification = verifier
+            .verify_effect(&effect)
+            .map_err(ManagedLifecycleError::Verification)?;
+        if verification.disposition != VerificationDisposition::Satisfied {
+            return Err(ManagedLifecycleError::Indeterminate(
+                "independent observation did not prove the retained request; no replay was attempted".into()));
+        }
+        let final_state = match snapshot.state {
+            TransactionState::Indeterminate => {
+                let risk_floor = self.registered_managed_risk_floor(&request)?;
+                match self.authority.recover_indeterminate_without_replay(
+                    &mut self.previews, principal.clone(), actor.clone(), request.clone(), risk_floor,
+                )? {
+                    DurableRecoveryOutcome::Verified(verified) => self.authority.commit_verified(&principal, verified)?.state,
+                    DurableRecoveryOutcome::Blocked(_) => return Err(ManagedLifecycleError::TerminalState("fresh native recovery found conflicting state; no replay was attempted".into())),
+                    DurableRecoveryOutcome::StillIndeterminate(_) => return Err(ManagedLifecycleError::Indeterminate("fresh Control observation did not prove completion; no replay was attempted".into())),
+                    DurableRecoveryOutcome::Reprepared(_) => return Err(ManagedLifecycleError::Authority("observe-only recovery unexpectedly produced prepared authority".into())),
+                }
+            }
+            TransactionState::Verified => {
+                let verified = self
+                    .authority
+                    .resume_verified(&principal, &transaction_id)?;
+                self.authority.commit_verified(&principal, verified)?.state
+            }
+            TransactionState::Committed => TransactionState::Committed,
+            TransactionState::Prepared
+            | TransactionState::Aborted
+            | TransactionState::RecoveryBlocked => {
+                return Err(ManagedLifecycleError::Authority(
+                    "recovery state changed unexpectedly".into(),
+                ));
+            }
+        };
+        let mut progress = progress_through(MutationStage::Commit)?;
+        self.authority.integrity_check()?;
+        self.request_journal
+            .as_ref()
+            .ok_or_else(|| {
+                ManagedLifecycleError::Authority("S17 journal disappeared during recovery".into())
+            })?
+            .integrity_check()
+            .map_err(|error| ManagedLifecycleError::Authority(error.to_string()))?;
+        advance(&mut progress, MutationStage::Audit)?;
+        self.reconcile(&principal, &actor, &request, &effect, verifier)?;
+        advance(&mut progress, MutationStage::Reconcile)?;
+        Ok(receipt(ReceiptContext {
+            transaction_id: &transaction_id,
+            plan_id: request_id.as_str(),
+            effect: &effect,
+            execution: None,
+            verification: &verification,
+            final_state: &final_state,
+            recovered: true,
+            progress: &progress,
+        }))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -430,12 +794,211 @@ where
         E: AuthorizedEffectExecutor,
         V: IndependentManagedVerifier,
     {
-        validate_public_request(&request)?;
-        validate_request_identity(&request)?;
-        if actor.kind != ActorKind::Human || !actor.interactive {
-            return Err(ManagedLifecycleError::ApprovalBoundary(
-                "v0.6 managed mutation requires an authenticated interactive human actor".into(),
+        if request.provider.as_str() != MANAGED_SYSTEMD_PROVIDER {
+            return Err(ManagedLifecycleError::UnsupportedEffect(
+                "systemd entry point accepts only its registered systemd route".into(),
             ));
+        }
+        self.converge_registered_effect(
+            principal,
+            actor,
+            request,
+            approval_authorizer,
+            executor,
+            verifier,
+            None,
+        )
+    }
+
+    /// Full durable lifecycle for one exact native compositor-lock generation.
+    /// Callers cannot select a risk class, approval purpose, or executor payload.
+    /// Native ownership/coverage is independently revalidated by the adapters;
+    /// this entry point is not a generic effect or authentication bypass.
+    #[allow(clippy::too_many_arguments)]
+    pub fn converge_session_lock<E, V>(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: PlanDesiredStateRequest,
+        approval_authorizer: &dyn ManagedApprovalAuthorizer,
+        executor: &mut E,
+        verifier: &mut V,
+    ) -> Result<ManagedMutationReceipt, ManagedLifecycleError>
+    where
+        E: AuthorizedEffectExecutor,
+        V: IndependentManagedVerifier,
+    {
+        let lock = SessionLockId::from_resource(&request.resource).map_err(|_| {
+            ManagedLifecycleError::UnsupportedEffect("native lock identity is not canonical".into())
+        })?;
+        if request.provider.as_str() != MANAGED_SESSION_LOCK_PROVIDER
+            || principal.as_str() != format!("unix:uid:{}", lock.epoch().uid())
+        {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "session-lock caller is not the exact native session owner".into(),
+            ));
+        }
+        if self.request_journal.is_none() {
+            return Err(ManagedLifecycleError::Authority(
+                "S17 requires a durable approved structured request journal".into(),
+            ));
+        }
+        self.converge_registered_effect(
+            principal,
+            actor,
+            request,
+            approval_authorizer,
+            executor,
+            verifier,
+            None,
+        )
+    }
+
+    /// Protective locking is a distinct authenticated service action, not an
+    /// owner impersonation or an approval bypass for ordinary manual actions.
+    /// The fixed request is derived from current durable owner consent and one
+    /// exact native sleep invocation. An existing transaction is observe-only:
+    /// revocation, event completion and owner restart can never cause replay.
+    pub fn converge_protective_session_lock<
+        E: AuthorizedEffectExecutor,
+        V: IndependentManagedVerifier,
+    >(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        event: linura_core::SleepInvocationId,
+        lock: SessionLockId,
+        executor: &mut E,
+        verifier: &mut V,
+    ) -> Result<ManagedMutationReceipt, ManagedLifecycleError> {
+        if principal.as_str() != linura_policy::PROTECTIVE_SLEEP_PRINCIPAL {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "protective locking requires the authenticated sleep service".into(),
+            ));
+        }
+        let actor = crate::protective_lock_execution::protective_actor()
+            .map_err(ManagedLifecycleError::Contract)?;
+        let request_id = event
+            .protective_request_id(lock.epoch())
+            .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
+        let principal_id = PrincipalId::new(principal.as_str())
+            .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
+        let transaction_id = TransactionId::for_namespace(&principal_id, &request_id);
+        match self.authority.snapshot(&transaction_id) {
+            Ok(_) => {
+                let retained = self.retained_session_request(&principal, &request_id)?;
+                if retained.resource
+                    != lock
+                        .resource_id()
+                        .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?
+                {
+                    return Err(ManagedLifecycleError::Authority(
+                        "protective retry cannot replace the retained native lock generation"
+                            .into(),
+                    ));
+                }
+                return self.recover_session_request_without_replay(
+                    principal,
+                    actor,
+                    &request_id,
+                    verifier,
+                );
+            }
+            Err(DurableAuthorityError::Transaction(detail))
+                if detail == "durable transaction not found" => {}
+            Err(error) => return Err(error.into()),
+        }
+        if self.request_journal.is_none() {
+            return Err(ManagedLifecycleError::Authority(
+                "S17 requires a durable approved structured request journal".into(),
+            ));
+        }
+        let settings = self.protective_settings.as_ref().ok_or_else(|| {
+            ManagedLifecycleError::Authority("protective-lock policy store is unavailable".into())
+        })?;
+        let context = crate::protective_lock_execution::ProtectiveLockContext::from_current(
+            settings, event, lock,
+        )
+        .map_err(ManagedLifecycleError::Authority)?;
+        let request = context.request().map_err(ManagedLifecycleError::Contract)?;
+        self.converge_registered_effect(
+            principal,
+            actor,
+            request,
+            &crate::protective_lock_execution::NoInteractiveProtectiveApproval,
+            executor,
+            verifier,
+            Some(context),
+        )
+    }
+
+    /// A one-shot exact transition uses the same durable authority lifecycle.
+    /// No resume/retry path may redispatch a possibly executed power operation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn converge_session_transition<
+        E: AuthorizedEffectExecutor,
+        V: IndependentManagedVerifier,
+    >(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: PlanDesiredStateRequest,
+        approval_authorizer: &dyn ManagedApprovalAuthorizer,
+        executor: &mut E,
+        verifier: &mut V,
+    ) -> Result<ManagedMutationReceipt, ManagedLifecycleError> {
+        let target = SessionTransitionId::from_resource(&request.resource)
+            .map_err(|error| ManagedLifecycleError::UnsupportedEffect(error.to_string()))?;
+        if !is_session_transition(&request)
+            || principal.as_str() != format!("unix:uid:{}", target.lock().epoch().uid())
+        {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "transition requires the exact authenticated session owner".into(),
+            ));
+        }
+        if self.request_journal.is_none() {
+            return Err(ManagedLifecycleError::Authority(
+                "S17 requires a durable approved structured request journal".into(),
+            ));
+        }
+        self.converge_registered_effect(
+            principal,
+            actor,
+            request,
+            approval_authorizer,
+            executor,
+            verifier,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn converge_registered_effect<E, V>(
+        &mut self,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: PlanDesiredStateRequest,
+        approval_authorizer: &dyn ManagedApprovalAuthorizer,
+        executor: &mut E,
+        verifier: &mut V,
+        protective: Option<crate::protective_lock_execution::ProtectiveLockContext>,
+    ) -> Result<ManagedMutationReceipt, ManagedLifecycleError>
+    where
+        E: AuthorizedEffectExecutor,
+        V: IndependentManagedVerifier,
+    {
+        validate_public_request(&request)?;
+        if let Some(context) = &protective {
+            context
+                .require_request(&principal, &actor, &request)
+                .map_err(ManagedLifecycleError::ApprovalBoundary)?;
+        } else {
+            validate_request_identity(&request)?;
+            if actor.kind != ActorKind::Human || !actor.interactive {
+                return Err(ManagedLifecycleError::ApprovalBoundary(
+                    "v0.6 managed mutation requires an authenticated interactive human actor"
+                        .into(),
+                ));
+            }
         }
 
         let principal_id = PrincipalId::new(principal.as_str().to_owned())
@@ -445,6 +1008,14 @@ where
 
         match self.authority.snapshot(&transaction_id) {
             Ok(_) => {
+                if protective.is_some() {
+                    return self.recover_session_request_without_replay(
+                        principal,
+                        actor,
+                        &request.request_id,
+                        verifier,
+                    );
+                }
                 return self.resume_existing(
                     principal,
                     actor,
@@ -461,14 +1032,25 @@ where
             Err(error) => return Err(error.into()),
         }
 
-        let risk_floor = self.registered_managed_systemd_risk_floor()?;
-        let candidate = match self.authority.candidate_with_risk_floor(
-            &mut self.previews,
-            principal.clone(),
-            actor.clone(),
-            request.clone(),
-            risk_floor,
-        ) {
+        let risk_floor = self.registered_managed_risk_floor(&request)?;
+        let candidate_result = if let Some(context) = &protective {
+            self.authority.protective_candidate(
+                &mut self.previews,
+                principal.clone(),
+                actor.clone(),
+                context.clone(),
+                risk_floor,
+            )
+        } else {
+            self.authority.candidate_with_risk_floor(
+                &mut self.previews,
+                principal.clone(),
+                actor.clone(),
+                request.clone(),
+                risk_floor,
+            )
+        };
+        let candidate = match candidate_result {
             Ok(candidate) => candidate,
             Err(DurableAuthorityError::CandidateNotMutation) => {
                 return Err(ManagedLifecycleError::UnsupportedEffect(
@@ -477,7 +1059,7 @@ where
             }
             Err(error) => return Err(error.into()),
         };
-        self.validate_registered_managed_systemd_candidate(&candidate)?;
+        self.validate_registered_managed_candidate(&candidate)?;
         let canonical_effect = effect_from_candidate(&candidate)?;
         if canonical_effect != effect {
             return Err(ManagedLifecycleError::Contract(
@@ -490,7 +1072,16 @@ where
             ));
         }
 
-        let human_approver = self.authorize_candidate(&candidate, &request, approval_authorizer)?;
+        let human_approver = if protective.is_some() && candidate.is_protective() {
+            if candidate.review().decision() != &PolicyDecision::Allow {
+                return Err(ManagedLifecycleError::ApprovalBoundary(
+                    "protective lock policy did not authorize the exact current invocation".into(),
+                ));
+            }
+            None
+        } else {
+            self.authorize_candidate(&candidate, &request, approval_authorizer)?
+        };
         let (candidate, approval_evidence_id) = if let Some(approver) = human_approver {
             let refreshed = self.refresh_candidate_after_approval(
                 &candidate,
@@ -515,7 +1106,34 @@ where
         } else {
             (candidate, None)
         };
-        let mut prepared = self.authority.prepare(candidate, approval_evidence_id)?;
+        if request.provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER
+            || is_session_transition(&request)
+        {
+            let retained = crate::retained_request::encode(principal_id, &request)?;
+            if retained.digest() != &crate::durable_authority::digest_request(&request)? {
+                return Err(ManagedLifecycleError::Authority(
+                    "retained request digest drift".into(),
+                ));
+            }
+            self.request_journal
+                .as_mut()
+                .ok_or_else(|| {
+                    ManagedLifecycleError::Authority("S17 request journal is unavailable".into())
+                })?
+                .retain(&retained)
+                .map_err(|error| ManagedLifecycleError::Authority(error.to_string()))?;
+        }
+        let mut prepared = if protective.is_some() {
+            let settings = self.protective_settings.as_ref().ok_or_else(|| {
+                ManagedLifecycleError::Authority(
+                    "protective-lock policy store is unavailable".into(),
+                )
+            })?;
+            self.authority
+                .prepare_protective(candidate, &mut self.previews, settings)?
+        } else {
+            self.authority.prepare(candidate, approval_evidence_id)?
+        };
 
         let mut progress = MutationProgress::new();
         advance(&mut progress, MutationStage::Observe)?;
@@ -525,7 +1143,25 @@ where
         advance(&mut progress, MutationStage::Prepare)?;
 
         let plan_id = prepared.binding().plan_id().as_str().to_owned();
-        let permit = self.handoff_registered_managed_systemd(&principal, &mut prepared)?;
+        let permit = if protective.is_some() {
+            self.validate_registered_managed_plan(
+                prepared.plan(),
+                prepared.binding().trusted_risk(),
+            )?;
+            let settings = self.protective_settings.as_ref().ok_or_else(|| {
+                ManagedLifecycleError::Authority(
+                    "protective-lock policy store is unavailable".into(),
+                )
+            })?;
+            self.authority.handoff_protective(
+                &principal,
+                &mut prepared,
+                &mut self.previews,
+                settings,
+            )?
+        } else {
+            self.handoff_registered_managed(&principal, &mut prepared)?
+        };
         let authorization = authorized_effect(effect.clone(), permit)?;
         let dispatch_digest = authorization.binding().dispatch_digest.to_hex();
         let execution = executor
@@ -558,14 +1194,27 @@ where
             }
         }
 
-        let verified = match self.authority.recover_indeterminate_with_risk_floor(
-            &mut self.previews,
-            principal.clone(),
-            actor.clone(),
-            request.clone(),
-            None,
-            risk_floor,
-        )? {
+        let recovery = if request.provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER
+            || is_session_transition(&request)
+        {
+            self.authority.recover_indeterminate_without_replay(
+                &mut self.previews,
+                principal.clone(),
+                actor.clone(),
+                request.clone(),
+                risk_floor,
+            )?
+        } else {
+            self.authority.recover_indeterminate_with_risk_floor(
+                &mut self.previews,
+                principal.clone(),
+                actor.clone(),
+                request.clone(),
+                None,
+                risk_floor,
+            )?
+        };
+        let verified = match recovery {
             DurableRecoveryOutcome::Verified(verified) => verified,
             DurableRecoveryOutcome::Reprepared(_) => {
                 return Err(ManagedLifecycleError::Indeterminate(
@@ -623,6 +1272,14 @@ where
     {
         self.authority
             .assert_request_matches(&principal, &request)?;
+        if (request.provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER
+            || is_session_transition(&request))
+            && self.retained_session_request(&principal, &request.request_id)? != request
+        {
+            return Err(ManagedLifecycleError::Authority(
+                "retained request differs from retry".into(),
+            ));
+        }
         let snapshot = self.authority.snapshot(&transaction_id)?;
         let plan_id = request.request_id.as_str().to_owned();
         match snapshot.state {
@@ -630,6 +1287,20 @@ where
                 "{} is still prepared after a failed pre-dispatch authority use; restart the trusted control composition root so restart recovery can retire it before retry",
                 transaction_id.as_str()
             ))),
+            // A client repeating Converge is not a different recovery policy.
+            // Session lock/unlock/power can never enter the older systemd recovery
+            // path that may reprepare and dispatch an approved retry.
+            TransactionState::Indeterminate
+                if request.provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER
+                    || is_session_transition(&request) =>
+            {
+                self.recover_session_request_without_replay(
+                    principal,
+                    actor,
+                    &request.request_id,
+                    verifier,
+                )
+            }
             TransactionState::Indeterminate => self.finish_indeterminate(
                 principal,
                 actor,
@@ -748,7 +1419,7 @@ where
             let approver = PolicyAuthenticatedApprover::new(
                 approval.principal().clone(),
                 ActorKind::Human,
-                BTreeSet::from([ApprovalClass::Administrator]),
+                BTreeSet::from([challenge.approval_class]),
             );
             let approval_request = ApprovalRequestId::new(format!(
                 "approval:v06:recovery:{}",
@@ -758,7 +1429,7 @@ where
             let expires_at = now_unix_seconds()?
                 .checked_add(MANAGED_APPROVAL_TTL_SECONDS)
                 .ok_or_else(|| ManagedLifecycleError::Contract("approval clock overflow".into()))?;
-            let risk_floor = self.registered_managed_systemd_risk_floor()?;
+            let risk_floor = self.registered_managed_risk_floor(&request)?;
             self.authority
                 .recover_indeterminate_with_approver_and_risk_floor(
                     &mut self.previews,
@@ -769,7 +1440,7 @@ where
                     risk_floor,
                 )?
         } else {
-            let risk_floor = self.registered_managed_systemd_risk_floor()?;
+            let risk_floor = self.registered_managed_risk_floor(&request)?;
             self.authority.recover_indeterminate_with_risk_floor(
                 &mut self.previews,
                 principal.clone(),
@@ -854,7 +1525,7 @@ where
         }
 
         let mut progress = progress_through(MutationStage::Prepare)?;
-        let permit = self.handoff_registered_managed_systemd(&principal, prepared.as_mut())?;
+        let permit = self.handoff_registered_managed(&principal, prepared.as_mut())?;
         let authorization = authorized_effect(effect.clone(), permit)?;
         let dispatch_digest = authorization.binding().dispatch_digest.to_hex();
         let execution = executor
@@ -888,7 +1559,7 @@ where
             }
         }
 
-        let risk_floor = self.registered_managed_systemd_risk_floor()?;
+        let risk_floor = self.registered_managed_risk_floor(&request)?;
         let verified = match self.authority.recover_indeterminate_with_risk_floor(
             &mut self.previews,
             principal.clone(),
@@ -944,9 +1615,11 @@ where
         approval_authorizer: &dyn ManagedApprovalAuthorizer,
     ) -> Result<Option<PolicyAuthenticatedApprover>, ManagedLifecycleError> {
         match candidate.review().decision() {
-            PolicyDecision::Allow => Ok(None),
+            PolicyDecision::Allow => Err(ManagedLifecycleError::ApprovalBoundary(
+                "registered protected effect requires purpose-bound human approval".into(),
+            )),
             PolicyDecision::RequireApproval { class, .. } => {
-                if *class != ApprovalClass::Administrator {
+                if *class != required_approval_for_request(request)? {
                     return Err(ManagedLifecycleError::ApprovalBoundary(format!(
                         "v0.6 narrow effect requires unsupported approval class {class:?}"
                     )));
@@ -982,7 +1655,7 @@ where
         effect: &EffectDescriptor,
     ) -> Result<DurableAuthorityCandidate, ManagedLifecycleError> {
         let approved_challenge = ManagedApprovalChallenge::from_candidate(approved, &request)?;
-        let risk_floor = self.registered_managed_systemd_risk_floor()?;
+        let risk_floor = self.registered_managed_risk_floor(&request)?;
         let refreshed = match self.authority.candidate_with_risk_floor(
             &mut self.previews,
             principal,
@@ -999,14 +1672,16 @@ where
             }
             Err(error) => return Err(error.into()),
         };
-        self.validate_registered_managed_systemd_candidate(&refreshed)?;
+        self.validate_registered_managed_candidate(&refreshed)?;
         let refreshed_challenge = ManagedApprovalChallenge::from_candidate(&refreshed, &request)?;
         let semantics_unchanged = approved_challenge.principal == refreshed_challenge.principal
             && approved_challenge.request_id == refreshed_challenge.request_id
             && approved_challenge.plan_id == refreshed_challenge.plan_id
             && approved_challenge.request_digest == refreshed_challenge.request_digest
             && approved_challenge.resource == refreshed_challenge.resource
-            && approved_challenge.desired_active_state == refreshed_challenge.desired_active_state
+            && approved_challenge.change_key == refreshed_challenge.change_key
+            && approved_challenge.approval_class == refreshed_challenge.approval_class
+            && approved_challenge.desired_value == refreshed_challenge.desired_value
             && approved_challenge.reason == refreshed_challenge.reason
             && review_semantics_unchanged(approved.review(), refreshed.review())
             && effect_from_candidate(&refreshed)? == *effect;
@@ -1019,10 +1694,17 @@ where
         Ok(refreshed)
     }
 
-    fn registered_managed_systemd_risk_floor(
+    fn registered_managed_risk_floor(
         &self,
+        request: &PlanDesiredStateRequest,
     ) -> Result<TrustedRiskFloor, ManagedLifecycleError> {
-        let operation_id = OperationId::new(MANAGED_SYSTEMD_REGISTERED_OPERATION_ID)
+        let _ = effect_from_request(request)?;
+        let (registered_id, floor_rule) = registered_route(
+            request.provider.as_str(),
+            request.observation_capability.as_str(),
+            &request.resource,
+        )?;
+        let operation_id = OperationId::new(registered_id)
             .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
         let risk = self
             .operation_semantics
@@ -1033,28 +1715,30 @@ where
                     "registered managed-systemd operation is missing its trusted risk floor".into(),
                 )
             })?;
-        Ok(TrustedRiskFloor::new(
-            risk,
-            MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID,
-        ))
+        Ok(TrustedRiskFloor::new(risk, floor_rule))
     }
 
-    fn validate_registered_managed_systemd_candidate(
+    fn validate_registered_managed_candidate(
         &self,
         candidate: &DurableAuthorityCandidate,
     ) -> Result<(), ManagedLifecycleError> {
-        self.validate_registered_managed_systemd_plan(
+        self.validate_registered_managed_plan(
             candidate.plan(),
             candidate.review().subject().prospective_risk(),
         )
     }
 
-    fn validate_registered_managed_systemd_plan(
+    fn validate_registered_managed_plan(
         &self,
         plan: &linura_planner::ReconciliationPlan,
         bound_risk: RiskClass,
     ) -> Result<(), ManagedLifecycleError> {
-        let operation_id = OperationId::new(MANAGED_SYSTEMD_REGISTERED_OPERATION_ID)
+        let (registered_id, _) = registered_route(
+            plan.provider.as_str(),
+            plan.observation_capability.as_str(),
+            &plan.resource,
+        )?;
+        let operation_id = OperationId::new(registered_id)
             .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
         let semantics = self
             .operation_semantics
@@ -1082,15 +1766,12 @@ where
         Ok(())
     }
 
-    fn handoff_registered_managed_systemd(
+    fn handoff_registered_managed(
         &mut self,
         principal: &AuthenticatedPrincipal,
         prepared: &mut PreparedDurableAuthority,
     ) -> Result<DispatchPermit, ManagedLifecycleError> {
-        self.validate_registered_managed_systemd_plan(
-            prepared.plan(),
-            prepared.binding().trusted_risk(),
-        )?;
+        self.validate_registered_managed_plan(prepared.plan(), prepared.binding().trusted_risk())?;
         self.authority
             .handoff(principal, prepared)
             .map_err(Into::into)
@@ -1113,10 +1794,19 @@ where
         if verification.disposition != VerificationDisposition::Satisfied {
             return Err(ManagedLifecycleError::Reconciliation(verification.detail));
         }
-        let (plan, observation) = self
-            .previews
-            .authority_candidate(principal.clone(), actor.clone(), request.clone())
-            .map_err(|error| ManagedLifecycleError::Reconciliation(error.to_string()))?;
+        let candidate =
+            if crate::protective_lock_execution::retained_protective_request(principal, request) {
+                self.previews.protective_recovery_candidate(
+                    principal.clone(),
+                    actor.clone(),
+                    request.clone(),
+                )
+            } else {
+                self.previews
+                    .authority_candidate(principal.clone(), actor.clone(), request.clone())
+            };
+        let (plan, observation) =
+            candidate.map_err(|error| ManagedLifecycleError::Reconciliation(error.to_string()))?;
         observation
             .validate(&plan.provider, &plan.resource, &plan.observation_capability)
             .map_err(|error| ManagedLifecycleError::Reconciliation(error.to_string()))?;
@@ -1134,7 +1824,10 @@ where
 /// The exact fresh observation remains independently bound into durable authority
 /// through its observation digest; human approval is transferable across the
 /// interaction boundary only when the reviewed mutation itself is unchanged.
-fn review_semantics_unchanged(left: &TrustedPolicyReview, right: &TrustedPolicyReview) -> bool {
+pub(crate) fn review_semantics_unchanged(
+    left: &TrustedPolicyReview,
+    right: &TrustedPolicyReview,
+) -> bool {
     let left_subject = left.subject();
     let right_subject = right.subject();
     let left_binding = left.binding();
@@ -1272,16 +1965,86 @@ fn validate_public_request(request: &PlanDesiredStateRequest) -> Result<(), Mana
     Ok(())
 }
 
+fn registered_route(
+    provider: &str,
+    capability: &str,
+    resource: &ResourceId,
+) -> Result<(&'static str, &'static str), ManagedLifecycleError> {
+    if provider == MANAGED_SESSION_TRANSITION_PROVIDER
+        && capability == MANAGED_SESSION_TRANSITION_CAPABILITY
+    {
+        let target = SessionTransitionId::from_resource(resource)
+            .map_err(|error| ManagedLifecycleError::UnsupportedEffect(error.to_string()))?;
+        return SESSION_TRANSITION_ROUTES
+            .into_iter()
+            .find(|(action, _, _, _, _)| *action == target.transition().as_str())
+            .map(|(_, operation, _, rule, _)| (operation, rule))
+            .ok_or_else(|| {
+                ManagedLifecycleError::UnsupportedEffect("unknown transition action".into())
+            });
+    }
+    match (provider, capability) {
+        (MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_CAPABILITY) => Ok((
+            MANAGED_SYSTEMD_REGISTERED_OPERATION_ID,
+            MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID,
+        )),
+        (MANAGED_SESSION_LOCK_PROVIDER, MANAGED_SESSION_LOCK_CAPABILITY) => Ok((
+            MANAGED_SESSION_LOCK_OPERATION_ID,
+            MANAGED_SESSION_LOCK_RISK_FLOOR_RULE_ID,
+        )),
+        _ => Err(ManagedLifecycleError::UnsupportedEffect(
+            "route is not a sealed registered managed effect".into(),
+        )),
+    }
+}
+
+fn managed_desired_attribute(
+    request: &PlanDesiredStateRequest,
+) -> Result<(String, String), ManagedLifecycleError> {
+    let _ = effect_from_request(request)?;
+    let (key, value) = request
+        .desired_state
+        .first_key_value()
+        .ok_or_else(|| ManagedLifecycleError::UnsupportedEffect("desired state is empty".into()))?;
+    Ok((key.clone(), value.clone()))
+}
+
+fn required_approval_for_request(
+    request: &PlanDesiredStateRequest,
+) -> Result<ApprovalClass, ManagedLifecycleError> {
+    let (key, value) = managed_desired_attribute(request)?;
+    if is_session_transition(request) {
+        let target = SessionTransitionId::from_resource(&request.resource)
+            .map_err(|error| ManagedLifecycleError::UnsupportedEffect(error.to_string()))?;
+        return Ok(match target.transition() {
+            SessionTransition::Suspend { .. } => ApprovalClass::Administrator,
+            SessionTransition::Logout | SessionTransition::Reboot | SessionTransition::PowerOff => {
+                ApprovalClass::DestructiveAction
+            }
+        });
+    }
+    match (request.provider.as_str(), key.as_str(), value.as_str()) {
+        (MANAGED_SYSTEMD_PROVIDER, "active_state", "active" | "inactive") => {
+            Ok(ApprovalClass::Administrator)
+        }
+        (MANAGED_SESSION_LOCK_PROVIDER, "secure", "true") => Ok(ApprovalClass::InteractiveUser),
+        (MANAGED_SESSION_LOCK_PROVIDER, "secure", "false") => {
+            Ok(ApprovalClass::SessionOwnerAuthentication)
+        }
+        _ => Err(ManagedLifecycleError::UnsupportedEffect(
+            "effect has no exact approval purpose".into(),
+        )),
+    }
+}
+
 fn effect_from_request(
     request: &PlanDesiredStateRequest,
 ) -> Result<EffectDescriptor, ManagedLifecycleError> {
-    if request.provider.as_str() != MANAGED_SYSTEMD_PROVIDER
-        || request.observation_capability.as_str() != MANAGED_SYSTEMD_CAPABILITY
-    {
-        return Err(ManagedLifecycleError::UnsupportedEffect(
-            "only the authoritative systemd unit observation route is supported".into(),
-        ));
-    }
+    let _ = registered_route(
+        request.provider.as_str(),
+        request.observation_capability.as_str(),
+        &request.resource,
+    )?;
     effect_from_parts(
         request.provider.clone(),
         request.resource.clone(),
@@ -1293,16 +2056,25 @@ fn effect_from_candidate(
     candidate: &DurableAuthorityCandidate,
 ) -> Result<EffectDescriptor, ManagedLifecycleError> {
     let subject = candidate.review().subject();
-    if subject.provider().as_str() != MANAGED_SYSTEMD_PROVIDER
-        || subject.capability().as_str() != MANAGED_SYSTEMD_CAPABILITY
-        || subject.changes().len() != 1
-    {
+    let _ = registered_route(
+        subject.provider().as_str(),
+        subject.capability().as_str(),
+        subject.resource(),
+    )?;
+    if subject.changes().len() != 1 {
         return Err(ManagedLifecycleError::UnsupportedEffect(
             "trusted plan is outside the single systemd active-state capability".into(),
         ));
     }
     let change = &subject.changes()[0];
-    if change.key != "active_state" {
+    let expected_key = if subject.provider().as_str() == MANAGED_SESSION_LOCK_PROVIDER {
+        "secure"
+    } else if subject.provider().as_str() == MANAGED_SESSION_TRANSITION_PROVIDER {
+        "completed"
+    } else {
+        "active_state"
+    };
+    if change.key != expected_key {
         return Err(ManagedLifecycleError::UnsupportedEffect(
             "trusted plan contains a mutation other than active_state".into(),
         ));
@@ -1320,6 +2092,57 @@ fn effect_from_parts(
     resource: ResourceId,
     desired_state: &BTreeMap<String, String>,
 ) -> Result<EffectDescriptor, ManagedLifecycleError> {
+    if provider.as_str() == MANAGED_SESSION_TRANSITION_PROVIDER {
+        let _ = SessionTransitionId::from_resource(&resource)
+            .map_err(|error| ManagedLifecycleError::UnsupportedEffect(error.to_string()))?;
+        if desired_state.len() != 1
+            || desired_state.get("completed").map(String::as_str) != Some("true")
+        {
+            return Err(ManagedLifecycleError::UnsupportedEffect(
+                "transition requires exactly completed=true".into(),
+            ));
+        }
+        return EffectDescriptor::new(
+            provider,
+            resource.clone(),
+            "execute-session-transition",
+            format!("transition={}\n", resource.as_str()).into_bytes(),
+        )
+        .map_err(|error| ManagedLifecycleError::Contract(error.to_string()));
+    }
+    if provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER {
+        let lock = SessionLockId::from_resource(&resource).map_err(|_| {
+            ManagedLifecycleError::UnsupportedEffect("native lock identity is not canonical".into())
+        })?;
+        if desired_state.len() != 1 {
+            return Err(ManagedLifecycleError::UnsupportedEffect(
+                "secure-lock accepts exactly one desired attribute".into(),
+            ));
+        }
+        let secure = desired_state
+            .get("secure")
+            .filter(|value| matches!(value.as_str(), "true" | "false"))
+            .ok_or_else(|| {
+                ManagedLifecycleError::UnsupportedEffect(
+                    "secure must be exactly true or false".into(),
+                )
+            })?;
+        let canonical = lock
+            .resource_id()
+            .map_err(|error| ManagedLifecycleError::Contract(error.to_string()))?;
+        return EffectDescriptor::new(
+            provider,
+            resource,
+            "set-secure",
+            format!("lock={}\nsecure={secure}\n", canonical.as_str()).into_bytes(),
+        )
+        .map_err(|error| ManagedLifecycleError::Contract(error.to_string()));
+    }
+    if provider.as_str() != MANAGED_SYSTEMD_PROVIDER {
+        return Err(ManagedLifecycleError::UnsupportedEffect(
+            "provider has no sealed managed effect factory".into(),
+        ));
+    }
     let unit = managed_unit_from_resource(resource.as_str())?.to_owned();
     if desired_state.len() != 1 {
         return Err(ManagedLifecycleError::UnsupportedEffect(
@@ -1421,16 +2244,28 @@ fn validate_operation_id(operation_id: &str) -> Result<(), ManagedLifecycleError
 fn validate_request_identity(
     request: &PlanDesiredStateRequest,
 ) -> Result<(), ManagedLifecycleError> {
+    let prefix = if request.provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER {
+        SESSION_REQUEST_PREFIX
+    } else if is_session_transition(request) {
+        TRANSITION_REQUEST_PREFIX
+    } else {
+        MANAGED_REQUEST_PREFIX
+    };
     let operation_id = request
         .request_id
         .as_str()
-        .strip_prefix(MANAGED_REQUEST_PREFIX)
+        .strip_prefix(prefix)
         .ok_or_else(|| {
             ManagedLifecycleError::InvalidRequestIdentity(format!(
-                "request id must begin with {MANAGED_REQUEST_PREFIX}"
+                "request id must begin with {prefix}"
             ))
         })?;
     validate_operation_id(operation_id)
+}
+
+fn is_session_transition(request: &PlanDesiredStateRequest) -> bool {
+    request.provider.as_str() == MANAGED_SESSION_TRANSITION_PROVIDER
+        && request.observation_capability.as_str() == MANAGED_SESSION_TRANSITION_CAPABILITY
 }
 
 fn now_unix_seconds() -> Result<u64, ManagedLifecycleError> {
@@ -1440,85 +2275,12 @@ fn now_unix_seconds() -> Result<u64, ManagedLifecycleError> {
         .map_err(|_| ManagedLifecycleError::Contract("system clock is before unix epoch".into()))
 }
 
-struct ApprovalCanonicalHasher {
-    hasher: Sha256,
-}
-
-impl ApprovalCanonicalHasher {
-    fn new(domain: &str) -> Result<Self, ManagedLifecycleError> {
-        let mut value = Self {
-            hasher: Sha256::new(),
-        };
-        value.field(domain.as_bytes())?;
-        Ok(value)
-    }
-
-    fn field(&mut self, bytes: &[u8]) -> Result<(), ManagedLifecycleError> {
-        if bytes.len() > MAX_CANONICAL_DIGEST_FIELD_BYTES {
-            return Err(ManagedLifecycleError::Contract(
-                "approval request digest field exceeds canonical byte bound".into(),
-            ));
-        }
-        let len = u64::try_from(bytes.len()).map_err(|_| {
-            ManagedLifecycleError::Contract("approval digest length overflow".into())
-        })?;
-        self.hasher.update(len.to_be_bytes());
-        self.hasher.update(bytes);
-        Ok(())
-    }
-
-    fn text(&mut self, value: &str) -> Result<(), ManagedLifecycleError> {
-        self.field(value.as_bytes())
-    }
-
-    fn number(&mut self, value: u64) -> Result<(), ManagedLifecycleError> {
-        self.field(&value.to_be_bytes())
-    }
-
-    fn finish(self) -> String {
-        format!("sha256:{}", hex::encode(self.hasher.finalize()))
-    }
-}
-
 fn digest_managed_request(
     request: &PlanDesiredStateRequest,
 ) -> Result<String, ManagedLifecycleError> {
-    let mut digest = ApprovalCanonicalHasher::new("linura.control.desired-request.v1")?;
-    digest.text(request.request_id.as_str())?;
-    digest.text(request.provider.as_str())?;
-    digest.text(request.resource.as_str())?;
-    digest.text(request.observation_capability.as_str())?;
-    digest.text(&request.reason.summary)?;
-    digest.number(
-        u64::try_from(request.reason.intent_ids.len())
-            .map_err(|_| ManagedLifecycleError::Contract("intent count overflow".into()))?,
-    )?;
-    for id in &request.reason.intent_ids {
-        digest.text(id.as_str())?;
-    }
-    digest.number(
-        u64::try_from(request.reason.requirement_ids.len())
-            .map_err(|_| ManagedLifecycleError::Contract("requirement count overflow".into()))?,
-    )?;
-    for id in &request.reason.requirement_ids {
-        digest.text(id.as_str())?;
-    }
-    digest.number(
-        u64::try_from(request.reason.capability_ids.len())
-            .map_err(|_| ManagedLifecycleError::Contract("capability count overflow".into()))?,
-    )?;
-    for id in &request.reason.capability_ids {
-        digest.text(id.as_str())?;
-    }
-    digest
-        .number(u64::try_from(request.desired_state.len()).map_err(|_| {
-            ManagedLifecycleError::Contract("desired-state count overflow".into())
-        })?)?;
-    for (key, value) in &request.desired_state {
-        digest.text(key)?;
-        digest.text(value)?;
-    }
-    Ok(digest.finish())
+    Ok(crate::durable_authority::digest_request(request)?
+        .as_str()
+        .to_owned())
 }
 
 fn advance(
@@ -1563,16 +2325,30 @@ fn receipt(context: ReceiptContext<'_>) -> ManagedMutationReceipt {
         recovered,
         progress,
     } = context;
-    let desired_active_state = String::from_utf8_lossy(&effect.canonical_payload)
-        .lines()
-        .find_map(|line| line.strip_prefix("active_state="))
-        .unwrap_or("unknown")
-        .to_owned();
+    let transition = effect.provider.as_str() == MANAGED_SESSION_TRANSITION_PROVIDER
+        && effect.operation == "execute-session-transition";
+    let change_key = if transition {
+        "completed"
+    } else if effect.provider.as_str() == MANAGED_SESSION_LOCK_PROVIDER {
+        "secure"
+    } else {
+        "active_state"
+    };
+    let desired_value = if transition {
+        "true".to_owned()
+    } else {
+        String::from_utf8_lossy(&effect.canonical_payload)
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{change_key}=")))
+            .unwrap_or("unknown")
+            .to_owned()
+    };
     ManagedMutationReceipt {
         transaction_id: transaction_id.as_str().to_owned(),
         plan_id: plan_id.to_owned(),
         resource: effect.resource.as_str().to_owned(),
-        desired_active_state,
+        change_key: change_key.into(),
+        desired_value,
         effect_digest: effect.digest().to_hex(),
         dispatch_digest: execution.map(|value| value.dispatch_digest.to_hex()),
         execution_disposition: execution.map(|value| execution_name(value.disposition).to_owned()),
