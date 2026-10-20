@@ -347,13 +347,23 @@ jobs:
             --tmpfs /build:rw,exec,nosuid,nodev,size=512m,uid=1000,gid=1000 \
             --mount "type=bind,source=$GITHUB_WORKSPACE/apps/linura-shell/security-owner,target=/source/security-owner,readonly" \
             --mount "type=bind,source=$GITHUB_WORKSPACE/apps/linura-shell/ui,target=/source/ui,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/interfaces/dbus/org.linura.SecurityOwner1.xml,target=/source/contracts/org.linura.SecurityOwner1.xml,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/packaging,target=/source/packaging,readonly" \
             "$native_image" sh -c '
               set -eu
               python3 /opt/linura-native-auth/check.py --json
               cmake -S /source/security-owner -B /build/security-owner -G Ninja \
-                -DLINURA_SECURITY_OWNER_NATIVE_AUTH=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+                -DLINURA_SECURITY_OWNER_NATIVE_AUTH=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                -DLINURA_SECURITY_OWNER_CONTRACT=/source/contracts/org.linura.SecurityOwner1.xml \
+                -DLINURA_SECURITY_OWNER_PACKAGING_DIR=/source/packaging
               cmake --build /build/security-owner --parallel 2
               ctest --test-dir /build/security-owner --output-on-failure
+              cmake --install /build/security-owner --prefix /build/install/usr
+              test -x /build/install/usr/lib/linura/linura-security-owner
+              test -f /build/install/usr/lib/systemd/system/linura-security-owner@.service
+              test -f /build/install/usr/lib/systemd/system/linura-security-owner@.path
+              test -f /build/install/usr/lib/systemd/system/user@.service.d/50-linura-security-owner.conf
+              test -f /build/install/usr/share/linura/security-owner/fonts.conf
             '
       - name: Run canonical Linura checks
         run: cargo xtask check
