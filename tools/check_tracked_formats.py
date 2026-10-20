@@ -141,6 +141,7 @@ def classify(path: Path, content: bytes) -> str:
         "Makefile",
         "apps/linura-shell/ui/CMakeLists.txt",
         "apps/linura-shell/bridge/CMakeLists.txt",
+        "apps/linura-shell/security-owner/CMakeLists.txt",
     }:
         return "build"
     if name == ".clang-format" or name == "CITATION.cff":

@@ -196,6 +196,13 @@ class TrackedFormatsTests(unittest.TestCase):
                     "text",
                 )
 
+    def test_security_owner_foundation_build_input_is_explicit(self) -> None:
+        path = "apps/linura-shell/security-owner/CMakeLists.txt"
+        self.assertEqual(
+            formats.classify(Path(path), (ROOT / path).read_bytes()),
+            "build",
+        )
+
     def test_sysusers_identity_is_policy_bound(self) -> None:
         valid = (
             b'u linura-authority - "Linura managed mutation authority" '
