@@ -2393,8 +2393,19 @@ def validate(root: Path) -> list[str]:
                 failures.append(f"Arch image shell integration missing: {fragment}")
 
     ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    for fragment in REQUIRED_CI:
+    for fragment in REQUIRED_CI[:2]:
         if fragment not in ci:
+            failures.append(f"Linura Shell CI contract missing: {fragment}")
+
+    # Other native CTest invocations must not masquerade as execution of the
+    # shipped ShellBridge's receipt, request-tracking and QML-surface tests.
+    # Canonical CI's independently pinned executable recipe covers this exact
+    # source-build step; scope the shell contract to that step alone.
+    boundary = "      - name: Build and install Linura Shell QML modules\n"
+    steps = ci.split(boundary)
+    shell_build = steps[1].split("\n      - ", 1)[0] if len(steps) == 2 else ""
+    for fragment in REQUIRED_CI[2:]:
+        if fragment not in shell_build:
             failures.append(f"Linura Shell CI contract missing: {fragment}")
 
     readme = (root / "apps/linura-shell/README.md").read_text(encoding="utf-8")

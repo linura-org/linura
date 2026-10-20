@@ -357,6 +357,7 @@ def _verify_ci_execution_steps(source: str) -> None:
         "namespace: canonical-ci-shell",
         "packages: |",
         "  cmake",
+        "  libwayland-dev",
         "  ninja-build",
         "  pkg-config",
         "  qt6-base-dev",
@@ -384,6 +385,20 @@ def _verify_ci_execution_steps(source: str) -> None:
             "canonical CI QML build differs from reviewed SHA-256; "
             "re-audit executable source-build commands before updating"
         )
+    native = required("Build and test native security-owner foundation")
+    if set(native["fields"]) != {"name", "run"} or native["fields"].get("run") != "|":
+        raise ValueError(
+            "canonical CI native security-owner build step structure drifted"
+        )
+    if native["run_lines"] != [
+        "set -euo pipefail",
+        'build_dir="$RUNNER_TEMP/linura-security-owner-foundation-build"',
+        'cmake -S apps/linura-shell/security-owner -B "$build_dir" -G Ninja \\',
+        "  -DCMAKE_BUILD_TYPE=Release",
+        'cmake --build "$build_dir" --parallel 2',
+        'ctest --test-dir "$build_dir" --output-on-failure',
+    ]:
+        raise ValueError("canonical CI native security-owner build recipe drifted")
     canonical = required("Run canonical Linura checks")
     if canonical["fields"].get("run") != "cargo xtask check":
         raise ValueError("canonical CI must execute the full cargo xtask check")
