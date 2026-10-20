@@ -32,6 +32,9 @@ PLAIN = frozenset(
         ".github/CODEOWNERS",
         "LICENSE",
         "bindings/python/LICENSE",
+        "tools/codex/native-auth/.dockerignore",
+        "tools/codex/native-auth/packages.txt",
+        "tools/codex/native-auth/ubuntu-snapshot.list",
     }
 )
 REQUIREMENT_LOCKS = frozenset(
@@ -57,6 +60,7 @@ PARSER_SUFFIXES = {
     ".sql": "text",
 }
 CONF_KINDS = {
+    "apps/linura-shell/security-owner/fonts.conf": "xml",
     "packaging/arch/archiso/pacman.conf": "pacman",
     "packaging/dbus-1/system.d/org.linura.Authority1.conf": "xml",
     "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf": "xml",
@@ -142,6 +146,7 @@ def classify(path: Path, content: bytes) -> str:
         "apps/linura-shell/ui/CMakeLists.txt",
         "apps/linura-shell/bridge/CMakeLists.txt",
         "apps/linura-shell/security-owner/CMakeLists.txt",
+        "tools/codex/native-auth/Dockerfile",
     }:
         return "build"
     if name == ".clang-format" or name == "CITATION.cff":

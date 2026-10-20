@@ -259,6 +259,14 @@ jobs:
             pkg-config
             qt6-base-dev
             qt6-declarative-dev
+            qml6-module-qtqml=6.4.2+dfsg-4build3
+            qml6-module-qtqml-models=6.4.2+dfsg-4build3
+            qml6-module-qtqml-workerscript=6.4.2+dfsg-4build3
+            qml6-module-qtquick=6.4.2+dfsg-4build3
+            qml6-module-qtquick-controls=6.4.2+dfsg-4build3
+            qml6-module-qtquick-layouts=6.4.2+dfsg-4build3
+            qml6-module-qtquick-templates=6.4.2+dfsg-4build3
+            qml6-module-qtquick-window=6.4.2+dfsg-4build3
       - name: Verify pinned multilingual formatting
         shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}
         run: |
@@ -323,6 +331,30 @@ jobs:
             exit 1
           fi
           grep -Fq "liblinura-ui.so => $ui_backing" <<<"$ui_linkage"
+          QML2_IMPORT_PATH="$install_dir/lib/qt6/qml" \
+            QML_IMPORT_PATH="$install_dir/lib/qt6/qml" \
+            ctest --test-dir "$build_dir" --output-on-failure
+      - name: Build and test native authentication components in pinned builder
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 --tag linura-native-auth:20261006 \
+            tools/codex/native-auth
+          native_image="$(docker image inspect --format '{{.Id}}' linura-native-auth:20261006)"
+          docker run --rm --platform linux/amd64 --network none --read-only \
+            --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges \
+            --cpus 2 --memory 2g --memory-swap 2g --pids-limit 256 --ulimit core=0 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m,uid=1000,gid=1000 \
+            --tmpfs /build:rw,exec,nosuid,nodev,size=512m,uid=1000,gid=1000 \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/apps/linura-shell/security-owner,target=/source/security-owner,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/apps/linura-shell/ui,target=/source/ui,readonly" \
+            "$native_image" sh -c '
+              set -eu
+              python3 /opt/linura-native-auth/check.py --json
+              cmake -S /source/security-owner -B /build/security-owner -G Ninja \
+                -DLINURA_SECURITY_OWNER_NATIVE_AUTH=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+              cmake --build /build/security-owner --parallel 2
+              ctest --test-dir /build/security-owner --output-on-failure
+            '
       - name: Run canonical Linura checks
         run: cargo xtask check
       - name: Verify canonical crates.io package
