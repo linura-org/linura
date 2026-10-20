@@ -28,6 +28,16 @@
 
 ## Primary threats and mitigations
 
+### Native session identity laundering, stale lock generation or forged sleep source
+A caller or process substitutes a syntactically valid native session, lock, owner invocation, power transition, permission observation or sleep identifier to affect another login, release a later lock or replay a previous power request.
+- Canonical IDs in `linura-core` are untrusted correlation material, even when parsing succeeds; a caller may construct them without possessing an OS credential.
+- Bind every session epoch to freshly attested kernel boot identity, authenticated logind owner UID, exact session ID and nonzero session creation generation, not PID, user name, ambient `self` or a stale session handle.
+- Bind a native lock to an independently attested security-owner service invocation and nonzero lock generation. Replacement owner, compositor, transport or generation invalidates old approval and unlock proofs.
+- Bind transitions to the exact lock and operation kind; a suspend-cycle baseline and a permission observation cannot prove real sleep/resume, logout, shutdown or reboot.
+- Bind a protective-lock request to an independently attested native pre-sleep invocation plus full login epoch. Neither this ID, a parsed request nor a transport receipt approves pre-sleep locking or sleep.
+- Keep caller identity, native observation, policy approval, human/PAM/Polkit authentication, prepared execution authority and independent postcondition verification separate. Freshly revalidate before dispatch; uncertainty, replacement and replay fail closed.
+- See proposed [ADR 0042](adr/0042-s17-session-security-and-power-authority.md); native proof and qualification remain mandatory.
+
 ### Confused deputy / privilege laundering
 Low-privilege client or agent convinces Linura to perform privileged work.
 - authenticated OS principal binding distinct from client-supplied provenance;
