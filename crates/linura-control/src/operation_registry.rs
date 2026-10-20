@@ -19,6 +19,43 @@ pub(crate) const MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID: &str =
     "operation-registry.managed-systemd-active-state.risk-floor";
 
 pub const TRANSIENT_AUDIO_VOLUME_OPERATION_ID: &str = "operation:audio.output.set-session-volume";
+pub const MANAGED_SESSION_LOCK_OPERATION_ID: &str = "operation:session.lock.set-secure";
+pub const MANAGED_SESSION_LOCK_PROVIDER: &str = "session-locker";
+pub const MANAGED_SESSION_LOCK_CAPABILITY: &str = "session.secure-lock.observe";
+pub const MANAGED_SESSION_TRANSITION_PROVIDER: &str = "logind";
+pub const MANAGED_SESSION_TRANSITION_CAPABILITY: &str = "session.transition.observe";
+pub(crate) const SESSION_TRANSITION_ROUTES: [(&str, &str, &str, &str, RiskClass); 4] = [
+    (
+        "suspend",
+        "operation:session.suspend",
+        "session:transition:suspend:",
+        "operation-registry.managed-session-suspend.risk-floor",
+        RiskClass::SecuritySensitive,
+    ),
+    (
+        "logout",
+        "operation:session.logout",
+        "session:transition:logout:",
+        "operation-registry.managed-session-logout.risk-floor",
+        RiskClass::Destructive,
+    ),
+    (
+        "reboot",
+        "operation:session.reboot",
+        "session:transition:reboot:",
+        "operation-registry.managed-session-reboot.risk-floor",
+        RiskClass::Destructive,
+    ),
+    (
+        "power-off",
+        "operation:session.power-off",
+        "session:transition:power-off:",
+        "operation-registry.managed-session-power-off.risk-floor",
+        RiskClass::Destructive,
+    ),
+];
+pub(crate) const MANAGED_SESSION_LOCK_RISK_FLOOR_RULE_ID: &str =
+    "operation-registry.managed-session-lock.risk-floor";
 pub const TRANSIENT_AUDIO_PROVIDER: &str = "pipewire";
 pub const TRANSIENT_AUDIO_CAPABILITY: &str = "audio.session.observe";
 pub const TRANSIENT_AUDIO_RESOURCE_PREFIX: &str = "audio:session:output:";
@@ -94,7 +131,36 @@ pub(crate) fn trusted_builtin_operation_registry()
     let mut registry = OperationRegistry::default();
     registry.register(managed_systemd_active_state_descriptor()?)?;
     registry.register(transient_audio_volume_descriptor()?)?;
+    registry.register(managed_session_lock_descriptor()?)?;
+    for (_, operation, prefix, _, risk) in SESSION_TRANSITION_ROUTES {
+        registry.register(OperationDescriptor::try_new(
+            OperationId::new(operation)?,
+            OperationClass::ManagedExternalEffect,
+            Some(risk),
+            Some(OperationEffectBinding::try_new(
+                ProviderId::new(MANAGED_SESSION_TRANSITION_PROVIDER)?,
+                CapabilityId::new(MANAGED_SESSION_TRANSITION_CAPABILITY)?,
+                prefix,
+                vec!["completed".into()],
+            )?),
+        )?)?;
+    }
     Ok(registry)
+}
+
+fn managed_session_lock_descriptor() -> Result<OperationDescriptor, TrustedOperationRegistryError> {
+    let binding = OperationEffectBinding::try_new(
+        ProviderId::new(MANAGED_SESSION_LOCK_PROVIDER)?,
+        CapabilityId::new(MANAGED_SESSION_LOCK_CAPABILITY)?,
+        "session:lock:",
+        vec!["secure".into()],
+    )?;
+    Ok(OperationDescriptor::try_new(
+        OperationId::new(MANAGED_SESSION_LOCK_OPERATION_ID)?,
+        OperationClass::ManagedExternalEffect,
+        Some(RiskClass::SecuritySensitive),
+        Some(binding),
+    )?)
 }
 
 fn managed_systemd_active_state_descriptor()
@@ -135,10 +201,83 @@ mod tests {
     use super::*;
 
     #[test]
+    fn session_lock_registration_is_managed_and_has_one_exact_security_sensitive_effect_shape() {
+        let registry =
+            trusted_builtin_operation_registry().unwrap_or_else(|error| unreachable!("{error}"));
+        let operation = OperationId::new(MANAGED_SESSION_LOCK_OPERATION_ID)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        let descriptor = registry
+            .descriptor(&operation)
+            .unwrap_or_else(|| unreachable!("session lock operation absent"));
+        assert_eq!(descriptor.class(), OperationClass::ManagedExternalEffect);
+        assert_eq!(descriptor.risk_floor(), Some(RiskClass::SecuritySensitive));
+        let binding = descriptor
+            .effect_binding()
+            .unwrap_or_else(|| unreachable!("session lock binding absent"));
+        assert_eq!(binding.provider().as_str(), MANAGED_SESSION_LOCK_PROVIDER);
+        assert_eq!(
+            binding.observation_capability().as_str(),
+            MANAGED_SESSION_LOCK_CAPABILITY
+        );
+        assert_eq!(binding.resource_prefix(), "session:lock:");
+        assert_eq!(binding.resource_suffix(), None);
+        assert_eq!(
+            binding
+                .change_keys()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["secure"]
+        );
+        assert!(!binding.matches_resource("session:epoch:unknown"));
+        assert!(!binding.matches_resource("audio:session:output:1"));
+    }
+
+    #[test]
+    fn all_power_routes_are_managed_with_action_specific_risks_and_no_cross_action_binding() {
+        let registry = trusted_builtin_operation_registry().unwrap_or_else(|e| unreachable!("{e}"));
+        for (action, operation, prefix, _, risk) in SESSION_TRANSITION_ROUTES {
+            let descriptor = registry
+                .descriptor(&OperationId::new(operation).unwrap_or_else(|e| unreachable!("{e}")))
+                .unwrap_or_else(|| unreachable!("missing power registration"));
+            assert_eq!(descriptor.class(), OperationClass::ManagedExternalEffect);
+            assert_eq!(descriptor.risk_floor(), Some(risk));
+            let binding = descriptor
+                .effect_binding()
+                .unwrap_or_else(|| unreachable!("missing binding"));
+            assert_eq!(
+                binding.provider().as_str(),
+                MANAGED_SESSION_TRANSITION_PROVIDER
+            );
+            assert_eq!(
+                binding.observation_capability().as_str(),
+                MANAGED_SESSION_TRANSITION_CAPABILITY
+            );
+            assert_eq!(binding.resource_prefix(), prefix);
+            assert_eq!(
+                binding
+                    .change_keys()
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                vec!["completed"]
+            );
+            for (other, _, other_prefix, _, _) in SESSION_TRANSITION_ROUTES {
+                assert_eq!(
+                    binding.matches_resource(&format!("{other_prefix}0:exact-fixture")),
+                    action == other
+                );
+            }
+            assert!(!binding.matches_resource("session:lock:exact-fixture"));
+            assert!(!binding.matches_resource("session:power-permission:reboot:0:exact-fixture"));
+        }
+    }
+
+    #[test]
     fn builtin_registry_binds_the_qualified_managed_systemd_operation() {
         let registry =
             trusted_builtin_operation_registry().unwrap_or_else(|error| unreachable!("{error}"));
-        assert_eq!(registry.len(), 2);
+        assert_eq!(registry.len(), 7);
 
         let operation_id = OperationId::new(MANAGED_SYSTEMD_REGISTERED_OPERATION_ID)
             .unwrap_or_else(|error| unreachable!("{error}"));

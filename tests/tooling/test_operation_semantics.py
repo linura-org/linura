@@ -747,10 +747,51 @@ class OperationSemanticsContractTests(unittest.TestCase):
             managed = root / "crates/linura-control/src/managed_lifecycle.rs"
             managed.write_text(
                 managed.read_text(encoding="utf-8").replace(
-                    "self.validate_registered_managed_systemd_candidate(&candidate)?;",
+                    "self.validate_registered_managed_candidate(&candidate)?;",
                     "",
                     1,
                 ),
+                encoding="utf-8",
+            )
+            self.assertTrue(
+                any(
+                    "managed lifecycle missing trusted operation-registry integration"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_managed_dispatch_cannot_skip_exact_registered_plan_revalidation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            managed = root / "crates/linura-control/src/managed_lifecycle.rs"
+            text = managed.read_text(encoding="utf-8")
+            marker = (
+                "self.validate_registered_managed_plan("
+                "prepared.plan(), prepared.binding().trusted_risk())?;"
+            )
+            self.assertEqual(text.count(marker), 1)
+            managed.write_text(text.replace(marker, "", 1), encoding="utf-8")
+            self.assertTrue(
+                any(
+                    "managed lifecycle missing trusted operation-registry integration"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
+    def test_managed_routing_must_stay_trusted_and_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            managed = root / "crates/linura-control/src/managed_lifecycle.rs"
+            text = managed.read_text(encoding="utf-8")
+            self.assertIn("registered_route(", text)
+            managed.write_text(
+                text.replace("registered_route(", "unchecked_route("),
                 encoding="utf-8",
             )
             self.assertTrue(
@@ -766,7 +807,7 @@ class OperationSemanticsContractTests(unittest.TestCase):
             root = Path(temp_dir)
             self._copy_fixture(root)
             managed = root / "crates/linura-control/src/managed_lifecycle.rs"
-            marker = "self.handoff_registered_managed_systemd(&principal, prepared.as_mut())?"
+            marker = "self.handoff_registered_managed(&principal, prepared.as_mut())?"
             text = managed.read_text(encoding="utf-8")
             self.assertEqual(text.count(marker), 1)
             managed.write_text(

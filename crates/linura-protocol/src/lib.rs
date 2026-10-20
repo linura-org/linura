@@ -73,6 +73,87 @@ pub struct PlanDesiredStateRequest {
     pub desired_state: BTreeMap<String, String>,
 }
 
+/// Process-retained diagnostics only. None of these states proves current lock
+/// coverage, permission to sleep, a successful sleep cycle or durable recovery.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeSleepGateState {
+    Unobserved,
+    Checking,
+    CoverageFenced,
+    Denied,
+}
+
+impl NativeSleepGateState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unobserved => "unobserved",
+            Self::Checking => "checking",
+            Self::CoverageFenced => "coverage-fenced",
+            Self::Denied => "denied",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "unobserved" => Some(Self::Unobserved),
+            "checking" => Some(Self::Checking),
+            "coverage-fenced" => Some(Self::CoverageFenced),
+            "denied" => Some(Self::Denied),
+            _ => None,
+        }
+    }
+}
+
+/// Fresh own-login identity plus a sanitized, machine-wide diagnostic for this
+/// boot. No other user's identity, raw error, event ID or execution material.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeSleepGateStatus {
+    pub epoch: linura_core::SessionEpoch,
+    pub state: NativeSleepGateState,
+}
+
+/// Owner-authenticated Linura-local configuration, not a lock or sleep request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProtectiveLockSettingRequest {
+    pub operation_id: String,
+    pub lock: linura_core::SessionLockId,
+    pub enabled: bool,
+}
+
+/// Historical owner consent only, never proof of native protection, current
+/// coverage, active login, policy authorization or permission to enter sleep.
+/// `latest_for_epoch` refers only to retained history in that login namespace.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProtectiveLockSettingReceipt {
+    pub request_id: RequestId,
+    pub confirmed_lock: linura_core::SessionLockId,
+    pub enabled: bool,
+    pub intent_id: IntentId,
+    pub revision_id: PolicyRevisionId,
+    pub confirmed_at_unix_ms: u64,
+    pub latest_for_epoch: bool,
+}
+
+/// Historical durable transaction state. This is NOT current compositor
+/// evidence, a replay instruction, or an execution credential.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionLockRequestStatus {
+    pub request_id: RequestId,
+    pub transaction_id: String,
+    pub lock: linura_core::SessionLockId,
+    pub secure: bool,
+    pub state: String,
+}
+
+/// Historical durable state only; not native completion or replay permission.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionTransitionRequestStatus {
+    pub request_id: RequestId,
+    pub transaction_id: String,
+    pub target: linura_core::SessionTransitionId,
+    pub state: String,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlanPreviewStatus {
     NoChange,
@@ -148,6 +229,7 @@ pub struct PlanPreview {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlanReviewApprovalClass {
     InteractiveUser,
+    SessionOwnerAuthentication,
     Administrator,
     DestructiveAction,
 }
@@ -157,6 +239,7 @@ impl PlanReviewApprovalClass {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::InteractiveUser => "interactive-user",
+            Self::SessionOwnerAuthentication => "session-owner-authentication",
             Self::Administrator => "administrator",
             Self::DestructiveAction => "destructive-action",
         }
