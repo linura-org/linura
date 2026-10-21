@@ -29,6 +29,7 @@ int main(int argc, char **argv)
     assert(presentation.metaObject()->indexOfMethod("assistiveProjection(bool)") == -1);
     auto &entry = presentation.protectedEntry();
     assert(entry.storageAvailable() && !entry.acceptsInput());
+    assert(presentation.metaObject()->indexOfMethod("primaryRequestAvailable()") == -1);
     assert(entry.metaObject()->indexOfProperty("text") == -1);
     assert(entry.metaObject()->indexOfProperty("password") == -1);
 
@@ -36,6 +37,7 @@ int main(int argc, char **argv)
     const auto *storage = frame.constBits();
     frame.fill(0xffff00ff);
     assert(presentation.paint(frame));
+    assert(presentation.primaryRequestAvailable());
     assert(frame.constBits() == storage);
     assert(frame.pixel(0, 0) != 0xffff00ff);
     const auto findTarget = [&](QSize viewport, NativePointerTarget::Action wanted) {
@@ -61,6 +63,7 @@ int main(int argc, char **argv)
     assert(presentation.pointerTarget(QSize(0, 480), primary).action ==
            NativePointerTarget::Action::None);
     presentation.present(NativePresentation::State::ConfirmingLock);
+    assert(!presentation.primaryRequestAvailable());
     const auto cancel = findTarget(frame.size(), NativePointerTarget::Action::Cancel);
     assert(presentation.pointerTarget(frame.size(), cancel).action ==
            NativePointerTarget::Action::Cancel);
@@ -74,11 +77,13 @@ int main(int argc, char **argv)
            NativePointerTarget::Action::None);
 
     presentation.present(NativePresentation::State::Authenticating);
+    assert(!presentation.primaryRequestAvailable());
     assert(presentation.pointerTarget(frame.size(), primary).action ==
            NativePointerTarget::Action::None);
     QImage masked;
     for (unsigned character = 0; character < 2; ++character) {
         assert(entry.beginNativePrompt());
+        assert(!presentation.primaryRequestAvailable());
         const auto metadata = presentation.assistiveProjection(true);
         assert(metadata.visible && metadata.accepting);
         assert(!presentation.assistiveProjection(false).accepting);
@@ -120,6 +125,10 @@ int main(int argc, char **argv)
              NativePresentation::State::Denied, NativePresentation::State::Unavailable,
              NativePresentation::State::Recovering, NativePresentation::State::SleepNotVerified}) {
         presentation.present(state);
+        assert(presentation.primaryRequestAvailable() ==
+               (state == NativePresentation::State::Locked ||
+                state == NativePresentation::State::Recovering ||
+                state == NativePresentation::State::SleepNotVerified));
         for (auto size : std::array{QSize(320, 240), QSize(1280, 720), QSize(1920, 1080)}) {
             QImage resized(size, QImage::Format_RGB32);
             const auto *pixels = resized.constBits();
@@ -142,6 +151,7 @@ int main(int argc, char **argv)
         assert(previous.isNull() || previous != frame);
         previous = frame.copy();
         assert(entry.beginNativePrompt());
+        assert(!presentation.primaryRequestAvailable());
         for (auto size :
              std::array{QSize(320, 240), QSize(480, 320), QSize(1280, 720), QSize(1920, 1080)}) {
             QImage resized(size, QImage::Format_RGB32);

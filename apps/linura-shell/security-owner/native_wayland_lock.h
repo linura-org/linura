@@ -33,8 +33,10 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     // Native runtime only, before initialization. Entry must outlive the backend;
     // process/session protection must already hold. No QML input route is added.
     using UnlockRequest = std::function<void()>;
+    using PrimaryRequestAvailable = std::function<bool()>;
     using PointerHitTest = std::function<NativePointerTarget(QSize, const QPointF &)>;
     [[nodiscard]] bool bindProtectedInput(SecretEntry &entry, UnlockRequest request,
+                                          PrimaryRequestAvailable primaryAvailable,
                                           PointerHitTest hitTest = {});
     [[nodiscard]] bool protectedInputAvailable() const noexcept;
     [[nodiscard]] bool protectedInputFocused() const;

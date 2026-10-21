@@ -60,6 +60,9 @@ enum class Case {
     UnlockRequest,
     UnlockHeldKey,
     UnlockModifiedKey,
+    UnlockDenied,
+    UnlockUnavailable,
+    UnlockInFlight,
     PointerRequest,
     PointerSubmit,
     PointerCancel,
@@ -93,7 +96,11 @@ bool inputCase(Case scenario)
 }
 bool unlockRequestCase(Case scenario)
 {
-    return scenario >= Case::UnlockRequest && scenario <= Case::UnlockModifiedKey;
+    return scenario >= Case::UnlockRequest && scenario <= Case::UnlockInFlight;
+}
+bool disabledPrimaryCase(Case scenario)
+{
+    return scenario >= Case::UnlockDenied && scenario <= Case::UnlockInFlight;
 }
 bool confirmationCase(Case scenario)
 {
@@ -576,7 +583,7 @@ struct WireServer final
         auto *native = wl_resource_create(client, &ext_session_lock_surface_v1_interface, 1, id);
         assert(native);
         auto *role = new Role{&self, surface, native};
-        if (self.scenario == Case::RenderedInput) {
+        if (self.scenario == Case::RenderedInput || disabledPrimaryCase(self.scenario)) {
             role->width = 640;
             role->height = 480;
         }
@@ -763,7 +770,8 @@ void client(Case scenario, int descriptor, int commands)
     int argc = 1;
     char name[] = "s17-wire-component";
     char *argv[] = {name, nullptr};
-    if (scenario == Case::RenderedInput || confirmationCase(scenario))
+    if (scenario == Case::RenderedInput || confirmationCase(scenario) ||
+        disabledPrimaryCase(scenario))
         QQuickWindow::setSceneGraphBackend(QStringLiteral("software"));
     std::unique_ptr<QCoreApplication> application;
     if (inputCase(scenario))
@@ -777,12 +785,18 @@ void client(Case scenario, int descriptor, int commands)
     std::unique_ptr<SecretEntry> ownedEntry;
     std::unique_ptr<NativePresentation> presentation;
     SecretEntry *entry = nullptr;
-    if (scenario == Case::RenderedInput || confirmationCase(scenario)) {
+    if (scenario == Case::RenderedInput || confirmationCase(scenario) ||
+        disabledPrimaryCase(scenario)) {
         presentation = std::make_unique<NativePresentation>();
         assert(presentation->initialize());
-        presentation->present(confirmationCase(scenario)
-                                  ? NativePresentation::State::ConfirmingLock
-                                  : NativePresentation::State::Authenticating);
+        auto state = NativePresentation::State::Authenticating;
+        if (confirmationCase(scenario))
+            state = NativePresentation::State::ConfirmingLock;
+        else if (scenario == Case::UnlockDenied)
+            state = NativePresentation::State::Denied;
+        else if (scenario == Case::UnlockUnavailable)
+            state = NativePresentation::State::Unavailable;
+        presentation->present(state);
         entry = &presentation->protectedEntry();
     } else if (inputCase(scenario)) {
         ownedEntry = std::make_unique<SecretEntry>();
@@ -799,8 +813,11 @@ void client(Case scenario, int descriptor, int commands)
         assert(backend.actualDisplayFd() == descriptor);
         assert(!backend.protectedInputAvailable() && !backend.protectedInputFocused());
         if (entry) {
+            // A missing primary-action observer must fail closed before native binding.
+            assert(!backend.bindProtectedInput(*entry, [&] { unlockRequests++; }, {}));
             assert(backend.bindProtectedInput(
                 *entry, [&] { unlockRequests++; },
+                [&] { return presentation ? presentation->primaryRequestAvailable() : true; },
                 pointerCase(scenario)
                     ? NativeWaylandLock::PointerHitTest([&](QSize, const QPointF &position) {
                           if (position.y() < 0 || position.y() > 10)
@@ -814,7 +831,7 @@ void client(Case scenario, int descriptor, int commands)
                           return NativePointerTarget{};
                       })
                     : NativeWaylandLock::PointerHitTest{}));
-            assert(!backend.bindProtectedInput(*entry, {}));
+            assert(!backend.bindProtectedInput(*entry, {}, {}));
         }
         const bool initialized = backend.initialize();
         assert(!backend.initialize()); // One startup attempt, no second reader.
@@ -824,7 +841,8 @@ void client(Case scenario, int descriptor, int commands)
         }
         assert(initialized && backend.available());
         if (entry)
-            assert(backend.protectedInputAvailable() && !backend.bindProtectedInput(*entry, {}));
+            assert(backend.protectedInputAvailable() &&
+                   !backend.bindProtectedInput(*entry, {}, {}));
         if (confirmationCase(scenario)) {
             assert(entry && presentation);
             unsigned completions = 0;
@@ -990,6 +1008,21 @@ void client(Case scenario, int descriptor, int commands)
             assert(unlockRequests == 0);
             unsigned char value = 1;
             assert(write(commands, &value, 1) == 1);
+            if (disabledPrimaryCase(scenario)) {
+                const auto until = std::chrono::steady_clock::now() + 100ms;
+                while (std::chrono::steady_clock::now() < until)
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+                assert(unlockRequests == 0 && entry->maskedLength() == 0);
+                value = 2;
+                assert(write(commands, &value, 1) == 1);
+                const auto settled = std::chrono::steady_clock::now() + 100ms;
+                while (std::chrono::steady_clock::now() < settled)
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+                assert(unlockRequests == 0 && !entry->acceptsInput());
+                assert(backend.dispatchNative(false));
+                waitUntil([&] { return !backend.requestedSecure(); });
+                return;
+            }
             if (scenario != Case::UnlockRequest) {
                 const auto until = std::chrono::steady_clock::now() + 100ms;
                 while (std::chrono::steady_clock::now() < until)
@@ -1154,7 +1187,8 @@ int main()
     run(Case::InvalidKeycode, NativeLockProtocol::NativeLockFaultExit, 1, 0);
     run(Case::UnknownKeymapFormat, NativeLockProtocol::NativeLockFaultExit, 1, 0);
     run(Case::RenderedInput, 0, 1, 1);
-    for (auto scenario : {Case::UnlockRequest, Case::UnlockHeldKey, Case::UnlockModifiedKey})
+    for (auto scenario : {Case::UnlockRequest, Case::UnlockHeldKey, Case::UnlockModifiedKey,
+                          Case::UnlockDenied, Case::UnlockUnavailable, Case::UnlockInFlight})
         run(scenario, 0, 1, 1);
     for (auto scenario :
          {Case::PointerRequest, Case::PointerSubmit, Case::PointerCancel, Case::PointerDragAway,

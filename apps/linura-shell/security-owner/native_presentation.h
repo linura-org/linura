@@ -38,6 +38,9 @@ class NativePresentation final : public QObject
     [[nodiscard]] bool paint(QImage &opaqueFrame);
     // C++ native hit testing only; never a Qt/QML event or authority handle.
     [[nodiscard]] NativePointerTarget pointerTarget(QSize viewport, const QPointF &position);
+    // Native-only actionability for Return requests, distinct from PAM submission.
+    // Must be checked again at each key press; never a sticky prior render flag.
+    [[nodiscard]] bool primaryRequestAvailable() const;
 
   Q_SIGNALS:
     void repaintRequested();

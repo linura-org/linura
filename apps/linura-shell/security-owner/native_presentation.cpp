@@ -367,6 +367,27 @@ bool NativePresentation::paint(QImage &frame)
     return ready();
 }
 
+bool NativePresentation::primaryRequestAvailable() const
+{
+    if (!impl_->correctThread() || !ready() || impl_->rendering)
+        return false;
+    if (impl_->entry.acceptsInput() || !impl_->root)
+        return false;
+    // The sole no-prompt actions mirror the first-party primary button.
+    // Authentication, denial, unavailability and confirmation have separate
+    // native paths and may not start a new Control unlock request.
+    switch (impl_->state) {
+    case State::Locked:
+    case State::Recovering:
+    case State::SleepNotVerified:
+        break;
+    default:
+        return false;
+    }
+    return impl_->root->property("primaryAvailable").toBool() &&
+           impl_->root->property("layoutFits").toBool();
+}
+
 NativePointerTarget NativePresentation::pointerTarget(QSize viewport, const QPointF &position)
 {
     if (!impl_->correctThread() || !ready() || impl_->rendering || viewport.width() <= 0 ||

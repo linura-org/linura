@@ -593,10 +593,12 @@ bool NativeWaylandLock::available() const noexcept
     return impl_->initialized;
 }
 bool NativeWaylandLock::bindProtectedInput(SecretEntry &entry, UnlockRequest request,
+                                           PrimaryRequestAvailable primaryAvailable,
                                            PointerHitTest hitTest)
 {
     if (thread() != QThread::currentThread() || entry.thread() != thread() ||
-        impl_->initializationAttempted || impl_->keyboard || !entry.storageAvailable())
+        impl_->initializationAttempted || impl_->keyboard || !entry.storageAvailable() ||
+        !primaryAvailable)
         return false;
     impl_->keyboard = std::make_unique<NativeKeyboard>(
         entry,
@@ -611,6 +613,7 @@ bool NativeWaylandLock::bindProtectedInput(SecretEntry &entry, UnlockRequest req
                 });
         },
         [this] { return impl_->lock && requestedSecure() && secureCoverage(); }, std::move(request),
+        std::move(primaryAvailable),
         hitTest ? NativeKeyboard::PointerHitTest([this, hitTest](wl_surface *surface,
                                                                  const QPointF &position) {
             const Impl::Output *output = nullptr;

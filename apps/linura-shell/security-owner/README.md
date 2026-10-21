@@ -24,6 +24,12 @@ the existing protected-input and approval deadlines, and is cleared on cancel,
 focus loss, daemon cancellation, or owner loss. Session-owner authentication
 still uses only the exact owner UID, never an alternative administrator.
 
+Native Return unlock requests additionally require the currently displayed
+first-party primary action to be enabled and geometrically valid. Error screens
+and in-flight authentication deny duplicate keyboard retries, as does a missing
+action observer. Pointer and keyboard paths recheck actionability at dispatch;
+none of these presentation checks replace Control approval or PAM evidence.
+
 The existing native identity, independently observed compositor state, exact
 session scope, fail-closed acquisition/release and bounded readiness contracts
 remain mandatory. Native authentication completion neither approves a Control

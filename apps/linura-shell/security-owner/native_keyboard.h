@@ -33,10 +33,14 @@ class NativeKeyboard final
     using SurfaceGuard = std::function<bool(wl_surface *)>;
     using CoverageGuard = std::function<bool()>;
     using UnlockRequest = std::function<void()>;
+    // Native presentation must attest the current displayed primary action.
+    // Missing/stale state never permits an unlock request.
+    using PrimaryRequestAvailable = std::function<bool()>;
     using PointerHitTest = std::function<NativePointerTarget(wl_surface *, const QPointF &)>;
     using Repaint = std::function<void()>;
     NativeKeyboard(SecretEntry &entry, SurfaceGuard guard, CoverageGuard coverage,
-                   UnlockRequest request, PointerHitTest hitTest = {}, Repaint repaint = {});
+                   UnlockRequest request, PrimaryRequestAvailable primaryAvailable,
+                   PointerHitTest hitTest = {}, Repaint repaint = {});
     ~NativeKeyboard();
     NativeKeyboard(const NativeKeyboard &) = delete;
     NativeKeyboard &operator=(const NativeKeyboard &) = delete;

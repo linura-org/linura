@@ -85,6 +85,7 @@ class NativeKeyboard::Impl final
     SurfaceGuard guard;
     CoverageGuard coverage;
     UnlockRequest unlockRequest;
+    PrimaryRequestAvailable primaryAvailable;
     PointerHitTest hitTest;
     Repaint repaint;
     wl_pointer *pointer = nullptr;
@@ -107,9 +108,11 @@ class NativeKeyboard::Impl final
     bool bound = false;
 
     Impl(SecretEntry &input, SurfaceGuard surfaceGuard, CoverageGuard coverageGuard,
-         UnlockRequest request, PointerHitTest target, Repaint paint)
+         UnlockRequest request, PrimaryRequestAvailable primaryRequest, PointerHitTest target,
+         Repaint paint)
         : entry(&input), guard(std::move(surfaceGuard)), coverage(std::move(coverageGuard)),
-          unlockRequest(std::move(request)), hitTest(std::move(target)), repaint(std::move(paint))
+          unlockRequest(std::move(request)), primaryAvailable(std::move(primaryRequest)),
+          hitTest(std::move(target)), repaint(std::move(paint))
     {
         const auto flags = static_cast<xkb_context_flags>(XKB_CONTEXT_NO_DEFAULT_INCLUDES |
                                                           XKB_CONTEXT_NO_ENVIRONMENT_NAMES);
@@ -299,7 +302,7 @@ class NativeKeyboard::Impl final
                 self.entry->nativeKey(primary ? Qt::Key_Return : Qt::Key_Escape, Qt::NoModifier,
                                       {});
             } else if (primary && !self.entry->acceptsInput() && self.coverage && self.coverage() &&
-                       self.unlockRequest)
+                       self.unlockRequest && self.primaryAvailable && self.primaryAvailable())
                 self.unlockRequest();
         });
     }
@@ -479,7 +482,8 @@ class NativeKeyboard::Impl final
                 // A native press requests typed intent through Control. It is
                 // not PAM success, approval, prepared dispatch or an unlock.
                 if ((symbol == XKB_KEY_Return || symbol == XKB_KEY_KP_Enter) &&
-                    self.protectedFocus() && self.unlockRequest) {
+                    self.protectedFocus() && self.unlockRequest && self.primaryAvailable &&
+                    self.primaryAvailable()) {
                     for (const char *modifier :
                          {XKB_MOD_NAME_SHIFT, XKB_MOD_NAME_CTRL, XKB_MOD_NAME_ALT,
                           XKB_MOD_NAME_LOGO, "Mod5", "LevelThree"}) {
@@ -580,16 +584,18 @@ class NativeKeyboard::Impl final
 };
 
 NativeKeyboard::NativeKeyboard(SecretEntry &entry, SurfaceGuard guard, CoverageGuard coverage,
-                               UnlockRequest request, PointerHitTest hitTest, Repaint repaint)
+                               UnlockRequest request, PrimaryRequestAvailable primaryAvailable,
+                               PointerHitTest hitTest, Repaint repaint)
     : impl_(std::make_unique<Impl>(entry, std::move(guard), std::move(coverage), std::move(request),
-                                   std::move(hitTest), std::move(repaint)))
+                                   std::move(primaryAvailable), std::move(hitTest),
+                                   std::move(repaint)))
 {}
 NativeKeyboard::~NativeKeyboard() = default;
 bool NativeKeyboard::bind(wl_seat *ownedSeat)
 {
     impl_->checkThread();
     if (impl_->bound || !ownedSeat || !impl_->context || !impl_->compose || !impl_->guard ||
-        !impl_->coverage || wl_seat_get_version(ownedSeat) < 5 ||
+        !impl_->coverage || !impl_->primaryAvailable || wl_seat_get_version(ownedSeat) < 5 ||
         !impl_->entry->bindNativeInput()) {
         if (ownedSeat)
             wl_seat_release(ownedSeat);
