@@ -327,6 +327,7 @@ def _verify_ci_execution_steps(source: str) -> None:
         ("Restore Cargo dependency inputs", {"name", "uses", "with"}),
         ("Install Linura Shell bridge build dependencies", {"name", "uses", "with"}),
         ("Build and install Linura Shell QML modules", {"name", "run"}),
+        ("Build and test native security-owner foundation", {"name", "run"}),
         ("Run canonical Linura checks", {"name", "run"}),
         ("Validate CI dependency cache policy before builds", {"name", "run"}),
     ):
@@ -358,6 +359,8 @@ def _verify_ci_execution_steps(source: str) -> None:
         "packages: |",
         "  cmake",
         "  libwayland-dev",
+        "  libpolkit-agent-1-dev",
+        "  libxkbcommon-dev",
         "  ninja-build",
         "  pkg-config",
         "  qt6-base-dev",
@@ -370,6 +373,7 @@ def _verify_ci_execution_steps(source: str) -> None:
         "  qml6-module-qtquick-layouts",
         "  qml6-module-qtquick-templates",
         "  qml6-module-qtquick-window",
+        "  wayland-protocols",
     ]:
         raise ValueError("canonical CI APT cache input step drifted")
 
@@ -394,11 +398,17 @@ def _verify_ci_execution_steps(source: str) -> None:
         "set -euo pipefail",
         'build_dir="$RUNNER_TEMP/linura-security-owner-foundation-build"',
         'cmake -S apps/linura-shell/security-owner -B "$build_dir" -G Ninja \\',
-        "  -DCMAKE_BUILD_TYPE=Release",
+        "  -DCMAKE_BUILD_TYPE=Release -DLINURA_SECURITY_OWNER_NATIVE_AUTH=ON \\",
+        "  -DBUILD_TESTING=ON",
         'cmake --build "$build_dir" --parallel 2',
         'ctest --test-dir "$build_dir" --output-on-failure',
     ]:
         raise ValueError("canonical CI native security-owner build recipe drifted")
+    order = list(named)
+    if order.index(
+        "Build and test native security-owner foundation"
+    ) + 1 != order.index("Run canonical Linura checks"):
+        raise ValueError("canonical CI native build/test execution order drifted")
     canonical = required("Run canonical Linura checks")
     if canonical["fields"].get("run") != "cargo xtask check":
         raise ValueError("canonical CI must execute the full cargo xtask check")

@@ -533,8 +533,9 @@ for the current implementation status.
   protected storage. Malformed encodings and capacity overflow leave no partial
   edit. An exclusively bound entry rejects generic Qt key-event injection; typed
   response data never traverses Qt/QML input filters. Layout/focus/keyboard loss
-  cancels and wipes. Compose data is fixed root-owned system data without user
-  include lookup. Embedded first-party rendering imports no user/network scene
+  cancels and wipes. Compose data is a source-pinned, digest-checked embedded
+  resource without runtime filesystem or user include lookup.
+  Embedded first-party rendering imports no user/network scene
   and never receives response text. Pre-lock confirmation uses the same exclusive
   connection's fixed private xdg-shell surface. It accepts only a fresh
   unmodified native Enter/Escape press or bounded native primary-button click,

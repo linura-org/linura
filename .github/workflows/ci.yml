@@ -256,6 +256,8 @@ jobs:
           packages: |
             cmake
             libwayland-dev
+            libpolkit-agent-1-dev
+            libxkbcommon-dev
             ninja-build
             pkg-config
             qt6-base-dev
@@ -268,6 +270,7 @@ jobs:
             qml6-module-qtquick-layouts
             qml6-module-qtquick-templates
             qml6-module-qtquick-window
+            wayland-protocols
       - name: Verify pinned multilingual formatting
         shell: /usr/bin/bash --noprofile --norc -euo pipefail {0}
         run: |
@@ -343,7 +346,8 @@ jobs:
           set -euo pipefail
           build_dir="$RUNNER_TEMP/linura-security-owner-foundation-build"
           cmake -S apps/linura-shell/security-owner -B "$build_dir" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release -DLINURA_SECURITY_OWNER_NATIVE_AUTH=ON \
+            -DBUILD_TESTING=ON
           cmake --build "$build_dir" --parallel 2
           ctest --test-dir "$build_dir" --output-on-failure
       - name: Run canonical Linura checks
