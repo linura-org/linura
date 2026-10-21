@@ -283,7 +283,10 @@ RELEASE_INHERITED = {
 
 
 # Pin the executable canonical check body; strings in Rust comments are not evidence.
-XTASK_CHECK_BODY = '    run("cargo", &["fmt", "--all", "--check"])?;\n    run("python3", &["tools/check_source_formatting.py"])?;\n    verify_ruff_version()?;\n    run("ruff", &["check", "."])?;\n    run("ruff", &["format", "--check", "."])?;\n    run(\n        "cargo",\n        &[\n            "clippy",\n            "--workspace",\n            "--all-targets",\n            "--all-features",\n            "--locked",\n            "--",\n            "-D",\n            "warnings",\n        ],\n    )?;\n    run(\n        "cargo",\n        &["test", "--workspace", "--all-features", "--locked"],\n    )?;\n    run("python3", &["scripts/check_repository.py"])?;\n    component_maturity()?;\n    authority_foundation()?;\n    run("python3", &["scripts/validate_assets.py"])?;\n    desktop_identity()?;\n    release_contracts()?;\n    run(\n        "python3",\n        &[\n            "-m",\n            "unittest",\n            "discover",\n            "-s",\n            "tests/tooling",\n            "-p",\n            "test_*.py",\n        ],\n    )?;\n    Ok(())\n'
+XTASK_CHECK_BODY = '    run("cargo", &["fmt", "--all", "--check"])?;\n    run("python3", &["tools/check_source_formatting.py"])?;\n    verify_ruff_version()?;\n    run("ruff", &["check", "."])?;\n    run("ruff", &["format", "--check", "."])?;\n    run(\n        "cargo",\n        &[\n            "clippy",\n            "--workspace",\n            "--all-targets",\n            "--all-features",\n            "--locked",\n            "--",\n            "-D",\n            "warnings",\n        ],\n    )?;\n    run(\n        "cargo",\n        &["test", "--workspace", "--all-features", "--locked"],\n    )?;\n    run("python3", &["scripts/check_repository.py"])?;\n    component_maturity()?;\n    authority_foundation()?;\n    run("python3", &["scripts/validate_assets.py"])?;\n    desktop_identity()?;\n    release_contracts()?;\n    run("python3", &["tools/run_tooling_tests.py"])?;\n    Ok(())\n'
+REVIEWED_TOOLING_RUNNER_SHA256 = (
+    "bd6f3fdd4c132843254be4bce7f446d487b76faf11cf98e300f519f29e0f4b4d"
+)
 
 PYPI_VERIFICATION_COMMANDS = (
     "set -euo pipefail",
@@ -2585,6 +2588,11 @@ def check(root: Path = ROOT) -> list[str]:
 
     ci = read(MANDATORY["canonical-check"])
     xtask = read("tools/xtask/src/main.rs")
+    require(
+        hashlib.sha256(read("tools/run_tooling_tests.py").encode("utf-8")).hexdigest()
+        == REVIEWED_TOOLING_RUNNER_SHA256,
+        "canonical Python tooling runner source changed",
+    )
     canonical = mandatory_bodies.get("canonical-check")
     if canonical:
         body, indent = canonical
