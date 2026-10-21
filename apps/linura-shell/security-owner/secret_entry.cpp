@@ -10,6 +10,7 @@
 #include <QThread>
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace Linura::SecurityOwner {
@@ -133,11 +134,46 @@ bool SecretEntry::beginNativePrompt(NativePromptKind kind, quint32 step, std::op
         return false;
     buffer_.clear();
     promptLabel_ = *label;
+    identityChoices_.clear();
     accepting_ = true;
     announceProtectedInputMetadata(*this);
     promptTimer_.start();
     Q_EMIT inputChanged();
     update();
+    return true;
+}
+
+void SecretEntry::showIdentityChoice()
+{
+    if (identityChoices_.isEmpty())
+        return;
+    promptLabel_ = QStringLiteral("Admin %1/%2: UID %3 (Up/Down, Enter)")
+                       .arg(identityIndex_ + 1)
+                       .arg(identityChoices_.size())
+                       .arg(identityChoices_[identityIndex_]);
+    announceProtectedInputMetadata(*this);
+    Q_EMIT inputChanged();
+    update();
+}
+
+bool SecretEntry::beginNativeIdentitySelection(const QVector<quint32> &uids)
+{
+    if (QThread::currentThread() != thread() || accepting_ || responding_ || !storageAvailable() ||
+        !isEnabled() || !isVisible() || uids.size() < 2 || uids.size() > 8)
+        return false;
+    for (int index = 0; index < static_cast<int>(uids.size()); ++index) {
+        if (uids[index] > static_cast<quint32>(std::numeric_limits<int>::max()))
+            return false;
+        for (int other = 0; other < index; ++other)
+            if (uids[other] == uids[index])
+                return false;
+    }
+    buffer_.clear();
+    identityChoices_ = uids;
+    identityIndex_ = 0;
+    accepting_ = true;
+    promptTimer_.start();
+    showIdentityChoice();
     return true;
 }
 
@@ -183,6 +219,8 @@ void SecretEntry::cancelNativePrompt()
     promptTimer_.stop();
     buffer_.clear();
     promptLabel_.clear();
+    identityChoices_.clear();
+    identityIndex_ = 0;
     announceProtectedInputMetadata(*this);
     Q_EMIT inputChanged();
     update();
@@ -218,6 +256,8 @@ void SecretEntry::keyPressEvent(QKeyEvent *event)
     event->accept();
     if (!accepting_ || nativeInputBound_)
         return;
+    if (!identityChoices_.isEmpty() && event->modifiers() != Qt::NoModifier)
+        return;
     if (handleCommand(event->key()))
         return;
     if (!(event->modifiers() & (Qt::ControlModifier | Qt::MetaModifier)) ||
@@ -242,6 +282,8 @@ void SecretEntry::nativeKey(int key, Qt::KeyboardModifiers modifiers, std::strin
     if (!nativeInputBound_ || !nativeFocused_ || !accepting_ ||
         QThread::currentThread() != thread())
         return;
+    if (!identityChoices_.isEmpty() && modifiers != Qt::NoModifier)
+        return;
     if (handleCommand(key))
         return;
     if (!(modifiers & (Qt::ControlModifier | Qt::MetaModifier)) ||
@@ -253,6 +295,20 @@ void SecretEntry::nativeKey(int key, Qt::KeyboardModifiers modifiers, std::strin
 
 bool SecretEntry::handleCommand(int key)
 {
+    if (!identityChoices_.isEmpty()) {
+        if (key == Qt::Key_Escape || key == Qt::Key_Tab || key == Qt::Key_Backtab) {
+            cancelFromInteraction();
+        } else if (key == Qt::Key_Up || key == Qt::Key_Down) {
+            const auto count = static_cast<int>(identityChoices_.size());
+            identityIndex_ = (identityIndex_ + count + (key == Qt::Key_Up ? -1 : 1)) % count;
+            showIdentityChoice();
+        } else if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+            // The native authentication owner must revalidate this candidate,
+            // then transition to PAM; never treat selection as authentication.
+            Q_EMIT identitySelected(identityChoices_[identityIndex_]);
+        }
+        return true; // No identity-selection keys enter protected response bytes.
+    }
     if (key == Qt::Key_Escape) {
         cancelFromInteraction();
         return true;

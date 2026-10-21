@@ -6,6 +6,7 @@
 #include <QColor>
 #include <QQuickPaintedItem>
 #include <QTimer>
+#include <QVector>
 
 #include <functional>
 
@@ -47,12 +48,15 @@ class SecretEntry final : public QQuickPaintedItem
                                          std::optional<quint32> uid = std::nullopt);
     [[nodiscard]] bool respondToNativePrompt(const std::function<void(const char *)> &response);
     void cancelNativePrompt();
+    // Official Polkit provides the identities; selection is native-keyboard-only.
+    [[nodiscard]] bool beginNativeIdentitySelection(const QVector<quint32> &uids);
 
   Q_SIGNALS:
     void inputChanged();
     void styleChanged();
     void submissionRequested();
     void cancellationRequested();
+    void identitySelected(quint32 uid);
 
   protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -67,6 +71,7 @@ class SecretEntry final : public QQuickPaintedItem
     [[nodiscard]] bool handleCommand(int key);
     void setNativeKeyboardFocus(bool focused);
     void cancelFromInteraction();
+    void showIdentityChoice();
     SecretBuffer buffer_;
     QTimer promptTimer_;
     bool accepting_ = false;
@@ -78,6 +83,8 @@ class SecretEntry final : public QQuickPaintedItem
     QColor surface_;
     QColor focusColor_;
     QString promptLabel_; // Fixed labels plus numeric metadata, never native question/response.
+    QVector<quint32> identityChoices_;
+    int identityIndex_ = 0;
 };
 
 } // namespace Linura::SecurityOwner

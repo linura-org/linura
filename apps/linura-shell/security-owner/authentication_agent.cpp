@@ -1,6 +1,7 @@
 #include "authentication_agent.h"
 
 #include <QByteArray>
+#include <QPair>
 #include <QThread>
 
 #define POLKIT_AGENT_I_KNOW_API_IS_SUBJECT_TO_CHANGE
@@ -14,6 +15,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <limits>
+#include <strings.h>
 #include <thread>
 #include <utility>
 
@@ -132,6 +134,42 @@ bool nativeAuthenticationOriginMatches(PolkitDetails *details, quint32 controlPi
            detailMatches(details, "polkit.subject-pid", QString::number(compositorPid));
 }
 
+std::optional<QVector<quint32>> nativeAuthenticationChoices(const NativeApprovalScope &scope,
+                                                            GList *identities)
+{
+    QVector<quint32> choices;
+    for (auto *item = identities; item; item = item->next) {
+        if (choices.size() == 8 || !item->data || !POLKIT_IS_UNIX_USER(item->data))
+            return std::nullopt;
+        const auto uid = polkit_unix_user_get_uid(POLKIT_UNIX_USER(item->data));
+        if (uid < 0 || choices.contains(static_cast<quint32>(uid)))
+            return std::nullopt;
+        choices.append(static_cast<quint32>(uid));
+    }
+    if (choices.isEmpty())
+        return std::nullopt;
+    if (scope.requiresSessionOwnerAuthentication()) {
+        if (!choices.contains(scope.lock.uid))
+            return std::nullopt;
+        return QVector<quint32>{scope.lock.uid};
+    }
+    return choices;
+}
+
+struct AuthenticationAgent::IdentitySelection final
+{
+    QVector<QPair<quint32, PolkitIdentity *>> identities;
+    QByteArray cookie;
+
+    ~IdentitySelection()
+    {
+        for (const auto &option : identities)
+            g_object_unref(option.second);
+        if (!cookie.isEmpty())
+            explicit_bzero(cookie.data(), static_cast<std::size_t>(cookie.size()));
+    }
+};
+
 struct AuthenticationAgent::Registration final
 {
     GMainContext *context = g_main_context_new();
@@ -158,6 +196,13 @@ AuthenticationAgent::AuthenticationAgent(NativeLockIdentity identity,
 {
     connect(&conversation_, &PolkitConversation::finished, this,
             &AuthenticationAgent::finishNative);
+    if (entry_) {
+        connect(entry_, &SecretEntry::identitySelected, this, &AuthenticationAgent::selectIdentity);
+        connect(entry_, &SecretEntry::cancellationRequested, this, [this] {
+            if (identitySelection_)
+                cancelInteraction();
+        });
+    }
     eventTimer_.setInterval(10);
     connect(&eventTimer_, &QTimer::timeout, this, [this] {
         if (registration_) {
@@ -170,13 +215,23 @@ AuthenticationAgent::AuthenticationAgent(NativeLockIdentity identity,
             g_main_context_unref(context);
         }
         const auto state = approval_.state();
+        if (identitySelection_ && (!task_ || !entry_ || !entry_->acceptsInput() ||
+                                   g_cancellable_is_cancelled(g_task_get_cancellable(task_)))) {
+            finishNative(false);
+            return;
+        }
         if (scope_ && state != NativeApproval::State::Confirming &&
             state != NativeApproval::State::Authenticating &&
             state != NativeApproval::State::Confirmed) {
-            conversation_.cancel();
-            scope_.reset();
-            controlPeer_.reset();
-            Q_EMIT presentationChanged();
+            if (conversation_.active())
+                conversation_.cancel();
+            else if (identitySelection_ || task_)
+                finishNative(false);
+            else {
+                scope_.reset();
+                controlPeer_.reset();
+                Q_EMIT presentationChanged();
+            }
         }
     });
 }
@@ -190,6 +245,9 @@ AuthenticationAgent::~AuthenticationAgent()
 {
     disconnect(&conversation_, nullptr, this, nullptr);
     conversation_.cancel();
+    if (identitySelection_ && entry_)
+        entry_->cancelNativePrompt();
+    identitySelection_.reset();
     if (task_) {
         g_task_return_new_error(task_, POLKIT_ERROR, POLKIT_ERROR_CANCELLED,
                                 "Native authentication owner lost");
@@ -211,7 +269,8 @@ bool AuthenticationAgent::confirmationPending() const noexcept
 
 bool AuthenticationAgent::authenticationPending() const noexcept
 {
-    return scope_ && scope_->purpose != ApprovalPurpose::ConfirmLock && conversation_.active();
+    return scope_ && scope_->purpose != ApprovalPurpose::ConfirmLock &&
+           (identitySelection_ || conversation_.active());
 }
 
 bool AuthenticationAgent::registerNativeSession(quint32 attestedCompositorPid)
@@ -385,6 +444,8 @@ void AuthenticationAgent::cancelInteraction()
     approval_.cancel();
     if (conversation_.active())
         conversation_.cancel();
+    else if (identitySelection_ || task_)
+        finishNative(false);
     else {
         scope_.reset();
         controlPeer_.reset();
@@ -396,6 +457,8 @@ void AuthenticationAgent::cancelInteraction()
 void AuthenticationAgent::ownerLost()
 {
     approval_.ownerLost();
+    if (identitySelection_)
+        finishNative(false);
     conversation_.ownerLost();
     scope_.reset();
     controlPeer_.reset();
@@ -420,21 +483,88 @@ void AuthenticationAgent::initiateNative(PolkitAgentListener *, const char *acti
         !expectedAction || !action || strnlen(action, 129) > 128 ||
         std::strcmp(action, expectedAction) != 0 ||
         !nativeAuthenticationOriginMatches(details, controlPeer_->pid, compositorPid_) ||
-        !identities || identities->next || !identities->data || !cancellable ||
-        g_cancellable_is_cancelled(cancellable)) {
+        !cancellable || g_cancellable_is_cancelled(cancellable) || !cookie ||
+        strnlen(cookie, 1025) == 0 || strnlen(cookie, 1025) > 1024 ||
+        approval_.state() != NativeApproval::State::Authenticating) {
         g_task_return_new_error(task, POLKIT_ERROR, POLKIT_ERROR_CANCELLED,
                                 "Native authentication scope unavailable or mismatched");
         return;
     }
+    const auto choices = nativeAuthenticationChoices(*scope_, identities);
+    if (!choices) {
+        g_task_return_new_error(task, POLKIT_ERROR, POLKIT_ERROR_CANCELLED,
+                                "Native authentication identities unavailable");
+        return;
+    }
     task_ = G_TASK(g_object_ref(task));
-    if (!conversation_.begin(*scope_, POLKIT_IDENTITY(identities->data), cookie, cancellable,
-                             entry_))
+    if (choices->size() == 1) {
+        for (auto *item = identities; item; item = item->next) {
+            if (static_cast<quint32>(polkit_unix_user_get_uid(POLKIT_UNIX_USER(item->data))) ==
+                choices->front()) {
+                if (!conversation_.begin(*scope_, POLKIT_IDENTITY(item->data), cookie, cancellable,
+                                         entry_))
+                    finishNative(false);
+                Q_EMIT presentationChanged();
+                return;
+            }
+        }
+        finishNative(false);
+        return;
+    }
+
+    // Official daemon identities are retained only until the user explicitly
+    // selects a bounded UID using the native protected-input surface. Selection
+    // is not PAM authentication or Control approval.
+    auto selection = std::make_unique<IdentitySelection>();
+    selection->cookie = QByteArray(cookie);
+    for (auto *item = identities; item; item = item->next) {
+        const auto uid =
+            static_cast<quint32>(polkit_unix_user_get_uid(POLKIT_UNIX_USER(item->data)));
+        selection->identities.append({uid, POLKIT_IDENTITY(g_object_ref(item->data))});
+    }
+    identitySelection_ = std::move(selection);
+    if (!entry_->beginNativeIdentitySelection(*choices))
+        finishNative(false);
+    Q_EMIT presentationChanged();
+}
+
+void AuthenticationAgent::selectIdentity(quint32 uid)
+{
+    if (!identitySelection_ || !scope_ || !task_ || !entry_ || !peerGuard_ || !polkitPeer_ ||
+        !controlPeer_ || QThread::currentThread() != thread() ||
+        approval_.state() != NativeApproval::State::Authenticating ||
+        g_cancellable_is_cancelled(g_task_get_cancellable(task_)) ||
+        !peerGuard_->stillCurrent(NativePeerPurpose::NativeAuthenticationDaemon, *polkitPeer_) ||
+        !peerGuard_->stillCurrent(NativePeerPurpose::ControlApproval, *controlPeer_)) {
+        finishNative(false);
+        return;
+    }
+    PolkitIdentity *identity = nullptr;
+    for (const auto &choice : identitySelection_->identities) {
+        if (choice.first == uid) {
+            identity = choice.second;
+            break;
+        }
+    }
+    if (!identity) {
+        finishNative(false);
+        return;
+    }
+    entry_->cancelNativePrompt();
+    const bool started =
+        conversation_.begin(*scope_, identity, identitySelection_->cookie.constData(),
+                            g_task_get_cancellable(task_), entry_);
+    identitySelection_.reset();
+    if (!started)
         finishNative(false);
     Q_EMIT presentationChanged();
 }
 
 void AuthenticationAgent::finishNative(bool success)
 {
+    if (identitySelection_ && entry_)
+        entry_->cancelNativePrompt();
+    identitySelection_.reset();
     if (!success)
         approval_.cancel(); // Failed startup cannot leave a stranded armed conversation.
     if (task_) {

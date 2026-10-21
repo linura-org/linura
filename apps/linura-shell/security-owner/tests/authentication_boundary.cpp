@@ -2,6 +2,7 @@
 #include "lock_mechanism.h"
 
 #include <QGuiApplication>
+#include <QKeyEvent>
 #include <QMetaProperty>
 #include <QUuid>
 
@@ -135,6 +136,56 @@ void officialAgentDetailsBindNativeOriginNotInventedForwardedFields()
     g_object_unref(details);
 }
 
+void multipleNativeAdministratorsRequireExplicitProtectedSelection()
+{
+    GList *identities = nullptr;
+    for (const gint uid : {0, 1001, 1002})
+        identities = g_list_append(identities, polkit_unix_user_new(uid));
+    auto owner = scope();
+    const auto own = nativeAuthenticationChoices(owner, identities);
+    check(!own); // No alternate administrator may unlock the session owner.
+    auto admin = owner;
+    admin.purpose = ApprovalPurpose::AuthenticateSuspend;
+    const auto choices = nativeAuthenticationChoices(admin, identities);
+    check(choices && *choices == QVector<quint32>({0, 1001, 1002}));
+    SecretEntry entry;
+    check(entry.beginNativeIdentitySelection(*choices));
+    check(entry.acceptsInput() && entry.maskedLength() == 0);
+    check(entry.nativeAccessibleName().contains(QStringLiteral("UID 0")));
+    quint32 chosen = 9999;
+    int selections = 0;
+    QObject::connect(&entry, &SecretEntry::identitySelected, &entry, [&](quint32 uid) {
+        ++selections;
+        chosen = uid;
+        entry.cancelNativePrompt();
+    });
+    QKeyEvent next(QEvent::KeyPress, Qt::Key_Down, Qt::NoModifier);
+    QGuiApplication::sendEvent(&entry, &next);
+    check(entry.nativeAccessibleName().contains(QStringLiteral("UID 1001")));
+    QKeyEvent confirm(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QGuiApplication::sendEvent(&entry, &confirm);
+    check(selections == 1 && chosen == 1001 && !entry.acceptsInput());
+    check(entry.maskedLength() == 0);
+    g_list_free_full(identities, g_object_unref);
+
+    GList *ownerOnly = g_list_append(nullptr, polkit_unix_user_new(1000));
+    const auto ownerChoices = nativeAuthenticationChoices(owner, ownerOnly);
+    check(ownerChoices && *ownerChoices == QVector<quint32>({1000}));
+    g_list_free_full(ownerOnly, g_object_unref);
+
+    GList *duplicate = nullptr;
+    duplicate = g_list_append(duplicate, polkit_unix_user_new(0));
+    duplicate = g_list_append(duplicate, polkit_unix_user_new(0));
+    check(!nativeAuthenticationChoices(admin, duplicate));
+    g_list_free_full(duplicate, g_object_unref);
+    GList *oversized = nullptr;
+    for (gint uid = 0; uid < 9; ++uid)
+        oversized = g_list_append(oversized, polkit_unix_user_new(uid));
+    check(!nativeAuthenticationChoices(admin, oversized));
+    g_list_free_full(oversized, g_object_unref);
+    check(!nativeAuthenticationChoices(admin, nullptr));
+}
+
 void wrongNativeIdentityAndCancellationNeverUnlock(ApprovalPurpose purpose)
 {
     SecretEntry entry;
@@ -180,6 +231,7 @@ int main(int argc, char **argv)
         unregisteredAgentCannotConfirm();
         officialTaskReceivesDenialWithoutArmedScope();
         officialAgentDetailsBindNativeOriginNotInventedForwardedFields();
+        multipleNativeAdministratorsRequireExplicitProtectedSelection();
         for (auto purpose :
              {ApprovalPurpose::AuthenticateUnlock, ApprovalPurpose::EnableProtectiveLock,
               ApprovalPurpose::RevokeProtectiveLock})

@@ -16,6 +16,14 @@ representation. Same-UID presentation readers remain untrusted. Native input,
 authentication state and lock/effect dispatch stay separate, fail-closed
 boundaries.
 
+When Polkit offers several administrator identities, the protected native field
+shows each eligible numeric UID with bounded Up/Down navigation and explicit
+Enter selection; the selected identity alone begins the official PAM exchange.
+The candidate list is limited to eight unique Unix identities, expires under
+the existing protected-input and approval deadlines, and is cleared on cancel,
+focus loss, daemon cancellation, or owner loss. Session-owner authentication
+still uses only the exact owner UID, never an alternative administrator.
+
 The existing native identity, independently observed compositor state, exact
 session scope, fail-closed acquisition/release and bounded readiness contracts
 remain mandatory. Native authentication completion neither approves a Control

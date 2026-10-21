@@ -510,6 +510,12 @@ class NativeKeyboard::Impl final
             case XKB_KEY_Tab:
                 qtKey = Qt::Key_Tab;
                 break;
+            case XKB_KEY_Up:
+                qtKey = Qt::Key_Up;
+                break;
+            case XKB_KEY_Down:
+                qtKey = Qt::Key_Down;
+                break;
             case XKB_KEY_ISO_Left_Tab:
                 qtKey = Qt::Key_Backtab;
                 break;

@@ -7,6 +7,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QTimer>
+#include <QVector>
 
 #include <memory>
 #include <optional>
@@ -22,6 +23,11 @@ namespace Linura::SecurityOwner {
 // NOT forward caller-authored CheckAuthorization details to the agent.
 [[nodiscard]] bool nativeAuthenticationOriginMatches(PolkitDetails *details, quint32 controlPid,
                                                      quint32 compositorPid);
+
+// Polkit-supplied candidate identities only. The session-owner path may
+// select only its own UID; administrative choices remain bounded and explicit.
+[[nodiscard]] std::optional<QVector<quint32>>
+nativeAuthenticationChoices(const NativeApprovalScope &scope, GList *identities);
 
 class AuthenticationAgent final : public QObject
 {
@@ -71,6 +77,8 @@ class AuthenticationAgent final : public QObject
 
   private:
     struct Registration;
+    struct IdentitySelection;
+    void selectIdentity(quint32 uid);
     void finishNative(bool success);
 
     NativeLockIdentity identity_;
@@ -78,6 +86,7 @@ class AuthenticationAgent final : public QObject
     QPointer<SecretEntry> entry_;
     PolkitConversation conversation_;
     std::unique_ptr<Registration> registration_;
+    std::unique_ptr<IdentitySelection> identitySelection_;
     std::optional<PeerGuard> peerGuard_;
     std::optional<NativePeerIdentity> polkitPeer_;
     std::optional<NativePeerIdentity> controlPeer_;
