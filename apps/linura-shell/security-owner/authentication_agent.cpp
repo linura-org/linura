@@ -228,8 +228,10 @@ AuthenticationAgent::AuthenticationAgent(NativeLockIdentity identity,
             else if (identitySelection_ || task_)
                 finishNative(false);
             else {
+                const auto retired = *scope_;
                 scope_.reset();
                 controlPeer_.reset();
+                Q_EMIT scopeRetired(retired);
                 Q_EMIT presentationChanged();
             }
         }
@@ -447,8 +449,11 @@ void AuthenticationAgent::cancelInteraction()
     else if (identitySelection_ || task_)
         finishNative(false);
     else {
+        const auto retired = scope_;
         scope_.reset();
         controlPeer_.reset();
+        if (retired)
+            Q_EMIT scopeRetired(*retired);
         Q_EMIT presentationChanged();
         Q_EMIT denied();
     }
@@ -460,8 +465,11 @@ void AuthenticationAgent::ownerLost()
     if (identitySelection_)
         finishNative(false);
     conversation_.ownerLost();
+    const auto retired = scope_;
     scope_.reset();
     controlPeer_.reset();
+    if (retired)
+        Q_EMIT scopeRetired(*retired);
     compositorPid_ = 0;
     compositorStartTicks_ = 0;
     registration_.reset();
@@ -577,8 +585,11 @@ void AuthenticationAgent::finishNative(bool success)
         task_ = nullptr;
     }
     if (!success) {
+        const auto retired = scope_;
         scope_.reset();
         controlPeer_.reset();
+        if (retired)
+            Q_EMIT scopeRetired(*retired);
     }
     Q_EMIT presentationChanged();
     if (success)

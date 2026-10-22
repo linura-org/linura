@@ -41,6 +41,9 @@ add_library(linura-security-owner-mechanisms STATIC
     native_managed_lock_backend.cpp native_managed_lock_backend.h
     secret_buffer.cpp secret_buffer.h
     peer_guard.cpp peer_guard.h
+    native_sleep_fence.cpp native_sleep_fence.h
+    native_sleep_probe.cpp native_sleep_probe.h
+    native_transition_fence.cpp native_transition_fence.h
 )
 target_link_libraries(linura-security-owner-mechanisms PUBLIC
     linura-security-owner-foundation Qt6::Core Qt6::DBus
@@ -134,6 +137,57 @@ if(LINURA_SECURITY_OWNER_NATIVE_AUTH)
     target_compile_options(linura-security-owner-auth PRIVATE
         -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion
     )
+    set(LINURA_SECURITY_OWNER_CONTRACT
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../interfaces/dbus/org.linura.SecurityOwner1.xml"
+        CACHE FILEPATH "Canonical private native-owner D-Bus interface")
+    if(NOT EXISTS "${LINURA_SECURITY_OWNER_CONTRACT}")
+        message(FATAL_ERROR "Canonical SecurityOwner1 contract is required")
+    endif()
+    set(LINURA_SECURITY_OWNER_PACKAGING_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../packaging" CACHE PATH
+        "Canonical native-owner deployment assets")
+    add_library(linura-security-owner-runtime STATIC
+        native_runtime.cpp native_runtime.h
+        native_unlock_status.cpp native_unlock_status.h
+        native_endpoint.cpp native_endpoint.h
+    )
+    target_link_libraries(linura-security-owner-runtime PUBLIC
+        linura-security-owner-auth linura-security-owner-wayland
+        linura-security-owner-presentation
+    )
+    target_compile_options(linura-security-owner-runtime PRIVATE
+        -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion
+    )
+    add_executable(linura-security-owner main.cpp)
+    target_link_libraries(linura-security-owner PRIVATE linura-security-owner-runtime)
+    target_compile_options(linura-security-owner PRIVATE
+        -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion
+    )
+    install(TARGETS linura-security-owner RUNTIME DESTINATION lib/linura)
+    install(FILES "${LINURA_SECURITY_OWNER_PACKAGING_DIR}/security-owner/fonts.conf"
+        DESTINATION share/linura/security-owner)
+    install(FILES
+        "${LINURA_SECURITY_OWNER_PACKAGING_DIR}/systemd/system/linura-security-owner@.service"
+        "${LINURA_SECURITY_OWNER_PACKAGING_DIR}/systemd/system/linura-security-owner@.path"
+        DESTINATION lib/systemd/system)
+    install(FILES
+        "${LINURA_SECURITY_OWNER_PACKAGING_DIR}/systemd/system/user@.service.d/50-linura-security-owner.conf"
+        DESTINATION lib/systemd/system/user@.service.d)
+    install(FILES "${LINURA_SECURITY_OWNER_CONTRACT}"
+        DESTINATION share/dbus-1/interfaces)
+    # The endpoint deliberately has no ownable bus name. Ship the narrow
+    # sender-scoped admission rule with the native service, not only its XML API.
+    install(FILES
+        "${LINURA_SECURITY_OWNER_PACKAGING_DIR}/dbus-1/system.d/org.linura.SecurityOwner1.conf"
+        DESTINATION share/dbus-1/system.d)
+    # CMake stages the fixed hook; only a root package transaction establishes
+    # the final file capability, never a CI/developer installation.
+    install(PROGRAMS
+        "${LINURA_SECURITY_OWNER_PACKAGING_DIR}/security-owner/install-capability.sh"
+        DESTINATION lib/linura RENAME linura-security-owner-install-capability)
+    install(FILES
+        "${LINURA_SECURITY_OWNER_PACKAGING_DIR}/arch/hooks/90-linura-security-owner-capability.hook"
+        DESTINATION share/libalpm/hooks)
 endif()
 
 include(CTest)
@@ -239,6 +293,35 @@ if(BUILD_TESTING)
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30
     )
 
+    add_executable(linura-security-owner-sleep-tests tests/native_sleep_fence.cpp)
+    target_link_libraries(linura-security-owner-sleep-tests PRIVATE
+        linura-security-owner-mechanisms)
+    target_compile_options(linura-security-owner-sleep-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+    )
+    add_test(NAME security-owner-native-sleep-coverage-fence
+        COMMAND linura-security-owner-sleep-tests)
+    set_tests_properties(security-owner-native-sleep-coverage-fence PROPERTIES TIMEOUT 20)
+
+    add_executable(linura-security-owner-transition-tests tests/native_transition_fence.cpp)
+    target_link_libraries(linura-security-owner-transition-tests PRIVATE
+        linura-security-owner-mechanisms)
+    target_compile_options(linura-security-owner-transition-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+    )
+    add_test(NAME security-owner-transition-coverage-fence
+        COMMAND linura-security-owner-transition-tests)
+    set_tests_properties(security-owner-transition-coverage-fence PROPERTIES TIMEOUT 20)
+
+    add_executable(linura-security-owner-launch-tests tests/native_launch.cpp)
+    target_link_libraries(linura-security-owner-launch-tests PRIVATE
+        linura-security-owner-mechanisms)
+    target_compile_options(linura-security-owner-launch-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+    )
+    add_test(NAME security-owner-launch-wire-boundary
+        COMMAND linura-security-owner-launch-tests)
+    set_tests_properties(security-owner-launch-wire-boundary PROPERTIES TIMEOUT 20)
     if(LINURA_SECURITY_OWNER_NATIVE_AUTH)
         add_executable(linura-security-owner-assistive-tests tests/native_assistive.cpp)
         target_link_libraries(linura-security-owner-assistive-tests PRIVATE
@@ -252,6 +335,18 @@ if(BUILD_TESTING)
         )
         set_tests_properties(security-owner-assistive-metadata-boundary PROPERTIES TIMEOUT 20)
 
+        add_executable(linura-security-owner-runtime-tests tests/native_runtime.cpp)
+        target_link_libraries(linura-security-owner-runtime-tests PRIVATE
+            linura-security-owner-runtime)
+        target_compile_options(linura-security-owner-runtime-tests PRIVATE
+            -UNDEBUG -Wall -Wextra -Wpedantic -Werror
+        )
+        add_test(NAME security-owner-runtime-boundary
+            COMMAND linura-security-owner-runtime-tests
+                "${LINURA_SECURITY_OWNER_CONTRACT}" "$<TARGET_FILE:linura-security-owner>")
+        set_tests_properties(security-owner-runtime-boundary PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20
+        )
         add_executable(linura-security-owner-auth-tests tests/authentication_boundary.cpp)
         target_link_libraries(linura-security-owner-auth-tests PRIVATE
             linura-security-owner-auth

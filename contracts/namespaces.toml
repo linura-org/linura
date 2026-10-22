@@ -29,6 +29,22 @@ object_token = "service"
 interface = "org.linura.SleepGate1"
 
 [[identifier]]
+id = "org.linura.SecurityOwner1"
+kind = "dbus-interface"
+status = "active"
+object_path = "/org/linura/SecurityOwner1"
+
+[[identifier]]
+id = "linura-security-owner@.service"
+kind = "systemd-unit"
+status = "active"
+
+[[identifier]]
+id = "linura-security-owner@.path"
+kind = "systemd-unit"
+status = "active"
+
+[[identifier]]
 id = "org.linura.Executor.Session1"
 kind = "dbus-service"
 status = "active"

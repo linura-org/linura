@@ -54,6 +54,7 @@ PARSER_SUFFIXES = {
     ".policy": "xml",
     ".desktop": "ini",
     ".service": "ini",
+    ".path": "ini",
     ".hook": "arch-hook",
     ".ini": "ini",
     ".sql": "text",
@@ -61,7 +62,10 @@ PARSER_SUFFIXES = {
 CONF_KINDS = {
     "apps/linura-shell/security-owner/fonts.conf": "xml",
     "packaging/arch/archiso/pacman.conf": "pacman",
+    "packaging/security-owner/fonts.conf": "xml",
+    "packaging/systemd/system/user@.service.d/50-linura-security-owner.conf": "ini",
     "packaging/dbus-1/system.d/org.linura.Authority1.conf": "xml",
+    "packaging/dbus-1/system.d/org.linura.SecurityOwner1.conf": "xml",
     "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf": "xml",
     "packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf": "ini",
     "packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf": "ini",
@@ -243,10 +247,23 @@ def format_errors(path: Path, content: bytes, kind: str) -> list[str]:
                         raise ValueError(f"invalid assignment at line {number}")
                     entry = (section, name.lower())
                     repeated_unit_field = (
-                        path.suffix == ".service"
-                        and kind == "ini"
-                        and section == "Service"
-                        and name in {"Environment", "LoadCredential"}
+                        (
+                            path.suffix == ".service"
+                            and kind == "ini"
+                            and section == "Service"
+                            and name in {"Environment", "LoadCredential"}
+                        )
+                        or (
+                            path.suffix == ".path"
+                            and kind == "ini"
+                            and section == "Path"
+                            and name == "PathExistsGlob"
+                        )
+                        or (
+                            kind == "arch-hook"
+                            and section == "Trigger"
+                            and name in {"Operation", "Target"}
+                        )
                     )
                     if entry in seen and not repeated_unit_field:
                         raise ValueError(f"duplicate directive at line {number}")

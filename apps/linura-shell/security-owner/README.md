@@ -48,6 +48,40 @@ native CTests on the checked-out source, with authentication and testing both
 explicitly enabled. This component-only evidence does not claim an activated
 system service, physical protected input or workstation qualification.
 
+## #240: managed transitions and supervised runtime
+
+The private security-owner executable composes the existing protected input,
+native lock, Polkit/PAM and independent compositor observation without handing
+policy or execution authority to QML. The private SecurityOwner1 endpoint
+freshly attests its Control and executor callers. A bounded pre-sleep fence
+retains independent secure coverage for the exact systemd suspend job. A
+separate transition fence binds the prepared managed effect to its transition
+identity and rejects replay, competing transitions and unsafe unlocks.
+Suspension success requires fresh kernel cycle evidence as well as current
+secure compositor coverage. Missing/ambiguous results remain observe-only and
+never trigger an automatic retry of a privileged effect.
+
+The owner exports its private SecurityOwner1 object solely on a dynamic unique
+system-bus name, not an ownable well-known service. The installed system-bus
+policy denies other callers to the object path and admits only the
+`linura-authority` and `root` Unix users on the exact private interface,
+plus their exact read-only `Introspectable.Introspect` discovery operation.
+Other metadata methods remain denied; introspection never grants authority.
+Admission is not authority: each method independently reattests the actual
+sender as the fixed supervised Control or session executor process. The policy
+is installed at `/usr/share/dbus-1/system.d/org.linura.SecurityOwner1.conf`;
+the interface XML alone does not authorize calls. CI checks this deployment
+contract and rejects missing or broadened policy, but real deployed bus routing
+and systemd/PAM interaction still require the #241 workstation gates.
+
+Deployment assets stage fixed root-supervised systemd service/path units,
+an immutable D-Bus contract, fixed font configuration and an Arch package hook
+for post-install capability establishment. CMake never grants a file capability
+to a development build. This slice is component-level composition and contract
+evidence only; real session, PAM, systemd, power, accessibility and physical
+workstation qualification remain in #241. The merged Unicode Compose, native
+keyboard actionability and exact-owner authentication semantics remain required.
+
 Component validation:
 
 ```sh
