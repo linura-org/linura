@@ -31,6 +31,63 @@ class CiCachePolicyTests(unittest.TestCase):
     def test_repository_policy_passes(self) -> None:
         self.assertEqual(policy.check(ROOT), [])
 
+    def test_native_authentication_cannot_be_disabled(self) -> None:
+        root = self.copy_root()
+        path = root / ".github/workflows/ci.yml"
+        source = path.read_text(encoding="utf-8")
+        required = "-DLINURA_SECURITY_OWNER_NATIVE_AUTH=ON"
+        self.assertIn(required, source)
+        path.write_text(
+            source.replace(required, "-DLINURA_SECURITY_OWNER_NATIVE_AUTH=OFF", 1),
+            encoding="utf-8",
+        )
+        failures = policy.check(root)
+        self.assertTrue(
+            any("native security-owner build recipe drifted" in f for f in failures),
+            failures,
+        )
+
+    def test_native_ctest_cannot_be_bypassed(self) -> None:
+        root = self.copy_root()
+        path = root / ".github/workflows/ci.yml"
+        source = path.read_text(encoding="utf-8")
+        marker = "      - name: Build and test native security-owner foundation\n"
+        required = 'ctest --test-dir "$build_dir" --output-on-failure'
+        self.assertEqual(source.count(marker), 1)
+        before, native_and_following = source.split(marker, 1)
+        self.assertIn(required, native_and_following)
+        path.write_text(
+            before + marker + native_and_following.replace(required, "true", 1),
+            encoding="utf-8",
+        )
+        failures = policy.check(root)
+        self.assertTrue(
+            any("native security-owner build recipe drifted" in f for f in failures),
+            failures,
+        )
+
+    def test_native_compose_explicit_host_dependency_cannot_be_reintroduced(
+        self,
+    ) -> None:
+        root = self.copy_root()
+        path = root / ".github/workflows/ci.yml"
+        source = path.read_text(encoding="utf-8")
+        package = "            libx11-data\n"
+        self.assertNotIn(package, source)
+        path.write_text(
+            source.replace(
+                "            libxkbcommon-dev\n",
+                package + "            libxkbcommon-dev\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        failures = policy.check(root)
+        self.assertTrue(
+            any("canonical CI APT cache input step drifted" in f for f in failures),
+            failures,
+        )
+
     def test_native_security_owner_build_must_execute_ctest(self) -> None:
         root = self.copy_root()
         path = root / ".github/workflows/ci.yml"
@@ -526,7 +583,8 @@ class CiCachePolicyTests(unittest.TestCase):
         failures = policy.check(root)
         self.assertTrue(
             any(
-                "cache integration missing invariant" in failure for failure in failures
+                "QML build differs from reviewed SHA-256" in failure
+                for failure in failures
             ),
             failures,
         )

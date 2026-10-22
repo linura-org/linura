@@ -22,6 +22,18 @@ cargo xtask check
 
 This checks Rust formatting, pinned Ruff Python lint and repository-wide formatting, Clippy, workspace tests, repository invariants, and structured asset validation. Additional commands expose acceptance scenarios and build plans without requiring contributors to memorize implementation-specific scripts.
 
+The canonical tooling test suite is discovered in full, then partitioned by
+module into up to two isolated Python workers (bounded by available CPU affinity).
+Each worker must report its exact executed test identities. The orchestrator
+rejects import/discovery errors, duplicate identities, lost tests, unexpected
+inventory changes, worker failures, and failed assertions. No test is skipped
+for performance; the 20 slowest tests are reported with wall-clock durations
+for repeatable performance regression analysis. The reviewed runner source is
+SHA-256 pinned by the canonical validation gate, so changing the worker or
+coverage semantics requires an explicit gate update and review. Rust Clippy,
+workspace tests, release validation, CodeQL, RustSec, and qualification lanes
+remain independent and unchanged.
+
 ## Editor and Python analysis baseline
 
 VS Code recommendations are repository-owned in `.vscode/extensions.json`: rust-analyzer for Rust, the Microsoft Python/Pylance pair for Python language intelligence, Ruff for Python lint/format integration, and Code Spell Checker for project terminology. `.vscode/settings.json` contains only project-relevant behavior; personal UI preferences and other workspace state remain ignored. Editor diagnostics are convenience feedback and never replace repository gates.

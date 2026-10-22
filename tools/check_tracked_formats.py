@@ -31,6 +31,8 @@ PLAIN = frozenset(
         ".gitattributes",
         ".github/CODEOWNERS",
         "LICENSE",
+        "apps/linura-shell/security-owner/compose/LICENSE",
+        "apps/linura-shell/security-owner/compose/en_US.UTF-8",
         "bindings/python/LICENSE",
     }
 )
@@ -57,6 +59,7 @@ PARSER_SUFFIXES = {
     ".sql": "text",
 }
 CONF_KINDS = {
+    "apps/linura-shell/security-owner/fonts.conf": "xml",
     "packaging/arch/archiso/pacman.conf": "pacman",
     "packaging/dbus-1/system.d/org.linura.Authority1.conf": "xml",
     "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf": "xml",

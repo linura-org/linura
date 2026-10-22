@@ -209,6 +209,17 @@ class TrackedFormatsTests(unittest.TestCase):
                     "text",
                 )
 
+    def test_embedded_compose_inputs_are_explicit_text(self) -> None:
+        for path in [
+            "apps/linura-shell/security-owner/compose/LICENSE",
+            "apps/linura-shell/security-owner/compose/en_US.UTF-8",
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(
+                    formats.classify(Path(path), (ROOT / path).read_bytes()),
+                    "text",
+                )
+
     def test_sysusers_identity_is_policy_bound(self) -> None:
         valid = (
             b'u linura-authority - "Linura managed mutation authority" '

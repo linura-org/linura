@@ -30,6 +30,7 @@ class ValidationGateTests(unittest.TestCase):
         paths.update(
             (
                 "tools/xtask/src/main.rs",
+                "tools/run_tooling_tests.py",
                 "tools/codex/versions.env",
                 ".github/workflows/trusted-release-proof.yml",
             )
@@ -47,6 +48,22 @@ class ValidationGateTests(unittest.TestCase):
         source = file.read_text()
         self.assertIn(before, source)
         file.write_text(source.replace(before, after, 1))
+
+    def test_tooling_runner_cannot_be_weakened_without_review(self):
+        self.assertEqual(gates.check(self.root), [])
+        path = self.root / "tools/run_tooling_tests.py"
+        source = path.read_text(encoding="utf-8")
+        required = "return 0 if valid else 1"
+        self.assertIn(required, source)
+        path.write_text(source.replace(required, "return 0", 1), encoding="utf-8")
+        failures = gates.check(self.root)
+        self.assertTrue(
+            any(
+                "canonical Python tooling runner source changed" in item
+                for item in failures
+            ),
+            failures,
+        )
 
     def test_heavy_ci_storage_cannot_be_skipped_or_replaced_by_an_inert_command(self):
         workflow = self.root / ".github/workflows/vm-acceptance.yml"

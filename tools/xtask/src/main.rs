@@ -115,18 +115,7 @@ fn check() -> Result<(), String> {
     run("python3", &["scripts/validate_assets.py"])?;
     desktop_identity()?;
     release_contracts()?;
-    run(
-        "python3",
-        &[
-            "-m",
-            "unittest",
-            "discover",
-            "-s",
-            "tests/tooling",
-            "-p",
-            "test_*.py",
-        ],
-    )?;
+    run("python3", &["tools/run_tooling_tests.py"])?;
     Ok(())
 }
 
