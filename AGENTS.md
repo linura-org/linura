@@ -60,6 +60,15 @@ Implement that by converting human/model input into typed intent and determinist
 - `executors/*`: narrow future privileged effectors only; dormant roadmap scaffolds are not deleted merely because execution is not yet supported.
 - `apps/*`: clients/process entry points; no duplicate domain rules.
 
+## Code review: high-consequence invariants
+
+For Codex and human review, inspect affected callers, providers, contracts and negative paths beyond the changed lines. Report concrete, reachable failures with the violated boundary and a safe correction; do not infer completeness from a no-findings review. These checks supplement, never replace, tests and independent qualification.
+
+- **Authority and identity:** Trace a changed external effect from authenticated transport principal and canonical operation class/plan through plan-bound policy and the qualified transient path or managed prepare/revalidation, then bounded execution, fresh verification and recovery. Flag client/model-selected authority, stale or reused approval, cached observation promoted into authority, and any executor or provider shortcut around Control. Preserve the distinct permitted semantics of transient and managed effects.
+- **Native Linux authentication and sessions:** For affected logind, Polkit, PAM, D-Bus, compositor/lock and protected-input paths, check zero, one and multiple eligible administrator identities; authenticated UID, seat and session-generation binding; denial/cancel; service unavailability; timeouts; and concurrent transition/restart races. Do not reject otherwise supported multi-administrator configurations merely because Polkit returns multiple valid identities; use bounded authorized selection/handling. Fail closed on untrusted or ambiguous authority and keep credentials out of untrusted surfaces and logs.
+- **Compatibility and recovery:** Cross-check changed behavior against `contracts/stability.toml`, `docs/api-versioning.md`, all affected consumers, prior qualified authority/lifecycle behavior (including v0.6), and persistence/reconciliation obligations. Preserve Stable contracts; update Experimental contracts and their consumers coherently without gratuitous shims. Look for denial, crash/restart, ambiguous dispatch, rollback and shared-ownership regressions that happy-path tests miss.
+- **Qualification regressions:** Check changed paths against `contracts/qualification-gate-matrix.toml` and applicable inherited/milestone evidence. Flag weakened assertions, bypassed required gates, missing negative/fault cases, stale-head results and claims that an unrun VM/hardware/visual lane passed. Keep unrelated qualification out of scope, but never substitute a smaller check for a required one.
+
 ## Change procedure
 
 1. Identify the user intent and durable domain object affected.
