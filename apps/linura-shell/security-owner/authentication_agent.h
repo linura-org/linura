@@ -74,6 +74,8 @@ class AuthenticationAgent final : public QObject
     void presentationChanged();
     void confirmationAvailable();
     void denied();
+    // Native expiration/cancellation only, never proof of an effect's outcome.
+    void scopeRetired(const NativeApprovalScope &scope);
 
   private:
     struct Registration;

@@ -7,6 +7,8 @@
 
 #include <optional>
 
+#include "native_sleep_fence.h"
+
 namespace Linura::SecurityOwner {
 
 enum class NativePeerPurpose {
@@ -63,6 +65,7 @@ class PeerGuard final
     [[nodiscard]] std::optional<NativePeerIdentity> namedPeer(NativePeerPurpose purpose) const;
     [[nodiscard]] bool stillCurrent(NativePeerPurpose purpose,
                                     const NativePeerIdentity &peer) const;
+    [[nodiscard]] std::optional<NativeSleepUnitFacts> sleepUnitSnapshot() const;
     // Native composition only: this is the same canonical authenticated system
     // bus connection used by this guard, never a QML/client-supplied transport.
     [[nodiscard]] const QDBusConnection &nativeConnection() const noexcept

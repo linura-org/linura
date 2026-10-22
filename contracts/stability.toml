@@ -11,6 +11,13 @@ version = "1"
 stability = "experimental"
 
 [[contract]]
+id = "dbus.org.linura.SecurityOwner1"
+kind = "dbus-interface"
+path = "interfaces/dbus/org.linura.SecurityOwner1.xml"
+version = "1"
+stability = "experimental"
+
+[[contract]]
 id = "dbus.org.linura.Executor.Session1"
 kind = "dbus-interface"
 path = "interfaces/dbus/org.linura.Executor.Session1.xml"
