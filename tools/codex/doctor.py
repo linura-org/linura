@@ -13,6 +13,7 @@ import re
 import selectors
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -29,6 +30,9 @@ class Check:
     name: str
     ready: bool
     remedy: str
+    # Additive diagnostics; 'ready' remains the compatibility/exit-status key.
+    # Failed probes never claim that an unavailable tool is merely incompatible.
+    status: str = "unverified"
 
 
 def versions() -> dict[str, str]:
@@ -140,6 +144,46 @@ def exact_version(output: str | None, expected: str) -> bool:
     ]
 
 
+def pinned_python_ready(tool_root: Path, env: dict[str, str], major_minor: str) -> bool:
+    """Validate the setup-owned Python selection, not this diagnostic's interpreter.
+
+    The doctor may be launched by the host's newer system Python, but the task
+    entry point selects the private, verified Python 3.12 symlink. Neither a
+    system fallback nor a regular replacement file may satisfy this probe.
+    """
+    directory = tool_root / "python312/bin"
+    selected = directory / "python3"
+    try:
+        parent = directory.lstat()
+        if (
+            not stat.S_ISDIR(parent.st_mode)
+            or stat.S_ISLNK(parent.st_mode)
+            or parent.st_uid != os.geteuid()
+            or stat.S_IMODE(parent.st_mode) != 0o700
+            or not selected.is_symlink()
+        ):
+            return False
+        target = selected.resolve(strict=True)
+        if not target.is_file() or not os.access(target, os.X_OK):
+            return False
+    except (OSError, RuntimeError):
+        return False
+    result = probe(
+        [
+            str(selected),
+            "-I",
+            "-S",
+            "-c",
+            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+        ],
+        env,
+    )
+    if result != major_minor:
+        return False
+    env["PATH"] = f"{directory}:{env['PATH']}"
+    return True
+
+
 def inventory(selected: set[str]) -> list[Check]:
     pins = versions()
     env = os.environ.copy()
@@ -152,8 +196,23 @@ def inventory(selected: set[str]) -> list[Check]:
     env["CARGO_NET_OFFLINE"] = "true"
     checks: list[Check] = []
 
-    def add(profile: str, name: str, ready: bool, remedy: str) -> None:
-        checks.append(Check(profile, name, ready, remedy))
+    def add(
+        profile: str,
+        name: str,
+        ready: bool,
+        remedy: str,
+        *,
+        failure_status: str = "unverified",
+    ) -> None:
+        checks.append(
+            Check(
+                profile,
+                name,
+                ready,
+                remedy,
+                "ready" if ready else failure_status,
+            )
+        )
 
     def commands(profile: str, names: tuple[str, ...]) -> None:
         for name in names:
@@ -162,6 +221,7 @@ def inventory(selected: set[str]) -> list[Check]:
                 name,
                 shutil.which(name, path=env["PATH"]) is not None,
                 f"Provide {name} in the configured base image; see docs/codex-development.md.",
+                failure_status="missing",
             )
 
     add(
@@ -170,6 +230,7 @@ def inventory(selected: set[str]) -> list[Check]:
         platform.system() == pins["HOST_OS"]
         and platform.machine() == pins["HOST_ARCH"],
         "Select the declared Linux x86_64 base image.",
+        failure_status="incompatible",
     )
     libc = probe(["getconf", "GNU_LIBC_VERSION"], env)
     match = re.fullmatch(r"glibc (\d+)\.(\d+)", libc or "")
@@ -178,13 +239,22 @@ def inventory(selected: set[str]) -> list[Check]:
         "glibc",
         bool(match and tuple(map(int, match.groups())) >= (2, 17)),
         "Select a glibc >= 2.17 base image; musl is unsupported.",
+        failure_status="incompatible" if libc is not None else "unverified",
+    )
+    private_python_verified = pinned_python_ready(
+        tool_root, env, pins["PYTHON_MAJOR_MINOR"]
     )
     add(
         "core",
         "python",
-        f"{sys.version_info.major}.{sys.version_info.minor}"
-        == pins["PYTHON_MAJOR_MINOR"],
-        "Select the repository-declared Python major/minor in the base environment.",
+        private_python_verified,
+        "Run pinned setup to create the private Python selection; if setup reports "
+        "no Python 3.12, supply it in the prepared host first. Never change system Python.",
+        failure_status=(
+            "missing"
+            if not (tool_root / "python312/bin/python3").is_symlink()
+            else "incompatible"
+        ),
     )
     channel = tomllib.loads((ROOT / "rust-toolchain.toml").read_text())["toolchain"][
         "channel"
@@ -194,6 +264,7 @@ def inventory(selected: set[str]) -> list[Check]:
         "rust-pin-alignment",
         channel == pins["RUST_VERSION"],
         "Align the reviewed Codex contract with rust-toolchain.toml.",
+        failure_status="incompatible",
     )
     commands(
         "core",
@@ -225,19 +296,41 @@ def inventory(selected: set[str]) -> list[Check]:
         ("cargo-audit", pins["CARGO_AUDIT_VERSION"]),
         ("ruff", pins["RUFF_VERSION"]),
     ):
+        result = probe([binary, "--version"], env)
         add(
             "core",
             f"{binary}-version",
-            exact_version(probe([binary, "--version"], env), expected),
+            exact_version(result, expected),
             "Run setup/maintenance during environment preparation, then restart the task.",
+            failure_status="incompatible" if result is not None else "unverified",
         )
     toolchain = f"{pins['RUST_VERSION']}-x86_64-unknown-linux-gnu"
+    selected_override = env.get("RUSTUP_TOOLCHAIN", "")
+    add(
+        "core",
+        "rust-toolchain-override",
+        selected_override in ("", pins["RUST_VERSION"], toolchain),
+        "Remove a conflicting RUSTUP_TOOLCHAIN override in the task environment.",
+        failure_status="incompatible",
+    )
+    listed = probe(["rustup", "toolchain", "list"], env)
+    installed = listed is not None and any(
+        line.split()[0] == toolchain for line in listed.splitlines() if line.split()
+    )
+    add(
+        "core",
+        "installed-toolchain",
+        installed,
+        "Run pinned setup to install the exact GNU Rust toolchain, including rustfmt and Clippy.",
+        failure_status="missing" if listed is not None else "unverified",
+    )
     active = probe(["rustup", "show", "active-toolchain"], env)
     add(
         "core",
         "active-toolchain",
         bool(active and active.split()[0] == toolchain),
         "Run setup/maintenance; remove conflicting task-level Rust toolchain overrides.",
+        failure_status="incompatible" if active is not None else "unverified",
     )
     for binary, args in (
         ("rustc", ["--version"]),
@@ -283,9 +376,12 @@ def inventory(selected: set[str]) -> list[Check]:
             ],
             env,
         ),
-        "Run maintenance at the selected checkout to warm its locked Cargo graph.",
+        "Run maintenance at the selected checkout to warm its locked Cargo graph; "
+        "an offline failure cannot distinguish uncached dependencies from invalid metadata.",
+        failure_status="unverified",
     )
 
+    qt_sdk_version: str | None = None
     if "shell" in selected or "editor" in selected or "image" in selected:
         commands("shell", ("cmake", "ninja", "pkg-config", "c++"))
         cmake = probe(["cmake", "--version"], env)
@@ -295,13 +391,39 @@ def inventory(selected: set[str]) -> list[Check]:
             "cmake-minimum",
             bool(match and tuple(map(int, match.groups())) >= (3, 24)),
             "Provide CMake >= 3.24 in the base image.",
+            failure_status="incompatible" if cmake is not None else "unverified",
         )
+        # Check each Qt library independently. One successful pkg-config query
+        # cannot prove that every module uses a compatible SDK version.
+        module_versions: dict[str, str] = {}
+        for module in QT_MODULES:
+            version = probe(["pkg-config", "--modversion", module], env)
+            match = re.fullmatch(r"6\.(\d+)\.(\d+)", version or "")
+            valid = bool(match and tuple(map(int, match.groups())) >= (4, 0))
+            if valid and version is not None:
+                module_versions[module] = version
+            add(
+                "shell",
+                f"qt6-module-{module.removeprefix('Qt6').lower()}",
+                valid,
+                f"Provide {module} >= 6.4 from the selected Qt development SDK.",
+                failure_status="incompatible" if version is not None else "unverified",
+            )
+        matching_modules = (
+            len(module_versions) == len(QT_MODULES)
+            and len(set(module_versions.values())) == 1
+        )
+        if matching_modules:
+            qt_sdk_version = next(iter(module_versions.values()))
         add(
             "shell",
             "qt6-development-modules",
-            probe(["pkg-config", "--atleast-version=6.4", *QT_MODULES], env)
+            matching_modules
+            and probe(["pkg-config", "--atleast-version=6.4", *QT_MODULES], env)
             is not None,
-            "Provide Qt >= 6.4 Core/DBus/Qml/Quick/QuickControls2 development packages.",
+            "Provide all Qt >= 6.4 modules from one consistent SDK; "
+            "verify the CMake build separately.",
+            failure_status="incompatible" if module_versions else "unverified",
         )
     if "editor" in selected:
         qtpaths = shutil.which("qtpaths6", path=env["PATH"])
@@ -316,6 +438,15 @@ def inventory(selected: set[str]) -> list[Check]:
                     sdk = {}
                     break
                 sdk[key] = value
+        sdk_version = sdk.get("QT_VERSION")
+        add(
+            "editor",
+            "qt6-sdk-version-alignment",
+            bool(qt_sdk_version and sdk_version == qt_sdk_version),
+            "Select qtpaths6 from the same Qt SDK as Core, DBus, Qml, Quick "
+            "and QuickControls2; do not mix Qt installation roots.",
+            failure_status="incompatible" if sdk_version else "unverified",
+        )
         qml_root = Path(sdk.get("QT_INSTALL_QML", "/nonexistent"))
         imports_ready = all(
             (qml_root.joinpath(*module.split(".")) / "qmldir").is_file()
@@ -390,11 +521,23 @@ def inventory(selected: set[str]) -> list[Check]:
                 "timeout",
             ),
         )
+        # Never execute an interpreter already rejected by core/python.
+        # A successful exit from a substituted executable is not VM readiness.
+        vm_result = (
+            probe(
+                [str(tool_root / "python312/bin/python3"), "tools/vm.py", "doctor"],
+                env,
+            )
+            if private_python_verified
+            else None
+        )
         add(
             "vm",
             "canonical-vm-doctor",
-            probe([sys.executable, "tools/vm.py", "doctor"], env) is not None,
-            "Run python3 tools/vm.py doctor; TCG is valid when KVM is unavailable.",
+            vm_result is not None,
+            "Run pinned setup to validate private Python 3.12 before the VM "
+            "doctor; TCG is valid when KVM is unavailable.",
+            failure_status="unverified",
         )
     if "image" in selected:
         commands("image", ("mkarchiso",))
@@ -443,9 +586,7 @@ def main() -> int:
         )
     else:
         for check in checks:
-            print(
-                f"{check.profile}/{check.name}: {'ready' if check.ready else 'missing or incompatible'}"
-            )
+            print(f"{check.profile}/{check.name}: {check.status}")
             if not check.ready:
                 print(f"  {check.remedy}")
         print("Readiness inventory only; no test or qualification success is asserted.")
