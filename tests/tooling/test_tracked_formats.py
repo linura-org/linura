@@ -47,6 +47,25 @@ class TrackedFormatsTests(unittest.TestCase):
             "unclassified",
         )
 
+    def test_reviewed_development_container_inputs_are_explicit_not_globally_allowed(
+        self,
+    ) -> None:
+        for name, kind in (
+            ("tools/codex/container/Dockerfile", "build"),
+            ("tools/codex/container/.dockerignore", "text"),
+            ("tools/codex/container/ubuntu-snapshot.list", "text"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    formats.classify(Path(name), (ROOT / name).read_bytes()), kind
+                )
+        for name in (
+            "tools/other/Dockerfile",
+            "tools/other/.dockerignore",
+            "tools/other/ubuntu-snapshot.list",
+        ):
+            self.assertEqual(formats.classify(Path(name), b"data\n"), "unclassified")
+
     def test_unknown_extension_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

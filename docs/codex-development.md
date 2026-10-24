@@ -42,6 +42,16 @@ the doctor checks the lock digest and exact installed distribution set. No
 task-time installer, `latest` tool selection, shell
 startup-file modification, or repository credential is needed.
 
+An optional pinned Rust/Qt component build instance is now specified in the
+[reviewed development-container recipe](../tools/codex/container/README.md).
+The package graph, source-image identity, Ubuntu snapshot and complete
+installed package fingerprint are fixed inputs; after creation, the canonical
+setup provisions the declared Rust 1.98.0 toolchain and Cargo lockfile.
+Strict preflight and `doctor --profile shell` check different things:
+Rust/lint/offline dependency pins versus Qt's actual CMake/SDK modules.
+A missing Qt SDK or editor QML runtime is a blocked component check, not
+evidence that host or native workstation qualification has passed.
+
 The environment owner must supply Linux x86_64, glibc >= 2.17, Python 3.12 with
 venv support, Bash, curl, Git, SHA-256 tooling, tar, a working C linker, and the
 standard text tools used by the scripts. Setup provisions the declared rustup,
@@ -62,12 +72,20 @@ or fleet credentials to an ordinary coding environment.
 
 ## Inspect capabilities before work
 
+For a separate local instance, the repository-defined
+[isolated development base](../tools/codex/container/README.md) supplies
+snapshot-pinned prerequisites and uses the same canonical setup/tool locks.
+Create it explicitly rather than repairing a host or an active task environment.
+Its readiness and builds are development checks, not qualification evidence.
+
 ```bash
 python3 tools/codex/doctor.py --profile core
 python3 tools/codex/doctor.py --profile editor --json
 python3 tools/codex/doctor.py --all  # complete inventory, not default readiness
 bash scripts/preflight_codex_environment.sh
 python3 tools/development_workspace.py authority-host
+# Only for the Ubuntu v0.9 recovery test profile:
+python3 tools/development_workspace.py authority-host --recovery-profile ubuntu-v09
 ```
 
 The doctor aggregates missing and incompatible prerequisites instead of stopping
@@ -80,6 +98,20 @@ satisfy all of them. The editor profile validates QML runtime imports and actual
 starts the selected SDK's `qmlls --help`, exposing unresolved shared-library
 failures that file-presence checks miss. The JSON report explicitly sets
 `qualification_evidence` to false.
+
+Generic `authority-host` checks ownership and temporary-directory semantics
+without requiring Ubuntu's package manager. The explicit `ubuntu-v09` recovery
+profile additionally requires the root-owned `/usr/bin/apt` used by that
+qualified recovery contract; this prerequisite is not portable recovery support
+or a requirement for every Linux development host.
+
+If `authority-host` reports UID-remapped system files or an unsafe temporary
+root, do not repair the active host or weaken the Rust checks. Run the affected
+tests in the repository's [isolated development
+base](../tools/codex/container/README.md#host-sensitive-authority-tests), whose
+native root-owned sticky `/tmp` and system executable ownership are checked before
+the test command. Do not replace that `/tmp` with a user-owned bind mount or
+tmpfs.
 
 The strict preflight also validates workflow semantics, exact active GNU Rust
 toolchain, rustfmt/Clippy availability, and the locked offline dependency graph.
@@ -125,6 +157,16 @@ QEMU topologies, FFmpeg codecs, GPU drivers, C++ features, running compositors,
 Quickshell imports or session services. Those are proved by the applicable real
 builds and qualification workflows. Never install a second unpinned desktop stack
 in a coding container as a substitute for the pinned graphical guest substrate.
+
+S17's native Polkit/GLib, compositor and protected-input expectations are
+bounded by the [workstation qualification contract](../contracts/v010-workstation-acceptance.toml) and [ADR 0042](adr/0042-s17-session-security-and-power-authority.md).
+The [isolated Codex development environment](../tools/codex/container/README.md)
+does not provide a separate native-auth builder or confer authorization to a
+host session. It leaves host and existing environment unchanged, mounts source
+read-only, drops capabilities and has no host/session sockets. Its readiness
+checks and component builds are **not native qualification evidence**; they
+cannot replace the canonical Qt/Wayland/Polkit native tests, the real
+Arch/Hyprland guest, or maintained physical-workstation acceptance.
 
 Build the Python wheel offline after `--bindings` setup:
 

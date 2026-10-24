@@ -34,6 +34,8 @@ PLAIN = frozenset(
         "apps/linura-shell/security-owner/compose/LICENSE",
         "apps/linura-shell/security-owner/compose/en_US.UTF-8",
         "bindings/python/LICENSE",
+        "tools/codex/container/.dockerignore",
+        "tools/codex/container/ubuntu-snapshot.list",
     }
 )
 REQUIREMENT_LOCKS = frozenset(
@@ -149,6 +151,7 @@ def classify(path: Path, content: bytes) -> str:
         "apps/linura-shell/ui/CMakeLists.txt",
         "apps/linura-shell/bridge/CMakeLists.txt",
         "apps/linura-shell/security-owner/CMakeLists.txt",
+        "tools/codex/container/Dockerfile",
     }:
         return "build"
     if name == ".clang-format" or name == "CITATION.cff":

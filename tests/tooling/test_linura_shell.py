@@ -31,6 +31,26 @@ class LinuraShellContractTests(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
 
+    def test_pinned_qt_dependencies_are_required_in_exact_acquisition_step(self):
+        for package in (
+            "qt6-base-dev",
+            "qt6-declarative-dev",
+            "qml6-module-qtquick-controls=6.4.2+dfsg-4build3",
+            "qml6-module-qtquick-layouts=6.4.2+dfsg-4build3",
+        ):
+            with self.subTest(package=package), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                self._copy_fixture(root)
+                workflow = root / ".github/workflows/ci.yml"
+                content = workflow.read_text(encoding="utf-8")
+                line = f"            {package}\n"
+                self.assertIn(line, content)
+                workflow.write_text(content.replace(line, "", 1), encoding="utf-8")
+                self.assertIn(
+                    f"Linura Shell CI pinned APT prerequisite missing: {package}",
+                    check_linura_shell.validate(root),
+                )
+
     def test_other_native_ctest_cannot_mask_shell(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

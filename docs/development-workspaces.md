@@ -605,6 +605,27 @@ run those tests outside a UID-remapped sandbox. Preflight must pass before
 repository edits in a Codex/cloud task. Setup/maintenance are
 environment-preparation actions, not an instruction to install tools mid-task.
 
+The default `authority-host` probe is **distribution-independent**:
+it requires the native trusted `/usr/bin/bash` and temporary-root ownership
+semantics used by authority-sensitive tests, not Ubuntu's package manager.
+Ubuntu v0.9 recovery tests additionally require the explicitly selected
+`--recovery-profile ubuntu-v09` check, which validates root-owned
+`/usr/bin/apt`. On a native Arch host, the generic probe must not fail
+because `apt` is absent; an Ubuntu-specific recovery gate must not be marked
+ready when that executable is missing or UID-remapped. Choose a separately
+prepared supported environment for the Ubuntu recovery profile:
+
+```bash
+python3 tools/development_workspace.py authority-host
+python3 tools/development_workspace.py authority-host --recovery-profile ubuntu-v09
+```
+
+The second command is **only** for the Ubuntu v0.9 recovery lane; a nonzero
+result does not authorize chowning system binaries, relaxing temporary-root
+checks or skipping that lane. Readiness is not test or release evidence. An
+optional development container may supply compatible Ubuntu dependencies, but
+does not replace mandatory Arch/Hyprland VM or physical qualifications.
+
 The canonical gate is not every CI gate: current RustSec audit, CodeQL, pinned
 Python typing, multilingual formatting and all impact-routed qualification still
 need their actual required executions. Follow the existing

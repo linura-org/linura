@@ -159,8 +159,9 @@ REQUIRED_BRIDGE = (
 )
 
 REQUIRED_CI = (
-    "qt6-base-dev",
-    "qt6-declarative-dev",
+    "qml6-module-qtquick-controls=6.4.2+dfsg-4build3",
+    "qml6-module-qtquick-layouts=6.4.2+dfsg-4build3",
+    'ctest --test-dir "$build_dir" --output-on-failure',
     "cmake -S apps/linura-shell/bridge",
     "cmake --build",
     "cmake --install",
@@ -186,6 +187,15 @@ REQUIRED_CI = (
     'QT_QML_IMPORT_PATH="$install_dir/lib/qt6/qml"',
     'QML_IMPORT_PATH="$install_dir/lib/qt6/qml"',
     'ctest --test-dir "$build_dir" --output-on-failure',
+)
+
+# The official Qt development packages and pinned QML modules must come from
+# the exact dedicated apt-input-cache step, not a neighboring unrelated job.
+REQUIRED_CI_PACKAGES = (
+    "qt6-base-dev",
+    "qt6-declarative-dev",
+    "qml6-module-qtquick-controls=6.4.2+dfsg-4build3",
+    "qml6-module-qtquick-layouts=6.4.2+dfsg-4build3",
 )
 
 REQUIRED_IMAGE_ASSETS = {
@@ -2393,9 +2403,22 @@ def validate(root: Path) -> list[str]:
                 failures.append(f"Arch image shell integration missing: {fragment}")
 
     ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    for fragment in REQUIRED_CI[:2]:
-        if fragment not in ci:
-            failures.append(f"Linura Shell CI contract missing: {fragment}")
+    # Scope package assertions to the actual pinned acquisition step, never
+    # treat a commented package or a different workflow step as installation.
+    apt_boundary = "      - name: Install Linura Shell bridge build dependencies\n"
+    apt_steps = ci.split(apt_boundary)
+    apt_install = apt_steps[1].split("\n      - ", 1)[0] if len(apt_steps) == 2 else ""
+    if (
+        "uses: ./.github/actions/ubuntu-apt-input-cache" not in apt_install
+        or "namespace: canonical-ci-shell" not in apt_install
+        or "          packages: |\n" not in apt_install
+    ):
+        failures.append("Linura Shell CI pinned APT acquisition step missing")
+    for package in REQUIRED_CI_PACKAGES:
+        if f"            {package}\n" not in apt_install + "\n":
+            failures.append(
+                f"Linura Shell CI pinned APT prerequisite missing: {package}"
+            )
 
     # Other native CTest invocations must not masquerade as execution of the
     # shipped ShellBridge's receipt, request-tracking and QML-surface tests.

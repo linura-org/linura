@@ -669,27 +669,41 @@ def trusted_native_recovery_program(path: Path) -> bool:
     )
 
 
-def inspect_authority_host() -> WorkspaceReport:
-    """Detect host ownership semantics required by authority unit tests."""
+def inspect_authority_host(*, recovery_profile: str | None = None) -> WorkspaceReport:
+    """Inspect generic ownership and explicitly selected recovery prerequisites."""
+    if recovery_profile not in (None, "ubuntu-v09"):
+        raise ValueError("unsupported authority-host recovery profile")
     expected_uid = os.geteuid()
     temporary_root = Path(os.environ.get("TMPDIR", "/tmp"))
     checks = [
         Check(
             "authority_host.native_recovery_program",
             trusted_native_recovery_program(Path("/usr/bin/bash")),
-            "Use a host namespace where /usr/bin/bash is a root-owned regular executable; UID-remapped roots are unsupported for authority tests.",
+            "Run authority-sensitive tests in a prepared host namespace where /usr/bin/bash is a root-owned regular executable; UID-remapped roots are unsupported. Use the documented prepared environment; never change host binary ownership.",
         ),
         Check(
             "authority_host.temporary_root",
             trusted_authority_test_directory(temporary_root, expected_uid),
-            "Select an absolute trusted TMPDIR whose directory chain is root/process-owned and not writable by other users except for a root-owned sticky shared root.",
+            "Use a prepared namespace with native root-owned sticky /tmp, or select an absolute trusted TMPDIR whose directory chain is root/process-owned and not writable by other users except for a root-owned sticky shared root; do not replace /tmp with a user-owned shared mount.",
         ),
     ]
+    if recovery_profile == "ubuntu-v09":
+        checks.append(
+            Check(
+                "authority_host.native_recovery_package_manager",
+                trusted_native_recovery_program(Path("/usr/bin/apt")),
+                "The Ubuntu v0.9 recovery profile requires /usr/bin/apt as a root-owned regular executable; generic authority-host readiness does not require this Ubuntu package manager. Use the documented prepared environment; never change host binary ownership.",
+            )
+        )
     return WorkspaceReport(
         schema_version=1,
         qualification_evidence=False,
         execution_performed=False,
-        scope="authority-test host readiness, not product or qualification evidence",
+        scope=(
+            "authority-test host ownership readiness"
+            + (" with Ubuntu v0.9 recovery prerequisites" if recovery_profile else "")
+            + ", not product or qualification evidence"
+        ),
         layout_ready=all(check.ready for check in checks),
         checks=[
             CheckReport(name=check.name, ready=check.ready, remedy=check.remedy)
@@ -1122,9 +1136,14 @@ def main() -> int:
     sub.add_parser(
         "outputs", help="check safe worktree-local default Cargo/CMake outputs"
     )
-    sub.add_parser(
+    authority_host = sub.add_parser(
         "authority-host",
-        help="check ownership semantics required by authority unit tests",
+        help="check generic authority-test ownership semantics",
+    )
+    authority_host.add_argument(
+        "--recovery-profile",
+        choices=("ubuntu-v09",),
+        help="also check prerequisites for the selected qualified recovery profile",
     )
     storage = sub.add_parser(
         "storage", help="inspect an operator-provisioned persistent volume"
@@ -1160,7 +1179,7 @@ def main() -> int:
     report = (
         inspect_outputs(args.worktree)
         if args.command == "outputs"
-        else inspect_authority_host()
+        else inspect_authority_host(recovery_profile=args.recovery_profile)
         if args.command == "authority-host"
         else inspect_editor(args.worktree, args.qtpaths)
         if args.command == "editor"

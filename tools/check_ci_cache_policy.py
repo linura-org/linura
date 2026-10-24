@@ -23,7 +23,7 @@ CONTRACT = ".github/actions/dependency-input-cache-policy.toml"
 # explicit adversarial review and a deliberate fingerprint update here.
 REVIEWED_ACTION_SHA256 = {
     CARGO_ACTION: "87ff8a5e51554c1118e30467f11762c9e1a7cf2479f04124bd2e0773909d973b",
-    APT_ACTION: "dcd0f4929a51b111d6d5c7263d7a4aba2f64e1b6865e848bdf17c55cb2d7e968",
+    APT_ACTION: "2e9923f6656ce64cde1e4563f135f6061b0e12191755da906ec4540eb3961a39",
 }
 
 CARGO_ALLOWED_PATHS = (
@@ -369,8 +369,8 @@ def _verify_ci_execution_steps(source: str) -> None:
         "  qml6-module-qtqml-models",
         "  qml6-module-qtqml-workerscript",
         "  qml6-module-qtquick",
-        "  qml6-module-qtquick-controls",
-        "  qml6-module-qtquick-layouts",
+        "  qml6-module-qtquick-controls=6.4.2+dfsg-4build3",
+        "  qml6-module-qtquick-layouts=6.4.2+dfsg-4build3",
         "  qml6-module-qtquick-templates",
         "  qml6-module-qtquick-window",
         "  wayland-protocols",

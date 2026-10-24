@@ -12,7 +12,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -764,6 +764,76 @@ class DevelopmentWorkspaceTests(unittest.TestCase):
             self.assertFalse(
                 workspace.trusted_native_recovery_program(Path("/usr/bin/bash"))
             )
+
+    def test_authority_host_remedies_preserve_production_ownership_checks(
+        self,
+    ) -> None:
+        with (
+            patch.object(
+                workspace,
+                "trusted_native_recovery_program",
+                return_value=False,
+            ),
+            patch.object(
+                workspace,
+                "trusted_authority_test_directory",
+                return_value=False,
+            ),
+        ):
+            report = workspace.inspect_authority_host()
+
+        self.assertFalse(report["layout_ready"])
+        remedies = "\n".join(check["remedy"] for check in report["checks"])
+        self.assertIn("documented prepared environment", remedies)
+        self.assertIn("never change host binary ownership", remedies)
+        self.assertIn("native root-owned sticky /tmp", remedies)
+        self.assertIn("do not replace /tmp with a user-owned shared mount", remedies)
+
+    def test_authority_host_checks_both_native_recovery_executables(self) -> None:
+        with (
+            patch.object(
+                workspace,
+                "trusted_native_recovery_program",
+                side_effect=lambda path: path == Path("/usr/bin/bash"),
+            ),
+            patch.object(
+                workspace,
+                "trusted_authority_test_directory",
+                return_value=True,
+            ),
+        ):
+            report = workspace.inspect_authority_host(recovery_profile="ubuntu-v09")
+
+        checks = {check["name"]: check["ready"] for check in report["checks"]}
+        self.assertTrue(checks["authority_host.native_recovery_program"])
+        self.assertFalse(checks["authority_host.native_recovery_package_manager"])
+        self.assertTrue(checks["authority_host.temporary_root"])
+        self.assertFalse(report["layout_ready"])
+
+    def test_generic_authority_host_does_not_require_ubuntu_package_manager(
+        self,
+    ) -> None:
+        with (
+            patch.object(
+                workspace,
+                "trusted_native_recovery_program",
+                side_effect=lambda path: path == Path("/usr/bin/bash"),
+            ) as program,
+            patch.object(
+                workspace, "trusted_authority_test_directory", return_value=True
+            ),
+        ):
+            report = workspace.inspect_authority_host()
+        self.assertTrue(report["layout_ready"])
+        self.assertEqual(program.call_args_list, [call(Path("/usr/bin/bash"))])
+        self.assertNotIn(
+            "authority_host.native_recovery_package_manager",
+            {check["name"] for check in report["checks"]},
+        )
+        self.assertFalse(report["qualification_evidence"])
+        self.assertFalse(report["execution_performed"])
+        with self.assertRaisesRegex(ValueError, "unsupported.*profile"):
+            workspace.inspect_authority_host(recovery_profile="unknown")
 
     def test_interactive_launcher_without_mount_creates_no_scratch_or_evidence(
         self,

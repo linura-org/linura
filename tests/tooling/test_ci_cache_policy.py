@@ -453,8 +453,17 @@ class CiCachePolicyTests(unittest.TestCase):
             "qml6-module-qtquick-templates",
             "qml6-module-qtquick-window",
         ):
-            with self.subTest(package=package):
-                failures = self.mutate_ci(f"            {package}\n", "")
+            # Canonical CI pins Controls/Layouts to an exact Ubuntu build.
+            # Mutation must remove the real pinned input, not a nonexistent
+            # unversioned spelling that would never exercise the guard.
+            candidate = (
+                f"{package}=6.4.2+dfsg-4build3"
+                if package
+                in ("qml6-module-qtquick-controls", "qml6-module-qtquick-layouts")
+                else package
+            )
+            with self.subTest(package=candidate):
+                failures = self.mutate_ci(f"            {candidate}\n", "")
                 self.assertTrue(
                     any(
                         "canonical CI APT cache input step drifted" in failure
