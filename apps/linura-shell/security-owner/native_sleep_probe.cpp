@@ -6,10 +6,23 @@
 #include <QDBusObjectPath>
 #include <QDBusReply>
 #include <QUuid>
+#include <cstddef>
 #include <sys/stat.h>
+#include <unistd.h>
 
 namespace Linura::SecurityOwner {
 namespace {
+template <std::size_t N>
+std::nullopt_t probeUnavailable(bool diagnostics, const char (&reason)[N]) noexcept
+{
+    if (diagnostics) {
+        // Immutable labels only. Never emit native properties or error text.
+        const ssize_t written = ::write(STDERR_FILENO, reason, N - 1);
+        (void)written;
+    }
+    return std::nullopt;
+}
+
 bool immutableAssets()
 {
     struct stat metadata
@@ -61,9 +74,55 @@ std::optional<quint32> jobId(const QVariant &value)
 
 } // namespace
 
+bool nativeSleepUnitLookupReply(const QDBusMessage &reply, const QString &supervisor,
+                                bool failureDiagnostics)
+{
+    if (!supervisor.startsWith(QLatin1Char(':')) || supervisor.size() > 128 ||
+        (!reply.service().isEmpty() && reply.service() != supervisor)) {
+        (void)probeUnavailable(failureDiagnostics,
+                               "native-sleep-owner-denied reason=lookup-reply-substitution\n");
+        return false;
+    }
+    if (reply.type() == QDBusMessage::ReplyMessage ||
+        (reply.type() == QDBusMessage::ErrorMessage &&
+         reply.errorName() == QLatin1String("org.freedesktop.systemd1.NoSuchUnit")))
+        return true;
+    if (!failureDiagnostics)
+        return false;
+    if (reply.type() == QDBusMessage::ErrorMessage) {
+        const auto name = reply.errorName();
+        if (name == QLatin1String("org.freedesktop.DBus.Error.NoReply") ||
+            name == QLatin1String("org.freedesktop.DBus.Error.Timeout"))
+            (void)probeUnavailable(true, "native-sleep-owner-denied reason=lookup-timeout\n");
+        else if (name == QLatin1String("org.linura.Private.NativeUnavailable"))
+            (void)probeUnavailable(true, "native-sleep-owner-denied reason=lookup-deadline\n");
+        else if (name == QLatin1String("org.freedesktop.DBus.Error.AccessDenied") ||
+                 name == QLatin1String("org.freedesktop.DBus.Error.AuthFailed"))
+            (void)probeUnavailable(true, "native-sleep-owner-denied reason=lookup-denied\n");
+        else if (name == QLatin1String("org.freedesktop.DBus.Error.InvalidArgs") ||
+                 name == QLatin1String("org.freedesktop.DBus.Error.InvalidSignature"))
+            (void)probeUnavailable(true, "native-sleep-owner-denied reason=lookup-arguments\n");
+        else if (name == QLatin1String("org.freedesktop.DBus.Error.Disconnected"))
+            (void)probeUnavailable(true, "native-sleep-owner-denied reason=lookup-disconnected\n");
+        else if (name == QLatin1String("org.freedesktop.DBus.Error.UnknownMethod") ||
+                 name == QLatin1String("org.freedesktop.DBus.Error.UnknownObject") ||
+                 name == QLatin1String("org.freedesktop.DBus.Error.UnknownInterface"))
+            (void)probeUnavailable(true, "native-sleep-owner-denied reason=lookup-unsupported\n");
+        else if (name == QLatin1String("org.freedesktop.DBus.Error.ServiceUnknown") ||
+                 name == QLatin1String("org.freedesktop.DBus.Error.NameHasNoOwner"))
+            (void)probeUnavailable(true, "native-sleep-owner-denied reason=lookup-owner-lost\n");
+        else
+            (void)probeUnavailable(true, "native-sleep-owner-denied reason=lookup-error-other\n");
+    } else {
+        (void)probeUnavailable(true, "native-sleep-owner-denied reason=lookup-invalid-type\n");
+    }
+    return false;
+}
+
 std::optional<NativeSleepUnitFacts> decodeNativeSleepUnitFacts(const QString &supervisor,
                                                                const QVariantMap &unit,
-                                                               const QVariantMap &service)
+                                                               const QVariantMap &service,
+                                                               bool failureDiagnostics)
 {
     if (unit.size() > 256 || service.size() > 256 || !typed<QString>(unit, "Id") ||
         unit.value(QStringLiteral("Id")).toString() != QLatin1String("systemd-suspend.service") ||
@@ -81,42 +140,50 @@ std::optional<NativeSleepUnitFacts> decodeNativeSleepUnitFacts(const QString &su
           service.value(QStringLiteral("User")).toString() == QLatin1String("root")) ||
         !typed<QString>(service, "Restart") ||
         service.value(QStringLiteral("Restart")).toString() != QLatin1String("no"))
-        return std::nullopt;
+        return probeUnavailable(failureDiagnostics,
+                                "native-sleep-owner-denied reason=codec-fields\n");
     const auto drops = unit.value(QStringLiteral("DropInPaths"));
     if (drops.metaType() != QMetaType::fromType<QStringList>() && !signature(drops, "as"))
-        return std::nullopt;
+        return probeUnavailable(failureDiagnostics,
+                                "native-sleep-owner-denied reason=codec-drop-ins\n");
     if (qdbus_cast<QStringList>(drops) !=
         QStringList{QStringLiteral("/usr/lib/systemd/system/systemd-suspend.service.d/"
                                    "50-linura-protective-lock.conf")})
-        return std::nullopt;
+        return probeUnavailable(failureDiagnostics,
+                                "native-sleep-owner-denied reason=codec-drop-ins\n");
     const auto job = jobId(unit.value(QStringLiteral("Job")));
     const auto helper = decodeNativeSingleLaunch(service.value(QStringLiteral("ExecStartPre")));
     const auto main = decodeNativeSingleLaunch(service.value(QStringLiteral("ExecStart")));
     if (!job || !helper || !main)
-        return std::nullopt;
+        return probeUnavailable(failureDiagnostics,
+                                "native-sleep-owner-denied reason=codec-commands\n");
     // These can alter whether/when the fixed gate is effective. Unknown or
     // extended unit programs are unsupported, not accepted by root ownership.
     for (const char *key : {"ExecCondition", "ExecStartPost", "ExecStop", "ExecStopPost"}) {
         const auto value = service.value(QLatin1String(key));
         if (!signature(value, "a(sasbttttuii)"))
-            return std::nullopt;
+            return probeUnavailable(failureDiagnostics,
+                                    "native-sleep-owner-denied reason=codec-extra-signature\n");
         const auto wire = value.value<QDBusArgument>();
         wire.beginArray();
         const bool empty = wire.atEnd();
         wire.endArray();
         if (!empty)
-            return std::nullopt;
+            return probeUnavailable(failureDiagnostics,
+                                    "native-sleep-owner-denied reason=codec-extra-command\n");
     }
     const auto success = service.value(QStringLiteral("SuccessExitStatus"));
     if (!signature(success, "(aiai)"))
-        return std::nullopt;
+        return probeUnavailable(failureDiagnostics,
+                                "native-sleep-owner-denied reason=codec-success-signature\n");
     const auto statuses = success.value<QDBusArgument>();
     statuses.beginStructure();
     QList<qint32> codes, signals;
     statuses >> codes >> signals;
     statuses.endStructure();
     if (!signals.isEmpty() || codes.size() > 1 || (!codes.isEmpty() && codes.first() != 0))
-        return std::nullopt;
+        return probeUnavailable(failureDiagnostics,
+                                "native-sleep-owner-denied reason=codec-success-status\n");
     return NativeSleepUnitFacts{
         supervisor,
         QUuid::fromRfc4122(unit.value(QStringLiteral("InvocationID")).toByteArray())
@@ -129,7 +196,7 @@ std::optional<NativeSleepUnitFacts> decodeNativeSleepUnitFacts(const QString &su
         *helper,
         *main};
 }
-std::optional<NativeSleepUnitFacts> PeerGuard::sleepUnitSnapshot() const
+std::optional<NativeSleepUnitFacts> PeerGuard::sleepUnitSnapshot(bool failureDiagnostics) const
 {
     QElapsedTimer budget;
     budget.start();
@@ -148,16 +215,26 @@ std::optional<NativeSleepUnitFacts> PeerGuard::sleepUnitSnapshot() const
     };
     const auto supervisor = owner();
     if (!supervisor)
-        return std::nullopt;
+        return probeUnavailable(failureDiagnostics,
+                                "native-sleep-owner-denied reason=unit-owner\n");
     const QDBusReply<quint32> uid(bus(QStringLiteral("GetConnectionUnixUser"), {*supervisor}));
-    if (!uid.isValid() || uid.value() != 0 || !immutableAssets())
-        return std::nullopt;
+    if (!uid.isValid() || uid.value() != 0)
+        return probeUnavailable(failureDiagnostics, "native-sleep-owner-denied reason=unit-uid\n");
+    if (!immutableAssets())
+        return probeUnavailable(failureDiagnostics,
+                                "native-sleep-owner-denied reason=unit-assets\n");
+    // Address every request to this root-attested unique connection, never the
+    // replaceable well-known name. The trusted bus admits only requested replies
+    // from that destination. Newer Qt hides service() on reply/error messages;
+    // any sender exposed by older Qt must still match. Recheck the named owner
+    // after the complete snapshot.
     const auto pathMessage =
         call(budget, *supervisor, QStringLiteral("/org/freedesktop/systemd1"),
              QStringLiteral("org.freedesktop.systemd1.Manager"), QStringLiteral("GetUnit"),
              {QStringLiteral("systemd-suspend.service")});
-    if (pathMessage.service() != *supervisor)
-        return std::nullopt;
+    if (!nativeSleepUnitLookupReply(pathMessage, *supervisor, failureDiagnostics))
+        return probeUnavailable(failureDiagnostics,
+                                "native-sleep-owner-denied reason=unit-lookup\n");
     const QDBusReply<QDBusObjectPath> path(pathMessage);
     if (!path.isValid() &&
         path.error().name() == QLatin1String("org.freedesktop.systemd1.NoSuchUnit")) {
@@ -166,10 +243,11 @@ std::optional<NativeSleepUnitFacts> PeerGuard::sleepUnitSnapshot() const
                  QStringLiteral("org.freedesktop.systemd1.Manager"), QStringLiteral("GetUnit"),
                  {QStringLiteral("systemd-suspend.service")});
         const QDBusReply<QDBusObjectPath> repeated(repeatedMessage);
-        if (repeatedMessage.service() != *supervisor || repeated.isValid() ||
+        if (!nativeSleepUnitLookupReply(repeatedMessage, *supervisor) || repeated.isValid() ||
             repeated.error().name() != path.error().name() || owner() != supervisor ||
             budget.elapsed() >= 2'000 || !immutableAssets())
-            return std::nullopt;
+            return probeUnavailable(failureDiagnostics,
+                                    "native-sleep-owner-denied reason=unit-absence\n");
         NativeSleepUnitFacts absent;
         absent.supervisor = *supervisor;
         absent.absent = true;
@@ -177,27 +255,15 @@ std::optional<NativeSleepUnitFacts> PeerGuard::sleepUnitSnapshot() const
     }
     if (!path.isValid() || path.value().path().size() > 256 ||
         !path.value().path().startsWith(QLatin1String("/org/freedesktop/systemd1/unit/")))
-        return std::nullopt;
+        return probeUnavailable(failureDiagnostics, "native-sleep-owner-denied reason=unit-path\n");
     const auto properties = [&](const QString &interface,
                                 const QStringList &names) -> std::optional<QVariantMap> {
-        QVariantMap values;
-        const auto boundedCall = [&](const QString &owner, const QString &object,
-                                     const QString &targetInterface, const QString &method,
-                                     const QList<QVariant> &arguments) {
-            const auto message = call(budget, owner, object, targetInterface, method, arguments);
-            return message.service() == *supervisor
-                       ? message
-                       : QDBusMessage::createError(
-                             QStringLiteral("org.linura.Private.NativeUnavailable"),
-                             QStringLiteral("Native supervisor changed"));
-        };
-        for (const auto &name : names) {
-            const auto value = readNativeDBusProperty(boundedCall, *supervisor, path.value().path(),
-                                                      interface, name);
-            if (!value)
-                return std::nullopt;
-            values.insert(name, *value);
-        }
+        const auto values =
+            readNativeDBusProperties(connection_, budget, *supervisor, path.value().path(),
+                                     interface, names, 2'000, 500, progress_);
+        if (!values)
+            (void)probeUnavailable(failureDiagnostics,
+                                   "native-sleep-owner-denied reason=unit-property\n");
         return values;
     };
     const auto sample = [&]() -> std::optional<NativeSleepUnitFacts> {
@@ -213,14 +279,21 @@ std::optional<NativeSleepUnitFacts> PeerGuard::sleepUnitSnapshot() const
              QStringLiteral("ExecStart"), QStringLiteral("ExecCondition"),
              QStringLiteral("ExecStartPost"), QStringLiteral("ExecStop"),
              QStringLiteral("ExecStopPost"), QStringLiteral("SuccessExitStatus")});
-        return unit && service ? decodeNativeSleepUnitFacts(*supervisor, *unit, *service)
-                               : std::nullopt;
+        if (!unit || !service)
+            return std::nullopt;
+        const auto decoded =
+            decodeNativeSleepUnitFacts(*supervisor, *unit, *service, failureDiagnostics);
+        if (!decoded)
+            return probeUnavailable(failureDiagnostics,
+                                    "native-sleep-owner-denied reason=unit-codec\n");
+        return decoded;
     };
     const auto first = sample();
     const auto second = sample();
     if (!first || !second || *first != *second || owner() != supervisor ||
         budget.elapsed() >= 2'000 || !immutableAssets())
-        return std::nullopt;
+        return probeUnavailable(failureDiagnostics,
+                                "native-sleep-owner-denied reason=unit-revalidation\n");
     return first;
 }
 } // namespace Linura::SecurityOwner

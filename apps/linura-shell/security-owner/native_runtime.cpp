@@ -47,6 +47,7 @@ class NativeRuntime::Impl final
     NativeRuntime &owner;
     std::optional<PeerGuard> peers;
     std::optional<NativeSessionBinding> binding;
+    NativeProbeProgress probeProgress;
     QString compositorSocket;
     std::unique_ptr<NativePresentation> presentation;
     std::unique_ptr<NativeAssistiveBridge> assistive;
@@ -107,8 +108,8 @@ class NativeRuntime::Impl final
         if (!peers || !binding || !backend || prctl(PR_GET_DUMPABLE) != 0 ||
             (initialized && (!presentation || !presentation->ready())))
             return false;
-        return inspectNativeSession(peers->nativeConnection(), backend->actualDisplayFd()) ==
-               binding;
+        return inspectNativeSession(peers->nativeConnection(), backend->actualDisplayFd(),
+                                    probeProgress) == binding;
     }
     std::optional<NativePeerIdentity> caller(const QDBusMessage &received,
                                              NativePeerPurpose purpose)
@@ -179,7 +180,8 @@ bool NativeRuntime::initialize(NativeStartup startup)
         !qobject_cast<QGuiApplication *>(QCoreApplication::instance()) ||
         prctl(PR_GET_DUMPABLE) != 0)
         return runtimeUnavailable("linura-security-owner: runtime/process-state\n");
-    NativeDeadline deadline(std::chrono::milliseconds(8'000));
+    NativeDeadline deadline(std::chrono::milliseconds(8'000),
+                            NativeDeadline::Stage::RuntimeInitialization);
     impl_->peers = PeerGuard::connect();
     if (!impl_->peers)
         return runtimeUnavailable("linura-security-owner: runtime/system-bus\n");
@@ -274,12 +276,22 @@ bool NativeRuntime::initialize(NativeStartup startup)
         !impl_->backend->initialize())
         return runtimeUnavailable("linura-security-owner: runtime/protected-input\n");
     impl_->protocol = std::make_unique<NativeLockProtocol>(*impl_->backend, impl_->binding->lock);
-    if (!impl_->protocol->bound() || !impl_->currentSession())
+    if (!impl_->protocol->bound())
+        return runtimeUnavailable("linura-security-owner: runtime/protocol-identity\n");
+    // An admitted lock can receive its compositor acknowledgement while a
+    // synchronous peer/session audit is still running. Progress only the owned
+    // Wayland fd between bounded reads, never a nested Qt event loop. All probe
+    // clocks and post-progress identity/scope/coverage checks remain in force.
+    impl_->probeProgress = [this] { impl_->backend->progressNativeState(); };
+    impl_->peers->setNativeProgress(impl_->probeProgress);
+    if (!impl_->currentSession())
         return runtimeUnavailable("linura-security-owner: runtime/protocol-identity\n");
     impl_->authentication = std::make_unique<AuthenticationAgent>(
         impl_->binding->lock, &impl_->presentation->protectedEntry());
     if (!impl_->authentication->registerNativeSession(impl_->binding->compositorPid))
         return runtimeUnavailable("linura-security-owner: runtime/auth-registration\n");
+    if (!impl_->authentication->setNativeProgress(impl_->probeProgress))
+        return runtimeUnavailable("linura-security-owner: runtime/auth-progress\n");
     impl_->assistive = std::make_unique<NativeAssistiveBridge>(startup.uid_);
     impl_->publishAssistiveMetadata();
     connect(impl_->presentation.get(), &NativePresentation::repaintRequested, this,
@@ -592,7 +604,7 @@ bool NativeRuntime::armApproval(const QDBusMessage &received, const NativeApprov
     if (!peer || impl_->approvalScope || impl_->transitionFence.active() ||
         impl_->sleepFence.active() || !scope.valid() || scope.lock != identity())
         return false;
-    NativeDeadline deadline(std::chrono::milliseconds(5'000));
+    NativeDeadline deadline(std::chrono::milliseconds(5'000), NativeDeadline::Stage::ApprovalArm);
     const auto state = impl_->independentState();
     if (!state || !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
         return false;
@@ -655,6 +667,9 @@ bool NativeRuntime::consumeApproval(const QDBusMessage &received, const NativeAp
         impl_->unlockProofConsumed = true;
     impl_->approvalScope.reset();
     impl_->approvalPeer.reset();
+    if (scope.purpose == ApprovalPurpose::EnableProtectiveLock ||
+        scope.purpose == ApprovalPurpose::RevokeProtectiveLock)
+        impl_->refreshPresentation(); // Authentication emitted before runtime scope retirement.
     return true;
 }
 
@@ -670,25 +685,42 @@ bool NativeRuntime::dispatchPrepared(const QDBusMessage &received, const NativeL
     return impl_->protocol->dispatch(lock, secure);
 }
 
-std::optional<NativeCompositorLockState> NativeRuntime::observe(const QDBusMessage &received)
+std::optional<NativeObservedLockState> nativeObservedLockState(NativeCompositorLockState compositor,
+                                                               LockMechanism::State mechanism,
+                                                               bool requested, bool coverage)
+{
+    if (compositor != NativeCompositorLockState::Locked &&
+        compositor != NativeCompositorLockState::Unlocked)
+        return std::nullopt;
+    if (mechanism == LockMechanism::State::Acquiring && requested && !coverage)
+        return NativeObservedLockState::Acquiring;
+    if (mechanism == LockMechanism::State::Releasing) {
+        if (!requested && !coverage && compositor == NativeCompositorLockState::Unlocked)
+            return NativeObservedLockState::Unlocked;
+        if (requested || !coverage)
+            return NativeObservedLockState::Releasing;
+        return std::nullopt;
+    }
+    if (mechanism == LockMechanism::State::Secure && requested && coverage &&
+        compositor == NativeCompositorLockState::Locked)
+        return NativeObservedLockState::Secure;
+    if ((mechanism == LockMechanism::State::Ready || mechanism == LockMechanism::State::Released) &&
+        !requested && !coverage && compositor == NativeCompositorLockState::Unlocked)
+        return NativeObservedLockState::Unlocked;
+    return std::nullopt;
+}
+
+std::optional<NativeObservedLockState> NativeRuntime::observe(const QDBusMessage &received)
 {
     if (!impl_->caller(received, NativePeerPurpose::ControlApproval))
         return std::nullopt;
+    impl_->backend->refreshNativeState();
     const auto independent = impl_->independentState();
     if (!independent)
         return std::nullopt;
     const auto mechanism = impl_->protocol->inspect();
-    if (*independent == NativeCompositorLockState::Locked &&
-        mechanism != LockMechanism::State::Secure)
-        return std::nullopt;
-    if (*independent == NativeCompositorLockState::Unlocked &&
-        mechanism != LockMechanism::State::Ready && mechanism != LockMechanism::State::Releasing &&
-        mechanism != LockMechanism::State::Released)
-        return std::nullopt;
-    if (*independent == NativeCompositorLockState::Unlocked &&
-        (impl_->backend->requestedSecure() || impl_->backend->secureCoverage()))
-        return std::nullopt;
-    return independent;
+    return nativeObservedLockState(*independent, mechanism, impl_->backend->requestedSecure(),
+                                   impl_->backend->secureCoverage());
 }
 
 bool NativeRuntime::fencePreparedTransition(const QDBusMessage &received,
@@ -768,28 +800,60 @@ bool NativeRuntime::verifyReleased(const QDBusMessage &received, const NativeLoc
     return impl_->protocol->independentlyVerifiedReleased(lock);
 }
 
+bool NativeRuntime::retainedVerifiedRelease(const QDBusMessage &received,
+                                            const NativeLockIdentity &lock)
+{
+    // This is retained native proof, not a second release event. The actual
+    // authenticated Control peer and independent compositor must still agree;
+    // requested=false by itself is never sufficient (Ready is also unlocked).
+    if (!impl_->caller(received, NativePeerPurpose::ControlApproval))
+        return false;
+    if (impl_->sleepFence.active() || lock != identity())
+        return false;
+    if (impl_->backend->requestedSecure() || impl_->backend->secureCoverage())
+        return false;
+    if (impl_->independentState() != NativeCompositorLockState::Unlocked)
+        return false;
+    return impl_->protocol->retainedVerifiedRelease(lock);
+}
+
 bool NativeRuntime::fenceSleepEntry(const QDBusMessage &received,
                                     const NativeSleepEntryIdentity &event,
                                     const NativeLockIdentity &lock)
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
-    if (!peer || lock != identity() || event.boot != lock.boot || impl_->approvalScope ||
-        impl_->unlockRequestLock || impl_->protocol->inspect() != LockMechanism::State::Secure ||
-        impl_->independentState() != NativeCompositorLockState::Locked)
-        return false;
-    NativeDeadline deadline(std::chrono::milliseconds(8'000));
+    if (!peer)
+        return runtimeUnavailable("native-sleep-owner-denied reason=peer\n");
+    if (lock != identity() || event.boot != lock.boot)
+        return runtimeUnavailable("native-sleep-owner-denied reason=binding\n");
+    if (impl_->approvalScope || impl_->unlockRequestLock)
+        return runtimeUnavailable("native-sleep-owner-denied reason=scope\n");
+    if (impl_->protocol->inspect() != LockMechanism::State::Secure)
+        return runtimeUnavailable("native-sleep-owner-denied reason=mechanism\n");
+    if (impl_->independentState() != NativeCompositorLockState::Locked)
+        return runtimeUnavailable("native-sleep-owner-denied reason=compositor\n");
+    NativeDeadline deadline(std::chrono::milliseconds(8'000), NativeDeadline::Stage::SleepEntry);
     const auto cycles = nativeSuccessfulSuspendCycles();
-    const auto unit = impl_->peers->sleepUnitSnapshot();
-    if (!cycles || !unit ||
-        (impl_->transitionFence.active() && !impl_->transitionFence.coversSuspend(lock, *cycles)) ||
-        !impl_->currentSession() ||
-        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer) ||
-        nativeSuccessfulSuspendCycles() != cycles ||
-        impl_->independentState() != NativeCompositorLockState::Locked)
-        return false;
+    const auto unit = impl_->peers->sleepUnitSnapshot(true);
+    if (!cycles)
+        return runtimeUnavailable("native-sleep-owner-denied reason=counter\n");
+    if (!unit)
+        return runtimeUnavailable("native-sleep-owner-denied reason=unit-snapshot\n");
+    if (impl_->transitionFence.active() && !impl_->transitionFence.coversSuspend(lock, *cycles))
+        return runtimeUnavailable("native-sleep-owner-denied reason=transition\n");
+    if (!impl_->currentSession())
+        return runtimeUnavailable("native-sleep-owner-denied reason=session\n");
+    if (!impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return runtimeUnavailable("native-sleep-owner-denied reason=peer-generation\n");
+    if (nativeSuccessfulSuspendCycles() != cycles)
+        return runtimeUnavailable("native-sleep-owner-denied reason=counter-generation\n");
+    if (impl_->independentState() != NativeCompositorLockState::Locked)
+        return runtimeUnavailable("native-sleep-owner-denied reason=coverage\n");
     // This is solely a fence around already-verified coverage. It cannot make
     // the pre-start helper's receipt into lock, power or unlock authority.
     const bool fenced = impl_->sleepFence.arm(event, lock, true, cycles, *unit);
+    if (!fenced)
+        (void)runtimeUnavailable("native-sleep-owner-denied reason=arm\n");
     impl_->refreshPresentation();
     return fenced;
 }
@@ -799,7 +863,7 @@ void NativeRuntime::recoverNativeSleepEntry()
     impl_->correctThread();
     if (!impl_->initialized || !impl_->sleepFence.active() || !impl_->currentSession())
         return;
-    NativeDeadline deadline(std::chrono::milliseconds(8'000));
+    NativeDeadline deadline(std::chrono::milliseconds(8'000), NativeDeadline::Stage::SleepRecovery);
     const auto unit = impl_->peers->sleepUnitSnapshot();
     const auto cycles = nativeSuccessfulSuspendCycles();
     if (unit && cycles && impl_->protocol->inspect() == LockMechanism::State::Secure &&
@@ -822,7 +886,8 @@ NativeRuntime::observePowerPermission(const QDBusMessage &received,
         return std::nullopt;
     // Bound even a native library ignoring cancellation. Timeout exits without
     // sending any unlock opcode; never synthesize permission from unavailability.
-    NativeDeadline deadline(std::chrono::milliseconds(2'000));
+    NativeDeadline deadline(std::chrono::milliseconds(2'000),
+                            NativeDeadline::Stage::PowerPermission);
     const auto result = impl_->authentication->observePowerPermission(transition);
     if (!impl_->currentSession() || transition.lock != identity() ||
         !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))

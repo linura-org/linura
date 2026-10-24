@@ -1,9 +1,6 @@
 //! Fresh fixed-service attestation for the narrow prepared handoff. Correlation
 //! hashes alone are never permission to call the executor.
 use std::collections::HashMap;
-use std::fs;
-use std::io::Read;
-use std::os::unix::fs::MetadataExt;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -27,6 +24,9 @@ struct Identity {
 /// no executor/Control name and exposes no channel/effect handle to its caller.
 /// Control independently authenticates this process and exact systemd program.
 pub fn protect_before_native_sleep() -> Result<(), String> {
+    // This is the fixed process entry mode, before any bus/runtime thread or
+    // transport is created. The same-PID re-exec retains native supervision.
+    crate::sleep_helper::enter_unprivileged()?;
     let channel = NativeSessionChannel {
         connection: crate::bus::connect_native_bus(None)?,
         role: NativeSessionRole::Executor,
@@ -91,7 +91,9 @@ impl NativeSessionChannel {
         let pid: u32 = field(&credentials, "ProcessID")?;
         let expected_uid = match role {
             NativeSessionRole::Executor => 0,
-            NativeSessionRole::Control => local_authority_uid()?,
+            NativeSessionRole::Control => {
+                crate::account::local_service_uid(crate::account::LocalServiceAccount::Authority)?
+            }
         };
         if uid != expected_uid || pid == 0 {
             return Err("native named service has the wrong kernel identity".into());
@@ -315,67 +317,4 @@ where
         .try_clone()
         .map_err(|_| "native service array field is unavailable".to_owned())?;
     Vec::<T>::try_from(value).map_err(|_| "native service array field has the wrong type".into())
-}
-fn local_authority_uid() -> Result<u32, String> {
-    let path = "/etc/passwd";
-    let meta = fs::symlink_metadata(path)
-        .map_err(|_| "local service account database is unavailable".to_owned())?;
-    if !meta.is_file() || meta.uid() != 0 || meta.mode() & 0o022 != 0 || meta.len() > 256 * 1024 {
-        return Err("local service account database is unsupported".into());
-    }
-    let mut bytes = Vec::new();
-    fs::File::open(path)
-        .map_err(|_| "local service accounts are unavailable".to_owned())?
-        .take(256 * 1024 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| "local service accounts cannot be read".to_owned())?;
-    if bytes.len() > 256 * 1024 {
-        return Err("local service accounts exceed their bound".into());
-    }
-    parse_authority_uid(
-        std::str::from_utf8(&bytes)
-            .map_err(|_| "local service accounts have invalid encoding".to_owned())?,
-    )
-}
-fn parse_authority_uid(contents: &str) -> Result<u32, String> {
-    let mut rows = contents
-        .lines()
-        .filter(|line| line.starts_with("linura-authority:"));
-    let row = rows
-        .next()
-        .ok_or("local authority service account is absent")?;
-    if rows.next().is_some() {
-        return Err("local authority service account is ambiguous".into());
-    }
-    let fields: Vec<_> = row.split(':').collect();
-    let uid: u32 = fields
-        .get(2)
-        .ok_or("local authority service UID is absent")?
-        .parse()
-        .map_err(|_| "local authority service UID is malformed".to_owned())?;
-    if fields.len() != 7 || uid == 0 || uid.to_string() != fields[2] {
-        return Err("local authority service account is noncanonical".into());
-    }
-    Ok(uid)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn service_identity_never_comes_from_nss_alias_or_duplicate_account() {
-        assert_eq!(
-            parse_authority_uid("linura-authority:x:991:991::/:/usr/bin/nologin"),
-            Ok(991)
-        );
-        for contents in [
-            "",
-            "linura-authority:x:0:0::/:/bin/sh",
-            "linura-authority:x:0991:991::/:/bin/sh",
-            "linura-authority:x:991",
-            "linura-authority:x:991:991::/:/bin/sh\nlinura-authority:x:992:992::/:/bin/sh",
-        ] {
-            assert!(parse_authority_uid(contents).is_err());
-        }
-    }
 }

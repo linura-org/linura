@@ -1255,7 +1255,8 @@ REVIEWED_SHELL_EXECUTION = {
     # included in the scan; the digest also binds those opaque bodies.
     "scripts/prepare_qualification_storage.sh": "4967e7217aeb4644fb645f47e1f47c4983785e4a134c146ab1dbea770bd55546",
     "qualification/v010/shell-runtime/prepare-substrate.sh": "3343b0bb022e493a9cba6f28d22aa2c31625d2fd43d7671d96edba3afccda3b9",
-    "qualification/v010/shell-runtime/run-shell-runtime.sh": "3533143a2a37fa733204daae9ba9177cffea726ce499e024d2968df433956b6b",
+    "qualification/v010/shell-runtime/run-shell-runtime.sh": "fb0bd980d983d3d694b0a6f8faf39976cee81ed94031edb09e33a1cae351cfb7",
+    "qualification/v010/shell-runtime/start-vm.sh": "76d2284b847b15564c9c3494b2b508d9ba8dacf941cef3e7ae6872010b911c71",
     "qualification/v010/workstation-acceptance/capture-hardware-session.sh": "ce2257338be8b6b1f9b07248102f28808bbbecf83277f886163127e244d11ad3",
     "qualification/v010/workstation-acceptance/launch-interactive.sh": "1c8ed5fc180526a8176e7a88635fae9b122daa0b64090e826ec3e3c6af957dd6",
     "qualification/v010/workstation-acceptance/run-hardware-qualification.sh": "fa08f7a5cf050d9692de40227b8e40668859d54e801318dfa7dfe7181ed90b72",

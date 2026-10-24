@@ -1,5 +1,280 @@
 use super::*;
 
+fn discovery_identity(name: &str) -> NativeOwnerIdentity {
+    NativeOwnerIdentity {
+        unique_name: name.into(),
+        uid: 1000,
+        pid: 51,
+        invocation: lock().security_owner_invocation().clone(),
+    }
+}
+
+#[test]
+fn endpoint_reply_rejects_wrong_wire_type_and_oversized_replies_before_selection() {
+    let call = value(
+        value(zbus::Message::method_call(
+            "/org/linura/SecurityOwner1",
+            "Introspect",
+        ))
+        .build(&()),
+    );
+    for (xml, expected) in [
+        (
+            "<node><interface name=\"org.linura.SecurityOwner1\"></interface></node>",
+            true,
+        ),
+        (
+            "<node><interface name=\"org.freedesktop.DBus.Introspectable\"></interface></node>",
+            false,
+        ),
+    ] {
+        let reply = value(value(zbus::Message::method_return(&call.header())).build(&(xml,)));
+        assert!(matches!(owner_endpoint_reply(&reply),Ok(found) if found==expected));
+    }
+    for length in [16 * 1024 + 1, crate::bus::MAX_REPLY_BYTES + 1] {
+        let reply = value(
+            value(zbus::Message::method_return(&call.header())).build(&("x".repeat(length),)),
+        );
+        assert!(matches!(
+            owner_endpoint_reply(&reply),
+            Err(NativeCallError::Failure(_))
+        ));
+    }
+    let reply = value(value(zbus::Message::method_return(&call.header())).build(&(42_u64,)));
+    assert!(matches!(
+        owner_endpoint_reply(&reply),
+        Err(NativeCallError::Failure(_))
+    ));
+}
+
+#[test]
+fn owner_disappearance_discards_every_partial_candidate_and_restarts_one_complete_snapshot() {
+    let initial = discovery_identity(":1.10");
+    let expected = (initial.pid, initial.invocation.clone());
+    let mut attempts = 0;
+    let result = value(complete_owner_discovery(
+        1000,
+        &expected,
+        || Duration::ZERO,
+        |remaining| {
+            attempts += 1;
+            let names = if attempts == 1 {
+                vec![":1.10".into(), ":1.11".into()]
+            } else {
+                vec![":1.12".into(), ":1.13".into()]
+            };
+            let selected = select_owner_connection(
+                &names,
+                (1000, 51),
+                remaining,
+                |name| {
+                    if name == ":1.11" {
+                        Err(NativeCallError::CredentialPeerVanished)
+                    } else {
+                        Ok((1000, 51))
+                    }
+                },
+                |name| Ok(name != ":1.13"),
+            )?;
+            Ok(selected.map(|name| discovery_identity(&name)))
+        },
+    ));
+    assert_eq!(attempts, 2);
+    assert_eq!(result.unique_name, ":1.12");
+    let mut remaining = MAX_DISCOVERY_NAMES;
+    assert_eq!(
+        value(select_owner_connection(
+            &[":1.10".into(), ":1.11".into()],
+            (1000, 51),
+            &mut remaining,
+            |_| Ok((1000, 51)),
+            |name| if name == ":1.11" {
+                Err(NativeCallError::EndpointPeerVanished)
+            } else {
+                Ok(true)
+            },
+        )),
+        None
+    );
+}
+
+#[test]
+fn owner_discovery_refuses_ambiguity_unknown_failures_missing_endpoint_and_persistent_churn() {
+    for mode in 0..5 {
+        let mut remaining = MAX_DISCOVERY_NAMES;
+        let result = select_owner_connection(
+            &[":1.10".into(), ":1.11".into()],
+            (1000, 51),
+            &mut remaining,
+            |_| {
+                if mode == 1 {
+                    Err(NativeCallError::Failure("credential denial".into()))
+                } else {
+                    Ok((1000, 51))
+                }
+            },
+            |_| match mode {
+                0 => Ok(true),
+                2 => Err(NativeCallError::Failure("inspection unavailable".into())),
+                3 => Err(NativeCallError::EndpointAbsent),
+                _ => Ok(false),
+            },
+        );
+        assert!(result.is_err());
+    }
+    let identity = discovery_identity(":1.10");
+    let expected = (identity.pid, identity.invocation.clone());
+    let mut attempts = 0;
+    assert!(
+        complete_owner_discovery(
+            1000,
+            &expected,
+            || Duration::ZERO,
+            |_| {
+                attempts += 1;
+                Ok(None)
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(attempts, 2);
+    attempts = 0;
+    assert!(
+        complete_owner_discovery(
+            1000,
+            &expected,
+            || Duration::ZERO,
+            |_| {
+                attempts += 1;
+                Err("unavailable".into())
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(attempts, 1);
+    let mut remaining = MAX_DISCOVERY_NAMES;
+    assert_eq!(
+        value(select_owner_connection(
+            &[":1.10".into(), ":1.11".into()],
+            (1000, 51),
+            &mut remaining,
+            |name| Ok(if name == ":1.10" {
+                (1000, 51)
+            } else {
+                (1001, 51)
+            }),
+            |_| Ok(true)
+        )),
+        Some(":1.10".into())
+    );
+}
+
+#[test]
+fn owner_discovery_keeps_aggregate_names_original_deadline_and_supervisor_epoch() {
+    let identity = discovery_identity(":1.10");
+    let expected = (identity.pid, identity.invocation.clone());
+    for change in ["uid", "pid", "invocation", "name"] {
+        let mut changed = identity.clone();
+        match change {
+            "uid" => changed.uid += 1,
+            "pid" => changed.pid += 1,
+            "invocation" => {
+                changed.invocation = value(SecurityOwnerInvocationId::new(
+                    "abcdef12-1234-4567-89ab-0123456789ab",
+                ))
+            }
+            _ => changed.unique_name = "org.linura.Preclaimed".into(),
+        }
+        assert!(
+            complete_owner_discovery(
+                1000,
+                &expected,
+                || Duration::ZERO,
+                |_| Ok(Some(changed.clone()))
+            )
+            .is_err(),
+            "{change}"
+        );
+    }
+    let mut calls = 0;
+    assert!(
+        complete_owner_discovery(
+            1000,
+            &expected,
+            || crate::bus::PROBE_BUDGET,
+            |_| {
+                calls += 1;
+                Ok(Some(identity.clone()))
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(calls, 0);
+    let mut times = [Duration::ZERO, crate::bus::PROBE_BUDGET].into_iter();
+    assert!(
+        complete_owner_discovery(
+            1000,
+            &expected,
+            || times.next().unwrap_or(Duration::MAX),
+            |_| Ok(Some(identity.clone()))
+        )
+        .is_err()
+    );
+    let mut remaining = MAX_DISCOVERY_NAMES;
+    let names = vec![":1.10".into(); MAX_DISCOVERY_NAMES - 1];
+    assert_eq!(
+        value(select_owner_connection(
+            &names,
+            (1000, 51),
+            &mut remaining,
+            |_| Err(NativeCallError::CredentialPeerVanished),
+            |_| Ok(true)
+        )),
+        None
+    );
+    assert_eq!(remaining, 1);
+    assert!(
+        select_owner_connection(
+            &[":1.12".into(), ":1.13".into()],
+            (1000, 51),
+            &mut remaining,
+            |_| Ok((1000, 51)),
+            |_| Ok(true)
+        )
+        .is_err()
+    );
+    assert_eq!(crate::bus::CALL_BUDGET, Duration::from_millis(500));
+    assert_eq!(crate::bus::PROBE_BUDGET, Duration::from_secs(2));
+}
+
+#[test]
+fn compound_owner_observation_and_approval_share_only_the_original_probe_remainder() {
+    for elapsed in [
+        Duration::ZERO,
+        Duration::from_millis(499),
+        Duration::from_millis(500),
+        Duration::from_millis(750),
+        Duration::from_millis(1_500),
+        Duration::from_millis(1_999),
+    ] {
+        let remaining = value(owner_reply_budget(elapsed));
+        assert_eq!(elapsed + remaining, Duration::from_secs(2));
+    }
+    assert_eq!(
+        value(owner_reply_budget(Duration::from_millis(750))),
+        Duration::from_millis(1_250)
+    );
+    assert!(value(owner_reply_budget(Duration::from_millis(750))) > crate::bus::CALL_BUDGET);
+    for expired in [
+        Duration::from_secs(2),
+        Duration::from_millis(2_001),
+        Duration::MAX,
+    ] {
+        assert!(owner_reply_budget(expired).is_err());
+    }
+    assert_eq!(crate::bus::CALL_BUDGET, Duration::from_millis(500));
+}
+
 #[test]
 fn each_authentication_purpose_has_its_own_fixed_non_lock_action() {
     for (purpose, action) in [
@@ -287,6 +562,63 @@ fn attestation_requires_exact_supervised_image_user_invocation_and_launch() {
     assert!(bind_supervised(0, &unit, &service, true, true).is_err());
     assert!(bind_supervised(1000, &unit, &service, false, true).is_err());
     assert!(bind_supervised(1000, &unit, &service, true, false).is_err());
+}
+
+#[test]
+fn supervision_refusals_report_only_closed_stages() {
+    for stage in [
+        "process",
+        "user",
+        "unit",
+        "state",
+        "invocation",
+        "launch",
+        "assets",
+    ] {
+        let (mut unit, mut service) = properties();
+        let mut uid = 1000;
+        let mut immutable_image = true;
+        match stage {
+            "process" => uid = 0,
+            "user" => {
+                service.insert(
+                    "User".into(),
+                    value(OwnedValue::try_from(Value::from("private-wire-marker"))),
+                );
+            }
+            "unit" => {
+                unit.insert(
+                    "FragmentPath".into(),
+                    value(OwnedValue::try_from(Value::from("private-wire-marker"))),
+                );
+            }
+            "state" => {
+                unit.insert(
+                    "ActiveState".into(),
+                    value(OwnedValue::try_from(Value::from("private-wire-marker"))),
+                );
+            }
+            "invocation" => {
+                unit.insert(
+                    "InvocationID".into(),
+                    value(OwnedValue::try_from(Value::from(vec![0_u8; 16]))),
+                );
+            }
+            "launch" => {
+                service.insert(
+                    "ExecStart".into(),
+                    value(OwnedValue::try_from(Value::from(Vec::<ExecStart>::new()))),
+                );
+            }
+            _ => immutable_image = false,
+        }
+        assert_eq!(
+            bind_supervised(uid, &unit, &service, true, immutable_image).err(),
+            Some(format!(
+                "native owner is not the exact immutable supervised invocation: supervision={stage}"
+            ))
+        );
+    }
 }
 
 #[test]

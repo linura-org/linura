@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -60,6 +61,14 @@ EXPECTED_RUNTIME_PACKAGES = [
     "ffmpeg",
     "wf-recorder",
     "wayland",
+    "wayland-protocols",
+    "polkit",
+    "at-spi2-core",
+    "libcap",
+    "libxkbcommon",
+    "libx11",
+    "fontconfig",
+    "ttf-dejavu",
 ]
 
 EXPECTED_CASES = [
@@ -98,6 +107,12 @@ RUNTIME_FILES = (
     "apps/linura-shell/bridge/CMakeLists.txt",
     "apps/linura-shell/bridge/audio_session_controller.h",
     "apps/linura-shell/bridge/audio_session_controller.cpp",
+    "apps/linura-shell/bridge/session_controller.h",
+    "apps/linura-shell/bridge/session_controller.cpp",
+    "apps/linura-shell/bridge/session_receipt.h",
+    "apps/linura-shell/bridge/session_receipt.cpp",
+    "apps/linura-shell/plugins/session/SessionControls.qml",
+    "apps/linura-shell/plugins/power/PowerControls.qml",
     "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml",
     "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml",
     "apps/linura-shell/plugins/notifications-osd/manifest.json",
@@ -299,14 +314,15 @@ def validate(root: Path) -> list[str]:
         "claim": "development-runtime-evidence-only",
         "target_profile": "arch-hyprland-v1",
         "workflow": WORKFLOW,
-        "runner": "github-hosted-ubuntu-qemu-tcg",
-        "vm_acceleration": "tcg",
+        "runner": "github-hosted-ubuntu-qemu-kvm",
+        "vm_acceleration": "kvm",
         "qt_quick_backend": "software",
         "vm_network_mac": "52:54:00:12:34:56",
         "vm_gpu_pci_bdf": "0000:00:02.0",
         "vm_gpu_vendor_id": "0x1af4",
         "vm_gpu_device_id": "0x1050",
         "vm_disk_size_gib": 16,
+        "runtime_disk_mode": "verified-private-disposable-persistent-copy",
         "runtime_root": "qualification/v010/shell-runtime",
     }
     for key, expected in expected_scalars.items():
@@ -475,6 +491,12 @@ def validate(root: Path) -> list[str]:
         "workflow_call:",
         "runs-on: ubuntu-24.04",
         "timeout-minutes: 90",
+        "VM_ACCELERATION: kvm",
+        "- name: Verify KVM device and grant the isolated runner access",
+        "[[ -c /dev/kvm ]]",
+        "sudo chmod 0600 /dev/kvm",
+        "[[ -r /dev/kvm && -w /dev/kvm ]]",
+        '--acceleration "$VM_ACCELERATION"',
         "python3 tools/check_v010_shell_runtime_qualification.py",
         "installed_shell_bridge_sha=",
         "SHELL_BRIDGE_SHA256",
@@ -533,6 +555,40 @@ def validate(root: Path) -> list[str]:
         "LINURAD_SHA256=%s",
         "SESSION_AUDIO_HELPER_SHA256=%s",
         "bash qualification/v010/shell-runtime/start-vm.sh",
+        '--qmp-socket "$native_input_socket"',
+        "umask 077",
+        "timeout --signal=TERM --kill-after=5s 900 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-auth.py",
+        '--bootstrap "$ARTIFACT_DIR/s17-native-bootstrap.json"',
+        '"$ARTIFACT_DIR/s17-native-authentication.json"',
+        '"$ARTIFACT_DIR/s17-native-case-digests.sha256"',
+        "'sha256sum /usr/lib/linura/qualification/linura-s17-assistive-probe'",
+        '> "$ARTIFACT_DIR/s17-native-assistive-binary.sha256"',
+        '"$ARTIFACT_DIR/s17-native-assistive-binary.sha256" \\',
+        "qualification/v010/session-security/native-assistive-fixture.py \\",
+        "qualification/v010/session-security/native-assistive-probe.cpp \\",
+        "qualification/v010/session-security/native-assistive-prompt.h \\",
+        "qualification/v010/session-security/native-assistive-denial.h \\",
+        "qualification/v010/session-security/native-assistive-denial-test.cpp \\",
+        "qualification/v010/session-security/native-assistive-discovery.h \\",
+        "qualification/v010/session-security/native-assistive-discovery-test.cpp \\",
+        "qualification/v010/session-security/CMakeLists.txt \\",
+        "timeout --signal=TERM --kill-after=5s 360 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-suspend.py",
+        '"$ARTIFACT_DIR/s17-native-suspend.json"',
+        '"$ARTIFACT_DIR/s17-native-suspend-digests.sha256"',
+        "start-vm.sh --persistent             --mode automated",
+        "for purpose in logout reboot power-off; do",
+        "timeout --signal=TERM --kill-after=5s 180 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-transition.py",
+        "timeout --signal=TERM --kill-after=5s 600 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-transition.py",
+        '"$ARTIFACT_DIR/s17-native-terminating-digests.sha256"',
+        'vm_directory="$(mktemp -d "$LINURA_VM_DIR/linura-s17-disk.XXXXXX")"',
+        'vm_image="$vm_directory/guest.qcow2"',
+        'source_archive="$LINURA_WORK_DIR/linura-source.tar.gz"',
+        'chmod 0600 "$vm_image"',
+        "/usr/bin/python3 -I -S qualification/v010/session-security/guard-disposable-disk.py",
+        '--source "$PREPARED_IMAGE" --copy "$vm_image"',
+        '--source "$PREPARED_IMAGE" --copy "$VM_IMAGE"',
+        '--expected-source-sha "$PREPARED_IMAGE_SHA256" --phase before',
+        '--expected-source-sha "$PREPARED_IMAGE_SHA256" --phase after',
         "--mode automated",
         "--display none",
         "cloud-localds",
@@ -548,6 +604,15 @@ def validate(root: Path) -> list[str]:
         'seat_setup_pipeline_status=("${PIPESTATUS[@]}")',
         'pipewire_fixture_props = artifacts / "pipewire-fixture-props.txt"',
         'cp --reflink=auto "$PREPARED_IMAGE" "$vm_image"',
+        "install -d -o root -g root -m 0700 /run/linura-source-stage",
+        "install -o root -g root -m 0600 /dev/null /run/linura-source-stage/source.tar.gz",
+        "test \"$(stat -c '%u:%g:%a:%h:%F' \"$archive\")\" = '0:0:600:1:regular file'",
+        'printf \'%s  %s\\n\' "$expected_sha256" "$archive" | sha256sum --check --strict',
+        "--no-same-owner --no-same-permissions",
+        'test -z "$(find "$source_root" -xdev \\( -type d -o -type f \\) -perm /022 -print -quit)"',
+        'test -z "$(find "$source_root" -xdev \\( -type d -o -type f \\) ! -user root -print -quit)"',
+        'test -z "$(find "$source_root" -xdev \\( -type d -o -type f \\) ! -group root -print -quit)"',
+        'test -z "$(find "$source_root" -xdev -type l -print -quit)"',
         '"$ARTIFACT_DIR/guest-storage.txt"',
         "prepared-substrate-manifest.json",
         "prepared-substrate-packages.txt",
@@ -624,7 +689,7 @@ def validate(root: Path) -> list[str]:
         )
     else:
         package_set = workflow.split(package_set_marker, 1)[1].split("}", 1)[0]
-        for required_package in ("pipewire-audio", "ffmpeg", "wf-recorder", "wayland"):
+        for required_package in EXPECTED_RUNTIME_PACKAGES:
             if f'"{required_package}"' not in package_set:
                 failures.append(
                     f"shell runtime evidence package set must include {required_package}"
@@ -636,6 +701,29 @@ def validate(root: Path) -> list[str]:
             return ""
         remainder = text.split(marker, 1)[1]
         return remainder.split("\n      - name:", 1)[0]
+
+    # Shared source names occur in several digest lists. Presence elsewhere
+    # cannot replace the binding for the step that actually used the input.
+    for step_name in (
+        "Qualify real S17 owner authentication and retained recovery",
+        "Qualify real managed S17 suspend and observe-only recovery",
+        "Qualify native S17 terminating transitions without effect replay",
+    ):
+        step = workflow_step_block(workflow, step_name)
+        if "authentication" not in step_name and '--vm-log "$VM_LOG"' not in step:
+            failures.append(
+                f"shell runtime workflow missing {step_name} prompt log binding"
+            )
+        for fragment in (
+            "qualification/v010/session-security/native-assistive-fixture.py \\",
+            "qualification/v010/session-security/native-assistive-probe.cpp \\",
+            "qualification/v010/session-security/native-assistive-prompt.h \\",
+            '"$ARTIFACT_DIR/s17-native-assistive-binary.sha256" \\',
+        ):
+            if fragment not in step:
+                failures.append(
+                    f"shell runtime workflow missing {step_name} input binding: {fragment}"
+                )
 
     prepared_hash = (
         "hashFiles('contracts/v010-shell-runtime-substrate.toml', "
@@ -732,9 +820,58 @@ def validate(root: Path) -> list[str]:
         )
     if "linura-v010-pacman" in workflow:
         failures.append("v0.10 runtime must not use the obsolete package-payload cache")
-    if "--persistent" in runtime_job:
+    if "tar -xzf /tmp/linura-source.tar.gz" in runtime_job:
         failures.append(
-            "exact-source qualification runtime must remain snapshot/disposable"
+            "exact-source provisioning must not preserve archive ownership or permissions"
+        )
+    # S17 power-off recovery needs persistence across QEMU exit, but only on the
+    # separately guarded private copy. Preserve the former no-writable-substrate
+    # assertion: no other persistent launch, image substitution or extra flag is
+    # admitted. The default shared launcher remains snapshot/disposable.
+    launches = re.findall(
+        r"bash qualification/v010/shell-runtime/start-vm\.sh\s+(.*?)\s+>",
+        runtime_job.replace("\\\n", " "),
+        re.DOTALL,
+    )
+    expected_launch = [
+        "--persistent",
+        "--mode",
+        "automated",
+        "--display",
+        "none",
+        "--acceleration",
+        "$VM_ACCELERATION",
+        "--image",
+        "$VM_IMAGE",
+        "--seed",
+        "$SEED_IMAGE",
+        "--memory",
+        "6144",
+        "--cpus",
+        "4",
+        "--nic-mac",
+        "$QUALIFICATION_NIC_MAC",
+        "--ssh-port",
+        "2223",
+        "--qmp-socket",
+    ]
+    try:
+        actual_launches = [
+            shlex.split(value.replace("\\\n", " ")) for value in launches
+        ]
+    except ValueError:
+        actual_launches = []
+    if (
+        actual_launches
+        != [
+            expected_launch + ["$native_input_socket"],
+            expected_launch + ["$NATIVE_INPUT_SOCKET"],
+        ]
+        or runtime_job.count("--persistent") != 2
+        or runtime_job.count('--acceleration "$VM_ACCELERATION"') != 2
+    ):
+        failures.append(
+            "exact-source qualification runtime must remain snapshot/disposable except for its two exact guarded S17 private-copy boots"
         )
     if 'cp --reflink=auto "$PREPARED_IMAGE" "$vm_image"' not in runtime_job:
         failures.append(
@@ -1908,7 +2045,7 @@ def validate(root: Path) -> list[str]:
             'wait_until "Quick Settings recovery after linurad restart" quick_settings_recovered',
             'pass_case "quick-settings-restart-recovery"',
             "seat-drm-preflight.txt",
-            "pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite ffmpeg wf-recorder wayland",
+            "pacman -Q systemd " + " ".join(EXPECTED_RUNTIME_PACKAGES),
             "package-versions.txt",
         ):
             if fragment not in run_text:
@@ -1977,7 +2114,11 @@ wait_until "WirePlumber mixer state for qualification sink" wireplumber_fixture_
     if vm_launcher.is_file():
         launcher_text = vm_launcher.read_text(encoding="utf-8")
         for fragment in (
-            "q35,accel=tcg",
+            "q35,accel=$acceleration",
+            'acceleration="tcg"',
+            "--acceleration)",
+            '[[ "$acceleration" == tcg || "$acceleration" == kvm ]]',
+            "[[ -c /dev/kvm && -r /dev/kvm && -w /dev/kvm ]]",
             "-vga none",
             "-device virtio-gpu-pci,id=linura-qualification-gpu,bus=pcie.0,addr=0x2",
             "readonly=on",

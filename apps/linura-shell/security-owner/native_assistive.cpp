@@ -326,7 +326,8 @@ class NativeAssistiveBridge::Impl final
                          [](guint id) { return id == 0; })) {
             // If a native library fails to deliver its cancelled callback, do
             // not leave stack callback state live indefinitely or unwind it.
-            NativeDeadline callbackDeadline(std::chrono::seconds(3));
+            NativeDeadline callbackDeadline(std::chrono::seconds(3),
+                                            NativeDeadline::Stage::AssistiveCallback);
             g_dbus_connection_call(
                 bus, Registry, Root, "org.a11y.atspi.Socket", "Embed",
                 g_variant_new("(@(so))", reference(Root)), G_VARIANT_TYPE("((so))"),

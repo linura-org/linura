@@ -1087,6 +1087,34 @@ class OperationSemanticsContractTests(unittest.TestCase):
                 )
             )
 
+    def test_wireplumber_dispatch_must_sync_before_reporting_success(self) -> None:
+        for before, after in (
+            ("Core.sync(function(sync_error)", "Core.idle_add(function(sync_error)"),
+            ("if sync_error ~= nil then", "if false then"),
+            ('fail("set-volume-sync-failed")', 'print("ignored")'),
+            (
+                'print("ok\\t1")\n        Core.quit()',
+                'Core.quit()\n        print("ok\\t1")',
+            ),
+        ):
+            with (
+                self.subTest(mutation=before),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                helper = root / "packaging/wireplumber/linura-session-audio.lua"
+                text = helper.read_text(encoding="utf-8")
+                self.assertIn(before, text)
+                helper.write_text(text.replace(before, after, 1), encoding="utf-8")
+                self.assertTrue(
+                    any(
+                        "WirePlumber session-audio helper missing identity-bound fragment"
+                        in failure
+                        for failure in check_operation_semantics.validate(root)
+                    )
+                )
+
     def test_transient_session_audit_cannot_drop_exact_schema_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

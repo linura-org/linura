@@ -76,6 +76,11 @@ bool LockMechanism::independentlyVerifiedReleased(const NativeLockIdentity &iden
     return true;
 }
 
+bool LockMechanism::retainedVerifiedRelease(const NativeLockIdentity &identity) const
+{
+    return state_ == State::Released && identity == identity_ && !coverage_ && !requested_;
+}
+
 bool LockMechanism::commitVerifiedRelease(const NativeLockIdentity &identity)
 {
     if (state_ != State::Released || identity != identity_ || coverage_ || requested_)

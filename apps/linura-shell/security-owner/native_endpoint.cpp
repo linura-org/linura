@@ -138,11 +138,17 @@ NativeLockObservationWire NativeEndpoint::ObserveLock()
         const auto state = runtime_.observe(message());
         const auto completed = bootMilliseconds();
         if (sampled && state && completed) {
-            NativeLockObservationWire observation{runtime_.identity().resource,
-                                                  *state == NativeCompositorLockState::Locked,
-                                                  *sampled};
-            if (observation.freshAtBootMs(*completed))
+            NativeLockObservationWire observation{
+                runtime_.identity().resource, *state == NativeObservedLockState::Secure, *sampled};
+            if (observation.freshAtBootMs(*completed)) {
+                if (*state == NativeObservedLockState::Acquiring ||
+                    *state == NativeObservedLockState::Releasing) {
+                    sendErrorReply(QStringLiteral("org.linura.Private.NativeTransitionPending"),
+                                   QStringLiteral("Native lock transition is pending"));
+                    return {}; // Never encode a transitional state as secure=false.
+                }
                 return observation;
+            }
         }
         sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
                        QStringLiteral("Native lock evidence unavailable"));
@@ -177,6 +183,11 @@ bool NativeEndpoint::VerifyReleased(const QString &resource)
 {
     const auto lock = NativeLockIdentity::parse(resource);
     return calledFromDBus() && lock && runtime_.verifyReleased(message(), *lock);
+}
+bool NativeEndpoint::RetainedVerifiedRelease(const QString &resource)
+{
+    const auto lock = NativeLockIdentity::parse(resource);
+    return calledFromDBus() && lock && runtime_.retainedVerifiedRelease(message(), *lock);
 }
 bool NativeEndpoint::FencePreparedTransition(const QString &resource)
 {

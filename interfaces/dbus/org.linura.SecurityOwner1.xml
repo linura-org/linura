@@ -22,6 +22,10 @@
     </method>
     <method name="CancelApproval"/>
     <method name="ObserveLock">
+      <!-- Consistent in-flight acquisition/release returns the fixed private
+           NativeTransitionPending error, never secure=false. Other unknown or
+           inconsistent state remains NativeUnavailable. Only Control's existing
+           bounded post-dispatch verification loop may await a known transition. -->
       <arg name="observation" type="(sbt)" direction="out"/>
     </method>
     <method name="ObservePowerPermission">
@@ -60,6 +64,14 @@
     <method name="VerifyReleased">
       <arg name="resource" type="s" direction="in"/>
       <arg name="verified" type="b" direction="out"/>
+    </method>
+    <!-- Retained proof from the first independent VerifyReleased transition.
+         Never mutates mechanism or rotates generation. Attested Control only;
+         the same current lock, independent unlocked compositor, clear coverage
+         and inactive sleep fence remain mandatory. Ready is never proof. -->
+    <method name="RetainedVerifiedRelease">
+      <arg name="resource" type="s" direction="in"/>
+      <arg name="retained" type="b" direction="out"/>
     </method>
     <method name="CommitVerifiedRelease">
       <arg name="resource" type="s" direction="in"/>

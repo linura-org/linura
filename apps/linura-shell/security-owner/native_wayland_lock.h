@@ -40,6 +40,11 @@ class NativeWaylandLock final : public NativeManagedLockBackend
                                           PointerHitTest hitTest = {});
     [[nodiscard]] bool protectedInputAvailable() const noexcept;
     [[nodiscard]] bool protectedInputFocused() const;
+    // Bounded observation of already available native events; no effect dispatch.
+    void refreshNativeState();
+    // Progress already queued native replies between bounded metadata reads.
+    // Skip nested native callbacks/rendering; never process Qt/D-Bus/timer events.
+    void progressNativeState();
     // Private native interaction, not an effect/approval credential. The runtime
     // arms the exact reviewed NativeApprovalScope first and consumes its fresh
     // confirmation through Control separately. Closing/expiry means denial.

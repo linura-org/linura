@@ -1,6 +1,7 @@
 #pragma once
 
 #include "native_scope.h"
+#include "native_probe_progress.h"
 
 #include <QDBusConnection>
 #include <QDBusObjectPath>
@@ -61,6 +62,7 @@ struct NativeSessionBinding final
 };
 
 [[nodiscard]] std::optional<NativeSessionBinding>
-inspectNativeSession(const QDBusConnection &trustedSystemBus, int actualWaylandDisplayFd);
+inspectNativeSession(const QDBusConnection &trustedSystemBus, int actualWaylandDisplayFd,
+                     const NativeProbeProgress &progress = {});
 
 } // namespace Linura::SecurityOwner

@@ -1,5 +1,6 @@
 //! Root-supervised native owner discovery and bounded private transport only.
 //! Neither these identities nor successful calls mint policy/dispatch authority.
+mod polkit;
 mod sleep_fence;
 
 use std::collections::HashMap;
@@ -17,6 +18,7 @@ use linura_observation::{ObservationAuthority, ObservationEnvelope, ObservedValu
 use linura_provider_sdk::ComponentDigest;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 
+use crate::bus::NativeCallError;
 use crate::{NativeSessionChannel, NativeSessionRole};
 
 const SYSTEMD: &str = "org.freedesktop.systemd1";
@@ -28,6 +30,105 @@ const FRAGMENT: &str = "/usr/lib/systemd/system/linura-security-owner@.service";
 const ENDPOINT: &str = "/org/linura/SecurityOwner1";
 const INTERFACE: &str = "org.linura.SecurityOwner1";
 const VALID_FOR_MS: u64 = 1_999;
+const MAX_DISCOVERY_NAMES: usize = 256;
+const MAX_DISCOVERY_SNAPSHOTS: usize = 2;
+
+fn owner_endpoint_reply(reply: &zbus::Message) -> Result<bool, NativeCallError> {
+    if reply.body().len() > crate::bus::MAX_REPLY_BYTES {
+        return Err(NativeCallError::Failure(
+            "native endpoint introspection exceeds its bound".into(),
+        ));
+    }
+    let xml: String = reply.body().deserialize().map_err(|_| {
+        NativeCallError::Failure("native endpoint introspection is malformed".into())
+    })?;
+    if xml.len() > 16 * 1024 {
+        return Err(NativeCallError::Failure(
+            "native endpoint introspection exceeds its bound".into(),
+        ));
+    }
+    Ok(xml.contains("<interface name=\"org.linura.SecurityOwner1\">"))
+}
+
+fn complete_owner_discovery<E, F>(
+    uid: u32,
+    expected: &(u32, SecurityOwnerInvocationId),
+    mut elapsed: E,
+    mut snapshot: F,
+) -> Result<NativeOwnerIdentity, String>
+where
+    E: FnMut() -> Duration,
+    F: FnMut(&mut usize) -> Result<Option<NativeOwnerIdentity>, String>,
+{
+    let mut remaining_names = MAX_DISCOVERY_NAMES;
+    for _ in 0..MAX_DISCOVERY_SNAPSHOTS {
+        if elapsed() >= crate::bus::PROBE_BUDGET {
+            return Err("native owner discovery exceeded its original deadline".into());
+        }
+        if let Some(identity) = snapshot(&mut remaining_names)? {
+            if !unique_name(&identity.unique_name)
+                || identity.uid != uid
+                || (identity.pid, &identity.invocation) != (expected.0, &expected.1)
+            {
+                return Err("native security owner changed during discovery".into());
+            }
+            if elapsed() >= crate::bus::PROBE_BUDGET {
+                return Err("native owner discovery exceeded its original deadline".into());
+            }
+            return Ok(identity);
+        }
+    }
+    Err("native owner discovery remained unstable within its bounded probe".into())
+}
+
+fn select_owner_connection<C, I>(
+    names: &[String],
+    expected: (u32, u32),
+    remaining_names: &mut usize,
+    mut credentials: C,
+    mut inspect: I,
+) -> Result<Option<String>, String>
+where
+    C: FnMut(&str) -> Result<(u32, u32), NativeCallError>,
+    I: FnMut(&str) -> Result<bool, NativeCallError>,
+{
+    *remaining_names = remaining_names
+        .checked_sub(names.len())
+        .ok_or("native bus enumeration exceeds its aggregate bound")?;
+    let mut found = None;
+    for name in names.iter().filter(|name| unique_name(name)) {
+        let peer = match credentials(name) {
+            Ok(peer) => peer,
+            Err(NativeCallError::CredentialPeerVanished) => return Ok(None),
+            Err(error) => return Err(error.label()),
+        };
+        if peer != expected {
+            continue;
+        }
+        let endpoint = match inspect(name) {
+            Ok(endpoint) => endpoint,
+            Err(NativeCallError::EndpointAbsent) => false,
+            Err(NativeCallError::EndpointPeerVanished) => return Ok(None),
+            Err(error) => return Err(error.label()),
+        };
+        if endpoint {
+            if found.is_some() {
+                return Err("native owner has ambiguous bus connections".into());
+            }
+            found = Some(name.clone());
+        }
+    }
+    found
+        .map(Some)
+        .ok_or_else(|| "native owner has no authenticated bus connection".into())
+}
+
+fn owner_reply_budget(elapsed: Duration) -> Result<Duration, String> {
+    crate::bus::PROBE_BUDGET
+        .checked_sub(elapsed)
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| "native owner probe deadline expired".into())
+}
 type Properties = HashMap<String, OwnedValue>;
 type ExecStart = (String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32);
 type ApprovalWire = (String, String, String, String, String, String, String, u32);
@@ -225,67 +326,85 @@ impl NativeSessionChannel {
     }
 
     fn connection_credentials(&self, name: &str, started: Instant) -> Result<(u32, u32), String> {
+        self.connection_credentials_classified(name, started)
+            .map_err(NativeCallError::label)
+    }
+
+    fn connection_credentials_classified(
+        &self,
+        name: &str,
+        started: Instant,
+    ) -> Result<(u32, u32), NativeCallError> {
         let properties: Properties = self
-            .bus_call("GetConnectionCredentials", &(name,), started)?
+            .call_classified(
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "GetConnectionCredentials",
+                &(name,),
+                started,
+            )?
             .body()
             .deserialize()
-            .map_err(|_| "native bus credentials are malformed".to_owned())?;
+            .map_err(|_| NativeCallError::Failure("native bus credentials are malformed".into()))?;
         Ok((
-            property(&properties, "UnixUserID")?,
-            property(&properties, "ProcessID")?,
+            property(&properties, "UnixUserID").map_err(NativeCallError::Failure)?,
+            property(&properties, "ProcessID").map_err(NativeCallError::Failure)?,
         ))
     }
 
     fn discover(&self, uid: u32, started: Instant) -> Result<NativeOwnerIdentity, String> {
-        let (pid, invocation) = self.supervised_owner(uid, started)?;
-        let names: Vec<String> = self
-            .bus_call("ListNames", &(), started)?
-            .body()
-            .deserialize()
-            .map_err(|_| "native bus names are malformed".to_owned())?;
-        if names.len() > 256 {
-            return Err("native bus enumeration exceeds its bound".into());
-        }
-        let mut found = None;
-        for name in names.iter().filter(|name| unique_name(name)) {
-            // A disappearing connection is a failed probe, not negative evidence.
-            if self.connection_credentials(name, started)? == (uid, pid) {
-                // Official GLib authentication uses its own connection. Select
-                // the private runtime endpoint, not an arbitrary connection
-                // from the same (independently attested immutable) process.
-                let Ok(reply) = self.call(
-                    name,
-                    ENDPOINT,
-                    "org.freedesktop.DBus.Introspectable",
-                    "Introspect",
-                    &(),
-                    started,
-                ) else {
-                    continue;
-                };
-                let xml: String = reply
+        let expected = self.supervised_owner(uid, started)?;
+        complete_owner_discovery(
+            uid,
+            &expected,
+            || started.elapsed(),
+            |remaining_names| {
+                let (pid, invocation) = self.supervised_owner(uid, started)?;
+                if (pid, &invocation) != (expected.0, &expected.1) {
+                    return Err("native security owner changed during discovery".into());
+                }
+                let names: Vec<String> = self
+                    .bus_call("ListNames", &(), started)?
                     .body()
                     .deserialize()
-                    .map_err(|_| "native endpoint introspection is malformed".to_owned())?;
-                if xml.len() > 16 * 1024
-                    || !xml.contains("<interface name=\"org.linura.SecurityOwner1\">")
-                {
-                    continue;
-                }
-                if found.is_some() {
-                    return Err("native owner has ambiguous bus connections".into());
-                }
-                found = Some(name.clone());
-            }
-        }
-        let identity = NativeOwnerIdentity {
-            unique_name: found.ok_or("native owner has no authenticated bus connection")?,
-            uid,
-            pid,
-            invocation,
-        };
-        self.revalidate(&identity, started)?;
-        Ok(identity)
+                    .map_err(|_| "native bus names are malformed".to_owned())?;
+                // A disappearing connection invalidates the WHOLE snapshot, never one
+                // row. One fresh snapshot may complete within the same two-second and
+                // aggregate 256-name budgets, pinned to the original supervisor epoch.
+                let found = select_owner_connection(
+                    &names,
+                    (uid, pid),
+                    remaining_names,
+                    |name| self.connection_credentials_classified(name, started),
+                    |name| {
+                        // Official GLib authentication uses its own connection. Select
+                        // the private runtime endpoint, not an arbitrary connection
+                        // from the same (independently attested immutable) process.
+                        let reply = self.call_classified(
+                            name,
+                            ENDPOINT,
+                            "org.freedesktop.DBus.Introspectable",
+                            "Introspect",
+                            &(),
+                            started,
+                        )?;
+                        owner_endpoint_reply(&reply)
+                    },
+                )?;
+                let Some(unique_name) = found else {
+                    return Ok(None);
+                };
+                let identity = NativeOwnerIdentity {
+                    unique_name,
+                    uid,
+                    pid,
+                    invocation,
+                };
+                self.revalidate(&identity, started)?;
+                Ok(Some(identity))
+            },
+        )
     }
 
     fn revalidate(&self, identity: &NativeOwnerIdentity, started: Instant) -> Result<(), String> {
@@ -305,27 +424,72 @@ impl NativeSessionChannel {
         uid: u32,
         sequence: u64,
     ) -> Result<ObservationEnvelope, String> {
+        self.observe_current_lock_sample(uid, sequence, None)?
+            .ok_or_else(|| "native lock transition has no settled observation".into())
+    }
+
+    fn revalidate_observation(
+        &self,
+        identity: &NativeOwnerIdentity,
+        boot: &BootId,
+        started: Instant,
+    ) -> Result<(), String> {
+        self.revalidate(identity, started)?;
+        if current_boot()? != *boot {
+            return Err("native boot changed during observation".into());
+        }
+        if started.elapsed() >= crate::bus::PROBE_BUDGET {
+            return Err("native observation reply exceeded its original deadline".into());
+        }
+        Ok(())
+    }
+
+    fn observe_current_lock_sample(
+        &self,
+        uid: u32,
+        sequence: u64,
+        expected: Option<&SessionLockId>,
+    ) -> Result<Option<ObservationEnvelope>, String> {
         self.require_role(NativeSessionRole::Control)?;
         let started = Instant::now();
         let boot = current_boot()?;
         let identity = self.discover(uid, started)?;
-        let reply = self.call(
+        if expected.is_some_and(|lock| {
+            lock.epoch().boot() != &boot || lock.security_owner_invocation() != &identity.invocation
+        }) {
+            return Err("native lock observation refers to a replaced owner/boot".into());
+        }
+        let reply = self.call_with_budget_classified(
             &identity.unique_name,
             ENDPOINT,
             INTERFACE,
             "ObserveLock",
             &(),
-            started,
-        )?;
+            // This endpoint composes fresh session/peer attestation and an
+            // independent compositor sample. Like approval, it is not one
+            // primitive metadata read. Spend only this probe's ORIGINAL
+            // remainder; discovery and post-reply revalidation share it.
+            owner_reply_budget(started.elapsed())?,
+        );
+        if started.elapsed() >= crate::bus::PROBE_BUDGET {
+            return Err("native observation reply exceeded its original deadline".into());
+        }
+        let reply = match reply {
+            Ok(reply) => reply,
+            Err(NativeCallError::TransitionPending) => {
+                // This is absence of a settled fact, never an unlocked fact.
+                // Even absence must retain the original identity/deadline.
+                self.revalidate_observation(&identity, &boot, started)?;
+                return Ok(None);
+            }
+            Err(error) => return Err(error.label()),
+        };
         require_observation_signature(&reply)?;
         let ((resource, secure, sampled_boot_ms),): ((String, bool, u64),) = reply
             .body()
             .deserialize()
             .map_err(|_| "native lock observation codec mismatch".to_owned())?;
-        self.revalidate(&identity, started)?;
-        if current_boot()? != boot {
-            return Err("native boot changed during observation".into());
-        }
+        self.revalidate_observation(&identity, &boot, started)?;
         // Read wall time first: time spent between the two clock reads must
         // shorten validity, never freshen the native sample.
         let now_unix_ms = unix_ms()?;
@@ -339,6 +503,7 @@ impl NativeSessionChannel {
             now_unix_ms,
             sequence,
         )
+        .map(Some)
     }
 
     pub fn observe_lock(
@@ -346,11 +511,26 @@ impl NativeSessionChannel {
         lock: &SessionLockId,
         sequence: u64,
     ) -> Result<ObservationEnvelope, String> {
-        let observation = self.observe_current_lock(lock.epoch().uid(), sequence)?;
+        self.observe_lock_if_settled(lock, sequence)?
+            .ok_or_else(|| "native lock transition has no settled observation".into())
+    }
+
+    /// Verification may observe a known in-flight native transition within
+    /// Control's existing settle bound. None is never an authoritative bool.
+    pub fn observe_lock_if_settled(
+        &self,
+        lock: &SessionLockId,
+        sequence: u64,
+    ) -> Result<Option<ObservationEnvelope>, String> {
+        let Some(observation) =
+            self.observe_current_lock_sample(lock.epoch().uid(), sequence, Some(lock))?
+        else {
+            return Ok(None);
+        };
         if observation.resource != lock.resource_id().map_err(|e| e.to_string())? {
             return Err("native lock generation differs from the requested generation".into());
         }
-        Ok(observation)
+        Ok(Some(observation))
     }
 
     pub fn authentication_subject(
@@ -465,7 +645,7 @@ impl NativeSessionChannel {
             ),
         ]);
         let reply = self.call_with_budget(
-            &daemon,
+            &daemon.unique_name,
             "/org/freedesktop/PolicyKit1/Authority",
             "org.freedesktop.PolicyKit1.Authority",
             "CheckAuthorization",
@@ -482,7 +662,7 @@ impl NativeSessionChannel {
             // Dropping a local pending reply does not cancel a remote prompt.
             // Cancel only this connection's fixed request, never another caller.
             let _cancelled = self.call(
-                &daemon,
+                &daemon.unique_name,
                 "/org/freedesktop/PolicyKit1/Authority",
                 "org.freedesktop.PolicyKit1.Authority",
                 "CancelCheckAuthorization",
@@ -495,13 +675,17 @@ impl NativeSessionChannel {
             .body()
             .deserialize()
             .map_err(|_| "native authentication result is malformed".to_owned())?;
-        if !authorized
-            || challenge
-            || started.elapsed() >= budget
-            || self.authentication_daemon()? != daemon
-            || self.authentication_subject(&request.lock)? != subject
-        {
-            return Err("native owner authentication was denied, stale or changed identity".into());
+        if !authorized || challenge {
+            return Err("native owner authentication was denied or still challenged".into());
+        }
+        if started.elapsed() >= budget {
+            return Err("native owner authentication deadline expired".into());
+        }
+        if self.authentication_daemon()? != daemon {
+            return Err("native authentication daemon changed after owner authentication".into());
+        }
+        if self.authentication_subject(&request.lock)? != subject {
+            return Err("native authentication subject changed after owner authentication".into());
         }
         Ok(())
     }
@@ -561,19 +745,6 @@ impl NativeSessionChannel {
         )
     }
 
-    fn authentication_daemon(&self) -> Result<String, String> {
-        let started = Instant::now();
-        let owner: String = self
-            .bus_call("GetNameOwner", &("org.freedesktop.PolicyKit1",), started)?
-            .body()
-            .deserialize()
-            .map_err(|_| "native authentication daemon is unavailable".to_owned())?;
-        if !unique_name(&owner) || self.connection_credentials(&owner, started)?.0 != 0 {
-            return Err("native authentication daemon has an unsupported identity".into());
-        }
-        Ok(owner)
-    }
-
     fn approval_call(&self, request: &NativeApprovalRequest, method: &str) -> Result<bool, String> {
         self.require_role(NativeSessionRole::Control)?;
         let wire = request.wire()?;
@@ -585,17 +756,24 @@ impl NativeSessionChannel {
             return Err("approval refers to a replaced native owner/boot".into());
         }
         let (result,): (bool,) = self
-            .call(
+            .call_with_budget(
                 &identity.unique_name,
                 ENDPOINT,
                 INTERFACE,
                 method,
                 &(wire,),
-                started,
+                // Arm/consume are compound native handshakes, including fresh
+                // peer checks and protected presentation work. Allocate only
+                // what remains of this probe's ORIGINAL two-second budget,
+                // rather than imposing a second 500ms primitive-call cap.
+                owner_reply_budget(started.elapsed())?,
             )?
             .body()
             .deserialize()
             .map_err(|_| "native approval result is malformed".to_owned())?;
+        if started.elapsed() >= crate::bus::PROBE_BUDGET {
+            return Err("native approval reply exceeded its original deadline".into());
+        }
         self.revalidate(&identity, started)?;
         Ok(result)
     }
@@ -680,6 +858,16 @@ impl NativeSessionChannel {
     }
     pub fn verify_released(&self, lock: &SessionLockId) -> Result<bool, String> {
         self.lock_call(NativeSessionRole::Control, lock, "VerifyReleased", None)
+    }
+    /// Read-only proof of the SAME previously verified release, before native
+    /// generation rotation. This never consumes the original proof.
+    pub fn retained_verified_release(&self, lock: &SessionLockId) -> Result<bool, String> {
+        self.lock_call(
+            NativeSessionRole::Control,
+            lock,
+            "RetainedVerifiedRelease",
+            None,
+        )
     }
     /// Call only after Control has durably committed the verified release.
     pub fn commit_verified_release(&self, lock: &SessionLockId) -> Result<bool, String> {
@@ -808,20 +996,29 @@ fn bind_supervised(
     let launches: Vec<ExecStart> = array_property(service, "ExecStart")?;
     let valid_exec = matches!(launches.as_slice(), [(image, argv, false, started_real, started_mono, 0, 0, launch_pid, 0, 0)]
         if image == IMAGE && argv == &[IMAGE] && *started_real != 0 && *started_mono != 0 && *launch_pid == pid);
-    if uid == 0
-        || pid == 0
-        || property::<&str>(service, "User")? != uid.to_string()
-        || property::<&str>(unit, "FragmentPath")? != FRAGMENT
-        || !drop_ins.is_empty()
-        || property::<&str>(unit, "ActiveState")? != "active"
+    let refusal = if uid == 0 || pid == 0 {
+        Some("process")
+    } else if property::<&str>(service, "User")? != uid.to_string() {
+        Some("user")
+    } else if property::<&str>(unit, "FragmentPath")? != FRAGMENT || !drop_ins.is_empty() {
+        Some("unit")
+    } else if property::<&str>(unit, "ActiveState")? != "active"
         || property::<&str>(unit, "SubState")? != "running"
-        || invocation.len() != 16
-        || invocation.iter().all(|b| *b == 0)
-        || !valid_exec
-        || !immutable_fragment
-        || !immutable_image
     {
-        return Err("native owner is not the exact immutable supervised invocation".into());
+        Some("state")
+    } else if invocation.len() != 16 || invocation.iter().all(|b| *b == 0) {
+        Some("invocation")
+    } else if !valid_exec {
+        Some("launch")
+    } else if !immutable_fragment || !immutable_image {
+        Some("assets")
+    } else {
+        None
+    };
+    if let Some(refusal) = refusal {
+        return Err(format!(
+            "native owner is not the exact immutable supervised invocation: supervision={refusal}"
+        ));
     }
     let hex: String = invocation
         .iter()

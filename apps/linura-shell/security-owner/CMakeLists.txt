@@ -292,6 +292,12 @@ if(BUILD_TESTING)
     set_tests_properties(security-owner-wayland-wire-boundary PROPERTIES
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30
     )
+    add_test(NAME security-owner-native-probe-progress
+        COMMAND linura-security-owner-wayland-tests --native-probe-progress
+    )
+    set_tests_properties(security-owner-native-probe-progress PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20
+    )
 
     add_executable(linura-security-owner-sleep-tests tests/native_sleep_fence.cpp)
     target_link_libraries(linura-security-owner-sleep-tests PRIVATE
@@ -322,6 +328,18 @@ if(BUILD_TESTING)
     add_test(NAME security-owner-launch-wire-boundary
         COMMAND linura-security-owner-launch-tests)
     set_tests_properties(security-owner-launch-wire-boundary PROPERTIES TIMEOUT 20)
+
+    find_program(LINURA_TEST_DBUS_DAEMON dbus-daemon REQUIRED)
+    add_executable(linura-security-owner-sleep-supervisor-tests tests/native_sleep_supervisor.cpp)
+    target_link_libraries(linura-security-owner-sleep-supervisor-tests PRIVATE
+        linura-security-owner-mechanisms)
+    target_compile_definitions(linura-security-owner-sleep-supervisor-tests PRIVATE
+        LINURA_TEST_DBUS_DAEMON="${LINURA_TEST_DBUS_DAEMON}")
+    target_compile_options(linura-security-owner-sleep-supervisor-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
+    add_test(NAME security-owner-sleep-supervisor-reply-boundary
+        COMMAND linura-security-owner-sleep-supervisor-tests)
+    set_tests_properties(security-owner-sleep-supervisor-reply-boundary PROPERTIES TIMEOUT 20)
     if(LINURA_SECURITY_OWNER_NATIVE_AUTH)
         add_executable(linura-security-owner-assistive-tests tests/native_assistive.cpp)
         target_link_libraries(linura-security-owner-assistive-tests PRIVATE

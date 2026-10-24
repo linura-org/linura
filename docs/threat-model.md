@@ -399,6 +399,17 @@ A provider or agent runtime emits malformed typed data, authority claims, hidden
 
 ## S17 native session-security threats (implementation in progress)
 
+- A dispatched lock transition can race its Wayland acknowledgement. Pending is
+  admitted only from the attested observation endpoint after a fresh compositor
+  sample and a consistent in-flight native mechanism. It is no security boolean
+  or observation envelope. Control revalidates the owner/boot and preserves its
+  existing bounded settle loop; all other errors abort and native watchdogs remain.
+- Repeated postcondition verification must not consume a release event twice or
+  confuse Ready/unlocked with verified Released. Read-only retained verification
+  requires that exact Released generation plus fresh authenticated peer/compositor,
+  absent coverage and clear sleep fence. Relock, owner replacement and generation
+  rotation invalidate it; neither a retained flag nor a receipt authorizes dispatch.
+
 These are required boundaries, not completed native qualification or a production
 support claim. See proposed [ADR 0042](adr/0042-s17-session-security-and-power-authority.md)
 for the current implementation status.
@@ -447,7 +458,16 @@ for the current implementation status.
   root/kernel bypasses have no universal prevention claim. Protection failure may
   leave a closed laptop awake, with a visible battery/heat tradeoff. The private
   no-argument `SleepGate1` route uses actual received-helper metadata and separate
-  bounded coverage coordination; root bus admission is never policy. Already-secure
+  bounded coverage coordination; service-account bus admission is never policy.
+  The root-launched fixed helper uses one same-PID self-exec to drop all user/group
+  identities to the fixed local service account, clear environment/groups and
+  usable capabilities, and prohibit privilege gain before opening transport.
+  The root-owned executable inode, exact argv, live root-supervised pre-start
+  PID/invocation and native phase remain independently attested. This preserves
+  live-image checking without adding inspection capability to Control. Untrusted
+  account selection, saved root IDs, supplementary groups, retained capabilities,
+  missing credential facts and root-only caller substitution fail closed.
+  Already-secure
   coverage does not wait on the managed mutation mutex or require protective
   enrollment. Uncovered sessions still enter the single durable managed lifecycle;
   busy/poisoned admission denies, never creates parallel authority. The owner's
@@ -492,6 +512,12 @@ for the current implementation status.
   boundary for the exact canonical challenge. Fixed non-retained Polkit actions
   are checked through a scrubbed environment on the canonical system bus; raw
   authorization-process diagnostics and credentials are not logged or forwarded.
+  Control's Polkit transport must bind the local non-root `polkitd` account to
+  the exact immutable `polkit.service` launch, current bus/kernel PID and nonzero
+  invocation under root systemd supervision. UID-only and root-owner shortcuts,
+  duplicate account records, unit drop-ins, substituted argv, finished launches
+  and changed generations fail. The original bounded probe covers two fresh
+  snapshots and owner rechecks; the identity is revalidated after authentication.
 - Control freshly checks native active-session facts and binds their predicates
   in the canonical plan. Fresh locker evidence cannot refresh expired ownership.
   Native adapters must attest the security-owner process and revalidate the same
@@ -529,12 +555,82 @@ for the current implementation status.
   partial routes and the five-second monotonic deadline fail closed, and
   `Restart=no` remains. Deployment, reload, ptrace and helper behavior still need
   native qualification; component tests do not prove these operating-system facts.
+- Native owner metadata reads use fixed, read-only property batches of at most
+  32 requests per interface. Each pending request retains its original 500 ms
+  timeout and the enclosing caller's unchanged aggregate clock. A partial,
+  malformed, substituted or late batch is unavailable, never a negative fact.
+  Revalidation issues a separate fresh batch and preserves every existing
+  session/launch/identity comparison. No `GetAll`, shared cache, retry, effect or
+  new authority path is introduced. The component wire barrier requires every
+  read to arrive before any reply, and checks changing samples and failed/late
+  members; native qualification still independently decides acceptance.
+- A compound native lock observation includes fresh peer/session attestation and
+  independent compositor sampling. Its RPC, like approval arm/consume, may use
+  only the remainder of the original two-second probe after discovery. Reply
+  arrival cannot restart that clock; late replies and failed final owner/boot
+  revalidation remain hard failures, and pending transitions create no evidence.
+  Primitive metadata calls retain their 500 ms cap. This allocation introduces
+  no retry, cached authority, effect, or additional verification window.
 - Native keyboard input goes directly from a wiped bounded UTF-8 temporary into
   protected storage. Malformed encodings and capacity overflow leave no partial
   edit. An exclusively bound entry rejects generic Qt key-event injection; typed
   response data never traverses Qt/QML input filters. Layout/focus/keyboard loss
   cancels and wipes. Compose data is a source-pinned, digest-checked embedded
   resource without runtime filesystem or user include lookup.
+  A focus-before-coverage ordering cannot strand the protected entry: each fresh
+  press revalidates the retained native surface and current complete coverage
+  before synchronizing entry focus. Leave, layout/device loss and held-key
+  rejection remain mandatory; an old focus flag cannot authorize input.
+  The native coverage event also synchronizes focus before any keypress, so a
+  read-only accessibility readiness probe cannot depend on secret input to focus.
+  An unchanged positive focus cannot announce a new focus event per key.
+  Retired consent and completed cooldown must not strand the native retry UI.
+  Visual denial retirement requires actual Idle approval state and no live scope
+  or conversation, without resetting failure state or creating authentication.
+  Native call diagnostics use closed classes/stages without remote error text;
+  failure-only guest service diagnostics cannot become current-state evidence
+  or replace the original failure and ephemeral-account cleanup.
+  Owner failure diagnostics compare invocation identity without retaining it
+  and read only bounded exit fields/closed watchdog labels from the fixed unit's current-boot
+  journal. A later running replacement must never be described as proof that
+  the original invocation survived. Closed supervisor refusal stages retain
+  every original identity, launch, immutable-asset and lifecycle check.
+  A watchdog's fixed diagnostic uses one nonblocking socket send; journal
+  backpressure, closure or a non-socket stderr cannot delay the original exit,
+  create a retry or invoke lock/Qt cleanup. Durations remain unchanged.
+  Blocking peer/session inspection must not starve a prepared lock's Wayland
+  acknowledgement. Factory-owned progress drains only the already attested
+  native connection between bounded reads, inside the original probe clock.
+  It must not dispatch Qt/D-Bus/timer events, recurse through native callbacks
+  or painting, cache evidence, renew deadlines or bypass the prepared effect
+  gate. Peer/session/scope/generation/compositor and final deadline checks must
+  still validate the post-progress result; the acquisition watchdog is unchanged.
+  Sleep-gate denial diagnostics select only source-owned stages/reasons and map
+  unknown error text to `unclassified`. The disposable suspend failure reader
+  bounds current-boot queries to the fixed sleep/Control and disposable owner
+  units, 64 entries, 16 KiB and three
+  seconds, discards raw journal text and exports only closed failure labels.
+  Those labels are diagnostic context, never invocation-bound authority or
+  verification evidence; unavailable diagnostics cannot erase a failed effect.
+  Owner fence/probe failures emit only immutable rejection labels, never native
+  properties, peer identifiers, authentication data or remote error text. Probe
+  diagnostics are enabled only for the fence call, never recovery; all original
+  admission, revalidation, timeout and coverage checks still fail closed.
+  Unit/property requests pin the root-attested unique supervisor connection on
+  the fixed authenticated system bus. Requested-reply routing rejects foreign
+  connection replies. Newer Qt hides reply/error `service()`; older Qt exposes
+  the sender, which must still match the pinned peer. The accessor is not portable
+  received-sender evidence. Fresh owner revalidation and
+  two complete matching snapshots remain required; absence requires two exact
+  native `NoSuchUnit` errors. Broker/local errors, non-replies, malformed fields,
+  denial, timeout and replacement fail closed under the original probe budget.
+  Unit-lookup diagnostics retain only closed failure classes, never remote
+  messages, native identifiers or invented empty-sender categories. The private-bus
+  component regression sends forged success/absence replies from a separate
+  connection before the genuine response; it is not native acceptance evidence.
+  A separate bounded two-second read retains only closed unit state/result
+  categories and main-PID presence. Unknown fields stay unavailable, and a
+  native success result never becomes managed completion or cycle evidence.
   Embedded first-party rendering imports no user/network scene
   and never receives response text. Pre-lock confirmation uses the same exclusive
   connection's fixed private xdg-shell surface. It accepts only a fresh

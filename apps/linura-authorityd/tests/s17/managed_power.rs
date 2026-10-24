@@ -240,7 +240,7 @@ fn open_power_control(
     let store = value(SqliteTransactionStore::open(
         database,
         verifier,
-        value(SqliteIntegrityKey::new(vec![0x52; 32])),
+        value(SqliteIntegrityKey::new(fixture_key(5))),
     ));
     value(
         value(ManagedLifecycleControl::new(
@@ -251,7 +251,7 @@ fn open_power_control(
         .with_request_journal(Box::new(value(
             linura_persistence_sqlite::SqliteApprovedRequestJournal::open(
                 database.with_extension("requests.sqlite3"),
-                value(SqliteIntegrityKey::new(vec![0x53; 32])),
+                value(SqliteIntegrityKey::new(fixture_key(6))),
             ),
         ))),
     )
