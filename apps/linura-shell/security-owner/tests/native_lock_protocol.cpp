@@ -113,15 +113,21 @@ NativeLockIdentity identity()
 void transitionAndCommitFence()
 {
     quint64 now = 100;
+    unsigned clockReads = 0;
     GuardedComponentLock native;
-    NativeLockProtocol binding(native, identity(), [&] { return now; });
+    NativeLockProtocol binding(native, identity(), [&] {
+        ++clockReads;
+        return now;
+    });
     check(binding.bound());
     check(binding.inspect() == LockMechanism::State::Ready);
+    check(!binding.retainedVerifiedRelease(identity()));
     for (int index = binding.metaObject()->methodOffset();
          index < binding.metaObject()->methodCount(); ++index) {
         const auto name = binding.metaObject()->method(index).name();
         check(name != "dispatch" && name != "commitVerifiedRelease" &&
               name != "independentlyVerifiedReleased" && name != "permitNativeEffect");
+        check(name != "retainedVerifiedRelease");
     }
     check(binding.metaObject()->indexOfProperty("locked") < 0);
     auto other = identity();
@@ -132,10 +138,12 @@ void transitionAndCommitFence()
     check(binding.dispatch(identity(), true));
     check(native.locked() && !native.secure());
     check(binding.inspect() == LockMechanism::State::Acquiring);
+    check(!binding.retainedVerifiedRelease(identity()));
     check(!binding.dispatch(identity(), true));
     check(!binding.dispatch(identity(), false));
     native.coverage(true);
     check(binding.inspect() == LockMechanism::State::Secure);
+    check(!binding.retainedVerifiedRelease(identity()));
     // Remaining secure beyond acquisition budget is valid, including suspend.
     now += NativeLockProtocol::AcquisitionMs + 1;
     check(binding.inspect() == LockMechanism::State::Secure);
@@ -144,17 +152,30 @@ void transitionAndCommitFence()
     check(binding.dispatch(identity(), false));
     check(!native.locked() && !native.secure());
     check(binding.inspect() == LockMechanism::State::Releasing);
+    check(!binding.retainedVerifiedRelease(identity()));
     check(!binding.dispatch(identity(), false));
     check(!binding.dispatch(identity(), true));
     check(!binding.commitVerifiedRelease(identity()));
     check(!binding.independentlyVerifiedReleased(other));
     check(binding.independentlyVerifiedReleased(identity()));
     check(binding.inspect() == LockMechanism::State::Released);
+    const auto writes = native.writes;
+    const auto retainedClockReads = clockReads;
+    check(binding.retainedVerifiedRelease(identity()));
+    check(!binding.retainedVerifiedRelease(other));
+    check(clockReads == retainedClockReads); // No refresh/clock mutation.
+    check(!binding.independentlyVerifiedReleased(identity()));
+    const auto secondRetainedClockReads = clockReads;
+    check(binding.retainedVerifiedRelease(identity()));
+    check(clockReads == secondRetainedClockReads);
+    check(native.writes == writes); // No second native effect.
     check(binding.identity() == identity());
     check(!binding.dispatch(identity(), true));
     check(!binding.commitVerifiedRelease(other));
     check(binding.commitVerifiedRelease(identity()));
     check(binding.inspect() == LockMechanism::State::Ready);
+    check(!binding.retainedVerifiedRelease(identity()));
+    check(!binding.retainedVerifiedRelease(binding.identity()));
     check(binding.identity().generation == 2);
     check(identity().wasRetiredBy(binding.identity()));
     check(!binding.identity().wasRetiredBy(identity()));

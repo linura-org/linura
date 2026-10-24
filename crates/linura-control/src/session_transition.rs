@@ -72,14 +72,23 @@ pub fn review_session_transition_postcondition(
             }
             if native.attributes.get("suspend_test_mode")
                 != Some(&ObservedValue::Text("none".into()))
-                || native.attributes.get("preparing_for_sleep") != Some(&ObservedValue::Bool(false))
             {
                 return Err(SessionSafetyError::UnsupportedSession);
             }
+            let preparing = match native.attributes.get("preparing_for_sleep") {
+                Some(ObservedValue::Bool(value)) => *value,
+                _ => return Err(SessionSafetyError::UnsupportedSession),
+            };
             let cycles = match native.attributes.get("successful_suspend_cycles") {
                 Some(ObservedValue::U64(value)) => *value,
                 _ => return Err(SessionSafetyError::UnsupportedSession),
             };
+            // A native admission reply can precede PrepareForSleep(false).
+            // This known in-flight state proves no completion. Keep it inside
+            // Control's existing bounded observation loop; never replay an effect.
+            if preparing {
+                return Ok(ResultState::Indeterminate);
+            }
             if cycles == successful_cycles_before {
                 return Ok(ResultState::NotSatisfied);
             }
@@ -297,6 +306,76 @@ mod tests {
         }
     }
     #[test]
+    fn preparing_for_sleep_never_completes_and_unknown_facts_still_fail() {
+        let target = target(SessionTransition::Suspend {
+            successful_cycles_before: 10,
+        });
+        let coverage = coverage(&target);
+        let mut native = observation(&target);
+        native
+            .attributes
+            .insert("preparing_for_sleep".into(), ObservedValue::Bool(true));
+        for cycles in [9, 10, 11, 12, u64::MAX] {
+            native.attributes.insert(
+                "successful_suspend_cycles".into(),
+                ObservedValue::U64(cycles),
+            );
+            assert_eq!(
+                id(review_session_transition_postcondition(
+                    &target,
+                    &native,
+                    Some(&coverage),
+                    1_100
+                )),
+                SessionTransitionPostcondition::Indeterminate
+            );
+        }
+        for key in native.attributes.keys() {
+            let mut missing = native.clone();
+            missing.attributes.remove(key);
+            assert!(
+                review_session_transition_postcondition(&target, &missing, Some(&coverage), 1_100)
+                    .is_err()
+            );
+        }
+        for (key, value) in [
+            ("preparing_for_sleep", ObservedValue::Text("true".into())),
+            (
+                "successful_suspend_cycles",
+                ObservedValue::Text("11".into()),
+            ),
+            ("suspend_test_mode", ObservedValue::Text("devices".into())),
+        ] {
+            let mut malformed = native.clone();
+            malformed.attributes.insert(key.into(), value);
+            assert!(
+                review_session_transition_postcondition(
+                    &target,
+                    &malformed,
+                    Some(&coverage),
+                    1_100
+                )
+                .is_err()
+            );
+        }
+        native
+            .attributes
+            .insert("successful_suspend_cycles".into(), ObservedValue::U64(11));
+        native
+            .attributes
+            .insert("preparing_for_sleep".into(), ObservedValue::Bool(false));
+        assert_eq!(
+            id(review_session_transition_postcondition(
+                &target,
+                &native,
+                Some(&coverage),
+                1_100
+            )),
+            SessionTransitionPostcondition::ResumedSecurely
+        );
+    }
+
+    #[test]
     fn envelope_substitution_future_stale_and_dry_run_facts_cannot_complete_a_transition() {
         let target = target(SessionTransition::Suspend {
             successful_cycles_before: 10,
@@ -332,10 +411,13 @@ mod tests {
                         .insert("preparing_for_sleep".into(), ObservedValue::Bool(true));
                 }
             }
-            assert!(
-                review_session_transition_postcondition(&target, &bad, Some(&coverage), 1_100)
-                    .is_err()
-            );
+            let reviewed =
+                review_session_transition_postcondition(&target, &bad, Some(&coverage), 1_100);
+            if kind == "sleeping" {
+                assert_eq!(id(reviewed), SessionTransitionPostcondition::Indeterminate);
+            } else {
+                assert!(reviewed.is_err());
+            }
         }
         for time in [999, 3_000, u64::MAX] {
             assert!(

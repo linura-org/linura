@@ -18,11 +18,13 @@
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <string_view>
 #include <utility>
 #include <vector>
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <unistd.h>
 #include <time.h>
 
@@ -41,6 +43,45 @@ template <class F> void nativeCallback(F &&function) noexcept
     }
 }
 void suppressNativeDiagnostic(const char *, va_list) {}
+enum class LockProgress {
+    Requested,
+    Configured,
+    FrameFlushed,
+    AllSurfacesFlushed,
+    Acknowledged,
+    Released
+};
+void reportLockProgress(LockProgress progress) noexcept
+{
+    std::string_view message;
+    switch (progress) {
+    case LockProgress::Requested:
+        message = "native-owner-lock-progress stage=requested\n";
+        break;
+    case LockProgress::Configured:
+        message = "native-owner-lock-progress stage=surface-configured\n";
+        break;
+    case LockProgress::FrameFlushed:
+        message = "native-owner-lock-progress stage=frame-flushed\n";
+        break;
+    case LockProgress::AllSurfacesFlushed:
+        message = "native-owner-lock-progress stage=all-surfaces-flushed\n";
+        break;
+    case LockProgress::Acknowledged:
+        message = "native-owner-lock-progress stage=acknowledged\n";
+        break;
+    case LockProgress::Released:
+        message = "native-owner-lock-progress stage=released\n";
+        break;
+    }
+    // Closed protocol milestones only, once per acquisition phase. Never log
+    // input, dimensions, peers or payloads; unavailable/full stderr is ignored.
+    const int savedError = errno;
+    const auto written =
+        ::send(STDERR_FILENO, message.data(), message.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+    (void)written;
+    errno = savedError;
+}
 quint64 bootMilliseconds()
 {
     timespec now{};
@@ -88,6 +129,7 @@ class NativeWaylandLock::Impl final
         bool configured = false;
         bool needsAck = false;
         bool pending = false;
+        bool acquisitionFrameQueued = false; // Diagnostic milestone only.
         std::vector<std::unique_ptr<Buffer>> buffers;
         ~Output()
         {
@@ -117,6 +159,7 @@ class NativeWaylandLock::Impl final
             surface = nullptr;
             buffers.clear();
             configured = needsAck = pending = false;
+            acquisitionFrameQueued = false;
         }
     };
 
@@ -148,6 +191,10 @@ class NativeWaylandLock::Impl final
     bool initializationAttempted = false;
     bool pumping = false;
     bool painting = false;
+    bool acquisitionConfigured = false;
+    bool acquisitionFrameQueued = false;
+    bool acquisitionFrameFlushed = false;
+    bool acquisitionAllSurfacesFlushed = false;
 
     Impl(NativeWaylandLock &instance, wl_display *connection, Painter paint)
         : owner(instance), display(connection), painter(std::move(paint))
@@ -196,8 +243,22 @@ class NativeWaylandLock::Impl final
                 failClosed();
             if (writer)
                 writer->setEnabled(true);
-        } else if (writer)
-            writer->setEnabled(false);
+        } else {
+            if (writer)
+                writer->setEnabled(false);
+            if (acquisitionFrameQueued && !acquisitionFrameFlushed) {
+                acquisitionFrameFlushed = true;
+                reportLockProgress(LockProgress::FrameFlushed);
+            }
+            if (lock && !acquisitionAllSurfacesFlushed && !outputs.empty() &&
+                std::all_of(outputs.begin(), outputs.end(), [](const auto &item) {
+                    const auto &output = *item.second;
+                    return output.configured && output.acquisitionFrameQueued && !output.pending;
+                })) {
+                acquisitionAllSurfacesFlushed = true;
+                reportLockProgress(LockProgress::AllSurfacesFlushed);
+            }
+        }
     }
 
     void pump()
@@ -206,7 +267,7 @@ class NativeWaylandLock::Impl final
             failClosed();
         if (pumping)
             return;
-        NativeDeadline deadline(std::chrono::milliseconds(500));
+        NativeDeadline deadline(std::chrono::milliseconds(500), NativeDeadline::Stage::WaylandPump);
         pumping = true;
         // Exclusive connection: never mix toolkit readers or blocking dispatch
         // with poll. Every prepare_read is matched by read_events/cancel_read.
@@ -342,6 +403,7 @@ class NativeWaylandLock::Impl final
             auto &self = *static_cast<Impl *>(data);
             if (native != self.lock || !self.owner.requestedSecure() || self.owner.secureCoverage())
                 failClosed();
+            reportLockProgress(LockProgress::Acknowledged);
             self.owner.publishNativeState(
                 true, true); // Actual protocol acknowledgement, not surface count.
         });
@@ -362,6 +424,7 @@ class NativeWaylandLock::Impl final
                 (void)id;
                 output->clearSurface();
             }
+            reportLockProgress(LockProgress::Released);
             self.owner.publishNativeState(false, false); // Not independent global release evidence.
         });
     }
@@ -372,6 +435,10 @@ class NativeWaylandLock::Impl final
             auto &output = *static_cast<Output *>(data);
             if (native != output.lockSurface || !boundedFrame(width, height))
                 failClosed();
+            if (!output.owner->acquisitionConfigured) {
+                output.owner->acquisitionConfigured = true;
+                reportLockProgress(LockProgress::Configured);
+            }
             output.width = width;
             output.height = height;
             output.serial = serial;
@@ -577,6 +644,10 @@ class NativeWaylandLock::Impl final
         selected->busy = true;
         output.pending = false;
         wl_surface_commit(output.surface);
+        if (output.lockSurface)
+            output.acquisitionFrameQueued = true;
+        if (output.lockSurface && !acquisitionFrameFlushed)
+            acquisitionFrameQueued = true;
     }
 };
 
@@ -635,7 +706,27 @@ bool NativeWaylandLock::bindProtectedInput(SecretEntry &entry, UnlockRequest req
         })
                 : NativeKeyboard::PointerHitTest{},
         [this] { QTimer::singleShot(0, this, &NativeWaylandLock::repaint); });
+    // Coverage may arrive after keyboard enter, without a second enter or key.
+    // Publish the same fresh native focus to protected accessibility metadata.
+    connect(
+        this, &NativeManagedLockBackend::nativeStateChanged, this,
+        [this] { impl_->keyboard->refreshProtectedFocus(); }, Qt::DirectConnection);
     return true;
+}
+void NativeWaylandLock::refreshNativeState()
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting)
+        failClosed();
+    // Drain available events on our exclusive connection before comparing its
+    // acknowledgement with an independent compositor sample. No wait or retry.
+    impl_->pump();
+}
+void NativeWaylandLock::progressNativeState()
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized)
+        failClosed();
+    if (!impl_->pumping && !impl_->painting)
+        impl_->pump();
 }
 bool NativeWaylandLock::protectedInputAvailable() const noexcept
 {
@@ -714,7 +805,8 @@ bool NativeWaylandLock::initialize()
         !impl_->painter)
         return false;
     impl_->initializationAttempted = true;
-    NativeDeadline deadline(std::chrono::milliseconds(2'000));
+    NativeDeadline deadline(std::chrono::milliseconds(2'000),
+                            NativeDeadline::Stage::WaylandInitialization);
     wl_log_set_handler_client(suppressNativeDiagnostic);
     impl_->registry = wl_display_get_registry(impl_->display);
     if (!impl_->registry)
@@ -761,6 +853,11 @@ bool NativeWaylandLock::applyNative(bool secure)
         static const ext_session_lock_v1_listener listener{Impl::locked, Impl::finished};
         if (ext_session_lock_v1_add_listener(impl_->lock, &listener, impl_.get()) != 0)
             failClosed();
+        impl_->acquisitionConfigured = false;
+        impl_->acquisitionFrameQueued = false;
+        impl_->acquisitionFrameFlushed = false;
+        impl_->acquisitionAllSurfacesFlushed = false;
+        reportLockProgress(LockProgress::Requested);
         publishNativeState(true, false);
         for (auto &[id, output] : impl_->outputs) {
             (void)id;
@@ -789,7 +886,7 @@ void NativeWaylandLock::repaint()
 {
     if (thread() != QThread::currentThread() || impl_->painting)
         failClosed();
-    NativeDeadline deadline(std::chrono::milliseconds(500));
+    NativeDeadline deadline(std::chrono::milliseconds(500), NativeDeadline::Stage::WaylandRepaint);
     nativeCallback([&] {
         for (auto &[id, output] : impl_->outputs) {
             (void)id;

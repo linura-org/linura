@@ -113,7 +113,8 @@ bool exactExecStart(NativePeerPurpose purpose, quint32 expectedPid, const QVaria
         return false;
     const auto expectedArgv =
         purpose == NativePeerPurpose::NativeAuthenticationDaemon
-            ? QStringList{QLatin1String(selected.image), QStringLiteral("--no-debug")}
+            ? QStringList{QLatin1String(selected.image), QStringLiteral("--no-debug"),
+                          QStringLiteral("--log-level=notice")}
             : QStringList{QLatin1String(selected.image)};
     return exactNativeExecStart(value, QLatin1String(selected.image), expectedArgv, expectedPid);
 }
@@ -242,7 +243,8 @@ PeerGuard::~PeerGuard()
 }
 
 PeerGuard::PeerGuard(PeerGuard &&other) noexcept
-    : connection_(other.connection_), connectionName_(std::exchange(other.connectionName_, {}))
+    : connection_(other.connection_), connectionName_(std::exchange(other.connectionName_, {})),
+      progress_(std::move(other.progress_))
 {}
 
 PeerGuard &PeerGuard::operator=(PeerGuard &&other) noexcept
@@ -252,6 +254,7 @@ PeerGuard &PeerGuard::operator=(PeerGuard &&other) noexcept
             QDBusConnection::disconnectFromBus(connectionName_);
         connection_ = other.connection_;
         connectionName_ = std::exchange(other.connectionName_, {});
+        progress_ = std::move(other.progress_);
     }
     return *this;
 }
@@ -264,7 +267,8 @@ std::optional<PeerGuard> PeerGuard::connect()
     const QString name = QStringLiteral("linura-private-security-owner-%1-%2")
                              .arg(getpid())
                              .arg(sequence.fetch_add(1));
-    NativeDeadline authenticationDeadline(std::chrono::milliseconds(2'000));
+    NativeDeadline authenticationDeadline(std::chrono::milliseconds(2'000),
+                                          NativeDeadline::Stage::BusAuthentication);
     auto connection = QDBusConnection::connectToBus(
         QStringLiteral("unix:path=/run/dbus/system_bus_socket"), name);
     if (!connection.isConnected()) {
@@ -274,10 +278,17 @@ std::optional<PeerGuard> PeerGuard::connect()
     return PeerGuard(std::move(connection), name);
 }
 
+void PeerGuard::setNativeProgress(NativeProbeProgress progress)
+{
+    progress_ = std::move(progress);
+}
+
 QDBusMessage PeerGuard::call(QElapsedTimer &budget, const QString &owner, const QString &path,
                              const QString &interface, const QString &method,
                              const QList<QVariant> &arguments) const
 {
+    if (progress_)
+        progress_();
     const qint64 remaining = ProbeBudgetMs - budget.elapsed();
     if (remaining <= 0)
         return QDBusMessage::createError(QStringLiteral("org.linura.Private.NativeUnavailable"),
@@ -325,18 +336,27 @@ std::optional<NativePeerIdentity> PeerGuard::attest(NativePeerPurpose purpose,
     if (!unit.isValid() || unit.value().path().size() > 256 ||
         !unit.value().path().startsWith(QLatin1String("/org/freedesktop/systemd1/unit/")))
         return std::nullopt;
-    const auto property = [&](const QString &interface,
-                              const QString &name) -> std::optional<QVariant> {
-        const auto boundedCall = [&](const QString &owner, const QString &path,
-                                     const QString &targetInterface, const QString &method,
-                                     const QList<QVariant> &arguments) {
-            return call(budget, owner, path, targetInterface, method, arguments);
-        };
-        return readNativeDBusProperty(boundedCall, *systemdOwner, unit.value().path(), interface,
-                                      name);
-    };
     const QString unitInterface = QStringLiteral("org.freedesktop.systemd1.Unit");
     const QString serviceInterface = QStringLiteral("org.freedesktop.systemd1.Service");
+    const auto properties = [&](const QString &interface, const QStringList &names) {
+        return readNativeDBusProperties(connection_, budget, *systemdOwner, unit.value().path(),
+                                        interface, names, ProbeBudgetMs, CallBudgetMs, progress_);
+    };
+    const auto unitFields =
+        properties(unitInterface, {QStringLiteral("ActiveState"), QStringLiteral("SubState"),
+                                   QStringLiteral("FragmentPath"), QStringLiteral("InvocationID"),
+                                   QStringLiteral("DropInPaths")});
+    const auto serviceFields =
+        properties(serviceInterface, {QStringLiteral("MainPID"), QStringLiteral("ExecStart")});
+    if (!unitFields || !serviceFields)
+        return std::nullopt;
+    const auto property = [&](const QString &interface,
+                              const QString &name) -> std::optional<QVariant> {
+        if (interface != unitInterface && interface != serviceInterface)
+            return std::nullopt;
+        const auto &fields = interface == unitInterface ? *unitFields : *serviceFields;
+        return fields.contains(name) ? std::optional<QVariant>(fields.value(name)) : std::nullopt;
+    };
     const auto active = property(unitInterface, QStringLiteral("ActiveState"));
     const auto sub = property(unitInterface, QStringLiteral("SubState"));
     const auto fragment = property(unitInterface, QStringLiteral("FragmentPath"));
@@ -379,9 +399,15 @@ std::optional<NativePeerIdentity> PeerGuard::attest(NativePeerPurpose purpose,
         budget.elapsed() >= ProbeBudgetMs)
         return std::nullopt;
     // Recheck the supervised PID and invocation after the complete native probe.
-    const auto freshPid = property(serviceInterface, QStringLiteral("MainPID"));
-    const auto freshInvocation = property(unitInterface, QStringLiteral("InvocationID"));
-    const auto freshExecStart = property(serviceInterface, QStringLiteral("ExecStart"));
+    const auto freshService =
+        properties(serviceInterface, {QStringLiteral("MainPID"), QStringLiteral("ExecStart")});
+    const auto freshUnit = properties(unitInterface, {QStringLiteral("InvocationID")});
+    if (!freshService || !freshUnit)
+        return std::nullopt;
+    const std::optional<QVariant> freshPid = freshService->value(QStringLiteral("MainPID"));
+    const std::optional<QVariant> freshInvocation =
+        freshUnit->value(QStringLiteral("InvocationID"));
+    const std::optional<QVariant> freshExecStart = freshService->value(QStringLiteral("ExecStart"));
     if (!freshPid || freshPid->metaType() != QMetaType::fromType<quint32>() ||
         freshPid->toUInt() != bound->pid || !freshInvocation ||
         freshInvocation->metaType() != QMetaType::fromType<QByteArray>() ||

@@ -215,6 +215,13 @@ AuthenticationAgent::AuthenticationAgent(NativeLockIdentity identity,
             g_main_context_unref(context);
         }
         const auto state = approval_.state();
+        if (deniedPresentation_ && state == NativeApproval::State::Idle && !scope_ && !task_ &&
+            !identitySelection_ && !conversation_.active()) {
+            // Retire only the visual denial after the ORIGINAL native cooldown.
+            // This neither resets approval state nor starts/authenticates input.
+            deniedPresentation_ = false;
+            Q_EMIT presentationChanged();
+        }
         if (identitySelection_ && (!task_ || !entry_ || !entry_->acceptsInput() ||
                                    g_cancellable_is_cancelled(g_task_get_cancellable(task_)))) {
             finishNative(false);
@@ -262,6 +269,14 @@ AuthenticationAgent::~AuthenticationAgent()
 bool AuthenticationAgent::registered() const noexcept
 {
     return registration_ && registration_->handle;
+}
+
+bool AuthenticationAgent::setNativeProgress(NativeProbeProgress progress)
+{
+    if (QThread::currentThread() != thread() || !registered() || !peerGuard_ || !progress)
+        return false;
+    peerGuard_->setNativeProgress(std::move(progress));
+    return true;
 }
 
 bool AuthenticationAgent::confirmationPending() const noexcept
@@ -353,6 +368,7 @@ bool AuthenticationAgent::arm(const NativeApprovalScope &scope, bool compositorS
         return false;
     scope_ = scope;
     controlPeer_ = controlPeer;
+    deniedPresentation_ = false;
     Q_EMIT presentationChanged();
     return true;
 }
@@ -455,6 +471,7 @@ void AuthenticationAgent::cancelInteraction()
         if (retired)
             Q_EMIT scopeRetired(*retired);
         Q_EMIT presentationChanged();
+        deniedPresentation_ = true;
         Q_EMIT denied();
     }
 }
@@ -594,8 +611,10 @@ void AuthenticationAgent::finishNative(bool success)
     Q_EMIT presentationChanged();
     if (success)
         Q_EMIT confirmationAvailable();
-    else
+    else {
+        deniedPresentation_ = true;
         Q_EMIT denied();
+    }
 }
 
 } // namespace Linura::SecurityOwner

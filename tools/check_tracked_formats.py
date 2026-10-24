@@ -34,6 +34,7 @@ PLAIN = frozenset(
         "apps/linura-shell/security-owner/compose/LICENSE",
         "apps/linura-shell/security-owner/compose/en_US.UTF-8",
         "bindings/python/LICENSE",
+        "qualification/v010/session-security/fixtures/linura-s17-qualification.pam",
         "tools/codex/container/.dockerignore",
         "tools/codex/container/ubuntu-snapshot.list",
     }
@@ -72,6 +73,7 @@ CONF_KINDS = {
     "packaging/systemd/sleep.conf.d/50-linura-qualified-sleep.conf": "ini",
     "packaging/systemd/system/systemd-suspend.service.d/50-linura-protective-lock.conf": "ini",
     "packaging/dbus-1/system.d/org.linura.Executor.Systemd1.conf": "xml",
+    "qualification/v010/session-security/fixtures/s17-hyprland.conf": "text",
     "packaging/sysusers.d/linura-authority.conf": "sysusers",
     "tests/acceptance/v05/49-linura-v05-qualification-dbus.conf": "xml",
 }
@@ -151,6 +153,7 @@ def classify(path: Path, content: bytes) -> str:
         "apps/linura-shell/ui/CMakeLists.txt",
         "apps/linura-shell/bridge/CMakeLists.txt",
         "apps/linura-shell/security-owner/CMakeLists.txt",
+        "qualification/v010/session-security/CMakeLists.txt",
         "tools/codex/container/Dockerfile",
     }:
         return "build"

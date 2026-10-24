@@ -50,6 +50,14 @@ REQUIRED = (
     "apps/linura-shell/bridge/CMakeLists.txt",
     "apps/linura-shell/bridge/audio_session_controller.h",
     "apps/linura-shell/bridge/audio_session_controller.cpp",
+    "apps/linura-shell/bridge/session_controller.h",
+    "apps/linura-shell/bridge/session_controller.cpp",
+    "apps/linura-shell/bridge/session_receipt.h",
+    "apps/linura-shell/bridge/session_receipt.cpp",
+    "apps/linura-shell/plugins/session/SessionControls.qml",
+    "apps/linura-shell/plugins/session/manifest.json",
+    "apps/linura-shell/plugins/power/PowerControls.qml",
+    "apps/linura-shell/plugins/power/manifest.json",
     "apps/linura-shell/org.linura.ControlCenter.desktop",
     "apps/linura-shell/org.linura.QuickSettings.desktop",
     "apps/linura-shell/org.linura.CommandPalette.desktop",
@@ -127,7 +135,8 @@ REQUIRED_BRIDGE = (
     "freshnessTimer_.setSingleShot(true)",
     "armFreshnessExpiry(snapshot)",
     "control.setTimeout(kObserveTimeoutMs)",
-    "session.setTimeout(kEffectTimeoutMs)",
+    "session.setTimeout(kEffectTimeoutMs);",
+    "QDBusPendingCall call = session.asyncCall(",
     "constexpr int kEffectTimeoutMs = 10'000;",
     "const QDBusArgument argument = qvariant_cast<QDBusArgument>(value);",
     "const QDBusArgument wire = arguments.at(0).value<QDBusArgument>();",
@@ -231,7 +240,7 @@ REQUIRED_IMAGE = (
     'shutil.copytree(OVERLAY / "airootfs", paths.staged / "airootfs", dirs_exist_ok=True)',
     'SHELL_BRIDGE_QT_MODULES = ("Qt6Core", "Qt6DBus", "Qt6Qml")',
     'UI_SDK_QT_MODULES = ("Qt6Core", "Qt6Qml", "Qt6Quick", "Qt6QuickControls2")',
-    "DOCTOR_QT_MODULES = tuple(dict.fromkeys(SHELL_BRIDGE_QT_MODULES + UI_SDK_QT_MODULES))",
+    "dict.fromkeys(SHELL_BRIDGE_QT_MODULES + UI_SDK_QT_MODULES + SECURITY_OWNER_MODULES)",
     "have_qt_modules(DOCTOR_QT_MODULES)",
     "graphical-session.target.wants/linura-shell.service",
     "default.target.wants/linurad.service",
@@ -314,6 +323,18 @@ def validate(root: Path) -> list[str]:
     quick_settings_qml = (
         root / "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml"
     ).read_text(encoding="utf-8")
+    session_qml = (
+        root / "apps/linura-shell/plugins/session/SessionControls.qml"
+    ).read_text(encoding="utf-8")
+    power_qml = (root / "apps/linura-shell/plugins/power/PowerControls.qml").read_text(
+        encoding="utf-8"
+    )
+    session_client = (
+        root / "apps/linura-shell/bridge/session_controller.cpp"
+    ).read_text(encoding="utf-8")
+    session_receipt = (root / "apps/linura-shell/bridge/session_receipt.cpp").read_text(
+        encoding="utf-8"
+    )
     palette_qml = (
         root / "apps/linura-shell/plugins/command-palette/CommandPalette.qml"
     ).read_text(encoding="utf-8")
@@ -380,7 +401,154 @@ def validate(root: Path) -> list[str]:
         + application_controller_qml
         + "\n"
         + ui_qml
+        + "\n"
+        + session_qml
+        + "\n"
+        + power_qml
     )
+
+    for fragment in FORBIDDEN_BRIDGE + (
+        "org.freedesktop.login1",
+        "org.linura.Executor",
+        "org.linura.SecurityOwner",
+    ):
+        if fragment in session_client:
+            failures.append(
+                f"S17 shell client must not acquire native or privileged authority: {fragment}"
+            )
+    for fragment in (
+        'QStringLiteral("unix:path=/run/dbus/system_bus_socket")',
+        'QStringLiteral("ConvergeSessionLock")',
+        'QStringLiteral("ConvergeSessionTransition")',
+        'QStringLiteral("RecoverSessionTransition")',
+        'QStringLiteral("RecoverSessionLock")',
+        "if (busy_ || hasPending()",
+        "if (!retain(operation, LockRequest))",
+        "if (!retain(operation, TransitionRequest))",
+        "if (!retain(operation, ProtectiveSettingRequest, resource, enabled))",
+        'QStringLiteral("ConfigureProtectiveLock")',
+        'QStringLiteral("GetProtectiveLockSettingRequestStatus")',
+        "file.setDirectWriteFallback(false)",
+        "file.size() > 1024",
+        'message.signature() != QStringLiteral("(sssssssssbas)")',
+        "validSessionReceipt(receipt, requestId(), expectedResource, kind_ == TransitionRequest)",
+    ):
+        if fragment not in " ".join(session_client.split()):
+            failures.append(f"S17 shell client safety contract missing: {fragment}")
+    reload_body = session_client.split("void SessionController::loadTracking()", 1)[
+        -1
+    ].split("bool SessionController::retain", 1)[0]
+    recovery_body = session_client.split("void SessionController::recover()", 1)[
+        -1
+    ].split("\nvoid SessionController::", 1)[0]
+    for name, body in (("reload", reload_body), ("recovery", recovery_body)):
+        if any(
+            effect in body
+            for effect in (
+                "convergeLock(",
+                "convergeTransition(",
+                "ConvergeSession",
+                "ConfigureProtectiveLock",
+                "request(",
+            )
+        ):
+            failures.append(f"S17 shell {name} must never resume or replay effects")
+    consent_body = session_client.split(
+        "void SessionController::configureProtectiveLock(", 1
+    )[-1].split("\nvoid SessionController::", 1)[0]
+    retained_consent = consent_body.find(
+        "retain(operation, ProtectiveSettingRequest, resource, enabled)"
+    )
+    if retained_consent < 0 or not retained_consent < consent_body.find(
+        'call(QStringLiteral("ConfigureProtectiveLock")'
+    ):
+        failures.append(
+            "S17 consent must retain exact request material before its write"
+        )
+    for fragment in (
+        'r.verification == QStringLiteral("satisfied")',
+        'r.state == QStringLiteral("committed")',
+        "r.stages == stages",
+        "(r.recovered || !r.disposition.isEmpty())",
+        "(resource.isEmpty() || r.resource == resource)",
+    ):
+        if fragment not in session_receipt:
+            failures.append(f"S17 shell completion contract missing: {fragment}")
+    sleep_status_body = session_client.split(
+        "void SessionController::refreshNativeSleepStatus()", 1
+    )[-1].split("QString SessionController::requestId()", 1)[0]
+    for fragment in (
+        "if (nativeSleepQueryPending_)",
+        "nativeSleepQueryPending_ = true;",
+        "nativeSleepQueryPending_ = false;",
+        'QStringLiteral("GetOwnNativeSleepGateStatus")',
+        'reply.signature() == QStringLiteral("(ss)")',
+        "validNativeSleepGateStatus(epoch, state)",
+        "2000",
+    ):
+        if fragment not in sleep_status_body:
+            failures.append(
+                f"S17 sleep diagnostics safety contract missing: {fragment}"
+            )
+    if "timer->setInterval(5000)" not in session_client:
+        failures.append(
+            "S17 sleep diagnostics must retain the bounded polling interval"
+        )
+    if any(
+        effect in sleep_status_body
+        for effect in (
+            "convergeLock(",
+            "convergeTransition(",
+            "ConvergeSession",
+            "ConfigureProtectiveLock",
+            "AcknowledgeSession",
+            "request(",
+        )
+    ):
+        failures.append(
+            "S17 sleep diagnostics must never initiate or acknowledge effects"
+        )
+    for fragment, body in (
+        ("SessionController {", shell_qml),
+        ("sessionController: managedSessionController", shell_qml),
+        ("Session.SessionControls {", quick_settings_qml),
+        ("controller: root.sessionController", quick_settings_qml),
+        ("Power.PowerControls {", session_qml),
+        ("root.controller.recover()", session_qml),
+        ("root.controller.forgetTracking()", session_qml),
+        ("LinuraDialog {", session_qml),
+    ):
+        if fragment not in body:
+            failures.append(f"S17 first-party session integration missing: {fragment}")
+    for action in ("Suspend", "Logout", "Reboot", "PowerOff"):
+        if f"SessionController.{action}" not in power_qml:
+            failures.append(f"S17 first-party power action missing: {action}")
+    for name, expected_operations in (
+        ("session", ["operation:session.lock.set-secure"]),
+        (
+            "power",
+            [
+                "operation:session.suspend",
+                "operation:session.logout",
+                "operation:session.reboot",
+                "operation:session.power-off",
+            ],
+        ),
+    ):
+        manifest = json.loads(
+            (root / f"apps/linura-shell/plugins/{name}/manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        if (
+            manifest.get("authority") != "none"
+            or manifest.get("trust") != "first-party"
+            or "capabilities" in manifest
+            or manifest.get("registered_operations") != expected_operations
+        ):
+            failures.append(
+                f"S17 {name} manifest must remain authority-free and exactly operation-bound"
+            )
 
     for fragment in (
         "import Quickshell",
@@ -810,7 +978,9 @@ def validate(root: Path) -> list[str]:
         "nativeActive=",
         "root.overflowKeyboardReturnPending = returnKeyboardFocus === true",
         "if (!root.overflowKeyboardReturnPending)\n                    root.interactionStarted()",
-        "if (root.overflowKeyboardReturnPending && !overflowWindow.visible)",
+        "function restoreKeyboardAfterNativeUnmap()",
+        "if (root.overflowKeyboardReturnPending\n                && !overflowWindow.visible\n                && !overflowWindow.backingWindowVisible)",
+        "Qt.callLater(root.restoreKeyboardAfterNativeUnmap)",
         "return overflowButton.activeFocus && overflowButton.Window.active",
         "return first.activeFocus && first.Window.active",
         "return entry.Window.active",
@@ -972,6 +1142,10 @@ def validate(root: Path) -> list[str]:
             )
     if system_tray_qml.count("overflowFlickable.ensureVisible(overflowEntry)") != 1:
         failures.append("System tray overflow must scroll the focused action into view")
+    if system_tray_qml.count("Qt.callLater(root.restoreKeyboardAfterNativeUnmap)") != 2:
+        failures.append(
+            "System tray contract missing: Qt.callLater(root.restoreKeyboardAfterNativeUnmap) on both dismissal and native unmap"
+        )
     if system_tray_qml.count("root.keyboardReturnRequested(overflowButton)") != 1:
         failures.append(
             "System tray overflow cancellation must request compositor keyboard-mode restoration for its opener"

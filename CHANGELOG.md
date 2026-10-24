@@ -8,6 +8,7 @@ Target milestone: [v0.10.0](docs/milestones/v0.10.0.md) — work in progress, no
 
 ### Changes since v0.9.0
 - Continue the Experimental Arch Linux/Hyprland workstation work, including typed shell, session, power, and desktop interaction contracts.
+- Add the Experimental S17 vertical implementation: protected native locker/PAM, managed lock/unlock and session/power operations, durable observe-only recovery, login-scoped protective pre-sleep locking, nonsecret native assistive metadata, offline recovery guidance, and guarded exact-source Arch/Hyprland qualification runners. S17 remains planned pending complete native/interaction evidence and exact-head gates; this is not a production-support claim.
 - Expand automated and interactive VM qualification, physical workstation acceptance, and evidence provenance. Qualification and platform support remain bounded by the explicit version-scoped contract.
 - Strengthen isolated development workspaces, qualification infrastructure, deterministic validation, and CI dependency-input caching.
 

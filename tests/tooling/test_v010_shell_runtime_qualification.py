@@ -55,6 +55,12 @@ FIXTURE_PATHS = (
     "apps/linura-shell/bridge/CMakeLists.txt",
     "apps/linura-shell/bridge/audio_session_controller.h",
     "apps/linura-shell/bridge/audio_session_controller.cpp",
+    "apps/linura-shell/bridge/session_controller.h",
+    "apps/linura-shell/bridge/session_controller.cpp",
+    "apps/linura-shell/bridge/session_receipt.h",
+    "apps/linura-shell/bridge/session_receipt.cpp",
+    "apps/linura-shell/plugins/session/SessionControls.qml",
+    "apps/linura-shell/plugins/power/PowerControls.qml",
     "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml",
     "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml",
     "apps/linura-shell/plugins/notifications-osd/manifest.json",
@@ -97,6 +103,52 @@ FIXTURE_PATHS = (
 
 
 class V010ShellRuntimeQualificationTests(unittest.TestCase):
+    def test_recording_timer_cleanup_reaps_the_wait_without_holding_output(self):
+        source = (
+            ROOT / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+        ).read_text()
+        start = source.index("# One process owns the wait and signal.")
+        end = source.index("recording_deadline_pid=$!", start) + len(
+            "recording_deadline_pid=$!"
+        )
+        timer = source[start:end]
+        program = (
+            "recording_duration_budget=30\nrecording_parent_pid=$BASHPID\n"
+            + timer
+            + '\nsleep 0.1\nkill "$recording_deadline_pid"\n'
+            + 'wait "$recording_deadline_pid" 2>/dev/null || true\n'
+            + 'if kill -0 "$recording_deadline_pid" 2>/dev/null; then exit 8; fi\n'
+            + "printf cleaned\n"
+        )
+        # communicate() waits for inherited stdout/stderr to close. The old
+        # shell/sleep timer retains those pipes for its entire budget. The
+        # separate test timeout leaves scheduling margin without waiting for it.
+        result = subprocess.run(
+            ["bash", "-c", program], capture_output=True, timeout=10
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, b"cleaned")
+
+    def test_recording_timer_still_fails_the_original_run_when_budget_expires(self):
+        source = (
+            ROOT / "qualification/v010/shell-runtime/run-shell-runtime.sh"
+        ).read_text()
+        start = source.index("# One process owns the wait and signal.")
+        end = source.index("recording_deadline_pid=$!", start) + len(
+            "recording_deadline_pid=$!"
+        )
+        program = (
+            "trap 'printf deadline; exit 7' USR1\n"
+            + "recording_duration_budget=1\nrecording_parent_pid=$BASHPID\n"
+            + source[start:end]
+            + '\nwait "$recording_deadline_pid"\nexit 9\n'
+        )
+        result = subprocess.run(
+            ["bash", "-c", program], capture_output=True, timeout=10
+        )
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(result.stdout, b"deadline")
+
     def _copy_fixture(self, root: Path) -> None:
         for relative in FIXTURE_PATHS:
             source = ROOT / relative
@@ -116,9 +168,71 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             check=False,
         )
 
+    def test_tray_keyboard_return_waits_for_native_popup_unmap(self) -> None:
+        source = (ROOT / "apps/linura-shell/tray/SystemTrayView.qml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("function restoreKeyboardAfterNativeUnmap()", source)
+        self.assertIn("&& !overflowWindow.backingWindowVisible", source)
+        self.assertEqual(
+            source.count("Qt.callLater(root.restoreKeyboardAfterNativeUnmap)"), 2
+        )
+        self.assertNotIn(
+            "if (root.overflowKeyboardReturnPending && !overflowWindow.visible)",
+            source,
+        )
+
     def test_runtime_qualification_contract_is_valid(self) -> None:
         result = self._run(ROOT)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_kvm_runtime_is_pinned_without_software_fallback(self) -> None:
+        cases = (
+            (
+                "contracts/v010-shell-runtime-qualification.toml",
+                'vm_acceleration = "kvm"',
+                'vm_acceleration = "tcg"',
+                "vm_acceleration",
+            ),
+            (
+                ".github/workflows/v010-shell-runtime-qualification.yml",
+                "VM_ACCELERATION: kvm",
+                "VM_ACCELERATION: tcg",
+                "VM_ACCELERATION: kvm",
+            ),
+            (
+                ".github/workflows/v010-shell-runtime-qualification.yml",
+                "[[ -c /dev/kvm ]]",
+                "true # unverified accelerator",
+                "[[ -c /dev/kvm ]]",
+            ),
+            (
+                "qualification/v010/shell-runtime/start-vm.sh",
+                "[[ -c /dev/kvm && -r /dev/kvm && -w /dev/kvm ]]",
+                "true # unverified device",
+                "/dev/kvm",
+            ),
+            (
+                ".github/workflows/v010-shell-runtime-qualification.yml",
+                '--acceleration "$VM_ACCELERATION"',
+                "--acceleration tcg",
+                "two exact guarded S17 private-copy boots",
+            ),
+        )
+        for relative, original, substitution, expected in cases:
+            with self.subTest(relative=relative, original=original):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self._copy_fixture(root)
+                    path = root / relative
+                    source = path.read_text(encoding="utf-8")
+                    self.assertIn(original, source)
+                    path.write_text(
+                        source.replace(original, substitution, 1), encoding="utf-8"
+                    )
+                    result = self._run(root)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(expected, result.stderr)
 
     def test_required_qualification_scripts_retain_executable_modes(self) -> None:
         # The shell runtime calls the recorder directly; losing the Git execute
@@ -462,11 +576,13 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             self._copy_fixture(root)
             script = root / "qualification/v010/shell-runtime/run-shell-runtime.sh"
             text = script.read_text(encoding="utf-8")
-            marker = "seatd pipewire pipewire-audio wireplumber networkmanager sqlite"
+            marker = "vulkan-swrast pipewire pipewire-audio wireplumber networkmanager sqlite"
             self.assertIn(marker, text)
             script.write_text(
                 text.replace(
-                    marker, "seatd pipewire wireplumber networkmanager sqlite", 1
+                    marker,
+                    "vulkan-swrast pipewire wireplumber networkmanager sqlite",
+                    1,
                 ),
                 encoding="utf-8",
             )
@@ -852,6 +968,126 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("shared disposable VM harness", result.stderr)
+
+    def test_native_authentication_cases_and_private_hardware_input_cannot_be_skipped(
+        self,
+    ) -> None:
+        for marker in (
+            '--qmp-socket "$native_input_socket"',
+            "timeout --signal=TERM --kill-after=5s 900 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-auth.py",
+            '--bootstrap "$ARTIFACT_DIR/s17-native-bootstrap.json"',
+            '"$ARTIFACT_DIR/s17-native-case-digests.sha256"',
+            "'sha256sum /usr/lib/linura/qualification/linura-s17-assistive-probe'",
+            '> "$ARTIFACT_DIR/s17-native-assistive-binary.sha256"',
+            '"$ARTIFACT_DIR/s17-native-assistive-binary.sha256" \\',
+            "qualification/v010/session-security/native-assistive-fixture.py \\",
+            "qualification/v010/session-security/native-assistive-probe.cpp \\",
+            "qualification/v010/session-security/native-assistive-prompt.h \\",
+            "qualification/v010/session-security/native-assistive-denial.h \\",
+            "qualification/v010/session-security/native-assistive-denial-test.cpp \\",
+            "qualification/v010/session-security/native-assistive-discovery.h \\",
+            "qualification/v010/session-security/native-assistive-discovery-test.cpp \\",
+            "qualification/v010/session-security/CMakeLists.txt \\",
+            "timeout --signal=TERM --kill-after=5s 360 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-suspend.py",
+            '"$ARTIFACT_DIR/s17-native-suspend-digests.sha256"',
+            "start-vm.sh --persistent             --mode automated",
+            "for purpose in logout reboot power-off; do",
+            "timeout --signal=TERM --kill-after=5s 180 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-transition.py",
+            "timeout --signal=TERM --kill-after=5s 600 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-transition.py",
+            '"$ARTIFACT_DIR/s17-native-terminating-digests.sha256"',
+            'vm_directory="$(mktemp -d "$LINURA_VM_DIR/linura-s17-disk.XXXXXX")"',
+            'vm_image="$vm_directory/guest.qcow2"',
+            'source_archive="$LINURA_WORK_DIR/linura-source.tar.gz"',
+            "install -d -o root -g root -m 0700 /run/linura-source-stage",
+            "install -o root -g root -m 0600 /dev/null /run/linura-source-stage/source.tar.gz",
+            "test \"$(stat -c '%u:%g:%a:%h:%F' \"$archive\")\" = '0:0:600:1:regular file'",
+            'printf \'%s  %s\\n\' "$expected_sha256" "$archive" | sha256sum --check --strict',
+            "--no-same-owner --no-same-permissions",
+            'test -z "$(find "$source_root" -xdev \\( -type d -o -type f \\) -perm /022 -print -quit)"',
+            'test -z "$(find "$source_root" -xdev \\( -type d -o -type f \\) ! -user root -print -quit)"',
+            'test -z "$(find "$source_root" -xdev \\( -type d -o -type f \\) ! -group root -print -quit)"',
+            'test -z "$(find "$source_root" -xdev -type l -print -quit)"',
+            '--expected-source-sha "$PREPARED_IMAGE_SHA256" --phase before',
+            '--expected-source-sha "$PREPARED_IMAGE_SHA256" --phase after',
+        ):
+            with self.subTest(marker=marker), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                workflow = (
+                    root / ".github/workflows/v010-shell-runtime-qualification.yml"
+                )
+                source = workflow.read_text(encoding="utf-8")
+                self.assertIn(marker, source)
+                workflow.write_text(
+                    source.replace(marker, "removed-native-case", 1), encoding="utf-8"
+                )
+                result = self._run(root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("workflow missing", result.stderr)
+
+    def test_each_native_phase_requires_its_own_shared_input_and_prompt_log_bindings(
+        self,
+    ):
+        for step_name in (
+            "Qualify real S17 owner authentication and retained recovery",
+            "Qualify real managed S17 suspend and observe-only recovery",
+            "Qualify native S17 terminating transitions without effect replay",
+        ):
+            markers = [
+                "qualification/v010/session-security/native-assistive-fixture.py \\",
+                "qualification/v010/session-security/native-assistive-probe.cpp \\",
+                "qualification/v010/session-security/native-assistive-prompt.h \\",
+                '"$ARTIFACT_DIR/s17-native-assistive-binary.sha256" \\',
+            ]
+            if "authentication" not in step_name:
+                markers.append('--vm-log "$VM_LOG"')
+            for marker in markers:
+                with (
+                    self.subTest(step=step_name, marker=marker),
+                    tempfile.TemporaryDirectory() as temp_dir,
+                ):
+                    root = Path(temp_dir)
+                    self._copy_fixture(root)
+                    path = (
+                        root / ".github/workflows/v010-shell-runtime-qualification.yml"
+                    )
+                    source = path.read_text()
+                    before, step = source.split("- name: " + step_name, 1)
+                    block, after = step.split("\n      - name:", 1)
+                    self.assertIn(marker, block)
+                    path.write_text(
+                        before
+                        + "- name: "
+                        + step_name
+                        + block.replace(marker, "removed-native-binding", 1)
+                        + "\n      - name:"
+                        + after
+                    )
+                    result = self._run(root)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("workflow missing " + step_name, result.stderr)
+
+    def test_permission_preserving_source_extraction_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            source = workflow.read_text(encoding="utf-8")
+            marker = (
+                'tar --extract --gzip --file "$archive" --directory '
+                '"$source_root" \\\n'
+                "            --no-same-owner --no-same-permissions"
+            )
+            self.assertIn(marker, source)
+            workflow.write_text(
+                source.replace(marker, "tar -xzf /tmp/linura-source.tar.gz", 1),
+                encoding="utf-8",
+            )
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "must not preserve archive ownership or permissions", result.stderr
+            )
 
     def test_shell_sandbox_cannot_be_weakened(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2060,6 +2296,23 @@ class V010ShellRuntimeQualificationTests(unittest.TestCase):
             runtime_text = text[runtime_index:]
             runtime_text = runtime_text.replace(marker, "--persistent " + marker, 1)
             workflow.write_text(text[:runtime_index] + runtime_text, encoding="utf-8")
+            result = self._run(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("snapshot/disposable", result.stderr)
+
+    def test_s17_persistent_boot_cannot_substitute_the_cached_prepared_image(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self._copy_fixture(root)
+            workflow = root / ".github/workflows/v010-shell-runtime-qualification.yml"
+            source = workflow.read_text(encoding="utf-8")
+            marker = '--image "$VM_IMAGE"'
+            self.assertEqual(source.count(marker), 2)
+            workflow.write_text(
+                source.replace(marker, '--image "$PREPARED_IMAGE"', 1), encoding="utf-8"
+            )
             result = self._run(root)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("snapshot/disposable", result.stderr)

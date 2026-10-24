@@ -43,6 +43,9 @@ class NativeLockProtocol final : public QObject
     // and Control's durable verified-commit acknowledgement. No local callback,
     // authentication success or native false property supplies either proof.
     [[nodiscard]] bool independentlyVerifiedReleased(const NativeLockIdentity &identity);
+    // Strictly observational retained proof. It does not refresh, advance a
+    // clock, mutate mechanism coverage, dispatch, fault or rotate generation.
+    [[nodiscard]] bool retainedVerifiedRelease(const NativeLockIdentity &identity) const;
     [[nodiscard]] bool commitVerifiedRelease(const NativeLockIdentity &identity);
 
   private Q_SLOTS:

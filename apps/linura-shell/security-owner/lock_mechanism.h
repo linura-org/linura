@@ -23,6 +23,9 @@ class LockMechanism final
     // Independent native postcondition, not the local requested=false state or
     // the protocol unlock acknowledgement. The adapter attests the compositor.
     [[nodiscard]] bool independentlyVerifiedReleased(const NativeLockIdentity &identity);
+    // Read the proof left by the one-shot independent verification. Ready and
+    // any replaced generation never supply evidence of a release.
+    [[nodiscard]] bool retainedVerifiedRelease(const NativeLockIdentity &identity) const;
     // Retain the old resource for verification/recovery until trusted Control
     // acknowledges its durable verified commit. This advances only native
     // bookkeeping, never dispatches a compositor effect. No client/QML caller.

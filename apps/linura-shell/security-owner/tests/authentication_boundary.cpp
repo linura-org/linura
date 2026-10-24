@@ -171,6 +171,8 @@ void multipleNativeAdministratorsRequireExplicitProtectedSelection()
     GList *ownerOnly = g_list_append(nullptr, polkit_unix_user_new(1000));
     const auto ownerChoices = nativeAuthenticationChoices(owner, ownerOnly);
     check(ownerChoices && *ownerChoices == QVector<quint32>({1000}));
+    const auto ownerAdminChoices = nativeAuthenticationChoices(admin, ownerOnly);
+    check(ownerAdminChoices && *ownerAdminChoices == QVector<quint32>({1000}));
     g_list_free_full(ownerOnly, g_object_unref);
 
     GList *duplicate = nullptr;

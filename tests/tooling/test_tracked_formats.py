@@ -174,6 +174,21 @@ class TrackedFormatsTests(unittest.TestCase):
                     formats.format_errors(Path("example.service"), invalid, "ini")
                 )
 
+    def test_systemd_path_globs_repeat_without_relaxing_other_directives(self) -> None:
+        valid = (
+            b"[Path]\nPathExistsGlob=/run/user/%i/wayland-[0-9]\n"
+            b"PathExistsGlob=/run/user/%i/wayland-[0-9]*[0-9]\n"
+            b"Unit=linura-security-owner@%i.service\n"
+        )
+        self.assertEqual(formats.format_errors(Path("native.path"), valid, "ini"), [])
+        for field in ("Unit", "TriggerLimitBurst", "PathExists"):
+            with self.subTest(field=field):
+                invalid = valid + f"{field}=first\n{field}=second\n".encode()
+                self.assertTrue(
+                    formats.format_errors(Path("native.path"), invalid, "ini")
+                )
+        self.assertTrue(formats.format_errors(Path("native.service"), valid, "ini"))
+
     def test_pacman_only_allows_explicit_valueless_options(self) -> None:
         content = b"[options]\nColor\nArchitecture = auto\n"
         self.assertEqual(
@@ -182,7 +197,10 @@ class TrackedFormatsTests(unittest.TestCase):
         self.assertTrue(formats.format_errors(Path("example.service"), content, "ini"))
 
     def test_arch_hook_allows_only_reviewed_bare_directive(self) -> None:
-        valid = b"[Trigger]\nOperation = Upgrade\n[Action]\nAbortOnFail\n"
+        valid = (
+            b"[Trigger]\nOperation = Install\nOperation = Upgrade\n"
+            b"Target = one\nTarget = two\n[Action]\nAbortOnFail\n"
+        )
         self.assertEqual(
             formats.format_errors(Path("upgrade.hook"), valid, "arch-hook"), []
         )
@@ -227,6 +245,27 @@ class TrackedFormatsTests(unittest.TestCase):
                     formats.classify(Path(path), (ROOT / path).read_bytes()),
                     "text",
                 )
+
+    def test_s17_inputs_are_narrowly_classified(self) -> None:
+        expected = {
+            "qualification/v010/session-security/CMakeLists.txt": "build",
+            "qualification/v010/session-security/fixtures/linura-s17-qualification.pam": "text",
+            "qualification/v010/session-security/fixtures/s17-hyprland.conf": "text",
+            "packaging/systemd/system/linura-security-owner@.path": "ini",
+        }
+        for name, kind in expected.items():
+            with self.subTest(path=name):
+                self.assertEqual(
+                    formats.classify(Path(name), (ROOT / name).read_bytes()), kind
+                )
+        self.assertEqual(
+            formats.classify(Path("unreviewed/CMakeLists.txt"), b"project(fake)\n"),
+            "unclassified",
+        )
+        self.assertEqual(
+            formats.classify(Path("unreviewed/Dockerfile"), b"FROM scratch\n"),
+            "unclassified",
+        )
 
     def test_embedded_compose_inputs_are_explicit_text(self) -> None:
         for path in [

@@ -478,6 +478,10 @@ class NativeKeyboard::Impl final
                 }
                 return;
             }
+            // A compositor enter may precede the final lock-coverage event.
+            // Derive focus again from this live guarded surface and coverage
+            // before delivering a fresh press, never from the old enter flag.
+            self.entry->setNativeKeyboardFocus(self.protectedFocus());
             if (!self.entry->acceptsInput()) {
                 // A native press requests typed intent through Control. It is
                 // not PAM success, approval, prepared dispatch or an unlock.
@@ -614,6 +618,11 @@ bool NativeKeyboard::focused() const
 {
     impl_->checkThread();
     return impl_->protectedFocus();
+}
+void NativeKeyboard::refreshProtectedFocus()
+{
+    impl_->checkThread();
+    impl_->entry->setNativeKeyboardFocus(impl_->protectedFocus());
 }
 void NativeKeyboard::forgetSurface(wl_surface *surface)
 {

@@ -413,6 +413,38 @@ QStringList contractShape(const QString &text)
 
 int main(int argc, char **argv)
 {
+    using Mechanism = LockMechanism::State;
+    using Sample = NativeObservedLockState;
+    assert(!nativeObservedLockState(static_cast<NativeCompositorLockState>(99),
+                                    Mechanism::Acquiring, true, false));
+    for (auto compositor :
+         {NativeCompositorLockState::Locked, NativeCompositorLockState::Unlocked}) {
+        assert(nativeObservedLockState(compositor, Mechanism::Acquiring, true, false) ==
+               Sample::Acquiring);
+        assert(!nativeObservedLockState(compositor, Mechanism::Acquiring, false, false));
+        assert(!nativeObservedLockState(compositor, Mechanism::Acquiring, true, true));
+        assert(nativeObservedLockState(compositor, Mechanism::Releasing, true, true) ==
+               Sample::Releasing);
+        assert(nativeObservedLockState(compositor, Mechanism::Releasing, true, false) ==
+               Sample::Releasing);
+        assert(!nativeObservedLockState(compositor, Mechanism::Releasing, false, true));
+        assert(!nativeObservedLockState(compositor, Mechanism::Faulted, true, false));
+        assert(!nativeObservedLockState(compositor, Mechanism::Faulted, false, false));
+    }
+    assert(nativeObservedLockState(NativeCompositorLockState::Unlocked, Mechanism::Releasing, false,
+                                   false) == Sample::Unlocked);
+    assert(nativeObservedLockState(NativeCompositorLockState::Locked, Mechanism::Releasing, false,
+                                   false) == Sample::Releasing);
+    assert(nativeObservedLockState(NativeCompositorLockState::Locked, Mechanism::Secure, true,
+                                   true) == Sample::Secure);
+    assert(!nativeObservedLockState(NativeCompositorLockState::Unlocked, Mechanism::Secure, true,
+                                    true));
+    for (auto ready : {Mechanism::Ready, Mechanism::Released}) {
+        assert(nativeObservedLockState(NativeCompositorLockState::Unlocked, ready, false, false) ==
+               Sample::Unlocked);
+        assert(!nativeObservedLockState(NativeCompositorLockState::Locked, ready, false, false));
+        assert(!nativeObservedLockState(NativeCompositorLockState::Unlocked, ready, true, false));
+    }
     assert(argc == 3);
     ordinaryStartupCannotBeRepaired(); // Before Qt exists, on ordinary exec.
     const pid_t entry = fork();
@@ -435,6 +467,7 @@ int main(int argc, char **argv)
                                "verifyReleased()", "commitVerifiedRelease()",
                                "observePowerPermission()", "exportNativeEndpoint()", "identity()"})
         assert(NativeRuntime::staticMetaObject.indexOfMethod(method) == -1);
+    assert(NativeRuntime::staticMetaObject.indexOfMethod("retainedVerifiedRelease()") == -1);
 
     const int index = NativeEndpoint::staticMetaObject.indexOfClassInfo("D-Bus Introspection");
     assert(index >= 0);
@@ -457,7 +490,8 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 12 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 13 && signals == 1 && annotations == 3);
+    assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));
     NativeEndpoint::registerWireTypes();
