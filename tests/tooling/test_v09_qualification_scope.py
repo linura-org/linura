@@ -180,6 +180,62 @@ class QualificationScopeTests(unittest.TestCase):
                     ["docs/development-infrastructure.md"], broken
                 )
 
+    def test_v09_contract_reuses_exact_canonical_cargo_inputs(self):
+        workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(
+            encoding="utf-8"
+        )
+        canonical = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        contract = workflow.split("\n  contract:\n", 1)[1].split(
+            "\n  offline-reference:\n", 1
+        )[0]
+        # Use the identical reviewed composite cache step as canonical CI;
+        # dependency archives only, never target/, binaries, or evidence.
+        cache_step = (
+            "      - name: Restore Cargo dependency inputs\n"
+            "        uses: ./.github/actions/cargo-input-cache\n"
+            "        with:\n"
+            "          namespace: canonical-ci\n"
+            "          rust-version: ${{ env.RUST_VERSION }}\n"
+        )
+        policy_step = (
+            "      - name: Verify reviewed dependency cache policy\n"
+            "        run: python3 tools/check_ci_cache_policy.py\n"
+        )
+        # Reject conditional, continue-on-error or additional injected keys
+        # between these audited steps; a cache failure must still fail the job.
+        self.assertEqual(contract.count(policy_step), 1)
+        self.assertEqual(
+            contract.split(policy_step, 1)[1].split(cache_step, 1)[0], "\n"
+        )
+        self.assertLess(contract.index(policy_step), contract.index(cache_step))
+        self.assertEqual(contract.count(cache_step), 1)
+        self.assertEqual(
+            contract.split(cache_step, 1)[1].split(
+                "      - name: Verify candidate component, roadmap and support-scope contracts",
+                1,
+            )[0],
+            "\n",
+        )
+        self.assertIn(cache_step, canonical)
+        self.assertEqual(
+            contract.count('test "$(git rev-parse HEAD)" = "$SOURCE_SHA"'), 1
+        )
+        self.assertLess(
+            contract.index('test "$(git rev-parse HEAD)" = "$SOURCE_SHA"'),
+            contract.index(policy_step),
+        )
+        self.assertLess(
+            contract.index("      - name: Install pinned Rust toolchain"),
+            contract.index(cache_step),
+        )
+        self.assertLess(
+            contract.index(cache_step),
+            contract.index("      - name: Test exact-source v0.9 regression contracts"),
+        )
+        self.assertEqual(contract.count("uses: ./.github/actions/cargo-input-cache"), 1)
+        self.assertNotIn("restore-keys:", contract)
+        self.assertNotIn("continue-on-error:", contract)
+
     def test_reusable_and_manual_runs_remain_forced_full(self):
         workflow = (ROOT / ".github/workflows/v09-qualification.yml").read_text(
             encoding="utf-8"
