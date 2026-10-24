@@ -34,7 +34,8 @@ jobs:
 
       - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
-          languages: rust,javascript-typescript
+          languages: rust,javascript-typescript,c-cpp,python
+          build-mode: none
       - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
 
       - name: Bind qualification execution envelope

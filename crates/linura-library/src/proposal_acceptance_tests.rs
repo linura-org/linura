@@ -15,8 +15,18 @@ fn id<T>(value: Result<T, ValidationError>) -> T {
     value.unwrap_or_else(|error| unreachable!("{error}"))
 }
 
-fn authority_pair(byte: u8) -> (TransactionAuthoritySigner, ProposalAcceptanceAuthority) {
-    let key = TransactionAuthorityKey::new(vec![byte; 32])
+fn test_key_material() -> Vec<u8> {
+    use std::io::Read;
+    let mut bytes = Vec::with_capacity(32);
+    let read = std::fs::File::open("/dev/urandom")
+        .and_then(|file| file.take(32).read_to_end(&mut bytes))
+        .unwrap_or_else(|error| unreachable!("test entropy unavailable: {error}"));
+    assert_eq!(read, 32);
+    bytes
+}
+
+fn authority_pair() -> (TransactionAuthoritySigner, ProposalAcceptanceAuthority) {
+    let key = TransactionAuthorityKey::new(test_key_material())
         .unwrap_or_else(|error| unreachable!("{error}"));
     let (signer, verifier) = key.split();
     (signer, ProposalAcceptanceAuthority::from_verifier(verifier))
@@ -81,7 +91,7 @@ impl AcceptanceLinearizationClock for TestClock {
 fn unprovisioned_library_fails_closed() {
     let mut library =
         LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
-    let (_, authority) = authority_pair(0x71);
+    let (_, authority) = authority_pair();
     assert!(matches!(
         authority.begin(&mut library),
         Err(ProposalAcceptanceError::AuthorityNotProvisioned)
@@ -92,8 +102,8 @@ fn unprovisioned_library_fails_closed() {
 fn provisioning_is_idempotent_and_cannot_be_rebound() {
     let mut library =
         LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
-    let (_, authority) = authority_pair(0x71);
-    let (_, wrong_authority) = authority_pair(0x72);
+    let (_, authority) = authority_pair();
+    let (_, wrong_authority) = authority_pair();
 
     authority
         .provision(&mut library)
@@ -111,8 +121,8 @@ fn provisioning_is_idempotent_and_cannot_be_rebound() {
 fn handoff_signed_by_another_authority_is_rejected() {
     let mut library =
         LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
-    let (_, authority) = authority_pair(0x71);
-    let (wrong_signer, _) = authority_pair(0x72);
+    let (_, authority) = authority_pair();
+    let (wrong_signer, _) = authority_pair();
     authority
         .provision(&mut library)
         .unwrap_or_else(|error| unreachable!("{error}"));
@@ -143,7 +153,7 @@ fn handoff_signed_by_another_authority_is_rejected() {
 fn exact_signed_handoff_commits_and_replays_without_fresh_time() {
     let mut library =
         LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
-    let (signer, authority) = authority_pair(0x71);
+    let (signer, authority) = authority_pair();
     authority
         .provision(&mut library)
         .unwrap_or_else(|error| unreachable!("{error}"));
@@ -188,7 +198,7 @@ fn exact_signed_handoff_commits_and_replays_without_fresh_time() {
 fn write_at_exclusive_deadline_fails_without_mutation() {
     let mut library =
         LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
-    let (signer, authority) = authority_pair(0x71);
+    let (signer, authority) = authority_pair();
     authority
         .provision(&mut library)
         .unwrap_or_else(|error| unreachable!("{error}"));
@@ -224,9 +234,7 @@ fn write_at_exclusive_deadline_fails_without_mutation() {
     assert!(library.intent(&intent.id).is_err());
 }
 
-fn committed_fixture(
-    authority_byte: u8,
-) -> (
+fn committed_fixture() -> (
     LocalLibrary,
     ProposalAcceptanceAuthority,
     ProposalAcceptanceMaterial,
@@ -234,7 +242,7 @@ fn committed_fixture(
 ) {
     let mut library =
         LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
-    let (signer, authority) = authority_pair(authority_byte);
+    let (signer, authority) = authority_pair();
     authority
         .provision(&mut library)
         .unwrap_or_else(|error| unreachable!("{error}"));
@@ -272,7 +280,7 @@ fn committed_fixture(
 fn library_owned_context_sources_are_revalidated_under_durable_guard() {
     let mut library =
         LocalLibrary::open_in_memory().unwrap_or_else(|error| unreachable!("{error}"));
-    let (_, authority) = authority_pair(0x73);
+    let (_, authority) = authority_pair();
     authority
         .provision(&mut library)
         .unwrap_or_else(|error| unreachable!("{error}"));
@@ -349,8 +357,8 @@ fn library_owned_context_sources_are_revalidated_under_durable_guard() {
 
 #[test]
 fn replay_request_requires_the_provisioned_authority() {
-    let (library, _authority, material, _) = committed_fixture(0x74);
-    let (_, wrong_authority) = authority_pair(0x75);
+    let (library, _authority, material, _) = committed_fixture();
+    let (_, wrong_authority) = authority_pair();
     let key = ProposalAcceptanceReplayKey {
         principal: material.principal.clone(),
         proposal_id: material.proposal_id.clone(),
@@ -368,7 +376,7 @@ fn replay_request_requires_the_provisioned_authority() {
 
 #[test]
 fn replay_detects_modified_time_evidence() {
-    let (library, authority, material, _) = committed_fixture(0x76);
+    let (library, authority, material, _) = committed_fixture();
     let entity_id = format!("v08:acceptance:{}", material.operation_id.as_str());
     library
         .connection

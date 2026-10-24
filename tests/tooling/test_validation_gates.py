@@ -2768,28 +2768,34 @@ class ValidationGateTests(unittest.TestCase):
                     )
             target.write_text(original, encoding="utf-8")
 
-    def test_codeql_preserves_rust_and_covers_trusted_publisher_javascript(self):
+    def test_codeql_preserves_all_four_required_languages(self):
         path = self.root / ".github/workflows/codeql.yml"
         original = path.read_text(encoding="utf-8")
-        self.assertIn("languages: rust,javascript-typescript", original)
+        self.assertIn("languages: rust,javascript-typescript,c-cpp,python", original)
         self.assertEqual(gates.check(self.root), [])
         for replacement in (
             "languages: rust",
             "languages: javascript-typescript",
             "languages: rust,javascript-typescript,python",
+            "languages: rust,javascript-typescript,c-cpp",
+            "languages: javascript-typescript,c-cpp,python",
+            "languages: rust,c-cpp,python",
+            "languages: rust,javascript-typescript",
             "languages: javascript-typescript,rust",
         ):
             with self.subTest(replacement=replacement):
                 path.write_text(
                     original.replace(
-                        "languages: rust,javascript-typescript", replacement, 1
+                        "languages: rust,javascript-typescript,c-cpp,python",
+                        replacement,
+                        1,
                     ),
                     encoding="utf-8",
                 )
                 errors = gates.check(self.root)
                 self.assertTrue(
                     any(
-                        "CodeQL initialization must configure exactly Rust and JavaScript"
+                        "CodeQL initialization must configure exactly Rust, JavaScript, C/C++ and Python with build-mode none"
                         in error
                         for error in errors
                     ),
@@ -4056,19 +4062,19 @@ class ValidationGateTests(unittest.TestCase):
             errors,
         )
 
-    def test_codeql_must_analyze_configured_rust_and_javascript(self):
+    def test_codeql_must_analyze_all_configured_languages(self):
         path = ".github/workflows/codeql.yml"
         target = self.root / path
         original = target.read_text(encoding="utf-8")
         for replacement in (
-            "          languages: python # languages: rust,javascript-typescript\n",
-            "          languages: python\n          languages: rust,javascript-typescript\n",
-            "          languages: rust,javascript-typescript,python\n",
+            "          languages: python # languages: rust,javascript-typescript,c-cpp,python\n",
+            "          languages: python\n          languages: rust,javascript-typescript,c-cpp,python\n",
+            "          languages: rust,javascript-typescript,c-cpp,python,python\n",
         ):
             with self.subTest(setting=replacement.strip()):
                 target.write_text(
                     original.replace(
-                        "          languages: rust,javascript-typescript\n",
+                        "          languages: rust,javascript-typescript,c-cpp,python\n",
                         replacement,
                         1,
                     ),
@@ -4077,7 +4083,7 @@ class ValidationGateTests(unittest.TestCase):
                 errors = gates.check(self.root)
                 self.assertTrue(
                     any(
-                        "CodeQL initialization must configure exactly Rust and JavaScript"
+                        "CodeQL initialization must configure exactly Rust, JavaScript, C/C++ and Python with build-mode none"
                         in e
                         for e in errors
                     ),
@@ -4089,8 +4095,8 @@ class ValidationGateTests(unittest.TestCase):
         path = ".github/workflows/codeql.yml"
         self.change(
             path,
-            "          languages: rust,javascript-typescript\n",
-            "          languages: rust,javascript-typescript\n        if: false\n",
+            "          languages: rust,javascript-typescript,c-cpp,python\n",
+            "          languages: rust,javascript-typescript,c-cpp,python\n        if: false\n",
         )
         self.assertTrue(
             any(
@@ -4099,6 +4105,32 @@ class ValidationGateTests(unittest.TestCase):
                 for e in gates.check(self.root)
             )
         )
+
+    def test_codeql_extraction_mode_and_unfiltered_coverage_are_required(self):
+        target = self.root / ".github/workflows/codeql.yml"
+        original = target.read_text(encoding="utf-8")
+        for replacement in (
+            "",
+            "          build-mode: manual\n",
+            "          build-mode: autobuild\n",
+            "          build-mode: none\n          build-mode: manual\n",
+            "          build-mode: none\n          config: 'paths-ignore: [crates]'\n",
+        ):
+            with self.subTest(replacement=replacement):
+                target.write_text(
+                    original.replace("          build-mode: none\n", replacement, 1),
+                    encoding="utf-8",
+                )
+                errors = gates.check(self.root)
+                self.assertTrue(
+                    any(
+                        "CodeQL initialization must configure exactly Rust, JavaScript, C/C++ and Python with build-mode none"
+                        in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+        target.write_text(original, encoding="utf-8")
 
     def test_required_job_cannot_be_skipped_by_failed_dependency(self):
         self.change(

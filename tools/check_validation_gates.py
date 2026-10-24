@@ -2984,14 +2984,17 @@ def check(root: Path = ROOT) -> list[str]:
             if action.endswith("/init@"):
                 settings = section(step or "", "with", indent + 4)
                 # Match the entire setting block. A comment, duplicate YAML
-                # key or a different effective language must not satisfy Rust.
+                # key, missing language or a different extraction mode must not
+                # satisfy the required source-analysis coverage.
                 require(
                     settings is not None
                     and re.fullmatch(
-                        r"\s*languages: rust,javascript-typescript\s*", settings
+                        r"\s*languages: rust,javascript-typescript,c-cpp,python\s*\n"
+                        r"\s*build-mode: none\s*",
+                        settings,
                     )
                     is not None,
-                    "CodeQL initialization must configure exactly Rust and JavaScript",
+                    "CodeQL initialization must configure exactly Rust, JavaScript, C/C++ and Python with build-mode none",
                 )
         require(
             len(action_revisions) == 2 and len(set(action_revisions.values())) == 1,

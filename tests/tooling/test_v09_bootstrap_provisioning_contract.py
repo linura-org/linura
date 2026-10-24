@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,6 +28,47 @@ def durable_source() -> str:
 
 
 class V09BootstrapProvisioningContractTests(unittest.TestCase):
+    def test_fixture_feature_guard_is_enforced_by_the_real_compiler(self) -> None:
+        source = (ROOT / "crates/linura-bootstrap/src/lib.rs").read_text()
+        guard, separator, _ = source.partition("use std::collections::BTreeSet;")
+        self.assertTrue(separator)
+        with tempfile.TemporaryDirectory(prefix="linura-bootstrap-guard-") as directory:
+            path = Path(directory) / "guard.rs"
+            path.write_text(guard)
+            for fixture, debug in (
+                (False, False),
+                (False, True),
+                (True, True),
+                (True, False),
+            ):
+                arguments = [
+                    "rustc",
+                    "--edition=2024",
+                    "--crate-type=lib",
+                    "--emit=metadata",
+                    "-C",
+                    "opt-level=" + ("0" if debug else "3"),
+                    "-C",
+                    "debug-assertions=" + ("yes" if debug else "no"),
+                    str(path),
+                    "-o",
+                    str(Path(directory) / "guard.rmeta"),
+                ]
+                if fixture:
+                    arguments.extend(["--cfg", 'feature="test-support"'])
+                result = subprocess.run(
+                    arguments, cwd=ROOT, capture_output=True, text=True, timeout=30
+                )
+                with self.subTest(fixture=fixture, debug=debug):
+                    if fixture and not debug:
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn(
+                            "must never be enabled in optimized release builds",
+                            result.stderr,
+                        )
+                    else:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_threat_model_keeps_bootstrap_state_non_authorizing(self) -> None:
         threat_model = (
             ROOT / "docs/threat-model-v0.9-bootstrap-provisioning.md"
