@@ -60,6 +60,215 @@ class CodexReadinessTests(unittest.TestCase):
         self.assertTrue(calls)
         self.assertFalse(any("install" in argv or "fetch" in argv for argv in calls))
 
+    def test_pinned_python_probe_uses_private_selection_even_with_newer_launcher(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            tools = Path(directory) / "linura-tools"
+            binary_dir = tools / "python312/bin"
+            binary_dir.mkdir(parents=True, mode=0o700)
+            selected = binary_dir / "python3"
+            selected.symlink_to(sys.executable)
+            env = {"PATH": "/usr/bin"}
+            calls = []
+
+            def fake_probe(argv, passed_env):
+                calls.append((argv, passed_env["PATH"]))
+                return "3.12"
+
+            with patch.object(doctor, "probe", side_effect=fake_probe):
+                self.assertTrue(doctor.pinned_python_ready(tools, env, "3.12"))
+            self.assertEqual(calls[0][0][:3], [str(selected), "-I", "-S"])
+            self.assertEqual(calls[0][1], "/usr/bin")
+            self.assertEqual(env["PATH"], f"{binary_dir}:/usr/bin")
+
+    def test_pinned_python_probe_rejects_missing_drifted_or_unsafe_selection(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            tools = Path(directory) / "linura-tools"
+            binary_dir = tools / "python312/bin"
+            binary_dir.mkdir(parents=True, mode=0o700)
+            selected = binary_dir / "python3"
+            env = {"PATH": "/usr/bin"}
+            with patch.object(doctor, "probe") as probe:
+                self.assertFalse(doctor.pinned_python_ready(tools, env, "3.12"))
+                selected.write_text("imposter", encoding="utf-8")
+                self.assertFalse(doctor.pinned_python_ready(tools, env, "3.12"))
+                selected.unlink()
+                selected.symlink_to(binary_dir / "missing")
+                self.assertFalse(doctor.pinned_python_ready(tools, env, "3.12"))
+                selected.unlink()
+                selected.symlink_to(sys.executable)
+                binary_dir.chmod(0o755)
+                self.assertFalse(doctor.pinned_python_ready(tools, env, "3.12"))
+                binary_dir.chmod(0o700)
+                probe.return_value = "3.14"
+                self.assertFalse(doctor.pinned_python_ready(tools, env, "3.12"))
+                probe.assert_called_once()
+            self.assertEqual(env["PATH"], "/usr/bin")
+
+    def test_readiness_reports_missing_tools_without_claiming_incompatibility(self):
+        with (
+            patch.object(doctor, "probe", return_value=None),
+            patch.object(doctor, "probe_status", return_value=False),
+            patch.object(doctor.shutil, "which", return_value=None),
+            patch.object(doctor, "pinned_python_ready", return_value=False),
+        ):
+            checks = doctor.inventory({"core", "shell"})
+        statuses = {check.name: check.status for check in checks}
+        self.assertEqual(statuses["rustup"], "missing")
+        self.assertEqual(statuses["qt6-module-core"], "unverified")
+        self.assertEqual(statuses["cmake"], "missing")
+        self.assertEqual(statuses["locked-offline-cargo-graph"], "unverified")
+        self.assertEqual(statuses["rustup-version"], "unverified")
+        self.assertTrue(
+            all(check.ready == (check.status == "ready") for check in checks)
+        )
+
+    def test_rust_toolchain_inventory_rejects_absent_pin_and_override(self):
+        pins = doctor.versions()
+        toolchain = f"{pins['RUST_VERSION']}-x86_64-unknown-linux-gnu"
+
+        def fake_probe(argv, _env):
+            if argv == ["rustup", "toolchain", "list"]:
+                return "1.97.0-x86_64-unknown-linux-gnu (default)"
+            if argv == ["rustup", "show", "active-toolchain"]:
+                return toolchain
+            return None
+
+        with (
+            patch.dict(os.environ, {"RUSTUP_TOOLCHAIN": "stable"}),
+            patch.object(doctor, "probe", side_effect=fake_probe),
+            patch.object(doctor, "probe_status", return_value=False),
+            patch.object(doctor.shutil, "which", return_value=None),
+            patch.object(doctor, "pinned_python_ready", return_value=False),
+        ):
+            checks = doctor.inventory({"core"})
+        statuses = {check.name: check.status for check in checks}
+        self.assertEqual(statuses["installed-toolchain"], "missing")
+        self.assertEqual(statuses["rust-toolchain-override"], "incompatible")
+        self.assertEqual(statuses["active-toolchain"], "ready")
+        self.assertEqual(statuses["locked-offline-cargo-graph"], "unverified")
+
+    def test_vm_diagnostic_uses_selected_python_not_launcher(self):
+        # The CI launcher may itself be the private pinned Python; simulate a
+        # different host launcher to prove there is no interpreter fallback.
+        observed = []
+
+        def fake_probe(argv, _env):
+            observed.append(argv)
+            return None
+
+        with (
+            patch.object(doctor.sys, "executable", "/usr/bin/python3-host-launcher"),
+            patch.object(doctor, "probe", side_effect=fake_probe),
+            patch.object(doctor, "probe_status", return_value=False),
+            patch.object(doctor.shutil, "which", return_value=None),
+            patch.object(doctor, "pinned_python_ready", return_value=True),
+        ):
+            doctor.inventory({"core", "vm"})
+        vm_calls = [args for args in observed if args[-2:] == ["tools/vm.py", "doctor"]]
+        self.assertEqual(len(vm_calls), 1)
+        self.assertTrue(vm_calls[0][0].endswith("/linura-tools/python312/bin/python3"))
+        self.assertNotEqual(vm_calls[0][0], "/usr/bin/python3-host-launcher")
+
+    def test_vm_diagnostic_never_runs_rejected_private_python(self):
+        calls = []
+
+        def fake_probe(argv, _env):
+            calls.append(argv)
+            if argv[-2:] == ["tools/vm.py", "doctor"]:
+                return "forged success"
+            return None
+
+        with (
+            patch.object(doctor, "probe", side_effect=fake_probe),
+            patch.object(doctor, "probe_status", return_value=False),
+            patch.object(doctor.shutil, "which", return_value=None),
+            patch.object(doctor, "pinned_python_ready", return_value=False),
+        ):
+            checks = doctor.inventory({"core", "vm"})
+        results = {check.name: check for check in checks}
+        self.assertFalse(results["python"].ready)
+        self.assertFalse(results["canonical-vm-doctor"].ready)
+        self.assertEqual(results["canonical-vm-doctor"].status, "unverified")
+        self.assertFalse(any(argv[-2:] == ["tools/vm.py", "doctor"] for argv in calls))
+
+    def test_vm_doctor_rejects_regular_executable_python_substitution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            binary_dir = home / ".local/linura-tools/python312/bin"
+            binary_dir.mkdir(parents=True, mode=0o700)
+            imposter = binary_dir / "python3"
+            imposter.write_text("#!/bin/sh\necho forged\n", encoding="utf-8")
+            imposter.chmod(0o700)
+            calls = []
+
+            def fake_probe(argv, _env):
+                calls.append(argv)
+                if argv[-2:] == ["tools/vm.py", "doctor"]:
+                    return "forged success"
+                return None
+
+            with (
+                patch.object(doctor.Path, "home", return_value=home),
+                patch.object(doctor, "probe", side_effect=fake_probe),
+                patch.object(doctor, "probe_status", return_value=False),
+                patch.object(doctor.shutil, "which", return_value=None),
+            ):
+                checks = doctor.inventory({"core", "vm"})
+            results = {check.name: check for check in checks}
+            self.assertFalse(results["python"].ready)
+            self.assertFalse(results["canonical-vm-doctor"].ready)
+            self.assertEqual(results["canonical-vm-doctor"].status, "unverified")
+            self.assertFalse(
+                any(argv[-2:] == ["tools/vm.py", "doctor"] for argv in calls)
+            )
+
+    def test_qt_modules_and_editor_sdk_must_share_one_version(self):
+        def check_versions(core_version, qml_version, sdk_version):
+            versions = {module: core_version for module in doctor.QT_MODULES}
+            versions["Qt6Qml"] = qml_version
+
+            def fake_probe(argv, _env):
+                if argv[:2] == ["pkg-config", "--modversion"]:
+                    return versions[argv[2]]
+                if argv[:2] == ["pkg-config", "--atleast-version=6.4"]:
+                    return ""
+                if argv == ["cmake", "--version"]:
+                    return "cmake version 3.27.0"
+                if argv[-1:] == ["--query"]:
+                    return f"QT_VERSION:{sdk_version}\nQT_INSTALL_QML:/missing\nQT_INSTALL_BINS:/missing"
+                return None
+
+            with (
+                patch.object(doctor, "probe", side_effect=fake_probe),
+                patch.object(doctor, "probe_status", return_value=False),
+                patch.object(doctor.shutil, "which", return_value="/usr/bin/probe"),
+                patch.object(doctor, "pinned_python_ready", return_value=True),
+            ):
+                return {
+                    check.name: check for check in doctor.inventory({"core", "editor"})
+                }
+
+        mixed = check_versions("6.4.2", "6.5.0", "6.4.2")
+        self.assertTrue(mixed["qt6-module-qml"].ready)
+        self.assertFalse(mixed["qt6-development-modules"].ready)
+        self.assertEqual(mixed["qt6-development-modules"].status, "incompatible")
+        self.assertFalse(mixed["qt6-sdk-version-alignment"].ready)
+
+        mismatched_editor = check_versions("6.4.2", "6.4.2", "6.5.0")
+        self.assertTrue(mismatched_editor["qt6-development-modules"].ready)
+        self.assertFalse(mismatched_editor["qt6-sdk-version-alignment"].ready)
+        self.assertEqual(
+            mismatched_editor["qt6-sdk-version-alignment"].status, "incompatible"
+        )
+
+        aligned = check_versions("6.4.2", "6.4.2", "6.4.2")
+        self.assertTrue(aligned["qt6-development-modules"].ready)
+        self.assertTrue(aligned["qt6-sdk-version-alignment"].ready)
+
     def test_editor_profile_requires_sdk_runtime_imports_and_working_qmlls(
         self,
     ) -> None:

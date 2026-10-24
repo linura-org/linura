@@ -89,7 +89,19 @@ python3 tools/development_workspace.py authority-host --recovery-profile ubuntu-
 ```
 
 The doctor aggregates missing and incompatible prerequisites instead of stopping
-at the first missing tool. It performs bounded, non-installing probes and emits
+at the first missing tool. It verifies the private pinned Python 3.12 selection
+created by setup, **not** the host Python used to launch the doctor. Thus
+a newer default system `python3` can run this diagnostic without creating a
+false missing-Python result. A missing, replaced, unsafe or wrong-version
+private selection still fails; setup must be run in the prepared environment.
+If the base host has no Python 3.12, supply it as an explicit host prerequisite
+before running setup. Neither the doctor nor a failed preflight installs it,
+alters system Python or treats a container as native qualification.
+For a missing local pin, first run `python3 tools/codex/doctor.py --profile core
+--json` to inventory failures, then `bash scripts/setup_codex_environment.sh`
+(or the optional isolated development recipe), and finally rerun strict
+`bash scripts/preflight_codex_environment.sh`. A failed setup or preflight
+remains a blocked gate. It performs bounded, non-installing probes and emits
 only named check results and fixed remediation text. It always includes the core
 profile. Nonzero status means the selected readiness profile is incomplete.
 `--all` inventories all profiles, including editor, VM, visual and the separate
@@ -112,6 +124,43 @@ base](../tools/codex/container/README.md#host-sensitive-authority-tests), whose
 native root-owned sticky `/tmp` and system executable ownership are checked before
 the test command. Do not replace that `/tmp` with a user-owned bind mount or
 tmpfs.
+
+### Complete profile-scoped diagnosis
+
+`doctor` emits a backward-compatible `ready` boolean and a per-check `status`
+of `ready`, `missing`, `incompatible`, or `unverified`. A command that
+fails, times out or has ambiguous results is **unverified**, not evidence that a
+package is absent. A present but wrong-version tool is incompatible. An
+unavailable command or toolchain may be missing. Neither a nominally ready
+profile nor an optional container qualifies native workstation behavior.
+The `vm` profile does not launch `tools/vm.py doctor` unless `core/python`
+has first validated the exact setup-owned private Python 3.12 interpreter; an
+invalid replacement remains `unverified` even if it could exit successfully.
+
+```bash
+python3 tools/codex/doctor.py --profile core --json
+python3 tools/codex/doctor.py --profile shell --json
+python3 tools/codex/doctor.py --profile editor --json
+python3 tools/codex/doctor.py --profile bindings --json
+bash scripts/preflight_codex_environment.sh --full
+```
+
+Core verifies the pinned private Python choice, source Rust toolchain contract,
+installed GNU Rust toolchain, conflicting `RUSTUP_TOOLCHAIN` overrides, rustfmt,
+Clippy, Ruff, cargo-audit, actionlint and the **offline** locked dependency graph.
+An offline Cargo metadata failure is not automatically attributed to a missing
+cache: investigate the selected checkout, pin and cache without fetching during
+the task. The shell profile separately checks CMake, Ninja, C++ and individual
+Qt 6 modules; their versions must agree. Editor checks the selected `qtpaths6`
+SDK against those modules, then checks QML runtime imports and a runnable
+`qmlls`. A coherent SDK is necessary but does not establish successful CMake
+compilation. Build and test the actual components in the optional prepared
+environment described in #244, and require native qualification separately.
+
+The `core` profile intentionally does **not** require Qt, QML, QEMU or an Arch
+image builder. The `shell`, `editor`, `bindings`, `vm`, `image` and `visual`
+profiles apply only when their capabilities are needed. `--all` remains a
+non-qualifying inventory, not a universal readiness requirement.
 
 The strict preflight also validates workflow semantics, exact active GNU Rust
 toolchain, rustfmt/Clippy availability, and the locked offline dependency graph.
