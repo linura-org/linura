@@ -15,6 +15,9 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 TEST_DIRECTORY = ROOT / "tests/tooling"
+# Only this module uses independent per-test temporary fixture roots; all other
+# modules retain one-worker-per-module semantics for shared-fixture isolation.
+SHARDABLE_MODULE = "test_validation_gates"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -54,10 +57,18 @@ class TimedResult(unittest.TextTestResult):
 
 
 def worker(assigned: Path, output: Path, log: Path) -> int:
-    modules = set(json.loads(assigned.read_text(encoding="utf-8")))
-    tests = [test for test in discover() if type(test).__module__ in modules]
-    if not tests or {type(test).__module__ for test in tests} != modules:
-        raise RuntimeError("tooling worker inventory does not match assigned modules")
+    expected_ids = json.loads(assigned.read_text(encoding="utf-8"))
+    if (
+        not isinstance(expected_ids, list)
+        or not expected_ids
+        or any(not isinstance(item, str) or not item for item in expected_ids)
+        or len(set(expected_ids)) != len(expected_ids)
+    ):
+        raise RuntimeError("tooling worker inventory mismatch: invalid assigned IDs")
+    assigned_ids = set(expected_ids)
+    tests = [test for test in discover() if test.id() in assigned_ids]
+    if {test.id() for test in tests} != assigned_ids or len(tests) != len(expected_ids):
+        raise RuntimeError("tooling worker inventory mismatch: selected IDs changed")
     with log.open("w", encoding="utf-8") as stream:
         runner = unittest.TextTestRunner(
             stream=stream, verbosity=1, resultclass=TimedResult
@@ -88,31 +99,56 @@ def main() -> int:
     tests = discover()
     expected = Counter(test.id() for test in tests)
     by_module = defaultdict(list)
+    independent_tests = []
     for test in tests:
-        by_module[type(test).__module__].append(test.id())
-    # Two isolated Python processes improve IO-heavy fixture throughput without
-    # sharing interpreter state or repeating any test in the canonical inventory.
+        module = type(test).__module__
+        if module == SHARDABLE_MODULE:
+            # ValidationGateTests gives each test a private TemporaryDirectory;
+            # reject added shared class/module fixtures instead of silently
+            # distributing stateful tests across independent worker processes.
+            cls = type(test)
+            source_module = sys.modules.get(module)
+            if (
+                cls.__bases__ != (unittest.TestCase,)
+                or cls.__name__ != "ValidationGateTests"
+                or "setUpClass" in cls.__dict__
+                or "tearDownClass" in cls.__dict__
+                or source_module is None
+                or callable(getattr(source_module, "setUpModule", None))
+                or callable(getattr(source_module, "tearDownModule", None))
+            ):
+                raise RuntimeError("tooling shard policy rejects shared fixtures")
+            independent_tests.append(test.id())
+        else:
+            by_module[module].append(test.id())
+    # Preserve single-process module fixtures except for the explicitly audited
+    # independent validation cases. Count-balanced modules alone put 757s of
+    # validation checks on one worker and 56s on the other.
     cpu_count = (
         len(os.sched_getaffinity(0))
         if hasattr(os, "sched_getaffinity")
         else (os.cpu_count() or 1)
     )
-    workers = min(2, cpu_count, len(by_module))
+    workers = min(2, cpu_count, len(by_module) + bool(independent_tests))
     assignments = [[] for _ in range(workers)]
     weights = [0] * workers
+    for position, identifier in enumerate(sorted(independent_tests)):
+        index = position % workers
+        assignments[index].append(identifier)
+        weights[index] += 1
     for module in sorted(by_module, key=lambda value: (-len(by_module[value]), value)):
         index = weights.index(min(weights))
-        assignments[index].append(module)
+        assignments[index].extend(by_module[module])
         weights[index] += len(by_module[module])
 
     with tempfile.TemporaryDirectory(prefix="linura-tooling-tests-") as directory:
         temp = Path(directory)
         processes = []
-        for index, modules in enumerate(assignments):
+        for index, identifiers in enumerate(assignments):
             selection = temp / f"worker-{index}.json"
             manifest = temp / f"result-{index}.json"
             log = temp / f"worker-{index}.log"
-            selection.write_text(json.dumps(modules), encoding="utf-8")
+            selection.write_text(json.dumps(identifiers), encoding="utf-8")
             process = subprocess.Popen(
                 [
                     sys.executable,
