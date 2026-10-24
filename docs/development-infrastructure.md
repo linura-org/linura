@@ -34,6 +34,20 @@ coverage semantics requires an explicit gate update and review. Rust Clippy,
 workspace tests, release validation, CodeQL, RustSec, and qualification lanes
 remain independent and unchanged.
 
+## Security source analysis
+
+Required CodeQL analysis covers Rust, JavaScript/TypeScript, C/C++ and Python
+with explicit `build-mode: none`, immutable action revisions and no source/query
+exclusions. The validation gate rejects removal of any language, changed build
+mode, conditional actions and additional filtering configuration. Buildless
+C/C++ analysis covers repository source, not generated Qt metadata; compiled
+native tests and graphical qualification remain independent requirements.
+The bootstrap test-support release prohibition uses a conditional anonymous
+constant panic: the real compiler must still reject optimized test-support
+builds, while the source analyzer can inspect the file without expanding a
+deliberate `compile_error!` diagnostic. Compiler-negative tests protect this
+boundary; a successful analysis does not replace native qualification.
+
 ## Editor and Python analysis baseline
 
 VS Code recommendations are repository-owned in `.vscode/extensions.json`: rust-analyzer for Rust, the Microsoft Python/Pylance pair for Python language intelligence, Ruff for Python lint/format integration, and Code Spell Checker for project terminology. `.vscode/settings.json` contains only project-relevant behavior; personal UI preferences and other workspace state remain ignored. Editor diagnostics are convenience feedback and never replace repository gates.

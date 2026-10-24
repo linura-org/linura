@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
 
 #[cfg(all(feature = "test-support", not(debug_assertions)))]
-compile_error!(
+// Constant evaluation keeps this a hard compiler error without an unconditional
+// compile-error macro diagnostic during whole-source static analysis.
+const _: () = panic!(
     "linura-bootstrap test-support is for unit/integration tests only and must never be enabled in optimized release builds"
 );
 

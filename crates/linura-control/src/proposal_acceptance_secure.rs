@@ -923,6 +923,16 @@ mod tests {
 
     use super::*;
 
+    fn test_key_material() -> Vec<u8> {
+        use std::io::Read;
+        let mut bytes = Vec::with_capacity(32);
+        let read = std::fs::File::open("/dev/urandom")
+            .and_then(|file| file.take(32).read_to_end(&mut bytes))
+            .unwrap_or_else(|error| unreachable!("test entropy unavailable: {error}"));
+        assert_eq!(read, 32);
+        bytes
+    }
+
     fn id<T>(value: Result<T, ValidationError>) -> T {
         value.unwrap_or_else(|error| unreachable!("{error}"))
     }
@@ -1069,7 +1079,7 @@ mod tests {
     }
 
     fn control(library: &mut LocalLibrary) -> ProposalAcceptanceControl {
-        let key = TransactionAuthorityKey::new(vec![0x73; 32])
+        let key = TransactionAuthorityKey::new(test_key_material())
             .unwrap_or_else(|error| unreachable!("{error}"));
         let control = ProposalAcceptanceControl::from_authority_key(key);
         control

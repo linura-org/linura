@@ -63,19 +63,47 @@ fn digest(value: &str) -> linura_transaction::ContentDigest {
     digest_bytes("test", value.as_bytes())
 }
 
+fn fixture_key(index: usize) -> Vec<u8> {
+    use std::io::Read;
+    // Retain independently generated test domains across simulated reopen.
+    static KEYS: std::sync::OnceLock<[[u8; 32]; 4]> = std::sync::OnceLock::new();
+    KEYS.get_or_init(|| {
+        let mut keys = [[0_u8; 32]; 4];
+        let mut entropy = fs::File::open("/dev/urandom")
+            .unwrap_or_else(|error| unreachable!("test entropy unavailable: {error}"));
+        for key in &mut keys {
+            entropy.read_exact(key)
+                .unwrap_or_else(|error| unreachable!("test entropy unavailable: {error}"));
+        }
+        keys
+    })[index].to_vec()
+}
+
+#[test]
+fn fixture_keys_survive_reopen_without_sharing_authority_or_integrity_material() {
+    for first in 0..4 {
+        assert!(fixture_key(first) == fixture_key(first));
+        assert!(fixture_key(first).iter().any(|byte| *byte != 0));
+        for second in first + 1..4 {
+            // Boolean assertions never include random material in panic output.
+            assert!(fixture_key(first) != fixture_key(second));
+        }
+    }
+}
+
 fn authority() -> (TransactionAuthoritySigner, TransactionAuthorityVerifier) {
-    TransactionAuthorityKey::new(vec![0x41; 32])
+    TransactionAuthorityKey::new(fixture_key(0))
         .unwrap_or_else(|error| unreachable!("{error}"))
         .split()
 }
 
 fn integrity_key() -> SqliteIntegrityKey {
-    SqliteIntegrityKey::new(vec![0x73; 32])
+    SqliteIntegrityKey::new(fixture_key(1))
         .unwrap_or_else(|error| unreachable!("{error}"))
 }
 
 fn alternate_integrity_key() -> SqliteIntegrityKey {
-    SqliteIntegrityKey::new(vec![0x74; 32])
+    SqliteIntegrityKey::new(fixture_key(2))
         .unwrap_or_else(|error| unreachable!("{error}"))
 }
 
@@ -163,7 +191,7 @@ fn wrong_verifier_or_record_integrity_key_is_rejected_on_reopen() {
     let db = TestDatabase::new();
     drop(open_store(&db.path).1);
 
-    let wrong_verifier = TransactionAuthorityKey::new(vec![0x52; 32])
+    let wrong_verifier = TransactionAuthorityKey::new(fixture_key(3))
         .unwrap_or_else(|error| unreachable!("{error}"))
         .split()
         .1;
