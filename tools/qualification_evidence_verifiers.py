@@ -347,12 +347,17 @@ def _host_environment_verified(envelope: dict[str, Any]) -> bool:
 
 
 def _machine_environment_verified(
-    primary: dict[str, Any], envelope: dict[str, Any]
+    primary: dict[str, Any],
+    envelope: dict[str, Any],
+    *,
+    virtualization: str = "qemu",
+    acceleration: str = "tcg",
 ) -> bool:
     _require_base_image_binding(primary, envelope)
     subject = _envelope_guest_environment(envelope)
     return (
-        subject.get("virtualization") == "qemu"
+        subject.get("virtualization") == virtualization
+        and subject.get("acceleration") == acceleration
         and subject.get("architecture") == "x86_64"
         and isinstance(subject.get("package_manifest_sha256"), str)
         and HEX64.fullmatch(subject["package_manifest_sha256"]) is not None
@@ -1394,6 +1399,15 @@ def _verify_v010(
             f"v0.10 {field} identity mismatch",
         )
     _require_base_image_binding(primary, envelope)
+    virtualization = _required_object(
+        primary.get("virtualization"), "v0.10 acceleration binding is missing"
+    )
+    _require(
+        virtualization.get("acceleration")
+        == contract["vm_acceleration"]
+        == _envelope_guest_environment(envelope).get("acceleration"),
+        "v0.10 runtime acceleration does not match contract and execution subject",
+    )
     cases_text = _text(_bundle_file(bundle, "cases.tsv"))
     observed: dict[str, str] = {}
     for line in cases_text.splitlines():
@@ -1493,7 +1507,9 @@ def _verify_v010(
             "recording-source-and-byte-identity-matched",
             "development-evidence-did-not-promote-release-support",
         ],
-        environment_verified=_machine_environment_verified(primary, envelope),
+        environment_verified=_machine_environment_verified(
+            primary, envelope, virtualization="kvm", acceleration="kvm"
+        ),
         details={"runtime_cases": len(observed), "retained_artifacts": len(artifacts)},
     )
 

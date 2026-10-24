@@ -21,7 +21,7 @@ PRETTIER_CONFIG = (
     "tools/source-format/package-lock.json",
 )
 FROZEN_FORMAT_INPUTS = {
-    "apps/linura-shell/tray/SystemTrayView.qml": "d3b91127319c67c050deb14269db702d22d7b1ba2a9d876d84eca69f5323ee91",
+    "apps/linura-shell/tray/SystemTrayView.qml": "e58bba825d7a73ed1668f31bf6db1c5ac3f08d9f22107d25f09b0ae2eb6ff38e",
     "apps/linura-shell/plugins/notifications-osd/LifecycleFeedback.qml": "6edc749d07c6b1f22bc5915665dc17c2c2c66b4d6d6ec32b1893a92ef171fe78",
     "apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml": "154ac33fa33424e630b181c0fb5cb28df07d4fd347e635d76e1eebcdc95b83ef",
     "apps/linura-shell/plugins/command-palette/CommandPalette.qml": "86b7300c6763d2101cf1e5dcd56147b4d9ca5afd8f352db0aabcfbb2e6229631",
@@ -30,8 +30,8 @@ FROZEN_FORMAT_INPUTS = {
     "apps/linura-shell/ui/LinuraDialog.qml": "38eea04373ee6e529d4caaf8d8b9f2bd5a87429cd794a93dbba88b006d461196",
     "apps/linura-shell/bridge/audio_session_controller.cpp": "8d2ccee988dfff9b55f690954fff0a4628967580be21dbadd2d4bb0b9b4229b5",
     "apps/linura-shell/bridge/audio_session_controller.h": "ad34a06d80726946c583c0bab2db3e9aa7fecb49aa2900d29584f87b5b1cffae",
-    "packaging/wireplumber/linura-session-audio.lua": "a63caddb8df6cd8584c355f7fb289b08abe09eca8b46521d274d84a408100d10",
-    "qualification/v010/shell-runtime/run-shell-runtime.sh": "3533143a2a37fa733204daae9ba9177cffea726ce499e024d2968df433956b6b",
+    "packaging/wireplumber/linura-session-audio.lua": "b4830d578d7ceadf46062c6fd93597898cd0d7708d9cf7101f820c6506a62019",
+    "qualification/v010/shell-runtime/run-shell-runtime.sh": "69c489d06175c89840e38adbc80ecdbea7486d8ff6a955f3a68e1073c05d8755",
     "qualification/v010/workstation-acceptance/record-session.sh": "b9e90e16aea31a6e87e1d901c0ae7b0a22c45d8d9b7b99d7e16939555ea0e9fc",
     "qualification/v010/workstation-acceptance/launch-interactive.sh": "1c8ed5fc180526a8176e7a88635fae9b122daa0b64090e826ec3e3c6af957dd6",
     "qualification/v010/workstation-acceptance/capture-hardware-session.sh": "ce2257338be8b6b1f9b07248102f28808bbbecf83277f886163127e244d11ad3",

@@ -14,7 +14,22 @@ namespace Linura::SecurityOwner {
 class NativeDeadline final
 {
   public:
-    explicit NativeDeadline(std::chrono::milliseconds duration);
+    enum class Stage {
+        Unclassified,
+        BusAuthentication,
+        RuntimeInitialization,
+        ApprovalArm,
+        SleepEntry,
+        SleepRecovery,
+        PowerPermission,
+        WaylandInitialization,
+        WaylandPump,
+        WaylandRepaint,
+        LockAcquisition,
+        LockRelease,
+        AssistiveCallback
+    };
+    explicit NativeDeadline(std::chrono::milliseconds duration, Stage stage = Stage::Unclassified);
     ~NativeDeadline();
     NativeDeadline(const NativeDeadline &) = delete;
     NativeDeadline &operator=(const NativeDeadline &) = delete;

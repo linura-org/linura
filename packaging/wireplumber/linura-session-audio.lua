@@ -171,8 +171,17 @@ Core.require_api("default-nodes", "mixer", function(default_nodes, mixer)
         fail("set-volume-failed")
       end
 
-      print("ok\t1")
-      Core.quit()
+      -- The mixer queues a PipeWire request. Keep the connection alive until
+      -- that request has crossed a server round trip; quitting here can discard
+      -- it while falsely reporting dispatch success. Control still obtains a
+      -- separate fresh observation to verify the authorized postcondition.
+      Core.sync(function(sync_error)
+        if sync_error ~= nil then
+          fail("set-volume-sync-failed")
+        end
+        print("ok\t1")
+        Core.quit()
+      end)
       return
     end
 

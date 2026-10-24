@@ -168,7 +168,7 @@ seat_group="$(stat -c '%G' "$seat_socket")"
 [[ -n "$seat_group" ]] || fail "seatd socket has no owning group"
 id -nG | tr ' ' '\n' | grep -Fxq "$seat_group" || fail "qualification user is not a member of seatd socket group $seat_group"
 
-qualification_gpu_pci_bdf="0000:00:02.0"
+qualification_gpu_pci_bdf="0000:01:00.0"
 qualification_gpu_vendor_id="0x1af4"
 qualification_gpu_device_id="0x1050"
 
@@ -191,6 +191,12 @@ qualification_device_id="$(tr '[:upper:]' '[:lower:]' < "$qualification_device/d
 [[ "$qualification_vendor" == "$qualification_gpu_vendor_id" ]] || fail "qualification DRM PCI vendor mismatch: expected $qualification_gpu_vendor_id, got $qualification_vendor"
 [[ "$qualification_device_id" == "$qualification_gpu_device_id" ]] || fail "qualification DRM PCI device mismatch: expected $qualification_gpu_device_id, got $qualification_device_id"
 
+# The guest must actually see the capability, not merely accept a QEMU option.
+gpu_pm_evidence="$evidence_root/gpu-power-management.txt"
+sudo -n /usr/bin/timeout --kill-after=1 2 /usr/bin/python3 -I -S \
+    "$source_root/qualification/v010/shell-runtime/check-gpu-pm.py" \
+    > "$gpu_pm_evidence" || fail "qualification GPU suspend preservation is unavailable"
+
 virtio_drm="/dev/dri/$qualification_card"
 [[ -c "$virtio_drm" ]] || fail "selected qualification DRM node is unavailable: $virtio_drm"
 [[ -r "$virtio_drm" && -w "$virtio_drm" ]] || fail "qualification user cannot access $virtio_drm"
@@ -208,6 +214,7 @@ virtio_drm="/dev/dri/$qualification_card"
     printf 'pci_bdf=%s\n' "$qualification_bdf"
     printf 'pci_vendor_id=%s\n' "$qualification_vendor"
     printf 'pci_device_id=%s\n' "$qualification_device_id"
+    cat "$gpu_pm_evidence"
     printf 'pci_transport_driver=%s\n' "$(basename "$(readlink -f "$qualification_device/driver" 2>/dev/null || true)")"
     ls -l /dev/dri
     udevadm info -q property -n "$virtio_drm"
@@ -322,10 +329,12 @@ trap 'fail "Level A recording budget exceeded before all cases completed"' USR1
 LINURA_SOURCE_ROOT="$source_root" LINURA_SOURCE_SHA="$source_sha"     "$workstation_recorder" start "$workstation_recording"
 recording_started=1
 recording_parent_pid="$BASHPID"
-(
-    sleep "$recording_duration_budget"
-    kill -USR1 "$recording_parent_pid" 2>/dev/null || true
-) &
+# One process owns the wait and signal. Killing a shell wrapper around sleep
+# leaves its child holding SSH output open until the entire budget expires.
+python3 -c 'import os, signal, sys, time
+time.sleep(int(sys.argv[1]))
+os.kill(int(sys.argv[2]), signal.SIGUSR1)
+' "$recording_duration_budget" "$recording_parent_pid" </dev/null >/dev/null 2>&1 &
 recording_deadline_pid=$!
 
 systemctl --user daemon-reload
@@ -1443,7 +1452,7 @@ pass_case "workstation-visual-recording"
     quickshell --version
 } > "$evidence_root/runtime-versions.txt"
 
-pacman -Q systemd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast seatd pipewire pipewire-audio wireplumber networkmanager sqlite ffmpeg wf-recorder wayland \
+pacman -Q systemd base-devel cmake ninja pkgconf dbus seatd hyprland quickshell qt6-base qt6-declarative qt6-wayland mesa vulkan-swrast pipewire pipewire-audio wireplumber networkmanager sqlite ffmpeg wf-recorder wayland wayland-protocols polkit at-spi2-core libcap libxkbcommon libx11 fontconfig ttf-dejavu \
     | LC_ALL=C sort > "$evidence_root/package-versions.txt"
 
 expected_cases=21

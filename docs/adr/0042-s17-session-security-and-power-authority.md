@@ -208,6 +208,15 @@ of authority. Fresh locker facts cannot extend an older session precondition.
 Native transport/process attestation and fresh privilege-
 boundary validation remain requirements of the production adapters.
 
+The compound private `ObserveLock` RPC, like approval arm/consume, may consume
+only the remainder of its original two-second probe after owner discovery.
+It includes fresh peer/session attestation and an independent compositor sample,
+so the 500 ms primitive-call cap is not a separate compound deadline. Initial
+discovery, reply completion and post-reply identity/boot revalidation share the
+same original clock. Primitive calls retain their 500 ms cap, native sample
+freshness and acquisition/release watchdogs remain unchanged, and neither a late
+reply nor a typed pending transition creates an authoritative observation.
+
 Native startup binds the owned actual Wayland connection's kernel peer, rather than
 checking one socket and subsequently trusting a separate pathname connection.
 The currently proposed qualification requires that peer to be the authoritative
@@ -251,6 +260,39 @@ lid-close cause. Root UID, service Actor metadata, caller-supplied event IDs or
 `PrepareForSleep` signals alone cannot authenticate the gate. The adapter checks
 the actual supervisor's unique root connection, live pre-start helper PID,
 invocation, immutable image/configuration, exact arguments and process generation.
+The fixed helper declines root before creating a bus connection: one same-PID,
+same-argument self-exec enters the descriptor-validated `linura-authority` UID
+and primary GID with an empty environment/groups, no inherited/permitted/effective/
+ambient capabilities, no saved root IDs and `no_new_privs`. Control can therefore
+inspect the live root-owned image without gaining process-inspection privilege.
+The exact native unit remains root-supervised and its main sleep operation keeps
+its existing privilege. The private bus route admits the helper's fixed service
+identity, then all native invocation/image/phase checks remain mandatory. Neither
+that UID nor a root caller can substitute for those checks.
+The native owner's unit probe addresses every request to the root-attested
+unique supervisor on the fixed trusted system bus, whose requested-reply routing
+binds the response to that request. Newer Qt intentionally hides `service()` on
+replies/errors; older Qt exposes the sender, which must still match the pinned
+peer. An empty accessor is neither identity evidence nor a substitution.
+Two matching fresh unit snapshots and final owner revalidation remain required.
+Only two exact native `NoSuchUnit` errors with an unchanged owner establish
+absence; local/broker errors, denial, timeout, malformed data and replacement
+remain failures under the original shared probe deadline.
+Peer, session and sleep-unit inspection queue bounded batches of fixed
+`Properties.Get` requests before waiting, preserving the original per-call and
+aggregate deadlines. Each complete initial/revalidation batch is a fresh native
+read; no partial map, `GetAll`, cache or timeout creates evidence. Exact field,
+launch, immutable-asset and identity comparisons and final owner revalidation
+remain mandatory. This removes redundant round-trip latency in the native
+owner's event loop without adding an authority path or widening a deadline.
+Bounded metadata reads must also service already queued replies on the owned,
+attested Wayland connection. The factory binds that progress hook only after
+native initialization. It never runs a Qt event loop or dispatches a new effect;
+recursive native callbacks/painting skip another pump. Its time consumes the
+original probe clock, while every initial/final identity, scope, compositor,
+field and deadline check remains mandatory. This keeps an admitted acquisition
+from timing out solely because peer inspection starved its acknowledgement.
+The five-second acquisition watchdog and fail-closed no-cleanup exit remain.
 No generic privileged command or client-selected native operation is introduced.
 Unsupported hibernation/direct-entry paths require explicit native coverage or
 denial; no universal guarantee is made against compromised root/kernel bypasses.
@@ -550,6 +592,43 @@ explicit recovery replay an indeterminate S17 effect. Restart recovery joins the
 authenticated retained request to its transaction and uses independent native
 postconditions. Durable release acknowledgement is separately idempotent.
 
+Owner discovery uses at most two complete native connection snapshots inside
+the same original two-second probe and aggregate 256-name budget. An exact typed
+missing-peer reply invalidates the entire snapshot, including any candidate
+already seen; it does not justify skipping an unknown row. One fresh snapshot
+may complete only while the original supervised UID, PID and invocation remain
+unchanged and final attestation succeeds. A separate GLib connection is excluded
+only by typed endpoint absence or valid introspection without the private
+interface. Denial, timeout, malformed/oversized replies, ambiguity, replacement
+and persistent churn fail closed. This narrow native consistency acquisition
+neither implements global retry policy nor emits partial/cached authoritative
+facts. No mutation or human approval is repeated.
+
+An independently verified native unlock advances Releasing to Released only once.
+Reconciliation and restart recovery may inspect that exact retained Released
+generation read-only, rechecking the attested Control caller, independent unlocked
+compositor, clear coverage and sleep fence. Ready/unlocked without the retained
+Released state is not proof; neither inspection nor repeated verification rotates
+the generation. Only the separately acknowledged durable commit rotates it.
+
+Fresh native lock observation may encounter a consistent Acquiring/Releasing
+mechanism before its asynchronous acknowledgement. The owner drains available
+Wayland events without a nested Qt event loop or retry, then compares the mechanism
+with fresh independent compositor state. A fixed typed pending reply is not an
+observation or a security boolean. Only Control's existing bounded post-dispatch
+verification loop may await that state, with original peer/boot/deadline checks.
+Suspend coverage uses this same typed pending result; canonical review still
+requires one independently observed completed kernel cycle and fresh secure
+coverage for the exact original lock generation before commit.
+Native `PreparingForSleep=true` is a known inconclusive postcondition rather
+than completion or an unknown-state error. Logind's admission acknowledgement
+can precede sleep; Control may observe again only within its existing bounded
+verification loop, without redispatch. Missing or malformed preparation/counter
+facts and debug modes still fail. Preparation must end before a completed cycle
+and exact secure coverage can qualify the retained transition.
+Unavailable, malformed, inconsistent and substituted evidence remain immediate
+failures; all native transition watchdogs and required verification remain intact.
+
 The private native runtime owns the actual Wayland connection and gated lock
 protocol, protected input, official Polkit/PAM listener and fixed embedded
 presentation. Pre-lock confirmation and unlock intent originate from actual
@@ -559,6 +638,22 @@ uses observe-only recovery. Polkit authentication uses the original compositor
 subject and daemon-injected caller/subject identity, not assumed forwarding of
 custom authorization details. Ordinary exec, late dumpability repair, Qt key
 injection, substituted generations and unguarded unlock cleanup are rejected.
+
+A compositor may deliver keyboard focus before final lock coverage. Each fresh
+native press revalidates that same configured surface and current complete
+coverage before updating the protected entry's focus. An old enter-time flag
+cannot discard all subsequent authenticated input. This does not synthesize a
+press, admit held keys, restore focus after a leave, or weaken cancellation on
+layout, capability or coverage loss. The wire regression covers focus arriving
+before the final lock acknowledgement; all existing denial cases remain.
+
+Both native adapters bind Polkit 127 to the locally provisioned `polkitd` account
+and its exact root-supervised service invocation; the daemon is not assumed to
+run as UID 0. Immutable unit/image, fixed live argv, current PID, nonzero
+invocation and owner stability are mandatory under the existing bounded native
+probe. Local account lookup is bounded and rejects ambiguous records without NSS
+or subprocesses. Peer attestation never substitutes for canonical purpose-bound
+approval or the native one-use proof.
 
 Repository-owned deployment must install the secure entry point, fixed font
 policy, root-supervised owner service/path and `user@.service` availability

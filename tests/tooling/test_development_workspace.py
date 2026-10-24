@@ -855,6 +855,12 @@ class DevelopmentWorkspaceTests(unittest.TestCase):
                 "user.name=Fixture",
                 "-c",
                 "user.email=fixture@example.invalid",
+                # Finish fixture maintenance before the read-only snapshot;
+                # its background lock removal is not a launcher mutation.
+                "-c",
+                "maintenance.autoDetach=false",
+                "-c",
+                "gc.autoDetach=false",
                 "commit",
                 "--quiet",
                 "-m",

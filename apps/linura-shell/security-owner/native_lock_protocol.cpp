@@ -106,7 +106,10 @@ void NativeLockProtocol::beginDeadline(quint64 durationMs)
     deadline_ = lastNow_ + durationMs;
     // Also bound a blocked Qt/native call: a Qt timer alone cannot do that.
     try {
-        watchdog_ = std::make_unique<NativeDeadline>(std::chrono::milliseconds(durationMs));
+        watchdog_ = std::make_unique<NativeDeadline>(std::chrono::milliseconds(durationMs),
+                                                     durationMs == AcquisitionMs
+                                                         ? NativeDeadline::Stage::LockAcquisition
+                                                         : NativeDeadline::Stage::LockRelease);
     } catch (...) {
         terminateInvocation(); // Residency/thread exhaustion cannot unwind a lock.
     }
@@ -221,6 +224,19 @@ bool NativeLockProtocol::independentlyVerifiedReleased(const NativeLockIdentity 
     if (protocol_->requestedSecure() || deadline_ != 0)
         return false;
     return mechanism_.independentlyVerifiedReleased(identity);
+}
+
+bool NativeLockProtocol::retainedVerifiedRelease(const NativeLockIdentity &identity) const
+{
+    // This path deliberately does NOT call refresh()/checkClock(): retained
+    // verification is a read of proof established by the one-shot verifier.
+    // Any inconsistency is false here; native state-change callbacks retain
+    // their existing fail-closed ownership separately.
+    if (!bound_ || thread() != QThread::currentThread() || !protocol_ ||
+        protocol_->thread() != thread() || protocol_->metaObject() != metadata_ ||
+        protocol_->requestedSecure() || protocol_->secureCoverage() || deadline_ != 0)
+        return false;
+    return mechanism_.retainedVerifiedRelease(identity);
 }
 
 bool NativeLockProtocol::commitVerifiedRelease(const NativeLockIdentity &identity)

@@ -8,6 +8,7 @@
 #include <optional>
 
 #include "native_sleep_fence.h"
+#include "native_probe_progress.h"
 
 namespace Linura::SecurityOwner {
 
@@ -60,12 +61,15 @@ class PeerGuard final
     PeerGuard(PeerGuard &&other) noexcept;
     PeerGuard &operator=(PeerGuard &&other) noexcept;
     [[nodiscard]] static std::optional<PeerGuard> connect();
+    void setNativeProgress(NativeProbeProgress progress);
     [[nodiscard]] std::optional<NativePeerIdentity> attest(NativePeerPurpose purpose,
                                                            const QString &transportSender) const;
     [[nodiscard]] std::optional<NativePeerIdentity> namedPeer(NativePeerPurpose purpose) const;
     [[nodiscard]] bool stillCurrent(NativePeerPurpose purpose,
                                     const NativePeerIdentity &peer) const;
-    [[nodiscard]] std::optional<NativeSleepUnitFacts> sleepUnitSnapshot() const;
+    // Failure-only fixed labels for the received sleep gate; recovery stays quiet.
+    [[nodiscard]] std::optional<NativeSleepUnitFacts>
+    sleepUnitSnapshot(bool failureDiagnostics = false) const;
     // Native composition only: this is the same canonical authenticated system
     // bus connection used by this guard, never a QML/client-supplied transport.
     [[nodiscard]] const QDBusConnection &nativeConnection() const noexcept
@@ -80,6 +84,7 @@ class PeerGuard final
                                     const QString &method, const QList<QVariant> &arguments) const;
     QDBusConnection connection_;
     QString connectionName_;
+    NativeProbeProgress progress_;
 };
 
 } // namespace Linura::SecurityOwner

@@ -54,14 +54,71 @@ impl NativeSleepGateHandler for NativeSleepGate {
     fn protect_received_helper(&mut self, sender: &str) -> Result<(), String> {
         // The principal is constructed below only inside this attested scope.
         // Metadata is from the received header, never method arguments.
-        let scope = self.binding.begin_received_sender(sender)?;
+        let scope = self
+            .binding
+            .begin_received_sender(sender)
+            .map_err(|error| denied("attestation", &error))?;
         let event = scope.event().clone();
-        let attempt = self.monitor.begin_attested_entry(&event)?;
-        coordinate_native_sleep_coverage(&mut ScopedCoverage { gate: self, sender }, &event)?;
-        attempt.coverage_fenced()
+        let attempt = self
+            .monitor
+            .begin_attested_entry(&event)
+            .map_err(|error| denied("entry", &error))?;
+        coordinate_native_sleep_coverage(&mut ScopedCoverage { gate: self, sender }, &event)
+            .map_err(|error| denied("coverage", &error))?;
+        attempt
+            .coverage_fenced()
+            .map_err(|error| denied("completion", &error))
         // Scope lifetime ends here. Native coverage fences outlive it and are
         // retired independently only after the exact native job has ended.
     }
+}
+
+// Failure-only observability. Never copy the sender or the original error: those
+// can contain transport/provider input. The journal is not observation evidence
+// and a diagnostic cannot permit continuation, retry or additional time.
+fn denied(stage: &str, error: &str) -> String {
+    let reason = match error {
+        "native sleep helper process image is unavailable" => "helper-image",
+        "native sleep helper arguments are unavailable"
+        | "native sleep helper arguments cannot be read" => "helper-arguments",
+        "native sleep helper process does not match the fixed image and arguments" => {
+            "helper-mismatch"
+        }
+        "native sleep helper has the wrong kernel identity" => "helper-identity",
+        "caller is not the exact immutable supervised pre-sleep helper" => "unit-contract",
+        "native sleep unit has an unsupported additional program" => "unit-programs",
+        "native sleep unit property is malformed" => "unit-codec",
+        "native service array field is absent"
+        | "native service array field is unavailable"
+        | "native service array field has the wrong type" => "unit-codec",
+        "native session call failed: class=access-denied; stage=mechanism" => "transport-denied",
+        "native session call failed: class=no-reply; stage=mechanism" => "transport-timeout",
+        "native process generation is unavailable" | "native process generation cannot be read" => {
+            "process-generation"
+        }
+        "native sleep gate assets are not immutable root-owned files" => "assets",
+        "native sleep helper generation changed"
+        | "native sleep helper or boot changed during attestation" => "generation",
+        "native sleep entry attestation expired"
+        | "native sleep coverage gate exceeded its original deadline" => "deadline",
+        "native sleep supervisor is not root" => "supervisor",
+        "native sleep gate has no qualified graphical session" => "no-session",
+        "native sleep inventory contains an unsupported session type/class"
+        | "native session inventory has incomplete type/class state" => "session-class",
+        "native sleep session inventory exceeds its bound"
+        | "native sleep session inventory has a duplicate epoch or changed boot"
+        | "native sleep session inventory is not authoritative for its epoch"
+        | "native graphical session inventory changed; sleep denied" => "session-inventory",
+        "managed Control is busy or poisoned; native sleep denied" => "control-busy",
+        "native sleep coverage generation changed" => "coverage-generation",
+        "native sleep coverage fence was refused" => "fence-refused",
+        _ => "unclassified",
+    };
+    let stage = match stage {
+        "attestation" | "entry" | "coverage" | "completion" => stage,
+        _ => "unclassified",
+    };
+    format!("native-sleep-gate-denied stage={stage} reason={reason}")
 }
 
 struct ScopedCoverage<'a> {
@@ -134,5 +191,35 @@ impl NativeSleepCoveragePort for ScopedCoverage<'_> {
             return Err("native sleep entry changed before continuation".into());
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::denied;
+
+    #[test]
+    fn denial_diagnostics_are_closed_and_never_copy_private_error_or_stage_text() {
+        assert_eq!(
+            denied(
+                "attestation",
+                "native sleep helper process image is unavailable"
+            ),
+            "native-sleep-gate-denied stage=attestation reason=helper-image"
+        );
+        assert_eq!(
+            denied("coverage", "native sleep coverage fence was refused"),
+            "native-sleep-gate-denied stage=coverage reason=fence-refused"
+        );
+        for error in [
+            "private-wire-marker",
+            "native sleep helper process image is unavailable\nprivate-wire-marker",
+            "native sleep helper process image is unavailable private-wire-marker",
+        ] {
+            assert_eq!(
+                denied("private-wire-marker", error),
+                "native-sleep-gate-denied stage=unclassified reason=unclassified"
+            );
+        }
     }
 }

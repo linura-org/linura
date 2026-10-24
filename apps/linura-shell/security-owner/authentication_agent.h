@@ -50,6 +50,7 @@ class AuthenticationAgent final : public QObject
     // must freshly attest the native session and the unique Control service
     // owner. These are never public SDK/client methods or writable QML state.
     [[nodiscard]] bool registerNativeSession(quint32 attestedCompositorPid);
+    [[nodiscard]] bool setNativeProgress(NativeProbeProgress progress);
     [[nodiscard]] bool arm(const NativeApprovalScope &scope, bool compositorSecure,
                            const NativePeerIdentity &controlPeer);
     [[nodiscard]] bool consume(const NativeApprovalScope &scope);
@@ -96,6 +97,7 @@ class AuthenticationAgent final : public QObject
     quint64 compositorStartTicks_ = 0;
     std::optional<NativeApprovalScope> scope_;
     GTask *task_ = nullptr;
+    bool deniedPresentation_ = false;
     QTimer eventTimer_;
 };
 

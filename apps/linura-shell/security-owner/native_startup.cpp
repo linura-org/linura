@@ -6,6 +6,7 @@
 #include <QDirIterator>
 #include <QLibraryInfo>
 #include <QQuickWindow>
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -13,11 +14,15 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 #include <poll.h>
 #include <sys/inotify.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 namespace Linura::SecurityOwner {
@@ -94,6 +99,94 @@ class ScopedDescriptor final
 
   private:
     int descriptor_;
+};
+
+// Liveness is startup readiness only, never peer/session identity. Retain each
+// successful passive connection while waiting for the other socket class: an
+// event loop that has not started accepting must not have its backlog filled
+// by repeated probes. Runtime still connects and attests its own actual peers.
+class ListeningRoutes final
+{
+  public:
+    explicit ListeningRoutes(quint32 uid) : uid_(uid) {}
+
+    void retain(const NativeSocketRoutes &routes)
+    {
+        std::erase_if(probes_, [&](const Probe &probe) {
+            return !routes.wayland.contains(probe.path) && !routes.compositor.contains(probe.path);
+        });
+    }
+
+    void clear()
+    {
+        probes_.clear();
+    }
+
+    bool listening(const QStringList &paths)
+    {
+        return std::any_of(paths.cbegin(), paths.cend(),
+                           [this](const QString &path) { return listening(path); });
+    }
+
+  private:
+    struct Probe final
+    {
+        QString path;
+        dev_t device;
+        ino_t inode;
+        std::unique_ptr<ScopedDescriptor> descriptor;
+    };
+
+    static bool connected(int descriptor)
+    {
+        pollfd request{descriptor, 0, 0};
+        return poll(&request, 1, 0) >= 0 && (request.revents & (POLLERR | POLLHUP | POLLNVAL)) == 0;
+    }
+
+    bool listening(const QString &path)
+    {
+        const auto bytes = path.toLocal8Bit();
+        sockaddr_un address{};
+        if (bytes.isEmpty() || static_cast<std::size_t>(bytes.size()) >= sizeof(address.sun_path))
+            return false;
+        struct stat before
+        {};
+        if (lstat(bytes.constData(), &before) != 0 || !S_ISSOCK(before.st_mode) ||
+            before.st_uid != uid_ || before.st_nlink != 1)
+            return false;
+        const auto existing = std::find_if(probes_.begin(), probes_.end(),
+                                           [&](const Probe &probe) { return probe.path == path; });
+        if (existing != probes_.end()) {
+            if (existing->device == before.st_dev && existing->inode == before.st_ino &&
+                connected(existing->descriptor->get()))
+                return true;
+            probes_.erase(existing);
+        }
+        if (probes_.size() >=
+            static_cast<std::size_t>(2 * NativeCompositorReadinessContract::maximumRoutes))
+            return false;
+        auto descriptor = std::make_unique<ScopedDescriptor>(
+            ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0));
+        if (!*descriptor)
+            return false;
+        address.sun_family = AF_UNIX;
+        std::memcpy(address.sun_path, bytes.constData(),
+                    static_cast<std::size_t>(bytes.size()) + 1);
+        if (connect(descriptor->get(), reinterpret_cast<const sockaddr *>(&address),
+                    sizeof(address)) != 0)
+            return false;
+        struct stat after
+        {};
+        if (lstat(bytes.constData(), &after) != 0 || !S_ISSOCK(after.st_mode) ||
+            after.st_uid != uid_ || after.st_nlink != 1 || before.st_dev != after.st_dev ||
+            before.st_ino != after.st_ino || !connected(descriptor->get()))
+            return false;
+        probes_.push_back({path, after.st_dev, after.st_ino, std::move(descriptor)});
+        return true;
+    }
+
+    quint32 uid_;
+    std::vector<Probe> probes_;
 };
 
 constexpr uint32_t readinessWatchMask = IN_ATTRIB | IN_CLOSE_WRITE | IN_CREATE | IN_DELETE |
@@ -292,7 +385,23 @@ waitForNativeSocketRoutes(const QString &runtimeDirectory, quint32 uid,
         *failure = NativeSocketReadinessFailure::None;
     if (readinessBudget <= 0ms || readinessBudget > NativeCompositorReadinessContract::maximumWait)
         return deny(NativeSocketReadinessFailure::InvalidBudget);
-    if (auto routes = discoverNativeSocketRoutes(runtimeDirectory, uid))
+    const auto deadline = std::chrono::steady_clock::now() + readinessBudget;
+    ListeningRoutes listeners(uid);
+    const auto ready = [&]() -> std::optional<NativeSocketRoutes> {
+        auto routes = discoverNativeSocketRoutes(runtimeDirectory, uid);
+        if (!routes) {
+            listeners.clear();
+            return std::nullopt;
+        }
+        listeners.retain(*routes);
+        const bool wayland = listeners.listening(routes->wayland);
+        const bool compositor = listeners.listening(routes->compositor);
+        if (wayland && compositor && listeners.listening(routes->wayland) &&
+            listeners.listening(routes->compositor) && std::chrono::steady_clock::now() < deadline)
+            return routes; // Preserve ALL candidates for independent runtime attestation.
+        return std::nullopt;
+    };
+    if (auto routes = ready())
         return routes;
 
     const ScopedDescriptor descriptor(inotify_init1(IN_CLOEXEC | IN_NONBLOCK));
@@ -306,38 +415,44 @@ waitForNativeSocketRoutes(const QString &runtimeDirectory, quint32 uid,
     // Scan again after every currently reachable directory is watched. An
     // object created during watch installation is therefore either discovered
     // now or represented by a queued event; no filesystem event is authority.
-    if (auto routes = discoverNativeSocketRoutes(runtimeDirectory, uid))
+    if (auto routes = ready())
         return routes;
 
-    const auto deadline = std::chrono::steady_clock::now() + readinessBudget;
+    // bind() creates a filesystem event, but listen() does not. A bounded
+    // liveness recheck also covers that gap without renewing the five seconds.
+    constexpr auto probeInterval = 50ms;
+    auto nextProbe = std::chrono::steady_clock::now() + probeInterval;
     unsigned eventCount = 0;
     while (true) {
         const auto now = std::chrono::steady_clock::now();
         if (now >= deadline)
             return deny(NativeSocketReadinessFailure::Deadline);
-        const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(deadline - now);
+        const auto untilProbe = std::min(deadline, nextProbe);
+        const auto remaining = std::chrono::ceil<std::chrono::milliseconds>(untilProbe - now);
         pollfd request{descriptor.get(), POLLIN, 0};
-        const int result = poll(&request, 1, static_cast<int>(remaining.count()));
+        const int result = poll(&request, 1, static_cast<int>(std::max(0ms, remaining).count()));
         if (result < 0 && errno == EINTR)
             continue; // Recompute the remaining monotonic budget after interruption.
         bool topologyChanged = false;
-        if (result == 0)
-            return deny(NativeSocketReadinessFailure::Deadline);
         if (result < 0 || (request.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0 ||
-            (request.revents & POLLIN) == 0)
+            (result > 0 && (request.revents & POLLIN) == 0))
             return deny(NativeSocketReadinessFailure::EventPoll);
-        if (const auto reason =
-                consumeReadinessEvents(descriptor.get(), watches, eventCount, topologyChanged);
-            reason != NativeSocketReadinessFailure::None)
+        if (result > 0) {
+            if (const auto reason =
+                    consumeReadinessEvents(descriptor.get(), watches, eventCount, topologyChanged);
+                reason != NativeSocketReadinessFailure::None)
+                return deny(reason);
+        }
+        if (!topologyChanged) {
+            if (std::chrono::steady_clock::now() < nextProbe)
+                continue;
+        } else if (const auto reason =
+                       installReadinessWatches(descriptor.get(), runtimeDirectory, uid, watches);
+                   reason != NativeSocketReadinessFailure::None)
             return deny(reason);
-        if (!topologyChanged)
-            continue;
-        if (const auto reason =
-                installReadinessWatches(descriptor.get(), runtimeDirectory, uid, watches);
-            reason != NativeSocketReadinessFailure::None)
-            return deny(reason);
-        if (auto routes = discoverNativeSocketRoutes(runtimeDirectory, uid))
+        if (auto routes = ready())
             return routes;
+        nextProbe = std::chrono::steady_clock::now() + probeInterval;
     }
 }
 
@@ -373,8 +488,9 @@ std::optional<NativeStartup> NativeStartup::prepare()
     const QString runtimeDirectory = QStringLiteral("/run/user/%1").arg(getuid());
     // systemd's path unit intentionally reacts to the first Wayland socket.
     // Hyprland publishes its independently attested control socket shortly
-    // afterwards. Filesystem events only wake a bounded scan-watch-rescan loop;
-    // complete strict discovery is the sole readiness/success condition.
+    // afterwards. Events and bounded listener probes wake a scan-watch-rescan
+    // loop. Strict discovery and listening peers establish availability only;
+    // runtime must still attest its actual connections and session identity.
     NativeSocketReadinessFailure readinessFailure = NativeSocketReadinessFailure::None;
     const auto routes = waitForNativeSocketRoutes(runtimeDirectory, getuid(),
                                                   NativeCompositorReadinessContract::maximumWait,

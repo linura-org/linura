@@ -6,11 +6,13 @@
 //! Native transport handles remain adapter details; this crate is forbidden to
 //! semantic crates, agent interpreters and the public SDK/UI.
 
+mod account;
 mod bus;
 mod observer;
 mod owner;
 mod service;
 mod sleep_gate;
+mod sleep_helper;
 mod sleep_observer;
 
 pub use bus::{NativeSessionChannel, NativeSessionRole};

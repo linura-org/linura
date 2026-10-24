@@ -800,6 +800,13 @@ def validate(root: Path) -> list[str]:
             'mixer["scale"] = "cubic"',
             'sinks:connect("installed"',
             "sinks:activate()",
+            """Core.sync(function(sync_error)
+        if sync_error ~= nil then
+          fail("set-volume-sync-failed")
+        end
+        print("ok\\t1")
+        Core.quit()
+      end)""",
         )
         for fragment in required_helper_fragments:
             if fragment not in helper_text:

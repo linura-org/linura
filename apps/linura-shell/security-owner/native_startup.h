@@ -18,8 +18,9 @@ struct NativeSocketRoutes final
     QStringList compositor;
 };
 
-// One production/qualification readiness contract. Filesystem events are only
-// bounded wakeups; complete strict discovery remains the sole success condition.
+// One production/qualification readiness contract. Events and bounded passive
+// listener probes establish startup availability only; runtime independently
+// attests every actual peer. A leftover socket inode is not a live listener.
 struct NativeCompositorReadinessContract final
 {
     static constexpr auto maximumWait = std::chrono::seconds(5);

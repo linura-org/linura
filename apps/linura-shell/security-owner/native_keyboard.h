@@ -51,6 +51,8 @@ class NativeKeyboard final
     [[nodiscard]] bool focused() const;
     void forgetSurface(wl_surface *surface);
     void resetFocus();
+    // Recheck only the bound compositor focus and coverage; never synthesize input.
+    void refreshProtectedFocus();
     void paintPointer(wl_surface *surface, QImage &frame) const;
     // Private pre-lock confirmation only. No text is decoded or delivered while
     // this target is selected. A new unmodified Enter/Escape press is required;

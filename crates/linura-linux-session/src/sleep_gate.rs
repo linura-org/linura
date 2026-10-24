@@ -117,9 +117,11 @@ impl NativeSessionChannel {
             .deserialize()
             .map_err(|_| "native sleep helper credentials are malformed")?;
         let pid: u32 = field(&credentials, "ProcessID")?;
-        if field::<u32>(&credentials, "UnixUserID")? != 0 || pid <= 1 {
-            return Err("native sleep helper has the wrong kernel identity".into());
-        }
+        validate_helper_peer(
+            field(&credentials, "UnixUserID")?,
+            pid,
+            crate::account::local_service_uid(crate::account::LocalServiceAccount::Authority)?,
+        )?;
         let start_ticks = process_start(pid)?;
         require_helper_process(pid)?;
         let supervisor: String = self
@@ -226,6 +228,13 @@ impl NativeSessionChannel {
     }
 }
 
+fn validate_helper_peer(uid: u32, pid: u32, expected_uid: u32) -> Result<(), String> {
+    if expected_uid == 0 || uid != expected_uid || pid <= 1 {
+        return Err("native sleep helper has the wrong kernel identity".into());
+    }
+    Ok(())
+}
+
 fn validate_gate_properties(
     facts: &HashMap<String, OwnedValue>,
     service: &HashMap<String, OwnedValue>,
@@ -282,7 +291,7 @@ fn validate_gate_properties(
     Ok(invocation)
 }
 
-fn require_helper_process(pid: u32) -> Result<(), String> {
+pub(crate) fn require_helper_process(pid: u32) -> Result<(), String> {
     let image = fs::metadata(HELPER).map_err(|_| "native sleep helper image is unavailable")?;
     let executing = fs::metadata(format!("/proc/{pid}/exe"))
         .map_err(|_| "native sleep helper process image is unavailable")?;
@@ -323,6 +332,20 @@ fn invocation_text(bytes: &[u8]) -> Result<String, String> {
 mod tests {
     use super::*;
     use zbus::zvariant::Value;
+
+    #[test]
+    fn helper_peer_requires_the_fixed_unprivileged_uid_before_native_attestation() {
+        assert!(validate_helper_peer(991, 42, 991).is_ok());
+        for (uid, pid, expected) in [
+            (0, 42, 991),
+            (1000, 42, 991),
+            (991, 0, 991),
+            (991, 1, 991),
+            (0, 42, 0),
+        ] {
+            assert!(validate_helper_peer(uid, pid, expected).is_err());
+        }
+    }
 
     fn id<T, E: std::fmt::Debug>(value: Result<T, E>) -> T {
         value.unwrap_or_else(|error| unreachable!("{error:?}"))

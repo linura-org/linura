@@ -23,6 +23,7 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
+#include <poll.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -277,7 +278,7 @@ void eventDrivenRouteReadinessPreservesCompleteStrictDiscovery()
     assert(getuid() != 0);
     QTemporaryDir directory;
     assert(directory.isValid());
-    const auto bindSocket = [](const QString &path) {
+    const auto bindSocket = [](const QString &path, bool listening = true) {
         const auto bytes = path.toLocal8Bit();
         sockaddr_un address{};
         address.sun_family = AF_UNIX;
@@ -288,6 +289,8 @@ void eventDrivenRouteReadinessPreservesCompleteStrictDiscovery()
         const int descriptor = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
         assert(descriptor >= 0 && bind(descriptor, reinterpret_cast<const sockaddr *>(&address),
                                        sizeof(address)) == 0);
+        if (listening)
+            assert(listen(descriptor, 16) == 0);
         return descriptor;
     };
     const auto wayland = directory.path() + QStringLiteral("/wayland-1");
@@ -377,6 +380,88 @@ void eventDrivenRouteReadinessPreservesCompleteStrictDiscovery()
     assert(failure == NativeSocketReadinessFailure::EventLimit);
     stormPublisher.join();
     assert(close(stormWayland) == 0);
+
+    // Socket inodes outlive a killed compositor. Presence-only readiness would
+    // immediately relaunch failed owners until both systemd limits are hit.
+    QTemporaryDir stale;
+    assert(stale.isValid());
+    const auto staleInstance = stale.path() + QStringLiteral("/hypr/stale_123");
+    assert(QDir().mkpath(staleInstance));
+    const int staleWayland = bindSocket(stale.path() + QStringLiteral("/wayland-1"));
+    const int staleCompositor = bindSocket(staleInstance + QStringLiteral("/.socket.sock"));
+    assert(close(staleWayland) == 0 && close(staleCompositor) == 0);
+    assert(discoverNativeSocketRoutes(stale.path(), getuid()));
+    assert(!waitForNativeSocketRoutes(stale.path(), getuid(), 80ms, &failure));
+    assert(failure == NativeSocketReadinessFailure::Deadline);
+
+    // listen() has no filesystem event. One retained passive connection must
+    // suffice even when the other server delays listening for several probes.
+    QTemporaryDir delayed;
+    assert(delayed.isValid());
+    const auto delayedInstance = delayed.path() + QStringLiteral("/hypr/delayed_123");
+    assert(QDir().mkpath(delayedInstance));
+    const int delayedWayland = bindSocket(delayed.path() + QStringLiteral("/wayland-1"), false);
+    const int delayedCompositor =
+        bindSocket(delayedInstance + QStringLiteral("/.socket.sock"), false);
+    assert(listen(delayedWayland, 0) == 0);
+    std::thread listener([&] {
+        std::this_thread::sleep_for(180ms);
+        assert(listen(delayedCompositor, 0) == 0);
+    });
+    const auto delayedRoutes = waitForNativeSocketRoutes(delayed.path(), getuid(), 800ms, &failure);
+    listener.join();
+    assert(delayedRoutes && failure == NativeSocketReadinessFailure::None);
+    pollfd queued{delayedWayland, POLLIN, 0};
+    assert(poll(&queued, 1, 0) == 1 && (queued.revents & POLLIN) != 0);
+    const int accepted = accept4(delayedWayland, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
+    assert(accepted >= 0 && close(accepted) == 0);
+    queued.revents = 0;
+    assert(poll(&queued, 1, 0) == 0); // No repeated probes filling the accept backlog.
+    assert(close(delayedWayland) == 0 && close(delayedCompositor) == 0);
+
+    // A previously connected peer closing is not retained as live evidence.
+    QTemporaryDir disappeared;
+    assert(disappeared.isValid());
+    const auto goneInstance = disappeared.path() + QStringLiteral("/hypr/gone_123");
+    assert(QDir().mkpath(goneInstance));
+    const int goneWayland = bindSocket(disappeared.path() + QStringLiteral("/wayland-1"));
+    const int goneCompositor = bindSocket(goneInstance + QStringLiteral("/.socket.sock"), false);
+    std::thread closePeer([&] {
+        pollfd waiting{goneWayland, POLLIN, 0};
+        assert(poll(&waiting, 1, 1000) == 1 && (waiting.revents & POLLIN) != 0);
+        const int peer = accept4(goneWayland, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
+        assert(peer >= 0 && close(peer) == 0 && close(goneWayland) == 0);
+        assert(listen(goneCompositor, 0) == 0);
+    });
+    assert(!waitForNativeSocketRoutes(disappeared.path(), getuid(), 250ms, &failure));
+    closePeer.join();
+    assert(failure == NativeSocketReadinessFailure::Deadline);
+    assert(close(goneCompositor) == 0);
+
+    // An old connection staying open does not attest a replacement pathname.
+    QTemporaryDir replaced;
+    assert(replaced.isValid());
+    const auto replacedInstance = replaced.path() + QStringLiteral("/hypr/replaced_123");
+    assert(QDir().mkpath(replacedInstance));
+    const auto replacedPath = replaced.path() + QStringLiteral("/wayland-1");
+    const int oldWayland = bindSocket(replacedPath);
+    const int replacedCompositor =
+        bindSocket(replacedInstance + QStringLiteral("/.socket.sock"), false);
+    int oldPeer = -1;
+    int replacement = -1;
+    std::thread replaceRoute([&] {
+        pollfd waiting{oldWayland, POLLIN, 0};
+        assert(poll(&waiting, 1, 1000) == 1 && (waiting.revents & POLLIN) != 0);
+        oldPeer = accept4(oldWayland, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
+        assert(oldPeer >= 0 && unlink(replacedPath.toLocal8Bit().constData()) == 0);
+        replacement = bindSocket(replacedPath, false);
+        assert(listen(replacedCompositor, 0) == 0);
+    });
+    assert(!waitForNativeSocketRoutes(replaced.path(), getuid(), 250ms, &failure));
+    replaceRoute.join();
+    assert(failure == NativeSocketReadinessFailure::Deadline);
+    assert(close(oldPeer) == 0 && close(replacement) == 0);
+    assert(close(oldWayland) == 0 && close(replacedCompositor) == 0);
 }
 
 QStringList contractShape(const QString &text)
@@ -413,6 +498,38 @@ QStringList contractShape(const QString &text)
 
 int main(int argc, char **argv)
 {
+    using Mechanism = LockMechanism::State;
+    using Sample = NativeObservedLockState;
+    assert(!nativeObservedLockState(static_cast<NativeCompositorLockState>(99),
+                                    Mechanism::Acquiring, true, false));
+    for (auto compositor :
+         {NativeCompositorLockState::Locked, NativeCompositorLockState::Unlocked}) {
+        assert(nativeObservedLockState(compositor, Mechanism::Acquiring, true, false) ==
+               Sample::Acquiring);
+        assert(!nativeObservedLockState(compositor, Mechanism::Acquiring, false, false));
+        assert(!nativeObservedLockState(compositor, Mechanism::Acquiring, true, true));
+        assert(nativeObservedLockState(compositor, Mechanism::Releasing, true, true) ==
+               Sample::Releasing);
+        assert(nativeObservedLockState(compositor, Mechanism::Releasing, true, false) ==
+               Sample::Releasing);
+        assert(!nativeObservedLockState(compositor, Mechanism::Releasing, false, true));
+        assert(!nativeObservedLockState(compositor, Mechanism::Faulted, true, false));
+        assert(!nativeObservedLockState(compositor, Mechanism::Faulted, false, false));
+    }
+    assert(nativeObservedLockState(NativeCompositorLockState::Unlocked, Mechanism::Releasing, false,
+                                   false) == Sample::Unlocked);
+    assert(nativeObservedLockState(NativeCompositorLockState::Locked, Mechanism::Releasing, false,
+                                   false) == Sample::Releasing);
+    assert(nativeObservedLockState(NativeCompositorLockState::Locked, Mechanism::Secure, true,
+                                   true) == Sample::Secure);
+    assert(!nativeObservedLockState(NativeCompositorLockState::Unlocked, Mechanism::Secure, true,
+                                    true));
+    for (auto ready : {Mechanism::Ready, Mechanism::Released}) {
+        assert(nativeObservedLockState(NativeCompositorLockState::Unlocked, ready, false, false) ==
+               Sample::Unlocked);
+        assert(!nativeObservedLockState(NativeCompositorLockState::Locked, ready, false, false));
+        assert(!nativeObservedLockState(NativeCompositorLockState::Unlocked, ready, true, false));
+    }
     assert(argc == 3);
     ordinaryStartupCannotBeRepaired(); // Before Qt exists, on ordinary exec.
     const pid_t entry = fork();
@@ -435,6 +552,7 @@ int main(int argc, char **argv)
                                "verifyReleased()", "commitVerifiedRelease()",
                                "observePowerPermission()", "exportNativeEndpoint()", "identity()"})
         assert(NativeRuntime::staticMetaObject.indexOfMethod(method) == -1);
+    assert(NativeRuntime::staticMetaObject.indexOfMethod("retainedVerifiedRelease()") == -1);
 
     const int index = NativeEndpoint::staticMetaObject.indexOfClassInfo("D-Bus Introspection");
     assert(index >= 0);
@@ -457,7 +575,8 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 12 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 13 && signals == 1 && annotations == 3);
+    assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));
     NativeEndpoint::registerWireTypes();

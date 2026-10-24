@@ -115,7 +115,7 @@ fn open_lock_control(
     let store = value(SqliteTransactionStore::open(
         database,
         verifier,
-        value(SqliteIntegrityKey::new(vec![0x52; 32])),
+        value(SqliteIntegrityKey::new(fixture_key(5))),
     ));
     let control = value(ManagedLifecycleControl::new(
         lock_preview_control(locks, sessions),
@@ -125,7 +125,7 @@ fn open_lock_control(
     value(control.with_request_journal(Box::new(value(
         linura_persistence_sqlite::SqliteApprovedRequestJournal::open(
             database.with_extension("requests.sqlite3"),
-            value(SqliteIntegrityKey::new(vec![0x53; 32])),
+            value(SqliteIntegrityKey::new(fixture_key(6))),
         ),
     ))))
 }
@@ -547,7 +547,7 @@ fn failed_retention_prevents_prepare_and_dispatch_after_authentication() {
     let store = value(SqliteTransactionStore::open(
         database.path(),
         authority_verifier,
-        value(SqliteIntegrityKey::new(vec![0x52; 32])),
+        value(SqliteIntegrityKey::new(fixture_key(5))),
     ));
     use linura_transaction::TransactionStore;
     assert!(value(store.list_state(linura_transaction::TransactionState::Prepared)).is_empty());
@@ -563,7 +563,7 @@ fn unconfigured_retention_cannot_be_skipped_by_an_authenticated_session_owner() 
     let store = value(SqliteTransactionStore::open(
         database.path(),
         authority_verifier,
-        value(SqliteIntegrityKey::new(vec![0x52; 32])),
+        value(SqliteIntegrityKey::new(fixture_key(5))),
     ));
     let mut control = value(ManagedLifecycleControl::new(
         lock_preview_control(vec![], vec![]),
@@ -595,7 +595,7 @@ fn orphan_retained_material_is_not_durable_authority_or_replay_permission() {
     let mut journal = value(
         linura_persistence_sqlite::SqliteApprovedRequestJournal::open(
             database.path().with_extension("requests.sqlite3"),
-            value(SqliteIntegrityKey::new(vec![0x53; 32])),
+            value(SqliteIntegrityKey::new(fixture_key(6))),
         ),
     );
     // An opaque record with no corresponding transaction cannot be recovered,
@@ -820,7 +820,7 @@ fn automatic_recovery_never_reprepares_when_verifier_and_control_disagree() {
     let store = value(SqliteTransactionStore::open(
         database.path(),
         authority_verifier,
-        value(SqliteIntegrityKey::new(vec![0x52; 32])),
+        value(SqliteIntegrityKey::new(fixture_key(5))),
     ));
     use linura_transaction::TransactionStore;
     let snapshots = value(store.list_state(linura_transaction::TransactionState::Indeterminate));
