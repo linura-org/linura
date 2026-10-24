@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import sys
@@ -53,6 +54,103 @@ class ToolingRunnerTests(unittest.TestCase):
         self.assertIn("Tooling tests: 3/3 completed", completed.stderr)
         for case in ("test_a.A.test_one", "test_a.A.test_two", "test_b.B.test_three"):
             self.assertIn(case, completed.stderr)
+
+    def test_isolated_validation_cases_shard_without_missing_or_duplicate_ids(self):
+        source = (
+            "import os\n"
+            "import unittest\n"
+            "class ValidationGateTests(unittest.TestCase):\n"
+            " def record(self, value):\n"
+            "  with open('gate-' + str(os.getpid()) + '.txt', 'a') as output:\n"
+            "   output.write(value + '\\n')\n"
+            " def test_0(self): self.record('0')\n"
+            " def test_1(self): self.record('1')\n"
+            " def test_2(self): self.record('2')\n"
+            " def test_3(self): self.record('3')\n"
+            " def test_4(self): self.record('4')\n"
+            " def test_5(self): self.record('5')\n"
+        )
+        (self.root / "tests/tooling/test_validation_gates.py").write_text(
+            source, encoding="utf-8"
+        )
+        completed = self.run_suite()
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        available_cpus = (
+            len(os.sched_getaffinity(0))
+            if hasattr(os, "sched_getaffinity")
+            else (os.cpu_count() or 1)
+        )
+        expected_workers = min(2, available_cpus)
+        self.assertIn(
+            f"Tooling tests: 9/9 completed across {expected_workers} workers",
+            completed.stderr,
+        )
+        manifests = list(self.root.glob("gate-*.txt"))
+        self.assertEqual(len(manifests), expected_workers)
+        self.assertEqual(
+            sorted("".join(path.read_text() for path in manifests).splitlines()),
+            list("012345"),
+        )
+
+    def test_validation_sharding_rejects_shared_class_fixture(self):
+        source = (
+            "import unittest\n"
+            "class ValidationGateTests(unittest.TestCase):\n"
+            " @classmethod\n"
+            " def setUpClass(cls): pass\n"
+            " def test_one(self): pass\n"
+        )
+        (self.root / "tests/tooling/test_validation_gates.py").write_text(
+            source, encoding="utf-8"
+        )
+        completed = self.run_suite()
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("tooling shard policy rejects shared fixtures", completed.stderr)
+
+    def test_validation_sharding_rejects_inherited_shared_fixture(self):
+        source = (
+            "import unittest\n"
+            "class SharedFixture(unittest.TestCase):\n"
+            " @classmethod\n"
+            " def setUpClass(cls): pass\n"
+            "class ValidationGateTests(SharedFixture):\n"
+            " def test_one(self): pass\n"
+        )
+        (self.root / "tests/tooling/test_validation_gates.py").write_text(
+            source, encoding="utf-8"
+        )
+        completed = self.run_suite()
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("tooling shard policy rejects shared fixtures", completed.stderr)
+
+    def test_failed_sharded_validation_case_fails_the_full_inventory(self):
+        (self.root / "tests/tooling/test_validation_gates.py").write_text(
+            "import unittest\n"
+            "class ValidationGateTests(unittest.TestCase):\n"
+            " def test_pass(self): self.assertTrue(True)\n"
+            " def test_fail(self): self.assertEqual(1, 2)\n",
+            encoding="utf-8",
+        )
+        completed = self.run_suite()
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("FAIL: test_fail", completed.stderr)
+        self.assertIn("Tooling tests: 5/5 completed", completed.stderr)
+
+    def test_validation_sharding_rejects_module_level_shared_fixtures(self):
+        for fixture in ("setUpModule", "tearDownModule"):
+            with self.subTest(fixture=fixture):
+                (self.root / "tests/tooling/test_validation_gates.py").write_text(
+                    "import unittest\n"
+                    f"def {fixture}(): pass\n"
+                    "class ValidationGateTests(unittest.TestCase):\n"
+                    " def test_one(self): pass\n",
+                    encoding="utf-8",
+                )
+                completed = self.run_suite()
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn(
+                    "tooling shard policy rejects shared fixtures", completed.stderr
+                )
 
     def test_failed_test_causes_failed_canonical_suite(self) -> None:
         path = self.root / "tests/tooling/test_b.py"
