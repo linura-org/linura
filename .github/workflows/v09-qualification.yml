@@ -247,6 +247,15 @@ jobs:
           rustup toolchain install "$RUST_VERSION" --profile minimal
           rustup default "$RUST_VERSION"
 
+      - name: Verify reviewed dependency cache policy
+        run: python3 tools/check_ci_cache_policy.py
+
+      - name: Restore Cargo dependency inputs
+        uses: ./.github/actions/cargo-input-cache
+        with:
+          namespace: canonical-ci
+          rust-version: ${{ env.RUST_VERSION }}
+
       - name: Verify candidate component, roadmap and support-scope contracts
         run: |
           set -euo pipefail
