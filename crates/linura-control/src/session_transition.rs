@@ -12,6 +12,10 @@ use crate::session_safety::{validate_envelope, validate_native_lock};
 pub enum SessionTransitionPostcondition {
     NotSatisfied,
     Indeterminate,
+    /// The native transition is complete enough to require an independent
+    /// secure-lock sample. This is not a satisfied postcondition or authority
+    /// to dispatch; callers must review both fresh envelopes again afterward.
+    SecureCoverageRequired,
     ResumedSecurely,
     OriginalSessionEnded,
     /// This proves the old boot ended, NOT that a currently observable host is
@@ -20,8 +24,11 @@ pub enum SessionTransitionPostcondition {
 }
 
 /// Classify fresh native evidence for the retained exact transition identity.
-/// Callers must still perform canonical reconciliation and durable commit; a
-/// result from this review is not a transaction receipt or executor credential.
+/// Review without coverage first. Only `SecureCoverageRequired` requests an
+/// independent lock sample; known pending native state must not start a probe
+/// that could cross kernel sleep. Review both envelopes again at the current
+/// time after sampling. Callers must still reconcile and durably commit; this
+/// result is not a transaction receipt or executor credential.
 pub fn review_session_transition_postcondition(
     transition: &SessionTransitionId,
     native: &ObservationEnvelope,
@@ -96,7 +103,7 @@ pub fn review_session_transition_postcondition(
                 return Ok(ResultState::Indeterminate);
             }
             let Some(coverage) = secure_coverage else {
-                return Ok(ResultState::Indeterminate);
+                return Ok(ResultState::SecureCoverageRequired);
             };
             if !validate_native_lock(transition.lock(), coverage, now_unix_ms)? {
                 return Ok(ResultState::Indeterminate);
@@ -197,7 +204,7 @@ mod tests {
             id(review_session_transition_postcondition(
                 &target, &native, None, 1_100
             )),
-            SessionTransitionPostcondition::Indeterminate
+            SessionTransitionPostcondition::SecureCoverageRequired
         );
         for (cycles, result) in [
             (10, SessionTransitionPostcondition::NotSatisfied),
@@ -373,6 +380,130 @@ mod tests {
             )),
             SessionTransitionPostcondition::ResumedSecurely
         );
+    }
+
+    #[test]
+    fn coverage_is_requested_only_for_a_valid_settled_exact_suspend_cycle() {
+        let target = target(SessionTransition::Suspend {
+            successful_cycles_before: 10,
+        });
+        let original = observation(&target);
+        for preparing in [false, true] {
+            for cycles in [9, 10, 11, 12, u64::MAX] {
+                let mut native = original.clone();
+                native
+                    .attributes
+                    .insert("preparing_for_sleep".into(), ObservedValue::Bool(preparing));
+                native.attributes.insert(
+                    "successful_suspend_cycles".into(),
+                    ObservedValue::U64(cycles),
+                );
+                let expected = if preparing {
+                    SessionTransitionPostcondition::Indeterminate
+                } else if cycles == 10 {
+                    SessionTransitionPostcondition::NotSatisfied
+                } else if cycles == 11 {
+                    SessionTransitionPostcondition::SecureCoverageRequired
+                } else {
+                    SessionTransitionPostcondition::Indeterminate
+                };
+                assert_eq!(
+                    id(review_session_transition_postcondition(
+                        &target, &native, None, 1_100
+                    )),
+                    expected
+                );
+            }
+        }
+        for changed_boot in [false, true] {
+            let mut native = original.clone();
+            native
+                .attributes
+                .insert("target_epoch_present".into(), ObservedValue::Bool(false));
+            if changed_boot {
+                native.attributes.insert(
+                    "current_boot_id".into(),
+                    ObservedValue::Text("abcd1234-1234-4567-89ab-0123456789ac".into()),
+                );
+            }
+            assert_eq!(
+                id(review_session_transition_postcondition(
+                    &target, &native, None, 1_100
+                )),
+                SessionTransitionPostcondition::Indeterminate
+            );
+        }
+        for key in original.attributes.keys() {
+            let mut native = original.clone();
+            native.attributes.remove(key);
+            assert!(
+                review_session_transition_postcondition(&target, &native, None, 1_100).is_err()
+            );
+        }
+        for (key, value) in [
+            ("preparing_for_sleep", ObservedValue::Text("false".into())),
+            (
+                "successful_suspend_cycles",
+                ObservedValue::Text("11".into()),
+            ),
+            ("suspend_test_mode", ObservedValue::Text("devices".into())),
+        ] {
+            let mut native = original.clone();
+            native.attributes.insert(key.into(), value);
+            assert!(
+                review_session_transition_postcondition(&target, &native, None, 1_100).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn coverage_requirement_does_not_freshen_either_observation_or_accept_substitution() {
+        let target = target(SessionTransition::Suspend {
+            successful_cycles_before: 10,
+        });
+        let native = observation(&target);
+        assert_eq!(
+            id(review_session_transition_postcondition(
+                &target, &native, None, 1_100
+            )),
+            SessionTransitionPostcondition::SecureCoverageRequired
+        );
+        let mut fresh_coverage = coverage(&target);
+        fresh_coverage.observed_at_unix_ms = 2_500;
+        assert_eq!(
+            id(review_session_transition_postcondition(
+                &target,
+                &native,
+                Some(&fresh_coverage),
+                2_999
+            )),
+            SessionTransitionPostcondition::ResumedSecurely
+        );
+        // Even newly sampled secure coverage cannot extend the earlier native
+        // envelope's two-second lifetime while the second probe runs.
+        assert!(
+            review_session_transition_postcondition(&target, &native, Some(&fresh_coverage), 3_000)
+                .is_err()
+        );
+        for field in [
+            "boot_id",
+            "session_id",
+            "security_owner_invocation",
+            "lock_generation",
+            "lock_protocol",
+        ] {
+            let mut changed = coverage(&target);
+            changed
+                .attributes
+                .insert(field.into(), ObservedValue::Text("substituted".into()));
+            assert!(
+                review_session_transition_postcondition(&target, &native, Some(&changed), 1_100)
+                    .is_err()
+            );
+        }
+        for time in [999, 3_000, u64::MAX] {
+            assert!(review_session_transition_postcondition(&target, &native, None, time).is_err());
+        }
     }
 
     #[test]

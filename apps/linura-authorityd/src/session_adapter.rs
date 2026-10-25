@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use linura_control::{AuthorizedEffect, AuthorizedEffectExecutor, IndependentManagedVerifier};
-use linura_core::{SessionLockId, SessionTransition, SessionTransitionId};
+use linura_core::{SessionLockId, SessionTransitionId};
 use linura_linux_session::NativeSessionChannel;
 use linura_observation::{ObservationAuthority, ObservedValue};
 use linura_provider_sdk::{
@@ -161,26 +161,32 @@ fn verify_native_transition<C, T>(
     target: &SessionTransitionId,
     observation: &linura_observation::ObservationEnvelope,
     coverage: C,
-    now: T,
+    mut now: T,
 ) -> Result<VerificationOutcome, String>
 where
     C: FnOnce() -> Result<Option<linura_observation::ObservationEnvelope>, String>,
-    T: FnOnce() -> Result<u64, String>,
+    T: FnMut() -> Result<u64, String>,
 {
-    let coverage = if matches!(target.transition(), SessionTransition::Suspend { .. }) {
-        coverage()?
-    } else {
-        None
-    };
-    let now = now()?;
-    let result = linura_control::review_session_transition_postcondition(
-        target,
-        observation,
-        coverage.as_ref(),
-        now,
-    )
-    .map_err(|e| e.to_string())?;
     use linura_control::SessionTransitionPostcondition as Postcondition;
+    // Canonical native review decides whether coverage can establish completion.
+    // Probing the owner while logind is still preparing to sleep may span the
+    // suspend itself and must not turn that known pending state into a failed
+    // lock observation. No native fact or coverage result is accepted stale.
+    let native =
+        linura_control::review_session_transition_postcondition(target, observation, None, now()?)
+            .map_err(|e| e.to_string())?;
+    let result = if native == Postcondition::SecureCoverageRequired {
+        let coverage = coverage()?;
+        linura_control::review_session_transition_postcondition(
+            target,
+            observation,
+            coverage.as_ref(),
+            now()?,
+        )
+        .map_err(|e| e.to_string())?
+    } else {
+        native
+    };
     let (disposition, detail) = match result {
         Postcondition::ResumedSecurely => (
             VerificationDisposition::Satisfied,
@@ -198,7 +204,7 @@ where
             VerificationDisposition::NotSatisfied,
             "fresh native transition postcondition is not satisfied",
         ),
-        Postcondition::Indeterminate => (
+        Postcondition::Indeterminate | Postcondition::SecureCoverageRequired => (
             VerificationDisposition::Inconclusive,
             "native transition outcome remains ambiguous; replay is forbidden",
         ),
@@ -229,7 +235,7 @@ pub(crate) fn parse_effect(effect: &EffectDescriptor) -> Result<(SessionLockId, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use linura_core::{CapabilityId, ProviderId, ResourceId};
+    use linura_core::{CapabilityId, ProviderId, ResourceId, SessionTransition};
     use linura_observation::ObservationEnvelope;
     use std::cell::Cell;
     use std::collections::BTreeMap;
@@ -322,12 +328,15 @@ mod tests {
             value(verify_native_transition(
                 &target,
                 &native,
-                || Ok(None),
+                || unreachable!("an unchanged native cycle cannot require coverage"),
                 || Ok(1100)
             ))
             .disposition,
             VerificationDisposition::NotSatisfied
         );
+        native
+            .attributes
+            .insert("successful_suspend_cycles".into(), ObservedValue::U64(11));
         assert!(
             verify_native_transition(
                 &target,
@@ -368,7 +377,7 @@ mod tests {
                 value(verify_native_transition(
                     &target,
                     &native,
-                    || Ok(Some(coverage.clone())),
+                    || unreachable!("native preparation must not query lock coverage"),
                     || Ok(1100)
                 ))
                 .disposition,
@@ -429,7 +438,7 @@ mod tests {
                 value(verify_native_transition(
                     &target,
                     &changed,
-                    || Ok(Some(coverage.clone())),
+                    || unreachable!("an ambiguous native cycle cannot require coverage"),
                     || Ok(1100)
                 ))
                 .disposition,
@@ -442,6 +451,175 @@ mod tests {
             .insert("lock_generation".into(), ObservedValue::U64(8));
         assert!(
             verify_native_transition(&target, &native, || Ok(Some(replaced)), || Ok(1100)).is_err()
+        );
+    }
+
+    #[test]
+    fn suspend_verifier_queries_coverage_once_only_after_native_completion() {
+        let (target, native, coverage) = transition_facts(SessionTransition::Suspend {
+            successful_cycles_before: 10,
+        });
+        let reads = Cell::new(0);
+        let clocks = Cell::new(0);
+        let result = value(verify_native_transition(
+            &target,
+            &native,
+            || {
+                // Native evidence has already passed canonical validation.
+                assert_eq!(clocks.get(), 1);
+                reads.set(reads.get() + 1);
+                Ok(Some(coverage))
+            },
+            || {
+                clocks.set(clocks.get() + 1);
+                Ok(1100)
+            },
+        ));
+        assert_eq!(result.disposition, VerificationDisposition::Satisfied);
+        assert_eq!(reads.get(), 1);
+        assert_eq!(clocks.get(), 2);
+    }
+
+    #[test]
+    fn suspend_verifier_rejects_bad_native_evidence_before_requesting_coverage() {
+        let (target, native, _) = transition_facts(SessionTransition::Suspend {
+            successful_cycles_before: 10,
+        });
+        for attribute in [
+            "preparing_for_sleep",
+            "successful_suspend_cycles",
+            "suspend_test_mode",
+            "current_boot_id",
+            "target_epoch_present",
+        ] {
+            for remove in [false, true] {
+                let mut malformed = native.clone();
+                if remove {
+                    malformed.attributes.remove(attribute);
+                } else {
+                    malformed
+                        .attributes
+                        .insert(attribute.into(), ObservedValue::Text("unknown".into()));
+                }
+                assert!(
+                    verify_native_transition(
+                        &target,
+                        &malformed,
+                        || unreachable!("malformed native evidence cannot request coverage"),
+                        || Ok(1100),
+                    )
+                    .is_err(),
+                    "attribute={attribute}, remove={remove}"
+                );
+            }
+        }
+        for fault in [
+            "provider",
+            "authority",
+            "capability",
+            "resource",
+            "freshness",
+        ] {
+            let mut invalid = native.clone();
+            match fault {
+                "provider" => invalid.provider = value(ProviderId::new("untrusted")),
+                "authority" => invalid.authority = ObservationAuthority::SyntheticTest,
+                "capability" => invalid.capability = value(CapabilityId::new("wrong.observe")),
+                "resource" => invalid.resource = value(ResourceId::new("wrong:resource")),
+                _ => invalid.observed_at_unix_ms = 1200,
+            }
+            assert!(
+                verify_native_transition(
+                    &target,
+                    &invalid,
+                    || unreachable!("invalid native envelope cannot request coverage"),
+                    || Ok(1100),
+                )
+                .is_err(),
+                "fault={fault}"
+            );
+        }
+    }
+
+    #[test]
+    fn suspend_verifier_keeps_required_coverage_failures_hard_without_retry() {
+        let (target, native, _) = transition_facts(SessionTransition::Suspend {
+            successful_cycles_before: 10,
+        });
+        for failure in [
+            "native-unavailable",
+            "denied",
+            "timeout",
+            "identity-changed",
+        ] {
+            let reads = Cell::new(0);
+            assert_eq!(
+                verify_native_transition(
+                    &target,
+                    &native,
+                    || {
+                        reads.set(reads.get() + 1);
+                        Err(failure.into())
+                    },
+                    || Ok(1100),
+                ),
+                Err(failure.into())
+            );
+            assert_eq!(reads.get(), 1);
+        }
+    }
+
+    #[test]
+    fn suspend_verifier_rechecks_original_native_freshness_after_coverage() {
+        let (target, native, coverage) = transition_facts(SessionTransition::Suspend {
+            successful_cycles_before: 10,
+        });
+        let mut fresh_coverage = coverage;
+        fresh_coverage.observed_at_unix_ms = 2999;
+        let reads = Cell::new(0);
+        let mut times = [1100, 3000].into_iter();
+        assert!(
+            verify_native_transition(
+                &target,
+                &native,
+                || {
+                    reads.set(reads.get() + 1);
+                    Ok(Some(fresh_coverage))
+                },
+                || Ok(times
+                    .next()
+                    .unwrap_or_else(|| unreachable!("extra clock read"))),
+            )
+            .is_err()
+        );
+        assert_eq!(reads.get(), 1);
+        assert!(times.next().is_none());
+    }
+
+    #[test]
+    fn suspend_verifier_rejects_stale_coverage_and_final_clock_failure() {
+        let (target, native, mut coverage) = transition_facts(SessionTransition::Suspend {
+            successful_cycles_before: 10,
+        });
+        coverage.observed_at_unix_ms = 1;
+        coverage.valid_for_ms = 100;
+        assert!(
+            verify_native_transition(&target, &native, || Ok(Some(coverage)), || Ok(1100)).is_err()
+        );
+        let (_, _, fresh) = transition_facts(SessionTransition::Suspend {
+            successful_cycles_before: 10,
+        });
+        let mut times = [Ok(1100), Err("unsupported final clock".into())].into_iter();
+        assert_eq!(
+            verify_native_transition(
+                &target,
+                &native,
+                || Ok(Some(fresh)),
+                || times
+                    .next()
+                    .unwrap_or_else(|| unreachable!("extra clock read")),
+            ),
+            Err("unsupported final clock".into())
         );
     }
 
