@@ -689,6 +689,13 @@ for the current implementation status.
   secure-lock coverage and bounded native delay-inhibitor coordination.
 - Session/boot-ending effects retain durable ambiguity; acknowledgement is not
   verified success and restart cannot blindly repeat a one-shot power action.
+- Post-dispatch suspend verification first classifies the complete fresh native
+  transition.
+  Known preparation or an unchanged cycle must not start a lock probe that could
+  cross kernel sleep. Only an exact completed cycle requests fresh secure coverage;
+  that intermediate requirement proves no completion. Final canonical review
+  revalidates both original envelopes at the current time, without extending
+  either lifetime, retrying failed required observations or replaying an effect.
 - Digest-only transactions cannot reconstruct approved intent on restart. S17
   retains canonical structured requests, including provenance, before prepare
   in an independently authenticated, bounded, write-once FULL-sync WAL journal.

@@ -341,6 +341,20 @@ product precondition. Private bounded records are not execution authority; a
 queue receipt, prompt marker, transport failure, QMP wake reply or historical
 transaction alone cannot qualify completion. The original queue identity and
 exact lock/transition generation must survive every result check.
+Production completion verification and planning's retained-completion review first
+classify the canonical native sleep facts. A known `PreparingForSleep=true`
+observation or an unchanged successful cycle does not start a completion-coverage
+probe across the pending sleep. Only an exact completed cycle can request
+independent secure coverage. After that sample, both
+original envelopes must still be fresh and bound to the same exact transition;
+missing/failed required coverage cannot produce success. The original bounded
+settling attempts and two-second observation contracts are unchanged. Regression
+tests exercise this ordering with an owner callback that fails if a pending or
+malformed native state reaches it, plus expiry during coverage, hard observation
+errors, substituted identities and exact-once sampling. Those deterministic tests
+do not substitute for the native suspend/recovery case above.
+Normal pre-dispatch planning still requires its separate fresh secure-coverage
+safety review; this ordering does not make a native counter execution authority.
 The watcher validates the exact phase and supervised owner invocation in the
 read-only report before writing its marker. The host rejects a FIFO, substituted
 or mutable log, excessive input, stale markers and incomplete or extended marker

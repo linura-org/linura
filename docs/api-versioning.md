@@ -177,6 +177,14 @@ The canonical suspend postcondition also keeps a fresh typed
 It cannot complete or replay the transition. Unknown preparation/counter facts,
 debug modes, changed identities and invalid freshness still fail closed; success
 requires preparation to end, one completed native cycle and exact secure coverage.
+Managed verification and planning's retained-completion review classify the
+complete fresh native transition before requesting completion coverage. Known
+pending preparation or an unchanged counter does not request that `ObserveLock`.
+Only canonical `SecureCoverageRequired` requests an independent sample after an
+exact completed cycle; that intermediate result is neither completion nor authority. Both original
+envelopes are reviewed again at the current time after sampling. The existing
+observation bounds remain unchanged, and required coverage errors remain failures.
+Ordinary pre-dispatch safety review still requires its own fresh secure coverage.
 
 ## Coherent-change requirement
 
