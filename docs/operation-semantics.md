@@ -52,7 +52,8 @@ The S17 secure-lock implementation registers:
   creation epoch, supervised security-owner invocation and native lock generation;
 - allowed material change key: `secure`.
 
-Secure-lock registration is not production support promotion. Its scoped policy
+Secure-lock registration is not production activation. Nor does the implemented
+Level A native path itself promote production support. Its scoped policy
 keeps owner authentication distinct from administrator approval, and every
 lock/unlock effect requires the canonical managed lifecycle. The native runtime,
 Authority1 endpoint, narrow executor and durable no-replay recovery are
