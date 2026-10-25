@@ -11,11 +11,8 @@ and temporary source checkouts can lose work or contaminate exact-source evidenc
 The workspace architecture needs a durable, explicit storage boundary without
 making ordinary editing depend on a provisioned qualification runner.
 
-When this ADR was written, identifier 0042 was reserved by the then-open S17
-reference PR #224. That is historical numbering provenance, not a current
-integration dependency: S17 implementation later moved into the split PR stack
-ending with #241. This accepted storage decision neither imports S17 authority
-nor changes its qualification boundary.
+Identifier 0042 is reserved by the open S17 PR #224. This decision uses the next
+unreserved identifier; it neither imports that slice nor changes its authority.
 
 ## Decision
 
@@ -101,3 +98,15 @@ An optional data directory with silent root fallback preserves convenience but
 violates the heavy-workload boundary. A mandatory disk for all editing would
 unnecessarily block lightweight work. Automatically provisioning or purging disks
 would expand tool authority and endanger recovery; none is selected.
+
+## Implementation provenance note (2026-10-25)
+
+The Context above records the decisions and integration expectations at the time
+this ADR was accepted; that history remains unchanged. The optional isolated
+Rust/Qt development environment was subsequently extracted and merged in
+[PR #244](https://github.com/linura-org/linura/pull/244). Primary worktree-based
+Linux host/Remote SSH development continues to use the shared pinned toolchain;
+the container is not a mandatory development substrate. Native S17 session
+security and power qualification later advanced through split PRs #234–#241.
+These implementation updates do not revise this ADR's dedicated heavy-storage
+boundary, qualify physical Q11 or promote S17/v0.10 release support.
