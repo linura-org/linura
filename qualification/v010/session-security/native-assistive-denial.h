@@ -34,3 +34,14 @@ inline NativeAssistiveCallFailure nativeAssistiveCallFailure(QStringView error)
         return NativeAssistiveCallFailure::Disconnected;
     return NativeAssistiveCallFailure::None;
 }
+
+// Keep both the closed transport failure and the phase active when it failed.
+// Every value is a failing process status; unsupported kinds/phases cannot
+// become success or alias a known diagnostic. No remote text enters this code.
+inline int nativeAssistiveFailureExitCode(NativeAssistiveCallFailure failure, int stage)
+{
+    const auto kind = static_cast<int>(failure);
+    if (kind < 30 || kind > 32 || stage < 10 || stage > 19)
+        return 1;
+    return 100 + (kind - 30) * 10 + (stage - 10);
+}

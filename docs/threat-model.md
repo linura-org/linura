@@ -627,6 +627,11 @@ for the current implementation status.
   seconds, discards raw journal text and exports only closed failure labels.
   Those labels are diagnostic context, never invocation-bound authority or
   verification evidence; unavailable diagnostics cannot erase a failed effect.
+  AT-SPI failure diagnostics retain only a fixed failure family and probe stage;
+  numeric exits cannot become accepted unsupported-interface or authentication
+  evidence. Correlated call timeouts still abort the probe within the original
+  call and aggregate bounds. Native observation errors retain only source-owned
+  rejection labels, never raw provider responses or credentials.
   Owner fence/probe failures emit only immutable rejection labels, never native
   properties, peer identifiers, authentication data or remote error text. Probe
   diagnostics are enabled only for the fence call, never recovery; all original
@@ -696,6 +701,13 @@ for the current implementation status.
   that intermediate requirement proves no completion. Final canonical review
   revalidates both original envelopes at the current time, without extending
   either lifetime, retrying failed required observations or replaying an effect.
+  A native read crossed by exactly the retained baseline-to-baseline+1 suspend
+  cycle may be discarded only after both disabled debug-mode reads, original
+  epoch presence, boot, root logind owner and original probe deadline validate.
+  The discarded sample has no authoritative envelope or new sequence. Only the
+  post-dispatch verifier may await another independent sample within Control's
+  unchanged bound; planning still rejects it. Transport errors, unknown facts,
+  extra cycles, changed identities and expired probes remain hard failures.
 - Digest-only transactions cannot reconstruct approved intent on restart. S17
   retains canonical structured requests, including provenance, before prepare
   in an independently authenticated, bounded, write-once FULL-sync WAL journal.

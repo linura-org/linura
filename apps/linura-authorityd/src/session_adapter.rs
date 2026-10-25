@@ -5,7 +5,7 @@ use linura_core::{SessionLockId, SessionTransitionId};
 use linura_linux_session::NativeSessionChannel;
 use linura_observation::{ObservationAuthority, ObservedValue};
 use linura_provider_sdk::{
-    EffectDescriptor, ExecutionOutcome, Observer, VerificationDisposition, VerificationOutcome,
+    EffectDescriptor, ExecutionOutcome, VerificationDisposition, VerificationOutcome,
 };
 
 #[derive(Debug)]
@@ -131,11 +131,11 @@ impl FreshSessionVerifier {
         // a completion flag to independent verification.
         let observation = self
             .transitions
-            .observe_authoritative(&effect.resource, &capability)
+            .observe_transition_if_settled(&effect.resource, &capability)
             .map_err(|e| e.to_string())?;
         verify_native_transition(
             &target,
-            &observation,
+            observation.as_ref(),
             || {
                 self.sequence = self
                     .sequence
@@ -159,7 +159,7 @@ impl FreshSessionVerifier {
 
 fn verify_native_transition<C, T>(
     target: &SessionTransitionId,
-    observation: &linura_observation::ObservationEnvelope,
+    observation: Option<&linura_observation::ObservationEnvelope>,
     coverage: C,
     mut now: T,
 ) -> Result<VerificationOutcome, String>
@@ -168,6 +168,23 @@ where
     T: FnMut() -> Result<u64, String>,
 {
     use linura_control::SessionTransitionPostcondition as Postcondition;
+    let Some(observation) = observation else {
+        if !matches!(
+            target.transition(),
+            linura_core::SessionTransition::Suspend { .. }
+        ) {
+            return Err("native pending sample is unsupported for this transition".into());
+        }
+        // The native adapter discarded an exact in-flight sample after its
+        // identity and budget checks. It supplies no authoritative facts and
+        // cannot request coverage or prove completion. Only Control's existing
+        // bounded verification loop may take another independent sample.
+        return VerificationOutcome::new(
+            VerificationDisposition::Inconclusive,
+            "native suspend cycle crossed observation; no coherent facts retained",
+        )
+        .map_err(|error| error.to_string());
+    };
     // Canonical native review decides whether coverage can establish completion.
     // Probing the owner while logind is still preparing to sleep may span the
     // suspend itself and must not turn that known pending state into a failed
@@ -314,7 +331,7 @@ mod tests {
         assert_eq!(
             value(verify_native_transition(
                 &target,
-                &native,
+                Some(&native),
                 || Ok(None),
                 || Ok(1100)
             ))
@@ -327,7 +344,7 @@ mod tests {
         assert_eq!(
             value(verify_native_transition(
                 &target,
-                &native,
+                Some(&native),
                 || unreachable!("an unchanged native cycle cannot require coverage"),
                 || Ok(1100)
             ))
@@ -340,7 +357,7 @@ mod tests {
         assert!(
             verify_native_transition(
                 &target,
-                &native,
+                Some(&native),
                 || Err("unavailable native coverage".into()),
                 || Ok(1100)
             )
@@ -349,15 +366,19 @@ mod tests {
         assert!(
             verify_native_transition(
                 &target,
-                &native,
+                Some(&native),
                 || Ok(None),
                 || Err("unsupported clock".into())
             )
             .is_err()
         );
-        assert!(verify_native_transition(&target, &native, || Ok(None), || Ok(4000)).is_err());
+        assert!(
+            verify_native_transition(&target, Some(&native), || Ok(None), || Ok(4000)).is_err()
+        );
         native.provider = value(ProviderId::new("untrusted"));
-        assert!(verify_native_transition(&target, &native, || Ok(None), || Ok(1100)).is_err());
+        assert!(
+            verify_native_transition(&target, Some(&native), || Ok(None), || Ok(1100)).is_err()
+        );
     }
 
     #[test]
@@ -376,7 +397,7 @@ mod tests {
             assert_eq!(
                 value(verify_native_transition(
                     &target,
-                    &native,
+                    Some(&native),
                     || unreachable!("native preparation must not query lock coverage"),
                     || Ok(1100)
                 ))
@@ -390,7 +411,7 @@ mod tests {
         assert_eq!(
             value(verify_native_transition(
                 &target,
-                &native,
+                Some(&native),
                 || Ok(Some(coverage)),
                 || Ok(1100)
             ))
@@ -407,7 +428,7 @@ mod tests {
         assert_eq!(
             value(verify_native_transition(
                 &target,
-                &native,
+                Some(&native),
                 || Ok(Some(coverage.clone())),
                 || Ok(1100)
             ))
@@ -421,7 +442,7 @@ mod tests {
         assert_eq!(
             value(verify_native_transition(
                 &target,
-                &native,
+                Some(&native),
                 || Ok(Some(insecure)),
                 || Ok(1100)
             ))
@@ -437,7 +458,7 @@ mod tests {
             assert_eq!(
                 value(verify_native_transition(
                     &target,
-                    &changed,
+                    Some(&changed),
                     || unreachable!("an ambiguous native cycle cannot require coverage"),
                     || Ok(1100)
                 ))
@@ -450,8 +471,52 @@ mod tests {
             .attributes
             .insert("lock_generation".into(), ObservedValue::U64(8));
         assert!(
-            verify_native_transition(&target, &native, || Ok(Some(replaced)), || Ok(1100)).is_err()
+            verify_native_transition(&target, Some(&native), || Ok(Some(replaced)), || Ok(1100))
+                .is_err()
         );
+    }
+
+    #[test]
+    fn discarded_in_flight_sample_cannot_probe_coverage_or_prove_completion() {
+        let (target, native, coverage) = transition_facts(SessionTransition::Suspend {
+            successful_cycles_before: 10,
+        });
+        let pending = value(verify_native_transition(
+            &target,
+            None,
+            || unreachable!("discarded native facts cannot request coverage"),
+            || unreachable!("a discarded sample cannot mint an evidence timestamp"),
+        ));
+        assert_eq!(pending.disposition, VerificationDisposition::Inconclusive);
+        // A subsequent independent, coherent native observation must still pass
+        // canonical review and require exact fresh secure coverage to complete.
+        let complete = value(verify_native_transition(
+            &target,
+            Some(&native),
+            || Ok(Some(coverage)),
+            || Ok(1100),
+        ));
+        assert_eq!(complete.disposition, VerificationDisposition::Satisfied);
+    }
+
+    #[test]
+    fn missing_native_facts_for_terminating_transitions_remain_errors() {
+        for transition in [
+            SessionTransition::Logout,
+            SessionTransition::Reboot,
+            SessionTransition::PowerOff,
+        ] {
+            let (target, _, _) = transition_facts(transition);
+            assert!(
+                verify_native_transition(
+                    &target,
+                    None,
+                    || unreachable!("missing native facts cannot request coverage"),
+                    || unreachable!("missing native facts cannot mint evidence"),
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]
@@ -463,7 +528,7 @@ mod tests {
         let clocks = Cell::new(0);
         let result = value(verify_native_transition(
             &target,
-            &native,
+            Some(&native),
             || {
                 // Native evidence has already passed canonical validation.
                 assert_eq!(clocks.get(), 1);
@@ -504,7 +569,7 @@ mod tests {
                 assert!(
                     verify_native_transition(
                         &target,
-                        &malformed,
+                        Some(&malformed),
                         || unreachable!("malformed native evidence cannot request coverage"),
                         || Ok(1100),
                     )
@@ -531,7 +596,7 @@ mod tests {
             assert!(
                 verify_native_transition(
                     &target,
-                    &invalid,
+                    Some(&invalid),
                     || unreachable!("invalid native envelope cannot request coverage"),
                     || Ok(1100),
                 )
@@ -556,7 +621,7 @@ mod tests {
             assert_eq!(
                 verify_native_transition(
                     &target,
-                    &native,
+                    Some(&native),
                     || {
                         reads.set(reads.get() + 1);
                         Err(failure.into())
@@ -581,7 +646,7 @@ mod tests {
         assert!(
             verify_native_transition(
                 &target,
-                &native,
+                Some(&native),
                 || {
                     reads.set(reads.get() + 1);
                     Ok(Some(fresh_coverage))
@@ -604,7 +669,8 @@ mod tests {
         coverage.observed_at_unix_ms = 1;
         coverage.valid_for_ms = 100;
         assert!(
-            verify_native_transition(&target, &native, || Ok(Some(coverage)), || Ok(1100)).is_err()
+            verify_native_transition(&target, Some(&native), || Ok(Some(coverage)), || Ok(1100))
+                .is_err()
         );
         let (_, _, fresh) = transition_facts(SessionTransition::Suspend {
             successful_cycles_before: 10,
@@ -613,7 +679,7 @@ mod tests {
         assert_eq!(
             verify_native_transition(
                 &target,
-                &native,
+                Some(&native),
                 || Ok(Some(fresh)),
                 || times
                     .next()
@@ -634,7 +700,7 @@ mod tests {
             assert_eq!(
                 value(verify_native_transition(
                     &target,
-                    &native,
+                    Some(&native),
                     || unreachable!("terminating coverage query"),
                     || Ok(1100)
                 ))
@@ -652,7 +718,7 @@ mod tests {
             }
             let result = value(verify_native_transition(
                 &target,
-                &native,
+                Some(&native),
                 || unreachable!("terminating coverage query"),
                 || Ok(1100),
             ));

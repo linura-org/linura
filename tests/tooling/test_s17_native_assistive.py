@@ -60,6 +60,21 @@ class NativeAssistiveFixtureTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 fixture.shared()
             immutable.assert_not_called()
+        with (
+            patch.object(fixture.os, "geteuid", return_value=0),
+            patch.object(
+                fixture,
+                "immutable",
+                side_effect=RuntimeError("fixture path is writable"),
+            ) as immutable,
+            patch.object(fixture.importlib.util, "spec_from_file_location") as load,
+        ):
+            with self.assertRaises(RuntimeError):
+                fixture.shared()
+            immutable.assert_called_once_with(
+                fixture.ROOT / "native-assistive-fixture.py"
+            )
+            load.assert_not_called()
 
     def test_positive_partial_report_is_exact_and_owner_must_survive_the_probe(self):
         port = Mock()
@@ -180,12 +195,20 @@ class NativeAssistiveFixtureTests(unittest.TestCase):
             *fixture.PROBE_FAILURES.items(),
             (-9, "unclassified"),
             (1, "unclassified"),
+            (30, "unclassified"),
+            (31, "unclassified"),
+            (32, "unclassified"),
+            (99, "unclassified"),
+            (130, "unclassified"),
+            (255, "unclassified"),
         ):
+            port.command.reset_mock()
             port.command.side_effect = CommandRefused(code)
             with (
                 self.subTest(code=code),
                 patch.object(fixture, "shared", return_value=(port, Mock())),
                 patch.object(fixture, "identity", return_value=before) as identity,
+                patch.object(fixture, "validate_report") as validate,
                 self.assertRaises(RuntimeError) as caught,
             ):
                 fixture.operate("locked")
@@ -193,7 +216,35 @@ class NativeAssistiveFixtureTests(unittest.TestCase):
                 str(caught.exception), "native assistive probe failed: " + expected
             )
             self.assertNotIn("private-service-wire-marker", str(caught.exception))
+            self.assertIs(caught.exception.__suppress_context__, True)
             self.assertEqual(identity.call_count, 1)
+            port.command.assert_called_once_with(
+                [str(fixture.BINARY), "123", "locked"], budget=12, owner=True
+            )
+            validate.assert_not_called()
+
+    def test_transport_statuses_preserve_exact_stage_without_aliasing_assertions(self):
+        self.assertEqual(len(fixture.PROBE_FAILURES), 40)
+        self.assertEqual(len(set(fixture.PROBE_FAILURES.values())), 40)
+        # Pin the wire mapping independently of the generated label table.
+        # A call timeout during the negative input test must never be confused
+        # with the ordinary "remote-input-denial" assertion category.
+        for code, expected in (
+            (10, "input"),
+            (18, "remote-input-denial"),
+            (100, "call-deadline-at-input"),
+            (106, "call-deadline-at-presentation-tree"),
+            (108, "call-deadline-at-remote-input-denial"),
+            (109, "call-deadline-at-report"),
+            (110, "call-peer-unavailable-at-input"),
+            (113, "call-peer-unavailable-at-owner-discovery"),
+            (119, "call-peer-unavailable-at-report"),
+            (120, "call-disconnected-at-input"),
+            (127, "call-disconnected-at-protected-interfaces"),
+            (129, "call-disconnected-at-report"),
+        ):
+            with self.subTest(code=code):
+                self.assertEqual(fixture.PROBE_FAILURES[code], expected)
 
 
 if __name__ == "__main__":

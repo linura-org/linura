@@ -468,3 +468,21 @@ traversal, broader power-inhibitor lifecycle, Q11 or complete S17**. Those
 remain the explicit acceptance work tracked by issue #252. This extension
 introduces no runtime authorization, privileged mutation, direct Hyprland
 configuration, or release-support promotion.
+
+A suspend counter can change while the native observer reads its bracketed
+facts. Only the exact retained baseline-to-baseline+1 crossing, with both debug
+modes disabled and all final epoch/boot/logind-owner/deadline checks intact, may
+be discarded as a nonterminal sample. It supplies no envelope, sequence or
+completion proof. Planning still rejects it; the post-dispatch verifier may
+sample again only within its existing Control bound and must subsequently prove
+fresh native completion and exact secure coverage. Mixed extra cycles,
+transport failures, malformed facts, changed identities and expiry remain hard
+failures. Injected whole-probe tests exercise final-check ordering and negative
+cases; they are not real native VM evidence.
+
+Failed native observation reports retain only fixed provider rejection labels.
+The assistive probe retains a fixed failure family and its source-owned phase,
+so a call timeout can be distinguished from an unsupported-interface denial and
+localized without publishing addresses, native prompt text or authentication
+responses. The original per-call, aggregate and fixture deadlines and all
+acceptance assertions remain unchanged.

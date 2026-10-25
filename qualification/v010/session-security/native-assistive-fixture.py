@@ -28,20 +28,26 @@ PHASES = {
     "reboot-prompt",
     "power-off-prompt",
 }
+PROBE_FAILURE_STAGES = (
+    "input",
+    "session-bus",
+    "accessibility-bus",
+    "owner-discovery",
+    "registry",
+    "application-tree",
+    "presentation-tree",
+    "protected-interfaces",
+    "remote-input-denial",
+    "report",
+)
+PROBE_CALL_FAILURES = ("deadline", "peer-unavailable", "disconnected")
 PROBE_FAILURES = {
-    10: "input",
-    11: "session-bus",
-    12: "accessibility-bus",
-    13: "owner-discovery",
-    14: "registry",
-    15: "application-tree",
-    16: "presentation-tree",
-    17: "protected-interfaces",
-    18: "remote-input-denial",
-    19: "report",
-    30: "call-deadline",
-    31: "call-peer-unavailable",
-    32: "call-disconnected",
+    **{10 + stage: label for stage, label in enumerate(PROBE_FAILURE_STAGES)},
+    **{
+        100 + kind * 10 + stage: "call-" + failure + "-at-" + label
+        for kind, failure in enumerate(PROBE_CALL_FAILURES)
+        for stage, label in enumerate(PROBE_FAILURE_STAGES)
+    },
 }
 
 

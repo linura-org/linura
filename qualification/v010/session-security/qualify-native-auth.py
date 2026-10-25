@@ -215,6 +215,29 @@ FAILURE_MARKERS = (
             "unclassified",
         )
     ),
+    # Only source-owned stage labels survive a failed AT-SPI call. A timeout
+    # remains a hard failure; this metadata grants no unsupported-API evidence.
+    *(
+        (
+            "assistive-call-" + kind + "-at-" + stage,
+            ("native assistive probe failed: call-" + kind + "-at-" + stage).encode(
+                "ascii"
+            ),
+        )
+        for stage in (
+            "input",
+            "session-bus",
+            "accessibility-bus",
+            "owner-discovery",
+            "registry",
+            "application-tree",
+            "presentation-tree",
+            "protected-interfaces",
+            "remote-input-denial",
+            "report",
+        )
+        for kind in ("deadline", "peer-unavailable", "disconnected")
+    ),
     ("owner-refused-scope", b"native owner refused the scoped interaction"),
     (
         "owner-missing-proof",
@@ -313,6 +336,21 @@ FAILURE_MARKERS = (
     ("executor", b"privileged executor failed"),
     ("execution-rejected", b"effect was rejected before dispatch"),
     ("verification", b"independent verification failed"),
+    (
+        "native-suspend-sample-changed",
+        b"native suspend state changed during observation",
+    ),
+    (
+        "native-transition-epoch-changed",
+        b"native transition epoch changed during observation",
+    ),
+    ("native-logind-owner-changed", b"logind ownership changed during observation"),
+    (
+        "native-logind-call-unavailable",
+        b"native logind observation is unavailable or timed out",
+    ),
+    ("native-logind-probe-expired", b"native session observation deadline expired"),
+    ("native-session-boot-changed", b"session boot generation is no longer current"),
     (
         "session-evidence-identity",
         b"session evidence does not bind the exact current epoch",

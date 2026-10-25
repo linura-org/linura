@@ -798,6 +798,83 @@ class NativeAuthenticationRunnerTests(unittest.TestCase):
                     + ",native",
                 )
 
+    def test_native_observation_and_assistive_stages_survive_only_as_closed_labels(
+        self,
+    ):
+        for category, marker in (
+            (
+                "native-suspend-sample-changed",
+                "native suspend state changed during observation",
+            ),
+            (
+                "native-transition-epoch-changed",
+                "native transition epoch changed during observation",
+            ),
+            (
+                "native-logind-owner-changed",
+                "logind ownership changed during observation",
+            ),
+            (
+                "native-logind-call-unavailable",
+                "native logind observation is unavailable or timed out",
+            ),
+            (
+                "native-logind-probe-expired",
+                "native session observation deadline expired",
+            ),
+            (
+                "native-session-boot-changed",
+                "session boot generation is no longer current",
+            ),
+        ):
+            with self.subTest(category=category):
+                labels = runner.failure_categories(
+                    ("provider violation: " + marker + " private-wire-marker").encode(
+                        "ascii"
+                    )
+                ).split(",")
+                self.assertIn(category, labels)
+                self.assertIn("provider", labels)
+                self.assertNotIn("private-wire-marker", labels)
+                self.assertTrue(
+                    all(
+                        label in {code for code, _ in runner.FAILURE_MARKERS}
+                        for label in labels
+                    )
+                )
+        for kind in ("deadline", "peer-unavailable", "disconnected"):
+            for stage in (
+                "input",
+                "session-bus",
+                "accessibility-bus",
+                "owner-discovery",
+                "registry",
+                "application-tree",
+                "presentation-tree",
+                "protected-interfaces",
+                "remote-input-denial",
+                "report",
+            ):
+                category = "assistive-call-" + kind + "-at-" + stage
+                with self.subTest(category=category):
+                    labels = runner.failure_categories(
+                        (
+                            "native assistive probe failed: call-"
+                            + kind
+                            + "-at-"
+                            + stage
+                            + " private-wire-marker"
+                        ).encode("ascii")
+                    ).split(",")
+                    self.assertIn(category, labels)
+                    self.assertIn("assistive-call-" + kind, labels)
+                    self.assertEqual("timeout" in labels, kind == "deadline")
+                    self.assertNotIn("private-wire-marker", labels)
+        labels = runner.failure_categories(
+            b"native assistive probe failed: call-deadline-at-unknown-private-marker"
+        ).split(",")
+        self.assertFalse(any("-at-" in label for label in labels))
+
     def test_unlock_failure_stages_remain_distinct_without_exporting_error_text(self):
         for category, detail in (
             (
