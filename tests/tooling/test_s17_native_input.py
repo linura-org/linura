@@ -405,6 +405,60 @@ class NativeInputTests(unittest.TestCase):
             finally:
                 server.close()
 
+    def test_hardware_input_rejects_nonempty_qmp_ack_and_stops_further_events(self):
+        # A QMP reply with a matching id is not proof of a successful hardware
+        # dispatch unless its return object matches the fixed QMP method.
+        # In particular, a rejected response must never continue to Enter.
+        for acknowledgement in (
+            None,
+            [],
+            True,
+            0,
+            {"queued": True},
+            "untrusted-wire-marker",
+        ):
+            for action in ("key", "click", "response"):
+
+                def reply(request):
+                    result = (
+                        {"running": True, "status": "running"}
+                        if request["execute"] == "query-status"
+                        else acknowledgement
+                        if request["execute"] == "input-send-event"
+                        else {}
+                    )
+                    return (
+                        json.dumps({"id": request["id"], "return": result}).encode()
+                        + b"\n"
+                    )
+
+                with (
+                    self.subTest(acknowledgement=acknowledgement, action=action),
+                    tempfile.TemporaryDirectory(dir="/tmp") as directory,
+                ):
+                    server = QmpServer(Path(directory), reply=reply)
+                    try:
+                        with native_input.NativeInput(server.path) as client:
+                            with self.assertRaisesRegex(
+                                RuntimeError,
+                                "native input QMP hardware acknowledgement is malformed",
+                            ) as caught:
+                                if action == "key":
+                                    client.key("ret")
+                                elif action == "click":
+                                    client.click(1200, 2000)
+                                else:
+                                    client.response("a" * 24)
+                            self.assertNotIn(
+                                "untrusted-wire-marker", str(caught.exception)
+                            )
+                    finally:
+                        server.close()
+                    self.assertEqual(
+                        [request["execute"] for request in server.requests],
+                        ["qmp_capabilities", "query-status", "input-send-event"],
+                    )
+
     def test_suspend_wake_requires_supported_machine_and_independent_suspended_state(
         self,
     ):

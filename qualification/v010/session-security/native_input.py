@@ -230,7 +230,7 @@ class NativeInput:
         if re.fullmatch(r"[a-z0-9]|ret|esc|backspace|tab|up|down", qcode) is None:
             raise RuntimeError("unsupported native input key")
         # One physical press/release, not a virtual-keyboard Wayland client.
-        self._request(
+        acknowledgement = self._request(
             "input-send-event",
             {
                 "events": [
@@ -242,6 +242,11 @@ class NativeInput:
                 ]
             },
         )
+        if acknowledgement != {}:
+            # QMP success for hardware input has an empty return object.
+            # No receipt, extra fields or malformed acknowledgement proves
+            # that the guest has received the event.
+            raise RuntimeError("native input QMP hardware acknowledgement is malformed")
 
     def response(self, ephemeral_response: str) -> None:
         if re.fullmatch(r"[a-z0-9]{24}", ephemeral_response) is None:
@@ -262,7 +267,7 @@ class NativeInput:
             or not (0 <= x <= 32767 and 0 <= y <= 32767)
         ):
             raise RuntimeError("native pointer coordinates are unsupported")
-        self._request(
+        acknowledgement = self._request(
             "input-send-event",
             {
                 "events": [
@@ -273,3 +278,8 @@ class NativeInput:
                 ]
             },
         )
+        if acknowledgement != {}:
+            # QMP success for hardware input has an empty return object.
+            # No receipt, extra fields or malformed acknowledgement proves
+            # that the guest has received the event.
+            raise RuntimeError("native input QMP hardware acknowledgement is malformed")
