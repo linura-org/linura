@@ -52,14 +52,15 @@ The S17 secure-lock implementation registers:
   creation epoch, supervised security-owner invocation and native lock generation;
 - allowed material change key: `secure`.
 
-Secure-lock registration is not production activation. Its scoped policy keeps
-owner authentication distinct from administrator approval, and every lock/unlock
-effect still requires the canonical managed lifecycle. The native runtime,
-Authority1 endpoint, narrow executor and durable no-replay recovery are composed
-in the branch. Repository-owned packaging defines activation, but positive
-deployment and pinned Arch/Hyprland qualification remain unexecuted; see proposed
-[ADR 0042](adr/0042-s17-session-security-and-power-authority.md). The registration
-does not qualify logout, suspend, reboot, power-off or S21 operations.
+Secure-lock registration is not production support promotion. Its scoped policy
+keeps owner authentication distinct from administrator approval, and every
+lock/unlock effect requires the canonical managed lifecycle. The native runtime,
+Authority1 endpoint, narrow executor and durable no-replay recovery are
+implemented. The [recorded exact-source Level A native run](https://github.com/linura-org/linura/actions/runs/40141305916)
+exercised real owner authentication, locking/unlocking and retained recovery,
+while full S17 and physical Q11 acceptance remain pending under
+[ADR 0042](adr/0042-s17-session-security-and-power-authority.md). Secure-lock
+registration alone neither qualifies other transition classes nor S21.
 
 S17 also registers four distinct managed transition candidates:
 `operation:session.suspend`, `operation:session.logout`, `operation:session.reboot`
@@ -77,9 +78,11 @@ purpose-bound administrator approval, independent verification, typed Authority1
 and SDK/CLI contracts, first-party shell controls and durable observe-only
 recovery. Suspend uses a native coverage fence until verified durable commit;
 power calls check strong and weak inhibitors even as root, never skip or force.
-These implementations do not establish production support. Real native failure,
-authentication, interaction/accessibility and retained qualification evidence,
-whole-slice internal review and exact-head gates remain required.
+These implementations do not establish production support. The recorded Level A
+native run exercised the declared authentication, suspend, logout, reboot and
+power-off cases with sealed retained reports and recovery checks. Additional
+native failure modes, broader interaction/accessibility, physical Q11, complete
+S17 acceptance, whole-slice review and applicable exact-head gates remain required.
 
 Protective-lock opt-in/revocation is separately classified as security-sensitive
 `LinuraOwnedState` (`operation:session.protective-lock.configure`). It changes
@@ -94,8 +97,10 @@ not an operation-class downgrade or shortcut around its durable lifecycle.
 The typed Authority1/SDK/CLI configuration and historical-query routes now
 compose this local store under distinct protected keys. Their receipts contain
 consent lineage only, never a policy decision, store seal or proof of protection.
-Protective managed-lifecycle and native gate integration remain pending; these
-configuration routes alone do not activate automatic locking.
+Protective managed-lifecycle and native pre-sleep-gate integration are implemented
+for the recorded Level A native cases. Configuration routes alone do not activate
+automatic locking or prove a protected sleep cycle; complete S17 and physical
+workstation evidence remain separately required.
 
 The first concrete v0.10 transient candidate is current-session output volume:
 

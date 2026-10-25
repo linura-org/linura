@@ -682,11 +682,11 @@ required independently. The recorded Level A native qualification retains authen
 suspend and terminating-transition reports for the exact implementation commit;
 complete S17 and physical Q11 remain outstanding.
 
-Managed suspend/logout/reboot/power-off and first-party controls must be
-implemented through the same typed authority and durable lifecycle. Native
-pointer interaction requires guarded component tests; assistive-technology,
-adversarial native input, power recovery and inhibitor lifecycle require
-independent native qualification. Availability observations
+Managed suspend/logout/reboot/power-off and first-party controls are implemented
+through the same typed authority and durable lifecycle for the recorded Level A
+native scope. Native pointer interaction requires guarded component tests;
+additional assistive-technology, adversarial native input, power recovery and
+inhibitor lifecycle coverage require independent native qualification. Availability observations
 and component tests do not qualify those effects. This ADR
 therefore remains Proposed and the S17 ledger remains planned until the complete
 vertical slice, review and exact-head evidence satisfy the acceptance boundary.

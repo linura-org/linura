@@ -388,8 +388,8 @@ Read-only Q11 status inspection remains available without running new heavy work
 | --- | --- |
 | Shared run preparation, generic/native VM and physical storage guards | Implemented; component checks are not native evidence |
 | Combined formatter inventory and sanitized toolchain-contract validation | Integrated with merged PR #221's canonical implementation |
-| Main integration and one clean commit | Candidate is based on merged #221; every subsequent edit requires fresh applicable checks and final review |
-| Complete prepared coding/Qt/editor bootstrap and acceptance | Reuse S17's pinned recipe ownership and merged #221 toolchain validation; no competing installer or repaired active instance |
+| Main integration and source continuity | Workspace/storage infrastructure is merged; S17 native integration and qualification are tracked by PR #241. Applicable checks still bind the exact current head |
+| Host-native coding/Qt/editor readiness | Primary local or Remote SSH host uses the pinned repository toolchain and verified Qt SDK; an optional pinned container is available when a separate compatible instance is needed |
 | Real heavy workloads, native/physical qualification and retained recordings | Actual operator-provisioned volume and supported runner configuration required |
 | Critical recovery protection | Current copies stay protected; independent off-machine backup still required |
 
@@ -399,11 +399,7 @@ Do not mark native qualification or editor acceptance as passed until their actu
 required evidence exists. Current CI results belong in the PR's verification
 record rather than a permanent claim that every developer host is ready.
 
-Merge this workspace infrastructure before integrating S17 (#224), then reconcile
-the shared VM launcher, image builder, runtime workflow and qualification
-contracts on the resulting main branch. Separate green PRs do not prove the
-combined implementation; rerun S17's complete applicable qualification after
-reconciliation and retain both changes' checks.
+The workspace infrastructure has merged. S17's native implementation and bounded Level A qualification are recorded in [PR #241](https://github.com/linura-org/linura/pull/241); its final merge and full-slice acceptance remain subject to current-head gates and governance. Do not reuse unmerged [PR #224](https://github.com/linura-org/linura/pull/224) as the active implementation. Qualified native cases cannot be inferred from separately green development/workspace checks.
 
 The storage root must be caller-owned, writable/searchable and private.
 Existing protected recovery/evidence/recording directories must be caller-owned
@@ -477,24 +473,7 @@ preflight or use production credentials. Report a mismatch and provision a
 separate compatible instance. Definitions on an unmerged feature branch are not
 automatically available or accepted on `main`.
 
-The snapshot-pinned development and native-header recipes introduced by
-[S17 PR #224](https://github.com/linura-org/linura/pull/224) live under
-`tools/codex/container/` and `tools/codex/native-auth/` on that branch. Reuse their
-reviewed definitions after integration; do not create a competing Dockerfile or
-copy an unmerged recipe into another PR to appear independent. If the selected
-checkout lacks those files, record that dependency. Existing approved prepared
-instances can provide scoped component checks, not an accepted-main recipe or
-native evidence. Source synchronization into a private validation clone is
-explicit and must not overwrite another task's clone/tools/state.
-
-For interim preparation, an operator may use the recipe files from the exact
-reviewed S17 commit in a restricted temporary build context, without importing
-S17 product code into this branch or merging it. Record the full recipe commit,
-file digests, snapshot/package-graph checks and immutable resulting image ID.
-The temporary material is derived input, not a second maintained Dockerfile.
-Do not build from a mutable PR ref. Accepted-main integration of those recipes is
-still a dependency; this branch must not be described as a standalone accepted
-container distribution. Existing instances are not modified or reinstalled.
+The primary development environment is the selected local Linux host or Remote SSH host, with its checked worktree, verified Python 3.12/Rust pins and, for Qt work, an actual matching Qt/Wayland SDK. The optional snapshot-pinned isolated development instance was extracted and merged through [PR #244](https://github.com/linura-org/linura/pull/244); its maintained recipe is [tools/codex/container/README.md](../tools/codex/container/README.md). It is **not** a required cross-repository, general-purpose or default execution substrate. When host-sensitive prerequisites cannot be satisfied safely, use a separately prepared instance for those specific checks instead of modifying active host protection or substituting an obsolete PR #224 recipe. Neither host readiness nor optional-container readiness qualifies a native Arch/Hyprland VM or physical workstation.
 
 Editor extensions are developer conveniences, not the compiler, Qt SDK, formatting
 authority or qualification runner. Record the installed extension versions for
@@ -527,8 +506,10 @@ obtain syntax highlighting. Review any additional dependencies explicitly.
 For meaningful C++ diagnostics, select the actual compiler and CMake compilation
 database from the environment containing the matching Qt, Wayland, GLib and
 Polkit development packages. Do not invent include directories or vendor headers
-to hide missing dependencies. Attaching the editor to an isolated prepared build
-environment keeps source paths, headers and compiler analysis in one namespace.
+to hide missing dependencies. Use the host-native SDK when it is installed and verified in the active editor
+namespace; attaching an editor to an optional isolated build environment is an
+alternative, not a prerequisite. In either case source paths, headers and
+compiler analysis must refer to that same namespace.
 
 For QML, register the intended Qt installation and configure the generated
 `org.linura.UI`, `org.linura.ShellBridge` and applicable Quickshell imports. Use the
@@ -558,18 +539,19 @@ missing capabilities. Qt 6.4 language intelligence is limited; this is not a cla
 of every feature in modern Qt or Quickshell support.
 
 The inventory requires real QtQuick, Controls and Layouts import metadata, not
-only headers and a server executable. The existing general coding image has
-Qt development headers but lacks those QML runtime imports; it can compile the
-components and pass an LSP initialization handshake, but it is not a complete
-QML editor environment. The existing native-header recipe supplies those runtime
-packages. Do not copy SDK libraries/imports between containers or retrofit the
-general instance; prepare an appropriately reviewed isolated editor environment
-from the existing specifications. First-party completion and actual VS Code
-activation remain required operational checks, not inferred from an inventory.
+only headers and a server executable. A host-native or optional-container SDK that has only Qt headers may compile
+components but still lack QtQuick/Controls/Layouts runtime imports needed for
+QML language intelligence. Verify the **selected** SDK and QML imports instead
+of assuming a particular historical image is complete. Do not copy SDK
+libraries/imports between execution namespaces or retrofit an active instance;
+provision missing prerequisites during explicit environment preparation.
+First-party completion and actual VS Code activation remain required
+operational checks, not inferred from an inventory.
 
-Use **Dev Containers: Attach to Running Container** only on an intended isolated
-prepared instance, open its task clone, and install reviewed editor extensions in
-that extension host during editor preparation. Container-local paths are not
+For the **optional** isolated instance only, use **Dev Containers: Attach to
+Running Container**, open its private task clone, and install reviewed editor
+extensions in that instance's extension host. The primary local/Remote SSH
+workspace continues to use its own native editor and toolchain. Container-local paths are not
 valid on the Remote SSH host. Do not forward the Docker socket into the container,
 create host wrappers masquerading as compilers/qmlls, or expose production/session
 sockets. CLI task builds and an LSP handshake are component checks; actual editor

@@ -11,8 +11,11 @@ and temporary source checkouts can lose work or contaminate exact-source evidenc
 The workspace architecture needs a durable, explicit storage boundary without
 making ordinary editing depend on a provisioned qualification runner.
 
-Identifier 0042 is reserved by the open S17 PR #224. This decision uses the next
-unreserved identifier; it neither imports that slice nor changes its authority.
+When this ADR was written, identifier 0042 was reserved by the then-open S17
+reference PR #224. That is historical numbering provenance, not a current
+integration dependency: S17 implementation later moved into the split PR stack
+ending with #241. This accepted storage decision neither imports S17 authority
+nor changes its qualification boundary.
 
 ## Decision
 
