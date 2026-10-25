@@ -427,3 +427,30 @@ component/mocked tests alone would not establish these outcomes. Additional
 protective-consent failure cases, multi-output, compositor failure, complete
 native accessibility and physical Q11 remain outstanding qualification work.
 These runners do not promote complete S17 or `arch-hyprland-v1` support.
+
+## S17 locked compositor output corroboration (incremental evidence)
+
+The native authentication runner reads bounded, sanitized Hyprland output
+counts after the managed lock and after observe-only recovery of the same
+retained transaction. An absent, unpowered, malformed or changed context rejects
+that qualification run and still requires secret cleanup. Raw output names,
+geometry and identifiers are not retained. The query is read-only, bounded,
+non-authorizing and uses first-instance discovery; **it is not independent proof
+of the native owner's authenticated Wayland connection or secure coverage**.
+Only the separately verified native lock receipt, exact owner generation and
+compositor mechanism can establish that security boundary.
+
+The runner additionally creates and removes a named **actual** headless output
+in the disposable Arch/KVM guest while the managed lock is retained. A usable
+second output must appear, first-party protected locked metadata must remain
+discoverable, and removing the output must restore the original aggregate
+state. The fixed commands are test-only compositor controls, not Linura
+product-authority effects. No original session security claim is derived from
+the output counts or the discovered first compositor instance.
+
+A stable single-output observation **does not qualify multi-output lock
+coverage, hotplug, compositor death, native pointer interaction, screen-reader
+traversal, broader power-inhibitor lifecycle, Q11 or complete S17**. Those
+remain the explicit acceptance work tracked by issue #252. This extension
+introduces no runtime authorization, privileged mutation, direct Hyprland
+configuration, or release-support promotion.
