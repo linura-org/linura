@@ -18,17 +18,14 @@ active-state effect nor the transient audio effect qualifies these new domains.
 
 ## Proposed decision
 
-**Implementation and acceptance status in this identity-only change:** Only
-canonical identity types, their bounded constructors/parsers, and focused Rust
-unit tests are included here. Control policy, approval, persistence, native
-helper attestation, Linux observation/execution, security-owner runtime,
-authentication, presentation, deployment and qualification described below
-are **proposed requirements, not implemented or qualified by this change**.
-Present-tense descriptions specify the intended complete architecture; they
-do not establish that the named services, methods, tests, migrations, or
-native evidence exist at this stage. They require their own implementation,
-review, independent verification and qualification. The S17 ledger remains
-`planned` and this ADR remains Proposed.
+**Implementation and acceptance status:** This ADR was introduced with an
+identity-only slice. Subsequent staged S17 PRs implemented the Control, native
+security-owner, authentication, deployment and managed power boundaries.
+The [v0.10 exact-source native run](https://github.com/linura-org/linura/actions/runs/40141305916) passed the automated Level A native cases on
+implementation commit `a99511d5bd22afa5dcf7878a3fb9e0feca74c87f`.
+Present-tense design requirements are not proof of untested failure modes,
+interactive/physical qualification or release support. The S17 ledger remains
+`planned` and this ADR remains Proposed pending complete slice acceptance.
 
 Keep S17 as **one complete authority path and one acceptance boundary**.
 Implementation may be separated along these dependencies without splitting trust
@@ -159,7 +156,9 @@ ambiguous identity selection fails closed. Transition authentication requires
 already-proven secure compositor coverage and never releases that lock.
 Control preserves `Administrator` versus `DestructiveAction` requirements when
 mapping a sealed challenge; neither a positive permission query nor PAM success
-is a prepared executor credential. Native real-session qualification is pending.
+is a prepared executor credential. Recorded Level A native real-session
+qualification now covers those authentication and transition routes; complete
+S17 acceptance remains pending.
 
 The scoped `policy:session-lock:v1` rule keeps `SecuritySensitive` risk intact.
 An exact own-session lock requires an explicit interactive request; an exact
@@ -394,16 +393,19 @@ distinct owner-authenticated setting purpose. Client tracking atomically retains
 the setting request, exact confirmed lock and decision before that write; it
 never becomes authority. On reload or uncertain response, consent recovery is
 history lookup only, never a repeated write, resumed chain or substituted login.
-Superseded history stays historical. Native consent interaction qualification is
-still required; no model, shell password control or direct executor is introduced.
+Superseded history stays historical. Recorded Level A native consent interaction now has execution evidence;
+remaining qualification is required for complete S17. No model, shell password
+control or direct executor is introduced.
 
 The proposed production image must stage the fixed suspend drop-in and disable
 unqualified hibernate, hybrid-sleep and suspend-then-hibernate modes. It does not
 change the development host or builders. This covers the declared native service
 route, not root/kernel/direct sysfs bypasses or administrator configuration changes.
-Deployment, positive PAM/power/lock recovery, accessibility and adversarial native
-qualification remain pending on the pinned Arch/Hyprland substrate. Component
-passes and installed assets alone cannot promote S17 from `planned`.
+Recorded Level A native results include deployment/bootstrap, actual PAM
+interaction, managed suspend/power and lock recovery on pinned Arch/Hyprland.
+Multi-output, compositor failure, broader accessibility, adversarial scenarios
+and physical Q11 remain outside that proof. Component passes and installed
+assets alone cannot promote S17 from `planned`.
 
 ### Managed effects and recovery
 
@@ -556,7 +558,8 @@ two exact pinned launch commands are checked. The ordinary launcher still
 defaults to snapshots. Runtime evidence retains its original boot identity;
 partial terminating reports bind their distinct original/observed boots and
 exact request/transaction/effect. Queue/host/QMP acknowledgements are not product
-completion; recovery remains observe-only. These cases are not yet executed.
+completion; recovery remains observe-only. The recorded Level A native run
+exercised these cases; it does not qualify physical Q11 or complete S17.
 
 Deterministic session recovery requires original-request lookup and explicit
 native-console break-glass boundaries; its operational guide is supplied with
@@ -578,10 +581,13 @@ shell restart, lock hint or historical consent is not a recovery credential.
   commit; full exact-head gates; then Codex review and genuinely new fixes;
   merge only when the complete slice is green.
 
-## Integrated authority design (not yet implemented or qualified here)
+## Integrated authority design and bounded native evidence
 
-This describes the required final composition; none of the following services,
-effects or deployment claims is delivered by this identity-only change.
+This section began as the intended composition for the earlier identity-only
+slice. Subsequent S17 PRs implemented the relevant integration, and the
+recorded Level A native lane exercised authentication, suspend and terminating
+transitions with retained recovery. The design still requires separate evidence
+for unqualified cases; this run does not complete S17 or promote release support.
 
 The integrated S17 design composes managed lock/unlock through public `Authority1`, typed
 SDK/CLI clients, unprivileged Control, the durable approved-request journal,
@@ -672,7 +678,9 @@ the session leader; a lingering manager or SSH shell cannot stand in for it.
 The bootstrap probe requires unchanged production attestation and automatic
 owner activation. Its report explicitly excludes authentication qualification,
 S17 completion and support promotion. Existing shell-runtime cases remain
-required independently. No retained real S17 native qualification exists yet.
+required independently. The recorded Level A native qualification retains authentication, assistive,
+suspend and terminating-transition reports for the exact implementation commit;
+complete S17 and physical Q11 remain outstanding.
 
 Managed suspend/logout/reboot/power-off and first-party controls must be
 implemented through the same typed authority and durable lifecycle. Native

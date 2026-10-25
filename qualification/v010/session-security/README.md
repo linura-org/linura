@@ -18,6 +18,19 @@ TCG profiles and physical-hardware virtualization rejection remain unchanged.
 
 Architecture and security requirements are defined by [ADR 0042](../../../docs/adr/0042-s17-session-security-and-power-authority.md) and the [S17 threat model](../../../docs/threat-model.md). Final acceptance and exact-source evidence are tracked in [PR #241](https://github.com/linura-org/linura/pull/241); [PR #224](https://github.com/linura-org/linura/pull/224) remains the unmerged diagnostic history. These references confer no release-support qualification.
 
+## Recorded Level A native evidence
+
+On 2026-10-24 UTC, the [v0.10 exact-source native run](https://github.com/linura-org/linura/actions/runs/40141305916) completed successfully against
+implementation commit `a99511d5bd22afa5dcf7878a3fb9e0feca74c87f`. The
+workflow executed real native session bootstrap, same-UID denial, PAM/Polkit
+owner authentication and native assistive checks, managed suspend and retained
+recovery, logout, reboot and power-off with observe-only recovery, and final
+execution-envelope/evidence admission. The workflow's stored artifact was read
+back and hash-checked. This is **Level A automated Arch/Hyprland/KVM evidence**
+for that exact implementation commit; a later documentation commit requires its
+own applicable head checks. It does not establish interactive Level B, physical
+Level C/Q11, complete S17 or release-qualified workstation support.
+
 `provision-native-session.py` refuses non-root, non-QEMU/KVM, wrong-hostname,
 non-Arch and non-root-immutable source contexts. It creates a genuine local
 PAM/logind Wayland session with Hyprland executing as its actual leader.
@@ -156,9 +169,10 @@ categories leave the fixture; remote text and metadata remain suppressed. All
 500 ms call limits, the original eight-second probe bound, exact tree/owner
 checks and remote input/relabel denials remain unchanged.
 
-There are no retained positive PAM/power cases merely because this input channel
-is implemented; those native cases and digest-bound retained reports remain
-required before S17 acceptance.
+The input channel alone cannot qualify PAM or power behavior. Such claims
+require independently executed native cases and digest-bound reports. The
+recorded Level A run above supplies those reports for its declared
+native-authentication and managed-transition scope, not complete S17 acceptance.
 
 `qualify-native-auth.py` extends that same lane with real hardware confirmation,
 the unchanged distribution PAM/Polkit owner conversation, Control restart and
@@ -217,10 +231,11 @@ invocation/start identity and phase. No response bytes, account hashes, approval
 seals or executor credentials enter these reports.
 
 Reports are emitted only after all assertions and cleanup succeed, then bound to
-bootstrap, exact-source binary identity and runner-source digests. They explicitly
-do not qualify power, hotplug, compositor failure, native accessibility, physical
-Q11 or complete S17. Component/mocked tests of this runner are not native evidence.
-The new native cases have not yet been executed or retained as S17 acceptance.
+bootstrap, exact-source binary identity and runner-source digests. The
+**authentication reports alone** do not qualify suspend/power, hotplug,
+compositor failure, full accessibility, physical Q11 or complete S17.
+Component/mocked tests of this runner are not native evidence; the recorded
+Level A run above independently executed and retained its native case reports.
 
 The authentication runner also requires actual AT-SPI registry discovery of the
 supervised native owner's locked and password-prompt presentations. The separate
@@ -243,7 +258,8 @@ failure diagnostics; raw service output remains suppressed.
 These cases inspect the native registry's actual application/dialog/password
 tree and require remote edit, action and relabel attempts to be rejected. Reports
 and the built probe/source digests are retained with authentication evidence.
-They remain **unexecuted** until that lane runs. They do not qualify Orca speech,
+The recorded Level A lane exercised these AT-SPI discovery and denial cases.
+They do not qualify Orca speech,
 pointer interaction, scaling, hotplug or physical Q11, and never assert complete
 accessibility or S17 support.
 
@@ -405,7 +421,9 @@ the prepared image, adding persistent boots or removing either guard fails.
 The shared launcher still defaults to snapshot mode for every ordinary caller.
 Disk guards alone are not execution or qualification evidence.
 
-These suspend and terminating cases are wired into the same pinned lane but have
-NOT run. Their mocked/component tests are not native evidence. Protective-consent
-failure cases, multi-output, compositor failure and native accessibility remain
-outstanding qualification work. S17 and Q11 are not promoted by these runners.
+The recorded Level A lane exercised managed suspend and terminating transitions,
+including retained observe-only recovery, against the pinned private guest;
+component/mocked tests alone would not establish these outcomes. Additional
+protective-consent failure cases, multi-output, compositor failure, complete
+native accessibility and physical Q11 remain outstanding qualification work.
+These runners do not promote complete S17 or `arch-hyprland-v1` support.
