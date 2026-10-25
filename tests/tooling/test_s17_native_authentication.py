@@ -87,6 +87,7 @@ class FakeGuest:
         self.fail_at = fail_at
         self.configured = False
         self.response: bytes | None = None
+        self.output_name: str | None = None
 
     def run(
         self,
@@ -109,6 +110,35 @@ class FakeGuest:
         args = command.split()
         if command.startswith(runner.ASSISTIVE_COMMAND):
             return json.dumps(assistive(args[-1])).encode("ascii")
+        if command.endswith("/usr/bin/hyprctl -i 0 -j monitors all"):
+            monitors = [
+                {
+                    "id": 0,
+                    "width": 1280,
+                    "height": 800,
+                    "disabled": False,
+                    "dpmsStatus": True,
+                }
+            ]
+            if self.output_name is not None:
+                monitors.append(
+                    {
+                        "id": 1,
+                        "width": 1280,
+                        "height": 800,
+                        "disabled": False,
+                        "dpmsStatus": True,
+                    }
+                )
+            return json.dumps(monitors).encode("ascii")
+        if "/usr/bin/hyprctl -i 0 output create headless linura-s17-" in command:
+            self.output_name = command.rsplit(" ", 1)[-1]
+            return b"ok"
+        if "/usr/bin/hyprctl -i 0 output remove linura-s17-" in command:
+            if self.output_name != command.rsplit(" ", 1)[-1]:
+                raise RuntimeError("native fixture output identity mismatch")
+            self.output_name = None
+            return b"ok"
         if "configure-protective-lock" in args:
             index = args.index("configure-protective-lock")
             return wire(setting(args[index + 2], args[index + 1] == "enable", True))
@@ -307,6 +337,133 @@ class NativeAuthenticationRunnerTests(unittest.TestCase):
             },
         )
         self.assertNotIn("private-wire-marker", json.dumps(report))
+
+    def test_headless_output_requires_observed_transition_and_cleanup(self):
+        guest = FakeGuest()
+        baseline = runner.corroborate_locked_output_inventory(guest, LOCK)
+        report = runner.exercise_locked_headless_hotplug(
+            guest, LOCK, "f" * 16, baseline
+        )
+        self.assertEqual(report["during-hotplug"]["count"], 2)
+        self.assertEqual(report["after-hotplug"], baseline)
+        self.assertIsNone(guest.output_name)
+        self.assertTrue(any("output remove linura-s17-" in x for x in guest.commands))
+        for bad in ("", "F" * 16, "g" * 16, "f" * 17):
+            unsupported = FakeGuest()
+            with self.subTest(suffix=bad), self.assertRaises(RuntimeError):
+                runner.exercise_locked_headless_hotplug(
+                    unsupported, LOCK, bad, baseline
+                )
+            self.assertEqual(unsupported.commands, [])
+
+    def test_headless_output_rejects_bad_ack_or_missing_real_output(self):
+        baseline = {
+            "count": 1,
+            "enabled_count": 1,
+            "powered_count": 1,
+            "zero_mode_count": 0,
+        }
+        for fault in ("create", "monitor", "remove", "metadata"):
+
+            class FaultGuest(FakeGuest):
+                def run(self, command, *args, **kwargs):
+                    reply = super().run(command, *args, **kwargs)
+                    if fault == "create" and "output create headless " in command:
+                        return b"untrusted-ack"
+                    if (
+                        fault == "monitor"
+                        and command.endswith("/usr/bin/hyprctl -i 0 -j monitors all")
+                        and self.output_name is not None
+                    ):
+                        return b"[]"
+                    if fault == "remove" and "output remove " in command:
+                        return b"untrusted-ack"
+                    if (
+                        fault == "metadata"
+                        and command == runner.ASSISTIVE_COMMAND + "locked"
+                    ):
+                        return b"{}"
+                    return reply
+
+            guest = FaultGuest()
+            with self.subTest(fault=fault), self.assertRaises(RuntimeError):
+                runner.exercise_locked_headless_hotplug(guest, LOCK, "f" * 16, baseline)
+            self.assertTrue(
+                any("output remove linura-s17-" in x for x in guest.commands)
+            )
+
+    def test_locked_output_corroboration_is_bounded_and_not_coverage_evidence(self):
+        guest = FakeGuest()
+        observed = runner.corroborate_locked_output_inventory(guest, LOCK)
+        self.assertEqual(
+            observed,
+            {
+                "count": 1,
+                "enabled_count": 1,
+                "powered_count": 1,
+                "zero_mode_count": 0,
+            },
+        )
+        self.assertEqual(len(guest.commands), 1)
+        self.assertIn("XDG_RUNTIME_DIR=/run/user/1000", guest.commands[0])
+        self.assertIn("/usr/bin/hyprctl -i 0 -j monitors all", guest.commands[0])
+        for wire_value in (
+            b"[]",
+            b'[{"id":0,"width":1280,"height":800,"disabled":true,"dpmsStatus":false}]',
+            b'[{"id":0,"width":1280,"height":800,"disabled":false,"dpmsStatus":false}]',
+            b'[{"id":0,"width":1280,"height":800,"disabled":false,"dpmsStatus":true},'
+            b'{"id":0,"width":1280,"height":800,"disabled":false,"dpmsStatus":true}]',
+            b'{"count":1}',
+            b"private-compositor-marker",
+        ):
+
+            class RejectedOutputGuest(FakeGuest):
+                def run(self, command, *args, **kwargs):
+                    result = super().run(command, *args, **kwargs)
+                    if command.endswith("/usr/bin/hyprctl -i 0 -j monitors all"):
+                        return wire_value
+                    return result
+
+            with self.subTest(wire=wire_value), self.assertRaises(RuntimeError):
+                runner.corroborate_locked_output_inventory(RejectedOutputGuest(), LOCK)
+
+    def test_locked_output_drift_rejects_acceptance_and_cleans_up(self):
+        class DriftGuest(FakeGuest):
+            observations = 0
+
+            def run(self, command, *args, **kwargs):
+                result = super().run(command, *args, **kwargs)
+                if command.endswith("/usr/bin/hyprctl -i 0 -j monitors all"):
+                    self.observations += 1
+                    if self.observations == 2:
+                        return json.dumps(
+                            [
+                                {
+                                    "id": 0,
+                                    "width": 1280,
+                                    "height": 800,
+                                    "disabled": False,
+                                    "dpmsStatus": True,
+                                },
+                                {
+                                    "id": 1,
+                                    "width": 1280,
+                                    "height": 800,
+                                    "disabled": False,
+                                    "dpmsStatus": True,
+                                },
+                            ]
+                        ).encode("ascii")
+                return result
+
+        guest = DriftGuest()
+        with self.assertRaisesRegex(RuntimeError, "output context changed"):
+            runner.qualify(guest, Mock(), LOCK, SOURCE)
+        # Two acceptance observations and one read-only failure diagnostic.
+        # The diagnostic observation must not promote a failed case to evidence.
+        self.assertEqual(guest.observations, 3)
+        self.assertFalse(guest.configured)
+        self.assertEqual(guest.commands[-1], runner.FIXTURE_COMMAND + "clear-response")
 
     def test_compositor_diagnostics_retain_only_bounded_aggregate_output_context(self):
         monitor = {
@@ -763,10 +920,11 @@ class NativeAuthenticationRunnerTests(unittest.TestCase):
             for index, command in enumerate(guest.commands)
             if index > 0 and command == runner.ASSISTIVE_COMMAND + "locked"
         ][1:]  # The initial locked presentation is independently checked too.
-        self.assertEqual(len(returned_to_lock), 5)
+        self.assertEqual(len(returned_to_lock), 6)
         for command, expected in zip(
             returned_to_lock,
             (
+                "/usr/bin/hyprctl -i 0 -j monitors all",
                 "unlock-session s17-native-account-locked-",
                 "configure-protective-lock enable ",
                 "configure-protective-lock revoke ",
@@ -816,6 +974,14 @@ class NativeAuthenticationRunnerTests(unittest.TestCase):
             },
         )
         self.assertEqual(set(report["assistive_probes"]), {"locked", "unlock-prompt"})
+        self.assertEqual(
+            report["compositor_output_context"]["during-hotplug"]["count"], 2
+        )
+        self.assertEqual(
+            report["compositor_output_context"]["after-hotplug"],
+            report["compositor_output_context"]["after-recovery"],
+        )
+        self.assertIsNone(guest.output_name)
         runner.require_same_retained_effect(
             report["receipts"]["lock"], report["receipts"]["lock-recovery"]
         )

@@ -976,6 +976,70 @@ def compositor_failure_monitors(wire: bytes) -> dict[str, int]:
     }
 
 
+def corroborate_locked_output_inventory(guest: Guest, resource: str) -> dict[str, int]:
+    """Read-only compositor context; never evidence of secure lock coverage."""
+    lock_resource(resource)
+    # Native lock receipts and protected owner prove security. Hyprctl's first
+    # discovered instance is only a bounded corroborating observation and must
+    # never be treated as the attested original Wayland connection.
+    uid = resource.split(":")[3]
+    command = (
+        "sudo -n /usr/bin/timeout --kill-after=1 2 "
+        "/usr/bin/runuser -u linura -- /usr/bin/env "
+        f"XDG_RUNTIME_DIR=/run/user/{uid} "
+        "/usr/bin/hyprctl -i 0 -j monitors all"
+    )
+    counts = compositor_failure_monitors(guest.run(command))
+    if counts["enabled_count"] == 0 or counts["powered_count"] == 0:
+        raise RuntimeError("native compositor has no usable observed output")
+    return counts
+
+
+def exercise_locked_headless_hotplug(
+    guest: Guest, resource: str, suffix: str, baseline: dict[str, int]
+) -> dict[str, dict[str, int]]:
+    """Native VM topology exercise; not independent lock-coverage proof."""
+    lock_resource(resource)
+    if re.fullmatch(r"[0-9a-f]{16}", suffix) is None or baseline["count"] >= 16:
+        raise RuntimeError("native qualification output identity is unsupported")
+    uid = resource.split(":")[3]
+    prefix = (
+        "sudo -n /usr/bin/timeout --kill-after=1 2 "
+        "/usr/bin/runuser -u linura -- /usr/bin/env "
+        f"XDG_RUNTIME_DIR=/run/user/{uid} /usr/bin/hyprctl -i 0 "
+    )
+    name = "linura-s17-" + suffix
+    during: dict[str, int] | None = None
+    try:
+        # An uncertain create result must still attempt cleanup.
+        if guest.run(prefix + "output create headless " + name).strip() != b"ok":
+            raise RuntimeError("native headless output creation was not acknowledged")
+        for _ in range(5):
+            sample = corroborate_locked_output_inventory(guest, resource)
+            if (
+                sample["count"] == baseline["count"] + 1
+                and sample["enabled_count"] == baseline["enabled_count"] + 1
+                and sample["powered_count"] == baseline["powered_count"] + 1
+                and sample["zero_mode_count"] == baseline["zero_mode_count"]
+            ):
+                during = sample
+                break
+            time.sleep(0.1)
+        if during is None:
+            raise RuntimeError("native headless output did not become usable")
+        # First-party metadata must still be present. It is not secure coverage.
+        validate_assistive_report(
+            guest.run(ASSISTIVE_COMMAND + "locked"), resource, "locked"
+        )
+    finally:
+        if guest.run(prefix + "output remove " + name).strip() != b"ok":
+            raise RuntimeError("native headless output cleanup was not acknowledged")
+    restored = corroborate_locked_output_inventory(guest, resource)
+    if restored != baseline:
+        raise RuntimeError("native compositor output topology was not restored")
+    return {"during-hotplug": during, "after-hotplug": restored}
+
+
 COMPOSITOR_FAILURE_MARKERS = (
     ("lock-request", "New sessionLock with id "),
     ("lock-admitted", "Session got locked by "),
@@ -1123,6 +1187,7 @@ def qualify(
     checks: dict[str, bool] = {}
     receipts: dict[str, dict[str, str]] = {}
     assistive: dict[str, dict[str, object]] = {}
+    output_context: dict[str, dict[str, int]] = {}
 
     def require_locked_presentation() -> None:
         # A retired consent prompt or elapsed denial must leave native retry
@@ -1142,6 +1207,9 @@ def qualify(
         )
         receipts["lock"] = validate_lock_receipt(receipt, locked, resource, True, False)
         checks["real-hardware-confirmed-managed-lock"] = True
+        output_context["after-lock"] = corroborate_locked_output_inventory(
+            guest, resource
+        )
         assistive["locked"] = validate_assistive_report(
             guest.run(ASSISTIVE_COMMAND + "locked"), resource, "locked"
         )
@@ -1155,6 +1223,20 @@ def qualify(
         )
         require_same_retained_effect(receipts["lock"], receipts["lock-recovery"])
         checks["control-restart-observe-only-lock-recovery"] = True
+        output_context["after-recovery"] = corroborate_locked_output_inventory(
+            guest, resource
+        )
+        if output_context["after-recovery"] != output_context["after-lock"]:
+            raise RuntimeError(
+                "native compositor output context changed during retained lock"
+            )
+        checks["locked-compositor-output-context-corroborated"] = True
+        output_context.update(
+            exercise_locked_headless_hotplug(
+                guest, resource, suffix, output_context["after-recovery"]
+            )
+        )
+        checks["headless-output-hotplug-observed-under-retained-lock"] = True
         # Exercise account denial before consent's successful PAM conversation.
         # Three consecutive negative cases can legitimately trigger the distro's
         # failure lockout. Only real subsequent authentication may clear its tally;
@@ -1287,6 +1369,7 @@ def qualify(
         "lock_resource": resource,
         "receipts": receipts,
         "assistive_probes": assistive,
+        "compositor_output_context": output_context,
         "s17_complete": False,
         "release_support_promotion": False,
         "power_hotplug_compositor_and_accessibility_qualified": False,
