@@ -186,6 +186,17 @@ envelopes are reviewed again at the current time after sampling. The existing
 observation bounds remain unchanged, and required coverage errors remain failures.
 Ordinary pre-dispatch safety review still requires its own fresh secure coverage.
 
+The Linux transition adapter can also discard one mixed suspend sample when its
+counter moves from the exact retained baseline to baseline+1 during the read.
+Both debug-mode reads must be `none`, the original epoch must remain present,
+and the final boot, root-attested logind owner and original two-second deadline
+must all validate first. This internal `None` result contains no envelope,
+sequence, timestamp or completion evidence. Only post-dispatch verification may
+await a fresh sample within Control's existing settle bound. The ordinary
+`Observer` query/planning contract still rejects the mixed sample. Transport
+errors, extra cycles, malformed facts and identity or clock changes remain hard
+failures; no failure-string matching authorizes a retry.
+
 ## Coherent-change requirement
 
 The private `SleepGate1` wire shape remains unchanged. Its fixed helper now

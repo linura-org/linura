@@ -311,7 +311,7 @@ int main(int argc, char **argv)
                             stdout) == static_cast<std::size_t>(output.size()));
         return 0;
     } catch (NativeAssistiveCallFailure callFailure) {
-        failure = static_cast<int>(callFailure);
+        failure = nativeAssistiveFailureExitCode(callFailure, failure);
     } catch (...) {
     }
     std::fputs("native assistive qualification failed; no positive evidence\n", stderr);

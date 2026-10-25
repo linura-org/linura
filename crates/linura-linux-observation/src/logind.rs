@@ -360,73 +360,172 @@ impl LogindSessionObserver {
         Ok(self.snapshot(owner, path.as_str(), current.clone())?.epoch == *expected)
     }
 
-    fn observe_transition(
+    /// One bounded transition sample. `None` means only that the exact expected
+    /// native suspend cycle crossed this sample; it supplies no authoritative
+    /// facts or completion evidence. Control may independently sample again
+    /// within its existing verification budget. All other failures remain errors.
+    pub fn observe_transition_if_settled(
         &self,
         resource: &ResourceId,
         capability: &CapabilityId,
-    ) -> Result<ObservationEnvelope, ProviderError> {
+    ) -> Result<Option<ObservationEnvelope>, ProviderError> {
+        if capability.as_str() != LOGIND_TRANSITION_CAPABILITY {
+            return Err(ProviderError::Unsupported(
+                "native transition observation capability is not supported".into(),
+            ));
+        }
         let transition = SessionTransitionId::from_resource(resource).map_err(|_| {
             ProviderError::Unsupported("native transition identity is not canonical".into())
         })?;
-        let observed_at_unix_ms = now_unix_ms()?;
-        let boot = current_boot()?;
-        let owner = self.trusted_owner()?;
-        require_probe_deadline(observed_at_unix_ms)?;
-        let epoch = transition.lock().epoch();
-        let present = self.epoch_present(&owner, epoch, &boot)?;
-        require_probe_deadline(observed_at_unix_ms)?;
-        let mut attributes = BTreeMap::from([
-            (
-                "current_boot_id".into(),
-                ObservedValue::Text(boot.as_str().into()),
-            ),
-            ("target_epoch_present".into(), ObservedValue::Bool(present)),
-        ]);
-        if matches!(transition.transition(), SessionTransition::Suspend { .. })
-            && epoch.boot() == &boot
-        {
-            // Linux's native completed suspend counter, not a later awake
-            // snapshot or PrepareForSleep(false). Debug dry-run modes must not
-            // turn a test cycle into retained production completion evidence.
-            let before = suspend_success_count()?;
-            let test = suspend_test_mode()?;
-            require_probe_deadline(observed_at_unix_ms)?;
-            let properties = self.properties(&owner, MANAGER_PATH, MANAGER_INTERFACE)?;
-            attributes.insert(
-                "preparing_for_sleep".into(),
-                ObservedValue::Bool(snapshot_property(&properties, "PreparingForSleep")?),
-            );
-            if before != suspend_success_count()? || test != suspend_test_mode()? {
-                return Err(ProviderError::InvalidState(
-                    "native suspend state changed during observation".into(),
-                ));
-            }
-            attributes.insert(
-                "successful_suspend_cycles".into(),
-                ObservedValue::U64(before),
-            );
-            attributes.insert("suspend_test_mode".into(), ObservedValue::Text(test));
-        }
-        require_probe_deadline(observed_at_unix_ms)?;
-        if present != self.epoch_present(&owner, epoch, &boot)? {
-            return Err(ProviderError::InvalidState(
-                "native transition epoch changed during observation".into(),
-            ));
-        }
-        require_same_boot(&boot, &current_boot()?)?;
-        self.require_same_owner(&owner)?;
-        require_probe_deadline(observed_at_unix_ms)?;
-        Ok(ObservationEnvelope {
+        let Some(sample) = sample_transition(&mut LogindTransitionProbe(self), &transition)? else {
+            return Ok(None);
+        };
+        Ok(Some(ObservationEnvelope {
             provider: self.observer_id(),
             resource: resource.clone(),
             capability: capability.clone(),
             authority: ObservationAuthority::NativeApi,
-            observed_at_unix_ms,
+            observed_at_unix_ms: sample.observed_at_unix_ms,
             valid_for_ms: VALID_FOR_MS,
             sequence: next_sequence(&self.sequence)?,
-            attributes,
-        })
+            attributes: sample.attributes,
+        }))
     }
+}
+
+// Private native mechanisms make the complete one-sample ordering testable.
+// This interface carries no scheduling, retry policy or observation authority.
+trait TransitionProbe {
+    fn now_unix_ms(&mut self) -> Result<u64, ProviderError>;
+    fn current_boot(&mut self) -> Result<BootId, ProviderError>;
+    fn trusted_owner(&mut self) -> Result<String, ProviderError>;
+    fn epoch_present(
+        &mut self,
+        owner: &str,
+        expected: &SessionEpoch,
+        current: &BootId,
+    ) -> Result<bool, ProviderError>;
+    fn suspend_success_count(&mut self) -> Result<u64, ProviderError>;
+    fn suspend_test_mode(&mut self) -> Result<String, ProviderError>;
+    fn preparing_for_sleep(&mut self, owner: &str) -> Result<bool, ProviderError>;
+    fn require_same_owner(&mut self, expected: &str) -> Result<(), ProviderError>;
+}
+
+struct LogindTransitionProbe<'a>(&'a LogindSessionObserver);
+
+impl TransitionProbe for LogindTransitionProbe<'_> {
+    fn now_unix_ms(&mut self) -> Result<u64, ProviderError> {
+        now_unix_ms()
+    }
+    fn current_boot(&mut self) -> Result<BootId, ProviderError> {
+        current_boot()
+    }
+    fn trusted_owner(&mut self) -> Result<String, ProviderError> {
+        self.0.trusted_owner()
+    }
+    fn epoch_present(
+        &mut self,
+        owner: &str,
+        expected: &SessionEpoch,
+        current: &BootId,
+    ) -> Result<bool, ProviderError> {
+        self.0.epoch_present(owner, expected, current)
+    }
+    fn suspend_success_count(&mut self) -> Result<u64, ProviderError> {
+        suspend_success_count()
+    }
+    fn suspend_test_mode(&mut self) -> Result<String, ProviderError> {
+        suspend_test_mode()
+    }
+    fn preparing_for_sleep(&mut self, owner: &str) -> Result<bool, ProviderError> {
+        let properties = self.0.properties(owner, MANAGER_PATH, MANAGER_INTERFACE)?;
+        snapshot_property(&properties, "PreparingForSleep")
+    }
+    fn require_same_owner(&mut self, expected: &str) -> Result<(), ProviderError> {
+        self.0.require_same_owner(expected)
+    }
+}
+
+struct TransitionSample {
+    observed_at_unix_ms: u64,
+    attributes: BTreeMap<String, ObservedValue>,
+}
+
+fn sample_transition(
+    probe: &mut impl TransitionProbe,
+    transition: &SessionTransitionId,
+) -> Result<Option<TransitionSample>, ProviderError> {
+    let observed_at_unix_ms = probe.now_unix_ms()?;
+    let boot = probe.current_boot()?;
+    let owner = probe.trusted_owner()?;
+    require_probe_deadline_at(observed_at_unix_ms, probe.now_unix_ms()?)?;
+    let epoch = transition.lock().epoch();
+    let present = probe.epoch_present(&owner, epoch, &boot)?;
+    require_probe_deadline_at(observed_at_unix_ms, probe.now_unix_ms()?)?;
+    let mut attributes = BTreeMap::from([
+        (
+            "current_boot_id".into(),
+            ObservedValue::Text(boot.as_str().into()),
+        ),
+        ("target_epoch_present".into(), ObservedValue::Bool(present)),
+    ]);
+    let mut pending_cycle = false;
+    if let SessionTransition::Suspend {
+        successful_cycles_before,
+    } = transition.transition()
+        && epoch.boot() == &boot
+    {
+        // Linux's completed counter and disabled debug mode, never an awake
+        // hint. Read both test-mode samples even when the counter has changed.
+        let before = probe.suspend_success_count()?;
+        let test_before = probe.suspend_test_mode()?;
+        require_probe_deadline_at(observed_at_unix_ms, probe.now_unix_ms()?)?;
+        let preparing = probe.preparing_for_sleep(&owner)?;
+        let after = probe.suspend_success_count()?;
+        let test_after = probe.suspend_test_mode()?;
+        if test_before != "none" || test_after != "none" {
+            return Err(ProviderError::Unsupported(
+                "native suspend debug mode is unknown or enabled".into(),
+            ));
+        }
+        if before != after {
+            if !present
+                || before != successful_cycles_before
+                || successful_cycles_before.checked_add(1) != Some(after)
+            {
+                return Err(unsettled_transition_error());
+            }
+            pending_cycle = true;
+        }
+        attributes.insert("preparing_for_sleep".into(), ObservedValue::Bool(preparing));
+        attributes.insert(
+            "successful_suspend_cycles".into(),
+            ObservedValue::U64(before),
+        );
+        attributes.insert("suspend_test_mode".into(), ObservedValue::Text(test_before));
+    }
+    require_probe_deadline_at(observed_at_unix_ms, probe.now_unix_ms()?)?;
+    if present != probe.epoch_present(&owner, epoch, &boot)? {
+        return Err(ProviderError::InvalidState(
+            "native transition epoch changed during observation".into(),
+        ));
+    }
+    require_same_boot(&boot, &probe.current_boot()?)?;
+    probe.require_same_owner(&owner)?;
+    require_probe_deadline_at(observed_at_unix_ms, probe.now_unix_ms()?)?;
+    if pending_cycle {
+        // Discard the entire mixed sample only after identity and its original
+        // deadline are revalidated. It never acquires a sequence or freshness.
+        return Ok(None);
+    }
+    Ok(Some(TransitionSample {
+        observed_at_unix_ms,
+        attributes,
+    }))
+}
+
+fn unsettled_transition_error() -> ProviderError {
+    ProviderError::InvalidState("native suspend state changed during observation".into())
 }
 
 fn require_power_query_identity(
@@ -559,7 +658,11 @@ impl Observer for LogindSessionObserver {
             ));
         }
         if capability.as_str() == LOGIND_TRANSITION_CAPABILITY {
-            return self.observe_transition(resource, capability);
+            // Planning/query callers still require one complete authoritative
+            // envelope. Only the native post-dispatch verifier consumes None.
+            return self
+                .observe_transition_if_settled(resource, capability)?
+                .ok_or_else(unsettled_transition_error);
         }
         let expected = SessionEpoch::from_resource(resource).map_err(invalid_epoch)?;
         let observed_at_unix_ms = now_unix_ms()?;
@@ -635,7 +738,11 @@ fn bounded_manager_reply(proxy: &Proxy<'_>, method: &str) -> Result<zbus::Messag
 }
 
 fn require_probe_deadline(observed_at: u64) -> Result<(), ProviderError> {
-    if now_unix_ms()?
+    require_probe_deadline_at(observed_at, now_unix_ms()?)
+}
+
+fn require_probe_deadline_at(observed_at: u64, now: u64) -> Result<(), ProviderError> {
+    if now
         .checked_sub(observed_at)
         .is_none_or(|elapsed| elapsed >= VALID_FOR_MS)
     {
@@ -1010,6 +1117,294 @@ fn bus_error(_error: zbus::Error) -> ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+
+    #[derive(Clone)]
+    enum ProbeValue {
+        Number(u64),
+        Boot(BootId),
+        Owner(String),
+        Present(bool),
+        Mode(String),
+        Preparing(bool),
+        OwnerChecked,
+    }
+
+    struct ScriptedTransitionProbe {
+        steps: VecDeque<(&'static str, Result<ProbeValue, ProviderError>)>,
+        visited: Vec<&'static str>,
+    }
+
+    impl ScriptedTransitionProbe {
+        fn take(&mut self, operation: &'static str) -> Result<ProbeValue, ProviderError> {
+            self.visited.push(operation);
+            let (expected, result) = self
+                .steps
+                .pop_front()
+                .unwrap_or_else(|| unreachable!("unexpected native probe"));
+            assert_eq!(operation, expected, "native probe ordering changed");
+            result
+        }
+
+        fn replace(
+            &mut self,
+            operation: &str,
+            occurrence: usize,
+            result: Result<ProbeValue, ProviderError>,
+        ) {
+            self.steps
+                .iter_mut()
+                .filter(|(name, _)| *name == operation)
+                .nth(occurrence)
+                .unwrap_or_else(|| unreachable!("native test step exists"))
+                .1 = result;
+        }
+    }
+
+    impl TransitionProbe for ScriptedTransitionProbe {
+        fn now_unix_ms(&mut self) -> Result<u64, ProviderError> {
+            match self.take("clock")? {
+                ProbeValue::Number(value) => Ok(value),
+                _ => unreachable!("clock fixture"),
+            }
+        }
+        fn current_boot(&mut self) -> Result<BootId, ProviderError> {
+            match self.take("boot")? {
+                ProbeValue::Boot(value) => Ok(value),
+                _ => unreachable!("boot fixture"),
+            }
+        }
+        fn trusted_owner(&mut self) -> Result<String, ProviderError> {
+            match self.take("owner")? {
+                ProbeValue::Owner(value) => Ok(value),
+                _ => unreachable!("owner fixture"),
+            }
+        }
+        fn epoch_present(
+            &mut self,
+            owner: &str,
+            expected: &SessionEpoch,
+            current: &BootId,
+        ) -> Result<bool, ProviderError> {
+            assert_eq!(owner, ":1.17");
+            assert_eq!(expected, &epoch(1000, 42));
+            assert_eq!(current.as_str(), BOOT);
+            match self.take("epoch")? {
+                ProbeValue::Present(value) => Ok(value),
+                _ => unreachable!("epoch fixture"),
+            }
+        }
+        fn suspend_success_count(&mut self) -> Result<u64, ProviderError> {
+            match self.take("counter")? {
+                ProbeValue::Number(value) => Ok(value),
+                _ => unreachable!("counter fixture"),
+            }
+        }
+        fn suspend_test_mode(&mut self) -> Result<String, ProviderError> {
+            match self.take("mode")? {
+                ProbeValue::Mode(value) => Ok(value),
+                _ => unreachable!("mode fixture"),
+            }
+        }
+        fn preparing_for_sleep(&mut self, owner: &str) -> Result<bool, ProviderError> {
+            assert_eq!(owner, ":1.17");
+            match self.take("preparing")? {
+                ProbeValue::Preparing(value) => Ok(value),
+                _ => unreachable!("preparing fixture"),
+            }
+        }
+        fn require_same_owner(&mut self, expected: &str) -> Result<(), ProviderError> {
+            assert_eq!(expected, ":1.17");
+            match self.take("owner-check")? {
+                ProbeValue::OwnerChecked => Ok(()),
+                _ => unreachable!("owner revalidation fixture"),
+            }
+        }
+    }
+
+    fn suspend_target(baseline: u64) -> SessionTransitionId {
+        let lock = id(linura_core::SessionLockId::new(
+            epoch(1000, 42),
+            id(linura_core::SecurityOwnerInvocationId::new(
+                "11223344-1234-4567-89ab-0123456789ab",
+            )),
+            7,
+        ));
+        id(SessionTransitionId::new(
+            lock,
+            SessionTransition::Suspend {
+                successful_cycles_before: baseline,
+            },
+        ))
+    }
+
+    fn transition_probe(before: u64, after: u64, preparing: bool) -> ScriptedTransitionProbe {
+        use ProbeValue as V;
+        ScriptedTransitionProbe {
+            steps: VecDeque::from([
+                ("clock", Ok(V::Number(1_000))),
+                ("boot", Ok(V::Boot(id(BootId::new(BOOT))))),
+                ("owner", Ok(V::Owner(":1.17".into()))),
+                ("clock", Ok(V::Number(1_001))),
+                ("epoch", Ok(V::Present(true))),
+                ("clock", Ok(V::Number(1_002))),
+                ("counter", Ok(V::Number(before))),
+                ("mode", Ok(V::Mode("none".into()))),
+                ("clock", Ok(V::Number(1_003))),
+                ("preparing", Ok(V::Preparing(preparing))),
+                ("counter", Ok(V::Number(after))),
+                ("mode", Ok(V::Mode("none".into()))),
+                ("clock", Ok(V::Number(1_004))),
+                ("epoch", Ok(V::Present(true))),
+                ("boot", Ok(V::Boot(id(BootId::new(BOOT))))),
+                ("owner-check", Ok(V::OwnerChecked)),
+                ("clock", Ok(V::Number(1_005))),
+            ]),
+            visited: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn exact_suspend_crossing_discards_all_facts_only_after_final_native_checks() {
+        for baseline in [10, u64::MAX - 1] {
+            for preparing in [false, true] {
+                let mut probe = transition_probe(baseline, baseline + 1, preparing);
+                assert!(id(sample_transition(&mut probe, &suspend_target(baseline))).is_none());
+                assert!(probe.steps.is_empty());
+                assert_eq!(
+                    &probe.visited[probe.visited.len() - 4..],
+                    &["epoch", "boot", "owner-check", "clock"]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn stable_suspend_samples_retain_original_freshness_and_all_native_facts() {
+        for (cycles, preparing) in [(10, false), (10, true), (11, false), (12, false)] {
+            let mut probe = transition_probe(cycles, cycles, preparing);
+            let sample = id(sample_transition(&mut probe, &suspend_target(10)))
+                .unwrap_or_else(|| unreachable!("complete stable native sample"));
+            assert!(probe.steps.is_empty());
+            assert_eq!(sample.observed_at_unix_ms, 1_000);
+            assert_eq!(sample.attributes.len(), 5);
+            assert_eq!(
+                sample.attributes.get("successful_suspend_cycles"),
+                Some(&ObservedValue::U64(cycles))
+            );
+            assert_eq!(
+                sample.attributes.get("preparing_for_sleep"),
+                Some(&ObservedValue::Bool(preparing))
+            );
+            assert_eq!(
+                sample.attributes.get("suspend_test_mode"),
+                Some(&ObservedValue::Text("none".into()))
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_counter_changes_and_overflow_never_become_known_pending() {
+        for (baseline, before, after) in [
+            (10, 10, 12),
+            (10, 11, 12),
+            (10, 11, 10),
+            (10, 9, 10),
+            (u64::MAX - 1, u64::MAX, 0),
+        ] {
+            let mut probe = transition_probe(before, after, false);
+            assert!(matches!(
+                sample_transition(&mut probe, &suspend_target(baseline)),
+                Err(ProviderError::InvalidState(_))
+            ));
+            assert_eq!(probe.visited.last(), Some(&"mode"));
+        }
+    }
+
+    #[test]
+    fn changed_debug_mode_is_read_and_rejected_even_during_exact_counter_crossing() {
+        for index in [0, 1] {
+            let mut probe = transition_probe(10, 11, false);
+            probe.replace("mode", index, Ok(ProbeValue::Mode("freezer".into())));
+            assert!(matches!(
+                sample_transition(&mut probe, &suspend_target(10)),
+                Err(ProviderError::Unsupported(_))
+            ));
+            assert_eq!(
+                probe.visited.iter().filter(|name| **name == "mode").count(),
+                2
+            );
+        }
+    }
+
+    #[test]
+    fn pending_native_sample_cannot_hide_epoch_boot_or_owner_replacement() {
+        for (operation, occurrence, response) in [
+            ("epoch", 0, Ok(ProbeValue::Present(false))),
+            ("epoch", 1, Ok(ProbeValue::Present(false))),
+            (
+                "boot",
+                1,
+                Ok(ProbeValue::Boot(id(BootId::new(
+                    "12345678-1234-4567-89ab-0123456789ab",
+                )))),
+            ),
+            (
+                "owner-check",
+                0,
+                Err(ProviderError::Unavailable("owner changed".into())),
+            ),
+        ] {
+            let mut probe = transition_probe(10, 11, false);
+            probe.replace(operation, occurrence, response);
+            assert!(sample_transition(&mut probe, &suspend_target(10)).is_err());
+        }
+    }
+
+    #[test]
+    fn exact_native_crossing_cannot_extend_probe_deadline_or_recover_transport_errors() {
+        for final_clock in [999, 3_000, u64::MAX] {
+            let mut probe = transition_probe(10, 11, false);
+            probe.replace("clock", 5, Ok(ProbeValue::Number(final_clock)));
+            assert!(matches!(
+                sample_transition(&mut probe, &suspend_target(10)),
+                Err(ProviderError::Unavailable(_))
+            ));
+            assert!(probe.steps.is_empty());
+        }
+        for (operation, occurrence) in [
+            ("owner", 0),
+            ("epoch", 0),
+            ("counter", 0),
+            ("mode", 0),
+            ("preparing", 0),
+            ("counter", 1),
+            ("mode", 1),
+            ("epoch", 1),
+            ("boot", 1),
+            ("owner-check", 0),
+            ("clock", 5),
+        ] {
+            let mut probe = transition_probe(10, 11, false);
+            let failure = ProviderError::Unavailable("native fixture timeout".into());
+            probe.replace(operation, occurrence, Err(failure.clone()));
+            assert!(matches!(
+                sample_transition(&mut probe, &suspend_target(10)),
+                Err(error) if error == failure
+            ));
+            assert_eq!(probe.visited.last(), Some(&operation));
+        }
+        let mut malformed = transition_probe(10, 11, false);
+        malformed.replace(
+            "preparing",
+            0,
+            Err(ProviderError::InvalidState("malformed native bool".into())),
+        );
+        assert!(matches!(
+            sample_transition(&mut malformed, &suspend_target(10)),
+            Err(ProviderError::InvalidState(_))
+        ));
+    }
 
     #[test]
     fn suspend_counter_cannot_accept_awake_hints_aliases_or_overflow() {
