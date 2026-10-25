@@ -26,6 +26,102 @@ RUNNER_ENV = {
 
 
 class QualificationEvidenceTests(unittest.TestCase):
+    def test_machine_environment_keeps_kvm_admission_explicit_and_acceleration_bound(
+        self,
+    ):
+        primary = {"base_image": {"sha256": "a" * 64}}
+        subject = {
+            "kind": "virtual-machine",
+            "architecture": "x86_64",
+            "virtualization": "qemu",
+            "acceleration": "tcg",
+            "distribution_id": "ubuntu",
+            "distribution_version": "24.04",
+            "package_manifest_sha256": "b" * 64,
+            "image_digests": {"base_image_sha256": "a" * 64},
+        }
+        envelope = {"execution_subject": subject}
+        self.assertTrue(
+            semantic_verifier._machine_environment_verified(primary, envelope)
+        )
+        for virtualization, acceleration in (
+            ("kvm", "kvm"),
+            ("qemu", "kvm"),
+            ("kvm", "tcg"),
+            ("none", "kvm"),
+            ("vmware", "kvm"),
+            ("kvm", None),
+        ):
+            candidate = {
+                "execution_subject": subject
+                | {"virtualization": virtualization, "acceleration": acceleration}
+            }
+            with self.subTest(virtualization=virtualization, acceleration=acceleration):
+                self.assertFalse(
+                    semantic_verifier._machine_environment_verified(primary, candidate)
+                )
+                self.assertEqual(
+                    semantic_verifier._machine_environment_verified(
+                        primary, candidate, virtualization="kvm", acceleration="kvm"
+                    ),
+                    virtualization == "kvm" and acceleration == "kvm",
+                )
+        with self.assertRaisesRegex(semantic_verifier.VerificationError, "base image"):
+            semantic_verifier._machine_environment_verified(
+                {"base_image": {"sha256": "c" * 64}}, envelope
+            )
+
+    def test_v010_producer_acceleration_cannot_disagree_with_qualified_guest(self):
+        primary = {
+            "repository": "linura-org/linura",
+            "source_sha": "a" * 40,
+            "schema_version": 1,
+            "result": "passed",
+            "claim": "development-runtime-evidence-only",
+            "target_profile": "arch-hyprland-v1",
+            "base_image": {"sha256": "b" * 64},
+        }
+        for field, path in (
+            ("runtime_contract", "contracts/v010-shell-runtime-qualification.toml"),
+            ("substrate_contract", "contracts/v010-shell-runtime-substrate.toml"),
+            (
+                "workstation_acceptance_contract",
+                "contracts/v010-workstation-acceptance.toml",
+            ),
+        ):
+            primary[field] = {
+                "path": path,
+                "sha256": hashlib.sha256((ROOT / path).read_bytes()).hexdigest(),
+            }
+        subject = {
+            "kind": "virtual-machine",
+            "architecture": "x86_64",
+            "virtualization": "kvm",
+            "acceleration": "kvm",
+            "distribution_id": "arch",
+            "distribution_version": "rolling",
+            "image_digests": {"base_image_sha256": "b" * 64},
+        }
+        envelope = {
+            "source": {"commit_sha": "a" * 40},
+            "execution_subject": subject,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            for producer, observed in ((None, "kvm"), ("tcg", "kvm"), ("kvm", "tcg")):
+                candidate = primary | {"virtualization": {"acceleration": producer}}
+                context = envelope | {
+                    "execution_subject": subject | {"acceleration": observed}
+                }
+                with (
+                    self.subTest(producer=producer, observed=observed),
+                    self.assertRaisesRegex(
+                        semantic_verifier.VerificationError, "acceleration"
+                    ),
+                ):
+                    semantic_verifier._verify_v010(
+                        ROOT, Path(directory), candidate, context
+                    )
+
     def _v07_bundle(self, directory: Path):
         directory.mkdir(parents=True, exist_ok=True)
         source_sha = subprocess.check_output(

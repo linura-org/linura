@@ -8,9 +8,27 @@ bool exactNativeLaunch(const NativeLaunchFacts &facts, const QString &image,
                        const QStringList &arguments, quint32 expectedPid)
 {
     if (image.isEmpty() || image.size() > 128 || !image.startsWith(QLatin1Char('/')) ||
-        arguments.isEmpty() || arguments.size() > 2 || arguments.first() != image ||
+        arguments.isEmpty() || arguments.size() > 3 || arguments.first() != image ||
         expectedPid == 0 || facts.image != image || facts.arguments != arguments)
         return false;
+    // This is an exact, audited launch profile, not permission for arbitrary
+    // three-argument programs. The pinned Arch polkit 127 daemon uses both
+    // fixed flags; every other native supervised program has no arguments.
+    if (image == QLatin1String("/usr/lib/polkit-1/polkitd")) {
+        QStringList expected{image};
+        expected.append(QStringLiteral("--no-debug"));
+        expected.append(QStringLiteral("--log-level=notice"));
+        if (arguments != expected)
+            return false;
+    } else if (image == QLatin1String("/usr/lib/linura/linura-executor-session") &&
+               arguments.size() == 2) {
+        // The suspend pre-exec hook is a separate, exact, non-Polkit
+        // privileged helper profile, never a generic two-argument allowance.
+        if (arguments.last() != QLatin1String("--protect-before-sleep"))
+            return false;
+    } else if (arguments.size() != 1) {
+        return false;
+    }
     for (const auto &word : arguments) {
         if (word.isEmpty() || word.size() > 128 || word.contains(QChar::Null))
             return false;
@@ -37,7 +55,7 @@ std::optional<NativeLaunchFacts> decodeNativeSingleLaunch(const QVariant &reply)
         return std::nullopt;
     value.beginArray();
     while (!value.atEnd()) {
-        if (facts.arguments.size() == 2)
+        if (facts.arguments.size() == 3)
             return std::nullopt;
         QString word;
         value >> word;

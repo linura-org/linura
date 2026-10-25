@@ -71,16 +71,20 @@ Admission is not authority: each method independently reattests the actual
 sender as the fixed supervised Control or session executor process. The policy
 is installed at `/usr/share/dbus-1/system.d/org.linura.SecurityOwner1.conf`;
 the interface XML alone does not authorize calls. CI checks this deployment
-contract and rejects missing or broadened policy, but real deployed bus routing
-and systemd/PAM interaction still require the #241 workstation gates.
+contract and rejects missing or broadened policy. The scoped real
+systemd/PAM/Polkit native cases passed in [PR #241's Level A run](https://github.com/linura-org/linura/actions/runs/40141305916);
+complete S17 and physical workstation qualification remain separate.
 
 Deployment assets stage fixed root-supervised systemd service/path units,
 an immutable D-Bus contract, fixed font configuration and an Arch package hook
 for post-install capability establishment. CMake never grants a file capability
-to a development build. This slice is component-level composition and contract
-evidence only; real session, PAM, systemd, power, accessibility and physical
-workstation qualification remain in #241. The merged Unicode Compose, native
-keyboard actionability and exact-owner authentication semantics remain required.
+to a development build. Component-level composition and contract checks are supplemented by retained
+Level A native evidence on implementation SHA
+`a99511d5bd22afa5dcf7878a3fb9e0feca74c87f` for the declared real
+session/PAM/systemd/power and bounded assistive-probe cases. Full accessibility,
+additional native scenarios, complete S17 and physical Q11 are not qualified.
+The merged Unicode Compose, native keyboard actionability and exact-owner
+authentication semantics remain required.
 
 Component validation:
 

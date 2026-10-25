@@ -87,7 +87,7 @@ The Authority1 runtime and the Control1 client surface share inward domain/contr
 
 ## Experience/intelligence topology and current maturity
 
-### S17 native session adapter boundary (unqualified development)
+### S17 native session adapter boundary (implemented; Level A native-qualified)
 
 `linura-linux-session` is the concrete shared native-owner adapter for the
 trusted authority and narrow session-executor composition roots. It owns
@@ -95,7 +95,12 @@ bounded system-bus mechanisms and supervised invocation attestation; canonical
 planning, policy, approved-request retention and recovery stay in Control.
 It cannot be imported by the public SDK, agent, UI or semantic domain crates.
 The dependency allowlist and adversarial alias/target/workspace tests enforce
-that boundary. Component tests do not activate or qualify S17 native behavior.
+that boundary. Component tests alone cannot qualify S17 native behavior. The
+[exact-source Level A native run](https://github.com/linura-org/linura/actions/runs/40141305916)
+on implementation SHA `a99511d5bd22afa5dcf7878a3fb9e0feca74c87f`
+exercised scoped native authentication, suspend and terminating transitions,
+including retained recovery. Complete S17 acceptance, interactive/physical
+Q11 evidence and release support remain separate requirements.
 
 The native locker registers a process-scoped official Polkit agent for the
 actual compositor peer / graphical-session leader, not the general desktop

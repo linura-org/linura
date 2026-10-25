@@ -18,17 +18,14 @@ active-state effect nor the transient audio effect qualifies these new domains.
 
 ## Proposed decision
 
-**Implementation and acceptance status in this identity-only change:** Only
-canonical identity types, their bounded constructors/parsers, and focused Rust
-unit tests are included here. Control policy, approval, persistence, native
-helper attestation, Linux observation/execution, security-owner runtime,
-authentication, presentation, deployment and qualification described below
-are **proposed requirements, not implemented or qualified by this change**.
-Present-tense descriptions specify the intended complete architecture; they
-do not establish that the named services, methods, tests, migrations, or
-native evidence exist at this stage. They require their own implementation,
-review, independent verification and qualification. The S17 ledger remains
-`planned` and this ADR remains Proposed.
+**Implementation and acceptance status:** This ADR was introduced with an
+identity-only slice. Subsequent staged S17 PRs implemented the Control, native
+security-owner, authentication, deployment and managed power boundaries.
+The [v0.10 exact-source native run](https://github.com/linura-org/linura/actions/runs/40141305916) passed the automated Level A native cases on
+implementation commit `a99511d5bd22afa5dcf7878a3fb9e0feca74c87f`.
+Present-tense design requirements are not proof of untested failure modes,
+interactive/physical qualification or release support. The S17 ledger remains
+`planned` and this ADR remains Proposed pending complete slice acceptance.
 
 Keep S17 as **one complete authority path and one acceptance boundary**.
 Implementation may be separated along these dependencies without splitting trust
@@ -159,7 +156,9 @@ ambiguous identity selection fails closed. Transition authentication requires
 already-proven secure compositor coverage and never releases that lock.
 Control preserves `Administrator` versus `DestructiveAction` requirements when
 mapping a sealed challenge; neither a positive permission query nor PAM success
-is a prepared executor credential. Native real-session qualification is pending.
+is a prepared executor credential. Recorded Level A native real-session
+qualification now covers those authentication and transition routes; complete
+S17 acceptance remains pending.
 
 The scoped `policy:session-lock:v1` rule keeps `SecuritySensitive` risk intact.
 An exact own-session lock requires an explicit interactive request; an exact
@@ -208,6 +207,15 @@ of authority. Fresh locker facts cannot extend an older session precondition.
 Native transport/process attestation and fresh privilege-
 boundary validation remain requirements of the production adapters.
 
+The compound private `ObserveLock` RPC, like approval arm/consume, may consume
+only the remainder of its original two-second probe after owner discovery.
+It includes fresh peer/session attestation and an independent compositor sample,
+so the 500 ms primitive-call cap is not a separate compound deadline. Initial
+discovery, reply completion and post-reply identity/boot revalidation share the
+same original clock. Primitive calls retain their 500 ms cap, native sample
+freshness and acquisition/release watchdogs remain unchanged, and neither a late
+reply nor a typed pending transition creates an authoritative observation.
+
 Native startup binds the owned actual Wayland connection's kernel peer, rather than
 checking one socket and subsequently trusting a separate pathname connection.
 The currently proposed qualification requires that peer to be the authoritative
@@ -251,6 +259,39 @@ lid-close cause. Root UID, service Actor metadata, caller-supplied event IDs or
 `PrepareForSleep` signals alone cannot authenticate the gate. The adapter checks
 the actual supervisor's unique root connection, live pre-start helper PID,
 invocation, immutable image/configuration, exact arguments and process generation.
+The fixed helper declines root before creating a bus connection: one same-PID,
+same-argument self-exec enters the descriptor-validated `linura-authority` UID
+and primary GID with an empty environment/groups, no inherited/permitted/effective/
+ambient capabilities, no saved root IDs and `no_new_privs`. Control can therefore
+inspect the live root-owned image without gaining process-inspection privilege.
+The exact native unit remains root-supervised and its main sleep operation keeps
+its existing privilege. The private bus route admits the helper's fixed service
+identity, then all native invocation/image/phase checks remain mandatory. Neither
+that UID nor a root caller can substitute for those checks.
+The native owner's unit probe addresses every request to the root-attested
+unique supervisor on the fixed trusted system bus, whose requested-reply routing
+binds the response to that request. Newer Qt intentionally hides `service()` on
+replies/errors; older Qt exposes the sender, which must still match the pinned
+peer. An empty accessor is neither identity evidence nor a substitution.
+Two matching fresh unit snapshots and final owner revalidation remain required.
+Only two exact native `NoSuchUnit` errors with an unchanged owner establish
+absence; local/broker errors, denial, timeout, malformed data and replacement
+remain failures under the original shared probe deadline.
+Peer, session and sleep-unit inspection queue bounded batches of fixed
+`Properties.Get` requests before waiting, preserving the original per-call and
+aggregate deadlines. Each complete initial/revalidation batch is a fresh native
+read; no partial map, `GetAll`, cache or timeout creates evidence. Exact field,
+launch, immutable-asset and identity comparisons and final owner revalidation
+remain mandatory. This removes redundant round-trip latency in the native
+owner's event loop without adding an authority path or widening a deadline.
+Bounded metadata reads must also service already queued replies on the owned,
+attested Wayland connection. The factory binds that progress hook only after
+native initialization. It never runs a Qt event loop or dispatches a new effect;
+recursive native callbacks/painting skip another pump. Its time consumes the
+original probe clock, while every initial/final identity, scope, compositor,
+field and deadline check remains mandatory. This keeps an admitted acquisition
+from timing out solely because peer inspection starved its acknowledgement.
+The five-second acquisition watchdog and fail-closed no-cleanup exit remain.
 No generic privileged command or client-selected native operation is introduced.
 Unsupported hibernation/direct-entry paths require explicit native coverage or
 denial; no universal guarantee is made against compromised root/kernel bypasses.
@@ -352,16 +393,19 @@ distinct owner-authenticated setting purpose. Client tracking atomically retains
 the setting request, exact confirmed lock and decision before that write; it
 never becomes authority. On reload or uncertain response, consent recovery is
 history lookup only, never a repeated write, resumed chain or substituted login.
-Superseded history stays historical. Native consent interaction qualification is
-still required; no model, shell password control or direct executor is introduced.
+Superseded history stays historical. Recorded Level A native consent interaction now has execution evidence;
+remaining qualification is required for complete S17. No model, shell password
+control or direct executor is introduced.
 
 The proposed production image must stage the fixed suspend drop-in and disable
 unqualified hibernate, hybrid-sleep and suspend-then-hibernate modes. It does not
 change the development host or builders. This covers the declared native service
 route, not root/kernel/direct sysfs bypasses or administrator configuration changes.
-Deployment, positive PAM/power/lock recovery, accessibility and adversarial native
-qualification remain pending on the pinned Arch/Hyprland substrate. Component
-passes and installed assets alone cannot promote S17 from `planned`.
+Recorded Level A native results include deployment/bootstrap, actual PAM
+interaction, managed suspend/power and lock recovery on pinned Arch/Hyprland.
+Multi-output, compositor failure, broader accessibility, adversarial scenarios
+and physical Q11 remain outside that proof. Component passes and installed
+assets alone cannot promote S17 from `planned`.
 
 ### Managed effects and recovery
 
@@ -514,7 +558,8 @@ two exact pinned launch commands are checked. The ordinary launcher still
 defaults to snapshots. Runtime evidence retains its original boot identity;
 partial terminating reports bind their distinct original/observed boots and
 exact request/transaction/effect. Queue/host/QMP acknowledgements are not product
-completion; recovery remains observe-only. These cases are not yet executed.
+completion; recovery remains observe-only. The recorded Level A native run
+exercised these cases; it does not qualify physical Q11 or complete S17.
 
 Deterministic session recovery requires original-request lookup and explicit
 native-console break-glass boundaries; its operational guide is supplied with
@@ -536,10 +581,13 @@ shell restart, lock hint or historical consent is not a recovery credential.
   commit; full exact-head gates; then Codex review and genuinely new fixes;
   merge only when the complete slice is green.
 
-## Integrated authority design (not yet implemented or qualified here)
+## Integrated authority design and bounded native evidence
 
-This describes the required final composition; none of the following services,
-effects or deployment claims is delivered by this identity-only change.
+This section began as the intended composition for the earlier identity-only
+slice. Subsequent S17 PRs implemented the relevant integration, and the
+recorded Level A native lane exercised authentication, suspend and terminating
+transitions with retained recovery. The design still requires separate evidence
+for unqualified cases; this run does not complete S17 or promote release support.
 
 The integrated S17 design composes managed lock/unlock through public `Authority1`, typed
 SDK/CLI clients, unprivileged Control, the durable approved-request journal,
@@ -550,6 +598,43 @@ explicit recovery replay an indeterminate S17 effect. Restart recovery joins the
 authenticated retained request to its transaction and uses independent native
 postconditions. Durable release acknowledgement is separately idempotent.
 
+Owner discovery uses at most two complete native connection snapshots inside
+the same original two-second probe and aggregate 256-name budget. An exact typed
+missing-peer reply invalidates the entire snapshot, including any candidate
+already seen; it does not justify skipping an unknown row. One fresh snapshot
+may complete only while the original supervised UID, PID and invocation remain
+unchanged and final attestation succeeds. A separate GLib connection is excluded
+only by typed endpoint absence or valid introspection without the private
+interface. Denial, timeout, malformed/oversized replies, ambiguity, replacement
+and persistent churn fail closed. This narrow native consistency acquisition
+neither implements global retry policy nor emits partial/cached authoritative
+facts. No mutation or human approval is repeated.
+
+An independently verified native unlock advances Releasing to Released only once.
+Reconciliation and restart recovery may inspect that exact retained Released
+generation read-only, rechecking the attested Control caller, independent unlocked
+compositor, clear coverage and sleep fence. Ready/unlocked without the retained
+Released state is not proof; neither inspection nor repeated verification rotates
+the generation. Only the separately acknowledged durable commit rotates it.
+
+Fresh native lock observation may encounter a consistent Acquiring/Releasing
+mechanism before its asynchronous acknowledgement. The owner drains available
+Wayland events without a nested Qt event loop or retry, then compares the mechanism
+with fresh independent compositor state. A fixed typed pending reply is not an
+observation or a security boolean. Only Control's existing bounded post-dispatch
+verification loop may await that state, with original peer/boot/deadline checks.
+Suspend coverage uses this same typed pending result; canonical review still
+requires one independently observed completed kernel cycle and fresh secure
+coverage for the exact original lock generation before commit.
+Native `PreparingForSleep=true` is a known inconclusive postcondition rather
+than completion or an unknown-state error. Logind's admission acknowledgement
+can precede sleep; Control may observe again only within its existing bounded
+verification loop, without redispatch. Missing or malformed preparation/counter
+facts and debug modes still fail. Preparation must end before a completed cycle
+and exact secure coverage can qualify the retained transition.
+Unavailable, malformed, inconsistent and substituted evidence remain immediate
+failures; all native transition watchdogs and required verification remain intact.
+
 The private native runtime owns the actual Wayland connection and gated lock
 protocol, protected input, official Polkit/PAM listener and fixed embedded
 presentation. Pre-lock confirmation and unlock intent originate from actual
@@ -559,6 +644,22 @@ uses observe-only recovery. Polkit authentication uses the original compositor
 subject and daemon-injected caller/subject identity, not assumed forwarding of
 custom authorization details. Ordinary exec, late dumpability repair, Qt key
 injection, substituted generations and unguarded unlock cleanup are rejected.
+
+A compositor may deliver keyboard focus before final lock coverage. Each fresh
+native press revalidates that same configured surface and current complete
+coverage before updating the protected entry's focus. An old enter-time flag
+cannot discard all subsequent authenticated input. This does not synthesize a
+press, admit held keys, restore focus after a leave, or weaken cancellation on
+layout, capability or coverage loss. The wire regression covers focus arriving
+before the final lock acknowledgement; all existing denial cases remain.
+
+Both native adapters bind Polkit 127 to the locally provisioned `polkitd` account
+and its exact root-supervised service invocation; the daemon is not assumed to
+run as UID 0. Immutable unit/image, fixed live argv, current PID, nonzero
+invocation and owner stability are mandatory under the existing bounded native
+probe. Local account lookup is bounded and rejects ambiguous records without NSS
+or subprocesses. Peer attestation never substitutes for canonical purpose-bound
+approval or the native one-use proof.
 
 Repository-owned deployment must install the secure entry point, fixed font
 policy, root-supervised owner service/path and `user@.service` availability
@@ -577,13 +678,15 @@ the session leader; a lingering manager or SSH shell cannot stand in for it.
 The bootstrap probe requires unchanged production attestation and automatic
 owner activation. Its report explicitly excludes authentication qualification,
 S17 completion and support promotion. Existing shell-runtime cases remain
-required independently. No retained real S17 native qualification exists yet.
+required independently. The recorded Level A native qualification retains authentication, assistive,
+suspend and terminating-transition reports for the exact implementation commit;
+complete S17 and physical Q11 remain outstanding.
 
-Managed suspend/logout/reboot/power-off and first-party controls must be
-implemented through the same typed authority and durable lifecycle. Native
-pointer interaction requires guarded component tests; assistive-technology,
-adversarial native input, power recovery and inhibitor lifecycle require
-independent native qualification. Availability observations
+Managed suspend/logout/reboot/power-off and first-party controls are implemented
+through the same typed authority and durable lifecycle for the recorded Level A
+native scope. Native pointer interaction requires guarded component tests;
+additional assistive-technology, adversarial native input, power recovery and
+inhibitor lifecycle coverage require independent native qualification. Availability observations
 and component tests do not qualify those effects. This ADR
 therefore remains Proposed and the S17 ledger remains planned until the complete
 vertical slice, review and exact-head evidence satisfy the acceptance boundary.

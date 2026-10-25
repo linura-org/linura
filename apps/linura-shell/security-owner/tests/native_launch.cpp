@@ -16,11 +16,13 @@
 #include <QDBusVirtualObject>
 #include <QEventLoop>
 #include <QTemporaryDir>
+#include <QTemporaryFile>
 #include <QTimer>
 #include <QUuid>
 
 #include <cassert>
 #include <optional>
+#include <unistd.h>
 
 // Official D-Bus codec exercise only: this private, same-UID peer bus does NOT
 // attest root-systemd, a native session, a service launch or execution authority.
@@ -260,6 +262,32 @@ int main(int argc, char **argv)
     assert(!exactNativeExecStart(roundTrip(QVariant(image)), image, {image}, 2048));
     assert(!exactNativeExecStart(roundTrip(QVariant(QStringList{image})), image, {image}, 2048));
 
+    // Real Polkit 127 systemd ExecStart is a three-word, exactly bound
+    // launch. Exercise its actual D-Bus encoding, including extra-word denial.
+    const QString polkitImage = QStringLiteral("/usr/lib/polkit-1/polkitd");
+    QStringList polkitArgs{polkitImage};
+    polkitArgs.append(QStringLiteral("--no-debug"));
+    polkitArgs.append(QStringLiteral("--log-level=notice"));
+    NativeLaunchFacts polkit;
+    polkit.image = polkitImage;
+    polkit.arguments = polkitArgs;
+    polkit.ignoreFailure = false;
+    polkit.startedReal = 1234;
+    polkit.startedMonotonic = 5678;
+    polkit.pid = 2048;
+    polkit.code = 0;
+    polkit.status = 0;
+    const auto polkitWire = roundTrip(QVariant::fromValue(LaunchList{polkit}));
+    assert(exactNativeExecStart(polkitWire, polkitImage, polkitArgs, 2048));
+    QStringList missingFlag{polkitImage};
+    missingFlag.append(QStringLiteral("--no-debug"));
+    assert(!exactNativeExecStart(polkitWire, polkitImage, missingFlag, 2048));
+    assert(!exactNativeExecStart(polkitWire, polkitImage, polkitArgs, 2049));
+    auto excessive = polkit;
+    excessive.arguments.append(QStringLiteral("--replace"));
+    const auto excessiveWire = roundTrip(QVariant::fromValue(LaunchList{excessive}));
+    assert(!exactNativeExecStart(excessiveWire, polkitImage, polkitArgs, 2048));
+
     const QDBusObjectPath userPath(QStringLiteral("/org/freedesktop/login1/user/_1000"));
     const QDBusObjectPath seatPath(QStringLiteral("/org/freedesktop/login1/seat/seat0"));
     const auto user = Linura::SecurityOwner::decodeNativeLogindUser(
@@ -366,6 +394,63 @@ int main(int argc, char **argv)
     const auto decoded = decode(unit, service);
     assert(decoded && decoded->invocation == invocation && decoded->job == 9 &&
            decoded->helper.pid == 42 && !decoded->absent);
+    // Actual codec failure output is closed even when native fields contain
+    // private text. Enabling diagnostics cannot change acceptance or authority.
+    for (bool diagnostics : {false, true}) {
+        QTemporaryFile output;
+        assert(output.open());
+        const int saved = dup(STDERR_FILENO);
+        assert(saved >= 0 && dup2(output.handle(), STDERR_FILENO) >= 0);
+        auto privateUnit = unit;
+        privateUnit[QStringLiteral("FragmentPath")] = QStringLiteral("private-wire-marker");
+        const auto refused = Linura::SecurityOwner::decodeNativeSleepUnitFacts(
+            QStringLiteral(":1.2"), privateUnit, service, diagnostics);
+        assert(dup2(saved, STDERR_FILENO) >= 0);
+        close(saved);
+        assert(!refused && output.seek(0));
+        const auto text = output.readAll();
+        assert(text == (diagnostics
+                            ? QByteArrayLiteral("native-sleep-owner-denied reason=codec-fields\n")
+                            : QByteArray{}));
+        assert(!text.contains("private-wire-marker"));
+        assert(Linura::SecurityOwner::decodeNativeSleepUnitFacts(QStringLiteral(":1.2"), unit,
+                                                                 service, diagnostics) == decoded);
+    }
+    for (bool diagnostics : {false, true}) {
+        QTemporaryFile output;
+        assert(output.open());
+        const int saved = dup(STDERR_FILENO);
+        assert(saved >= 0 && dup2(output.handle(), STDERR_FILENO) >= 0);
+        const auto error =
+            QDBusMessage::createError(QStringLiteral("org.freedesktop.DBus.Error.NoReply"),
+                                      QStringLiteral("private-wire-marker"));
+        const bool accepted = Linura::SecurityOwner::nativeSleepUnitLookupReply(
+            error, QStringLiteral(":1.2"), diagnostics);
+        assert(dup2(saved, STDERR_FILENO) >= 0);
+        close(saved);
+        assert(!accepted && output.seek(0));
+        const auto text = output.readAll();
+        assert(text == (diagnostics
+                            ? QByteArrayLiteral("native-sleep-owner-denied reason=lookup-timeout\n")
+                            : QByteArray{}));
+        assert(!text.contains("private-wire-marker"));
+    }
+    // A matching string on an outgoing call is not a received native reply.
+    const auto outgoing = QDBusMessage::createMethodCall(
+        QStringLiteral(":1.2"), QStringLiteral("/"), QStringLiteral("org.linura.Private.Component"),
+        QStringLiteral("GetUnit"));
+    assert(!Linura::SecurityOwner::nativeSleepUnitLookupReply(outgoing, QStringLiteral(":1.2")));
+    assert(
+        !Linura::SecurityOwner::nativeSleepUnitLookupReply(QDBusMessage{}, QStringLiteral(":1.2")));
+    for (const auto &name : {QStringLiteral("org.freedesktop.DBus.Error.AccessDenied"),
+                             QStringLiteral("org.freedesktop.DBus.Error.ServiceUnknown"),
+                             QStringLiteral("org.freedesktop.DBus.Error.Disconnected"),
+                             QStringLiteral("org.freedesktop.DBus.Error.InvalidArgs"),
+                             QStringLiteral("org.linura.Private.NativeUnavailable"),
+                             QStringLiteral("org.freedesktop.systemd1.NoSuchUnit.extra")})
+        assert(!Linura::SecurityOwner::nativeSleepUnitLookupReply(
+            QDBusMessage::createError(name, QStringLiteral("private-wire-marker")),
+            QStringLiteral(":1.2")));
     for (auto it = unit.cbegin(); it != unit.cend(); ++it) {
         auto missing = unit;
         missing.remove(it.key());

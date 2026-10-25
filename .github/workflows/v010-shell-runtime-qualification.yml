@@ -29,10 +29,10 @@ env:
   BASE_IMAGE_URL: https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2
   BASE_IMAGE_CHECKSUM_URL: https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2.SHA256
   ARCH_ARCHIVE_URL: https://archive.archlinux.org/repos/2026/09/16/$repo/os/$arch
-  VM_ACCELERATION: tcg
+  VM_ACCELERATION: kvm
   RELEASE_TARGET: x86_64-unknown-linux-gnu
   QUALIFICATION_NIC_MAC: 52:54:00:12:34:56
-  QUALIFICATION_GPU_PCI_BDF: "0000:00:02.0"
+  QUALIFICATION_GPU_PCI_BDF: "0000:01:00.0"
   QUALIFICATION_GPU_VENDOR_ID: "0x1af4"
   QUALIFICATION_GPU_DEVICE_ID: "0x1050"
   QUALIFICATION_DISK_GIB: 16
@@ -40,7 +40,7 @@ env:
 jobs:
   substrate:
     name: prepared immutable Arch runtime substrate
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -192,7 +192,7 @@ jobs:
   runtime:
     name: exact-source Arch/Hyprland/Quickshell runtime
     needs: substrate
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -275,6 +275,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends             cloud-image-utils             ffmpeg             openssh-client             qemu-system-x86             qemu-utils
 
+      - name: Verify KVM device and grant the isolated runner access
+        run: |
+          set -euo pipefail
+          # Standard GitHub-hosted Ubuntu VM; never silently fall back to TCG.
+          [[ "$VM_ACCELERATION" == kvm ]]
+          [[ -c /dev/kvm ]]
+          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          sudo chmod 0600 /dev/kvm
+          [[ -r /dev/kvm && -w /dev/kvm ]]
+          test "$(stat -c '%u:%g:%a:%F' /dev/kvm)" = "$(id -u):$(id -g):600:character special file"
+
       - name: Restore prepared runtime substrate
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -343,7 +354,9 @@ jobs:
       - name: Create disposable Arch cloud-init guest
         run: |
           set -euo pipefail
-          vm_image="$LINURA_VM_DIR/linura-v010-shell.qcow2"
+          umask 077
+          vm_directory="$(mktemp -d "$LINURA_VM_DIR/linura-s17-disk.XXXXXX")"
+          vm_image="$vm_directory/guest.qcow2"
           seed_image="$LINURA_VM_DIR/linura-v010-shell-seed.img"
           ssh_key="$LINURA_WORK_DIR/linura-v010-shell-key"
           vm_log="$LINURA_WORK_DIR/linura-v010-shell-qemu.log"
@@ -353,6 +366,11 @@ jobs:
           network_config="$LINURA_WORK_DIR/v010-shell-network-config"
 
           cp --reflink=auto "$PREPARED_IMAGE" "$vm_image"
+          chmod 0600 "$vm_image"
+          /usr/bin/python3 -I -S qualification/v010/session-security/guard-disposable-disk.py \
+            --source "$PREPARED_IMAGE" --copy "$vm_image" \
+            --expected-source-sha "$PREPARED_IMAGE_SHA256" --phase before \
+            > "$LINURA_WORK_DIR/s17-disposable-disk-before.json"
           qemu-img resize "$vm_image" "${QUALIFICATION_DISK_GIB}G"
           ssh-keygen -q -t ed25519 -N '' -f "$ssh_key"
           public_key="$(cat "$ssh_key.pub")"
@@ -397,6 +415,7 @@ jobs:
 
           cloud-localds --network-config="$network_config"             "$seed_image" "$user_data" "$meta_data"
           mkdir -p "$artifact_dir"
+          cp "$LINURA_WORK_DIR/s17-disposable-disk-before.json" "$artifact_dir/"
           {
             printf 'VM_IMAGE=%s\n' "$vm_image"
             printf 'SEED_IMAGE=%s\n' "$seed_image"
@@ -408,7 +427,13 @@ jobs:
       - name: Start disposable Arch graphical guest
         run: |
           set -euo pipefail
-          bash qualification/v010/shell-runtime/start-vm.sh             --mode automated             --display none             --image "$VM_IMAGE"             --seed "$SEED_IMAGE"             --memory 6144             --cpus 4             --nic-mac "$QUALIFICATION_NIC_MAC"             --ssh-port 2223             >"$VM_LOG" 2>&1 &
+          umask 077
+          native_input_dir="$(mktemp -d /tmp/linura-s17-input.XXXXXX)"
+          native_input_socket="$native_input_dir/qmp.sock"
+          printf 'NATIVE_INPUT_SOCKET=%s\n' "$native_input_socket" >> "$GITHUB_ENV"
+          # Persistence applies ONLY to the fresh private copy made above, never
+          # the cacheable prepared substrate. Power-off recovery reboots this copy.
+          bash qualification/v010/shell-runtime/start-vm.sh --persistent             --mode automated             --display none             --acceleration "$VM_ACCELERATION"             --image "$VM_IMAGE"             --seed "$SEED_IMAGE"             --memory 6144             --cpus 4             --nic-mac "$QUALIFICATION_NIC_MAC"             --ssh-port 2223 --qmp-socket "$native_input_socket"             >"$VM_LOG" 2>&1 &
           printf 'VM_PID=%s\n' "$!" >> "$GITHUB_ENV"
 
       - name: Wait for Arch guest and verify prepared runtime substrate
@@ -604,10 +629,48 @@ jobs:
             exit "$seat_setup_tee_status"
           fi
 
-          git archive --format=tar.gz --output="$LINURA_WORK_DIR/linura-source.tar.gz" "$SOURCE_SHA"
-          scp "${ssh_common[@]}" -P 2223             "$LINURA_WORK_DIR/linura-source.tar.gz"             linura@127.0.0.1:/tmp/linura-source.tar.gz
+          source_archive="$LINURA_WORK_DIR/linura-source.tar.gz"
+          git archive --format=tar.gz --output="$source_archive" "$SOURCE_SHA"
+          source_archive_sha256="$(sha256sum "$source_archive" | awk '{print $1}')"
+          [[ "$source_archive_sha256" =~ ^[0-9a-f]{64}$ ]]
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            'sudo -n install -d -o root -g root -m 0700 /run/linura-source-stage; sudo -n install -o root -g root -m 0600 /dev/null /run/linura-source-stage/source.tar.gz; sudo -n tee /run/linura-source-stage/source.tar.gz >/dev/null' \
+            < "$source_archive"
           scp "${ssh_common[@]}" -P 2223             "$LINURAD_BINARY"             linura@127.0.0.1:/tmp/linurad-qualification
-          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1             'sudo -n rm -rf /opt/linura-source && sudo -n install -d -o root -g root -m 0755 /opt/linura-source && sudo -n tar -xzf /tmp/linura-source.tar.gz -C /opt/linura-source && rm -f /tmp/linura-source.tar.gz && sudo -n bash /opt/linura-source/qualification/v010/shell-runtime/provision-shell-runtime.sh linura /opt/linura-source /tmp/linurad-qualification && rm -f /tmp/linurad-qualification'
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            "sudo -n /usr/bin/env 'EXPECTED_SHA256=$source_archive_sha256' /usr/bin/bash -s" <<'GUEST'
+          set -euo pipefail
+          expected_sha256="${EXPECTED_SHA256:?}"
+          archive=/run/linura-source-stage/source.tar.gz
+          source_root=/opt/linura-source
+          [[ "$expected_sha256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(stat -c '%u:%g:%a:%h:%F' "$archive")" = '0:0:600:1:regular file'
+          printf '%s  %s\n' "$expected_sha256" "$archive" | sha256sum --check --strict
+          rm -rf "$source_root"
+          install -d -o root -g root -m 0755 "$source_root"
+          umask 022
+          tar --extract --gzip --file "$archive" --directory "$source_root" \
+            --no-same-owner --no-same-permissions
+          rm -f "$archive"
+          rmdir /run/linura-source-stage
+          for path in \
+            /opt \
+            "$source_root" \
+            "$source_root/qualification" \
+            "$source_root/qualification/v010" \
+            "$source_root/qualification/v010/session-security"; do
+            [[ -d "$path" && ! -L "$path" ]]
+            test "$(stat -c '%u:%g:%F' "$path")" = '0:0:directory'
+            test -z "$(find "$path" -maxdepth 0 -perm /022 -print -quit)"
+          done
+          test -z "$(find "$source_root" -xdev \( -type d -o -type f \) -perm /022 -print -quit)"
+          test -z "$(find "$source_root" -xdev \( -type d -o -type f \) ! -user root -print -quit)"
+          test -z "$(find "$source_root" -xdev \( -type d -o -type f \) ! -group root -print -quit)"
+          test -z "$(find "$source_root" -xdev -type l -print -quit)"
+          bash /opt/linura-source/qualification/v010/shell-runtime/provision-shell-runtime.sh \
+            linura /opt/linura-source /tmp/linurad-qualification
+          rm -f /tmp/linurad-qualification
+          GUEST
 
           installed_linurad_sha="$(ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 'sha256sum /usr/bin/linurad | awk "{print \$1}"')"
           installed_helper_sha="$(ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 'sha256sum /usr/lib/linura/linura-session-audio.lua | awk "{print \$1}"')"
@@ -661,6 +724,130 @@ jobs:
           if [[ "$copy_status" -ne 0 ]]; then
             exit "$copy_status"
           fi
+
+      - name: Install and check genuine S17 native session bootstrap
+        run: |
+          set -euo pipefail
+          ssh_common=(
+            -i "$SSH_KEY"
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            -o ConnectTimeout=3
+          )
+          # Use the same exact-source release outputs and asset installer as
+          # the image. The substrate contains no Linura binaries/native evidence.
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            'sudo -n install -d -o linura -g linura -m 0700 /tmp/linura-s17-binaries'
+          for name in linurad linuractl linura-firstboot linura-update-guard linura-executor-systemd linura-executor-session linura-authorityd; do
+            binary="$LINURA_CARGO_TARGET/$RELEASE_TARGET/release/$name"
+            test -x "$binary"
+            expected_binary_sha="$(sha256sum "$binary" | awk '{print $1}')"
+            sha256sum "$binary" >> "$ARTIFACT_DIR/s17-source-binaries.sha256"
+            scp "${ssh_common[@]}" -P 2223 "$binary" \
+              "linura@127.0.0.1:/tmp/linura-s17-binaries/$name"
+            installed_binary_sha="$(ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+              "sha256sum /tmp/linura-s17-binaries/$name" | awk '{print $1}')"
+            [[ "$installed_binary_sha" == "$expected_binary_sha" ]] || exit 1
+          done
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            'sudo -n chown -R root:root /tmp/linura-s17-binaries; sudo -n chmod 0700 /tmp/linura-s17-binaries'
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            'sudo -n timeout 1100 python3 /opt/linura-source/qualification/v010/session-security/provision-native-session.py' \
+            2>&1 | tee "$ARTIFACT_DIR/s17-native-provision.log"
+          set +e
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            'sudo -n timeout 100 python3 /opt/linura-source/qualification/v010/session-security/check-native-session.py' \
+            > "$ARTIFACT_DIR/s17-native-bootstrap.json" 2> "$ARTIFACT_DIR/s17-native-bootstrap.stderr"
+          native_status=$?
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            'sudo -n journalctl -b --no-pager -n 1000 -u linura-s17-session.service -u "linura-security-owner@*" -u linura-authorityd.service -u linura-executor-session.service' \
+            > "$ARTIFACT_DIR/s17-native-bootstrap-journal.log" 2>&1
+          diagnostics_status=$?
+          set -e
+          [[ "$native_status" -eq 0 ]] || exit "$native_status"
+          [[ "$diagnostics_status" -eq 0 ]] || exit "$diagnostics_status"
+
+      - name: Exercise native same-UID process-access denial
+        run: |
+          set -euo pipefail
+          ssh_common=(
+            -i "$SSH_KEY"
+            -o BatchMode=yes
+            -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            -o ConnectTimeout=3
+          )
+          # Stronger adversarial fixture: temporarily remove Yama in the VM,
+          # prove native owner protection, and restore the original setting.
+          # This does not qualify authentication or the complete S17 slice.
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            'sudo -n timeout 40 /usr/bin/python3 -I -S /opt/linura-source/qualification/v010/session-security/run-same-uid-probes.py' \
+            > "$ARTIFACT_DIR/s17-native-same-uid.json" 2> "$ARTIFACT_DIR/s17-native-same-uid.stderr"
+
+      - name: Qualify real S17 owner authentication and retained recovery
+        run: |
+          set -euo pipefail
+          # Fresh random responses cross private stdin/QMP only. No response
+          # arguments, static passwords, PAM overrides or production rule changes.
+          # This case subset is NOT complete S17 or physical-workstation evidence.
+          timeout --signal=TERM --kill-after=5s 900 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-auth.py \
+            --qmp-socket "$NATIVE_INPUT_SOCKET" \
+            --ssh-identity "$SSH_KEY" \
+            --bootstrap "$ARTIFACT_DIR/s17-native-bootstrap.json" \
+            --source-sha "$SOURCE_SHA" \
+            > "$ARTIFACT_DIR/s17-native-authentication.json" \
+            2> "$ARTIFACT_DIR/s17-native-authentication.stderr"
+          ssh -F /dev/null -i "$SSH_KEY" -p 2223 \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=3 linura@127.0.0.1 \
+            'sha256sum /usr/lib/linura/qualification/linura-s17-assistive-probe' \
+            > "$ARTIFACT_DIR/s17-native-assistive-binary.sha256"
+          sha256sum \
+            "$ARTIFACT_DIR/s17-native-authentication.json" \
+            "$ARTIFACT_DIR/s17-native-bootstrap.json" \
+            "$ARTIFACT_DIR/s17-source-binaries.sha256" \
+            "$ARTIFACT_DIR/s17-native-assistive-binary.sha256" \
+            qualification/v010/session-security/qualify-native-auth.py \
+            qualification/v010/session-security/native-auth-fixture.py \
+            qualification/v010/session-security/native-assistive-fixture.py \
+            qualification/v010/session-security/native-assistive-probe.cpp \
+            qualification/v010/session-security/native-assistive-prompt.h \
+            qualification/v010/session-security/native-assistive-denial.h \
+            qualification/v010/session-security/native-assistive-denial-test.cpp \
+            qualification/v010/session-security/native-assistive-discovery.h \
+            qualification/v010/session-security/native-assistive-discovery-test.cpp \
+            qualification/v010/session-security/CMakeLists.txt \
+            qualification/v010/session-security/provision-native-session.py \
+            qualification/v010/session-security/native_input.py \
+            > "$ARTIFACT_DIR/s17-native-case-digests.sha256"
+
+      - name: Qualify real managed S17 suspend and observe-only recovery
+        run: |
+          set -euo pipefail
+          # The fixed guest service waits for SSH logins to end. Production
+          # other-session/inhibitor checks, administrator PAM and native gates
+          # remain unchanged. QMP wakes only an independently observed suspend.
+          timeout --signal=TERM --kill-after=5s 360 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-suspend.py \
+            --qmp-socket "$NATIVE_INPUT_SOCKET" \
+            --ssh-identity "$SSH_KEY" \
+            --vm-log "$VM_LOG" \
+            --source-sha "$SOURCE_SHA" \
+            > "$ARTIFACT_DIR/s17-native-suspend.json" \
+            2> "$ARTIFACT_DIR/s17-native-suspend.stderr"
+          sha256sum \
+            "$ARTIFACT_DIR/s17-native-suspend.json" \
+            "$ARTIFACT_DIR/s17-source-binaries.sha256" \
+            qualification/v010/session-security/qualify-native-suspend.py \
+            qualification/v010/session-security/native-suspend-fixture.py \
+            qualification/v010/session-security/qualify-native-auth.py \
+            qualification/v010/session-security/native-assistive-fixture.py \
+            qualification/v010/session-security/native-assistive-probe.cpp \
+            qualification/v010/session-security/native-assistive-prompt.h \
+            "$ARTIFACT_DIR/s17-native-assistive-binary.sha256" \
+            qualification/v010/session-security/native_input.py \
+            > "$ARTIFACT_DIR/s17-native-suspend-digests.sha256"
 
       - name: Capture runtime package identity
         run: |
@@ -894,6 +1081,11 @@ jobs:
                   raise SystemExit(f"invalid or duplicate package version record: {line!r}")
               package_versions[name] = version
           required_packages = {
+              "base-devel",
+              "cmake",
+              "ninja",
+              "pkgconf",
+              "dbus",
               "systemd",
               "hyprland",
               "quickshell",
@@ -911,6 +1103,14 @@ jobs:
               "ffmpeg",
               "wf-recorder",
               "wayland",
+              "wayland-protocols",
+              "polkit",
+              "at-spi2-core",
+              "libcap",
+              "libxkbcommon",
+              "libx11",
+              "fontconfig",
+              "ttf-dejavu",
           }
           if set(package_versions) != required_packages:
               raise SystemExit(
@@ -994,6 +1194,85 @@ jobs:
           )
           PY
 
+      - name: Qualify native S17 terminating transitions without effect replay
+        run: |
+          set -euo pipefail
+          # Runtime evidence above remains bound to its ORIGINAL execution boot.
+          # These distinct partial S17 reports retain their own old/new boot IDs.
+          ssh_common=(-F /dev/null -i "$SSH_KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3)
+          for purpose in logout reboot power-off; do
+            printf 'native-transition-stage purpose=%s phase=prepare\n' "$purpose"
+            timeout --signal=TERM --kill-after=5s 180 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-transition.py \
+              --phase prepare --purpose "$purpose" --source-sha "$SOURCE_SHA" \
+              --qmp-socket "$NATIVE_INPUT_SOCKET" --vm-log "$VM_LOG" --ssh-identity "$SSH_KEY" \
+              > "$ARTIFACT_DIR/s17-$purpose-handoff.json" \
+              2> "$ARTIFACT_DIR/s17-$purpose-prepare.stderr"
+            if [[ "$purpose" == power-off ]]; then
+              deadline=$((SECONDS + 60))
+              while kill -0 "$VM_PID" 2>/dev/null; do
+                state="$(ps -o stat= -p "$VM_PID" || true)"
+                [[ "$state" == Z* ]] && break
+                (( SECONDS < deadline )) || { echo 'guest power-off did not exit QEMU' >&2; exit 1; }
+                sleep 1
+              done
+              umask 077
+              native_input_dir="$(mktemp -d /tmp/linura-s17-recovery-input.XXXXXX)"
+              NATIVE_INPUT_SOCKET="$native_input_dir/qmp.sock"
+              printf 'NATIVE_INPUT_SOCKET=%s\n' "$NATIVE_INPUT_SOCKET" >> "$GITHUB_ENV"
+              # SAME disposable disk, unchanged pinned guest topology. This is
+              # a host boot, not a replay of the original managed power request.
+              bash qualification/v010/shell-runtime/start-vm.sh --persistent \
+                --mode automated --display none --acceleration "$VM_ACCELERATION" --image "$VM_IMAGE" --seed "$SEED_IMAGE" \
+                --memory 6144 --cpus 4 --nic-mac "$QUALIFICATION_NIC_MAC" \
+                --ssh-port 2223 --qmp-socket "$NATIVE_INPUT_SOCKET" \
+                > "$ARTIFACT_DIR/s17-power-off-recovery-qemu.log" 2>&1 &
+              VM_PID=$!
+              printf 'VM_PID=%s\n' "$VM_PID" >> "$GITHUB_ENV"
+            fi
+            printf 'native-transition-stage purpose=%s phase=verify\n' "$purpose"
+            timeout --signal=TERM --kill-after=5s 600 /usr/bin/python3 -I -S qualification/v010/session-security/qualify-native-transition.py \
+              --phase verify --purpose "$purpose" --source-sha "$SOURCE_SHA" \
+              --handoff "$ARTIFACT_DIR/s17-$purpose-handoff.json" --ssh-identity "$SSH_KEY" \
+              > "$ARTIFACT_DIR/s17-native-$purpose.json" \
+              2> "$ARTIFACT_DIR/s17-$purpose-verify.stderr"
+            if [[ "$purpose" != power-off ]]; then
+              printf 'native-transition-stage purpose=%s phase=bootstrap\n' "$purpose"
+              # Recreate the genuine PAM/logind session, never fabricate a
+              # session handle or manually start the native security owner.
+              ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+                'sudo -n timeout 100 /usr/bin/python3 -I -S /opt/linura-source/qualification/v010/session-security/check-native-session.py' \
+                > "$ARTIFACT_DIR/s17-after-$purpose-bootstrap.json" \
+                2> "$ARTIFACT_DIR/s17-after-$purpose-bootstrap.stderr"
+            fi
+          done
+          sha256sum \
+            "$ARTIFACT_DIR"/s17-native-logout.json \
+            "$ARTIFACT_DIR"/s17-native-reboot.json \
+            "$ARTIFACT_DIR"/s17-native-power-off.json \
+            "$ARTIFACT_DIR"/s17-logout-handoff.json \
+            "$ARTIFACT_DIR"/s17-reboot-handoff.json \
+            "$ARTIFACT_DIR"/s17-power-off-handoff.json \
+            "$ARTIFACT_DIR/s17-source-binaries.sha256" \
+            qualification/v010/session-security/native-transition-fixture.py \
+            qualification/v010/session-security/qualify-native-transition.py \
+            qualification/v010/session-security/native-suspend-fixture.py \
+            qualification/v010/session-security/qualify-native-suspend.py \
+            qualification/v010/session-security/qualify-native-auth.py \
+            qualification/v010/session-security/native-assistive-fixture.py \
+            qualification/v010/session-security/native-assistive-probe.cpp \
+            qualification/v010/session-security/native-assistive-prompt.h \
+            "$ARTIFACT_DIR/s17-native-assistive-binary.sha256" \
+            qualification/v010/session-security/native_input.py \
+            > "$ARTIFACT_DIR/s17-native-terminating-digests.sha256"
+
+      - name: Verify cached substrate remained immutable after native power recovery
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -I -S qualification/v010/session-security/guard-disposable-disk.py \
+            --source "$PREPARED_IMAGE" --copy "$VM_IMAGE" \
+            --expected-source-sha "$PREPARED_IMAGE_SHA256" --phase after \
+            > "$ARTIFACT_DIR/s17-disposable-disk-after.json"
+
       - name: Bind qualification execution envelope
         uses: ./.github/actions/qualification-envelope
         with:
@@ -1019,6 +1298,30 @@ jobs:
           mkdir -p "$artifact_dir"
           if [[ -f "${VM_LOG:-}" ]]; then
             cp "$VM_LOG" "$artifact_dir/qemu.log"
+          fi
+          # These fixed native runner stderr files contain source-redacted
+          # categories/receipts; bootstrap runs before credential configuration.
+          # Recreated-session bootstrap also reads no authentication responses.
+          # Keep journals, process environments and arbitrary files out of logs.
+          # This executes only after a failure and cannot change its outcome.
+          if [[ '${{ job.status }}' == failure ]]; then
+            for diagnostic in \
+              s17-native-bootstrap.stderr \
+              s17-native-authentication.stderr \
+              s17-native-suspend.stderr \
+              s17-logout-prepare.stderr \
+              s17-logout-verify.stderr \
+              s17-after-logout-bootstrap.stderr \
+              s17-reboot-prepare.stderr \
+              s17-reboot-verify.stderr \
+              s17-after-reboot-bootstrap.stderr \
+              s17-power-off-prepare.stderr \
+              s17-power-off-verify.stderr; do
+              if [[ -s "$artifact_dir/$diagnostic" ]]; then
+                printf '%s\n' "native-failure-diagnostic $diagnostic"
+                /usr/bin/timeout --kill-after=1 2 /usr/bin/head -c 16384 "$artifact_dir/$diagnostic"
+              fi
+            done
           fi
 
       - name: Admit and upload sealed qualification evidence

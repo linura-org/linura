@@ -14,14 +14,19 @@
 #include <QString>
 
 #include <cstring>
+#include <cerrno>
 #include <array>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 #include <sys/wait.h>
 #include <sys/auxv.h>
 #include <sys/prctl.h>
+#include <sys/socket.h>
+#include <signal.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 using namespace Linura::SecurityOwner;
@@ -341,13 +346,16 @@ void compositorTransitions()
 {
     const auto original = identity();
     LockMechanism lock(original);
+    check(!lock.retainedVerifiedRelease(original)); // Ready is NOT release proof.
     check(!lock.dispatch(original, false));
     check(lock.dispatch(original, true));
     check(!lock.dispatch(original, true));
     check(!lock.dispatch(original, false));
     check(!lock.secureCoverage());
+    check(!lock.retainedVerifiedRelease(original)); // Acquiring.
     lock.compositorCoverage(true);
     check(lock.secureCoverage());
+    check(!lock.retainedVerifiedRelease(original)); // Secure.
     auto replacement = original;
     ++replacement.generation;
     check(!lock.dispatch(replacement, false));
@@ -356,18 +364,26 @@ void compositorTransitions()
     check(lock.identity() == original);
     lock.compositorCoverage(false);
     check(lock.state() == LockMechanism::State::Releasing);
-    check(lock.identity() == original); // Protocol event/ack is not verification.
+    check(!lock.retainedVerifiedRelease(original)); // Observation is not the proof.
+    // Protocol event/ack is not verification.
+    check(lock.identity() == original);
     check(!lock.independentlyVerifiedReleased(replacement));
     check(lock.independentlyVerifiedReleased(original));
     check(lock.state() == LockMechanism::State::Released);
+    check(lock.retainedVerifiedRelease(original));
+    check(!lock.retainedVerifiedRelease(replacement));
     check(lock.identity() == original); // Recovery still has its original resource.
     check(!lock.dispatch(original, true));
     check(!lock.dispatch(original, false));
-    check(!lock.independentlyVerifiedReleased(original));
+    check(!lock.independentlyVerifiedReleased(original)); // One-shot MUST stay false.
+    // Read-only repeat has no effect.
+    check(lock.retainedVerifiedRelease(original));
     check(!lock.commitVerifiedRelease(replacement));
     check(lock.commitVerifiedRelease(original));
     check(!lock.commitVerifiedRelease(original));
     check(lock.identity().generation == 2);
+    check(!lock.retainedVerifiedRelease(original));
+    check(!lock.retainedVerifiedRelease(lock.identity()));
     check(NativeLockIdentity::parse(lock.identity().resource) == lock.identity());
     check(!lock.dispatch(original, true));
     check(lock.dispatch(lock.identity(), true));
@@ -399,6 +415,7 @@ void generationCommitFence()
     check(lock.independentlyVerifiedReleased(original));
     lock.compositorCoverage(true); // Unexpected relock invalidates release state.
     check(lock.state() == LockMechanism::State::Faulted);
+    check(!lock.retainedVerifiedRelease(original)); // Relock invalidates retained proof.
     check(!lock.commitVerifiedRelease(original));
 
     quint64 time = 100;
@@ -660,13 +677,44 @@ void supervisedLaunchBinding()
     check(!exactNativeExecStart(QVariant{}, image, {image}, 2048));
     check(!exactNativeExecStart(QVariant(image), image, {image}, 2048));
     check(!exactNativeExecStart(QVariant(QStringList{image}), image, {image}, 2048));
-    // Polkit's fixed official --no-debug launch retains the existing bounded
-    // two-word exception, not arbitrary launch arguments for other services.
+    // The pinned Arch polkit 127 unit uses exactly two audited flags. The
+    // third word is never a generic argument-list or daemon-identity bypass.
     other = valid;
     other.image = QStringLiteral("/usr/lib/polkit-1/polkitd");
-    other.arguments = {other.image, QStringLiteral("--no-debug")};
+    other.arguments = {other.image};
+    other.arguments.append(QStringLiteral("--no-debug"));
+    other.arguments.append(QStringLiteral("--log-level=notice"));
     check(exactNativeLaunch(other, other.image, other.arguments, 2048));
-    check(!exactNativeLaunch(other, other.image, {other.image}, 2048));
+    other.arguments = {other.image};
+    check(!exactNativeLaunch(other, other.image, other.arguments, 2048));
+    other.arguments.append(QStringLiteral("--no-debug"));
+    check(!exactNativeLaunch(other, other.image, other.arguments, 2048));
+    other.arguments = {other.image};
+    other.arguments.append(QStringLiteral("--log-level=notice"));
+    other.arguments.append(QStringLiteral("--no-debug"));
+    check(!exactNativeLaunch(other, other.image, other.arguments, 2048));
+    other.arguments = {other.image};
+    other.arguments.append(QStringLiteral("--no-debug"));
+    other.arguments.append(QStringLiteral("--log-level=debug"));
+    check(!exactNativeLaunch(other, other.image, other.arguments, 2048));
+    other.arguments.append(QStringLiteral("--replace"));
+    check(!exactNativeLaunch(other, other.image, other.arguments, 2048));
+    other = valid;
+    other.arguments.append(QStringLiteral("--no-debug"));
+    check(!exactNativeLaunch(other, image, other.arguments, 2048));
+
+    // The historical protective-sleep helper is a separate exact two-word
+    // profile. Do not suppress its positive or negative CTest coverage.
+    other = valid;
+    other.image = QStringLiteral("/usr/lib/linura/linura-executor-session");
+    other.arguments = {other.image};
+    other.arguments.append(QStringLiteral("--protect-before-sleep"));
+    check(exactNativeLaunch(other, other.image, other.arguments, 2048));
+    other.arguments[1] = QStringLiteral("--unknown");
+    check(!exactNativeLaunch(other, other.image, other.arguments, 2048));
+    other.arguments[1] = QStringLiteral("--protect-before-sleep");
+    other.image = QStringLiteral("/usr/lib/linura/linura-authorityd");
+    check(!exactNativeLaunch(other, other.image, other.arguments, 2048));
 }
 
 void actualCompositorBinding()
@@ -723,18 +771,91 @@ void nativeBoundaryTimeout()
         NativeDeadline completed(std::chrono::milliseconds(1'000));
         // Destruction cancels/joins the timer promptly; it cannot outlive owner.
     }
+    const auto exited = [](pid_t child) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        int status = 0;
+        while (std::chrono::steady_clock::now() < deadline) {
+            const auto result = waitpid(child, &status, WNOHANG);
+            if (result == child)
+                return status;
+            check(result == 0);
+            usleep(1'000);
+        }
+        (void)kill(child, SIGKILL);
+        (void)waitpid(child, &status, 0);
+        check(false); // Diagnostic backpressure must not stall the original exit.
+        return status;
+    };
+    std::array<int, 2> journal{};
+    check(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, journal.data()) == 0);
     const pid_t child = fork();
     check(child >= 0);
     if (child == 0) {
-        NativeDeadline stalled(std::chrono::milliseconds(100));
+        close(journal[0]);
+        if (dup2(journal[1], STDERR_FILENO) != STDERR_FILENO)
+            _exit(2);
+        close(journal[1]);
+        NativeDeadline stalled(std::chrono::milliseconds(100), NativeDeadline::Stage::WaylandPump);
         // Emulate a non-cancellable native authentication handshake. The native
         // deadline exits without any Qt/lock destructor, not a false success.
         usleep(500'000);
         _exit(0);
     }
-    int status = 0;
-    check(waitpid(child, &status, 0) == child);
+    close(journal[1]);
+    int status = exited(child);
     check(WIFEXITED(status) && WEXITSTATUS(status) == NativeDeadline::NativeBoundaryTimeoutExit);
+    std::array<char, 128> diagnostic{};
+    const auto count = recv(journal[0], diagnostic.data(), diagnostic.size(), MSG_DONTWAIT);
+    constexpr std::string_view expected = "native-owner-timeout stage=wayland-pump\n";
+    check(count == static_cast<ssize_t>(expected.size()));
+    check(std::string_view(diagnostic.data(), expected.size()) == expected);
+    close(journal[0]);
+
+    check(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, journal.data()) == 0);
+    const pid_t congested = fork();
+    check(congested >= 0);
+    if (congested == 0) {
+        close(journal[0]);
+        std::array<char, 4096> padding{};
+        while (send(journal[1], padding.data(), padding.size(), MSG_DONTWAIT | MSG_NOSIGNAL) > 0) {
+        }
+        if ((errno != EAGAIN && errno != EWOULDBLOCK) ||
+            dup2(journal[1], STDERR_FILENO) != STDERR_FILENO)
+            _exit(2);
+        close(journal[1]);
+        NativeDeadline stalled(std::chrono::milliseconds(100), NativeDeadline::Stage::WaylandPump);
+        usleep(500'000);
+        _exit(0);
+    }
+    close(journal[1]);
+    status = exited(congested); // Intentionally do not drain the full journal socket.
+    close(journal[0]);
+    check(WIFEXITED(status) && WEXITSTATUS(status) == NativeDeadline::NativeBoundaryTimeoutExit);
+    for (const bool closed : {false, true}) {
+        std::array<int, 2> pipe{};
+        check(pipe2(pipe.data(), O_CLOEXEC | O_NONBLOCK) == 0);
+        const pid_t unavailable = fork();
+        check(unavailable >= 0);
+        if (unavailable == 0) {
+            close(pipe[0]);
+            if (dup2(pipe[1], STDERR_FILENO) != STDERR_FILENO)
+                _exit(2);
+            close(pipe[1]);
+            if (closed)
+                close(STDERR_FILENO);
+            NativeDeadline stalled(std::chrono::milliseconds(100),
+                                   NativeDeadline::Stage::WaylandPump);
+            usleep(500'000);
+            _exit(0);
+        }
+        close(pipe[1]);
+        status = exited(unavailable);
+        std::array<char, 128> output{};
+        check(read(pipe[0], output.data(), output.size()) == 0);
+        close(pipe[0]);
+        check(WIFEXITED(status) &&
+              WEXITSTATUS(status) == NativeDeadline::NativeBoundaryTimeoutExit);
+    }
 }
 
 void suspendCannotExtendConfirmation()

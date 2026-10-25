@@ -81,6 +81,9 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "direction=\"out\"/></method>"
         "<method name=\"VerifyReleased\"><arg name=\"resource\" type=\"s\" direction=\"in\"/>"
         "<arg name=\"verified\" type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"RetainedVerifiedRelease\"><arg name=\"resource\" type=\"s\" "
+        "direction=\"in\"/>"
+        "<arg name=\"retained\" type=\"b\" direction=\"out\"/></method>"
         "<method name=\"CommitVerifiedRelease\"><arg name=\"resource\" type=\"s\" "
         "direction=\"in\"/>"
         "<arg name=\"committed\" type=\"b\" direction=\"out\"/></method>"
@@ -103,6 +106,7 @@ class NativeEndpoint final : public QObject, protected QDBusContext
     bool FenceSleepEntry(const QString &event, const QString &lock);
     bool DispatchPreparedLock(const QString &resource, bool secure);
     bool VerifyReleased(const QString &resource);
+    bool RetainedVerifiedRelease(const QString &resource);
     bool CommitVerifiedRelease(const QString &resource);
 
   Q_SIGNALS:

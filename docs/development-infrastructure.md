@@ -2,6 +2,12 @@
 
 Linura treats development infrastructure as part of the product safety boundary. The same repository-owned commands should be used locally, in CI, in VM acceptance, and in release proof whenever practical.
 
+**Primary development is host-native**: the selected local Linux or Remote SSH
+host owns the worktree, pinned tools and verified build prerequisites. A
+separately provisioned container is an **optional** scoped development
+alternative, not a mandatory or cross-repository dependency. Neither option
+substitutes for the appropriate native VM or maintained physical qualification.
+
 For persistent task worktrees, editor/Qt setup, isolated build storage, environment
 selection and safe cleanup/recovery, use
 [Development workspaces and storage](development-workspaces.md). Repository-owned

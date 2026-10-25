@@ -1,0 +1,5 @@
+# Pinned actionlint predates this GA GitHub-hosted label.
+# Runner admission remains restricted by check_validation_gates.py.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04

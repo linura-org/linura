@@ -1255,7 +1255,8 @@ REVIEWED_SHELL_EXECUTION = {
     # included in the scan; the digest also binds those opaque bodies.
     "scripts/prepare_qualification_storage.sh": "4967e7217aeb4644fb645f47e1f47c4983785e4a134c146ab1dbea770bd55546",
     "qualification/v010/shell-runtime/prepare-substrate.sh": "3343b0bb022e493a9cba6f28d22aa2c31625d2fd43d7671d96edba3afccda3b9",
-    "qualification/v010/shell-runtime/run-shell-runtime.sh": "3533143a2a37fa733204daae9ba9177cffea726ce499e024d2968df433956b6b",
+    "qualification/v010/shell-runtime/run-shell-runtime.sh": "69c489d06175c89840e38adbc80ecdbea7486d8ff6a955f3a68e1073c05d8755",
+    "qualification/v010/shell-runtime/start-vm.sh": "c2f516674ee155d6cd6f25caab2cd90d6aaa264fc4ddb997a0d4c036dbd6267b",
     "qualification/v010/workstation-acceptance/capture-hardware-session.sh": "ce2257338be8b6b1f9b07248102f28808bbbecf83277f886163127e244d11ad3",
     "qualification/v010/workstation-acceptance/launch-interactive.sh": "1c8ed5fc180526a8176e7a88635fae9b122daa0b64090e826ec3e3c6af957dd6",
     "qualification/v010/workstation-acceptance/run-hardware-qualification.sh": "fa08f7a5cf050d9692de40227b8e40668859d54e801318dfa7dfe7181ed90b72",
@@ -2138,12 +2139,17 @@ def toolchain_data_loads_guarded(
     workflow_name: str | None = None,
 ) -> bool:
     """Allow only exact, unconditional validated-data loads in reviewed steps."""
+    if workflow_name == ".github/workflows/v010-shell-runtime-qualification.yml":
+        # This lane requires QEMU's PCI No_Soft_Reset support for real S3.
+        runner_labels = ("ubuntu-26.04",)
+    elif not require_load or workflow_name == ".github/workflows/codeql.yml":
+        runner_labels = ("ubuntu-24.04", "ubuntu-latest")
+    else:
+        runner_labels = ("ubuntu-24.04",)
     if not workflow_execution_context_guarded(
         workflow,
         data_only=require_load,
-        runner_labels=("ubuntu-24.04", "ubuntu-latest")
-        if not require_load or workflow_name == ".github/workflows/codeql.yml"
-        else ("ubuntu-24.04",),
+        runner_labels=runner_labels,
     ):
         return False
     if workflow_name is not None:
@@ -2459,6 +2465,15 @@ def toolchain_data_loads_guarded(
     return matched == sources
 
 
+ACTIONLINT_RUNNER_CONFIG = (
+    "# Pinned actionlint predates this GA GitHub-hosted label.\n"
+    "# Runner admission remains restricted by check_validation_gates.py.\n"
+    "self-hosted-runner:\n"
+    "  labels:\n"
+    "    - ubuntu-26.04\n"
+)
+
+
 def check(root: Path = ROOT) -> list[str]:
     failures = []
     # Cache only this invocation's input snapshot. A later check must reread
@@ -2497,6 +2512,18 @@ def check(root: Path = ROOT) -> list[str]:
         except (OSError, UnicodeError):
             failures.append("unreadable gate input: " + name)
             return ""
+
+    # Extend only the pinned linter's outdated label table. No ignored rules,
+    # label patterns or alternate configuration may bypass native linting.
+    require(
+        read(".github/actionlint.yaml") == ACTIONLINT_RUNNER_CONFIG,
+        "actionlint configuration must retain only the reviewed hosted runner label",
+    )
+    alternate_lint_config = root / ".github/actionlint.yml"
+    require(
+        not alternate_lint_config.exists() and not alternate_lint_config.is_symlink(),
+        "actionlint must not load an alternate configuration",
+    )
 
     mandatory_bodies: dict[str, tuple[str, int] | None] = {}
     for job, path in MANDATORY.items():

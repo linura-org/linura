@@ -98,3 +98,15 @@ An optional data directory with silent root fallback preserves convenience but
 violates the heavy-workload boundary. A mandatory disk for all editing would
 unnecessarily block lightweight work. Automatically provisioning or purging disks
 would expand tool authority and endanger recovery; none is selected.
+
+## Implementation provenance note (2026-10-25)
+
+The Context above records the decisions and integration expectations at the time
+this ADR was accepted; that history remains unchanged. The optional isolated
+Rust/Qt development environment was subsequently extracted and merged in
+[PR #244](https://github.com/linura-org/linura/pull/244). Primary worktree-based
+Linux host/Remote SSH development continues to use the shared pinned toolchain;
+the container is not a mandatory development substrate. Native S17 session
+security and power qualification later advanced through split PRs #234–#241.
+These implementation updates do not revise this ADR's dedicated heavy-storage
+boundary, qualify physical Q11 or promote S17/v0.10 release support.

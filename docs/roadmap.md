@@ -225,6 +225,14 @@ v0.9 does not claim a general-purpose full-disk/dual-boot/bare-metal Linux insta
 **Status:** planned  
 **Target claim class:** Experimental
 
+Implementation is advancing independently of the milestone's **release** status:
+S17 session-security/power code is integrated, with a passing [exact-source
+Level A native qualification run](https://github.com/linura-org/linura/actions/runs/40141305916)
+on implementation SHA `a99511d5bd22afa5dcf7878a3fb9e0feca74c87f`.
+Its machine-readable slice remains `planned` until PR #241 is merged and the
+ledger's required merged-PR evidence is recorded. Broader S17 failure/interaction
+cases, physical Q11 and complete v0.10 release qualification are still pending.
+
 Deliver a complete daily-usable Linura workstation on the exact `arch-hyprland-v1` boundary while keeping the support claim explicitly Experimental. “Complete” describes the ordinary end-user product surface inside that declared profile; it does not imply generic Linux breadth or Stable support.
 
 The required experience includes:

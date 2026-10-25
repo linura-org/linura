@@ -9,29 +9,13 @@ use linura_transaction::{ProtectiveLockSettingRecord, ProtectiveLockSettingStore
 
 const SERVICE: &str = "service:system-sleep-protection";
 
-fn fixture_key(index: usize) -> Vec<u8> {
-    use std::io::Read;
-
-    // Preserve one process-local key per isolated test domain, including DB
-    // reopen/recovery, without embedding production-like secrets in source.
-    static KEYS: std::sync::OnceLock<[[u8; 32]; 4]> = std::sync::OnceLock::new();
-    let keys = KEYS.get_or_init(|| {
-        let mut keys = [[0_u8; 32]; 4];
-        let mut entropy = value(std::fs::File::open("/dev/urandom"));
-        for key in &mut keys {
-            value(entropy.read_exact(key));
-        }
-        keys
-    });
-    keys[index].to_vec()
-}
-
 #[test]
 fn fixture_keys_are_process_stable_and_domain_separated() {
-    for first in 0..4 {
-        assert_eq!(fixture_key(first), fixture_key(first));
-        for second in (first + 1)..4 {
-            assert_ne!(fixture_key(first), fixture_key(second));
+    for first in 0..7 {
+        assert!(fixture_key(first) == fixture_key(first));
+        assert!(fixture_key(first).iter().any(|byte| *byte != 0));
+        for second in (first + 1)..7 {
+            assert!(fixture_key(first) != fixture_key(second));
         }
     }
 }

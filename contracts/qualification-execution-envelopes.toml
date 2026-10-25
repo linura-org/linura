@@ -59,10 +59,10 @@ distribution_id = "ubuntu"
 distribution_version = "24.04"
 package_manager = "dpkg"
 
-[guest_profile.arch_rolling_qemu]
+[guest_profile.arch_rolling_qemu_kvm]
 architecture = "x86_64"
-virtualization = "qemu"
-acceleration = "tcg"
+virtualization = "kvm"
+acceleration = "kvm"
 distribution_id = "arch"
 distribution_version = "rolling"
 package_manager = "pacman"
@@ -333,9 +333,9 @@ required_observations = []
 id = "v010-shell-runtime"
 execution_subject = "guest"
 kind = "github-hosted"
-guest_profile = "arch_rolling_qemu"
+guest_profile = "arch_rolling_qemu_kvm"
 workflow = ".github/workflows/v010-shell-runtime-qualification.yml"
-profile_version = 1
+profile_version = 2
 input_files = ["contracts/v010-shell-runtime-qualification.toml", "contracts/v010-shell-runtime-substrate.toml", "contracts/v010-workstation-acceptance.toml"]
 required_digests = ["base_image_sha256", "prepared_image_sha256", "guest_package_manifest_sha256"]
 required_cache_digests = ["prepared_substrate"]

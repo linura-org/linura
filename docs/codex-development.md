@@ -154,8 +154,10 @@ the task. The shell profile separately checks CMake, Ninja, C++ and individual
 Qt 6 modules; their versions must agree. Editor checks the selected `qtpaths6`
 SDK against those modules, then checks QML runtime imports and a runnable
 `qmlls`. A coherent SDK is necessary but does not establish successful CMake
-compilation. Build and test the actual components in the optional prepared
-environment described in #244, and require native qualification separately.
+compilation. Build and test the actual components in the prepared host-native SDK, or in
+the optional isolated instance documented by #244 if the host cannot safely
+satisfy the prerequisites. Neither choice replaces independent native
+qualification.
 
 The `core` profile intentionally does **not** require Qt, QML, QEMU or an Arch
 image builder. The `shell`, `editor`, `bindings`, `vm`, `image` and `visual`

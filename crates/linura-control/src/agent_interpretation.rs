@@ -1156,8 +1156,11 @@ mod tests {
         .unwrap_or_else(|error| unreachable!("{error}"));
         let runtime = AgentRuntime::default();
         let work = work();
+        // Reach the transport before testing its late-success rejection. The
+        // transport itself sleeps past exactly the remaining admitted budget;
+        // a two-millisecond setup window instead races early admission denial.
         let mut budget =
-            InterpretationSessionBudget::new(id(RequestId::new("session:timeout")), 12, 1, 4096)
+            InterpretationSessionBudget::new(id(RequestId::new("session:timeout")), 1010, 1, 4096)
                 .unwrap_or_else(|error| unreachable!("{error}"));
         let mut invocation = InterpretationInvocation {
             runtime: &runtime,
@@ -1174,6 +1177,28 @@ mod tests {
             Err(InterpretationControlError::ProviderTimeout)
         ));
         assert_eq!(transport_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn elapsed_attempt_cannot_mint_a_handoff_deadline_or_accept_completion() {
+        let mut deadline =
+            AttemptDeadline::new(1010, 1000).unwrap_or_else(|error| unreachable!("{error}"));
+        deadline.started = deadline
+            .started
+            .checked_sub(std::time::Duration::from_millis(1000))
+            .unwrap_or_else(|| unreachable!("fixed elapsed fixture is representable"));
+        assert!(matches!(
+            deadline.remaining_ms(),
+            Err(InterpretationControlError::ProviderTimeout)
+        ));
+        assert!(matches!(
+            deadline.transport_deadline(),
+            Err(InterpretationControlError::ProviderTimeout)
+        ));
+        assert!(matches!(
+            deadline.ensure_live(),
+            Err(InterpretationControlError::ProviderTimeout)
+        ));
     }
 
     #[test]
@@ -1263,9 +1288,13 @@ mod tests {
         .unwrap_or_else(|error| unreachable!("{error}"));
         let runtime = AgentRuntime::default();
         let work = work();
+        // SlowTransport consumes the remaining deadline itself. Allow admission
+        // enough scheduling time to reach that transport: a two-millisecond
+        // setup window can expire first on a loaded runner and exercise only
+        // early rejection, leaving the fallback assertion untested.
         let mut budget = InterpretationSessionBudget::new(
             id(RequestId::new("session:fallback-deadline")),
-            12,
+            1010,
             2,
             2048,
         )

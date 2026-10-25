@@ -240,6 +240,9 @@ void SecretEntry::cancelFromInteraction()
 
 void SecretEntry::setNativeKeyboardFocus(bool focused)
 {
+    if (focused && nativeFocused_)
+        return; // No repeated accessibility focus announcement for each press.
+    // Every loss still cancels, including a prompt awaiting its first focus.
     nativeFocused_ = focused;
     if (!focused)
         cancelFromInteraction();

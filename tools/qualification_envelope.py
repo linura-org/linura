@@ -704,10 +704,10 @@ def load_contract(root: Path = ROOT) -> dict:
             "distribution_version": "24.04",
             "package_manager": "dpkg",
         },
-        "arch_rolling_qemu": {
+        "arch_rolling_qemu_kvm": {
             "architecture": "x86_64",
-            "virtualization": "qemu",
-            "acceleration": "tcg",
+            "virtualization": "kvm",
+            "acceleration": "kvm",
             "distribution_id": "arch",
             "distribution_version": "rolling",
             "package_manager": "pacman",

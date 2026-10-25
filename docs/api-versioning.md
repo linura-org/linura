@@ -159,7 +159,35 @@ metadata and typed codecs are checked together. Production composition and nativ
 qualification remain required before S17 activation; the interface's generation
 does not establish support or a Stable compatibility obligation.
 
+Native connection discovery has no public API change. At most two whole
+snapshots share the original two-second probe and aggregate 256-name limit.
+Typed disappearance invalidates a whole snapshot; fresh discovery must retain
+the original supervised UID/PID/invocation and final attestation. Unknown errors,
+ambiguous endpoints and persistent churn remain failures, never partial authority.
+
+`ObserveLock` returns a boolean only for settled native state. A consistent native
+acquisition/release may return the fixed private `NativeTransitionPending` error;
+ordinary authoritative queries still fail without a settled observation. Only
+post-dispatch lock and suspend-coverage verification may await that typed state within Control's existing
+bound. Other errors remain failures. `RetainedVerifiedRelease` rereads only the
+same independently verified Released generation with fresh peer/compositor checks;
+it cannot consume another release event, rotate a generation or authorize dispatch.
+The canonical suspend postcondition also keeps a fresh typed
+`PreparingForSleep=true` snapshot inconclusive within that existing bound.
+It cannot complete or replay the transition. Unknown preparation/counter facts,
+debug modes, changed identities and invalid freshness still fail closed; success
+requires preparation to end, one completed native cycle and exact secure coverage.
+
 ## Coherent-change requirement
+
+The private `SleepGate1` wire shape remains unchanged. Its fixed helper now
+irreversibly enters the local `linura-authority` UID/GID before connecting;
+transport admission and native attestation require that effective identity.
+Control still verifies the same root-supervised pre-start PID/invocation, current
+immutable executable and arguments. The explicit root allow rule is removed,
+and the handler independently rejects a root kernel UID. No compatibility
+exception is retained for this Experimental route. This grants no lock/power
+permission or executor credential and changes no persisted authority meaning.
 
 For Experimental D-Bus changes, these must remain coherent in the same candidate:
 

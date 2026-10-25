@@ -11,6 +11,7 @@
 #include <QGuiApplication>
 #include <QKeyEvent>
 #include <QQuickWindow>
+#include <QTimer>
 #include <xkbcommon/xkbcommon.h>
 #include <wayland-client-core.h>
 #include <wayland-server.h>
@@ -20,6 +21,8 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 #include <cstdio>
@@ -48,7 +51,11 @@ enum class Case {
     InvalidSize,
     ActiveDestruction,
     MissingManager,
+    ProbeProgress,
+    ProbeStarvation,
     ProtectedInput,
+    InputLateCoverage,
+    InputLateFocusLoss,
     InputFocusLoss,
     InputMapChange,
     InputCapabilityLoss,
@@ -146,6 +153,7 @@ struct WireServer final
     wl_resource *keyboard = nullptr;
     wl_resource *pointer = nullptr;
     wl_resource *seat = nullptr;
+    wl_resource *deferredLock = nullptr;
     std::string mapText;
     bool focusSent = false;
     uint32_t altGrMask = 0;
@@ -220,6 +228,11 @@ struct WireServer final
             return;
         }
         const unsigned count = ++self.commits;
+        if ((self.scenario == Case::ProbeProgress || self.scenario == Case::ProbeStarvation) &&
+            self.deferredLock) {
+            ext_session_lock_v1_send_locked(self.deferredLock);
+            self.deferredLock = nullptr;
+        }
         if (inputCase(self.scenario) && !self.focusSent) {
             assert(self.keyboard);
             wl_array held;
@@ -238,6 +251,14 @@ struct WireServer final
                                       wl_fixed_from_int(5));
             }
             self.focusSent = true;
+            if (self.scenario == Case::InputLateCoverage ||
+                self.scenario == Case::InputLateFocusLoss) {
+                // The compositor may focus the configured surface before its
+                // final global coverage acknowledgement. No second enter follows.
+                assert(self.deferredLock);
+                ext_session_lock_v1_send_locked(self.deferredLock);
+                self.deferredLock = nullptr;
+            }
         }
         if (self.scenario == Case::Hotplug) {
             if (count == 1)
@@ -456,6 +477,15 @@ struct WireServer final
     void command(unsigned char value)
     {
         assert(inputCase(scenario) && keyboard && !roles.empty());
+        if (scenario == Case::InputLateFocusLoss && value == 4) {
+            wl_keyboard_send_leave(keyboard, 20, roles.begin()->second->surface->native);
+            return;
+        }
+        if (scenario == Case::InputLateCoverage && value == 3) {
+            stroke(30);
+            stroke(48); // Unarmed text only synchronizes actual native focus.
+            return;
+        }
         if (pointerCase(scenario)) {
             pointerCommand(value);
             return;
@@ -620,7 +650,11 @@ struct WireServer final
             unexpectedLockDestroy, getSurface, unlock
         };
         wl_resource_set_implementation(native, &implementation, &self, nullptr);
-        ext_session_lock_v1_send_locked(native);
+        if (self.scenario == Case::InputLateCoverage || self.scenario == Case::InputLateFocusLoss ||
+            self.scenario == Case::ProbeProgress || self.scenario == Case::ProbeStarvation)
+            self.deferredLock = native;
+        else
+            ext_session_lock_v1_send_locked(native);
         if (self.scenario == Case::Finished)
             ext_session_lock_v1_send_finished(native);
     }
@@ -781,6 +815,7 @@ void client(Case scenario, int descriptor, int commands)
     auto *display = wl_display_connect_to_fd(descriptor);
     assert(display);
     unsigned paints = 0, gates = 0, unlockRequests = 0;
+    bool queuedCallback = false;
     quint64 pointerRevision = 1;
     std::unique_ptr<SecretEntry> ownedEntry;
     std::unique_ptr<NativePresentation> presentation;
@@ -803,10 +838,16 @@ void client(Case scenario, int descriptor, int commands)
         entry = ownedEntry.get();
     }
     {
+        NativeWaylandLock *ownedBackend = nullptr;
         NativeWaylandLock backend(display, [&](quint32, QImage &frame) {
             paints++;
+            if (scenario == Case::ProbeProgress) {
+                assert(ownedBackend);
+                ownedBackend->progressNativeState(); // No recursive pump while painting.
+            }
             return scenario != Case::PaintFailure && (!presentation || presentation->paint(frame));
         });
+        ownedBackend = &backend;
         if (presentation)
             QObject::connect(presentation.get(), &NativePresentation::repaintRequested, &backend,
                              &NativeWaylandLock::repaint, Qt::QueuedConnection);
@@ -898,7 +939,8 @@ void client(Case scenario, int descriptor, int commands)
             assert(!backend.dispatchNative(true));
             return;
         }
-        if (scenario == Case::ManagedFence || scenario == Case::DirectRelease) {
+        if (scenario == Case::ManagedFence || scenario == Case::DirectRelease ||
+            scenario == Case::ProbeProgress || scenario == Case::ProbeStarvation) {
             auto identity = NativeLockIdentity::parse(
                 QStringLiteral("session:lock:abcd1234-1234-4567-89ab-0123456789ab:1000:2:42:"
                                "98765432-1234-4567-89ab-0123456789ab:1"));
@@ -906,7 +948,21 @@ void client(Case scenario, int descriptor, int commands)
             NativeLockProtocol binding(backend, *identity);
             assert(binding.bound());
             assert(binding.dispatch(*identity, true));
-            waitUntil([&] { return backend.secureCoverage() && paints > 0; });
+            if (scenario == Case::ProbeStarvation) {
+                // Replies are queued on the wire, but a blocked Qt thread does
+                // not read them. The ORIGINAL five-second watchdog must exit.
+                std::this_thread::sleep_for(6s);
+                _exit(81);
+            }
+            // A synchronous observer may run before Qt dispatches its socket
+            // notifier. Drain actual available Wayland replies without a nested
+            // Qt event loop; cached acquiring state must not hide the reply.
+            const auto nativeDeadline = std::chrono::steady_clock::now() + 2s;
+            while (!backend.secureCoverage() || paints == 0) {
+                assert(std::chrono::steady_clock::now() < nativeDeadline);
+                backend.refreshNativeState();
+                std::this_thread::sleep_for(1ms);
+            }
             if (scenario == Case::DirectRelease) {
                 (void)backend.dispatchNative(
                     false); // No managed dispatch frame: zero release opcodes.
@@ -936,6 +992,19 @@ void client(Case scenario, int descriptor, int commands)
                 if (generation == 1) {
                     identity = next;
                     assert(binding.dispatch(*identity, true));
+                    if (scenario == Case::ProbeProgress) {
+                        QTimer::singleShot(0, &backend, [&] { queuedCallback = true; });
+                        const auto auditsEnd = std::chrono::steady_clock::now() + 6s;
+                        // Emulate successive bounded metadata reads without a
+                        // Qt event loop. The server acknowledges only a valid
+                        // committed frame, never the lock request itself.
+                        while (std::chrono::steady_clock::now() < auditsEnd) {
+                            backend.progressNativeState();
+                            std::this_thread::sleep_for(20ms);
+                        }
+                        assert(!queuedCallback && backend.secureCoverage() && paints == 2);
+                        assert(binding.inspect() == LockMechanism::State::Secure);
+                    }
                     waitUntil([&] { return backend.secureCoverage() && paints >= 2; });
                 }
             }
@@ -946,6 +1015,13 @@ void client(Case scenario, int descriptor, int commands)
             return scenario != Case::DeniedAcquire && (secure || scenario != Case::DeniedRelease);
         }));
         assert(!backend.installManagedEffectGate([](bool) { return true; }));
+        unsigned beforeFocusCancellations = 0;
+        if (scenario == Case::InputLateFocusLoss) {
+            assert(entry && !entry->nativeAccessibilityFocused());
+            QObject::connect(entry, &SecretEntry::cancellationRequested, entry,
+                             [&] { ++beforeFocusCancellations; });
+            assert(entry->beginNativePrompt());
+        }
         assert(backend.dispatchNative(true));
         waitUntil([&] { return backend.secureCoverage() && paints > 0; });
         assert(backend.requestedSecure() && gates == 1);
@@ -1042,6 +1118,37 @@ void client(Case scenario, int descriptor, int commands)
         }
         if (entry) {
             waitUntil([&] { return backend.protectedInputFocused(); });
+            if (scenario == Case::InputLateFocusLoss) {
+                // Pre-coverage state/enter cancelled the prompt while cached
+                // focus was false. Coverage then established focus, no key.
+                assert(beforeFocusCancellations == 1 && !entry->acceptsInput());
+                unsigned cancellations = 0;
+                QObject::connect(entry, &SecretEntry::cancellationRequested, entry,
+                                 [&] { ++cancellations; });
+                assert(entry->nativeAccessibilityFocused());
+                assert(entry->beginNativePrompt());
+                unsigned char leave = 4;
+                assert(write(commands, &leave, 1) == 1);
+                waitUntil([&] { return cancellations != 0; });
+                assert(cancellations == 1 && !entry->acceptsInput() && entry->maskedLength() == 0 &&
+                       !backend.protectedInputFocused());
+                assert(backend.dispatchNative(false));
+                waitUntil([&] { return !backend.requestedSecure(); });
+                return;
+            }
+            if (scenario == Case::InputLateCoverage) {
+                assert(entry->nativeAccessibilityFocused());
+                unsigned notices = 0;
+                const auto connection =
+                    QObject::connect(entry, &SecretEntry::inputChanged, entry, [&] { ++notices; });
+                unsigned char synchronize = 3;
+                assert(write(commands, &synchronize, 1) == 1);
+                const auto settled = std::chrono::steady_clock::now() + 100ms;
+                while (std::chrono::steady_clock::now() < settled)
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+                assert(notices == 0 && !entry->acceptsInput() && entry->maskedLength() == 0);
+                QObject::disconnect(connection); // No repeated focus event per key.
+            }
             KeyFilter filter;
             unsigned submissions = 0;
             bool cancelled = false;
@@ -1123,11 +1230,21 @@ void run(Case scenario, int expectedExit, unsigned expectedLocks, unsigned expec
 {
     int sockets[2];
     int commands[2];
+    int diagnostics[2] = {-1, -1};
+    const bool captureProgress =
+        scenario == Case::ProbeProgress || scenario == Case::ProbeStarvation;
     assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
     assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, commands) == 0);
+    if (captureProgress)
+        assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, diagnostics) == 0);
     const pid_t child = fork();
     assert(child >= 0);
     if (child == 0) {
+        if (captureProgress) {
+            close(diagnostics[0]);
+            assert(dup2(diagnostics[1], STDERR_FILENO) == STDERR_FILENO);
+            close(diagnostics[1]);
+        }
         close(sockets[0]);
         close(commands[0]);
         client(scenario, sockets[1], commands[1]);
@@ -1135,6 +1252,8 @@ void run(Case scenario, int expectedExit, unsigned expectedLocks, unsigned expec
     }
     close(sockets[1]);
     close(commands[1]);
+    if (captureProgress)
+        close(diagnostics[1]);
     WireServer server(scenario, sockets[0], commands[0]); // No server thread exists across fork.
     int status = 0;
     assert(waitpid(child, &status, 0) == child);
@@ -1142,6 +1261,28 @@ void run(Case scenario, int expectedExit, unsigned expectedLocks, unsigned expec
         std::fprintf(stderr, "native wire case=%u wait-status=%d expected-exit=%d\n",
                      static_cast<unsigned>(scenario), status, expectedExit);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == expectedExit);
+    if (captureProgress) {
+        std::string trace;
+        char bytes[512];
+        ssize_t count;
+        while ((count = read(diagnostics[0], bytes, sizeof(bytes))) > 0) {
+            trace.append(bytes, static_cast<std::size_t>(count));
+            assert(trace.size() <= 4096);
+        }
+        assert(count == 0);
+        close(diagnostics[0]);
+        if (scenario == Case::ProbeProgress) {
+            const std::string cycle = "native-owner-lock-progress stage=requested\n"
+                                      "native-owner-lock-progress stage=surface-configured\n"
+                                      "native-owner-lock-progress stage=frame-flushed\n"
+                                      "native-owner-lock-progress stage=all-surfaces-flushed\n"
+                                      "native-owner-lock-progress stage=acknowledged\n"
+                                      "native-owner-lock-progress stage=released\n";
+            assert(trace == cycle + cycle);
+        } else
+            assert(trace == "native-owner-lock-progress stage=requested\n"
+                            "native-owner-timeout stage=lock-acquisition\n");
+    }
     assert(server.locks == expectedLocks && server.unlocks == expectedUnlocks &&
            server.errors == 0);
     if (scenario == Case::Repaint)
@@ -1150,13 +1291,20 @@ void run(Case scenario, int expectedExit, unsigned expectedLocks, unsigned expec
         assert(server.acknowledgements == 1 && server.commits > 1);
     if (scenario == Case::ResizePressure)
         assert(server.acknowledgements == 2 && server.commits >= 5);
-    if (scenario == Case::Hotplug || scenario == Case::ManagedFence)
+    if (scenario == Case::Hotplug || scenario == Case::ManagedFence ||
+        scenario == Case::ProbeProgress)
         assert(server.acknowledgements == 2 && server.commits >= 2);
 }
 } // namespace
 
-int main()
+int main(int argc, char **argv)
 {
+    if (argc == 2 && std::string_view(argv[1]) == "--native-probe-progress") {
+        run(Case::ProbeProgress, 0, 2, 2);
+        run(Case::ProbeStarvation, NativeDeadline::NativeBoundaryTimeoutExit, 1, 0);
+        return 0;
+    }
+    assert(argc == 1);
     assert(!NativeWaylandLock::boundedFrame(0, 1));
     assert(!NativeWaylandLock::boundedFrame(1, 0));
     assert(!NativeWaylandLock::boundedFrame(8193, 1));
@@ -1179,6 +1327,8 @@ int main()
     run(Case::ActiveDestruction, NativeLockProtocol::NativeLockFaultExit, 1, 0);
     run(Case::MissingManager, 0, 0, 0);
     run(Case::ProtectedInput, 0, 1, 1);
+    run(Case::InputLateCoverage, 0, 1, 1);
+    run(Case::InputLateFocusLoss, 0, 1, 1);
     run(Case::InputFocusLoss, 0, 1, 1);
     run(Case::InputMapChange, 0, 1, 1);
     run(Case::InputCapabilityLoss, 0, 1, 1);

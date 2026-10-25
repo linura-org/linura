@@ -2,6 +2,8 @@
 Description=Linura native compositor availability for UID %i
 After=user@%i.service
 BindsTo=user@%i.service
+# BindsTo propagates stops; PartOf also queues the new watcher on manager restart.
+PartOf=user@%i.service
 
 [Path]
 # Watch the immediate, already-supervised runtime directory. A glob inside

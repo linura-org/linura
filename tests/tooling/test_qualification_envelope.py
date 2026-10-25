@@ -73,8 +73,9 @@ class QualificationEnvelopeTests(unittest.TestCase):
         )
         self.assertEqual(by_id["vm-acceptance"]["execution_subject"], "guest")
         self.assertEqual(
-            by_id["v010-shell-runtime"]["guest_profile"], "arch_rolling_qemu"
+            by_id["v010-shell-runtime"]["guest_profile"], "arch_rolling_qemu_kvm"
         )
+        self.assertEqual(by_id["v010-shell-runtime"]["profile_version"], 2)
         self.assertEqual(
             by_id["v09-qualification-contract"]["execution_subject"], "runner"
         )
@@ -225,6 +226,72 @@ class QualificationEnvelopeTests(unittest.TestCase):
                 "guest_package_manifest_sha256 does not match guest execution subject",
             ):
                 envelopes.verify_envelope(ROOT, path)
+
+    def test_v010_subject_requires_arch_kvm_without_changing_ubuntu_tcg(self):
+        contract = envelopes.load_contract(ROOT)
+        lane = envelopes.lane_by_id(contract, "v010-shell-runtime")
+        capture = _ubuntu_guest_capture() | {
+            "distribution_id": "arch",
+            "distribution_version": "rolling",
+            "package_manager": "pacman",
+            "virtualization": "kvm",
+        }
+        digests = {
+            "base_image_sha256": "a" * 64,
+            "prepared_image_sha256": "d" * 64,
+            "guest_package_manifest_sha256": "b" * 64,
+        }
+        observations = {"runtime_package_manifest_sha256": "b" * 64}
+        subject = envelopes._execution_subject_binding(
+            contract,
+            lane,
+            {},
+            capture,
+            digests,
+            observations,
+            {"VM_ACCELERATION": "kvm"},
+        )
+        self.assertEqual(subject["virtualization"], "kvm")
+        self.assertEqual(subject["acceleration"], "kvm")
+        self.assertEqual(
+            subject["image_digests"],
+            {"base_image_sha256": "a" * 64, "prepared_image_sha256": "d" * 64},
+        )
+        for changed, acceleration in (
+            ({"virtualization": "qemu"}, "kvm"),
+            ({"virtualization": "none"}, "kvm"),
+            ({"virtualization": "vmware"}, "kvm"),
+            ({}, "tcg"),
+            ({"architecture": "aarch64"}, "kvm"),
+            ({"distribution_id": "ubuntu"}, "kvm"),
+            ({"package_manager": "dpkg"}, "kvm"),
+            ({"package_manifest_sha256": "e" * 64}, "kvm"),
+        ):
+            with (
+                self.subTest(changed=changed, acceleration=acceleration),
+                self.assertRaises(envelopes.EnvelopeError),
+            ):
+                envelopes._execution_subject_binding(
+                    contract,
+                    lane,
+                    {},
+                    capture | changed,
+                    digests,
+                    observations,
+                    {"VM_ACCELERATION": acceleration},
+                )
+        ubuntu_lane = envelopes.lane_by_id(contract, "vm-acceptance")
+        ubuntu = envelopes._execution_subject_binding(
+            contract,
+            ubuntu_lane,
+            {},
+            _ubuntu_guest_capture(),
+            {"base_image_sha256": "a" * 64},
+            {"guest_package_manifest_sha256": "b" * 64},
+            {"VM_ACCELERATION": "tcg"},
+        )
+        self.assertEqual(ubuntu["virtualization"], "qemu")
+        self.assertEqual(ubuntu["acceleration"], "tcg")
 
     def test_aggregate_execution_subject_binds_component_set(self):
         source_sha = subprocess.check_output(

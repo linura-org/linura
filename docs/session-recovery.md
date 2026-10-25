@@ -1,8 +1,11 @@
 # S17 deterministic session recovery
 
-These are recovery procedures, not evidence that the in-progress S17 native
-deployment has qualified. No model, network service or conversation history is
-required. Never interpret a lock hint, shell receipt, awake screen or successful
+These are recovery procedures, not substitutes for qualification evidence. The
+[recorded Level A native S17 run](https://github.com/linura-org/linura/actions/runs/40141305916)
+exercised bounded observe-only recovery for its scoped authentication, suspend,
+logout, reboot and power-off cases. Complete S17 acceptance and physical
+workstation Q11 remain unqualified. No model, network service or conversation
+history is required. Never interpret a lock hint, shell receipt, awake screen or successful
 command submission as proof of secure coverage or a completed power transition.
 
 ## Preserve the original request

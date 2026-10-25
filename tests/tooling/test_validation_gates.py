@@ -32,6 +32,7 @@ class ValidationGateTests(unittest.TestCase):
                 "tools/xtask/src/main.rs",
                 "tools/run_tooling_tests.py",
                 "tools/codex/versions.env",
+                ".github/actionlint.yaml",
                 ".github/workflows/trusted-release-proof.yml",
             )
         )
@@ -622,6 +623,7 @@ class ValidationGateTests(unittest.TestCase):
                         gates.toolchain_data_loads_guarded(
                             original.replace(marker, injected + marker, 1),
                             require_load=True,
+                            workflow_name=name,
                         )
                     )
 
@@ -762,9 +764,79 @@ class ValidationGateTests(unittest.TestCase):
             with self.subTest(workflow=workflow):
                 self.assertTrue(
                     gates.toolchain_data_loads_guarded(
-                        (ROOT / workflow).read_text(), require_load=True
+                        (ROOT / workflow).read_text(),
+                        require_load=True,
+                        workflow_name=workflow,
                     )
                 )
+
+    def test_actionlint_configuration_cannot_bypass_checks(self):
+        target = self.root / ".github/actionlint.yaml"
+        original = target.read_text()
+        for changed in (
+            original.replace("ubuntu-26.04", "*"),
+            original + "paths:\n  '**':\n    ignore:\n      - '.*'\n",
+            original.replace("ubuntu-26.04", "attacker-runner"),
+            "",
+        ):
+            with self.subTest(changed=changed):
+                target.write_text(changed)
+                self.assertTrue(
+                    any(
+                        "actionlint configuration" in error
+                        for error in gates.check(self.root)
+                    )
+                )
+        target.write_text(original)
+        alternate = self.root / ".github/actionlint.yml"
+        alternate.write_text("paths:\n  '**':\n    ignore: ['.*']\n")
+        self.assertTrue(
+            any("alternate configuration" in error for error in gates.check(self.root))
+        )
+        alternate.unlink()
+        alternate.symlink_to("missing-actionlint-config")
+        self.assertTrue(
+            any("alternate configuration" in error for error in gates.check(self.root))
+        )
+        alternate.unlink()
+        self.assertEqual(gates.check(self.root), [])
+
+    def test_graphical_runtime_runner_exception_is_narrow_and_pinned(self):
+        workflow = ".github/workflows/v010-shell-runtime-qualification.yml"
+        source = (ROOT / workflow).read_text()
+        self.assertEqual(source.count("runs-on: ubuntu-26.04"), 2)
+        self.assertTrue(
+            gates.toolchain_data_loads_guarded(
+                source, require_load=True, workflow_name=workflow
+            )
+        )
+        for replacement in ("ubuntu-24.04", "ubuntu-latest", "self-hosted"):
+            with self.subTest(replacement=replacement):
+                changed = source.replace("ubuntu-26.04", replacement, 1)
+                self.assertFalse(
+                    gates.toolchain_data_loads_guarded(
+                        changed, require_load=True, workflow_name=workflow
+                    )
+                )
+        security_name = ".github/workflows/security.yml"
+        security = (ROOT / security_name).read_text()
+        self.assertFalse(
+            gates.toolchain_data_loads_guarded(
+                security.replace("ubuntu-24.04", "ubuntu-26.04", 1),
+                require_load=True,
+                workflow_name=security_name,
+            )
+        )
+        changed = source.replace(
+            "    runs-on: ubuntu-26.04\n",
+            "    runs-on: ubuntu-26.04\n    container: attacker/image\n",
+            1,
+        )
+        self.assertFalse(
+            gates.toolchain_data_loads_guarded(
+                changed, require_load=True, workflow_name=workflow
+            )
+        )
 
     def test_toolchain_preload_environment_mutations_reach_repository_gate(self):
         path = self.root / ".github/workflows/security.yml"
@@ -1170,7 +1242,10 @@ class ValidationGateTests(unittest.TestCase):
             with self.subTest(workflow=name):
                 source = (self.root / name).read_text(encoding="utf-8")
                 self.assertTrue(
-                    gates.toolchain_data_loads_guarded(source, require_load=True), name
+                    gates.toolchain_data_loads_guarded(
+                        source, require_load=True, workflow_name=name
+                    ),
+                    name,
                 )
 
     def test_toolchain_preload_reported_python_helper_is_rejected(self):

@@ -22,8 +22,8 @@ namespace Linura::SecurityOwner {
 namespace {
 
 // This probe performs two complete, independently decoded snapshots across a
-// fixed sequence of individually bounded calls. Slow native transports must be
-// allowed to finish that sequence without dropping any revalidation. The
+// fixed sequence of bounded read-only batches with individually bounded calls.
+// Batching removes serial round trips without dropping any revalidation. The
 // enclosing NativeRuntime startup deadline remains the final 8-second bound.
 constexpr qint64 ProbeBudgetMs = 4'000;
 constexpr qint64 CallBudgetMs = 500;
@@ -146,7 +146,8 @@ std::optional<NativeLockIdentity> bindNativeSession(const NativeSessionFacts &fa
 }
 
 std::optional<NativeSessionBinding> inspectNativeSession(const QDBusConnection &trustedSystemBus,
-                                                         int actualWaylandDisplayFd)
+                                                         int actualWaylandDisplayFd,
+                                                         const NativeProbeProgress &progress)
 {
     const auto peer = displayPeer(actualWaylandDisplayFd);
     const auto boot = kernelBoot();
@@ -157,6 +158,8 @@ std::optional<NativeSessionBinding> inspectNativeSession(const QDBusConnection &
     budget.start();
     const auto call = [&](const QString &owner, const QString &path, const QString &interface,
                           const QString &method, const QList<QVariant> &arguments) {
+        if (progress)
+            progress();
         const qint64 remaining = ProbeBudgetMs - budget.elapsed();
         if (remaining <= 0)
             return QDBusMessage::createError(QStringLiteral("org.linura.Private.NativeUnavailable"),
@@ -197,13 +200,20 @@ std::optional<NativeSessionBinding> inspectNativeSession(const QDBusConnection &
     const auto path = sessionForPeer();
     if (!path)
         return std::nullopt;
-    const auto property = [&](const QString &owner, const QString &object, const QString &interface,
-                              const QString &name) -> std::optional<QVariant> {
-        return readNativeDBusProperty(call, owner, object, interface, name);
-    };
     const QString sessionInterface = QStringLiteral("org.freedesktop.login1.Session");
-    const auto field = [&](const QString &name) {
-        return property(*logindOwner, *path, sessionInterface, name);
+    const QStringList sessionNames{
+        QStringLiteral("Id"),    QStringLiteral("User"),   QStringLiteral("TimestampMonotonic"),
+        QStringLiteral("Type"),  QStringLiteral("Class"),  QStringLiteral("State"),
+        QStringLiteral("Seat"),  QStringLiteral("Active"), QStringLiteral("Remote"),
+        QStringLiteral("Leader")};
+    const auto sessionFields =
+        readNativeDBusProperties(trustedSystemBus, budget, *logindOwner, *path, sessionInterface,
+                                 sessionNames, ProbeBudgetMs, CallBudgetMs, progress);
+    if (!sessionFields)
+        return std::nullopt;
+    const auto field = [&](const QString &name) -> std::optional<QVariant> {
+        return sessionFields->contains(name) ? std::optional<QVariant>(sessionFields->value(name))
+                                             : std::nullopt;
     };
     const auto id = field(QStringLiteral("Id"));
     const auto uid = field(QStringLiteral("User"));
@@ -249,6 +259,28 @@ std::optional<NativeSessionBinding> inspectNativeSession(const QDBusConnection &
         return std::nullopt;
     const QString unitInterface = QStringLiteral("org.freedesktop.systemd1.Unit");
     const QString serviceInterface = QStringLiteral("org.freedesktop.systemd1.Service");
+    const QStringList unitNames{QStringLiteral("InvocationID"), QStringLiteral("FragmentPath"),
+                                QStringLiteral("DropInPaths"), QStringLiteral("ActiveState"),
+                                QStringLiteral("SubState")};
+    const QStringList serviceNames{QStringLiteral("MainPID"), QStringLiteral("User"),
+                                   QStringLiteral("ExecStart")};
+    const auto systemdFields = [&](const QString &interface, const QStringList &names) {
+        return readNativeDBusProperties(trustedSystemBus, budget, *systemdOwner,
+                                        unit.value().path(), interface, names, ProbeBudgetMs,
+                                        CallBudgetMs, progress);
+    };
+    const auto unitFields = systemdFields(unitInterface, unitNames);
+    const auto serviceFields = systemdFields(serviceInterface, serviceNames);
+    if (!unitFields || !serviceFields)
+        return std::nullopt;
+    const auto property = [&](const QString &owner, const QString &object, const QString &interface,
+                              const QString &name) -> std::optional<QVariant> {
+        if (owner != *systemdOwner || object != unit.value().path() ||
+            (interface != unitInterface && interface != serviceInterface))
+            return std::nullopt;
+        const auto &fields = interface == unitInterface ? *unitFields : *serviceFields;
+        return fields.contains(name) ? std::optional<QVariant>(fields.value(name)) : std::nullopt;
+    };
     const auto mainPid =
         property(*systemdOwner, unit.value().path(), serviceInterface, QStringLiteral("MainPID"));
     const auto serviceUser =
@@ -298,11 +330,17 @@ std::optional<NativeSessionBinding> inspectNativeSession(const QDBusConnection &
     // An attested process and a boot snapshot cannot freshen replaced session
     // identity. Re-resolve and recheck its creation before retaining the binding.
     const auto freshPath = sessionForPeer();
-    const auto freshCreated = field(QStringLiteral("TimestampMonotonic"));
-    const auto freshLeader = field(QStringLiteral("Leader"));
+    const auto freshSession =
+        readNativeDBusProperties(trustedSystemBus, budget, *logindOwner, *path, sessionInterface,
+                                 sessionNames, ProbeBudgetMs, CallBudgetMs, progress);
+    if (!freshSession)
+        return std::nullopt;
+    const std::optional<QVariant> freshCreated =
+        freshSession->value(QStringLiteral("TimestampMonotonic"));
+    const std::optional<QVariant> freshLeader = freshSession->value(QStringLiteral("Leader"));
     const auto freshPeer = displayPeer(actualWaylandDisplayFd);
-    const auto freshUser = field(QStringLiteral("User"));
-    const auto freshSeat = field(QStringLiteral("Seat"));
+    const std::optional<QVariant> freshUser = freshSession->value(QStringLiteral("User"));
+    const std::optional<QVariant> freshSeat = freshSession->value(QStringLiteral("Seat"));
     if (!freshUser || !freshSeat)
         return std::nullopt;
     const auto freshSessionUser = decodeNativeLogindUser(*freshUser);
@@ -310,18 +348,21 @@ std::optional<NativeSessionBinding> inspectNativeSession(const QDBusConnection &
     if (!freshSessionUser || !freshSessionSeat)
         return std::nullopt;
     const auto sameField = [&](const QString &name, const QVariant &original) {
-        const auto current = field(name);
+        const std::optional<QVariant> current = freshSession->value(name);
         return current && current->metaType() == original.metaType() && *current == original;
     };
+    const auto freshUnit = systemdFields(unitInterface, unitNames);
+    const auto freshService = systemdFields(serviceInterface, serviceNames);
+    if (!freshUnit || !freshService)
+        return std::nullopt;
     const auto sameService = [&](const QString &interface, const QString &name,
                                  const QVariant &original) {
-        const auto current = property(*systemdOwner, unit.value().path(), interface, name);
+        const std::optional<QVariant> current =
+            (interface == unitInterface ? *freshUnit : *freshService).value(name);
         return current && current->metaType() == original.metaType() && *current == original;
     };
-    const auto freshExecStart =
-        property(*systemdOwner, unit.value().path(), serviceInterface, QStringLiteral("ExecStart"));
-    const auto freshDropIns =
-        property(*systemdOwner, unit.value().path(), unitInterface, QStringLiteral("DropInPaths"));
+    const std::optional<QVariant> freshExecStart = freshService->value(QStringLiteral("ExecStart"));
+    const std::optional<QVariant> freshDropIns = freshUnit->value(QStringLiteral("DropInPaths"));
     if (!freshDropIns ||
         (freshDropIns->metaType() != QMetaType::fromType<QStringList>() &&
          (freshDropIns->metaType() != QMetaType::fromType<QDBusArgument>() ||

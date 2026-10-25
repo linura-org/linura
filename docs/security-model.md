@@ -82,6 +82,13 @@ Session1 carries only narrow typed request material. Operation class, trusted ri
 
 The first-party Control Center and Quick Settings surfaces are clients of this same boundary, not additional trust zones with mutation authority. They receive authoritative observation through the compiled ShellBridge and can request only the registered session-volume operation; neither QML surface receives provider handles, raw D-Bus mutation construction, operation-class/risk selection or executor authority. The exact-source shell development gate therefore qualifies the client-to-Session1 composition with real PipeWire/WirePlumber, exact-node verification and durable audit evidence while retaining Q11 as the separate real-workstation interaction/visual support gate.
 
+The audio helper keeps its connection alive until a PipeWire synchronization
+round trip completes after the identity-bound mixer update. A synchronization
+error cannot produce the dispatch acknowledgement. This drains the asynchronous
+request before process exit; it grants no additional authority and does not
+replace Control's independent postcondition observation or existing process
+deadline. Transport loss still fails closed and never triggers an effect retry.
+
 ## Human approval is not executor authority
 
 The original caller's Polkit decision authorizes continuation of the exact Authority1 request. It is not a bearer token and is never forwarded as authority to the root executor.
@@ -98,6 +105,190 @@ This separation prevents an OS approval check from collapsing:
 - recovery state;
 - independent verification;
 - verified commit and reconciliation.
+
+Native session owner discovery, compound observation/arm/consume RPC and post-reply
+identity revalidation share the original two-second probe deadline. `ObserveLock`
+performs fresh session/peer attestation and an independent compositor sample;
+like the arm/consume handshake, it may use only the remainder after discovery.
+Primitive identity/mechanism calls retain their 500 ms cap. Reply arrival never
+starts a new budget or freshens a proof. A late reply or failed revalidation fails
+closed, and this allocation changes neither the human-interaction deadline nor executor
+authority.
+
+The owner's native peer/session/unit inspectors queue at most 32 fixed
+`Properties.Get` reads per interface before waiting. Each pending call retains
+the existing 500 ms cap from admission, and all batches share their caller's
+original probe clock (two seconds for peer/sleep probes, four for the existing
+session inspector). Every reply is checked before a complete map can be used;
+missing, malformed, substituted or late replies discard the entire batch.
+Initial and revalidation batches are distinct fresh reads, never a cache.
+All prior UID/PID, invocation, launch, session, immutable-asset, owner-continuity
+and final deadline checks remain. Batching removes serial round trips from the
+owner's event loop; it grants no observation authority or additional time.
+
+Synchronous metadata inspection must not starve an already admitted native lock.
+The immutable runtime binds a progress callback after the owned Wayland backend
+and protocol are initialized. Between bounded metadata calls and batch waits,
+it drains only already available events on that same attested connection.
+Progress time consumes the existing probe clock; each remote call keeps its
+original cap, and expired probes still fail without returning a partial map.
+Nested native callbacks or painting skip a recursive pump. No Qt event loop,
+D-Bus method dispatch, timer delivery, cache or effect retry is introduced.
+Only the existing prepared gate sends lock/unlock effects; native acknowledgements
+remain mechanism facts, with every peer/session/identity/scope/compositor and
+final deadline check retained before accepting a result. Authentication's own
+peer inspector uses the same bounded progress hook. A queued Qt callback is not
+executed by this path, and a stalled acquisition still exits after five seconds.
+
+Native owner discovery may acquire at most two complete connection snapshots
+inside that same probe, with at most 256 listed names across both snapshots.
+An exact typed missing-connection reply discards the entire snapshot; it never
+turns the missing row into negative evidence. A fresh snapshot must retain the
+original supervised UID, PID and invocation, and final supervision/credentials
+are revalidated before use. Persistent churn, exhaustion, ambiguity, replacement,
+malformed credentials and unknown/denied/timed-out introspection fail closed.
+Only typed absence of the private object/interface/method excludes a separate
+GLib connection from endpoint selection. This is native snapshot consistency,
+not a second observation authority, cached fact or control-plane retry policy.
+
+Post-dispatch lock and suspend-coverage verification distinguish a known native
+acquisition/release transition from unavailable or inconsistent evidence. The owner first authenticates
+Control and samples the compositor independently; it drains already available
+Wayland events before comparing native acknowledgements. Only consistent in-flight
+mechanism states produce the fixed typed pending reply. Control revalidates the
+same owner and boot within the original probe deadline, then uses its existing
+bounded verification loop. Pending creates no observation envelope or secure/unlocked
+boolean, cannot authorize mutation, and cannot commit a postcondition. Other errors
+still fail immediately. Native acquisition/release watchdogs remain unchanged.
+Suspend still requires exactly one independently observed kernel cycle and the
+same fresh secure lock generation. Pending coverage cannot substitute for either
+fact; the existing canonical review remains inconclusive or unsatisfied until
+both are proved, within Control's unchanged bounded verification loop.
+The exact native `PreparingForSleep=true` fact is likewise inconclusive, never
+completion: logind may acknowledge admission before the machine sleeps. Missing
+or malformed preparation/counter facts and debug suspend modes remain errors.
+Only fresh `PreparingForSleep=false`, exactly one completed kernel cycle and
+the same verified secure generation can satisfy suspend. No additional effect
+dispatch, observation budget or retry window follows from this classification.
+
+The fixed pre-sleep helper starts under the root-owned native unit, then sets
+`no_new_privs` and executes its one immutable image again with the same PID and
+arguments as the fixed `linura-authority` UID and primary GID. It clears the
+environment and supplementary groups before opening a bus connection, and checks
+all real/effective/saved/filesystem IDs, empty capability sets and the privilege
+gain restriction. The local account comes from one bounded descriptor-validated
+`/etc/passwd` snapshot, never caller input or NSS.
+
+This makes the live executable inspectable by unprivileged Control while
+preserving the root-owned image inode, exact arguments, process generation,
+systemd ControlPID, invocation, immutable configuration and live pre-kernel
+phase checks. Neither root UID nor the service account alone qualifies an entry.
+The native unit's main sleep operation retains its original root execution;
+only the helper declines privilege. The helper carries no secret or reusable
+executor authority. Security-owner and PAM protection remain separate boundaries.
+
+The first independently verified release consumes its event once. Reconciliation
+may reread only that same retained Released generation after fresh Control-peer,
+compositor, coverage and sleep-fence checks. Ready/unlocked alone is insufficient;
+replaced identities, relock and durable generation rotation invalidate that read.
+It grants no dispatch authority and never repeats a release or rotates a generation.
+
+Control and the native owner both authenticate the pinned Polkit 127 daemon as
+the local `polkitd` account supervised by root-owned systemd. UID 0 is not its
+daemon identity, and knowing the account UID is insufficient. The native adapter
+requires the exact immutable unit fragment and executable, fixed live argv,
+matching bus/kernel PID, nonzero invocation and absence of drop-ins. Two fresh
+snapshots and service-owner rechecks share one original two-second probe budget;
+the complete daemon identity must also survive the human interaction. A single
+bounded local-account reader serves the fixed Control and Polkit identities. It
+rejects root, aliases, duplicate/noncanonical rows, mutable/link-substituted files
+and excessive input without consulting NSS or starting a process. These checks
+establish a transport peer only; canonical approval and native proof consumption
+remain independently required.
+
+Protected keyboard delivery checks its actual configured Wayland surface and
+current complete lock coverage on each fresh press. Focus can arrive before the
+coverage acknowledgement, so an enter-time snapshot cannot permanently disable
+later guarded input. Coverage changes synchronize focus before the first key,
+including the protected accessibility projection. Focus/layout/device loss still wipes and cancels; neither
+held keys nor generic Qt events can restore or submit native authentication.
+Unchanged positive focus is not reannounced for each key; every loss still
+cancels, including a prompt that has not yet received its first focused press.
+Retiring consent refreshes presentation after both authentication and runtime
+scopes are cleared. A denial returns to the locked retry presentation only when
+the original native approval cooldown has reached Idle with no live conversation
+or scope; presentation never resets that cooldown, approves input or unlocks.
+
+Native transport errors expose fixed source-owned failure classes and mechanism
+stages, never remote error names, messages, request bodies or addresses. Unknown
+errors remain failures. Disposable qualification may retain bounded locker exit
+facts only as failure diagnostics, independently of accepted native evidence.
+Supervisor refusals distinguish only fixed process/user/unit/state/invocation/
+launch/asset stages. No native field value enters the error. Failure-only owner
+diagnostics compare the current invocation with the requested lock and discard
+both identifiers. A separate three-second current-boot query reads at most 64
+journal entries for that validated owner unit under the existing 16 KiB output
+bound, selecting process exit fields and fixed watchdog labels only. Decoding
+retains only known exit codes, numeric statuses and closed timeout stages.
+Watchdogs make one allocation-free, nonblocking send to systemd's stderr socket
+before their original exit 71. A full, closed or non-socket stderr cannot block,
+allocate, retry, reset a deadline or invoke cleanup. Existing watchdog durations,
+admission, cancellation and fail-closed exit remain unchanged.
+The same nonblocking channel records only six closed Wayland milestones:
+request marshalled, first lock surface configured, first frame flushed,
+all currently announced lock surfaces flushed, actual locked acknowledgement
+and release acknowledgement. At most one of each is emitted per acquisition.
+These contain no input, identifiers, dimensions or
+payload, and are discarded unless failure diagnostics are collected. A first
+surface/frame is not proof of all-output coverage. Ordered milestones explain
+where acquisition stopped; no log line changes admission, a deadline or native
+state, and none can satisfy verification or recovery.
+Failure-only compositor context uses fixed three-second read-only queries under
+the disposable account with an explicit first-live-instance selector; it does not
+depend on inheriting a compositor environment through SSH. Bounded parsers retain
+only aggregate output counts and
+closed upstream protocol/render-failure labels. Raw logs, names, identifiers and
+dimensions are discarded. Ambient compositor discovery is not attestation of
+the original invocation; these diagnostics cannot supply acceptance or recovery.
+A replacement owner, successful native exit or empty
+journal never repairs the original operation or constitutes acceptance evidence.
+Sleep-gate denials carry only fixed stages and reasons in the private denial
+reply and the helper's existing failure journal entry. Unknown errors map to `unclassified`; sender,
+provider errors and response data are never copied into that diagnostic.
+The native adapter accepts only the complete closed grammar on an access-denied
+reply to the fixed private helper method, after the existing reply-size check.
+Every such reply remains a hard failure; other error text stays redacted.
+After a failed suspend submission, disposable qualification may read at most
+64 current-boot journal entries from the fixed sleep/Control units and the
+disposable fixture owner's fixed unit under
+its existing shared 16 KiB output cap and a separate three-second diagnostic
+budget. Only recognized failure categories leave the guest; raw journal text
+is discarded. This context is not bound to an individual invocation and cannot
+serve as execution, verification, recovery or support evidence. Diagnostic
+failure preserves the original failed submission and cleanup.
+The owner's fence refusal emits only immutable rejection labels through its
+existing fixed-label diagnostic mechanism. Optional unit-probe diagnostics are
+enabled only for this fence call; recovery remains quiet. They never print
+native properties, peer identity, error text or authentication data, and do not
+change admission, freshness, deadlines, coverage fencing or failure results.
+The native unit probe sends every lookup/property request to the root-attested
+supervisor's unique connection on the fixed, kernel-authenticated system bus.
+The bus's requested-reply routing correlates the response to that destination;
+Newer Qt deliberately returns an empty `QDBusMessage::service()` for reply/error
+messages; older Qt exposes the sender, which must still match the pinned peer.
+That accessor is therefore not portable sender evidence. Neither a replaceable
+well-known destination nor an invented sender value substitutes for this binding.
+Only a typed object-path reply or the exact native `NoSuchUnit` error can enter
+lookup decoding. Absence requires a second identical error and unchanged owner;
+present units require two matching complete snapshots and unchanged owner.
+Local/broker failures, denial, timeout, malformed replies and replacement remain
+refusals within the original shared two-second budget. Diagnostics retain only
+closed error classes, never remote messages or a purported reply-sender category.
+An independent two-second read of the fixed suspend unit's active/substate,
+result and recorded main-PID presence uses separate property selectors and
+the same output cap. Missing, duplicate, malformed or unknown fields produce
+only an unavailable category. Even a native `Result=success` is failure context
+here and cannot replace the failed managed verification or qualify a cycle.
 
 ## Privileged executor rules
 

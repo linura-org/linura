@@ -40,6 +40,22 @@ fn value<T, E: Debug>(result: Result<T, E>) -> T {
     result.unwrap_or_else(|error| unreachable!("{error:?}"))
 }
 
+fn fixture_key(index: usize) -> Vec<u8> {
+    use std::io::Read;
+    // One random key per test domain, retained across simulated DB restarts.
+    // This module is a test executable and never supplies production secrets.
+    static KEYS: std::sync::OnceLock<[[u8; 32]; 7]> = std::sync::OnceLock::new();
+    let keys = KEYS.get_or_init(|| {
+        let mut keys = [[0_u8; 32]; 7];
+        let mut entropy = value(std::fs::File::open("/dev/urandom"));
+        for key in &mut keys {
+            value(entropy.read_exact(key));
+        }
+        keys
+    });
+    keys[index].to_vec()
+}
+
 trait ResultErrorExt<T, E> {
     fn error_or_unreachable(self) -> E;
 }
@@ -205,7 +221,7 @@ fn authority_material() -> (
     linura_transaction::TransactionAuthoritySigner,
     linura_transaction::TransactionAuthorityVerifier,
 ) {
-    value(TransactionAuthorityKey::new(vec![0x41; 32])).split()
+    value(TransactionAuthorityKey::new(fixture_key(4))).split()
 }
 
 fn open_control(
@@ -216,7 +232,7 @@ fn open_control(
     value(coordinator.register_observer(Box::new(QueueObserver::new(observations))));
     let previews = PlanPreviewControl::new(coordinator);
     let (signer, verifier) = authority_material();
-    let integrity = value(SqliteIntegrityKey::new(vec![0x52; 32]));
+    let integrity = value(SqliteIntegrityKey::new(fixture_key(5)));
     let store = value(SqliteTransactionStore::open(database, verifier, integrity));
     value(ManagedLifecycleControl::new(previews, store, signer))
 }

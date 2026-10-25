@@ -4,6 +4,7 @@
 #include "native_sleep_fence.h"
 #include "native_startup.h"
 #include "compositor_probe.h"
+#include "lock_mechanism.h"
 
 #include <QDBusMessage>
 #include <QObject>
@@ -11,6 +12,11 @@
 #include <optional>
 
 namespace Linura::SecurityOwner {
+
+enum class NativeObservedLockState { Unlocked, Secure, Acquiring, Releasing };
+[[nodiscard]] std::optional<NativeObservedLockState>
+nativeObservedLockState(NativeCompositorLockState compositor, LockMechanism::State mechanism,
+                        bool requested, bool coverage);
 
 // Private security-owning composition, never registered with QML. The sole
 // constructor consumes real secure-exec startup, attests the actual connection,
@@ -28,7 +34,7 @@ class NativeRuntime final : public QObject
                                        const NativeApprovalScope &scope);
     [[nodiscard]] bool dispatchPrepared(const QDBusMessage &received,
                                         const NativeLockIdentity &identity, bool secure);
-    [[nodiscard]] std::optional<NativeCompositorLockState> observe(const QDBusMessage &received);
+    [[nodiscard]] std::optional<NativeObservedLockState> observe(const QDBusMessage &received);
     [[nodiscard]] bool fencePreparedTransition(const QDBusMessage &received,
                                                const NativeTransitionIdentity &target);
     [[nodiscard]] bool cancelUndispatchedTransition(const QDBusMessage &received,
@@ -42,6 +48,8 @@ class NativeRuntime final : public QObject
     observePowerPermission(const QDBusMessage &received, const NativeTransitionIdentity &identity);
     [[nodiscard]] bool verifyReleased(const QDBusMessage &received,
                                       const NativeLockIdentity &identity);
+    [[nodiscard]] bool retainedVerifiedRelease(const QDBusMessage &received,
+                                               const NativeLockIdentity &identity);
     [[nodiscard]] bool commitVerifiedRelease(const QDBusMessage &received,
                                              const NativeLockIdentity &identity);
     void cancelApproval(const QDBusMessage &received);
