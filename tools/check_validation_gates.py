@@ -1689,7 +1689,7 @@ REVIEWED_CHECKOUT_FREE_JOBS: dict[tuple[str, str], str] = {
     (
         ".github/workflows/release.yml",
         "publish-pypi",
-    ): "634bf38c9884d3e8b894f306edf92349ecef49c8f90146f93f6c4334ad165211",
+    ): "9a67f9a6c3b674be9b0f6e737b7ecc836a240d3356787c9ad7bf9b6c2d8f080b",
     (
         ".github/workflows/release.yml",
         "verification-dispatch",
