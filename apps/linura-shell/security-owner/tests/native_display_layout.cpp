@@ -63,6 +63,7 @@ int main()
     second.generation = 4;
     second.name = QStringLiteral("HDMI-A-1");
     observed.heads.push_back(second);
+    observed.generation = 4;
     const auto twoBaseline =
         QString(baseline).append(QStringLiteral("2:4:enabled:1920:1080:60000:1000:0:1920:0:-;"));
     const auto mirrored =
@@ -72,6 +73,18 @@ int main()
     assert(mirrorIntent && mirrorIntent->nativeOptions(observed, scope, *lock));
     const auto mirrorCommands = mirrorIntent->desired.commands(observed);
     assert(mirrorCommands.size() == 2 && mirrorCommands[1].endsWith(",mirror,DP-1"));
+    auto ambiguous = observed;
+    ambiguous.heads[1].name = ambiguous.heads[0].name;
+    assert(mirrorIntent->desired.commands(ambiguous).empty());
+    ambiguous = observed;
+    ambiguous.heads[1].handle = ambiguous.heads[0].handle;
+    assert(mirrorIntent->desired.commands(ambiguous).empty());
+    ambiguous = observed;
+    ambiguous.heads[1].generation = observed.generation + 1;
+    assert(mirrorIntent->desired.commands(ambiguous).empty());
+    ambiguous = observed;
+    ambiguous.generation = 0;
+    assert(mirrorIntent->desired.commands(ambiguous).empty());
     const auto cyclic = NativeDisplayIntent::parse(
         QString(mirrorIntent->encode())
             .replace(QStringLiteral("1:2:enabled:1920:1080:60000:1000:0:0:0:-;"),

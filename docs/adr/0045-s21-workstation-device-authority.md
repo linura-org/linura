@@ -80,9 +80,14 @@ native deadlines are narrowed and their exact evidence digests enter Control's
 authority binding. A changed baseline or loss of the final currently powered
 independent output rejects mutation planning.
 
-This implementation still requires real pinned-runtime qualification. No display
-operation is registered, no recovery format is installed, and no executor or
-public mutation endpoint is activated by these read-only mechanisms and fixtures.
+The trusted registry now registers `operation:display.layout.apply` with managed,
+security-sensitive semantics. Draft protected-journal phase records, an
+unconnected display lifecycle controller, native command formatting and a
+bounded peer-checked compositor IPC mechanism exist. Registration and component
+code do **not** activate an authorized executor, independently timed rollback,
+restart-safe restoration or a public display mutation endpoint. The display
+mutation route must remain disabled until the complete native execution and
+recovery contract passes pinned-runtime and adversarial qualification.
 
 ### Native backlight
 

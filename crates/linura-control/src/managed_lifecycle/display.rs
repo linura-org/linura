@@ -423,10 +423,14 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 ));
             }
             Ok(outcome) if outcome.disposition == ExecutionDisposition::RejectedBeforeDispatch => {
+                // The dispatch reservation was retained before calling the port.
+                // Without a separately durable rejection record, the same
+                // request must remain indeterminate across a process restart.
+                // A transient port reply cannot override durable uncertainty.
                 return Ok(receipt(
                     &request,
                     deadline,
-                    DisplayLayoutState::NotDispatched,
+                    DisplayLayoutState::Indeterminate,
                     &principal_id,
                 ));
             }
@@ -509,12 +513,24 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .as_ref()
             .or(revert.as_ref())
             .unwrap_or(&dispatched);
-        if let Some(confirmed) = Record::load(
+        let confirmed = Record::load(
             self.display_journal()?,
             &principal_id,
             &digest,
             Phase::Confirmed,
-        )? {
+        )?;
+        let restored = Record::load(
+            self.display_journal()?,
+            &principal_id,
+            &digest,
+            Phase::Restored,
+        )?;
+        if confirmed.is_some() && restored.is_some() {
+            return Err(ManagedLifecycleError::Authority(
+                "display confirmation and restoration are conflicting terminal histories".into(),
+            ));
+        }
+        if let Some(confirmed) = confirmed {
             confirmed.validate_after(confirmation.as_ref())?;
             if snapshot.state != TransactionState::Committed {
                 return Err(ManagedLifecycleError::Authority(
@@ -528,12 +544,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 &principal_id,
             ));
         }
-        if let Some(restored) = Record::load(
-            self.display_journal()?,
-            &principal_id,
-            &digest,
-            Phase::Restored,
-        )? {
+        if let Some(restored) = restored {
             restored.validate_after(Some(predecessor))?;
             return Ok(receipt(
                 &request,

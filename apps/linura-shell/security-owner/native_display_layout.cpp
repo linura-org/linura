@@ -162,8 +162,19 @@ std::optional<NativeDisplayIntent> NativeDisplayIntent::parse(const QString &mat
 }
 bool NativeDisplayLayout::nativeOptions(const NativeDisplaySnapshot &snapshot) const
 {
-    if (outputs.size() != snapshot.heads.size() || outputs.empty() || outputs.size() > 16)
+    if (snapshot.generation == 0 || outputs.size() != snapshot.heads.size() || outputs.empty() ||
+        outputs.size() > 16)
         return false;
+    // No inferred identity from an ambiguous or stale native inventory,
+    // including a caller-created snapshot outside the live Wayland tracker.
+    std::set<quint64> handles;
+    std::set<QString> names;
+    for (const auto &head : snapshot.heads) {
+        if (head.handle == 0 || head.generation == 0 || head.generation > snapshot.generation ||
+            !nativeName(head.name) || !handles.insert(head.handle).second ||
+            !names.insert(head.name).second)
+            return false;
+    }
     bool independent = false;
     for (const auto &row : outputs) {
         const auto head =
