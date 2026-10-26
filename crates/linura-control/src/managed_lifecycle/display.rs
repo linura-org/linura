@@ -758,30 +758,25 @@ mod terminal_history_tests {
 
     #[test]
     fn confirmed_requires_committed_authority_and_restoration_cannot_follow_commit() {
-        assert!(validate_terminal_display_history(
-            Phase::Confirmed,
-            TransactionState::Committed,
-        )
-        .is_ok());
-        assert!(validate_terminal_display_history(
-            Phase::Confirmed,
-            TransactionState::Indeterminate,
-        )
-        .is_err());
-        assert!(validate_terminal_display_history(
-            Phase::Restored,
-            TransactionState::Committed,
-        )
-        .is_err());
-        assert!(validate_terminal_display_history(
-            Phase::Restored,
-            TransactionState::Indeterminate,
-        )
-        .is_ok());
-        assert!(validate_terminal_display_history(
-            Phase::Dispatched,
-            TransactionState::Committed,
-        )
-        .is_err());
+        assert!(
+            validate_terminal_display_history(Phase::Confirmed, TransactionState::Committed,)
+                .is_ok()
+        );
+        assert!(
+            validate_terminal_display_history(Phase::Confirmed, TransactionState::Indeterminate,)
+                .is_err()
+        );
+        assert!(
+            validate_terminal_display_history(Phase::Restored, TransactionState::Committed,)
+                .is_err()
+        );
+        assert!(
+            validate_terminal_display_history(Phase::Restored, TransactionState::Indeterminate,)
+                .is_ok()
+        );
+        assert!(
+            validate_terminal_display_history(Phase::Dispatched, TransactionState::Committed,)
+                .is_err()
+        );
     }
 }

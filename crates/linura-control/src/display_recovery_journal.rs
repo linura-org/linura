@@ -220,8 +220,7 @@ impl Record {
         // A journal backend must return the exact addressed record. Checking
         // its payload alone would accept substituted phase-key material from
         // a compromised or incorrect retention implementation.
-        if retained.principal() != principal
-            || retained.request_id() != &Self::key(request, phase)?
+        if retained.principal() != principal || retained.request_id() != &Self::key(request, phase)?
         {
             return Err(invalid());
         }
@@ -346,7 +345,12 @@ mod tests {
             reserved.canonical.clone(),
         )));
         assert_eq!(
-            id(Record::load(&correct, &principal, &request, Phase::Reserved)),
+            id(Record::load(
+                &correct,
+                &principal,
+                &request,
+                Phase::Reserved
+            )),
             Some(reserved)
         );
     }
