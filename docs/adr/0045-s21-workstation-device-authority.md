@@ -1,0 +1,65 @@
+# ADR 0045: S21 device effects share one Control authority and verified recovery
+
+- Status: Proposed
+- Refines: ADR 0003, ADR 0012, ADR 0024, ADR 0031, ADR 0032, ADR 0033 and ADR 0042
+- Scope: v0.10 S21, `arch-hyprland-v1`; depends on accepted S17 security/power authority
+
+## Context and decision
+
+S21 adds display topology, native brightness and UDisks2 removable-media effects to the reference workstation experience while reusing S17 managed session power. Native provider *discovery* is not mutation authority. Control Center, Quick Settings, OSD, keyboard, CLI/SDK and agent proposals are invocation/presentation paths over the **same trusted Control-owned operation semantics**, not competing executors or policy planes.
+
+Each supported effect must use a registered trusted operation whose class, risk floor, provider, observation capability, exact resource identity, material keys, authenticated principal, postcondition and failure/recovery semantics are independently reviewed. Providers return bounded authoritative observations; they cannot supply operation classes, approvals, grants or executable plans. Unknown, unqualified, substituted or stale effects fail closed.
+
+The companion `contracts/v010-s21-design.toml` is **inert proposed design data**, not a runtime operation registry. Candidate names and risk classifications require separate implementation/native security review before registration or activation. A proposed ADR, a passing component fixture and implementation code do not qualify a native effect, S21 completion, Q11 physical evidence or release support.
+
+Native session/seat/boot/provider generation must be freshly attested; connector names, EDID, D-Bus paths, disk labels, `/dev/sdX`, UID strings and correlation IDs are not authorization evidence. All privileged, durable, security-sensitive or ambiguity-sensitive effects use the canonical managed lifecycle; transient effects require an independently proven, unprivileged and at-most-`UserState` envelope. ShellBridge remains an unprivileged presentation client. No arbitrary privileged shell, Hyprland command construction, unchecked sysfs writes, Polkit bypass, raw D-Bus forwarding or arbitrary mount options are allowed.
+
+## Scope and existing ownership
+
+The existing Linura Shell has a power plugin, Control Center, Quick Settings, and the presentation-only compiled `org.linura.ShellBridge`. Existing S17 managed session power and native locked-session coverage must be reused. Platform discovery can identify the Hyprland compositor and UDisks2 provider, but these are not authoritative S21 effect adapters. The current source has no first-party display/storage shell plugins, typed display-layout authority, qualified physical brightness provider, or removable-storage mutation provider.
+
+The S21 contract fixes shared boundaries before the domain implementations. Domain-specific positive/negative qualification is in `docs/qualification/v0.10.0-s21.md` and adversarial security requirements in `docs/qualification/v0.10.0-s21-security.md`. No candidate operation is executable until later trust-boundary and qualification review.
+
+## Trust invariant
+
+Every effect has exactly one *trusted* operation descriptor, risk floor, provider/observation scope, exact resource identity, allowed change keys, principal binding, and verification strategy. The client, plugin, policy proposal, imported config, agent, or provider cannot change the operation class or authorize privileged execution. An unknown operation, stale/ambiguous evidence, changed actor/seat, lost provider or missing compatible profile yields explicit unsupported/blocked/indeterminate state rather than a fallback effect. Never expose generic shell commands, unrestricted D-Bus method forwarding, arbitrary `hyprctl` expressions, sysfs paths, mount options or systemd commands as a Linura authority API.
+
+For `ManagedExternalEffect`: request/observe/plan/validate/authorize/prepare/execute/independently verify/commit/audit/reconcile; retain exact plan/approval/generation through restart; no blind replay of indeterminate effects. `TransientExternalEffect` is eligible **only** after the domain proves unprivileged, at-most-UserState, nondurable semantics with Control-mediation, fresh post-effect evidence and durable attempt audit. Classifications here are conservative *candidate* floors, never runtime registrations. Versioned typed observations are authoritative only for the exact provider, resource and freshness window.
+
+## Candidate provider/resource boundaries
+
+### Display topology
+
+Authoritative Hyprland output observation must bind the exact compositor instance, selected logind session, a complete active-output topology and individual connector generations. Connector names, enumeration indices and EDID strings can be useful correlation but are not unique authorization identities by themselves. A typed complete-layout plan includes enablement, chosen native mode/refresh, scale, transform, position and supported mirroring. Reject unsupported mode tuples, stale hotplug topology, duplicate/ambiguous connectors and any plan that could eliminate the only recoverable visible/secure output.
+
+Treat topology changes as managed and **recovery-critical**. Prepare a bounded last-known-good recovery path independent of the potentially invisible QML interface; distinguish proposed, dispatched, independently verified, committed and indeterminate state. Where Hyprland lacks an atomic backend transaction, do not claim one; partial apply and lost acknowledgement require independent re-observation, and a timeout cannot finalize success. Native `ext-session-lock` coverage of every active output and exact lock generation must be preserved across hotplug and layout changes or the effect must fail closed. Freeze the actual pinned Hyprland version and its supported API before implementing the executor.
+
+### Native backlight
+
+Bind a physical kernel/logind backlight device to exact active session, seat and device generation, plus native max/current values and qualified minimum. Favor the reviewed logind `Session.SetBrightness` route for the actual owner when the target profile and device permit it; a caller-supplied sysfs path or ambient privileged helper is never authority. Percentages, hotkeys and OSD are presentation mappings and must be verified against independent native state after effect. Lack of a physical backlight is `unsupported`, not permission to substitute software gamma or external DDC/CI. The proposed `SecuritySensitive` risk floor conservatively includes loss of visible access and does **not** permit a transient shortcut. The eventual executor requires reviewed owner permissions, managed authorization and recovery. Unsupported hardware remains read-only. Prevent sole-output blackout with a qualified minimum and recovery path.
+
+### UDisks2 removable media
+
+UDisks2 observation must identify drive, block, partition and filesystem relationships, actual mount state, physical children/siblings, D-Bus owner generation, supported functions and authenticated seat/session context. D-Bus paths, `/dev/sdX`, filesystem labels and serial numbers alone are not stable mutation identities. Native `Filesystem.Mount`, `Filesystem.Unmount`, `Drive.Eject` and `Drive.PowerOff` are distinct reviewed operations with independent availability, authorization, postconditions and recovery. Eject does not imply power-off; power-off does not imply physical ejection. Authorization uses the actual UDisks2/Polkit invoking subject, not an assumed privilege from Linura or root's `Can*` observations. Eject/power-off must account for other filesystems on a shared drive. No formatting, partitioning, forced/busy unmount, untrusted mount paths/options, break-glass bypass or data erasure is introduced.
+
+Treat all privileged effects as managed. A successful D-Bus reply is not a verified mount or safe-eject state. Busy-device denial, device replacement/removal, service loss, delayed reply, partial cleanup and restart require bounded independent observation and no duplicate replay. No data-loss-prone recovery without explicit new authorization.
+
+### Power and idle
+
+S17 **already owns** registered lock/suspend/logout/reboot/power-off, native logind permissions, inhibitors, other sessions, secure suspend fence and durable indeterminate recovery. S21 must reuse those exact operation identities and authority routes, including subject-sensitive permission sampling; a new power executor, direct `systemctl` shortcut, root-origin permission substitution or inhibition bypass is prohibited. `block-weak` is a blocker. Idle configuration, observation, UX and shortcut policy may be added only as separately reviewed Linura-owned or managed semantics. Auto-destructive idle dispatch requires its own independently justified authorization and safety contract and is otherwise unsupported.
+
+## Multi-interface convergence
+
+ShellBridge and QML are unprivileged presentation only; typed queries, plans and receipts converge through Control. Quick Settings, Control Center, keyboard/OSD, supported CLI/SDK and accepted agent proposals must resolve identical operation IDs, resources and risk floors. Stale/unknown/blocked/pending/indeterminate/verified states must remain distinguishable. No optimistic success on timeout. Qualification must cover focus/keyboard/pointer, screen reader, reduced motion, overlay input regions, multioutput/HiDPI, offline provider and restart/reconnect, including no-AI mode.
+
+## Qualification and release gates
+
+Before S21 activation: review contracts and native API versions; build negative tests for stale session/seat/output/device identities, hotplug, screen blackout, failed rollback, ext-session-lock coverage, privilege substitution, malicious mount options, sibling-drive removal, busy media, lost dispatch reply and restart with uncertain effects. Use exact-source Level A Arch/Hyprland runtime and real UDisks2 guest observation/transactions. VM fixtures prove only their declared scope; simulated brightness is not real backlight hardware and virtual disks do not prove physical USB eject. Physical Q11 acceptance separately binds supported monitors/GPU/driver, actual backlight and removable media where claimed, input/accessibility, provider identities, and recovery. Video is supporting evidence, never the sole oracle.
+
+Preserve inherited v0.4, v0.6, v0.9, S17/v0.10 CI and evidence gates. Never set S17 or S21 to complete, alter `interactive_workstation.evidence_ready`, promote release support, or mark physical cases passed on the basis of documentation, candidate contract, mocked adapter or completed implementation alone.
+
+## Implementation sequencing and acceptance
+
+S21 architecture/contracts -> S21-2 display -> S21-3 brightness -> S21-4 UDisks2 -> S21-5 power UX/idle -> S21-6 workstation convergence -> S21-7 native integration and qualification. Independent backend PRs can be developed in parallel after the trusted contract is stable, but integration/merge follows the S17 dependency and reviewed backend requirements.
+
+S21 integration remains dependent on independently accepted S17 session security and power, exact-source negative qualification, recovery proof and protected merged-PR evidence. Proposed contracts and individual domain PRs cannot assert slice acceptance.

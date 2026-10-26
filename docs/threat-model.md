@@ -748,6 +748,29 @@ for the current implementation status.
   multi-output/hotplug, authentication/account denial and visual/interaction
   evidence are required before activation or final review.
 
+### S21 device identity substitution, insecure output topology and media loss
+
+A client, provider or stale resource alias may retarget approved operations to
+another compositor output, physical backlight, removable drive or login session;
+a partial write or lost reply may be misrepresented as verified completion.
+- Bind each effect to freshly observed boot/session/seat/provider and exact
+  resource generation. Connector labels, EDID, native object paths and
+  `/dev/sdX` alone do not confer authority.
+- Reject unsafe/partially applied display layouts unless independently
+  recoverable, and preserve native S17 `ext-session-lock` coverage for
+  every active output during hotplug and compositor restart.
+- Deny foreign-seat/unknown backlight, unsafe physical brightness bounds,
+  implicit software-gamma substitutions and arbitrary privileged sysfs writes.
+- Keep UDisks2/Polkit subject authentication, drive/partition/filesystem
+  topology, busy or sibling-volume denial, no arbitrary mount options,
+  and no replay after unplug or ambiguous eject.
+- Reuse S17 secure suspend, native inhibitors including `block-weak`,
+  principal and non-replayable power recovery, without force shortcuts.
+- Final success requires independent post-effect observation; synthetic
+  fixtures and video do not substitute for required native/physical proof.
+- See proposed [ADR 0045](adr/0045-s21-workstation-device-authority.md) and
+  [S21 security qualification](qualification/v0.10.0-s21-security.md).
+
 ## Deferred threats
 
 Fleet/remote orchestration and hosted/shared Library services receive dedicated threat-model extensions before any network control plane or trusted shared catalog is enabled.
