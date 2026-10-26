@@ -3,6 +3,12 @@ use std::fmt::{Debug, Display, Formatter};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod display;
+pub use display::{
+    AuthorizedDisplayContinuation, DISPLAY_CONFIRMATION_WINDOW_MS, DisplayContinuationAction,
+    DisplayLayoutReceipt, DisplayLayoutState, DisplayTransactionPort, IndependentDisplayVerifier,
+};
+
 use linura_core::{
     Actor, ActorKind, ApprovalRequestId, OperationClass, OperationId, PlanId, PrincipalId,
     ProviderId, RequestId, ResourceId, RiskClass, SessionLockId, SessionTransition,
@@ -21,17 +27,18 @@ use linura_transaction::{
 
 use crate::approval_review::PolicyAuthenticatedApprover;
 use crate::durable_authority::TrustedRiskFloor;
-pub use crate::operation_registry::{
-    MANAGED_SESSION_LOCK_CAPABILITY, MANAGED_SESSION_LOCK_OPERATION_ID,
-    MANAGED_SESSION_LOCK_PROVIDER, MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_PROVIDER,
-    MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
-};
 use crate::operation_registry::{
+    MANAGED_DISPLAY_LAYOUT_OPERATION_ID, MANAGED_DISPLAY_LAYOUT_RISK_FLOOR_RULE_ID,
     MANAGED_SESSION_LOCK_RISK_FLOOR_RULE_ID, MANAGED_SESSION_TRANSITION_CAPABILITY,
     MANAGED_SESSION_TRANSITION_PROVIDER, MANAGED_SYSTEMD_CHANGE_KEY,
     MANAGED_SYSTEMD_RESOURCE_PREFIX, MANAGED_SYSTEMD_RESOURCE_SUFFIX,
     MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID, SESSION_TRANSITION_ROUTES,
     trusted_builtin_operation_registry,
+};
+pub use crate::operation_registry::{
+    MANAGED_SESSION_LOCK_CAPABILITY, MANAGED_SESSION_LOCK_OPERATION_ID,
+    MANAGED_SESSION_LOCK_PROVIDER, MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_PROVIDER,
+    MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
 };
 use crate::policy_review::TrustedPolicyReview;
 use crate::{
@@ -46,6 +53,7 @@ const MANAGED_APPROVAL_TTL_SECONDS: u64 = 300;
 const MANAGED_REQUEST_PREFIX: &str = "request:v06:";
 const SESSION_REQUEST_PREFIX: &str = "request:v010:session-lock:";
 const TRANSITION_REQUEST_PREFIX: &str = "request:v010:session-transition:";
+const DISPLAY_REQUEST_PREFIX: &str = "request:v010:display-layout:";
 const MAX_OPERATION_ID_BYTES: usize = 64;
 const MAX_POST_DISPATCH_VERIFY_ATTEMPTS: usize = 64;
 const MAX_POST_DISPATCH_VERIFY_INTERVAL: Duration = Duration::from_millis(250);
@@ -459,6 +467,8 @@ pub fn managed_request_id(
         SESSION_REQUEST_PREFIX
     } else if is_session_transition(request) {
         TRANSITION_REQUEST_PREFIX
+    } else if is_display_request(request) {
+        DISPLAY_REQUEST_PREFIX
     } else {
         MANAGED_REQUEST_PREFIX
     };
@@ -1970,6 +1980,16 @@ fn registered_route(
     capability: &str,
     resource: &ResourceId,
 ) -> Result<(&'static str, &'static str), ManagedLifecycleError> {
+    if provider == linura_observation::DISPLAY_PROVIDER
+        && capability == linura_observation::DISPLAY_OUTPUTS_CAPABILITY
+    {
+        linura_core::DisplayTopologyId::from_resource(resource)
+            .map_err(|e| ManagedLifecycleError::UnsupportedEffect(e.to_string()))?;
+        return Ok((
+            MANAGED_DISPLAY_LAYOUT_OPERATION_ID,
+            MANAGED_DISPLAY_LAYOUT_RISK_FLOOR_RULE_ID,
+        ));
+    }
     if provider == MANAGED_SESSION_TRANSITION_PROVIDER
         && capability == MANAGED_SESSION_TRANSITION_CAPABILITY
     {
@@ -2024,6 +2044,7 @@ fn required_approval_for_request(
         });
     }
     match (request.provider.as_str(), key.as_str(), value.as_str()) {
+        (linura_observation::DISPLAY_PROVIDER, "layout", _) => Ok(ApprovalClass::Administrator),
         (MANAGED_SYSTEMD_PROVIDER, "active_state", "active" | "inactive") => {
             Ok(ApprovalClass::Administrator)
         }
@@ -2067,7 +2088,9 @@ fn effect_from_candidate(
         ));
     }
     let change = &subject.changes()[0];
-    let expected_key = if subject.provider().as_str() == MANAGED_SESSION_LOCK_PROVIDER {
+    let expected_key = if subject.provider().as_str() == linura_observation::DISPLAY_PROVIDER {
+        "layout"
+    } else if subject.provider().as_str() == MANAGED_SESSION_LOCK_PROVIDER {
         "secure"
     } else if subject.provider().as_str() == MANAGED_SESSION_TRANSITION_PROVIDER {
         "completed"
@@ -2092,6 +2115,24 @@ fn effect_from_parts(
     resource: ResourceId,
     desired_state: &BTreeMap<String, String>,
 ) -> Result<EffectDescriptor, ManagedLifecycleError> {
+    if provider.as_str() == linura_observation::DISPLAY_PROVIDER {
+        if desired_state.len() != 1 {
+            return Err(ManagedLifecycleError::UnsupportedEffect(
+                "display layout requires one complete intent".into(),
+            ));
+        }
+        let material = desired_state.get("layout").ok_or_else(|| {
+            ManagedLifecycleError::UnsupportedEffect("display layout intent is absent".into())
+        })?;
+        let effect = linura_provider_sdk::display_layout_effect(material)
+            .map_err(ManagedLifecycleError::UnsupportedEffect)?;
+        if effect.resource != resource {
+            return Err(ManagedLifecycleError::UnsupportedEffect(
+                "display effect refers to another topology".into(),
+            ));
+        }
+        return Ok(effect);
+    }
     if provider.as_str() == MANAGED_SESSION_TRANSITION_PROVIDER {
         let _ = SessionTransitionId::from_resource(&resource)
             .map_err(|error| ManagedLifecycleError::UnsupportedEffect(error.to_string()))?;
@@ -2248,6 +2289,8 @@ fn validate_request_identity(
         SESSION_REQUEST_PREFIX
     } else if is_session_transition(request) {
         TRANSITION_REQUEST_PREFIX
+    } else if is_display_request(request) {
+        DISPLAY_REQUEST_PREFIX
     } else {
         MANAGED_REQUEST_PREFIX
     };
@@ -2266,6 +2309,10 @@ fn validate_request_identity(
 fn is_session_transition(request: &PlanDesiredStateRequest) -> bool {
     request.provider.as_str() == MANAGED_SESSION_TRANSITION_PROVIDER
         && request.observation_capability.as_str() == MANAGED_SESSION_TRANSITION_CAPABILITY
+}
+fn is_display_request(request: &PlanDesiredStateRequest) -> bool {
+    request.provider.as_str() == linura_observation::DISPLAY_PROVIDER
+        && request.observation_capability.as_str() == linura_observation::DISPLAY_OUTPUTS_CAPABILITY
 }
 
 fn now_unix_seconds() -> Result<u64, ManagedLifecycleError> {

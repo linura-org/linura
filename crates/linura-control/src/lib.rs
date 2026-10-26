@@ -18,6 +18,7 @@ mod approval;
 mod approval_review;
 mod authority_clock;
 mod display_plan;
+mod display_recovery_journal;
 mod display_safety;
 mod durable_authority;
 pub use display_plan::DisplayLayoutPlanRequest;
@@ -75,12 +76,14 @@ pub use durable_authority::{
     DurableRecoveryOutcome, FreshRecoveryApproval, PreparedDurableAuthority,
 };
 pub use managed_lifecycle::{
-    AuthorizedEffect, AuthorizedEffectExecutor, IndependentManagedVerifier,
-    MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_INTENT_ORIGIN, MANAGED_SYSTEMD_OPERATION,
-    MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
-    ManagedApprovalAuthorizer, ManagedApprovalChallenge, ManagedApprovalClass,
-    ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt, TrustedHumanApproval,
-    managed_request_id,
+    AuthorizedDisplayContinuation, AuthorizedEffect, AuthorizedEffectExecutor,
+    DISPLAY_CONFIRMATION_WINDOW_MS, DisplayContinuationAction, DisplayLayoutReceipt,
+    DisplayLayoutState, DisplayTransactionPort, IndependentDisplayVerifier,
+    IndependentManagedVerifier, MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_INTENT_ORIGIN,
+    MANAGED_SYSTEMD_OPERATION, MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_REGISTERED_OPERATION_ID,
+    MANAGED_SYSTEMD_UNIT_PREFIX, ManagedApprovalAuthorizer, ManagedApprovalChallenge,
+    ManagedApprovalClass, ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt,
+    TrustedHumanApproval, managed_request_id,
 };
 pub use operation_registry::{
     MANAGED_SESSION_LOCK_CAPABILITY, MANAGED_SESSION_LOCK_OPERATION_ID,

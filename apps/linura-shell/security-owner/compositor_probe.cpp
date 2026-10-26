@@ -1,4 +1,5 @@
 #include "compositor_probe.h"
+#include "native_display_layout.h"
 
 #include <QByteArray>
 #include <QElapsedTimer>
@@ -10,6 +11,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <limits>
@@ -53,10 +55,10 @@ bool peerMatches(int descriptor, const NativeSessionBinding &binding)
            static_cast<quint32>(peer.pid) == binding.compositorPid;
 }
 
-bool waitReady(int descriptor, short event, QElapsedTimer &budget)
+bool waitReady(int descriptor, short event, QElapsedTimer &budget, qint64 limit = ProbeBudgetMs)
 {
     while (true) {
-        const qint64 remaining = ProbeBudgetMs - budget.elapsed();
+        const qint64 remaining = limit - budget.elapsed();
         if (remaining <= 0)
             return false;
         pollfd pending{descriptor, event, 0};
@@ -115,10 +117,10 @@ std::optional<NativeCompositorLockState> decodeNativeHyprlandLock(QByteArrayView
 }
 
 namespace {
-enum class NativeReadQuery { Lock, Outputs };
 std::optional<QByteArray>
-readNativeHyprland(const QString &nativeSocketPath, const NativeSessionBinding &binding,
-                   NativeReadQuery query, NativeCompositorProbeFailure *failure)
+nativeExchange(const QString &nativeSocketPath, const NativeSessionBinding &binding,
+                QByteArrayView command, qsizetype maximum, qint64 limit,
+                NativeCompositorProbeFailure *failure)
 {
     if (failure)
         *failure = NativeCompositorProbeFailure::None;
@@ -128,6 +130,8 @@ readNativeHyprland(const QString &nativeSocketPath, const NativeSessionBinding &
             *failure = reason;
         return std::nullopt;
     };
+    if (command.isEmpty() || command.size() > 512 || maximum <= 0 || maximum > 256 * 1024 || limit <= 0 || limit > ProbeBudgetMs)
+        return deny(NativeCompositorProbeFailure::Binding);
     const auto parsed = NativeLockIdentity::parse(binding.lock.resource);
     if (!parsed || *parsed != binding.lock || binding.compositorPid == 0 ||
         binding.compositorPid > static_cast<quint32>(std::numeric_limits<pid_t>::max()) ||
@@ -153,11 +157,11 @@ readNativeHyprland(const QString &nativeSocketPath, const NativeSessionBinding &
     QElapsedTimer budget;
     budget.start();
     const auto unavailable = [&](NativeCompositorProbeFailure reason) {
-        return deny(budget.elapsed() >= ProbeBudgetMs ? NativeCompositorProbeFailure::Deadline
+        return deny(budget.elapsed() >= limit ? NativeCompositorProbeFailure::Deadline
                                                       : reason);
     };
     if (::connect(descriptor, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) != 0) {
-        if ((errno != EINPROGRESS && errno != EAGAIN) || !waitReady(descriptor, POLLOUT, budget))
+        if ((errno != EINPROGRESS && errno != EAGAIN) || !waitReady(descriptor, POLLOUT, budget, limit))
             return unavailable(NativeCompositorProbeFailure::Connect);
         int error = 0;
         socklen_t bytes = sizeof(error);
@@ -165,13 +169,11 @@ readNativeHyprland(const QString &nativeSocketPath, const NativeSessionBinding &
             bytes != sizeof(error) || error != 0)
             return unavailable(NativeCompositorProbeFailure::Connect);
     }
-    if (!peerMatches(descriptor, binding) || budget.elapsed() >= ProbeBudgetMs)
+    if (!peerMatches(descriptor, binding) || budget.elapsed() >= limit)
         return unavailable(NativeCompositorProbeFailure::Peer);
-    const QByteArrayView command = query == NativeReadQuery::Lock ? QByteArrayView("j/locked")
-                                                                : QByteArrayView("j/monitors all");
     std::size_t sent = 0;
     while (sent < static_cast<std::size_t>(command.size())) {
-        if (budget.elapsed() >= ProbeBudgetMs)
+        if (budget.elapsed() >= limit)
             return deny(NativeCompositorProbeFailure::Deadline);
         const ssize_t count =
             send(descriptor, command.data() + sent, static_cast<std::size_t>(command.size()) - sent, MSG_NOSIGNAL);
@@ -180,24 +182,23 @@ readNativeHyprland(const QString &nativeSocketPath, const NativeSessionBinding &
         else if (count < 0 && errno == EINTR)
             continue;
         else if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            if (!waitReady(descriptor, POLLOUT, budget))
+            if (!waitReady(descriptor, POLLOUT, budget, limit))
                 return unavailable(NativeCompositorProbeFailure::Send);
         } else {
             return unavailable(NativeCompositorProbeFailure::Send);
         }
     }
-    const qsizetype maximum = query == NativeReadQuery::Lock ? MaximumReplyBytes : 256 * 1024;
     QByteArray reply;
     std::array<char, 4096> chunk{};
     while (true) {
-        if (!waitReady(descriptor, POLLIN, budget))
+        if (!waitReady(descriptor, POLLIN, budget, limit))
             return unavailable(NativeCompositorProbeFailure::Receive);
         const ssize_t count = recv(descriptor, chunk.data(), chunk.size(), 0);
         if (count > 0) {
             if (count > maximum - reply.size()) return deny(NativeCompositorProbeFailure::ReplyLimit);
             reply.append(chunk.data(), static_cast<qsizetype>(count));
         } else if (count == 0) {
-            if (!peerMatches(descriptor, binding) || budget.elapsed() >= ProbeBudgetMs)
+            if (!peerMatches(descriptor, binding) || budget.elapsed() >= limit)
                 return unavailable(NativeCompositorProbeFailure::Peer);
             return reply;
         } else if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -211,7 +212,7 @@ std::optional<NativeCompositorLockState>
 observeNativeHyprlandLock(const QString &path, const NativeSessionBinding &binding,
                           NativeCompositorProbeFailure *failure)
 {
-    const auto reply = readNativeHyprland(path, binding, NativeReadQuery::Lock, failure);
+    const auto reply = nativeExchange(path, binding, "j/locked", MaximumReplyBytes, ProbeBudgetMs, failure);
     if (!reply) return std::nullopt;
     const auto decoded = decodeNativeHyprlandLock(*reply);
     if (!decoded && failure) *failure = NativeCompositorProbeFailure::Reply;
@@ -220,7 +221,27 @@ observeNativeHyprlandLock(const QString &path, const NativeSessionBinding &bindi
 std::optional<QByteArray>
 observeNativeHyprlandOutputs(const QString &path, const NativeSessionBinding &binding)
 {
-    return readNativeHyprland(path, binding, NativeReadQuery::Outputs, nullptr);
+    return nativeExchange(path, binding, "j/monitors all", 256 * 1024, ProbeBudgetMs, nullptr);
+}
+
+NativeDisplayWriteResult applyNativeHyprlandLayout(const NativeDisplayLayout &layout,
+    const NativeDisplaySnapshot &snapshot, const QString &path, const NativeSessionBinding &binding)
+{
+    const auto commands = layout.commands(snapshot);
+    if (commands.empty() || commands.size() > 16) return {};
+    QElapsedTimer total; total.start();
+    NativeDisplayWriteResult result;
+    for (const auto &command : commands) {
+        const qint64 remaining = 1500 - total.elapsed();
+        if (remaining <= 0) return result;
+        // Set before entering the exchange: failure after connect/write may
+        // hide an effect. The runtime's recovery timer is already armed.
+        result.attempted = true;
+        const auto reply = nativeExchange(path, binding, command, 64, std::min(remaining, ProbeBudgetMs), nullptr);
+        if (!reply || (*reply != "ok" && *reply != "ok\n")) return result;
+    }
+    result.allAcknowledged = true;
+    return result;
 }
 
 } // namespace Linura::SecurityOwner

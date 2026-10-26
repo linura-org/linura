@@ -20,7 +20,14 @@ impl DisplayLayoutIntent {
         baseline: DisplayLayout,
         desired: DisplayLayout,
     ) -> Result<Self, DisplayLayoutError> {
-        if baseline.topology() != desired.topology() || lock.epoch() != desired.topology().session()
+        if baseline.topology() != desired.topology()
+            || lock.epoch() != desired.topology().session()
+            || baseline.outputs().len() != desired.outputs().len()
+            || baseline
+                .outputs()
+                .iter()
+                .zip(desired.outputs())
+                .any(|(left, right)| left.output() != right.output())
         {
             return Err(DisplayLayoutError::ForeignOutput);
         }

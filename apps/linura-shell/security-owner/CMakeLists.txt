@@ -23,6 +23,7 @@ add_library(linura-security-owner-foundation STATIC
     native_startup.cpp
     session_bootstrap.cpp
     compositor_probe.cpp
+    native_display_layout.cpp native_display_layout.h
     native_wayland_readiness.cpp
 )
 target_include_directories(linura-security-owner-foundation PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -203,6 +204,12 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
     pkg_check_modules(WAYLAND_SERVER REQUIRED IMPORTED_TARGET wayland-server)
+
+    add_executable(linura-security-owner-display-layout-tests tests/native_display_layout.cpp)
+    target_link_libraries(linura-security-owner-display-layout-tests PRIVATE linura-security-owner-wayland)
+    target_compile_options(linura-security-owner-display-layout-tests PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
+    add_test(NAME security-owner-display-layout-boundary COMMAND linura-security-owner-display-layout-tests)
+    set_tests_properties(security-owner-display-layout-boundary PROPERTIES TIMEOUT 10)
 
     set(OUTPUT_SERVER_HEADER "${CMAKE_CURRENT_BINARY_DIR}/wlr-output-management-unstable-v1-server-protocol.h")
     add_custom_command(OUTPUT "${OUTPUT_SERVER_HEADER}"

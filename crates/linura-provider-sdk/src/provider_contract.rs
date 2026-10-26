@@ -194,6 +194,28 @@ pub struct EffectDescriptor {
     pub canonical_payload: Vec<u8>,
 }
 
+/// A content-bound description, never a permit or a native validity assertion.
+/// The complete bounded intent travels as typed private adapter material; the
+/// receiver must validate it against fresh native facts and recompute this exact
+/// descriptor before accepting the separately prepared ExecutionBinding.
+/// This preserves the established component payload bound for complete layouts.
+pub fn display_layout_effect(material: &str) -> Result<EffectDescriptor, String> {
+    let decoded =
+        linura_core::DisplayLayoutMaterial::decode(material).map_err(|e| e.to_string())?;
+    let resource = decoded
+        .topology()
+        .resource_id()
+        .map_err(|e| e.to_string())?;
+    let digest = hash_parts(b"linura.display.layout-intent.v1", &[material.as_bytes()]);
+    EffectDescriptor::new(
+        ProviderId::new("hyprland").map_err(|e| e.to_string())?,
+        resource,
+        "apply-display-layout",
+        format!("LNDI-SHA256:1:{}", digest.to_hex()).into_bytes(),
+    )
+    .map_err(|e| e.to_string())
+}
+
 impl EffectDescriptor {
     pub fn new(
         provider: ProviderId,

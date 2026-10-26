@@ -20,6 +20,9 @@ pub(crate) const MANAGED_SYSTEMD_RISK_FLOOR_RULE_ID: &str =
 
 pub const TRANSIENT_AUDIO_VOLUME_OPERATION_ID: &str = "operation:audio.output.set-session-volume";
 pub const MANAGED_SESSION_LOCK_OPERATION_ID: &str = "operation:session.lock.set-secure";
+pub const MANAGED_DISPLAY_LAYOUT_OPERATION_ID: &str = "operation:display.layout.apply";
+pub(crate) const MANAGED_DISPLAY_LAYOUT_RISK_FLOOR_RULE_ID: &str =
+    "operation-registry.managed-display-layout.risk-floor";
 pub const MANAGED_SESSION_LOCK_PROVIDER: &str = "session-locker";
 pub const MANAGED_SESSION_LOCK_CAPABILITY: &str = "session.secure-lock.observe";
 pub const MANAGED_SESSION_TRANSITION_PROVIDER: &str = "logind";
@@ -132,6 +135,17 @@ pub(crate) fn trusted_builtin_operation_registry()
     registry.register(managed_systemd_active_state_descriptor()?)?;
     registry.register(transient_audio_volume_descriptor()?)?;
     registry.register(managed_session_lock_descriptor()?)?;
+    registry.register(OperationDescriptor::try_new(
+        OperationId::new(MANAGED_DISPLAY_LAYOUT_OPERATION_ID)?,
+        OperationClass::ManagedExternalEffect,
+        Some(RiskClass::SecuritySensitive),
+        Some(OperationEffectBinding::try_new(
+            ProviderId::new(linura_observation::DISPLAY_PROVIDER)?,
+            CapabilityId::new(linura_observation::DISPLAY_OUTPUTS_CAPABILITY)?,
+            "display:topology:",
+            vec!["layout".into()],
+        )?),
+    )?)?;
     for (_, operation, prefix, _, risk) in SESSION_TRANSITION_ROUTES {
         registry.register(OperationDescriptor::try_new(
             OperationId::new(operation)?,

@@ -326,6 +326,35 @@ fn unlocked_state_requires_exact_native_topology_and_no_forged_coverage() {
 }
 
 #[test]
+fn the_last_currently_powered_independent_output_cannot_be_disabled() {
+    let mut fixture = Fixture::new();
+    fixture
+        .display
+        .attributes
+        .insert("output.0.powered".into(), ObservedValue::Bool(false));
+    let facts = id(DisplayObservationFacts::from_envelope(
+        &fixture.display,
+        fixture.desired.topology(),
+        1100,
+    ));
+    let outputs = vec![
+        fixture.desired.outputs()[0].clone(),
+        DisplayOutputLayout::Disabled {
+            output: fixture.desired.outputs()[1].output().clone(),
+        },
+    ];
+    fixture.desired = id(DisplayLayout::new(
+        facts.inventory(),
+        facts.capabilities(),
+        outputs,
+    ));
+    assert_eq!(
+        fixture.review(1100),
+        Err(DisplaySafetyError::NoVisibleRecoveryOutput)
+    );
+}
+
+#[test]
 fn verification_requires_newer_independent_samples_and_original_lock_generation() {
     let original = Fixture::new();
     let review = id(original.review(1100));
@@ -435,7 +464,7 @@ fn request(f: &Fixture) -> DisplayLayoutPlanRequest {
 }
 
 #[test]
-fn preview_uses_canonical_planner_and_coordinator_without_registering_an_effect() {
+fn preview_uses_canonical_planner_and_coordinator_without_dispatch_authority() {
     let mut f = Fixture::new();
     let now =
         id(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)).as_millis() as u64;
@@ -484,12 +513,18 @@ fn preview_uses_canonical_planner_and_coordinator_without_registering_an_effect(
         Err(crate::PlanPreviewControlError::IdempotencyConflict { .. })
     ));
     let registry = id(crate::operation_registry::trusted_builtin_operation_registry());
-    assert!(
-        registry
-            .descriptor(&id(linura_core::OperationId::new(
-                "operation:display.layout.apply"
-            )))
-            .is_none()
+    let descriptor = registry
+        .descriptor(&id(linura_core::OperationId::new(
+            "operation:display.layout.apply",
+        )))
+        .unwrap_or_else(|| unreachable!("trusted display descriptor"));
+    assert_eq!(
+        descriptor.class(),
+        linura_core::OperationClass::ManagedExternalEffect
+    );
+    assert_eq!(
+        descriptor.risk_floor(),
+        Some(linura_core::RiskClass::SecuritySensitive)
     );
     let mut unavailable = PlanPreviewControl::new(ObservationCoordinator::new());
     assert!(
