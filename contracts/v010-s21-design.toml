@@ -1,0 +1,116 @@
+schema_version = 1
+milestone = "v0.10.0"
+slice = "S21"
+profile = "arch-hyprland-v1"
+status = "proposed"
+activation = "none"
+register_runtime_operations = false
+implements_effects = false
+dependency = "S17"
+existing_semantics = "contracts/operation-semantics.toml"
+architecture = "docs/adr/0045-s21-workstation-device-authority.md"
+qualification_document = "docs/qualification/v0.10.0-s21.md"
+security_qualification = "docs/qualification/v0.10.0-s21-security.md"
+runtime_support_promotion = false
+interactive_evidence_ready = false
+unsupported_behavior = "fail-closed"
+identity_binding = "provider-resource-boot-session-seat-generation"
+verification = "independent-native-post-effect-observation"
+indeterminate_replay = false
+
+[[candidate_operation]]
+id = "operation:display.layout.apply"
+provider = "hyprland"
+observation = "display.outputs.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-compositor-session-output-topology-generation"
+requested_keys = ["layout"]
+source = "S21-2"
+requires = ["last-known-good-recovery", "ext-session-lock-output-coverage", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:display.backlight.set-brightness"
+provider = "logind-backlight"
+observation = "display.backlight.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "session-seat-device-generation"
+requested_keys = ["native_value"]
+source = "S21-3"
+requires = ["physical-device-identification", "verified-minimum", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:storage.filesystem.mount"
+provider = "udisks2"
+observation = "storage.removable.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-drive-block-filesystem-generation"
+requested_keys = ["mounted"]
+source = "S21-4"
+requires = ["subject-bound-polkit", "no-arbitrary-mount-options", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:storage.filesystem.unmount"
+provider = "udisks2"
+observation = "storage.removable.observe"
+class = "managed-external-effect"
+risk_floor = "destructive"
+resource = "exact-drive-block-filesystem-generation"
+requested_keys = ["mounted"]
+source = "S21-4"
+requires = ["subject-bound-polkit", "busy-device-denial", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:storage.drive.eject"
+provider = "udisks2"
+observation = "storage.removable.observe"
+class = "managed-external-effect"
+risk_floor = "destructive"
+resource = "exact-drive-all-sibling-volumes-generation"
+requested_keys = ["ejected"]
+source = "S21-4"
+requires = ["subject-bound-polkit", "sibling-filesystem-review", "no-blind-replay"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:storage.drive.power-off"
+provider = "udisks2"
+observation = "storage.removable.observe"
+class = "managed-external-effect"
+risk_floor = "destructive"
+resource = "exact-drive-all-sibling-volumes-generation"
+requested_keys = ["powered_off"]
+source = "S21-4"
+requires = ["subject-bound-polkit", "sibling-filesystem-review", "no-blind-replay"]
+enabled = false
+
+[existing_authority]
+provider = "logind"
+reuse = [
+  "operation:session.lock.set-secure",
+  "operation:session.suspend",
+  "operation:session.logout",
+  "operation:session.reboot",
+  "operation:session.power-off"
+]
+no_new_power_executor = true
+no_skip_inhibitors = true
+authorization_source = "s17-managed-control"
+source = "S21-5"
+
+[qualification]
+development_level = "level-a-arch-hyprland-exact-source"
+physical_release_level = "level-c-maintained-hardware-q11"
+fixture_evidence_is_physical = false
+video_is_correctness_oracle = false
+require_adversarial = true
+require_hotplug_output_security = true
+require_indeterminate_no_replay = true
+require_provider_subject_freshness = true
+require_keyboard_pointer_accessibility = true
