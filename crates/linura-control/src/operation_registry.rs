@@ -291,7 +291,30 @@ mod tests {
     fn builtin_registry_binds_the_qualified_managed_systemd_operation() {
         let registry =
             trusted_builtin_operation_registry().unwrap_or_else(|error| unreachable!("{error}"));
-        assert_eq!(registry.len(), 7);
+        // Builtin registrations include the S21 managed display operation.
+        // Keep verifying the legacy systemd binding below; never drop it.
+        assert_eq!(registry.len(), 8);
+        let display = registry
+            .descriptor(
+                &OperationId::new(MANAGED_DISPLAY_LAYOUT_OPERATION_ID)
+                    .unwrap_or_else(|error| unreachable!("{error}")),
+            )
+            .unwrap_or_else(|| unreachable!("managed display operation is not registered"));
+        assert_eq!(display.class(), OperationClass::ManagedExternalEffect);
+        assert_eq!(display.risk_floor(), Some(RiskClass::SecuritySensitive));
+        let display_effect = display
+            .effect_binding()
+            .unwrap_or_else(|| unreachable!("managed display effect binding is missing"));
+        assert_eq!(display_effect.provider().as_str(), linura_observation::DISPLAY_PROVIDER);
+        assert_eq!(
+            display_effect.observation_capability().as_str(),
+            linura_observation::DISPLAY_OUTPUTS_CAPABILITY
+        );
+        assert_eq!(display_effect.resource_prefix(), "display:topology:");
+        assert_eq!(
+            display_effect.change_keys().iter().map(String::as_str).collect::<Vec<_>>(),
+            vec!["layout"]
+        );
 
         let operation_id = OperationId::new(MANAGED_SYSTEMD_REGISTERED_OPERATION_ID)
             .unwrap_or_else(|error| unreachable!("{error}"));
