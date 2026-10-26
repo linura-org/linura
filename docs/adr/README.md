@@ -66,3 +66,4 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0041 — Explicit activation of independent applicable qualification](0041-applicable-qualification-activation.md)
 - [0042 — S17 binds session security and power to one managed authority path](0042-s17-session-security-and-power-authority.md)
 - [0043 — Separate lightweight development from dedicated qualification storage](0043-dedicated-development-and-qualification-storage.md)
+- [0044 — Explicit native development preparation across Ubuntu and Arch](0044-explicit-native-development-preparation.md)

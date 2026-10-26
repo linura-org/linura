@@ -22,6 +22,13 @@ evidence.
 
 ## Prepare the environment
 
+For explicit host preparation across Ubuntu 24.04/26.04 and Arch Linux, use
+[native development preparation](native-development.md). Its read-only plan and
+explicit prepare/maintenance commands map all existing profiles to native
+dependencies, provision private Python/Node/Pyright and reuse the canonical
+bootstrap below. ArchISO still requires an Arch builder. Doctor/preflight remain
+read-only; ordinary delegated tasks do not run preparation automatically.
+
 Configure these commands in the environment's setup and maintenance fields:
 
 ```bash
@@ -71,6 +78,13 @@ cannot activate those settings. Do not add production, release, R2, personal SSH
 or fleet credentials to an ordinary coding environment.
 
 ## Inspect capabilities before work
+
+Before starting a milestone or reusing an old checkout, run
+`python3 tools/development_drift.py`. It inventories source drift without fetching,
+switching branches or discarding work. See [source drift inspection](development-drift.md)
+for exit codes, privacy boundaries and reviewed resolution steps. Follow it with
+the readiness and qualification checks below; source alignment alone does not
+establish a prepared host or a completed prerequisite slice.
 
 For a separate local instance, the repository-defined
 [isolated development base](../tools/codex/container/README.md) supplies

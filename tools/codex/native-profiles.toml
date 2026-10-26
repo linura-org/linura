@@ -1,0 +1,42 @@
+schema_version = 1
+host_os = "Linux"
+host_arch = "x86_64"
+ubuntu_releases = ["24.04", "26.04"]
+arch_database_max_age_hours = 24
+plan_max_age_seconds = 900
+
+[profile.core]
+requires = []
+ubuntu = ["build-essential", "ca-certificates", "curl", "git", "pkg-config", "python3", "python3-venv", "xz-utils", "libssl-dev", "zlib1g-dev", "libbz2-dev", "libreadline-dev", "libsqlite3-dev", "libffi-dev", "liblzma-dev", "libncurses-dev", "uuid-dev"]
+arch = ["gcc", "make", "ca-certificates", "curl", "git", "pkgconf", "python", "xz", "openssl", "zlib", "bzip2", "readline", "sqlite", "libffi", "ncurses", "util-linux"]
+
+[profile.shell]
+requires = ["core"]
+ubuntu = ["cmake", "ninja-build", "pkg-config", "qt6-base-dev", "qt6-base-dev-tools", "qt6-declarative-dev", "qt6-declarative-dev-tools", "libwayland-dev", "wayland-protocols", "libxkbcommon-dev", "libglib2.0-dev", "libpolkit-agent-1-dev", "libpam0g-dev", "dbus"]
+arch = ["cmake", "ninja", "pkgconf", "qt6-base", "qt6-declarative", "wayland", "wayland-protocols", "libxkbcommon", "glib2", "polkit", "pam", "dbus"]
+
+[profile.editor]
+requires = ["shell"]
+ubuntu = ["qml6-module-qtqml", "qml6-module-qtqml-models", "qml6-module-qtqml-workerscript", "qml6-module-qtquick", "qml6-module-qtquick-controls", "qml6-module-qtquick-layouts", "qml6-module-qtquick-templates", "qml6-module-qtquick-window"]
+arch = ["qt6-declarative"]
+
+[profile.bindings]
+requires = ["core"]
+ubuntu = []
+arch = []
+
+[profile.vm]
+requires = ["core"]
+ubuntu = ["qemu-system-x86", "qemu-utils", "openssh-client", "cloud-image-utils"]
+arch = ["qemu-system-x86", "qemu-img", "openssh", "cloud-utils"]
+
+[profile.image]
+requires = ["shell"]
+supported = ["arch"]
+ubuntu = []
+arch = ["archiso"]
+
+[profile.visual]
+requires = ["core"]
+ubuntu = ["ffmpeg", "imagemagick"]
+arch = ["ffmpeg", "imagemagick"]

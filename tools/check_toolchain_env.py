@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import sys
 
-SEMVER_KEYS = frozenset(
+SHARED_SEMVER_KEYS = frozenset(
     {
         "RUSTUP_VERSION",
         "RUST_VERSION",
@@ -18,12 +18,23 @@ SEMVER_KEYS = frozenset(
         "PYTHON_PIP_VERSION",
     }
 )
-DIGEST_KEYS = frozenset({"RUSTUP_INIT_SHA256", "ACTIONLINT_SHA256"})
-EXPECTED_KEYS = (
-    SEMVER_KEYS
-    | DIGEST_KEYS
+SHARED_DIGEST_KEYS = frozenset({"RUSTUP_INIT_SHA256", "ACTIONLINT_SHA256"})
+NATIVE_KEYS = frozenset(
+    {
+        "NATIVE_PYTHON_RELEASE",
+        "NATIVE_PYTHON_SHA256",
+        "NATIVE_NODE_VERSION",
+        "NATIVE_NODE_SHA256",
+    }
+)
+SHARED_KEYS = (
+    SHARED_SEMVER_KEYS
+    | SHARED_DIGEST_KEYS
     | frozenset({"PYTHON_MAJOR_MINOR", "HOST_OS", "HOST_ARCH"})
 )
+SEMVER_KEYS = SHARED_SEMVER_KEYS | {"NATIVE_PYTHON_RELEASE", "NATIVE_NODE_VERSION"}
+DIGEST_KEYS = SHARED_DIGEST_KEYS | {"NATIVE_PYTHON_SHA256", "NATIVE_NODE_SHA256"}
+EXPECTED_KEYS = SHARED_KEYS | NATIVE_KEYS
 PATTERNS = {
     **dict.fromkeys(SEMVER_KEYS, re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")),
     **dict.fromkeys(DIGEST_KEYS, re.compile(r"[0-9a-f]{64}")),
@@ -69,7 +80,9 @@ def validate(source: Path) -> dict[str, str]:
     return validate_bytes(source.read_bytes())
 
 
-TOOLCHAIN_FIELDS = tuple(sorted(EXPECTED_KEYS))
+# --values is the shared bootstrap/workflow projection. Native-only pins are
+# validated by every consumer but do not enter unrelated workflow read arrays.
+TOOLCHAIN_FIELDS = tuple(sorted(SHARED_KEYS))
 
 
 def main() -> int:

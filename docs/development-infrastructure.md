@@ -8,6 +8,13 @@ separately provisioned container is an **optional** scoped development
 alternative, not a mandatory or cross-repository dependency. Neither option
 substitutes for the appropriate native VM or maintained physical qualification.
 
+[Native development preparation](native-development.md) supplies explicit
+profile-based planning/preparation for Ubuntu 24.04/26.04 and Arch Linux. It
+reuses shared tool pins and bootstrap, retains native package-manager protection
+and verifies selected readiness checks. Supporting both hosts does not require
+both installations for ordinary work; readiness and independent qualification
+retain separate evidence boundaries.
+
 For persistent task worktrees, editor/Qt setup, isolated build storage, environment
 selection and safe cleanup/recovery, use
 [Development workspaces and storage](development-workspaces.md). Repository-owned
