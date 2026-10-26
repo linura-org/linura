@@ -234,6 +234,24 @@ fn attempt_state(
     }
 }
 
+fn validate_terminal_display_history(
+    phase: Phase,
+    state: TransactionState,
+) -> Result<(), ManagedLifecycleError> {
+    match (phase, state) {
+        (Phase::Confirmed, TransactionState::Committed) => Ok(()),
+        (Phase::Restored, TransactionState::Committed) | (Phase::Confirmed, _) => {
+            Err(ManagedLifecycleError::Authority(
+                "display terminal record contradicts the durable authority state".into(),
+            ))
+        }
+        (Phase::Restored, _) => Ok(()),
+        _ => Err(ManagedLifecycleError::Authority(
+            "display journal supplied a non-terminal phase as terminal".into(),
+        )),
+    }
+}
+
 impl<S: TransactionStore> ManagedLifecycleControl<S> {
     fn display_journal(&self) -> Result<&dyn ApprovedRequestJournal, ManagedLifecycleError> {
         self.request_journal.as_deref().ok_or_else(|| {
@@ -532,11 +550,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         }
         if let Some(confirmed) = confirmed {
             confirmed.validate_after(confirmation.as_ref())?;
-            if snapshot.state != TransactionState::Committed {
-                return Err(ManagedLifecycleError::Authority(
-                    "display confirmation and transaction commit disagree".into(),
-                ));
-            }
+            validate_terminal_display_history(Phase::Confirmed, snapshot.state)?;
             return Ok(receipt(
                 &request,
                 reserved.deadline_unix_ms,
@@ -546,6 +560,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         }
         if let Some(restored) = restored {
             restored.validate_after(Some(predecessor))?;
+            validate_terminal_display_history(Phase::Restored, snapshot.state)?;
             return Ok(receipt(
                 &request,
                 reserved.deadline_unix_ms,
@@ -734,5 +749,39 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         };
         let _ = port.continue_layout(continuation);
         self.display_layout_status(principal, actor, request_id, port, verifier)
+    }
+}
+
+#[cfg(test)]
+mod terminal_history_tests {
+    use super::*;
+
+    #[test]
+    fn confirmed_requires_committed_authority_and_restoration_cannot_follow_commit() {
+        assert!(validate_terminal_display_history(
+            Phase::Confirmed,
+            TransactionState::Committed,
+        )
+        .is_ok());
+        assert!(validate_terminal_display_history(
+            Phase::Confirmed,
+            TransactionState::Indeterminate,
+        )
+        .is_err());
+        assert!(validate_terminal_display_history(
+            Phase::Restored,
+            TransactionState::Committed,
+        )
+        .is_err());
+        assert!(validate_terminal_display_history(
+            Phase::Restored,
+            TransactionState::Indeterminate,
+        )
+        .is_ok());
+        assert!(validate_terminal_display_history(
+            Phase::Dispatched,
+            TransactionState::Committed,
+        )
+        .is_err());
     }
 }

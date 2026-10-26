@@ -217,7 +217,12 @@ impl Record {
             Err(TransactionStoreError::NotFound) => return Ok(None),
             Err(error) => return Err(ManagedLifecycleError::Authority(error.to_string())),
         };
-        if retained.principal() != principal {
+        // A journal backend must return the exact addressed record. Checking
+        // its payload alone would accept substituted phase-key material from
+        // a compromised or incorrect retention implementation.
+        if retained.principal() != principal
+            || retained.request_id() != &Self::key(request, phase)?
+        {
             return Err(invalid());
         }
         let record = Self::decode(retained.canonical())?;
@@ -271,5 +276,137 @@ impl Record {
             _ => return Err(invalid()),
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id<T, E: std::fmt::Debug>(value: Result<T, E>) -> T {
+        value.unwrap_or_else(|error| unreachable!("{error:?}"))
+    }
+
+    fn fixture() -> (PrincipalId, ContentDigest, Record) {
+        let principal = id(PrincipalId::new("unix:uid:1000"));
+        let request_id = id(RequestId::new("request:v010:display-fixture"));
+        let digest = linura_transaction::digest_parts(
+            "linura.display.recovery-test.request.v1",
+            [b"request".as_slice()],
+        );
+        let transaction = TransactionId::for_namespace(&principal, &request_id);
+        let record = id(Record::new(
+            digest.clone(),
+            transaction,
+            Phase::Reserved,
+            200,
+            100,
+            None,
+            None,
+            None,
+        ));
+        (principal, digest, record)
+    }
+
+    #[derive(Debug)]
+    struct SubstitutionJournal(RetainedRequest);
+
+    impl ApprovedRequestJournal for SubstitutionJournal {
+        fn retain(&mut self, _: &RetainedRequest) -> Result<(), TransactionStoreError> {
+            Err(TransactionStoreError::AuthorityRejected)
+        }
+
+        fn load(
+            &self,
+            _: &PrincipalId,
+            _: &RequestId,
+        ) -> Result<RetainedRequest, TransactionStoreError> {
+            Ok(self.0.clone())
+        }
+
+        fn integrity_check(&self) -> Result<(), TransactionStoreError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn journal_rejects_substituted_phase_key_even_with_valid_payload() {
+        let (principal, request, reserved) = fixture();
+        let wrong_key = id(Record::key(&request, Phase::Dispatched));
+        let substituted = SubstitutionJournal(id(RetainedRequest::new(
+            principal.clone(),
+            wrong_key,
+            reserved.canonical.clone(),
+        )));
+        assert!(Record::load(&substituted, &principal, &request, Phase::Reserved).is_err());
+
+        let correct = SubstitutionJournal(id(RetainedRequest::new(
+            principal.clone(),
+            id(Record::key(&request, Phase::Reserved)),
+            reserved.canonical.clone(),
+        )));
+        assert_eq!(
+            id(Record::load(&correct, &principal, &request, Phase::Reserved)),
+            Some(reserved)
+        );
+    }
+
+    #[test]
+    fn recovery_phases_are_linear_and_reject_terminal_replay() {
+        let (_, request, reserved) = fixture();
+        let dispatch_digest = "a".repeat(64);
+        let dispatched = id(Record::new(
+            request.clone(),
+            reserved.transaction_id.clone(),
+            Phase::Dispatched,
+            200,
+            110,
+            Some(dispatch_digest.clone()),
+            Some(reserved.digest().clone()),
+            None,
+        ));
+        assert!(dispatched.validate_after(Some(&reserved)).is_ok());
+
+        let observation = linura_transaction::digest_parts(
+            "linura.display.recovery-test.observation.v1",
+            [b"native".as_slice()],
+        );
+        let decision = id(Record::new(
+            request.clone(),
+            reserved.transaction_id.clone(),
+            Phase::ConfirmRequested,
+            200,
+            120,
+            Some(dispatch_digest.clone()),
+            Some(dispatched.digest().clone()),
+            Some(observation.clone()),
+        ));
+        assert!(decision.validate_after(Some(&dispatched)).is_ok());
+
+        let confirmed = id(Record::new(
+            request.clone(),
+            reserved.transaction_id.clone(),
+            Phase::Confirmed,
+            200,
+            130,
+            Some(dispatch_digest.clone()),
+            Some(decision.digest().clone()),
+            Some(observation.clone()),
+        ));
+        assert!(confirmed.validate_after(Some(&decision)).is_ok());
+
+        let restored = id(Record::new(
+            request,
+            reserved.transaction_id.clone(),
+            Phase::Restored,
+            200,
+            140,
+            Some(dispatch_digest),
+            Some(confirmed.digest().clone()),
+            Some(observation),
+        ));
+        assert!(restored.validate_after(Some(&confirmed)).is_err());
+        assert!(decision.validate_after(Some(&confirmed)).is_err());
+        assert!(dispatched.validate_after(Some(&dispatched)).is_err());
     }
 }
