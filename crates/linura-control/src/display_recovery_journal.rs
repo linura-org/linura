@@ -85,6 +85,11 @@ impl Record {
             || request_digest == ContentDigest::zero()
             || previous.as_ref() == Some(&ContentDigest::zero())
             || observation_digest.as_ref() == Some(&ContentDigest::zero())
+            // Pre-effect reservation and dispatch phases cannot contain
+            // post-effect observation evidence, even if they arrive through a
+            // structurally valid retained-record payload.
+            || matches!(phase, Phase::Reserved | Phase::Dispatched)
+                && observation_digest.is_some()
             || matches!(
                 phase,
                 Phase::ConfirmRequested
@@ -353,6 +358,48 @@ mod tests {
             )),
             Some(reserved)
         );
+    }
+
+    #[test]
+    fn preeffect_phases_refuse_posteffect_observation_evidence() {
+        let (_, request, reserved) = fixture();
+        let observation = linura_transaction::digest_parts(
+            "linura.display.recovery-test.observation.v1",
+            [b"native".as_slice()],
+        );
+        assert!(Record::new(
+            request.clone(),
+            reserved.transaction_id.clone(),
+            Phase::Reserved,
+            200,
+            100,
+            None,
+            None,
+            Some(observation.clone()),
+        )
+        .is_err());
+        assert!(Record::new(
+            request.clone(),
+            reserved.transaction_id.clone(),
+            Phase::Dispatched,
+            200,
+            110,
+            Some("a".repeat(64)),
+            Some(reserved.digest().clone()),
+            Some(observation),
+        )
+        .is_err());
+        assert!(Record::new(
+            request,
+            reserved.transaction_id.clone(),
+            Phase::Dispatched,
+            200,
+            110,
+            Some("a".repeat(64)),
+            Some(reserved.digest().clone()),
+            None,
+        )
+        .is_ok());
     }
 
     #[test]
