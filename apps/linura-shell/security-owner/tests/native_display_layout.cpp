@@ -73,6 +73,10 @@ int main()
     assert(mirrorIntent && mirrorIntent->nativeOptions(observed, scope, *lock));
     const auto mirrorCommands = mirrorIntent->desired.commands(observed);
     assert(mirrorCommands.size() == 2 && mirrorCommands[1].endsWith(",mirror,DP-1"));
+    auto repeated = mirrorIntent->desired;
+    repeated.outputs[1] = repeated.outputs[0];
+    assert(!repeated.nativeOptions(observed));
+    assert(repeated.commands(observed).empty());
     auto ambiguous = observed;
     ambiguous.heads[1].name = ambiguous.heads[0].name;
     assert(mirrorIntent->desired.commands(ambiguous).empty());

@@ -176,7 +176,13 @@ bool NativeDisplayLayout::nativeOptions(const NativeDisplaySnapshot &snapshot) c
             return false;
     }
     bool independent = false;
+    // A complete layout must mention every exact live output once. An
+    // independently constructed layout must not duplicate a head and silently
+    // omit a different head merely because the row count still matches.
+    std::set<std::pair<quint64, quint64>> requested;
     for (const auto &row : outputs) {
+        if (!requested.emplace(row.handle, row.generation).second)
+            return false;
         const auto head =
             std::find_if(snapshot.heads.begin(), snapshot.heads.end(), [&](const auto &head) {
                 return head.handle == row.handle && head.generation == row.generation;
@@ -208,7 +214,7 @@ bool NativeDisplayLayout::nativeOptions(const NativeDisplaySnapshot &snapshot) c
         } else
             independent = true;
     }
-    return independent;
+    return independent && requested.size() == snapshot.heads.size();
 }
 bool NativeDisplayIntent::nativeOptions(const NativeDisplaySnapshot &snapshot,
                                         const QString &exactTopology,
