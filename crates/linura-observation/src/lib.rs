@@ -5,6 +5,12 @@ use std::fmt::{Display, Formatter};
 
 use linura_core::{CapabilityId, ProviderId, ResourceId};
 
+mod display;
+pub use display::{
+    DISPLAY_OUTPUTS_CAPABILITY, DISPLAY_PROVIDER, DisplayEvidenceError, DisplayObservationFacts,
+    display_observation_attributes,
+};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ObservationAuthority {
     NativeApi,

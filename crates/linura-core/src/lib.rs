@@ -1,5 +1,16 @@
 #![forbid(unsafe_code)]
 
+mod display_layout;
+pub use display_layout::{
+    DisplayLayout, DisplayLayoutError, DisplayMode, DisplayOutputLayout, DisplayScale,
+    DisplayTransform, NativeOutputCapabilities,
+};
+mod display_topology;
+pub use display_topology::{
+    CompositorInvocationId, DisplayIdentityError, DisplayOutputId, DisplayOutputSet,
+    DisplayTopologyId,
+};
+
 mod session_epoch;
 pub use session_epoch::{
     BootId, SecurityOwnerInvocationId, SessionEpoch, SessionEpochError, SessionLockId,

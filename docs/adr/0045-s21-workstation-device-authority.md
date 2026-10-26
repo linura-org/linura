@@ -34,6 +34,41 @@ Authoritative Hyprland output observation must bind the exact compositor instanc
 
 Treat topology changes as managed and **recovery-critical**. Prepare a bounded last-known-good recovery path independent of the potentially invisible QML interface; distinguish proposed, dispatched, independently verified, committed and indeterminate state. Where Hyprland lacks an atomic backend transaction, do not claim one; partial apply and lost acknowledgement require independent re-observation, and a timeout cannot finalize success. Native `ext-session-lock` coverage of every active output and exact lock generation must be preserved across hotplug and layout changes or the effect must fail closed. Freeze the actual pinned Hyprland version and its supported API before implementing the executor.
 
+The implemented component boundary uses a typed `DisplayObservationFacts`
+projection of the existing `linura-observation::ObservationEnvelope`; it adds
+no second observation envelope or source authority. Its closed versioned fields
+bind the complete output-generation inventory, exact advertised mode tuples,
+enablement, geometry, scale, transform, mirroring and powered enabled outputs.
+Canonical `LNDL:1` layout data is bounded, contains no control characters and is
+validated against the complete native inventory before use as planner material.
+It is not a compositor command, durable recovery journal or execution credential.
+Unknown schema versions, extra/missing fields, aliases and unsupported native
+precision fail closed. The read-only JSON adapter retains disabled-output mode
+advertisements, mirroring and DPMS state, and rejects duplicate known fields.
+Hyprland's rounded available-mode strings do not establish exact native mode
+support when the current refresh tuple differs; do not round it into eligibility.
+
+`PlanPreviewControl::plan_display_layout` coordinates separate display, logind
+and security-owner observations and derives the canonical non-executable
+`ReconciliationPlan`. Existing preview request limits, principal namespacing,
+idempotency and retention bounds apply; the native lock target is part of the
+normalized request. `DisplayLayoutSafetyReview` shares existing active-session
+checks, requires the exact seat and independently bound topology/output coverage,
+and retains only a last-known-good **candidate**. The earliest native expiry
+bounds the review. Pure postcondition review requires newer timestamps and
+sequences from every source, the retained lock generation, matching complete
+layout and a powered independent output. It neither commits nor replays effects.
+
+These component contracts are not native activation. The existing native S17
+owner does not yet emit the new `display_topology`, `observed_outputs` and
+`covered_outputs` bindings; their absence rejects display safety review rather
+than promoting S17's generic secure bit or a screen count. Native generation
+attestation and reliable hotplug invalidation, exact mode support, native coverage
+binding and independent qualification remain necessary before registering a
+display observer in production composition. No display operation is registered,
+no persistence format is installed, and no executor or public mutation endpoint
+is activated by the projection, preview or component fixtures.
+
 ### Native backlight
 
 Bind a physical kernel/logind backlight device to exact active session, seat and device generation, plus native max/current values and qualified minimum. Favor the reviewed logind `Session.SetBrightness` route for the actual owner when the target profile and device permit it; a caller-supplied sysfs path or ambient privileged helper is never authority. Percentages, hotkeys and OSD are presentation mappings and must be verified against independent native state after effect. Lack of a physical backlight is `unsupported`, not permission to substitute software gamma or external DDC/CI. The proposed `SecuritySensitive` risk floor conservatively includes loss of visible access and does **not** permit a transient shortcut. The eventual executor requires reviewed owner permissions, managed authorization and recovery. Unsupported hardware remains read-only. Prevent sole-output blackout with a qualified minimum and recovery path.

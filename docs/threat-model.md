@@ -759,6 +759,20 @@ a partial write or lost reply may be misrepresented as verified completion.
 - Reject unsafe/partially applied display layouts unless independently
   recoverable, and preserve native S17 `ext-session-lock` coverage for
   every active output during hotplug and compositor restart.
+- The display component projection rejects incomplete or aliased output/mode
+  inventories, wrong native envelope identity/authority and expired evidence.
+  Native JSON cannot round an ambiguous refresh tuple into supported state;
+  duplicate known fields, invalid scale/transform and mirror chains are rejected.
+- Display preview uses the canonical planner and existing bounded retention;
+  changing the layout, reason or native lock target under one retained request
+  identity fails closed. Separate fresh logind and lock observations must bind
+  the exact seat, compositor topology and complete active-output generations.
+  A generic secure bit, screen count or discovery-only IPC result is insufficient.
+- Pure display postcondition review requires strictly post-dispatch timestamps
+  and advancing observation sequences from all sources, unchanged lock identity
+  and state, exact full layout and a powered independent output. Neither this
+  review nor a retained last-known-good candidate grants dispatch, durable
+  restoration, commit or replay authority. Native binding/activation remains pending.
 - Deny foreign-seat/unknown backlight, unsafe physical brightness bounds,
   implicit software-gamma substitutions and arbitrary privileged sysfs writes.
 - Keep UDisks2/Polkit subject authentication, drive/partition/filesystem
