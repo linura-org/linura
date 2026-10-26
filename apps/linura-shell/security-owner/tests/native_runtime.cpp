@@ -686,14 +686,21 @@ int main(int argc, char **argv)
     invalid.resource = QStringLiteral("session:lock:unsupported");
     assert(!invalid.freshAtBootMs(12345));
 
-    NativeDisplayObservationWire displayObserved{scope.resource,
-        QStringLiteral("33333333-3333-4333-8333-333333333333"), QStringLiteral("seat0"),
-        12345, QStringLiteral("{\"schema\":1}"), QStringLiteral("[]"), true};
-    const auto displayDecoded = qdbus_cast<NativeDisplayObservationWire>(
-        roundTrip(QVariant::fromValue(displayObserved)));
-    assert(displayDecoded.resource == displayObserved.resource && displayDecoded.compositor == displayObserved.compositor &&
+    NativeDisplayObservationWire displayObserved{
+        scope.resource,
+        QStringLiteral("33333333-3333-4333-8333-333333333333"),
+        QStringLiteral("seat0"),
+        12345,
+        QStringLiteral("{\"schema\":1}"),
+        QStringLiteral("[]"),
+        true};
+    const auto displayDecoded =
+        qdbus_cast<NativeDisplayObservationWire>(roundTrip(QVariant::fromValue(displayObserved)));
+    assert(displayDecoded.resource == displayObserved.resource &&
+           displayDecoded.compositor == displayObserved.compositor &&
            displayDecoded.seat == displayObserved.seat && displayDecoded.sampledBootMs == 12345 &&
-           displayDecoded.topology == displayObserved.topology && displayDecoded.monitors == displayObserved.monitors && displayDecoded.secure);
+           displayDecoded.topology == displayObserved.topology &&
+           displayDecoded.monitors == displayObserved.monitors && displayDecoded.secure);
 
     const auto suffix = scope.resource.mid(qsizetype(sizeof("session:lock:") - 1));
     for (const auto &action : {"suspend", "reboot", "power-off", "logout"}) {

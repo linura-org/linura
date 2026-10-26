@@ -100,16 +100,19 @@ const QDBusArgument &operator>>(const QDBusArgument &wire, NativeLockObservation
 QDBusArgument &operator<<(QDBusArgument &wire, const NativeDisplayObservationWire &observation)
 {
     wire.beginStructure();
-    wire << observation.resource << observation.compositor << observation.seat << observation.sampledBootMs
-         << observation.topology << observation.monitors << observation.secure;
+    wire << observation.resource << observation.compositor << observation.seat
+         << observation.sampledBootMs << observation.topology << observation.monitors
+         << observation.secure;
     wire.endStructure();
     return wire;
 }
-const QDBusArgument &operator>>(const QDBusArgument &wire, NativeDisplayObservationWire &observation)
+const QDBusArgument &operator>>(const QDBusArgument &wire,
+                                NativeDisplayObservationWire &observation)
 {
     wire.beginStructure();
-    wire >> observation.resource >> observation.compositor >> observation.seat >> observation.sampledBootMs
-         >> observation.topology >> observation.monitors >> observation.secure;
+    wire >> observation.resource >> observation.compositor >> observation.seat >>
+        observation.sampledBootMs >> observation.topology >> observation.monitors >>
+        observation.secure;
     wire.endStructure();
     return wire;
 }
@@ -178,10 +181,11 @@ NativeDisplayObservationWire NativeEndpoint::ObserveDisplay()
         const auto sampled = bootMilliseconds();
         const auto state = runtime_.observeDisplay(message());
         const auto completed = bootMilliseconds();
-        if (sampled && completed && state && NativeLockObservationWire{
-                state->resource, state->secure, *sampled}.freshAtBootMs(*completed))
-            return {state->resource, state->compositor, state->seat, *sampled,
-                    state->topology, state->monitors, state->secure};
+        if (sampled && completed && state &&
+            NativeLockObservationWire{state->resource, state->secure, *sampled}.freshAtBootMs(
+                *completed))
+            return {state->resource, state->compositor, state->seat,  *sampled,
+                    state->topology, state->monitors,   state->secure};
         sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
                        QStringLiteral("Native display evidence unavailable"));
     }

@@ -47,7 +47,8 @@ struct NativeDisplayObservationWire final
     bool secure = false;
 };
 QDBusArgument &operator<<(QDBusArgument &wire, const NativeDisplayObservationWire &observation);
-const QDBusArgument &operator>>(const QDBusArgument &wire, NativeDisplayObservationWire &observation);
+const QDBusArgument &operator>>(const QDBusArgument &wire,
+                                NativeDisplayObservationWire &observation);
 
 // Adapter only, on the owner's authenticated canonical system-bus connection.
 // It owns no planner/policy/prepare logic. The runtime checks the actual message

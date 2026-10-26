@@ -182,7 +182,8 @@ class NativeWaylandLock::Impl final
     ext_session_lock_v1 *lock = nullptr;
     wl_callback *releaseAck = nullptr;
     std::map<quint32, std::unique_ptr<Output>> outputs;
-    std::unique_ptr<NativeDisplayTopology> displayTopology = std::make_unique<NativeDisplayTopology>();
+    std::unique_ptr<NativeDisplayTopology> displayTopology =
+        std::make_unique<NativeDisplayTopology>();
     const QString displayInvocation = QUuid::createUuid().toString(QUuid::WithoutBraces);
     std::unique_ptr<QSocketNotifier> reader;
     std::unique_ptr<QSocketNotifier> writer;
@@ -346,8 +347,8 @@ class NativeWaylandLock::Impl final
                 auto output = std::make_unique<Output>();
                 output->owner = &self;
                 output->id = name;
-                output->native = static_cast<wl_output *>(
-                    wl_registry_bind(self.registry, name, &wl_output_interface, std::min(version, 4U)));
+                output->native = static_cast<wl_output *>(wl_registry_bind(
+                    self.registry, name, &wl_output_interface, std::min(version, 4U)));
                 if (!output->native)
                     failClosed();
                 static const wl_output_listener listener{outputGeometry, outputMode,
@@ -699,17 +700,19 @@ std::optional<NativeDisplaySnapshot> NativeWaylandLock::observeDisplayTopology()
         (void)id;
         if (output->nativeName.isEmpty() || !seen.insert(output->nativeName).second)
             return std::nullopt;
-        const auto found = std::find_if(snapshot->heads.begin(), snapshot->heads.end(),
-            [&](const auto &head) { return head.enabled && head.name == output->nativeName; });
+        const auto found =
+            std::find_if(snapshot->heads.begin(), snapshot->heads.end(), [&](const auto &head) {
+                return head.enabled && head.name == output->nativeName;
+            });
         if (found == snapshot->heads.end())
             return std::nullopt;
         // A flushed opaque frame and native protocol acknowledgement are
         // separate requirements. Newly hotplugged/configuring outputs remain
         // uncovered until both hold; counts/Qt screens cannot satisfy this.
         found->covered = secureCoverage() && requestedSecure() && impl_->lock &&
-            output->lockSurface && output->configured && !output->needsAck && !output->pending &&
-            output->configureGeneration != 0 &&
-            output->committedConfigureGeneration == output->configureGeneration;
+                         output->lockSurface && output->configured && !output->needsAck &&
+                         !output->pending && output->configureGeneration != 0 &&
+                         output->committedConfigureGeneration == output->configureGeneration;
     }
     return snapshot;
 }

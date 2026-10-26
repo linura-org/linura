@@ -35,8 +35,8 @@ struct NativeDisplayIntent final
     [[nodiscard]] static std::optional<NativeDisplayIntent> parse(const QString &material);
     [[nodiscard]] QString encode() const;
     [[nodiscard]] bool nativeOptions(const NativeDisplaySnapshot &snapshot,
-                                      const QString &exactTopology,
-                                      const NativeLockIdentity &exactLock) const;
+                                     const QString &exactTopology,
+                                     const NativeLockIdentity &exactLock) const;
 };
 
 } // namespace Linura::SecurityOwner

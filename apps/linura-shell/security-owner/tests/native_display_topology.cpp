@@ -20,7 +20,11 @@ using namespace std::chrono_literals;
 namespace {
 struct Server final
 {
-    struct Head { wl_resource *resource; std::vector<wl_resource *> modes; };
+    struct Head
+    {
+        wl_resource *resource;
+        std::vector<wl_resource *> modes;
+    };
     wl_display *display = wl_display_create();
     wl_resource *manager = nullptr;
     std::vector<std::unique_ptr<Head>> heads;
@@ -29,7 +33,10 @@ struct Server final
     bool missingMode = false, missingDone = false;
     std::thread worker;
 
-    static void release(wl_client *, wl_resource *resource) { wl_resource_destroy(resource); }
+    static void release(wl_client *, wl_resource *resource)
+    {
+        wl_resource_destroy(resource);
+    }
     static void stopManager(wl_client *, wl_resource *resource)
     {
         zwlr_output_manager_v1_send_finished(resource);
@@ -45,7 +52,10 @@ struct Server final
         auto entry = std::make_unique<Head>();
         entry->resource = wl_resource_create(client, &zwlr_output_head_v1_interface, 4, 0);
         assert(entry->resource);
-        static const struct zwlr_output_head_v1_interface requests{release};
+        static const struct zwlr_output_head_v1_interface requests
+        {
+            release
+        };
         wl_resource_set_implementation(entry->resource, &requests, nullptr, nullptr);
         zwlr_output_manager_v1_send_head(manager, entry->resource);
         zwlr_output_head_v1_send_name(entry->resource, name);
@@ -56,11 +66,15 @@ struct Server final
         for (int width : {1920, 1280}) {
             auto *mode = wl_resource_create(client, &zwlr_output_mode_v1_interface, 3, 0);
             assert(mode);
-            static const struct zwlr_output_mode_v1_interface modeRequests{release};
+            static const struct zwlr_output_mode_v1_interface modeRequests
+            {
+                release
+            };
             wl_resource_set_implementation(mode, &modeRequests, nullptr, nullptr);
             entry->modes.push_back(mode);
             zwlr_output_head_v1_send_mode(entry->resource, mode);
-            if (!missingMode) zwlr_output_mode_v1_send_size(mode, width, width == 1920 ? 1080 : 720);
+            if (!missingMode)
+                zwlr_output_mode_v1_send_size(mode, width, width == 1920 ? 1080 : 720);
             zwlr_output_mode_v1_send_refresh(mode, 60000);
         }
         zwlr_output_head_v1_send_current_mode(entry->resource, entry->modes.front());
@@ -70,12 +84,16 @@ struct Server final
     {
         auto &self = *static_cast<Server *>(data);
         self.manager = wl_resource_create(client, &zwlr_output_manager_v1_interface,
-                                         static_cast<int>(version), id);
+                                          static_cast<int>(version), id);
         assert(self.manager);
-        static const struct zwlr_output_manager_v1_interface requests{configuration, stopManager};
+        static const struct zwlr_output_manager_v1_interface requests
+        {
+            configuration, stopManager
+        };
         wl_resource_set_implementation(self.manager, &requests, &self, nullptr);
         self.head(client, "DP-1");
-        if (!self.missingDone) zwlr_output_manager_v1_send_done(self.manager, 1);
+        if (!self.missingDone)
+            zwlr_output_manager_v1_send_done(self.manager, 1);
     }
     void action(int command)
     {
@@ -88,7 +106,8 @@ struct Server final
             zwlr_output_head_v1_send_scale(first.resource, 320);
         } else if (command == 2) {
             zwlr_output_head_v1_send_finished(first.resource);
-            for (auto *mode : first.modes) zwlr_output_mode_v1_send_finished(mode);
+            for (auto *mode : first.modes)
+                zwlr_output_mode_v1_send_finished(mode);
             head(client, "DP-1"); // Name ABA within one server event turn.
             zwlr_output_manager_v1_send_done(manager, 2);
         } else if (command == 3) {
@@ -128,9 +147,11 @@ struct Server final
     }
     void finish()
     {
-        stop.store(true); worker.join();
+        stop.store(true);
+        worker.join();
         assert(effects.load() == 0);
-        wl_display_destroy_clients(display); wl_display_destroy(display);
+        wl_display_destroy_clients(display);
+        wl_display_destroy(display);
     }
 };
 struct Registry final
@@ -155,7 +176,8 @@ struct Registry final
 void scenario(int action, bool missingMode = false, bool missingDone = false)
 {
     Server server;
-    server.missingMode = missingMode; server.missingDone = missingDone;
+    server.missingMode = missingMode;
+    server.missingDone = missingDone;
     int sockets[2];
     assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
     assert(server.display && wl_client_create(server.display, sockets[0]));
@@ -188,7 +210,8 @@ void scenario(int action, bool missingMode = false, bool missingDone = false)
                 assert(after->heads.front().handle == first.handle);
                 assert(after->heads.front().generation == first.generation);
                 assert(after->heads.front().x == -100 && after->heads.front().y == 20);
-                assert(after->heads.front().transform == 1 && after->heads.front().scaleFixed == 320);
+                assert(after->heads.front().transform == 1 &&
+                       after->heads.front().scaleFixed == 320);
             } else if (action == 2) {
                 assert(after && after->heads.size() == 1 && after->generation > before->generation);
                 assert(after->heads.front().name == first.name);
@@ -208,7 +231,8 @@ void scenario(int action, bool missingMode = false, bool missingDone = false)
 } // namespace
 int main()
 {
-    for (int action : {1, 2, 3, 4, 5}) scenario(action);
+    for (int action : {1, 2, 3, 4, 5})
+        scenario(action);
     scenario(1, true, false);
     scenario(1, false, true);
 }

@@ -117,20 +117,20 @@ std::optional<NativeCompositorLockState> decodeNativeHyprlandLock(QByteArrayView
 }
 
 namespace {
-std::optional<QByteArray>
-nativeExchange(const QString &nativeSocketPath, const NativeSessionBinding &binding,
-                QByteArrayView command, qsizetype maximum, qint64 limit,
-                NativeCompositorProbeFailure *failure)
+std::optional<QByteArray> nativeExchange(const QString &nativeSocketPath,
+                                         const NativeSessionBinding &binding,
+                                         QByteArrayView command, qsizetype maximum, qint64 limit,
+                                         NativeCompositorProbeFailure *failure)
 {
     if (failure)
         *failure = NativeCompositorProbeFailure::None;
-    const auto deny =
-        [failure](NativeCompositorProbeFailure reason) -> std::optional<QByteArray> {
+    const auto deny = [failure](NativeCompositorProbeFailure reason) -> std::optional<QByteArray> {
         if (failure)
             *failure = reason;
         return std::nullopt;
     };
-    if (command.isEmpty() || command.size() > 512 || maximum <= 0 || maximum > 256 * 1024 || limit <= 0 || limit > ProbeBudgetMs)
+    if (command.isEmpty() || command.size() > 512 || maximum <= 0 || maximum > 256 * 1024 ||
+        limit <= 0 || limit > ProbeBudgetMs)
         return deny(NativeCompositorProbeFailure::Binding);
     const auto parsed = NativeLockIdentity::parse(binding.lock.resource);
     if (!parsed || *parsed != binding.lock || binding.compositorPid == 0 ||
@@ -157,11 +157,11 @@ nativeExchange(const QString &nativeSocketPath, const NativeSessionBinding &bind
     QElapsedTimer budget;
     budget.start();
     const auto unavailable = [&](NativeCompositorProbeFailure reason) {
-        return deny(budget.elapsed() >= limit ? NativeCompositorProbeFailure::Deadline
-                                                      : reason);
+        return deny(budget.elapsed() >= limit ? NativeCompositorProbeFailure::Deadline : reason);
     };
     if (::connect(descriptor, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) != 0) {
-        if ((errno != EINPROGRESS && errno != EAGAIN) || !waitReady(descriptor, POLLOUT, budget, limit))
+        if ((errno != EINPROGRESS && errno != EAGAIN) ||
+            !waitReady(descriptor, POLLOUT, budget, limit))
             return unavailable(NativeCompositorProbeFailure::Connect);
         int error = 0;
         socklen_t bytes = sizeof(error);
@@ -175,8 +175,8 @@ nativeExchange(const QString &nativeSocketPath, const NativeSessionBinding &bind
     while (sent < static_cast<std::size_t>(command.size())) {
         if (budget.elapsed() >= limit)
             return deny(NativeCompositorProbeFailure::Deadline);
-        const ssize_t count =
-            send(descriptor, command.data() + sent, static_cast<std::size_t>(command.size()) - sent, MSG_NOSIGNAL);
+        const ssize_t count = send(descriptor, command.data() + sent,
+                                   static_cast<std::size_t>(command.size()) - sent, MSG_NOSIGNAL);
         if (count > 0)
             sent += static_cast<std::size_t>(count);
         else if (count < 0 && errno == EINTR)
@@ -195,7 +195,8 @@ nativeExchange(const QString &nativeSocketPath, const NativeSessionBinding &bind
             return unavailable(NativeCompositorProbeFailure::Receive);
         const ssize_t count = recv(descriptor, chunk.data(), chunk.size(), 0);
         if (count > 0) {
-            if (count > maximum - reply.size()) return deny(NativeCompositorProbeFailure::ReplyLimit);
+            if (count > maximum - reply.size())
+                return deny(NativeCompositorProbeFailure::ReplyLimit);
             reply.append(chunk.data(), static_cast<qsizetype>(count));
         } else if (count == 0) {
             if (!peerMatches(descriptor, binding) || budget.elapsed() >= limit)
@@ -212,33 +213,43 @@ std::optional<NativeCompositorLockState>
 observeNativeHyprlandLock(const QString &path, const NativeSessionBinding &binding,
                           NativeCompositorProbeFailure *failure)
 {
-    const auto reply = nativeExchange(path, binding, "j/locked", MaximumReplyBytes, ProbeBudgetMs, failure);
-    if (!reply) return std::nullopt;
+    const auto reply =
+        nativeExchange(path, binding, "j/locked", MaximumReplyBytes, ProbeBudgetMs, failure);
+    if (!reply)
+        return std::nullopt;
     const auto decoded = decodeNativeHyprlandLock(*reply);
-    if (!decoded && failure) *failure = NativeCompositorProbeFailure::Reply;
+    if (!decoded && failure)
+        *failure = NativeCompositorProbeFailure::Reply;
     return decoded;
 }
-std::optional<QByteArray>
-observeNativeHyprlandOutputs(const QString &path, const NativeSessionBinding &binding)
+std::optional<QByteArray> observeNativeHyprlandOutputs(const QString &path,
+                                                       const NativeSessionBinding &binding)
 {
     return nativeExchange(path, binding, "j/monitors all", 256 * 1024, ProbeBudgetMs, nullptr);
 }
 
 NativeDisplayWriteResult applyNativeHyprlandLayout(const NativeDisplayLayout &layout,
-    const NativeDisplaySnapshot &snapshot, const QString &path, const NativeSessionBinding &binding)
+                                                   const NativeDisplaySnapshot &snapshot,
+                                                   const QString &path,
+                                                   const NativeSessionBinding &binding)
 {
     const auto commands = layout.commands(snapshot);
-    if (commands.empty() || commands.size() > 16) return {};
-    QElapsedTimer total; total.start();
+    if (commands.empty() || commands.size() > 16)
+        return {};
+    QElapsedTimer total;
+    total.start();
     NativeDisplayWriteResult result;
     for (const auto &command : commands) {
         const qint64 remaining = 1500 - total.elapsed();
-        if (remaining <= 0) return result;
+        if (remaining <= 0)
+            return result;
         // Set before entering the exchange: failure after connect/write may
         // hide an effect. The runtime's recovery timer is already armed.
         result.attempted = true;
-        const auto reply = nativeExchange(path, binding, command, 64, std::min(remaining, ProbeBudgetMs), nullptr);
-        if (!reply || (*reply != "ok" && *reply != "ok\n")) return result;
+        const auto reply =
+            nativeExchange(path, binding, command, 64, std::min(remaining, ProbeBudgetMs), nullptr);
+        if (!reply || (*reply != "ok" && *reply != "ok\n"))
+            return result;
     }
     result.allAcknowledged = true;
     return result;

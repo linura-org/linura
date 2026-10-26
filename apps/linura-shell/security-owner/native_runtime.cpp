@@ -738,9 +738,11 @@ std::optional<NativeDisplaySample> NativeRuntime::observeDisplay(const QDBusMess
         return std::nullopt;
     const auto after = impl_->backend->observeDisplayTopology();
     const auto settled = nativeObservedLockState(*independent, impl_->protocol->inspect(),
-        impl_->backend->requestedSecure(), impl_->backend->secureCoverage());
+                                                 impl_->backend->requestedSecure(),
+                                                 impl_->backend->secureCoverage());
     if (!after || *before != *after || !settled ||
-        (*settled != NativeObservedLockState::Secure && *settled != NativeObservedLockState::Unlocked))
+        (*settled != NativeObservedLockState::Secure &&
+         *settled != NativeObservedLockState::Unlocked))
         return std::nullopt;
     const QString topology = after->encode();
     // Round-trip UTF-8 strictly; invalid native metadata must not be normalized
@@ -748,8 +750,12 @@ std::optional<NativeDisplaySample> NativeRuntime::observeDisplay(const QDBusMess
     const QString metadata = QString::fromUtf8(*monitors);
     if (topology.isEmpty() || metadata.toUtf8() != *monitors)
         return std::nullopt;
-    return NativeDisplaySample{identity().resource, impl_->backend->displayInvocation(),
-        impl_->binding->seat, topology, metadata, *settled == NativeObservedLockState::Secure};
+    return NativeDisplaySample{identity().resource,
+                               impl_->backend->displayInvocation(),
+                               impl_->binding->seat,
+                               topology,
+                               metadata,
+                               *settled == NativeObservedLockState::Secure};
 }
 
 bool NativeRuntime::fencePreparedTransition(const QDBusMessage &received,
