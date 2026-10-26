@@ -305,14 +305,21 @@ mod tests {
         let display_effect = display
             .effect_binding()
             .unwrap_or_else(|| unreachable!("managed display effect binding is missing"));
-        assert_eq!(display_effect.provider().as_str(), linura_observation::DISPLAY_PROVIDER);
+        assert_eq!(
+            display_effect.provider().as_str(),
+            linura_observation::DISPLAY_PROVIDER
+        );
         assert_eq!(
             display_effect.observation_capability().as_str(),
             linura_observation::DISPLAY_OUTPUTS_CAPABILITY
         );
         assert_eq!(display_effect.resource_prefix(), "display:topology:");
         assert_eq!(
-            display_effect.change_keys().iter().map(String::as_str).collect::<Vec<_>>(),
+            display_effect
+                .change_keys()
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
             vec!["layout"]
         );
 
