@@ -14,6 +14,7 @@ use crate::{ObservationAuthority, ObservationEnvelope, ObservedValue};
 
 pub const DISPLAY_PROVIDER: &str = "hyprland";
 pub const DISPLAY_OUTPUTS_CAPABILITY: &str = "display.outputs.observe";
+pub const DISPLAY_COVERAGE_CAPABILITY: &str = "session.display-coverage.observe";
 const MAX_VALID_FOR_MS: u64 = 2_000;
 const MAX_ATTRIBUTES: usize = 100;
 

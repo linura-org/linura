@@ -2,6 +2,7 @@
 #include "native_deadline.h"
 #include "native_lock_protocol.h"
 #include "native_keyboard.h"
+#include "native_wayland_readiness.h"
 #include "secret_entry.h"
 #include "ext-session-lock-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
@@ -9,6 +10,7 @@
 #include <QSocketNotifier>
 #include <QThread>
 #include <QTimer>
+#include <QUuid>
 #include <wayland-client.h>
 #include <algorithm>
 #include <array>
@@ -18,6 +20,8 @@
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <limits>
+#include <set>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -126,10 +130,12 @@ class NativeWaylandLock::Impl final
         quint32 width = 0;
         quint32 height = 0;
         quint32 serial = 0;
+        QString nativeName;
         bool configured = false;
         bool needsAck = false;
         bool pending = false;
         bool acquisitionFrameQueued = false; // Diagnostic milestone only.
+        quint64 configureGeneration = 0, committedConfigureGeneration = 0;
         std::vector<std::unique_ptr<Buffer>> buffers;
         ~Output()
         {
@@ -160,6 +166,7 @@ class NativeWaylandLock::Impl final
             buffers.clear();
             configured = needsAck = pending = false;
             acquisitionFrameQueued = false;
+            configureGeneration = committedConfigureGeneration = 0;
         }
     };
 
@@ -175,6 +182,8 @@ class NativeWaylandLock::Impl final
     ext_session_lock_v1 *lock = nullptr;
     wl_callback *releaseAck = nullptr;
     std::map<quint32, std::unique_ptr<Output>> outputs;
+    std::unique_ptr<NativeDisplayTopology> displayTopology = std::make_unique<NativeDisplayTopology>();
+    const QString displayInvocation = QUuid::createUuid().toString(QUuid::WithoutBraces);
     std::unique_ptr<QSocketNotifier> reader;
     std::unique_ptr<QSocketNotifier> writer;
     std::unique_ptr<NativeKeyboard> keyboard;
@@ -221,6 +230,7 @@ class NativeWaylandLock::Impl final
         confirmationTimer.stop();
         confirmation.reset();
         outputs.clear();
+        displayTopology.reset();
         keyboard.reset();
         if (desktop)
             xdg_wm_base_destroy(desktop);
@@ -327,6 +337,8 @@ class NativeWaylandLock::Impl final
                 static const xdg_wm_base_listener listener{desktopPing};
                 if (!self.desktop || xdg_wm_base_add_listener(self.desktop, &listener, &self) != 0)
                     failClosed();
+            } else if (std::strcmp(interface, "zwlr_output_manager_v1") == 0) {
+                self.displayTopology->announce(self.registry, name, version);
             } else if (std::strcmp(interface, "wl_output") == 0) {
                 if (version < 3 || self.outputs.size() >= MaximumOutputs ||
                     self.outputs.contains(name))
@@ -335,7 +347,7 @@ class NativeWaylandLock::Impl final
                 output->owner = &self;
                 output->id = name;
                 output->native = static_cast<wl_output *>(
-                    wl_registry_bind(self.registry, name, &wl_output_interface, 3));
+                    wl_registry_bind(self.registry, name, &wl_output_interface, std::min(version, 4U)));
                 if (!output->native)
                     failClosed();
                 static const wl_output_listener listener{outputGeometry, outputMode,
@@ -369,7 +381,15 @@ class NativeWaylandLock::Impl final
         if (scale < 1 || scale > 16)
             failClosed();
     }
-    static void outputName(void *, wl_output *, const char *) {}
+    static void outputName(void *data, wl_output *, const char *name)
+    {
+        nativeCallback([&] {
+            auto &output = *static_cast<Output *>(data);
+            if (!name || !output.nativeName.isEmpty() || strnlen(name, 129) > 128)
+                failClosed();
+            output.nativeName = QString::fromUtf8(name);
+        });
+    }
     static void outputDescription(void *, wl_output *, const char *) {}
     static void desktopPing(void *data, xdg_wm_base *native, uint32_t serial)
     {
@@ -385,6 +405,7 @@ class NativeWaylandLock::Impl final
     {
         nativeCallback([&] {
             auto &self = *static_cast<Impl *>(data);
+            self.displayTopology->removed(name);
             if (std::find(self.requiredGlobals.begin(), self.requiredGlobals.end(), name) !=
                 self.requiredGlobals.end())
                 failClosed();
@@ -441,6 +462,9 @@ class NativeWaylandLock::Impl final
             }
             output.width = width;
             output.height = height;
+            if (output.configureGeneration == std::numeric_limits<quint64>::max())
+                failClosed();
+            ++output.configureGeneration;
             output.serial = serial;
             output.configured = true;
             output.needsAck = true;
@@ -645,6 +669,8 @@ class NativeWaylandLock::Impl final
         output.pending = false;
         wl_surface_commit(output.surface);
         if (output.lockSurface)
+            output.committedConfigureGeneration = output.configureGeneration;
+        if (output.lockSurface)
             output.acquisitionFrameQueued = true;
         if (output.lockSurface && !acquisitionFrameFlushed)
             acquisitionFrameQueued = true;
@@ -655,6 +681,38 @@ NativeWaylandLock::NativeWaylandLock(wl_display *ownedDisplay, Painter painter)
     : impl_(std::make_unique<Impl>(*this, ownedDisplay, std::move(painter)))
 {}
 NativeWaylandLock::~NativeWaylandLock() = default;
+const QString &NativeWaylandLock::displayInvocation() const noexcept
+{
+    return impl_->displayInvocation;
+}
+std::optional<NativeDisplaySnapshot> NativeWaylandLock::observeDisplayTopology()
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping ||
+        !waitForNativeWaylandReady(impl_->display, std::chrono::milliseconds(250)))
+        return std::nullopt;
+    auto snapshot = impl_->displayTopology->snapshotAfterSync();
+    if (!snapshot)
+        return std::nullopt;
+    std::set<QString> seen;
+    for (const auto &[id, output] : impl_->outputs) {
+        (void)id;
+        if (output->nativeName.isEmpty() || !seen.insert(output->nativeName).second)
+            return std::nullopt;
+        const auto found = std::find_if(snapshot->heads.begin(), snapshot->heads.end(),
+            [&](const auto &head) { return head.enabled && head.name == output->nativeName; });
+        if (found == snapshot->heads.end())
+            return std::nullopt;
+        // A flushed opaque frame and native protocol acknowledgement are
+        // separate requirements. Newly hotplugged/configuring outputs remain
+        // uncovered until both hold; counts/Qt screens cannot satisfy this.
+        found->covered = secureCoverage() && requestedSecure() && impl_->lock &&
+            output->lockSurface && output->configured && !output->needsAck && !output->pending &&
+            output->configureGeneration != 0 &&
+            output->committedConfigureGeneration == output->configureGeneration;
+    }
+    return snapshot;
+}
 int NativeWaylandLock::actualDisplayFd() const noexcept
 {
     return impl_->display ? wl_display_get_fd(impl_->display) : -1;

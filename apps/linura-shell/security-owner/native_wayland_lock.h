@@ -2,6 +2,7 @@
 
 #include "native_managed_lock_backend.h"
 #include "native_keyboard.h"
+#include "native_display_topology.h"
 #include <QImage>
 #include <QSize>
 #include <cstddef>
@@ -45,6 +46,10 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     // Progress already queued native replies between bounded metadata reads.
     // Skip nested native callbacks/rendering; never process Qt/D-Bus/timer events.
     void progressNativeState();
+    // Read-only sync-fenced native inventory and per-output lock-surface facts.
+    // Absence means unsupported/incomplete; it never weakens S17 lock coverage.
+    [[nodiscard]] std::optional<NativeDisplaySnapshot> observeDisplayTopology();
+    [[nodiscard]] const QString &displayInvocation() const noexcept;
     // Private native interaction, not an effect/approval credential. The runtime
     // arms the exact reviewed NativeApprovalScope first and consumes its fresh
     // confirmation through Control separately. Closing/expiry means denial.

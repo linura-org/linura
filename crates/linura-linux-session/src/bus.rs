@@ -16,6 +16,7 @@ const CONNECT_BUDGET: Duration = Duration::from_secs(2);
 pub(crate) const CALL_BUDGET: Duration = Duration::from_millis(500);
 pub(crate) const PROBE_BUDGET: Duration = Duration::from_secs(2);
 pub(crate) const MAX_REPLY_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_DISPLAY_REPLY_BYTES: usize = 384 * 1024;
 pub(crate) const INTERACTION_BUDGET: Duration = Duration::from_secs(60);
 
 pub(crate) enum NativeCallError {
@@ -410,7 +411,16 @@ impl NativeSessionChannel {
                 )))
             },
         ))?;
-        if reply.body().len() > MAX_REPLY_BYTES {
+        let maximum = if path == "/org/linura/SecurityOwner1"
+            && interface == "org.linura.SecurityOwner1"
+            && method == "ObserveDisplay"
+            && self.role == NativeSessionRole::Control
+        {
+            MAX_DISPLAY_REPLY_BYTES
+        } else {
+            MAX_REPLY_BYTES
+        };
+        if reply.body().len() > maximum {
             return Err(NativeCallError::other(
                 "native session reply exceeded its size bound",
             ));

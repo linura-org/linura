@@ -100,11 +100,21 @@ add_custom_command(OUTPUT "${XDG_HEADER}" "${XDG_CODE}"
     COMMAND "${WAYLAND_SCANNER}" private-code "${XDG_XML}" "${XDG_CODE}"
     DEPENDS "${XDG_XML}" VERBATIM
 )
+set(OUTPUT_XML "${CMAKE_CURRENT_SOURCE_DIR}/protocols/wlr-output-management-unstable-v1.xml")
+set(OUTPUT_HEADER "${CMAKE_CURRENT_BINARY_DIR}/wlr-output-management-unstable-v1-client-protocol.h")
+set(OUTPUT_CODE "${CMAKE_CURRENT_BINARY_DIR}/wlr-output-management-unstable-v1-protocol.c")
+add_custom_command(OUTPUT "${OUTPUT_HEADER}" "${OUTPUT_CODE}"
+    COMMAND "${WAYLAND_SCANNER}" client-header "${OUTPUT_XML}" "${OUTPUT_HEADER}"
+    COMMAND "${WAYLAND_SCANNER}" private-code "${OUTPUT_XML}" "${OUTPUT_CODE}"
+    DEPENDS "${OUTPUT_XML}" VERBATIM
+)
 add_library(linura-security-owner-wayland STATIC
     native_wayland_lock.cpp native_wayland_lock.h
+    native_display_topology.cpp native_display_topology.h
     native_keyboard.cpp native_keyboard.h
     native_compose.cpp native_compose.h
     "${LOCK_HEADER}" "${LOCK_CODE}" "${XDG_HEADER}" "${XDG_CODE}"
+    "${OUTPUT_HEADER}" "${OUTPUT_CODE}"
 )
 set(compose_source "${CMAKE_CURRENT_SOURCE_DIR}/compose/en_US.UTF-8")
 set_source_files_properties("${compose_source}" PROPERTIES
@@ -193,6 +203,22 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
     pkg_check_modules(WAYLAND_SERVER REQUIRED IMPORTED_TARGET wayland-server)
+
+    set(OUTPUT_SERVER_HEADER "${CMAKE_CURRENT_BINARY_DIR}/wlr-output-management-unstable-v1-server-protocol.h")
+    add_custom_command(OUTPUT "${OUTPUT_SERVER_HEADER}"
+        COMMAND "${WAYLAND_SCANNER}" server-header "${OUTPUT_XML}" "${OUTPUT_SERVER_HEADER}"
+        DEPENDS "${OUTPUT_XML}" VERBATIM)
+    add_executable(linura-security-owner-display-topology-tests
+        tests/native_display_topology.cpp "${OUTPUT_SERVER_HEADER}")
+    target_include_directories(linura-security-owner-display-topology-tests PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}")
+    target_link_libraries(linura-security-owner-display-topology-tests PRIVATE
+        linura-security-owner-wayland PkgConfig::WAYLAND_SERVER)
+    target_compile_options(linura-security-owner-display-topology-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
+    add_test(NAME security-owner-display-topology-wire-boundary
+        COMMAND linura-security-owner-display-topology-tests)
+    set_tests_properties(security-owner-display-topology-wire-boundary PROPERTIES TIMEOUT 30)
 
     add_executable(linura-security-owner-readiness-tests tests/native_wayland_readiness.cpp)
     target_link_libraries(linura-security-owner-readiness-tests PRIVATE

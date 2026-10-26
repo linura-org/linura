@@ -9,7 +9,7 @@ use linura_core::{DisplayLayout, DisplayOutputLayout, SessionLockId};
 use linura_observation::{DisplayObservationFacts, ObservationEnvelope, ObservedValue};
 
 use crate::AuthenticatedPrincipal;
-use crate::session_safety::{validate_active_session, validate_native_lock};
+use crate::session_safety::{validate_active_session, validate_native_lock_capability};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DisplayLayoutSafetyReview {
@@ -66,13 +66,22 @@ impl DisplayLayoutSafetyReview {
         if !facts.has_powered_independent_output() {
             return Err(DisplaySafetyError::NoVisibleRecoveryOutput);
         }
+        if !desired.outputs().iter().any(|entry| matches!(entry,
+            DisplayOutputLayout::Enabled { output, mirror: None, .. } if facts.powered_outputs().contains(output))) {
+            return Err(DisplaySafetyError::NoVisibleRecoveryOutput);
+        }
         let lock = SessionLockId::from_resource(&locker.resource)
             .map_err(|_| DisplaySafetyError::LockCoverage)?;
         if lock.epoch() != topology.session() {
             return Err(DisplaySafetyError::LockCoverage);
         }
-        let secure = validate_native_lock(&lock, locker, now_unix_ms)
-            .map_err(|_| DisplaySafetyError::LockCoverage)?;
+        let secure = validate_native_lock_capability(
+            &lock,
+            locker,
+            linura_observation::DISPLAY_COVERAGE_CAPABILITY,
+            now_unix_ms,
+        )
+        .map_err(|_| DisplaySafetyError::LockCoverage)?;
         let resource = topology
             .resource_id()
             .map_err(|_| DisplaySafetyError::Display)?;

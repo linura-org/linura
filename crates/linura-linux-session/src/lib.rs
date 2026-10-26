@@ -8,6 +8,7 @@
 
 mod account;
 mod bus;
+mod display_observer;
 mod observer;
 mod owner;
 mod service;
@@ -16,6 +17,7 @@ mod sleep_helper;
 mod sleep_observer;
 
 pub use bus::{NativeSessionChannel, NativeSessionRole};
+pub use display_observer::NativeDisplayObserver;
 pub use observer::{NativeLockObserver, NativePowerPermissionObserver};
 pub use owner::{
     NativeApprovalPurpose, NativeApprovalRequest, NativeAuthenticationSubject, NativeOwnerIdentity,

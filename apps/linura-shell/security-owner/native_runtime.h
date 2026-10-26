@@ -14,6 +14,11 @@
 namespace Linura::SecurityOwner {
 
 enum class NativeObservedLockState { Unlocked, Secure, Acquiring, Releasing };
+struct NativeDisplaySample final
+{
+    QString resource, compositor, seat, topology, monitors;
+    bool secure = false;
+};
 [[nodiscard]] std::optional<NativeObservedLockState>
 nativeObservedLockState(NativeCompositorLockState compositor, LockMechanism::State mechanism,
                         bool requested, bool coverage);
@@ -35,6 +40,7 @@ class NativeRuntime final : public QObject
     [[nodiscard]] bool dispatchPrepared(const QDBusMessage &received,
                                         const NativeLockIdentity &identity, bool secure);
     [[nodiscard]] std::optional<NativeObservedLockState> observe(const QDBusMessage &received);
+    [[nodiscard]] std::optional<NativeDisplaySample> observeDisplay(const QDBusMessage &received);
     [[nodiscard]] bool fencePreparedTransition(const QDBusMessage &received,
                                                const NativeTransitionIdentity &target);
     [[nodiscard]] bool cancelUndispatchedTransition(const QDBusMessage &received,

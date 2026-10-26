@@ -221,6 +221,18 @@ For Experimental D-Bus changes, these must remain coherent in the same candidate
 A live method not represented in canonical XML, or XML that does not match live signatures, is contract drift and fails qualification rather than being explained away as Experimental flexibility.
 
 
+The private Experimental `SecurityOwner1.ObserveDisplay` method is a read-only
+native display probe, separate from `ObserveLock`. Its `(ssstssb)` structure binds
+the exact native lock resource, compositor connection generation, seat,
+suspend-inclusive sample time, bounded typed topology JSON, bounded native
+monitor metadata and settled independently observed secure state. The Linux
+adapter retains the original two-second probe deadline and projects canonical
+`display.outputs.observe` and `session.display-coverage.observe` evidence.
+The larger reply cap applies only to this exact private method for supervised
+Control; existing methods and error replies retain their previous bounds.
+Unknown schemas, incomplete inventories and mismatched independent facts fail
+closed. This method creates no output configuration or execution authority.
+
 ### Session1 bounded transient-effect contract
 
 `org.linura.Session1` is a distinct Experimental **session-bus transient-effect** contract introduced for the v0.10 workstation line. It is hosted by the same unprivileged `linurad` process and well-known session-bus service as Control1, but it is a separate object/interface and does not widen the historical non-executable Control1 method surface.

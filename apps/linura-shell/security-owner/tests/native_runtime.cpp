@@ -575,7 +575,7 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 13 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 14 && signals == 1 && annotations == 3);
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));
@@ -588,6 +588,8 @@ int main(int argc, char **argv)
                QMetaType::fromType<NativeLockObservationWire>())) == "(sbt)");
     assert(QByteArray(QDBusMetaType::typeToSignature(
                QMetaType::fromType<NativePowerPermissionWire>())) == "(sst)");
+    assert(QByteArray(QDBusMetaType::typeToSignature(
+               QMetaType::fromType<NativeDisplayObservationWire>())) == "(ssstssb)");
     NativeApprovalWire scope{QStringLiteral("session:lock:abcd1234-1234-4567-89ab-0123456789ab:"
                                             "1000:2:42:98765432-1234-4567-89ab-0123456789ab:1"),
                              QStringLiteral("unix:uid:1000"),
@@ -683,6 +685,15 @@ int main(int argc, char **argv)
     invalid = decoded;
     invalid.resource = QStringLiteral("session:lock:unsupported");
     assert(!invalid.freshAtBootMs(12345));
+
+    NativeDisplayObservationWire displayObserved{scope.resource,
+        QStringLiteral("33333333-3333-4333-8333-333333333333"), QStringLiteral("seat0"),
+        12345, QStringLiteral("{\"schema\":1}"), QStringLiteral("[]"), true};
+    const auto displayDecoded = qdbus_cast<NativeDisplayObservationWire>(
+        roundTrip(QVariant::fromValue(displayObserved)));
+    assert(displayDecoded.resource == displayObserved.resource && displayDecoded.compositor == displayObserved.compositor &&
+           displayDecoded.seat == displayObserved.seat && displayDecoded.sampledBootMs == 12345 &&
+           displayDecoded.topology == displayObserved.topology && displayDecoded.monitors == displayObserved.monitors && displayDecoded.secure);
 
     const auto suffix = scope.resource.mid(qsizetype(sizeof("session:lock:") - 1));
     for (const auto &action : {"suspend", "reboot", "power-off", "logout"}) {

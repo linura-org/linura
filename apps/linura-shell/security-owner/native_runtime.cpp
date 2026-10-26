@@ -723,6 +723,35 @@ std::optional<NativeObservedLockState> NativeRuntime::observe(const QDBusMessage
                                    impl_->backend->secureCoverage());
 }
 
+std::optional<NativeDisplaySample> NativeRuntime::observeDisplay(const QDBusMessage &received)
+{
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer || !impl_->binding || impl_->binding->seat.isEmpty())
+        return std::nullopt;
+    const auto before = impl_->backend->observeDisplayTopology();
+    if (!before)
+        return std::nullopt;
+    const auto independent = impl_->independentState();
+    const auto monitors = observeNativeHyprlandOutputs(impl_->compositorSocket, *impl_->binding);
+    if (!independent || !monitors || monitors->isEmpty() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    const auto after = impl_->backend->observeDisplayTopology();
+    const auto settled = nativeObservedLockState(*independent, impl_->protocol->inspect(),
+        impl_->backend->requestedSecure(), impl_->backend->secureCoverage());
+    if (!after || *before != *after || !settled ||
+        (*settled != NativeObservedLockState::Secure && *settled != NativeObservedLockState::Unlocked))
+        return std::nullopt;
+    const QString topology = after->encode();
+    // Round-trip UTF-8 strictly; invalid native metadata must not be normalized
+    // into different JSON bytes before the typed Rust decoder sees it.
+    const QString metadata = QString::fromUtf8(*monitors);
+    if (topology.isEmpty() || metadata.toUtf8() != *monitors)
+        return std::nullopt;
+    return NativeDisplaySample{identity().resource, impl_->backend->displayInvocation(),
+        impl_->binding->seat, topology, metadata, *settled == NativeObservedLockState::Secure};
+}
+
 bool NativeRuntime::fencePreparedTransition(const QDBusMessage &received,
                                             const NativeTransitionIdentity &target)
 {

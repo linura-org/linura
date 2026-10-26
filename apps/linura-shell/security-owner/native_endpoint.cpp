@@ -97,6 +97,22 @@ const QDBusArgument &operator>>(const QDBusArgument &wire, NativeLockObservation
     wire.endStructure();
     return wire;
 }
+QDBusArgument &operator<<(QDBusArgument &wire, const NativeDisplayObservationWire &observation)
+{
+    wire.beginStructure();
+    wire << observation.resource << observation.compositor << observation.seat << observation.sampledBootMs
+         << observation.topology << observation.monitors << observation.secure;
+    wire.endStructure();
+    return wire;
+}
+const QDBusArgument &operator>>(const QDBusArgument &wire, NativeDisplayObservationWire &observation)
+{
+    wire.beginStructure();
+    wire >> observation.resource >> observation.compositor >> observation.seat >> observation.sampledBootMs
+         >> observation.topology >> observation.monitors >> observation.secure;
+    wire.endStructure();
+    return wire;
+}
 
 NativeEndpoint::NativeEndpoint(NativeRuntime &runtime) : QObject(&runtime), runtime_(runtime)
 {
@@ -112,6 +128,7 @@ void NativeEndpoint::registerWireTypes()
     qDBusRegisterMetaType<NativeApprovalWire>();
     qDBusRegisterMetaType<NativeLockObservationWire>();
     qDBusRegisterMetaType<NativePowerPermissionWire>();
+    qDBusRegisterMetaType<NativeDisplayObservationWire>();
 }
 bool NativeEndpoint::ArmApproval(const NativeApprovalWire &wire)
 {
@@ -154,6 +171,21 @@ NativeLockObservationWire NativeEndpoint::ObserveLock()
                        QStringLiteral("Native lock evidence unavailable"));
     }
     return {}; // Invalid identity/time, never an unlocked observation.
+}
+NativeDisplayObservationWire NativeEndpoint::ObserveDisplay()
+{
+    if (calledFromDBus()) {
+        const auto sampled = bootMilliseconds();
+        const auto state = runtime_.observeDisplay(message());
+        const auto completed = bootMilliseconds();
+        if (sampled && completed && state && NativeLockObservationWire{
+                state->resource, state->secure, *sampled}.freshAtBootMs(*completed))
+            return {state->resource, state->compositor, state->seat, *sampled,
+                    state->topology, state->monitors, state->secure};
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Native display evidence unavailable"));
+    }
+    return {};
 }
 bool NativeEndpoint::DispatchPreparedLock(const QString &resource, bool secure)
 {

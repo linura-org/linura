@@ -114,14 +114,16 @@ std::optional<NativeCompositorLockState> decodeNativeHyprlandLock(QByteArrayView
     return state;
 }
 
-std::optional<NativeCompositorLockState>
-observeNativeHyprlandLock(const QString &nativeSocketPath, const NativeSessionBinding &binding,
-                          NativeCompositorProbeFailure *failure)
+namespace {
+enum class NativeReadQuery { Lock, Outputs };
+std::optional<QByteArray>
+readNativeHyprland(const QString &nativeSocketPath, const NativeSessionBinding &binding,
+                   NativeReadQuery query, NativeCompositorProbeFailure *failure)
 {
     if (failure)
         *failure = NativeCompositorProbeFailure::None;
     const auto deny =
-        [failure](NativeCompositorProbeFailure reason) -> std::optional<NativeCompositorLockState> {
+        [failure](NativeCompositorProbeFailure reason) -> std::optional<QByteArray> {
         if (failure)
             *failure = reason;
         return std::nullopt;
@@ -165,13 +167,14 @@ observeNativeHyprlandLock(const QString &nativeSocketPath, const NativeSessionBi
     }
     if (!peerMatches(descriptor, binding) || budget.elapsed() >= ProbeBudgetMs)
         return unavailable(NativeCompositorProbeFailure::Peer);
-    constexpr char command[] = "j/locked";
+    const QByteArrayView command = query == NativeReadQuery::Lock ? QByteArrayView("j/locked")
+                                                                : QByteArrayView("j/monitors all");
     std::size_t sent = 0;
-    while (sent < sizeof(command) - 1) {
+    while (sent < static_cast<std::size_t>(command.size())) {
         if (budget.elapsed() >= ProbeBudgetMs)
             return deny(NativeCompositorProbeFailure::Deadline);
         const ssize_t count =
-            send(descriptor, command + sent, sizeof(command) - 1 - sent, MSG_NOSIGNAL);
+            send(descriptor, command.data() + sent, static_cast<std::size_t>(command.size()) - sent, MSG_NOSIGNAL);
         if (count > 0)
             sent += static_cast<std::size_t>(count);
         else if (count < 0 && errno == EINTR)
@@ -183,25 +186,41 @@ observeNativeHyprlandLock(const QString &nativeSocketPath, const NativeSessionBi
             return unavailable(NativeCompositorProbeFailure::Send);
         }
     }
-    std::array<char, static_cast<std::size_t>(MaximumReplyBytes + 1)> reply{};
-    std::size_t used = 0;
-    while (used < reply.size()) {
+    const qsizetype maximum = query == NativeReadQuery::Lock ? MaximumReplyBytes : 256 * 1024;
+    QByteArray reply;
+    std::array<char, 4096> chunk{};
+    while (true) {
         if (!waitReady(descriptor, POLLIN, budget))
             return unavailable(NativeCompositorProbeFailure::Receive);
-        const ssize_t count = recv(descriptor, reply.data() + used, reply.size() - used, 0);
+        const ssize_t count = recv(descriptor, chunk.data(), chunk.size(), 0);
         if (count > 0) {
-            used += static_cast<std::size_t>(count);
+            if (count > maximum - reply.size()) return deny(NativeCompositorProbeFailure::ReplyLimit);
+            reply.append(chunk.data(), static_cast<qsizetype>(count));
         } else if (count == 0) {
             if (!peerMatches(descriptor, binding) || budget.elapsed() >= ProbeBudgetMs)
                 return unavailable(NativeCompositorProbeFailure::Peer);
-            const auto state = decodeNativeHyprlandLock(
-                QByteArrayView(reply.data(), static_cast<qsizetype>(used)));
-            return state ? state : deny(NativeCompositorProbeFailure::Reply);
+            return reply;
         } else if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
             return unavailable(NativeCompositorProbeFailure::Receive);
         }
     }
-    return deny(NativeCompositorProbeFailure::ReplyLimit); // Never a prefix success.
+}
+} // namespace
+
+std::optional<NativeCompositorLockState>
+observeNativeHyprlandLock(const QString &path, const NativeSessionBinding &binding,
+                          NativeCompositorProbeFailure *failure)
+{
+    const auto reply = readNativeHyprland(path, binding, NativeReadQuery::Lock, failure);
+    if (!reply) return std::nullopt;
+    const auto decoded = decodeNativeHyprlandLock(*reply);
+    if (!decoded && failure) *failure = NativeCompositorProbeFailure::Reply;
+    return decoded;
+}
+std::optional<QByteArray>
+observeNativeHyprlandOutputs(const QString &path, const NativeSessionBinding &binding)
+{
+    return readNativeHyprland(path, binding, NativeReadQuery::Outputs, nullptr);
 }
 
 } // namespace Linura::SecurityOwner

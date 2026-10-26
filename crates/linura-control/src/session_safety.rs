@@ -23,13 +23,22 @@ pub(crate) fn validate_native_lock(
     observation: &ObservationEnvelope,
     now_unix_ms: u64,
 ) -> Result<bool, SessionSafetyError> {
+    validate_native_lock_capability(lock, observation, LOCKER_CAPABILITY, now_unix_ms)
+}
+
+pub(crate) fn validate_native_lock_capability(
+    lock: &SessionLockId,
+    observation: &ObservationEnvelope,
+    capability: &str,
+    now_unix_ms: u64,
+) -> Result<bool, SessionSafetyError> {
     let resource = lock
         .resource_id()
         .map_err(|_| SessionSafetyError::IdentityMismatch)?;
     validate_envelope(
         observation,
         LOCKER_PROVIDER,
-        LOCKER_CAPABILITY,
+        capability,
         &resource,
         now_unix_ms,
     )?;

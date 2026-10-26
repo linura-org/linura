@@ -59,15 +59,30 @@ bounds the review. Pure postcondition review requires newer timestamps and
 sequences from every source, the retained lock generation, matching complete
 layout and a powered independent output. It neither commits nor replays effects.
 
-These component contracts are not native activation. The existing native S17
-owner does not yet emit the new `display_topology`, `observed_outputs` and
-`covered_outputs` bindings; their absence rejects display safety review rather
-than promoting S17's generic secure bit or a screen count. Native generation
-attestation and reliable hotplug invalidation, exact mode support, native coverage
-binding and independent qualification remain necessary before registering a
-display observer in production composition. No display operation is registered,
-no persistence format is installed, and no executor or public mutation endpoint
-is activated by the projection, preview or component fixtures.
+The private native owner now has a read-only `ObserveDisplay` probe. It retains
+head/mode lifetimes on the same attested Wayland connection, gives recycled head
+names new identities, and synchronizes bounded reads before and after the fixed
+peer-checked Hyprland metadata query. A changed snapshot is rejected. Exact native
+mode tuples come from the pinned output-management protocol; rounded JSON mode
+strings cannot manufacture support. Unsupported fixed-point scale precision is
+rejected. Independent `ext-session-lock` acknowledgement and per-output committed
+configure generations supply coverage facts; screen counts and diagnostic
+acquisition milestones supply no coverage authority.
+
+The Linux adapter projects these facts into the existing display envelope and a
+distinct `session.display-coverage.observe` capability. Existing S17 lock-wire
+semantics remain unchanged. Control registers the bounded observers and checks
+independent logind/coverage facts for each display candidate. The complete typed
+`LNDI:1` request binds the exact lock generation, last-good baseline and desired
+layout. Generic canonical preview and durable authority candidate derivation use
+the same display factory; there is no alternate provider-owned plan. Contributing
+native deadlines are narrowed and their exact evidence digests enter Control's
+authority binding. A changed baseline or loss of the final currently powered
+independent output rejects mutation planning.
+
+This implementation still requires real pinned-runtime qualification. No display
+operation is registered, no recovery format is installed, and no executor or
+public mutation endpoint is activated by these read-only mechanisms and fixtures.
 
 ### Native backlight
 

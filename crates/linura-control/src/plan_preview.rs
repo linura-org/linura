@@ -114,30 +114,15 @@ impl From<ObservationControlError> for PlanPreviewControlError {
 pub(super) struct NormalizedPlanInput {
     principal: AuthenticatedPrincipal,
     request: PlanDesiredStateRequest,
-    display_lock: Option<linura_core::SessionLockId>,
 }
 
 impl NormalizedPlanInput {
-    fn new(
+    pub(super) fn new(
         principal: AuthenticatedPrincipal,
         request: PlanDesiredStateRequest,
     ) -> Result<Self, PlanPreviewControlError> {
         validate_request(&request)?;
-        Ok(Self {
-            principal,
-            request,
-            display_lock: None,
-        })
-    }
-
-    pub(super) fn display(
-        principal: AuthenticatedPrincipal,
-        request: PlanDesiredStateRequest,
-        lock: linura_core::SessionLockId,
-    ) -> Result<Self, PlanPreviewControlError> {
-        let mut input = Self::new(principal, request)?;
-        input.display_lock = Some(lock);
-        Ok(input)
+        Ok(Self { principal, request })
     }
 
     fn plan_id(&self) -> Result<PlanId, PlanPreviewControlError> {
@@ -439,6 +424,9 @@ impl PlanPreviewControl {
         protective: Option<&crate::protective_lock_execution::ProtectiveLockContext>,
         observe_only_protective: bool,
     ) -> Result<(ReconciliationPlan, ObservationEnvelope), PlanPreviewControlError> {
+        if input.request.provider.as_str() == linura_observation::DISPLAY_PROVIDER {
+            return self.build_fresh_display_plan(&input.principal, actor, &input.request);
+        }
         let observation_request = ObservationRequest {
             provider: input.request.provider.clone(),
             resource: input.request.resource.clone(),
@@ -878,12 +866,6 @@ fn estimate_input_bytes(input: &NormalizedPlanInput) -> usize {
         .saturating_add(input.request.resource.as_str().len())
         .saturating_add(input.request.observation_capability.as_str().len())
         .saturating_add(semantic_reason_bytes(&input.request.reason))
-        .saturating_add(input.display_lock.as_ref().map_or(0, |lock| {
-            size_of::<linura_core::SessionLockId>()
-                .saturating_add(lock.epoch().session_id().len())
-                .saturating_add(lock.epoch().boot().as_str().len())
-                .saturating_add(lock.security_owner_invocation().as_str().len())
-        }))
         .saturating_add(
             input
                 .request

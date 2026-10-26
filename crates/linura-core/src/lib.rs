@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
+mod display_intent;
 mod display_layout;
+pub use display_intent::{DisplayLayoutIntent, DisplayLayoutMaterial, MAX_DISPLAY_INTENT_BYTES};
 pub use display_layout::{
     DisplayLayout, DisplayLayoutError, DisplayMode, DisplayOutputLayout, DisplayScale,
     DisplayTransform, NativeOutputCapabilities,

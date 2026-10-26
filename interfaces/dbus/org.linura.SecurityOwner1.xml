@@ -28,6 +28,9 @@
            bounded post-dispatch verification loop may await a known transition. -->
       <arg name="observation" type="(sbt)" direction="out"/>
     </method>
+    <method name="ObserveDisplay">
+      <arg name="observation" type="(ssstssb)" direction="out"/>
+    </method>
     <method name="ObservePowerPermission">
       <arg name="resource" type="s" direction="in"/>
       <arg name="observation" type="(sst)" direction="out"/>

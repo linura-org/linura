@@ -393,7 +393,7 @@ std::optional<NativeSessionBinding> inspectNativeSession(const QDBusConnection &
         ownerOf(QStringLiteral("org.freedesktop.systemd1")) != systemdOwner ||
         budget.elapsed() >= ProbeBudgetMs)
         return std::nullopt;
-    return NativeSessionBinding{*lock, quint32(peer->pid)};
+    return NativeSessionBinding{*lock, quint32(peer->pid), facts.seat};
 }
 
 } // namespace Linura::SecurityOwner

@@ -6,6 +6,7 @@
 #include <QKeyEvent>
 #include <QMetaMethod>
 #include <QMetaProperty>
+#include <QQuickWindow>
 
 #include <cstring>
 #include <iostream>
@@ -36,7 +37,15 @@ int main(int argc, char **argv)
 {
     QGuiApplication application(argc, argv);
     try {
-        SecretEntry entry;
+        // Visibility restoration requires an actual scene/window on Qt 6.10;
+        // a detached item may stay effectively hidden after setVisible(true).
+        // Exercise cancellation in the same scene ownership shape as the native
+        // renderer, retaining every hide/disable/focus/borrowed-response check.
+        QQuickWindow window;
+        window.resize(1, 1);
+        window.show();
+        application.processEvents();
+        SecretEntry entry(window.contentItem());
         using Linura::SecurityOwner::classifyNativePrompt;
         using Linura::SecurityOwner::nativePromptLabel;
         check(classifyNativePrompt(" Password: ") == NativePromptKind::Password);

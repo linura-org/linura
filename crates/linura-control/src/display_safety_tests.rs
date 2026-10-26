@@ -153,7 +153,7 @@ impl Fixture {
         ]));
         let locker = envelope(
             "session-locker",
-            "session.secure-lock.observe",
+            linura_observation::DISPLAY_COVERAGE_CAPABILITY,
             id(lock.resource_id()),
             lock_attributes,
         );
@@ -416,6 +416,13 @@ fn actor() -> Actor {
 fn request(f: &Fixture) -> DisplayLayoutPlanRequest {
     DisplayLayoutPlanRequest {
         request_id: id(RequestId::new("request:display:component-test")),
+        baseline: id(DisplayObservationFacts::from_envelope(
+            &f.display,
+            f.desired.topology(),
+            f.display.observed_at_unix_ms,
+        ))
+        .layout()
+        .clone(),
         layout: f.desired.clone(),
         lock: id(SessionLockId::from_resource(&f.locker.resource)),
         reason: SemanticReason {

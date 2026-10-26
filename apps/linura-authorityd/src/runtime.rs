@@ -18,7 +18,7 @@ use linura_dbus::{
 use linura_executor_systemd::{ManagedActiveState, ManagedUnitName};
 use linura_linux_observation::{LogindSessionObserver, SystemdObserver};
 use linura_linux_session::{
-    NativeLockObserver, NativePowerPermissionObserver, NativeSessionChannel,
+    NativeDisplayObserver, NativeLockObserver, NativePowerPermissionObserver, NativeSessionChannel,
     NativeSleepEntryObserver,
 };
 use linura_observation_control::ObservationCoordinator;
@@ -103,6 +103,9 @@ impl ManagedRuntime {
             .map_err(|error| error.to_string())?;
         coordinator
             .register_observer(Box::new(NativeLockObserver::new(channel.clone())?))
+            .map_err(|error| error.to_string())?;
+        coordinator
+            .register_observer(Box::new(NativeDisplayObserver::new(channel.clone())?))
             .map_err(|error| error.to_string())?;
         coordinator
             .register_observer(Box::new(NativePowerPermissionObserver::new(
