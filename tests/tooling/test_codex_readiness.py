@@ -269,6 +269,29 @@ class CodexReadinessTests(unittest.TestCase):
         self.assertTrue(aligned["qt6-development-modules"].ready)
         self.assertTrue(aligned["qt6-sdk-version-alignment"].ready)
 
+    def test_shell_requires_native_build_dependencies_without_claiming_runtime(self):
+        calls = []
+
+        def probe(argv, _env):
+            calls.append(argv)
+            if argv == ["pkg-config", "--exists", "xkbcommon >= 1.6"]:
+                return None
+            if argv[:2] == ["pkg-config", "--exists"]:
+                return ""
+            return None
+
+        with (
+            patch.object(doctor, "probe", side_effect=probe),
+            patch.object(doctor, "probe_status", return_value=False),
+            patch.object(doctor.shutil, "which", return_value=None),
+        ):
+            checks = {check.name: check for check in doctor.inventory({"shell"})}
+        self.assertTrue(checks["native-module-wayland-protocols"].ready)
+        self.assertFalse(checks["native-module-xkbcommon"].ready)
+        self.assertFalse(checks["wayland-scanner"].ready)
+        self.assertIn(["pkg-config", "--exists", "wayland-protocols >= 1.34"], calls)
+        self.assertFalse(any("install" in argv for argv in calls))
+
     def test_editor_profile_requires_sdk_runtime_imports_and_working_qmlls(
         self,
     ) -> None:

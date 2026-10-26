@@ -11,7 +11,12 @@ import tempfile
 import tomllib
 import unittest
 
-from tools.check_toolchain_env import EXPECTED_KEYS, validate, validate_bytes
+from tools.check_toolchain_env import (
+    EXPECTED_KEYS,
+    SHARED_KEYS,
+    validate,
+    validate_bytes,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT = ROOT / "tools/codex/versions.env"
@@ -144,6 +149,29 @@ class ToolchainEnvironmentTests(unittest.TestCase):
 
     def test_existing_contract_has_every_reviewed_key(self) -> None:
         self.assertEqual(set(validate(CONTRACT)), EXPECTED_KEYS)
+
+    def test_native_pins_are_mandatory_and_never_enter_shared_shell_projection(
+        self,
+    ) -> None:
+        original = CONTRACT.read_bytes()
+        for key in (
+            "NATIVE_PYTHON_RELEASE",
+            "NATIVE_PYTHON_SHA256",
+            "NATIVE_NODE_VERSION",
+            "NATIVE_NODE_SHA256",
+        ):
+            line = next(
+                line
+                for line in original.splitlines(keepends=True)
+                if line.startswith((key + "=").encode())
+            )
+            with self.subTest(key=key):
+                with self.assertRaises(ValueError):
+                    validate_bytes(original.replace(line, b""))
+                with self.assertRaises(ValueError):
+                    validate_bytes(original.replace(line, (key + "=$(id)\n").encode()))
+                self.assertNotIn(key, SHARED_KEYS)
+        self.assertEqual(len(SHARED_KEYS), 12)
 
     def test_shell_metacharacters_and_commands_are_rejected(self) -> None:
         original = CONTRACT.read_bytes()
@@ -803,7 +831,7 @@ class ToolchainEnvironmentTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout,
-            " ".join(validate(CONTRACT)[key] for key in sorted(EXPECTED_KEYS)) + "\n",
+            " ".join(validate(CONTRACT)[key] for key in sorted(SHARED_KEYS)) + "\n",
         )
         with tempfile.TemporaryDirectory() as directory:
             unsafe = Path(directory) / "versions.env"

@@ -384,6 +384,21 @@ def inventory(selected: set[str]) -> list[Check]:
     qt_sdk_version: str | None = None
     if "shell" in selected or "editor" in selected or "image" in selected:
         commands("shell", ("cmake", "ninja", "pkg-config", "c++"))
+        commands("shell", ("wayland-scanner",))
+        for module, requirement in (
+            ("wayland-client", "wayland-client"),
+            ("wayland-server", "wayland-server"),
+            ("wayland-protocols", "wayland-protocols >= 1.34"),
+            ("xkbcommon", "xkbcommon >= 1.6"),
+            ("polkit-agent-1", "polkit-agent-1"),
+        ):
+            add(
+                "shell",
+                f"native-module-{module}",
+                probe(["pkg-config", "--exists", requirement], env) is not None,
+                f"Prepare {requirement} for native security-owner component builds; "
+                "a successful probe is not runtime qualification.",
+            )
         cmake = probe(["cmake", "--version"], env)
         match = re.search(r"cmake version (\d+)\.(\d+)", cmake or "")
         add(

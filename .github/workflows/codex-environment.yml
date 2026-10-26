@@ -9,6 +9,7 @@ on:
       - "**/AGENTS.md"
       - "CONTRIBUTING.md"
       - "docs/codex-development.md"
+      - "docs/native-development.md"
       - "docs/development-infrastructure.md"
       - "scripts/*codex*.sh"
       - "scripts/lib/*.sh"
@@ -39,6 +40,7 @@ on:
       - "**/AGENTS.md"
       - "CONTRIBUTING.md"
       - "docs/codex-development.md"
+      - "docs/native-development.md"
       - "docs/development-infrastructure.md"
       - "scripts/*codex*.sh"
       - "scripts/lib/*.sh"
@@ -148,6 +150,9 @@ jobs:
             --wheel-dir "$RUNNER_TEMP/linura-python-wheel" ./bindings/python
           PYTHONPATH=bindings/python/src python3 -m unittest discover \
             -s bindings/python/tests -p 'test_*.py'
+
+      - name: Verify native preparation failure and recovery contracts
+        run: bash scripts/run_codex.sh python3 -m unittest discover -s tests/tooling -p 'test_codex_native.py'
 
       - name: Bind qualification execution envelope
         uses: ./.github/actions/qualification-envelope

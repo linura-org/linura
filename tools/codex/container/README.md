@@ -80,6 +80,13 @@ docker exec --workdir /workspace/linura linura-s17-development \
   bash scripts/run_codex.sh cmake --build /build/linura-bridge --parallel 2
 ```
 
+`shell` now also checks native security-owner build dependencies: Wayland
+client/server/protocols/scanner, xkbcommon and Polkit headers. This minimal pinned
+recipe does not supply that complete native build profile; a failed prerequisite
+check remains a blocked check. Preparing a fuller isolated image requires its own
+reviewed package set/digest and build validation. Use native preparation on a
+supported host when that is the selected development environment.
+
 `shell` readiness does not claim Qt editor/QML runtime imports. For editor
 work additionally request `--profile editor` and require all checks to pass;
 missing QML modules or a nonfunctional `qmlls` are real missing prerequisites,

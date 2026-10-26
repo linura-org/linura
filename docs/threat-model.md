@@ -28,6 +28,31 @@
 
 ## Primary threats and mitigations
 
+### Developer preparation confused with runtime authority or qualification
+
+A stale saved preparation plan, interrupted native transaction, substituted
+cached tool or diagnostic success is treated as permission to mutate a host or as
+application acceptance evidence.
+
+- Native development preparation is an explicit operator command over a reviewed
+  checkout, not a runtime/model/provider interface. Only fixed package-manager
+  entrypoints use native sudo authorization; the Python process stays unprivileged.
+- Saved developer plans bind source inputs, user/home/host and native package
+  state; short expiry and complete rederivation reject stale or tampered inputs.
+  They are not product ReconciliationPlans, authorization credentials or a security
+  boundary against the same developer changing repository code.
+- Native authenticated repositories/configuration, package-manager locks/hooks
+  and administrator maintenance remain trusted. No key import, insecure install,
+  removal, downgrade, partial Arch upgrade or protection bypass is automated.
+- Digest-verified archives precede extraction/execution; private generation
+  manifests precede cached executable probes. Unmanaged paths are not overwritten.
+- Interrupted package phases retain original ownership and transaction receipts;
+  changed state requires operator review before acceptance of a new observation.
+  Shared dependencies are retained and no rollback/database repair is improvised.
+- Doctor/preflight never install. Receipts explicitly deny qualification authority;
+  native package transactions and application A/B/C evidence require their own
+  actual execution. See [ADR 0044](adr/0044-explicit-native-development-preparation.md).
+
 ### Native session identity laundering, stale lock generation or forged sleep source
 A caller or process substitutes a syntactically valid native session, lock, owner invocation, power transition, permission observation or sleep identifier to affect another login, release a later lock or replay a previous power request.
 - Canonical IDs in `linura-core` are untrusted correlation material, even when parsing succeeds; a caller may construct them without possessing an OS credential.

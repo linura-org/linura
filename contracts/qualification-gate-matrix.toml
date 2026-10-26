@@ -93,6 +93,7 @@ paths = [
   "**/AGENTS.md",
   "CONTRIBUTING.md",
   "docs/codex-development.md",
+  "docs/native-development.md",
   "docs/development-infrastructure.md",
   "scripts/*codex*.sh",
   "scripts/lib/*.sh",
