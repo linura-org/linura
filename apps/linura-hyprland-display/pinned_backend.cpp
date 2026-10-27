@@ -2,6 +2,7 @@
 #include "native_scale.h"
 #include "rule_overlay.h"
 #include "wire_endpoint.h"
+#include "native_power_inhibitor.h"
 #include "linura-display-integration-build.h"
 
 #include "src/Compositor.hpp"
@@ -66,6 +67,7 @@ class PinnedBackend final : public Backend
     {
         OutputKey key;
         PHLMONITORREF monitor;
+        WP<Aquamarine::IOutput> output;
         std::vector<Mode> modes;
     };
     std::uint64_t generation = 1, securityEpoch = 1, nextHandle = 1;
@@ -73,6 +75,16 @@ class PinnedBackend final : public Backend
     std::map<Monitor::CMonitor *, Target> overlay;
     const std::string instance = instanceId();
     bool writing = false, commitFailed = false, supported = true;
+    NativePowerInhibitor powerInhibitor;
+
+    [[nodiscard]] bool inhibitPowerTransitions() override
+    {
+        return powerInhibitor.acquire();
+    }
+    void releasePowerInhibitor() noexcept override
+    {
+        powerInhibitor.release();
+    }
 
     [[nodiscard]] std::optional<ClockSample> clock() override
     {
@@ -195,7 +207,11 @@ class PinnedBackend final : public Backend
     {
         const auto found = std::find_if(bindings.begin(), bindings.end(),
                                         [&](const Binding &binding) { return binding.key == key; });
-        return found == bindings.end() ? nullptr : found->monitor.lock();
+        if (found == bindings.end())
+            return nullptr;
+        const auto monitor = found->monitor.lock();
+        return monitor && monitor->m_output && found->output.lock() == monitor->m_output ? monitor
+                                                                                         : nullptr;
     }
     [[nodiscard]] bool refreshBindings()
     {
@@ -253,12 +269,14 @@ class PinnedBackend final : public Backend
             }
             const auto retained =
                 std::find_if(bindings.begin(), bindings.end(), [&](const Binding &binding) {
-                    return binding.monitor.lock() == monitor;
+                    return binding.monitor.lock() == monitor &&
+                           binding.output.lock() == monitor->m_output;
                 });
             if (retained == bindings.end()) {
                 if (nextHandle == std::numeric_limits<std::uint64_t>::max())
                     return supported = false;
-                next.push_back({OutputKey{nextHandle++, 1}, monitor, std::move(modes)});
+                next.push_back(
+                    {OutputKey{nextHandle++, 1}, monitor, monitor->m_output, std::move(modes)});
                 changed = true;
             } else {
                 auto key = retained->key;
@@ -268,7 +286,7 @@ class PinnedBackend final : public Backend
                     ++key.generation;
                     changed = true;
                 }
-                next.push_back({key, monitor, std::move(modes)});
+                next.push_back({key, monitor, monitor->m_output, std::move(modes)});
             }
         }
         if (changed) {

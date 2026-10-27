@@ -1034,7 +1034,11 @@ def corroborate_locked_output_inventory(guest: Guest, resource: str) -> dict[str
 
 
 def exercise_locked_headless_hotplug(
-    guest: Guest, resource: str, suffix: str, baseline: dict[str, int]
+    guest: Guest,
+    resource: str,
+    suffix: str,
+    baseline: dict[str, int],
+    after_hotplug: Callable[[], None] | None = None,
 ) -> dict[str, dict[str, int]]:
     """Native VM topology exercise; not independent lock-coverage proof."""
     lock_resource(resource)
@@ -1065,6 +1069,8 @@ def exercise_locked_headless_hotplug(
             time.sleep(0.1)
         if during is None:
             raise RuntimeError("native headless output did not become usable")
+        if after_hotplug is not None:
+            after_hotplug()
         # First-party metadata must still be present. It is not secure coverage.
         validate_assistive_report(
             guest.run(ASSISTIVE_COMMAND + "locked"), resource, "locked"
@@ -1295,6 +1301,45 @@ def qualify(
         guest.run(
             FIXTURE_COMMAND + "set-response", payload=(response + "\n").encode("ascii")
         )
+
+        def qualify_protected_input_hotplug() -> None:
+            def hotplug_during_unlock_prompt() -> None:
+                validate_assistive_report(
+                    guest.run(ASSISTIVE_COMMAND + "unlock-prompt"),
+                    resource,
+                    "unlock-prompt",
+                )
+                # No response is entered into a cancelled/reconfigured prompt. The
+                # same real PAM request must fail, and a later fresh request must
+                # independently authenticate against the same retained lock below.
+                output_context.update(
+                    {
+                        "authentication-" + key: value
+                        for key, value in exercise_locked_headless_hotplug(
+                            guest,
+                            resource,
+                            suffix,
+                            output_context["after-recovery"],
+                            lambda: time.sleep(NATIVE_DENIAL_SETTLE_SECONDS),
+                        ).items()
+                    }
+                )
+
+            guest.run(
+                prefix
+                + f"unlock-session s17-native-hotplug-{suffix} S21-native-input-hotplug",
+                hotplug_during_unlock_prompt,
+                expect_failure=True,
+            )
+            if fields(guest.run(prefix + "own-session-lock")) != {"resource": resource}:
+                raise RuntimeError(
+                    "native hotplug changed or released the original lock generation"
+                )
+            require_locked_presentation()
+            checks[
+                "output-hotplug-cancels-protected-authentication-without-release"
+            ] = True
+
         for operation, decision, consent in (
             (enabled, "enable", True),
             (revoked, "revoke", False),
@@ -1308,6 +1353,8 @@ def qualify(
             )
             require_locked_presentation()
             checks["native-owner-pam-" + decision + "-consent"] = True
+            if consent:
+                qualify_protected_input_hotplug()
         receipt = guest.run(
             prefix
             + "protective-lock-setting-status request:v010:protective-lock-setting:"
@@ -1339,6 +1386,7 @@ def qualify(
         checks["native-cancellation-does-not-complete-unlock"] = True
         time.sleep(NATIVE_DENIAL_SETTLE_SECONDS)
         require_locked_presentation()
+
         # One deliberately incorrect response, not repeated password guessing.
         # Even if PAM refuses it by timeout, it must never complete release.
         # The correct-response completion below must retain this same generation.

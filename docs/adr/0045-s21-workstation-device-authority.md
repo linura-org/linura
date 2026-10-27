@@ -131,6 +131,26 @@ not qualify the integration. Actual private-header compilation, whole-compositor
 linking, live build/protocol identity, native mutation/restoration and S17 coverage
 must pass before activation or merge.
 
+The compositor mechanism owns a native logind block inhibitor for both sleep and
+shutdown before its first layout write. It verifies the canonical system bus,
+root logind owner and both preparation facts under one 250 ms probe budget,
+retains the CLOEXEC descriptor independently of clients, and rechecks the entire
+captured snapshot and original clocks after acquisition. Native confirmation or
+independently observed restoration can retire the inhibitor; an acknowledgement,
+failed compensation or client loss cannot. This coordinates the pending mechanism
+with native power without adding another power authority or force path. Compositor
+death still requires durable Control reconciliation and cannot count as restored.
+
+The native owner separately binds protected interactions to output configuration
+and keyboard generations. Every active output needs a configured, committed and
+flushed lock frame before input becomes eligible. Hotplug/resize cancels pending
+text/compose/click state, and focus/keymap/capability replacement invalidates a
+completed unconsumed proof. The existing Level A native authentication runner
+exercises output hotplug during a real pending PAM unlock, requires denial and
+the same retained lock generation, then requires successful fresh authentication.
+The runner preserves distro lockout behavior and never enters a response into the
+cancelled prompt. Implementing that case is not evidence that it has run.
+
 Development readiness reuses `core`/`shell`/`editor`; `shell` already covers the
 security-owner prerequisites, with full native CMake/CTest required separately.
 The standalone `hyprland-build` inventory checks the source-pinned Arch SDK and

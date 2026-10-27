@@ -55,6 +55,7 @@ REQUIRED = {
     "pixman",
     "libdrm",
     "tomlplusplus",
+    "systemd-libs",
 }
 
 
@@ -174,7 +175,7 @@ def dependency_script(data: dict) -> str:
     lines.extend(
         [
             "test -f /usr/include/GLES3/gl3.h",
-            "pkg-config --exists glesv2 egl wayland-server aquamarine hyprutils hyprgraphics hyprlang hyprcursor hyprwire libeis-1.0",
+            "pkg-config --exists glesv2 egl wayland-server aquamarine hyprutils hyprgraphics hyprlang hyprcursor hyprwire libeis-1.0 libsystemd",
             "mkdir probe",
             "cat > probe/CMakeLists.txt <<'CMAKE'",
             "cmake_minimum_required(VERSION 3.30)",

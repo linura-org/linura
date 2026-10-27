@@ -136,6 +136,7 @@ class NativeWaylandLock::Impl final
         bool pending = false;
         bool acquisitionFrameQueued = false; // Diagnostic milestone only.
         quint64 configureGeneration = 0, committedConfigureGeneration = 0;
+        quint64 flushedConfigureGeneration = 0;
         std::vector<std::unique_ptr<Buffer>> buffers;
         ~Output()
         {
@@ -167,6 +168,7 @@ class NativeWaylandLock::Impl final
             configured = needsAck = pending = false;
             acquisitionFrameQueued = false;
             configureGeneration = committedConfigureGeneration = 0;
+            flushedConfigureGeneration = 0;
         }
     };
 
@@ -205,6 +207,27 @@ class NativeWaylandLock::Impl final
     bool acquisitionFrameQueued = false;
     bool acquisitionFrameFlushed = false;
     bool acquisitionAllSurfacesFlushed = false;
+    quint64 inputGeneration = 1;
+
+    void invalidateOutputConfiguration()
+    {
+        if (inputGeneration == std::numeric_limits<quint64>::max())
+            failClosed();
+        ++inputGeneration;
+        if (keyboard)
+            keyboard->invalidateOutputConfiguration();
+    }
+    bool inputCovered() const
+    {
+        return lock && owner.requestedSecure() && owner.secureCoverage() && !outputs.empty() &&
+               std::all_of(outputs.begin(), outputs.end(), [](const auto &item) {
+                   const auto &output = *item.second;
+                   return output.lockSurface && output.configured && !output.needsAck &&
+                          !output.pending && output.configureGeneration != 0 &&
+                          output.committedConfigureGeneration == output.configureGeneration &&
+                          output.flushedConfigureGeneration == output.configureGeneration;
+               });
+    }
 
     Impl(NativeWaylandLock &instance, wl_display *connection, Painter paint)
         : owner(instance), display(connection), painter(std::move(paint))
@@ -257,6 +280,13 @@ class NativeWaylandLock::Impl final
         } else {
             if (writer)
                 writer->setEnabled(false);
+            for (auto &[id, output] : outputs) {
+                (void)id;
+                if (output->lockSurface && !output->pending && !output->needsAck)
+                    output->flushedConfigureGeneration = output->committedConfigureGeneration;
+            }
+            if (keyboard)
+                keyboard->refreshProtectedFocus();
             if (acquisitionFrameQueued && !acquisitionFrameFlushed) {
                 acquisitionFrameFlushed = true;
                 reportLockProgress(LockProgress::FrameFlushed);
@@ -344,6 +374,7 @@ class NativeWaylandLock::Impl final
                 if (version < 3 || self.outputs.size() >= MaximumOutputs ||
                     self.outputs.contains(name))
                     failClosed();
+                self.invalidateOutputConfiguration();
                 auto output = std::make_unique<Output>();
                 output->owner = &self;
                 output->id = name;
@@ -414,6 +445,8 @@ class NativeWaylandLock::Impl final
                 failClosed();
             if (name == self.desktopGlobal)
                 failClosed();
+            if (self.outputs.contains(name))
+                self.invalidateOutputConfiguration();
             self.outputs.erase(
                 name); // Surface destruction leaves compositor blank, never unlocked.
         });
@@ -466,6 +499,7 @@ class NativeWaylandLock::Impl final
             if (output.configureGeneration == std::numeric_limits<quint64>::max())
                 failClosed();
             ++output.configureGeneration;
+            output.owner->invalidateOutputConfiguration();
             output.serial = serial;
             output.configured = true;
             output.needsAck = true;
@@ -744,8 +778,7 @@ bool NativeWaylandLock::bindProtectedInput(SecretEntry &entry, UnlockRequest req
                     return output->surface == surface && output->lockSurface && output->configured;
                 });
         },
-        [this] { return impl_->lock && requestedSecure() && secureCoverage(); }, std::move(request),
-        std::move(primaryAvailable),
+        [this] { return impl_->inputCovered(); }, std::move(request), std::move(primaryAvailable),
         hitTest ? NativeKeyboard::PointerHitTest([this, hitTest](wl_surface *surface,
                                                                  const QPointF &position) {
             const Impl::Output *output = nullptr;
@@ -798,6 +831,14 @@ bool NativeWaylandLock::protectedInputFocused() const
     if (thread() != QThread::currentThread())
         failClosed();
     return impl_->initialized && impl_->keyboard && impl_->keyboard->focused();
+}
+quint64 NativeWaylandLock::protectedInputGeneration() const noexcept
+{
+    return impl_->inputGeneration;
+}
+quint64 NativeWaylandLock::protectedInteractionGeneration() const noexcept
+{
+    return impl_->keyboard ? impl_->keyboard->interactionGeneration() : 0;
 }
 bool NativeWaylandLock::lockConfirmationVisible() const noexcept
 {

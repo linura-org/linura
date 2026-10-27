@@ -760,6 +760,21 @@ for the current implementation status.
   Acknowledgements cannot establish restoration. Compositor loss, stale native
   lifetimes, coverage gaps and failed compensation remain indeterminate until
   independently reconciled; they cannot silently replay or renew authority.
+- The compositor acquires the fixed native logind sleep/shutdown block inhibitor
+  before any display write, independently checks the root service and current
+  preparation state, and revalidates captured output facts and deadlines after
+  acquisition. Denial, service loss or a preparing transition refuses admission.
+  Its descriptor outlives clients and remains held through ambiguous/failed
+  restoration. Only native full-layout verification retires it; this does not
+  establish recovery after compositor termination or bypass S17's power policy.
+- Protected input requires committed and flushed frames for every current lock
+  surface, not merely the global lock acknowledgement. Output add/remove/resize
+  cancels the old prompt and invalidates unconsumed proofs. A completed proof is
+  also bound to the native keyboard focus/keymap/capability generation. Held keys,
+  compose state and clicks cannot migrate a response into a reconfigured prompt.
+  Wire fixtures are not native authentication/hotplug qualification; the existing
+  Level A runner must additionally execute its new real pending-PAM/hotplug denial
+  and independently authenticate the same retained lock again afterwards.
 - Compile against the exact reviewed Hyprland source/API and preserve unrelated
   monitor-rule fields. Reject mismatched integration identities, missing
   GLES3/EGL/SDK dependencies, unsupported environments and unverified native

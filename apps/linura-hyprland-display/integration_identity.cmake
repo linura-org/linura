@@ -7,6 +7,7 @@ function(linura_display_integration_identity source_dir output_dir)
         display_transaction.cpp display_transaction.h
         integration_identity.cmake
         pinned_backend.cpp pinned_integration.h rule_overlay.h native_scale.h
+        native_power_inhibitor.cpp native_power_inhibitor.h
         wire_endpoint.cpp wire_endpoint.h
         protocols/linura-display-management-v1.xml
     )

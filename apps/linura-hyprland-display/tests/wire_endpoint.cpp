@@ -18,6 +18,17 @@ namespace {
 class NativeFixture final : public Backend
 {
   public:
+    bool inhibited = false;
+    [[nodiscard]] bool inhibitPowerTransitions() override
+    {
+        assert(!inhibited);
+        return inhibited = true;
+    }
+    void releasePowerInhibitor() noexcept override
+    {
+        assert(inhibited);
+        inhibited = false;
+    }
     std::mutex mutex;
     const Mode full{1920, 1080, 60'000}, small{1280, 720, 60'000};
     Snapshot facts{1,

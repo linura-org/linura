@@ -41,6 +41,10 @@ class NativeWaylandLock final : public NativeManagedLockBackend
                                           PointerHitTest hitTest = {});
     [[nodiscard]] bool protectedInputAvailable() const noexcept;
     [[nodiscard]] bool protectedInputFocused() const;
+    // Local native lifetime, never approval. Every output add/remove/configure
+    // invalidates proofs captured against an earlier generation.
+    [[nodiscard]] quint64 protectedInputGeneration() const noexcept;
+    [[nodiscard]] quint64 protectedInteractionGeneration() const noexcept;
     // Bounded observation of already available native events; no effect dispatch.
     void refreshNativeState();
     // Progress already queued native replies between bounded metadata reads.

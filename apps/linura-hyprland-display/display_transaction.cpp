@@ -132,13 +132,23 @@ DisplayTransaction::start(Backend &backend, const Correlation &correlation, cons
         attempt->phase_ = Phase::RecoveryFailed;
         return {};
     }
+    bool inhibited = false;
     try {
+        inhibited = backend.inhibitPowerTransitions();
+        // Inhibition is a bounded native call, so every captured precondition
+        // and both original clocks must be checked again before the first write.
+        const auto fresh = inhibited ? backend.snapshot() : std::nullopt;
         const auto completed = backend.clock();
-        if (!completed || attempt->expired(*completed)) {
+        if (!inhibited || !fresh || *fresh != captured || !completed ||
+            attempt->expired(*completed)) {
+            if (inhibited)
+                backend.releasePowerInhibitor();
             attempt->phase_ = Phase::RecoveryFailed;
             return {};
         }
     } catch (...) {
+        if (inhibited)
+            backend.releasePowerInhibitor();
         attempt->phase_ = Phase::RecoveryFailed;
         return {};
     }
@@ -196,6 +206,7 @@ bool DisplayTransaction::confirm(const Correlation &correlation, ClockSample now
         if (!completed || expired(*completed))
             return false;
         phase_ = Phase::Confirmed;
+        backend_.releasePowerInhibitor();
         return true;
     } catch (...) {
         return false;
@@ -228,8 +239,10 @@ void DisplayTransaction::verifyRestoration()
         return;
     try {
         const auto sample = backend_.snapshot();
-        if (sample && scopeMatches(*sample) && matches(baseline_, *sample))
+        if (sample && scopeMatches(*sample) && matches(baseline_, *sample)) {
             phase_ = Phase::Restored;
+            backend_.releasePowerInhibitor();
+        }
     } catch (...) {
         // A failed observation cannot become restoration, nor grant a retry.
     }

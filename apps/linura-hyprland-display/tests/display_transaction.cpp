@@ -34,6 +34,23 @@ class Fixture final : public Backend
     bool available = true, acknowledge = true, throwWrite = false, performWrite = true;
     ClockSample now = Start;
     bool expireAfterWrite = false;
+    bool permitInhibitor = true, inhibited = false, changeDuringInhibition = false;
+    unsigned inhibitorReleases = 0;
+    [[nodiscard]] bool inhibitPowerTransitions() override
+    {
+        if (!permitInhibitor || inhibited)
+            return false;
+        inhibited = true;
+        if (changeDuringInhibition)
+            ++facts.generation;
+        return true;
+    }
+    void releasePowerInhibitor() noexcept override
+    {
+        assert(inhibited);
+        inhibited = false;
+        ++inhibitorReleases;
+    }
     [[nodiscard]] std::optional<ClockSample> clock() override
     {
         return now;
@@ -45,6 +62,7 @@ class Fixture final : public Backend
     [[nodiscard]] bool applyOwnedLayout(const Layout &layout, const Snapshot &expected) override
     {
         assert(expected.generation == facts.generation);
+        assert(inhibited); // Includes compensation, never just the initial apply.
         ++writes;
         if (expireAfterWrite)
             now.bootMs = 65'000;
@@ -346,6 +364,53 @@ void preserveUnmanagedRuleFields()
     assert(disabled.m_disabled && disabled.m_resolution == original.m_resolution &&
            disabled.m_scale == original.m_scale && disabled.m_iccFile == original.m_iccFile);
 }
+void powerCoordinationBeforeWriteAndThroughRecovery()
+{
+    {
+        Fixture native;
+        native.permitInhibitor = false;
+        assert(!DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
+                                          native.facts, Start));
+        assert(native.writes == 0 && !native.inhibited && native.inhibitorReleases == 0);
+    }
+    {
+        Fixture native;
+        native.changeDuringInhibition = true;
+        const auto captured = native.facts;
+        assert(!DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
+                                          captured, Start));
+        assert(native.writes == 0 && !native.inhibited && native.inhibitorReleases == 1);
+    }
+    {
+        Fixture native;
+        const auto baseline = native.baseline(), desired = native.desired();
+        auto attempt =
+            DisplayTransaction::start(native, Bound, baseline, desired, native.facts, Start);
+        assert(attempt && native.inhibited && native.inhibitorReleases == 0);
+        attempt->restore();
+        assert(native.writes == 2 && native.inhibited && attempt->fenced());
+        // A transport acknowledgement does not retire the native inhibitor.
+        native.available = false;
+        attempt->tick(Start);
+        assert(native.inhibited && attempt->fenced());
+        native.available = true;
+        attempt->tick(Start);
+        assert(!native.inhibited && native.inhibitorReleases == 1 && !attempt->fenced());
+        attempt->tick(Start);
+        assert(native.inhibitorReleases == 1);
+    }
+    {
+        Fixture native;
+        auto attempt = DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
+                                                 native.facts, Start);
+        assert(attempt && native.inhibited);
+        native.available = false;
+        attempt->restore();
+        assert(attempt->phase() == DisplayTransaction::Phase::RecoveryFailed && native.inhibited);
+        attempt.reset();
+        assert(native.inhibited && native.inhibitorReleases == 0 && native.writes == 1);
+    }
+}
 } // namespace
 
 int main()
@@ -358,4 +423,5 @@ int main()
     staleCapturedInventoryNeverDispatches();
     exactNativeScaleRoundTrip();
     preserveUnmanagedRuleFields();
+    powerCoordinationBeforeWriteAndThroughRecovery();
 }

@@ -59,6 +59,9 @@ enum class Case {
     InputFocusLoss,
     InputMapChange,
     InputCapabilityLoss,
+    InputHotplug,
+    InputOutputRemoval,
+    InputReconfigure,
     HeldSubmission,
     InvalidKeymap,
     InvalidKeycode,
@@ -584,7 +587,18 @@ struct WireServer final
                 sendMap();
             else if (scenario == Case::InputCapabilityLoss)
                 wl_seat_send_capabilities(seat, 0);
-            else {
+            else if (scenario == Case::InputHotplug)
+                assert(wl_global_create(display, &wl_output_interface, 3, this, bindOutput));
+            else if (scenario == Case::InputOutputRemoval) {
+                wl_global_destroy(initialOutput);
+                initialOutput = nullptr;
+            } else if (scenario == Case::InputReconfigure) {
+                auto &role = *roles.begin()->second;
+                role.serial++;
+                role.width = 64;
+                role.height = 48;
+                ext_session_lock_surface_v1_send_configure(role.native, role.serial, 64, 48);
+            } else {
                 if (scenario == Case::HeldSubmission)
                     sendKey(28, WL_KEYBOARD_KEY_STATE_RELEASED);
                 stroke(28);
@@ -1192,15 +1206,23 @@ void client(Case scenario, int descriptor, int commands)
                 assert(submissions == 0 && entry->acceptsInput() && entry->maskedLength() == 0);
             } else
                 waitUntil([&] { return entry->maskedLength() == 2; });
+            const auto inputGeneration = backend.protectedInputGeneration();
             value = 2;
             assert(write(commands, &value, 1) == 1);
-            const bool cancellation = scenario == Case::InputFocusLoss ||
-                                      scenario == Case::InputMapChange ||
-                                      scenario == Case::InputCapabilityLoss;
+            const bool cancellation =
+                scenario == Case::InputFocusLoss || scenario == Case::InputMapChange ||
+                scenario == Case::InputCapabilityLoss || scenario == Case::InputHotplug ||
+                scenario == Case::InputOutputRemoval || scenario == Case::InputReconfigure;
             waitUntil([&] { return cancellation ? cancelled : submissions == 1; });
             assert(!entry->acceptsInput() && entry->maskedLength() == 0 && filter.keys == 0);
-            if (cancellation)
-                assert(submissions == 0 && !backend.protectedInputFocused());
+            if (cancellation) {
+                assert(submissions == 0);
+                if (scenario == Case::InputHotplug || scenario == Case::InputOutputRemoval ||
+                    scenario == Case::InputReconfigure)
+                    assert(backend.protectedInputGeneration() > inputGeneration);
+                else
+                    assert(!backend.protectedInputFocused());
+            }
             application->removeEventFilter(&filter);
             entry->removeEventFilter(&filter);
         }
@@ -1332,6 +1354,9 @@ int main(int argc, char **argv)
     run(Case::InputFocusLoss, 0, 1, 1);
     run(Case::InputMapChange, 0, 1, 1);
     run(Case::InputCapabilityLoss, 0, 1, 1);
+    run(Case::InputHotplug, 0, 1, 1);
+    run(Case::InputOutputRemoval, 0, 1, 1);
+    run(Case::InputReconfigure, 0, 1, 1);
     run(Case::HeldSubmission, 0, 1, 1);
     run(Case::InvalidKeymap, NativeLockProtocol::NativeLockFaultExit, 1, 0);
     run(Case::InvalidKeycode, NativeLockProtocol::NativeLockFaultExit, 1, 0);

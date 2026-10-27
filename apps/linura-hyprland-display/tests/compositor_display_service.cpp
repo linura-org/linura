@@ -15,6 +15,17 @@ class NativeFixture final : public Backend
     const Mode full{1920, 1080, 60'000}, small{1280, 720, 60'000};
     Target current{OutputKey{0, 1}, true, full, 1000, 0, 0, 0, {}};
     int writes = 0;
+    bool inhibited = false;
+    [[nodiscard]] bool inhibitPowerTransitions() override
+    {
+        assert(!inhibited);
+        return inhibited = true;
+    }
+    void releasePowerInhibitor() noexcept override
+    {
+        assert(inhibited);
+        inhibited = false;
+    }
     [[nodiscard]] std::optional<ClockSample> clock() override
     {
         return compositorClock();
@@ -27,6 +38,7 @@ class NativeFixture final : public Backend
     [[nodiscard]] bool applyOwnedLayout(const Layout &targets, const Snapshot &) override
     {
         ++writes;
+        assert(inhibited);
         current = targets[0];
         return true;
     }

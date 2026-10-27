@@ -79,6 +79,11 @@ class Backend
     // expensive native work prevents a pre-probe timestamp extending authority.
     [[nodiscard]] virtual std::optional<ClockSample> clock() = 0;
     [[nodiscard]] virtual bool applyOwnedLayout(const Layout &, const Snapshot &) = 0;
+    // The compositor retains the actual native sleep/shutdown inhibitor, not
+    // its client. Denial, an already preparing transition or unknown service
+    // state must refuse BEFORE a display write. A failed recovery keeps it.
+    [[nodiscard]] virtual bool inhibitPowerTransitions() = 0;
+    virtual void releasePowerInhibitor() noexcept = 0;
 };
 
 // A single bounded native mechanism attempt. Rust owns admission, authorization,

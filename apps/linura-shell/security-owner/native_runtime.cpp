@@ -58,6 +58,8 @@ class NativeRuntime::Impl final
     std::unique_ptr<AuthenticationAgent> authentication;
     std::optional<NativePeerIdentity> approvalPeer;
     std::optional<NativeApprovalScope> approvalScope;
+    quint64 approvalInputGeneration = 0;
+    quint64 approvalProofGeneration = 0;
     NativeTransitionFence transitionFence;
     NativeSleepFence sleepFence;
     bool sleepNotVerified = false;
@@ -136,6 +138,8 @@ class NativeRuntime::Impl final
         // Clear before invoking callbacks, which can emit presentation signals.
         approvalScope.reset();
         approvalPeer.reset();
+        approvalInputGeneration = 0;
+        approvalProofGeneration = 0;
         if (backend)
             backend->cancelLockConfirmation();
         if (authentication)
@@ -305,8 +309,13 @@ bool NativeRuntime::initialize(NativeStartup startup)
             &NativeWaylandLock::repaint, Qt::QueuedConnection);
     connect(impl_->authentication.get(), &AuthenticationAgent::presentationChanged, this,
             [this] { impl_->refreshPresentation(); });
-    connect(impl_->authentication.get(), &AuthenticationAgent::confirmationAvailable, this,
-            &NativeRuntime::approvalInteractionCompleted);
+    connect(impl_->authentication.get(), &AuthenticationAgent::confirmationAvailable, this, [this] {
+        // Capture the actual input lifetime when the native proof is
+        // produced, after the first dialog/lock focus. Later enter,
+        // leave, keymap or capability changes cannot migrate that proof.
+        impl_->approvalProofGeneration = impl_->backend->protectedInteractionGeneration();
+        Q_EMIT approvalInteractionCompleted();
+    });
     connect(impl_->authentication.get(), &AuthenticationAgent::scopeRetired, this,
             [this](const NativeApprovalScope &retired) {
                 if (!impl_->approvalScope || *impl_->approvalScope != retired)
@@ -619,6 +628,8 @@ bool NativeRuntime::armApproval(const QDBusMessage &received, const NativeApprov
         return false;
     impl_->approvalScope = scope;
     impl_->approvalPeer = *peer;
+    impl_->approvalInputGeneration = impl_->backend->protectedInputGeneration();
+    impl_->approvalProofGeneration = 0;
     impl_->inCall = true;
     const bool armed = impl_->authentication->arm(scope, secure, *peer);
     impl_->inCall = false;
@@ -660,6 +671,18 @@ bool NativeRuntime::consumeApproval(const QDBusMessage &received, const NativeAp
     const auto expected = scope.purpose == ApprovalPurpose::ConfirmLock
                               ? NativeCompositorLockState::Unlocked
                               : NativeCompositorLockState::Locked;
+    if (impl_->approvalInputGeneration != impl_->backend->protectedInputGeneration()) {
+        impl_->clearApproval();
+        return false;
+    }
+    if (impl_->approvalProofGeneration == 0)
+        return false; // Polling an in-progress interaction does not cancel it.
+    if (impl_->approvalProofGeneration != impl_->backend->protectedInteractionGeneration() ||
+        (scope.purpose != ApprovalPurpose::ConfirmLock &&
+         !impl_->backend->protectedInputFocused())) {
+        impl_->clearApproval();
+        return false;
+    }
     if (state != expected || !impl_->authentication->consume(scope))
         return false;
     if (scope.transition)

@@ -55,6 +55,7 @@ runtime_packages = [
   "libcap",
   "libxkbcommon",
   "libx11",
+  "systemd-libs",
   "fontconfig",
   "ttf-dejavu",
 ]
@@ -64,6 +65,11 @@ runtime_packages = [
 [repository_sha256]
 core = "7e00dedcbdafa67db01ea65b5657855f81271da0ed496d21d752b8f9037e036f"
 extra = "7d10af6511ba617512213e64434b8f55290893b9b77c959f21a1fcb5ef3c78cd"
+
+[[package]]
+name = "systemd-libs"
+version = "261.3-1"
+sha256 = "e817f4be82f7b2dfe924426b3e70291ea34f8fdec27bf6641e863f45eb784c36"
 
 # Pinned Hyprland requires Glaze 7. Snapshot Glaze 8 is incompatible.
 [archived_package]
