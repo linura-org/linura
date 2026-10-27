@@ -81,6 +81,19 @@ def assistive(phase):
     }
 
 
+def display_admission():
+    return {
+        "schema_version": 1,
+        "claim": "native-display-owner-admission-predicate-cases-only",
+        "native_owner_pid": 123,
+        "native_owner_uid": 1000,
+        "native_owner_invocation": LOCK.split(":")[6].replace("-", ""),
+        "checks": dict.fromkeys(sorted(runner.DISPLAY_ADMISSION_CHECKS), True),
+        "s21_2_complete": False,
+        "release_support_promotion": False,
+    }
+
+
 class FakeGuest:
     def __init__(self, fail_at=None):
         self.commands = []
@@ -112,6 +125,8 @@ class FakeGuest:
             return wire({"resource": LOCK})
         if command.startswith(runner.ASSISTIVE_COMMAND):
             return json.dumps(assistive(args[-1])).encode("ascii")
+        if command == runner.DISPLAY_ADMISSION_COMMAND:
+            return json.dumps(display_admission()).encode("ascii")
         if command.endswith("/usr/bin/hyprctl -i 0 -j monitors all"):
             monitors = [
                 {
@@ -1055,6 +1070,12 @@ class NativeAuthenticationRunnerTests(unittest.TestCase):
             },
         )
         self.assertEqual(set(report["assistive_probes"]), {"locked", "unlock-prompt"})
+        self.assertEqual(report["native_display_admission"], display_admission())
+        self.assertTrue(
+            report["checks"][
+                "native-display-owner-supervision-admitted-and-same-uid-denied"
+            ]
+        )
         self.assertEqual(
             report["compositor_output_context"]["during-hotplug"]["count"], 2
         )

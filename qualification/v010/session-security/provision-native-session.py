@@ -174,6 +174,7 @@ def provision() -> None:
                 "Ninja",
                 "-DCMAKE_BUILD_TYPE=Release",
                 "-DBUILD_TESTING=ON",
+                "-DLINURA_DISPLAY_OWNER_ADMISSION_PROBE=ON",
             ],
             check=True,
             timeout=60,
@@ -192,6 +193,11 @@ def provision() -> None:
         probe_destination.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         shutil.copyfile(probe_build / "linura-s17-assistive-probe", probe_destination)
         probe_destination.chmod(0o755)
+        admission_destination = (
+            probe_destination.parent / "linura-s21-owner-admission-probe"
+        )
+        shutil.copyfile(probe_build / admission_destination.name, admission_destination)
+        admission_destination.chmod(0o755)
     finally:
         shutil.rmtree(build_root)
     # Deliberate guest package-install boundary, AFTER final root ownership.

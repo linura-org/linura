@@ -875,11 +875,26 @@ jobs:
             -o ConnectTimeout=3 linura@127.0.0.1 \
             'sha256sum /usr/lib/linura/qualification/linura-s17-assistive-probe' \
             > "$ARTIFACT_DIR/s17-native-assistive-binary.sha256"
+          ssh -F /dev/null -i "$SSH_KEY" -p 2223 \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=3 linura@127.0.0.1 \
+            'sha256sum /usr/lib/linura/qualification/linura-s21-owner-admission-probe' \
+            > "$ARTIFACT_DIR/s21-native-owner-admission-binary.sha256"
           sha256sum \
             "$ARTIFACT_DIR/s17-native-authentication.json" \
             "$ARTIFACT_DIR/s17-native-bootstrap.json" \
             "$ARTIFACT_DIR/s17-source-binaries.sha256" \
             "$ARTIFACT_DIR/s17-native-assistive-binary.sha256" \
+            "$ARTIFACT_DIR/s21-native-owner-admission-binary.sha256" \
+            qualification/v010/session-security/native-display-admission-fixture.py \
+            qualification/v010/session-security/native-display-admission-probe.cpp \
+            apps/linura-hyprland-display/native_owner_admission.cpp \
+            apps/linura-hyprland-display/native_owner_admission.h \
+            apps/linura-hyprland-display/owner_identity.cpp \
+            apps/linura-hyprland-display/wire_endpoint.h \
+            apps/linura-hyprland-display/compositor_display_service.h \
+            apps/linura-hyprland-display/display_transaction.h \
             qualification/v010/session-security/qualify-native-auth.py \
             qualification/v010/session-security/native-auth-fixture.py \
             qualification/v010/session-security/native-assistive-fixture.py \
