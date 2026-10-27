@@ -752,28 +752,20 @@ std::optional<NativeDisplaySnapshot> NativeWaylandLock::observeDisplayTopology()
             return std::nullopt;
     }
     impl_->displayInvocation = pinned->compositor;
-    auto snapshot = std::move(pinned->topology);
-    std::set<QString> seen;
+    std::vector<NativeLockOutputCoverage> surfaces;
     for (const auto &[id, output] : impl_->outputs) {
         (void)id;
-        if (output->nativeName.isEmpty() || !seen.insert(output->nativeName).second)
-            return std::nullopt;
-        const auto found =
-            std::find_if(snapshot.heads.begin(), snapshot.heads.end(), [&](const auto &head) {
-                return head.enabled && head.name == output->nativeName;
-            });
-        if (found == snapshot.heads.end())
-            return std::nullopt;
         // A flushed opaque frame and native protocol acknowledgement are
         // separate requirements. Newly hotplugged/configuring outputs remain
         // uncovered until both hold; counts/Qt screens cannot satisfy this.
-        found->covered = secureCoverage() && requestedSecure() && impl_->lock &&
-                         output->lockSurface && output->configured && !output->needsAck &&
-                         !output->pending && output->configureGeneration != 0 &&
-                         output->committedConfigureGeneration == output->configureGeneration &&
-                         output->flushedConfigureGeneration == output->configureGeneration;
+        const bool covered = secureCoverage() && requestedSecure() && impl_->lock &&
+                             output->lockSurface && output->configured && !output->needsAck &&
+                             !output->pending && output->configureGeneration != 0 &&
+                             output->committedConfigureGeneration == output->configureGeneration &&
+                             output->flushedConfigureGeneration == output->configureGeneration;
+        surfaces.push_back({output->nativeName, covered});
     }
-    return snapshot;
+    return projectOwnerDisplayCoverage(std::move(pinned->topology), surfaces);
 }
 int NativeWaylandLock::actualDisplayFd() const noexcept
 {

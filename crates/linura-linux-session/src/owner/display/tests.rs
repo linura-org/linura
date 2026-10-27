@@ -332,6 +332,52 @@ fn settled_unlocked_coverage_is_empty_and_incomplete_secure_coverage_is_visible(
 }
 
 #[test]
+fn locked_disabled_output_keeps_identity_without_inheriting_surface_coverage() {
+    let (mut topology, mut monitors) = inputs();
+    let mut disabled = topology["heads"][0].clone();
+    for (field, entry) in [
+        ("handle", json!("2")),
+        ("generation", json!("4")),
+        ("name", json!("HDMI-A-1")),
+        ("enabled", json!(false)),
+        ("covered", json!(false)),
+        ("current_mode", Value::Null),
+        ("scale_fixed", json!(0)),
+        ("scale_milli", json!(0)),
+        ("scale_float_bits", json!(0)),
+    ] {
+        disabled[field] = entry;
+    }
+    topology["heads"]
+        .as_array_mut()
+        .unwrap_or_else(|| unreachable!("typed fixture"))
+        .push(disabled);
+    monitors
+        .as_array_mut()
+        .unwrap_or_else(|| unreachable!("typed fixture"))
+        .push(json!({"id":7,"name":"HDMI-A-1","disabled":true,
+            "dpmsStatus":false,"mirrorOf":"none"}));
+    let (display, locker) = value(decode(&topology, &monitors));
+    let identity = value(DisplayTopologyId::from_resource(&display.resource));
+    let facts = value(linura_observation::DisplayObservationFacts::from_envelope(
+        &display, &identity, 10000,
+    ));
+    assert_eq!(facts.inventory().outputs().len(), 2);
+    assert!(matches!(
+        &facts.layout().outputs()[1],
+        DisplayOutputLayout::Disabled { output } if output.handle() == 2 && output.generation() == 4
+    ));
+    assert_eq!(locker.attributes["secure"], ObservedValue::Bool(true));
+    for field in ["observed_outputs", "covered_outputs"] {
+        assert_eq!(locker.attributes[field], ObservedValue::Text("1:2".into()));
+    }
+    // The pre-fix producer leaked this compositor fence bit. It must remain a
+    // hard decoder error, rather than silently ignoring contradictory evidence.
+    topology["heads"][1]["covered"] = json!(true);
+    assert!(decode(&topology, &monitors).is_err());
+}
+
+#[test]
 fn prepared_sample_digest_matches_native_framing_and_binds_every_raw_fact() {
     let sample: Wire = (
         "session:lock:fixture".into(),

@@ -42,6 +42,16 @@ struct NativeDisplaySnapshot final
     bool operator==(const NativeDisplaySnapshot &) const = default;
 };
 
+// Owner-local surface evidence, collected only from the owned Wayland lock
+// resources. Compositor safety-fence bits never supply this projection.
+struct NativeLockOutputCoverage final
+{
+    QString outputName;
+    bool covered = false;
+};
+[[nodiscard]] std::optional<NativeDisplaySnapshot>
+projectOwnerDisplayCoverage(NativeDisplaySnapshot, const std::vector<NativeLockOutputCoverage> &);
+
 // A bounded, continuously retained native object-lifetime inventory. A removed
 // connector that reappears receives another handle/generation even when its name
 // is reused. No method here can construct or submit an output configuration.

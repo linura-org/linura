@@ -65,6 +65,33 @@ QString NativeDisplaySnapshot::encode() const
     return bytes.size() <= 64 * 1024 ? QString::fromUtf8(bytes) : QString{};
 }
 
+std::optional<NativeDisplaySnapshot>
+projectOwnerDisplayCoverage(NativeDisplaySnapshot snapshot,
+                            const std::vector<NativeLockOutputCoverage> &surfaces)
+{
+    if (snapshot.heads.empty() || snapshot.heads.size() > MaximumHeads ||
+        surfaces.size() > MaximumHeads)
+        return std::nullopt;
+    // The private compositor sample describes its safety fence, including
+    // disabled outputs. This observation describes independently verified owner
+    // surfaces. No incoming covered bit, even on an active head, is evidence.
+    for (auto &head : snapshot.heads)
+        head.covered = false;
+    std::set<QString> seen;
+    for (const auto &surface : surfaces) {
+        if (surface.outputName.isEmpty() || !seen.insert(surface.outputName).second)
+            return std::nullopt;
+        const auto found =
+            std::find_if(snapshot.heads.begin(), snapshot.heads.end(), [&](const auto &head) {
+                return head.enabled && head.name == surface.outputName;
+            });
+        if (found == snapshot.heads.end())
+            return std::nullopt; // Stale/mismatched owner inventory is not settled.
+        found->covered = surface.covered;
+    }
+    return snapshot;
+}
+
 class NativeDisplayTopology::Impl final
 {
   public:

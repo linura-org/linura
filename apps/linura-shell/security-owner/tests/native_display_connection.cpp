@@ -6,6 +6,9 @@
 #include "wire_endpoint.h"
 #include "linura-display-integration-build.h"
 #include <atomic>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <cassert>
 #include <chrono>
 #include <cstring>
@@ -87,7 +90,11 @@ class Harness final
                                               : std::string(40, 'a'),
                                 IntegrationSourceDigest},
             [](OutputKey key) -> std::optional<std::string> {
-                return key == OutputKey{1, 1} ? std::optional<std::string>("DP-1") : std::nullopt;
+                if (key == OutputKey{1, 1})
+                    return "DP-1";
+                if (key == OutputKey{2, 1})
+                    return "HDMI-A-1";
+                return std::nullopt;
             },
             [](pid_t pid, uid_t uid) -> std::optional<WireEndpoint::OwnerInvocation> {
                 assert(pid == getpid() && uid == getuid());
@@ -259,6 +266,45 @@ void terminalWireObjectsRetireWithoutEvictingOneUseReservations()
     }
     assert(harness.backend.writes == 70);
 }
+void compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage()
+{
+    Harness harness;
+    {
+        const std::lock_guard lock(harness.backend.mutex);
+        harness.backend.facts.coverage = Coverage::Secure;
+        harness.backend.facts.heads[0].covered = true;
+        harness.backend.facts.heads.push_back({OutputKey{2, 1},
+                                               {harness.backend.full, harness.backend.small},
+                                               Target{OutputKey{2, 1}, false, {}, 0, 0, 0, 0, {}},
+                                               false,
+                                               true});
+    }
+    Client owner(harness.descriptors[0]);
+    const auto sampled = owner.connection->sample();
+    assert(sampled && sampled->coverage == 1 && sampled->topology.heads.size() == 2);
+    // Actual wire decoding retains compositor fence semantics; projection must
+    // discard them even for a disabled head with no wl_output/owner surface.
+    assert(sampled->topology.heads[0].covered && sampled->topology.heads[1].covered &&
+           !sampled->topology.heads[1].enabled);
+    const auto projected = projectOwnerDisplayCoverage(sampled->topology, {{"DP-1", true}});
+    assert(projected && projected->heads[0].covered && !projected->heads[1].covered);
+    assert(projected->generation == sampled->topology.generation &&
+           projected->heads[1].handle == sampled->topology.heads[1].handle &&
+           projected->heads[1].modes == sampled->topology.heads[1].modes);
+    const auto encoded = QJsonDocument::fromJson(projected->encode().toUtf8()).object();
+    assert(encoded["schema"].toInt() == 2);
+    const auto heads = encoded["heads"].toArray();
+    assert(heads[0].toObject()["covered"].toBool() && !heads[1].toObject()["covered"].toBool());
+    const auto missing = projectOwnerDisplayCoverage(sampled->topology, {});
+    const auto pending = projectOwnerDisplayCoverage(sampled->topology, {{"DP-1", false}});
+    assert(missing && pending && !missing->heads[0].covered && !pending->heads[0].covered &&
+           !missing->heads[1].covered && !pending->heads[1].covered);
+    assert(!projectOwnerDisplayCoverage(sampled->topology, {{"HDMI-A-1", true}}));
+    assert(!projectOwnerDisplayCoverage(sampled->topology, {{"DP-1", true}, {"DP-1", true}}));
+    assert(!projectOwnerDisplayCoverage(sampled->topology, {{"unknown-output", true}}));
+    assert(!projectOwnerDisplayCoverage(sampled->topology, {{"", true}}));
+    assert(harness.backend.writes == 0); // Observation cannot configure anything.
+}
 } // namespace
 int main()
 {
@@ -266,4 +312,5 @@ int main()
     clientLossDoesNotDisarmNativeRecovery();
     unsupportedBuildAndSubstitutedSnapshotCannotWrite();
     terminalWireObjectsRetireWithoutEvictingOneUseReservations();
+    compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage();
 }
