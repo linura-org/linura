@@ -37,16 +37,17 @@ class V06PolkitBoundaryTests(unittest.TestCase):
             script,
         )
         self.assertIn(
-            "--test-threads=1 --nocapture --skip s17_managed_ 2>&1 "
+            "--test-threads=1 --nocapture --skip s17_managed_ --skip s21_managed_ 2>&1 "
             "| tee /tmp/v06-legacy-matrix.log",
             script,
         )
-        self.assertIn("49 passed; 0 failed; 0 ignored;", script)
+        self.assertIn("56 passed; 0 failed; 0 ignored;", script)
         self.assertIn("11 passed; 0 failed; 0 ignored;", script)
 
         mock = """set -euo pipefail
 matrix() {
     if [[ " $* " == *" --skip s17_managed_ "* ]]; then
+        [[ " $* " == *" --skip s21_managed_ "* ]] || return 99
         printf 'test result: ok. %s passed; 0 failed; %s ignored;\\n' "$LINURA_TEST_BASELINE" "$LINURA_BASELINE_IGNORED"
         return "$LINURA_BASELINE_EXIT"
     fi
@@ -55,15 +56,16 @@ matrix() {
 }
 """
         for full, baseline, ignored, baseline_ignored, code, baseline_code, valid in (
-            (49, 11, 0, 0, 0, 0, True),
-            (48, 11, 0, 0, 0, 0, False),
-            (50, 11, 0, 0, 0, 0, False),
-            (49, 10, 0, 0, 0, 0, False),
-            (49, 12, 0, 0, 0, 0, False),
-            (49, 11, 1, 0, 0, 0, False),
-            (49, 11, 0, 1, 0, 0, False),
-            (49, 11, 0, 0, 1, 0, False),
-            (49, 11, 0, 0, 0, 1, False),
+            (56, 11, 0, 0, 0, 0, True),
+            (49, 11, 0, 0, 0, 0, False),
+            (55, 11, 0, 0, 0, 0, False),
+            (57, 11, 0, 0, 0, 0, False),
+            (56, 10, 0, 0, 0, 0, False),
+            (56, 12, 0, 0, 0, 0, False),
+            (56, 11, 1, 0, 0, 0, False),
+            (56, 11, 0, 1, 0, 0, False),
+            (56, 11, 0, 0, 1, 0, False),
+            (56, 11, 0, 0, 0, 1, False),
         ):
             with (
                 self.subTest(
