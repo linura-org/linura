@@ -30,6 +30,8 @@ struct Fixture
         head.modes = {{1920, 1080, 60000}};
         head.current = head.modes[0];
         head.scaleFixed = 256;
+        head.scaleMilli = 1000;
+        head.scaleFloatBits = 0x3f800000U;
         context = {{3, {head}}, topology, lock, true};
         const auto prefix = QStringLiteral("LNDL:1;") + topology;
         intent = *NativeDisplayIntent::parse(

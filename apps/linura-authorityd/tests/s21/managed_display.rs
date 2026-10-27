@@ -3,14 +3,15 @@
 use super::*;
 use linura_control::{
     AuthorizedDisplayContinuation, DisplayContinuationAction, DisplayLayoutPlanRequest,
-    DisplayLayoutState, DisplayTransactionPort, IndependentDisplayVerifier,
-    ManagedApprovalAuthorizer, ManagedApprovalChallenge,
+    DisplayTransactionPort, IndependentDisplayVerifier, ManagedApprovalAuthorizer,
+    ManagedApprovalChallenge,
 };
 use linura_core::{
     CompositorInvocationId, DisplayLayout, DisplayMode, DisplayOutputId, DisplayOutputLayout,
     DisplayOutputSet, DisplayScale, DisplayTopologyId, DisplayTransform, NativeOutputCapabilities,
 };
 use linura_observation::display_observation_attributes;
+use linura_protocol::DisplayLayoutState;
 use linura_provider_sdk::ExecutionBinding;
 use linura_transaction::{ApprovedRequestJournal, RetainedRequest, TransactionStoreError};
 

@@ -233,6 +233,26 @@ Control; existing methods and error replies retain their previous bounds.
 Unknown schemas, incomplete inventories and mismatched independent facts fail
 closed. This method creates no output configuration or execution authority.
 
+The public Experimental display contract adds `BeginDisplayLayout`,
+`GetDisplayLayoutStatus`, `ConfirmDisplayLayout` and `RevertDisplayLayout` on
+Authority1. The begin request contains only a bounded operation label, complete
+`LNDI:1` intent and semantic reason. The transport derives the principal and
+rejects a foreign-session intent; clients cannot choose policy, trusted risk,
+executor handles or a prepared plan. The single `(sssst)` receipt binds request,
+transaction, topology, closed lifecycle state and the original confirmation
+deadline. Unknown states, substituted requests and different wire shapes fail
+client decoding. Pending, restored and confirmed remain distinct; historical
+reports never assert current native layout or protection. Compositions without
+the complete native admission/execution/recovery ports explicitly refuse these
+methods. The current production composition remains unsupported; publishing the
+contract is not activation or S21-2 completion.
+
+The owner display projection uses private schema 2, binding the exact native
+thousandth scale and its IEEE float bits to the independent wlr 24.8 projection.
+The pinned compositor's UUID/output lifetimes replace owner-generated display
+identities. A missing/mismatched live source integration or inconsistent complete
+inventory is unsupported. No schema-1 compatibility path supplies authority.
+
 The separate private `ObservePreparedDisplay` method admits only the supervised
 session executor and returns `((ssstssb)s)`: the same bounded sample plus a
 length-framed SHA-256 content correlation. Rust checks the digest, typed complete

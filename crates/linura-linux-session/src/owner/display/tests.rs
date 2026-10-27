@@ -31,9 +31,10 @@ fn coverage(secure: bool) -> ObservationEnvelope {
 fn inputs() -> (Value, Value) {
     let head = json!({"handle":"1", "generation":"2", "name":"DP-1", "enabled":true,
         "covered":true, "modes":[[1920,1080,59940],[1280,720,60000]], "current_mode":[1920,1080,59940],
-        "x":0, "y":0, "transform":0, "scale_fixed":320});
+        "x":0, "y":0, "transform":0, "scale_fixed":320,
+        "scale_milli":1250, "scale_float_bits":1.25_f32.to_bits()});
     (
-        json!({"schema":1, "generation":"3", "heads":[head]}),
+        json!({"schema":2, "generation":"3", "heads":[head]}),
         json!([{"id":0,"name":"DP-1",
         "disabled":false,"dpmsStatus":true,"mirrorOf":"none", "availableModes":["1920x1080@59.94Hz"]}]),
     )
@@ -103,6 +104,8 @@ fn closed_native_schema_rejects_missing_unknown_duplicate_and_wrong_types() {
         "y",
         "transform",
         "scale_fixed",
+        "scale_milli",
+        "scale_float_bits",
     ] {
         let mut bad = topology.clone();
         bad["heads"][0]
@@ -117,10 +120,10 @@ fn closed_native_schema_rejects_missing_unknown_duplicate_and_wrong_types() {
     for raw in [
         topology
             .to_string()
-            .replacen("\"schema\":1", "\"schema\":1,\"schema\":1", 1),
+            .replacen("\"schema\":2", "\"schema\":2,\"schema\":2", 1),
         topology
             .to_string()
-            .replacen("\"schema\":1", "\"schema\":1,\"sch\\u0065ma\":1", 1),
+            .replacen("\"schema\":2", "\"schema\":2,\"sch\\u0065ma\":2", 1),
     ] {
         assert!(
             project(
@@ -174,6 +177,8 @@ fn independent_inventory_and_supported_native_precision_cannot_be_substituted() 
     }
     for (field, invalid) in [
         ("scale_fixed", json!(257)),
+        ("scale_milli", json!(1251)),
+        ("scale_float_bits", json!(1.25_f32.to_bits() + 1)),
         ("transform", json!(8)),
         ("current_mode", json!([1920, 1080, 60000])),
         ("x", json!(65537)),
@@ -359,4 +364,22 @@ fn prepared_sample_digest_matches_native_framing_and_binds_every_raw_fact() {
     let mut sampled_later = sample;
     sampled_later.3 += 1;
     assert_eq!(sample_digest(&sampled_later), digest);
+}
+
+#[test]
+fn all_native_thousandth_scales_require_exact_float_and_independent_fixed_projection() {
+    let (mut topology, monitors) = inputs();
+    for milli in 500_u32..=4000 {
+        let native = milli as f32 / 1000.0;
+        topology["heads"][0]["scale_milli"] = json!(milli);
+        topology["heads"][0]["scale_float_bits"] = json!(native.to_bits());
+        let independent_fixed = (f64::from(native) * 256.0).round_ties_even() as i32;
+        topology["heads"][0]["scale_fixed"] = json!(independent_fixed);
+        assert!(decode(&topology, &monitors).is_ok(), "scale {milli}");
+        topology["heads"][0]["scale_float_bits"] = json!(native.to_bits() + 1);
+        assert!(
+            decode(&topology, &monitors).is_err(),
+            "adjacent native float {milli}"
+        );
+    }
 }

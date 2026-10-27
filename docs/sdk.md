@@ -6,6 +6,22 @@ authorize an unlock, repeat a power action or assert current native coverage.
 
 `linura-sdk` is the public, non-privileged Rust façade for Linura clients and integrations.
 
+The Experimental display client provides `DisplayLayoutRequest`,
+`DisplayLayoutReceipt` and `DisplayLayoutState` through `LocalAuthorityClient`.
+`begin_display_layout`, `display_layout_status`, `confirm_display_layout` and
+`revert_display_layout` use the same Authority1 contract. The CLI test-client
+commands are `begin-display-layout <operation-id> <canonical-intent> <reason>` and
+`display-layout-status|confirm-display-layout|revert-display-layout <request-id>`.
+They require the local authority and no model. There is no automatic effect
+retry, executor handle, approval assertion or client-selected principal.
+The begin material is a bounded complete `LNDI:1` intent, not a command string.
+Receipts report the explicit lifecycle state and original deadline; they never
+report a pending attempt as completion or history as current native layout.
+The current production authority composition refuses these display operations
+until its complete prepared native admission and recovery ports are connected
+and qualified. These client/transport contracts alone are not usable production
+display management or completion of S21-2. Full display UI remains S21-6.
+
 ## Purpose
 
 Applications should not need to depend directly on internal authority, provider or executor crates merely to understand Linura's system model. The SDK therefore re-exports the stable client-facing concepts required to inspect and request Linura state:

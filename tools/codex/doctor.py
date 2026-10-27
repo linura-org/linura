@@ -280,6 +280,7 @@ def hyprland_build_checks(env: dict[str, str]) -> list[Check]:
                 "hyprcursor",
                 "hyprwire",
                 "libeis-1.0",
+                "libsystemd",
             ],
             env,
         )

@@ -62,6 +62,8 @@ struct Head {
     y: i32,
     transform: u32,
     scale_fixed: i32,
+    scale_milli: u32,
+    scale_float_bits: u32,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -119,7 +121,7 @@ fn project(
         serde_json::from_str(topology).map_err(|_| "native display topology is malformed")?;
     let metadata: Vec<Monitor> =
         serde_json::from_str(monitors).map_err(|_| "native display metadata is malformed")?;
-    if native.schema != 1
+    if native.schema != 2
         || native.heads.is_empty()
         || native.heads.len() > 16
         || metadata.len() != native.heads.len()
@@ -204,15 +206,20 @@ fn project(
         };
         if head.enabled {
             let mode = mode(head.current_mode.ok_or("native current mode is missing")?)?;
-            let scale = u32::try_from(head.scale_fixed).map_err(|_| "native scale is invalid")?;
-            let milli = scale.checked_mul(1000).ok_or("native scale overflow")?;
-            if milli % 256 != 0 {
-                return Err("native scale has unsupported exact precision".into());
+            let scale = DisplayScale::new(head.scale_milli).map_err(|e| e.to_string())?;
+            let native_scale = head.scale_milli as f32 / 1000.0;
+            if native_scale.to_bits() != head.scale_float_bits
+                || (f64::from(native_scale) * 256.0).round_ties_even()
+                    != f64::from(head.scale_fixed)
+            {
+                return Err(
+                    "native scale differs from its exact compositor and wlr projections".into(),
+                );
             }
             let row = DisplayOutputLayout::Enabled {
                 output: output.clone(),
                 mode,
-                scale: DisplayScale::new(milli / 256).map_err(|e| e.to_string())?,
+                scale,
                 transform: DisplayTransform::from_native(head.transform)
                     .map_err(|e| e.to_string())?,
                 x: head.x,
@@ -236,6 +243,8 @@ fn project(
         } else {
             if head.current_mode.is_some()
                 || head.scale_fixed != 0
+                || head.scale_milli != 0
+                || head.scale_float_bits != 0
                 || head.transform != 0
                 || head.x != 0
                 || head.y != 0

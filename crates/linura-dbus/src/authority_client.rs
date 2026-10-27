@@ -17,8 +17,8 @@ use linura_protocol::{
 };
 
 use crate::authority::{
-    AuthorityReceiptWire, ProtectiveLockSettingWire, SessionLockStatusWire,
-    SessionTransitionStatusWire,
+    AuthorityReceiptWire, DisplayLayoutReceiptWire, ProtectiveLockSettingWire,
+    SessionLockStatusWire, SessionTransitionStatusWire,
 };
 use crate::{
     AUTHORITY_INTERFACE_NAME, AUTHORITY_OBJECT_PATH, AUTHORITY_SERVICE_NAME, TransportError,
@@ -36,6 +36,70 @@ pub struct Authority1Client {
 }
 
 impl Authority1Client {
+    pub fn begin_display_layout(
+        &self,
+        request: &linura_protocol::DisplayLayoutRequest,
+    ) -> Result<linura_protocol::DisplayLayoutReceipt, TransportError> {
+        let expected = linura_protocol::display_layout_request_id(&format!(
+            "{}{}",
+            linura_protocol::DISPLAY_LAYOUT_REQUEST_PREFIX,
+            request.operation_id(),
+        ))
+        .map_err(TransportError::new)?;
+        let receipt = decode_display_reply(
+            self.call(
+                "BeginDisplayLayout",
+                &(request.operation_id(), request.material(), request.reason()),
+            )?,
+            &expected,
+        )?;
+        let material = linura_core::DisplayLayoutMaterial::decode(request.material())
+            .map_err(|e| TransportError::new(e.to_string()))?;
+        if receipt.resource
+            != material
+                .topology()
+                .resource_id()
+                .map_err(|e| TransportError::new(e.to_string()))?
+        {
+            return Err(TransportError::new(
+                "display receipt refers to another topology",
+            ));
+        }
+        Ok(receipt)
+    }
+    pub fn display_layout_status(
+        &self,
+        request_id: &RequestId,
+    ) -> Result<linura_protocol::DisplayLayoutReceipt, TransportError> {
+        linura_protocol::display_layout_request_id(request_id.as_str())
+            .map_err(TransportError::new)?;
+        decode_display_reply(
+            self.call("GetDisplayLayoutStatus", &(request_id.as_str(),))?,
+            request_id,
+        )
+    }
+    pub fn confirm_display_layout(
+        &self,
+        request_id: &RequestId,
+    ) -> Result<linura_protocol::DisplayLayoutReceipt, TransportError> {
+        linura_protocol::display_layout_request_id(request_id.as_str())
+            .map_err(TransportError::new)?;
+        decode_display_reply(
+            self.call("ConfirmDisplayLayout", &(request_id.as_str(),))?,
+            request_id,
+        )
+    }
+    pub fn revert_display_layout(
+        &self,
+        request_id: &RequestId,
+    ) -> Result<linura_protocol::DisplayLayoutReceipt, TransportError> {
+        linura_protocol::display_layout_request_id(request_id.as_str())
+            .map_err(TransportError::new)?;
+        decode_display_reply(
+            self.call("RevertDisplayLayout", &(request_id.as_str(),))?,
+            request_id,
+        )
+    }
     pub fn connect() -> Result<Self, TransportError> {
         // Never use DBUS_SYSTEM_BUS_ADDRESS, an autolaunched bus or caller's
         // connection as evidence. Authenticate the actual canonical bus peer.
@@ -347,6 +411,52 @@ impl Authority1Client {
             .deserialize()
             .map_err(TransportError::from)
     }
+}
+
+fn decode_display_reply(
+    reply: zbus::Message,
+    expected: &RequestId,
+) -> Result<linura_protocol::DisplayLayoutReceipt, TransportError> {
+    if reply.body().signature().to_string() != "(sssst)" {
+        return Err(TransportError::new(
+            "display lifecycle reply has a different wire shape",
+        ));
+    }
+    let (wire,): (DisplayLayoutReceiptWire,) = reply.body().deserialize()?;
+    decode_display_receipt(wire, expected)
+}
+
+fn decode_display_receipt(
+    wire: DisplayLayoutReceiptWire,
+    expected: &RequestId,
+) -> Result<linura_protocol::DisplayLayoutReceipt, TransportError> {
+    let (request_id, transaction_id, resource, state, deadline) = wire;
+    let request_id =
+        linura_protocol::display_layout_request_id(&request_id).map_err(TransportError::new)?;
+    if &request_id != expected
+        || !self::transaction_id(&transaction_id)
+        || resource.len() > 256
+        || deadline == 0
+        || deadline > i64::MAX as u64
+    {
+        return Err(TransportError::new(
+            "display lifecycle receipt is malformed or substituted",
+        ));
+    }
+    let resource = ResourceId::new(resource).map_err(|e| TransportError::new(e.to_string()))?;
+    linura_core::DisplayTopologyId::from_resource(&resource)
+        .map_err(|e| TransportError::new(e.to_string()))?;
+    let state = linura_protocol::DisplayLayoutState::from_wire(&state)
+        .ok_or_else(|| TransportError::new("display lifecycle receipt has an unknown state"))?;
+    let receipt = linura_protocol::DisplayLayoutReceipt {
+        request_id,
+        transaction_id,
+        resource,
+        state,
+        confirmation_expires_at_unix_ms: deadline,
+    };
+    receipt.validate().map_err(TransportError::new)?;
+    Ok(receipt)
 }
 
 fn decode_native_sleep_gate_status(
@@ -720,6 +830,50 @@ fn validate_completion_wire(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn display_wire_shape_and_receipts_bind_exact_request_and_closed_lifecycle_state() {
+        let expected = value(linura_protocol::display_layout_request_id(
+            "request:v010:display-layout:test",
+        ));
+        let wire: DisplayLayoutReceiptWire = (
+            expected.as_str().into(), format!("transaction:v1:{}", "1".repeat(64)),
+            "display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:seat0:33333333-3333-4333-8333-333333333333:3".into(),
+            "awaiting-confirmation".into(), 15000,
+        );
+        let message = value(zbus::Message::method_call("/org/linura/Fixture", "Receipt"));
+        let message = value(message.build(&(wire.clone(),)));
+        assert_eq!(message.body().signature().to_string(), "(sssst)");
+        let decoded = value(decode_display_reply(message, &expected));
+        assert_eq!(
+            decoded.state,
+            linura_protocol::DisplayLayoutState::AwaitingConfirmation
+        );
+        assert_eq!(decoded.confirmation_expires_at_unix_ms, 15000);
+        let message = value(zbus::Message::method_call("/org/linura/Fixture", "Receipt"));
+        // A one-tuple wrapper is intentionally transparent to zvariant. Use
+        // an actually different wire type, rather than mistaking that Rust
+        // spelling for a distinct D-Bus signature.
+        let wrong_shape = value(message.build(&(
+            wire.0.clone(),
+            wire.1.clone(),
+            wire.2.clone(),
+            wire.3.clone(),
+            wire.4.to_string(),
+        )));
+        assert_eq!(wrong_shape.body().signature().to_string(), "(sssss)");
+        assert!(decode_display_reply(wrong_shape, &expected).is_err());
+        for field in 0..5 {
+            let mut substituted = wire.clone();
+            match field {
+                0 => substituted.0 = "request:v010:display-layout:other".into(),
+                1 => substituted.1 = "transaction:placeholder".into(),
+                2 => substituted.2 = "display:topology:current".into(),
+                3 => substituted.3 = "success".into(),
+                _ => substituted.4 = 0,
+            }
+            assert!(decode_display_receipt(substituted, &expected).is_err());
+        }
+    }
     #[test]
     fn native_sleep_diagnostics_decode_only_canonical_bounded_login_and_closed_states() {
         let epoch = "session:epoch:abcd1234-1234-4567-89ab-0123456789ab:1000:c2:42";

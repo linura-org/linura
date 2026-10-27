@@ -2,6 +2,7 @@
 #include "native_deadline.h"
 #include "native_lock_protocol.h"
 #include "native_keyboard.h"
+#include "native_display_connection.h"
 #include "native_wayland_readiness.h"
 #include "secret_entry.h"
 #include "ext-session-lock-v1-client-protocol.h"
@@ -186,7 +187,8 @@ class NativeWaylandLock::Impl final
     std::map<quint32, std::unique_ptr<Output>> outputs;
     std::unique_ptr<NativeDisplayTopology> displayTopology =
         std::make_unique<NativeDisplayTopology>();
-    const QString displayInvocation = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QString displayInvocation;
+    std::unique_ptr<NativeDisplayConnection> displayConnection;
     std::unique_ptr<QSocketNotifier> reader;
     std::unique_ptr<QSocketNotifier> writer;
     std::unique_ptr<NativeKeyboard> keyboard;
@@ -230,7 +232,8 @@ class NativeWaylandLock::Impl final
     }
 
     Impl(NativeWaylandLock &instance, wl_display *connection, Painter paint)
-        : owner(instance), display(connection), painter(std::move(paint))
+        : owner(instance), display(connection), painter(std::move(paint)),
+          displayConnection(std::make_unique<NativeDisplayConnection>(connection))
     {
         confirmationTimer.setInterval(100);
         QObject::connect(&confirmationTimer, &QTimer::timeout, &owner, [this] {
@@ -254,6 +257,7 @@ class NativeWaylandLock::Impl final
         confirmationTimer.stop();
         confirmation.reset();
         outputs.clear();
+        displayConnection.reset();
         displayTopology.reset();
         keyboard.reset();
         if (desktop)
@@ -370,6 +374,8 @@ class NativeWaylandLock::Impl final
                     failClosed();
             } else if (std::strcmp(interface, "zwlr_output_manager_v1") == 0) {
                 self.displayTopology->announce(self.registry, name, version);
+            } else if (std::strcmp(interface, "linura_display_manager_v1") == 0) {
+                self.displayConnection->announce(self.registry, name, version);
             } else if (std::strcmp(interface, "wl_output") == 0) {
                 if (version < 3 || self.outputs.size() >= MaximumOutputs ||
                     self.outputs.contains(name))
@@ -438,6 +444,7 @@ class NativeWaylandLock::Impl final
         nativeCallback([&] {
             auto &self = *static_cast<Impl *>(data);
             self.displayTopology->removed(name);
+            self.displayConnection->removed(name);
             if (std::find(self.requiredGlobals.begin(), self.requiredGlobals.end(), name) !=
                 self.requiredGlobals.end())
                 failClosed();
@@ -726,19 +733,36 @@ std::optional<NativeDisplaySnapshot> NativeWaylandLock::observeDisplayTopology()
         impl_->pumping ||
         !waitForNativeWaylandReady(impl_->display, std::chrono::milliseconds(250)))
         return std::nullopt;
-    auto snapshot = impl_->displayTopology->snapshotAfterSync();
-    if (!snapshot)
+    const auto independent = impl_->displayTopology->snapshotAfterSync();
+    auto pinned = impl_->displayConnection->sample();
+    if (!independent || !pinned || independent->heads.size() != pinned->topology.heads.size() ||
+        (!impl_->displayInvocation.isEmpty() && impl_->displayInvocation != pinned->compositor))
         return std::nullopt;
+    for (const auto &head : pinned->topology.heads) {
+        const auto corroborating =
+            std::find_if(independent->heads.begin(), independent->heads.end(),
+                         [&](const auto &other) { return other.name == head.name; });
+        if (corroborating == independent->heads.end() || corroborating->enabled != head.enabled ||
+            !std::is_permutation(corroborating->modes.begin(), corroborating->modes.end(),
+                                 head.modes.begin(), head.modes.end()) ||
+            corroborating->current != head.current ||
+            (head.enabled && (corroborating->x != head.x || corroborating->y != head.y ||
+                              corroborating->transform != head.transform ||
+                              corroborating->scaleFixed != head.scaleFixed)))
+            return std::nullopt;
+    }
+    impl_->displayInvocation = pinned->compositor;
+    auto snapshot = std::move(pinned->topology);
     std::set<QString> seen;
     for (const auto &[id, output] : impl_->outputs) {
         (void)id;
         if (output->nativeName.isEmpty() || !seen.insert(output->nativeName).second)
             return std::nullopt;
         const auto found =
-            std::find_if(snapshot->heads.begin(), snapshot->heads.end(), [&](const auto &head) {
+            std::find_if(snapshot.heads.begin(), snapshot.heads.end(), [&](const auto &head) {
                 return head.enabled && head.name == output->nativeName;
             });
-        if (found == snapshot->heads.end())
+        if (found == snapshot.heads.end())
             return std::nullopt;
         // A flushed opaque frame and native protocol acknowledgement are
         // separate requirements. Newly hotplugged/configuring outputs remain
@@ -746,7 +770,8 @@ std::optional<NativeDisplaySnapshot> NativeWaylandLock::observeDisplayTopology()
         found->covered = secureCoverage() && requestedSecure() && impl_->lock &&
                          output->lockSurface && output->configured && !output->needsAck &&
                          !output->pending && output->configureGeneration != 0 &&
-                         output->committedConfigureGeneration == output->configureGeneration;
+                         output->committedConfigureGeneration == output->configureGeneration &&
+                         output->flushedConfigureGeneration == output->configureGeneration;
     }
     return snapshot;
 }

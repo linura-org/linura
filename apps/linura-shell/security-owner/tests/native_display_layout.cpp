@@ -21,6 +21,8 @@ int main()
     root.modes = {{1920, 1080, 60000}, {1280, 720, 59940}};
     root.current = root.modes[0];
     root.scaleFixed = 256;
+    root.scaleMilli = 1000;
+    root.scaleFloatBits = 0x3f800000U;
     observed.heads.push_back(root);
     const auto baseline = QStringLiteral("LNDL:1;") + scope +
                           QStringLiteral(";1:2:enabled:1920:1080:60000:1000:0:0:0:-;");
@@ -31,6 +33,15 @@ int main()
     const auto intent = NativeDisplayIntent::parse(text);
     assert(intent && intent->encode() == text && intent->nativeOptions(observed, scope, *lock));
     assert(intent->baseline.matchesGeometry(observed));
+    auto missingPrecision = observed;
+    missingPrecision.heads[0].scaleMilli = 0;
+    assert(!intent->baseline.matchesGeometry(missingPrecision));
+    auto changedPrecision = observed;
+    ++changedPrecision.heads[0].scaleFloatBits;
+    assert(!intent->baseline.matchesGeometry(changedPrecision));
+    const auto thousandthIntent = NativeDisplayIntent::parse(
+        QString(text).replace(QStringLiteral(":1250:"), QStringLiteral(":1251:")));
+    assert(thousandthIntent && thousandthIntent->desired.nativeOptions(observed));
     assert(!intent->desired.matchesGeometry(observed));
     const auto commands = intent->desired.commands(observed);
     assert(commands.size() == 1 &&
@@ -39,7 +50,7 @@ int main()
          {QString(text).replace(QStringLiteral("LNDI:1;"), QStringLiteral("LNDI:2;")),
           text + QLatin1Char('\n'), text + QStringLiteral("extra;"),
           QString(text).replace(QStringLiteral("1:2:enabled"), QStringLiteral("01:2:enabled")),
-          QString(text).replace(QStringLiteral(":1250:"), QStringLiteral(":1251:")),
+          QString(text).replace(QStringLiteral(":1250:"), QStringLiteral(":4001:")),
           QString(text).replace(QStringLiteral(":-100:"), QStringLiteral(":-0:")),
           QString(text).replace(QStringLiteral(":-100:"), QStringLiteral(":-65537:"))}) {
         assert(!NativeDisplayIntent::parse(bad));

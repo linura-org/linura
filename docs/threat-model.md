@@ -786,6 +786,21 @@ for the current implementation status.
   restoration and S17 lock coverage required in S21-2 and physical Q11 separately
   maintained. No build profile, self-reported phase or old-head result promotes
   readiness to runtime acceptance or release support.
+- The native owner binds the private output protocol on its existing attested
+  Wayland connection and requires the live pinned upstream/source identities.
+  Stable compositor/output lifetimes survive owner reconnection for observation;
+  replacement clients cannot acquire old apply/confirmation rights. Complete
+  inventory, geometry, original timestamps and exact float/fixed scale evidence
+  must agree independently. Retiring terminal wire objects preserves one-use
+  correlation tombstones; resource reclamation is not permission to replay.
+- The public display methods accept only bounded typed intent or a same-request
+  lifecycle decision. Principal identity remains transport-derived. Receipt
+  decoding requires the exact structure, request namespace, canonical topology,
+  transaction and closed state; history is never current layout or protection.
+  Unsupported authority compositions refuse before prepare. The current
+  production composition remains unsupported until native prepared admission,
+  protected display decisions, execution and recovery are fully connected and
+  qualified. A transport method or an SDK command cannot stand in for that proof.
 
 A client, provider or stale resource alias may retarget approved operations to
 another compositor output, physical backlight, removable drive or login session;

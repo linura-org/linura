@@ -11,10 +11,13 @@ pub use linura_capability_sdk::{
     DesiredResourceBlueprint, Resolution,
 };
 pub use linura_core::{
-    Actor, ActorId, ActorKind, AuthorityClass, Capability, CapabilityId, IntentId, PlanId,
-    PolicyId, PolicyRevisionId, PrincipalId, ProfileId, ProviderId, RequestId, RequirementId,
-    ResourceId, RiskClass, SemanticReason, SessionEpoch, SessionLockId, SessionTransition,
-    SessionTransitionId, SetupId, SupportLevel, ValidationError, WorkflowId,
+    Actor, ActorId, ActorKind, AuthorityClass, Capability, CapabilityId, CompositorInvocationId,
+    DisplayLayout, DisplayLayoutIntent, DisplayLayoutMaterial, DisplayMode, DisplayOutputId,
+    DisplayOutputLayout, DisplayOutputSet, DisplayScale, DisplayTopologyId, DisplayTransform,
+    IntentId, NativeOutputCapabilities, PlanId, PolicyId, PolicyRevisionId, PrincipalId, ProfileId,
+    ProviderId, RequestId, RequirementId, ResourceId, RiskClass, SemanticReason, SessionEpoch,
+    SessionLockId, SessionTransition, SessionTransitionId, SetupId, SupportLevel, ValidationError,
+    WorkflowId,
 };
 pub use linura_dbus::{
     Authority1Client as LocalAuthorityClient, Control1Client as LocalControlClient,
@@ -48,15 +51,16 @@ pub use linura_observation::{
     ObservedValue, ProviderAvailability, ProviderHealth,
 };
 pub use linura_protocol::{
-    CapabilitySnapshot, ExplainResponse, ExplainTarget, IntentCommand, NativeSleepGateState,
-    NativeSleepGateStatus, ObservationExplanation, ObservationRequest, ObservationResponse,
-    ObservationSystemSnapshot, PROTOCOL_MAJOR, PlanDesiredStateRequest, PlanPreview,
-    PlanPreviewChange, PlanPreviewFinding, PlanPreviewFindingLevel, PlanPreviewStatus, PlanReview,
-    PlanReviewApprovalClass, PlanReviewDecision, PortableProfileExport, PortableSetupExport,
-    ProfileAdoptionRequest, ProfileAdoptionResponse, ProtectiveLockSettingReceipt,
-    ProtectiveLockSettingRequest, ProtocolVersion, ProviderSnapshot, SessionLockReceipt,
-    SessionLockRequest, SessionLockRequestStatus, SessionTransitionCompletion,
-    SessionTransitionReceipt, SessionTransitionRequest, SessionTransitionRequestStatus,
-    SetupAdoptionRequest, SetupAdoptionResponse, SystemSnapshot,
+    CapabilitySnapshot, DisplayLayoutReceipt, DisplayLayoutRequest, DisplayLayoutState,
+    ExplainResponse, ExplainTarget, IntentCommand, NativeSleepGateState, NativeSleepGateStatus,
+    ObservationExplanation, ObservationRequest, ObservationResponse, ObservationSystemSnapshot,
+    PROTOCOL_MAJOR, PlanDesiredStateRequest, PlanPreview, PlanPreviewChange, PlanPreviewFinding,
+    PlanPreviewFindingLevel, PlanPreviewStatus, PlanReview, PlanReviewApprovalClass,
+    PlanReviewDecision, PortableProfileExport, PortableSetupExport, ProfileAdoptionRequest,
+    ProfileAdoptionResponse, ProtectiveLockSettingReceipt, ProtectiveLockSettingRequest,
+    ProtocolVersion, ProviderSnapshot, SessionLockReceipt, SessionLockRequest,
+    SessionLockRequestStatus, SessionTransitionCompletion, SessionTransitionReceipt,
+    SessionTransitionRequest, SessionTransitionRequestStatus, SetupAdoptionRequest,
+    SetupAdoptionResponse, SystemSnapshot, display_layout_request_id,
 };
 pub use linura_provenance::{ProvenanceKind, ProvenanceRecord, WhyChain};

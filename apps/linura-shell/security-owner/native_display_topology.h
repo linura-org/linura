@@ -28,6 +28,9 @@ struct NativeDisplayHead final
     std::vector<NativeDisplayMode> modes;
     std::optional<NativeDisplayMode> current;
     qint32 x = 0, y = 0, transform = 0, scaleFixed = 0;
+    // Exact pinned compositor facts; wlr's 24.8 projection alone cannot prove
+    // an arbitrary thousandth scale. The independent projection is retained.
+    quint32 scaleMilli = 0, scaleFloatBits = 0;
     bool operator==(const NativeDisplayHead &) const = default;
 };
 

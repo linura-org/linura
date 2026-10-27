@@ -4,6 +4,26 @@
     <annotation name="org.linura.ContractId" value="dbus.org.linura.Authority1"/>
     <annotation name="org.linura.ContractVersion" value="1"/>
     <annotation name="org.linura.Stability" value="experimental"/>
+    <!-- Typed display intent only. Unsupported native compositions fail before
+         preparation; no receipt or request ID is an execution credential. -->
+    <method name="BeginDisplayLayout">
+      <arg name="operation_id" type="s" direction="in"/>
+      <arg name="material" type="s" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="receipt" type="(sssst)" direction="out"/>
+    </method>
+    <method name="GetDisplayLayoutStatus">
+      <arg name="request_id" type="s" direction="in"/>
+      <arg name="receipt" type="(sssst)" direction="out"/>
+    </method>
+    <method name="ConfirmDisplayLayout">
+      <arg name="request_id" type="s" direction="in"/>
+      <arg name="receipt" type="(sssst)" direction="out"/>
+    </method>
+    <method name="RevertDisplayLayout">
+      <arg name="request_id" type="s" direction="in"/>
+      <arg name="receipt" type="(sssst)" direction="out"/>
+    </method>
     <!-- Read-only process-retained diagnostic, scoped to a freshly observed own
          login. No current protection or successful sleep assertion. No inputs. -->
     <method name="GetOwnNativeSleepGateStatus">

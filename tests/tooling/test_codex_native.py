@@ -467,6 +467,7 @@ class NativePreparationTests(unittest.TestCase):
         self.assertEqual(self.commands.effects, [])
         spec = native.load_spec()
         self.assertIn("libglvnd", spec["profile"]["hyprland-build"]["arch"])
+        self.assertIn("systemd-libs", spec["profile"]["hyprland-build"]["arch"])
         self.assertNotIn("editor", native.profiles(["hyprland-build"], spec))
         broken = (
             native.read_regular(ROOT / native.SPEC)

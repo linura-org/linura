@@ -7,35 +7,7 @@ use linura_core::DisplayLayoutMaterial;
 use linura_observation::{ObservationAuthority, ObservationEnvelope, ObservedValue};
 
 pub const DISPLAY_CONFIRMATION_WINDOW_MS: u64 = 15_000;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DisplayLayoutState {
-    AwaitingConfirmation,
-    Confirmed,
-    Restored,
-    NotDispatched,
-    Indeterminate,
-}
-impl DisplayLayoutState {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::AwaitingConfirmation => "awaiting-confirmation",
-            Self::Confirmed => "confirmed",
-            Self::Restored => "restored",
-            Self::NotDispatched => "not-dispatched",
-            Self::Indeterminate => "indeterminate",
-        }
-    }
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DisplayLayoutReceipt {
-    pub request_id: RequestId,
-    pub transaction_id: String,
-    pub resource: ResourceId,
-    pub state: DisplayLayoutState,
-    pub confirmation_expires_at_unix_ms: u64,
-}
+use linura_protocol::{DisplayLayoutReceipt, DisplayLayoutState};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DisplayContinuationAction {
     Confirm,

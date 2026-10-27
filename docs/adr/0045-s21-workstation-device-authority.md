@@ -63,9 +63,14 @@ The private native owner now has a read-only `ObserveDisplay` probe. It retains
 head/mode lifetimes on the same attested Wayland connection, gives recycled head
 names new identities, and synchronizes bounded reads before and after the fixed
 peer-checked Hyprland metadata query. A changed snapshot is rejected. Exact native
-mode tuples come from the pinned output-management protocol; rounded JSON mode
-strings cannot manufacture support. Unsupported fixed-point scale precision is
-rejected. Independent `ext-session-lock` acknowledgement and per-output committed
+mode tuples and identities come from the pinned private integration, with live
+upstream/source identity validation. A new owner adopts the same compositor UUID
+and native output lifetimes for observation; reconnecting never acquires an old
+attempt's apply or continuation right. Independent wlr inventory/geometry and
+Hyprland metadata corroborate the sample. Rounded JSON mode strings cannot
+manufacture support. Exact native thousandth scales require their original float
+bits and matching independent 24.8 projection. Unknown precision fails closed.
+Independent `ext-session-lock` acknowledgement and per-output committed
 configure generations supply coverage facts; screen counts and diagnostic
 acquisition milestones supply no coverage authority.
 
@@ -84,8 +89,10 @@ The trusted registry now registers `operation:display.layout.apply` with managed
 security-sensitive semantics. Draft protected-journal phase records, an
 unconnected display lifecycle controller, candidate formatter fixtures and
 bounded peer-checked read-only compositor IPC exist. Registration and component
-code do **not** activate an authorized executor, independently timed rollback,
-restart-safe restoration or a public display mutation endpoint. The display
+code do **not** activate an authorized executor, restart-safe restoration or a
+production display mutation composition. Typed Authority1 begin/status/confirm/
+revert, SDK and CLI contracts are present, with explicit unsupported results
+until qualified native ports are connected. The display
 mutation route must remain disabled until the complete native execution and
 recovery contract passes pinned-runtime and adversarial qualification.
 

@@ -1,9 +1,11 @@
 #include "native_display_layout.h"
 #include <QStringList>
 #include <algorithm>
+#include <bit>
 #include <limits>
 #include <map>
 #include <set>
+#include <wayland-util.h>
 
 namespace Linura::SecurityOwner {
 namespace {
@@ -72,8 +74,8 @@ std::optional<NativeDisplayTarget> target(const QString &value)
     const auto x = signedNumber(fields[8]), y = signedNumber(fields[9]);
     if (!width || !height || !refresh || !scale || !transform || !x || !y || *width == 0 ||
         *width > 32768 || *height == 0 || *height > 32768 || *refresh == 0 ||
-        *refresh > 1'000'000 || *scale < 500 || *scale > 4000 || *scale % 125 != 0 ||
-        *transform > 7 || *x < -65536 || *x > 65536 || *y < -65536 || *y > 65536)
+        *refresh > 1'000'000 || *scale < 500 || *scale > 4000 || *transform > 7 || *x < -65536 ||
+        *x > 65536 || *y < -65536 || *y > 65536)
         return std::nullopt;
     result.enabled = true;
     result.mode = {static_cast<qint32>(*width), static_cast<qint32>(*height),
@@ -220,13 +222,16 @@ bool NativeDisplayLayout::nativeOptions(const NativeDisplaySnapshot &snapshot) c
             });
         if (head == snapshot.heads.end() || !nativeName(head->name))
             return false;
-        if (!row.enabled)
+        if (!row.enabled) {
+            if (row.mode != NativeDisplayMode{} || row.scaleMilli != 0 || row.transform != 0 ||
+                row.x != 0 || row.y != 0 || row.mirror)
+                return false;
             continue;
-        if (row.scaleMilli < 500 || row.scaleMilli > 4000 || row.scaleMilli % 125 != 0 ||
-            row.transform > 7 || row.x < -65536 || row.x > 65536 || row.y < -65536 ||
-            row.y > 65536 || row.mode.width <= 0 || row.mode.width > 32768 ||
-            row.mode.height <= 0 || row.mode.height > 32768 || row.mode.refresh <= 0 ||
-            row.mode.refresh > 1'000'000)
+        }
+        if (row.scaleMilli < 500 || row.scaleMilli > 4000 || row.transform > 7 || row.x < -65536 ||
+            row.x > 65536 || row.y < -65536 || row.y > 65536 || row.mode.width <= 0 ||
+            row.mode.width > 32768 || row.mode.height <= 0 || row.mode.height > 32768 ||
+            row.mode.refresh <= 0 || row.mode.refresh > 1'000'000)
             return false;
         if (std::find(head->modes.begin(), head->modes.end(), row.mode) == head->modes.end())
             return false;
@@ -271,8 +276,10 @@ bool NativeDisplayLayout::matchesGeometry(const NativeDisplaySnapshot &snapshot)
         if (row.enabled &&
             (!head.current || *head.current != row.mode || head.x != row.x || head.y != row.y ||
              head.transform != static_cast<qint32>(row.transform) ||
-             static_cast<qint64>(head.scaleFixed) * 1000 !=
-                 static_cast<qint64>(row.scaleMilli) * 256))
+             head.scaleMilli != row.scaleMilli ||
+             head.scaleFloatBits !=
+                 std::bit_cast<quint32>(static_cast<float>(row.scaleMilli) / 1000.F) ||
+             head.scaleFixed != wl_fixed_from_double(static_cast<float>(row.scaleMilli) / 1000.F)))
             return false;
     }
     return true;

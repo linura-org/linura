@@ -31,6 +31,8 @@ struct Fixture
         head.modes = {{1920, 1080, 60000}};
         head.current = head.modes[0];
         head.scaleFixed = 256;
+        head.scaleMilli = 1000;
+        head.scaleFloatBits = 0x3f800000U;
         baseline.generation = 3;
         baseline.heads.push_back(head);
         desired = baseline;

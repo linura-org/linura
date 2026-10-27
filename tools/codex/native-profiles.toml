@@ -80,6 +80,7 @@ arch = [
   "pkgconf",
   "python",
   "re2",
+  "systemd-libs",
   "tomlplusplus",
   "wayland",
   "wayland-protocols",

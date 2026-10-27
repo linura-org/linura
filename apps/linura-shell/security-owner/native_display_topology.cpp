@@ -54,9 +54,11 @@ QString NativeDisplaySnapshot::encode() const
             {"x", head.x},
             {"y", head.y},
             {"transform", head.transform},
-            {"scale_fixed", head.scaleFixed}});
+            {"scale_fixed", head.scaleFixed},
+            {"scale_milli", static_cast<qint64>(head.scaleMilli)},
+            {"scale_float_bits", static_cast<qint64>(head.scaleFloatBits)}});
     }
-    const auto bytes = QJsonDocument(QJsonObject{{"schema", 1},
+    const auto bytes = QJsonDocument(QJsonObject{{"schema", 2},
                                                  {"generation", QString::number(generation)},
                                                  {"heads", entries}})
                            .toJson(QJsonDocument::Compact);
