@@ -750,6 +750,19 @@ for the current implementation status.
 
 ### S21 device identity substitution, insecure output topology and media loss
 
+- A same-UID Wayland client must not reach display writes by constructing private
+  protocol messages or exhaust all protected-owner slots. Private-global binding
+  attests the owner before allocating any slot; apply reattests the bound
+  invocation. Admission requires the exact immutable root-systemd-supervised
+  owner PID/UID, service image/arguments and live InvocationID through the fixed
+  root-peer bus. Each original-connection confirm/revert reattests that same
+  invocation under one 250 ms budget and retained pidfd. Root service/daemon
+  replacement, PID reuse, non-running state, drop-ins, malformed evidence or an
+  unavailable bus deny the explicit effect; they do not disarm automatic native
+  recovery. Component substitutions and real-wire denial/timer tests do not
+  qualify the actual root-supervised positive path. That native path remains
+  required before production activation.
+
 - A source-pinned compositor integration is a bounded native mechanism, never
   policy or privileged execution authority. The production caller must retain
   canonical Rust planning, authenticated principal binding, managed durable

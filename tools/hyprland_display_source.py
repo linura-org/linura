@@ -211,11 +211,13 @@ endif()
 add_subdirectory("${LINURA_DISPLAY_INTEGRATION_DIR}" "${CMAKE_BINARY_DIR}/linura-display")
 pkg_check_modules(LINURA_DISPLAY_SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
 target_sources(hyprland_lib PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}/pinned_backend.cpp"
-  "${LINURA_DISPLAY_INTEGRATION_DIR}/native_power_inhibitor.cpp")
+  "${LINURA_DISPLAY_INTEGRATION_DIR}/native_power_inhibitor.cpp"
+  "${LINURA_DISPLAY_INTEGRATION_DIR}/native_owner_admission.cpp")
 target_include_directories(hyprland_lib PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}" "${CMAKE_SOURCE_DIR}")
-target_link_libraries(hyprland_lib PUBLIC linura-hyprland-display-wire PkgConfig::LINURA_DISPLAY_SYSTEMD)
+target_link_libraries(hyprland_lib PUBLIC linura-hyprland-display-owner PkgConfig::LINURA_DISPLAY_SYSTEMD)
 if(TARGET hyprland_gtests)
-  target_sources(hyprland_gtests PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_rule_overlay.cpp")
+  target_sources(hyprland_gtests PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_rule_overlay.cpp"
+    "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_owner_admission.cpp")
   target_include_directories(hyprland_gtests PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}")
 endif()
 """

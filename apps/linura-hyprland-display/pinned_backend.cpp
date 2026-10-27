@@ -3,6 +3,7 @@
 #include "rule_overlay.h"
 #include "wire_endpoint.h"
 #include "native_power_inhibitor.h"
+#include "native_owner_admission.h"
 #include "linura-display-integration-build.h"
 
 #include "src/Compositor.hpp"
@@ -319,7 +320,7 @@ void initialize(wl_display &display, wl_event_loop &loop)
     endpoint = std::make_unique<WireEndpoint>(
         display, *backend, *service,
         NativeBuildIdentity{backend->instance, UpstreamCommit, IntegrationSourceDigest},
-        nativeOutputName);
+        nativeOutputName, attestDisplayOwner);
 }
 void shutdown()
 {

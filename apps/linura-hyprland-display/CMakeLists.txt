@@ -57,10 +57,21 @@ target_link_libraries(linura-hyprland-display-wire PUBLIC linura-hyprland-displa
 target_compile_options(linura-hyprland-display-wire PRIVATE
     -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
 
+add_library(linura-hyprland-display-owner STATIC owner_identity.cpp)
+target_link_libraries(linura-hyprland-display-owner PUBLIC linura-hyprland-display-wire)
+target_compile_options(linura-hyprland-display-owner PRIVATE
+    -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+
 include(CTest)
 if(BUILD_TESTING)
     find_package(Threads REQUIRED)
     pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client>=1.22)
+    add_executable(linura-hyprland-display-owner-tests tests/native_owner_admission.cpp)
+    target_link_libraries(linura-hyprland-display-owner-tests PRIVATE linura-hyprland-display-owner)
+    target_compile_options(linura-hyprland-display-owner-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-display-owner-admission COMMAND linura-hyprland-display-owner-tests)
+    set_tests_properties(hyprland-display-owner-admission PROPERTIES TIMEOUT 5)
     add_executable(linura-hyprland-display-wire-tests tests/wire_endpoint.cpp "${DISPLAY_CLIENT_HEADER}")
     target_link_libraries(linura-hyprland-display-wire-tests PRIVATE
         linura-hyprland-display-wire PkgConfig::WAYLAND_CLIENT Threads::Threads)

@@ -63,6 +63,9 @@ class WireEndpoint::Impl final
         Impl *owner = nullptr;
         wl_client *native = nullptr;
         bool alive = true;
+        pid_t pid = 0;
+        uid_t uid = 0;
+        OwnerInvocation invocation{};
         std::size_t resources = 0, snapshots = 0;
     };
     struct Captured final
@@ -140,7 +143,11 @@ class WireEndpoint::Impl final
         bool original() const
         {
             const auto found = owner.origins.find(bound.transaction);
-            return client->alive && found != owner.origins.end() && found->second.lock() == client;
+            if (!client->alive || found == owner.origins.end() ||
+                found->second.client.lock() != client)
+                return false;
+            const auto fresh = owner.admitOwner(client->pid, client->uid);
+            return fresh && *fresh == client->invocation && *fresh == found->second.invocation;
         }
     };
 
@@ -148,10 +155,16 @@ class WireEndpoint::Impl final
     CompositorDisplayService &service;
     NativeBuildIdentity identity;
     OutputName outputName;
+    AdmitOwner admitOwner;
     wl_global *global = nullptr;
     std::map<wl_client *, std::shared_ptr<Client>> clients;
     std::set<wl_resource *> resources;
-    std::map<std::string, std::weak_ptr<Client>> origins;
+    struct Origin final
+    {
+        std::weak_ptr<Client> client;
+        OwnerInvocation invocation;
+    };
+    std::map<std::string, Origin> origins;
     static_assert(std::is_standard_layout_v<Client> && offsetof(Client, destroyed) == 0);
 
     template <typename T> static T &object(wl_resource *resource)
@@ -160,14 +173,14 @@ class WireEndpoint::Impl final
     }
 
     Impl(wl_display &display, Backend &native, CompositorDisplayService &attempts,
-         NativeBuildIdentity build, OutputName names)
+         NativeBuildIdentity build, OutputName names, AdmitOwner admission)
         : backend(native), service(attempts), identity(std::move(build)),
-          outputName(std::move(names))
+          outputName(std::move(names)), admitOwner(std::move(admission))
     {
         if (getuid() == 0 || getuid() != geteuid() || identity.compositorInstance.size() != 36 ||
             identity.upstreamCommit.size() != 40 || identity.integrationDigest.size() != 64 ||
             !scalar(identity.upstreamCommit.c_str(), 40, true) ||
-            !scalar(identity.integrationDigest.c_str(), 64, true) || !outputName)
+            !scalar(identity.integrationDigest.c_str(), 64, true) || !outputName || !admitOwner)
             return;
         global = wl_global_create(&display, &linura_display_manager_v1_interface, 1, this, bind);
     }
@@ -251,6 +264,15 @@ class WireEndpoint::Impl final
         try {
             auto found = self.clients.find(native);
             if (found == self.clients.end()) {
+                const auto invocation = self.admitOwner(pid, uid);
+                if (!invocation || std::all_of(invocation->begin(), invocation->end(),
+                                               [](unsigned char byte) { return byte == 0; })) {
+                    // Reject before accounting or installing a destroy listener.
+                    // Ordinary clients cannot consume every protected-owner
+                    // slot merely by binding the private advertised global.
+                    wl_client_post_implementation_error(native, "native display owner unavailable");
+                    return;
+                }
                 if (self.clients.size() >= MaxClients) {
                     wl_client_post_no_memory(native);
                     return;
@@ -258,6 +280,9 @@ class WireEndpoint::Impl final
                 auto client = std::make_shared<Client>();
                 client->owner = &self;
                 client->native = native;
+                client->pid = pid;
+                client->uid = uid;
+                client->invocation = *invocation;
                 client->destroyed.notify = clientDestroyed;
                 found = self.clients.emplace(native, std::move(client)).first;
                 wl_client_add_destroy_listener(native, &found->second->destroyed);
@@ -433,6 +458,12 @@ class WireEndpoint::Impl final
         }
         attempt.used = true; // Before constructing a potentially effectful call.
         try {
+            const auto invocation =
+                attempt.owner.admitOwner(attempt.client->pid, attempt.client->uid);
+            if (!invocation || *invocation != attempt.client->invocation) {
+                attempt.deny();
+                return;
+            }
             Layout baseline, desired;
             for (const auto &head : attempt.captured->sample.heads)
                 baseline.push_back(head.current);
@@ -448,7 +479,8 @@ class WireEndpoint::Impl final
                 attempt.deny();
                 return;
             }
-            attempt.owner.origins.emplace(attempt.bound.transaction, attempt.client);
+            attempt.owner.origins.emplace(attempt.bound.transaction,
+                                          Origin{attempt.client, *invocation});
             (void)attempt.owner.service.begin(attempt.bound, baseline, desired,
                                               attempt.captured->sample, attempt.captured->at);
             if (!attempt.owner.service.status(attempt.bound))
@@ -507,9 +539,9 @@ const struct linura_display_attempt_v1_interface WireEndpoint::Impl::attemptImpl
 };
 
 WireEndpoint::WireEndpoint(wl_display &display, Backend &backend, CompositorDisplayService &service,
-                           NativeBuildIdentity identity, OutputName names)
-    : impl_(
-          std::make_unique<Impl>(display, backend, service, std::move(identity), std::move(names)))
+                           NativeBuildIdentity identity, OutputName names, AdmitOwner admission)
+    : impl_(std::make_unique<Impl>(display, backend, service, std::move(identity), std::move(names),
+                                   std::move(admission)))
 {}
 WireEndpoint::~WireEndpoint() = default;
 bool WireEndpoint::available() const noexcept

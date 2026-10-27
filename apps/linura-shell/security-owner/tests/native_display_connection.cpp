@@ -88,6 +88,12 @@ class Harness final
                                 IntegrationSourceDigest},
             [](OutputKey key) -> std::optional<std::string> {
                 return key == OutputKey{1, 1} ? std::optional<std::string>("DP-1") : std::nullopt;
+            },
+            [](pid_t pid, uid_t uid) -> std::optional<WireEndpoint::OwnerInvocation> {
+                assert(pid == getpid() && uid == getuid());
+                WireEndpoint::OwnerInvocation invocation{};
+                invocation[0] = 1;
+                return invocation;
             });
         assert(endpoint->available());
         for (int i = 0; i < 3; ++i) {

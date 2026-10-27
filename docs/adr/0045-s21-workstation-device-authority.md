@@ -138,6 +138,21 @@ not qualify the integration. Actual private-header compilation, whole-compositor
 linking, live build/protocol identity, native mutation/restoration and S17 coverage
 must pass before activation or merge.
 
+The private native endpoint admits effects only from the kernel PID/UID of the
+exact root-supervised protected owner launch. One 250 ms fixed system-bus probe
+requires a root unique systemd owner, the immutable packaged service/image, no
+drop-ins, exact numeric User/MainPID/ExecStart, active running state and a nonzero
+InvocationID. A retained pidfd and repeated service/daemon evidence reject process
+exit, PID reuse and replacement during the probe. Every explicit confirmation or
+revert reattests the original invocation as well as the original connection.
+Private-global binding checks the same admission before allocating a client
+slot; ordinary same-UID clients cannot exhaust the protected-owner slots. An
+admitted replacement owner can observe old reservations without acquiring any
+continuation. No user service,
+environment-selected bus, local/root caller exemption or POSIX SID assumption can
+replace this evidence. Admission loss cannot stop automatic compositor recovery;
+admission itself never substitutes for prepared canonical Control authority.
+
 The compositor mechanism owns a native logind block inhibitor for both sleep and
 shutdown before its first layout write. It verifies the canonical system bus,
 root logind owner and both preparation facts under one 250 ms probe budget,

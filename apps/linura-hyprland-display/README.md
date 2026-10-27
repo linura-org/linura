@@ -91,7 +91,17 @@ The compositor owns the bounded BOOTTIME restoration timer and preserves all
 unrelated monitor-rule fields through a typed overlay. Reply acknowledgements
 are not native verification. Continuations require the original native client
 connection; another connection cannot disarm the timer using copied correlation
-fields. Linura's production caller must separately pass Control's canonical
+fields. Apply, confirm and explicit revert also require fresh kernel-peer and
+root-systemd evidence for the exact immutable `linura-security-owner@UID.service`
+launch. Binding the private global checks this before allocating a client slot;
+ordinary same-UID clients cannot exhaust the protected-owner capacity. The
+original invocation remains bound to the connection and reservation. A same-UID
+process, replaced owner, stopped service or unavailable system bus cannot mutate
+or retire the timer. An admitted replacement owner can observe old reservations;
+the compositor's automatic recovery remains independent of this admission.
+Each probe retains a pidfd and shares one
+250 ms deadline; it neither starts a service nor relies on a POSIX session ID.
+Linura's production caller must separately pass Control's canonical
 managed authority and prepared native-owner admission. The private protocol is
 an adapter mechanism, not a policy grant or public SDK.
 

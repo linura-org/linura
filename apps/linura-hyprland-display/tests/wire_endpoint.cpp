@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <mutex>
@@ -67,8 +68,9 @@ class Harness final
     std::unique_ptr<WireEndpoint> endpoint;
     std::vector<int> connections;
     std::atomic<bool> stop{false};
+    std::atomic<unsigned char> admittedInvocation{1};
     std::thread server;
-    Harness()
+    explicit Harness(int connectionCount = 3)
     {
         assert(display);
         auto *loop = wl_display_get_event_loop(display);
@@ -80,11 +82,20 @@ class Harness final
             [](OutputKey key) -> std::optional<std::string> {
                 return key == OutputKey{1, 1} ? std::optional<std::string>("fixture-output")
                                               : std::nullopt;
+            },
+            [this](pid_t pid, uid_t uid) -> std::optional<WireEndpoint::OwnerInvocation> {
+                assert(pid == getpid() && uid == getuid());
+                const auto value = admittedInvocation.load();
+                if (value == 0)
+                    return std::nullopt;
+                WireEndpoint::OwnerInvocation invocation{};
+                invocation[0] = value;
+                return invocation;
             });
         assert(endpoint->available());
         // Create server resources before starting its event thread. Two native
         // connections have identical kernel UID/PID but different ownership.
-        for (int i = 0; i != 3; ++i) {
+        for (int i = 0; i != connectionCount; ++i) {
             int pair[2];
             assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair) == 0);
             assert(wl_client_create(display, pair[0]));
@@ -131,7 +142,7 @@ class Client final
     linura_display_manager_v1 *manager = nullptr;
     std::vector<std::unique_ptr<SnapshotData>> snapshots;
     std::vector<std::unique_ptr<Attempt>> attempts;
-    explicit Client(int descriptor)
+    explicit Client(int descriptor, bool expectAccepted = true)
         : display(wl_display_connect_to_fd(descriptor)), registry(nullptr)
     {
         assert(display);
@@ -146,7 +157,18 @@ class Client final
             },
             [](void *, wl_registry *, std::uint32_t) {}};
         wl_registry_add_listener(registry, &listener, this);
-        sync();
+        auto result = wl_display_roundtrip(display);
+        if (expectAccepted) {
+            assert(result >= 0);
+        } else {
+            // The registry callback queues bind after get_registry. Depending
+            // on event batching its denial may arrive on either roundtrip.
+            if (result >= 0)
+                result = wl_display_roundtrip(display);
+            assert(result < 0 && wl_display_get_error(display) == EPROTO);
+            assert(wl_display_get_protocol_error(display, nullptr, nullptr) ==
+                   WL_DISPLAY_ERROR_IMPLEMENTATION);
+        }
         assert(manager);
     }
     ~Client()
@@ -332,10 +354,106 @@ void disconnectRetainsIndependentRestoration()
     observer.sync();
     assert(server.native.writes.load() == 2);
 }
+void admissionDenialCannotWriteOrRetry()
+{
+    Harness server;
+    Client client(server.connections[0]);
+    auto &sample = client.snapshot(); // Read-only evidence needs no mutation admission.
+    auto &attempt = client.attempt(correlation("transaction:wire-unattested"));
+    client.configure(attempt, sample);
+    server.admittedInvocation.store(0);
+    linura_display_attempt_v1_apply(attempt.wire);
+    client.sync();
+    assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED);
+    assert(server.native.writes.load() == 0);
+    server.admittedInvocation.store(1);
+    linura_display_attempt_v1_apply(attempt.wire);
+    client.sync();
+    assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED);
+    assert(server.native.writes.load() == 0);
+}
+void rejectedBindingsCannotExhaustProtectedOwnerSlots()
+{
+    Harness server(12);
+    server.admittedInvocation.store(0);
+    // More refused clients than the server's entire eight-client capacity.
+    // Their kernel UID and PID match this fixture, so only native admission
+    // distinguishes them. No mutation request or snapshot is necessary.
+    for (std::size_t i = 0; i < 11; ++i) {
+        Client rejected(server.connections[i], false);
+        assert(server.native.writes.load() == 0);
+    }
+    server.admittedInvocation.store(1);
+    Client admitted(server.connections.back());
+    auto &sample = admitted.snapshot();
+    auto &attempt = admitted.attempt(correlation("transaction:wire-admitted-after-denials"));
+    admitted.configure(attempt, sample);
+    linura_display_attempt_v1_apply(attempt.wire);
+    admitted.sync();
+    assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_PENDING &&
+           server.native.writes.load() == 1);
+    linura_display_attempt_v1_confirm(attempt.wire);
+    admitted.sync();
+    assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_CONFIRMED);
+}
+void changedInvocationCannotInheritAnAdmittedConnection()
+{
+    Harness server;
+    Client client(server.connections[0]);
+    auto &sample = client.snapshot();
+    auto &attempt = client.attempt(correlation("transaction:wire-replaced-before-apply"));
+    client.configure(attempt, sample);
+    server.admittedInvocation.store(2);
+    linura_display_attempt_v1_apply(attempt.wire);
+    client.sync();
+    assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED &&
+           server.native.writes.load() == 0);
+}
+void changedOrUnavailableOwnerCannotDecideButTimerRecovers()
+{
+    for (const auto replacement : {0U, 2U}) {
+        Harness server;
+        Client owner(server.connections[0]), observer(server.connections[1]);
+        observer.sync(); // Admit this observation connection before revocation.
+        auto &sample = owner.snapshot();
+        const auto bound = correlation("transaction:wire-owner-replaced", 750);
+        auto &attempt = owner.attempt(bound);
+        owner.configure(attempt, sample);
+        linura_display_attempt_v1_apply(attempt.wire);
+        owner.sync();
+        assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_PENDING &&
+               server.native.writes.load() == 1);
+        server.admittedInvocation.store(static_cast<unsigned char>(replacement));
+        linura_display_attempt_v1_confirm(attempt.wire);
+        owner.sync();
+        assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED);
+        // Recovering another resource on the SAME original connection cannot
+        // substitute a replacement invocation or bypass service unavailability.
+        auto &restoring = owner.attempt(bound);
+        linura_display_attempt_v1_restore(restoring.wire);
+        owner.sync();
+        assert(restoring.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED &&
+               server.native.writes.load() == 1);
+        auto &status = observer.attempt(bound);
+        const auto deadline = compositorClock()->bootMs + 3000;
+        while (status.phase != LINURA_DISPLAY_ATTEMPT_V1_PHASE_RESTORED &&
+               compositorClock()->bootMs < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            linura_display_attempt_v1_get_status(status.wire);
+            observer.sync();
+        }
+        assert(status.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_RESTORED &&
+               server.native.writes.load() == 2);
+    }
+}
 } // namespace
 int main()
 {
     ownershipAndOneUse();
     staleAndCrossSnapshotAreRejected();
     disconnectRetainsIndependentRestoration();
+    admissionDenialCannotWriteOrRetry();
+    rejectedBindingsCannotExhaustProtectedOwnerSlots();
+    changedInvocationCannotInheritAnAdmittedConnection();
+    changedOrUnavailableOwnerCannotDecideButTimerRecovers();
 }
