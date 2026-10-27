@@ -49,7 +49,15 @@ def reserve_run(run_id: str, development: bool) -> tuple[dict, str, bool]:
         raise ValueError(
             "exact-source preparation requires a clean checkout; use --development only for non-qualification work"
         )
-    if development:
+    # A CI job reserves its provider-owned root once, then this driver creates
+    # several fresh prepare/build runs inside it. Revalidate that exact root
+    # and every run boundary; never recreate it, relax its permissions or reuse
+    # an occupied run. Dedicated-volume preparation retains its existing path.
+    prepared_provider_root = (
+        os.environ.get("LINURA_STORAGE_CLASS") == "github-hosted-ephemeral"
+        and Path(storage.arguments(run_id).storage_root).exists()
+    )
+    if development or prepared_provider_root:
         paths = storage.run_layout(ROOT, ENVIRONMENT, run_id)
         for role in ("temporary", "vm", "cmake"):
             storage.private_tree(

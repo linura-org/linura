@@ -77,7 +77,7 @@ int main()
     assert(!f.confirm(*attempt));
     assert(!attempt->beginRestore(f.desired, f.topology, f.lock, true));
 
-    for (const auto times :
+    for (const auto &times :
          {std::pair<quint64, quint64>{16000, 16999}, {15999, 17000}, {999, 2002}, {1002, 1999}}) {
         auto expired = f.arm();
         assert(expired && f.apply(*expired));

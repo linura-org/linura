@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 import hashlib
 import io
+import os
 import subprocess
 import tarfile
 import tempfile
@@ -14,6 +15,100 @@ from tools import hyprland_display_build as build
 
 
 class HyprlandDisplayBuildTests(unittest.TestCase):
+    def test_exact_ci_subruns_validate_existing_provider_root_and_reserve_fresh_roles(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = {
+                "generated": {
+                    "temporary": str(root / "temporary"),
+                    "vm-disposable": str(root / "vm"),
+                    "cmake-build": str(root / "cmake"),
+                }
+            }
+            replies = [
+                subprocess.CompletedProcess([], 0, "a" * 40 + "\n"),
+                subprocess.CompletedProcess([], 0, b""),
+            ]
+            with (
+                patch.dict(
+                    os.environ, {"LINURA_STORAGE_CLASS": "github-hosted-ephemeral"}
+                ),
+                patch.object(build, "run", side_effect=replies),
+                patch.object(
+                    build.storage,
+                    "arguments",
+                    return_value=argparse.Namespace(storage_root=root),
+                ),
+                patch.object(build.storage, "run_layout", return_value=paths) as guard,
+                patch.object(build.storage, "private_tree") as reserve,
+                patch.object(build.storage, "prepare") as prepare,
+            ):
+                observed, sha, dirty = build.reserve_run("fresh-sdk-run", False)
+                self.assertEqual(observed, paths)
+                self.assertEqual(sha, "a" * 40)
+                self.assertFalse(dirty)
+                guard.assert_called_once_with(
+                    build.ROOT, build.ENVIRONMENT, "fresh-sdk-run"
+                )
+                self.assertEqual(reserve.call_count, 3)
+                self.assertTrue(
+                    all(
+                        call.kwargs == {"exclusive": True}
+                        for call in reserve.call_args_list
+                    )
+                )
+                prepare.assert_not_called()
+
+    def test_existing_provider_root_cannot_bypass_guard_or_reuse_an_occupied_run(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = {
+                "generated": {
+                    "temporary": str(root / "temporary"),
+                    "vm-disposable": str(root / "vm"),
+                    "cmake-build": str(root / "cmake"),
+                }
+            }
+            for failure in ("root", "occupied"):
+                replies = [
+                    subprocess.CompletedProcess([], 0, "a" * 40 + "\n"),
+                    subprocess.CompletedProcess([], 0, b""),
+                ]
+                with (
+                    self.subTest(failure=failure),
+                    patch.dict(
+                        os.environ, {"LINURA_STORAGE_CLASS": "github-hosted-ephemeral"}
+                    ),
+                    patch.object(build, "run", side_effect=replies),
+                    patch.object(
+                        build.storage,
+                        "arguments",
+                        return_value=argparse.Namespace(storage_root=root),
+                    ),
+                    patch.object(
+                        build.storage,
+                        "run_layout",
+                        side_effect=ValueError("root rejected")
+                        if failure == "root"
+                        else None,
+                        return_value=paths,
+                    ),
+                    patch.object(
+                        build.storage,
+                        "private_tree",
+                        side_effect=FileExistsError("occupied"),
+                    ) as reserve,
+                    patch.object(build.storage, "prepare") as prepare,
+                ):
+                    with self.assertRaises((ValueError, FileExistsError)):
+                        build.reserve_run("fresh-sdk-run", False)
+                    self.assertEqual(reserve.call_count, 0 if failure == "root" else 1)
+                    prepare.assert_not_called()
+
     def sdk_archive(self, root: Path, name: str, target: str | None = None) -> Path:
         archive = root / "sdk.tar"
         with tarfile.open(archive, "w") as stream:

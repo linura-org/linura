@@ -496,6 +496,7 @@ def validate(root: Path) -> list[str]:
         "timeout-minutes: 90",
         "VM_ACCELERATION: kvm",
         "- name: Verify KVM device and grant the isolated runner access",
+        '[[ "$VM_ACCELERATION" == kvm ]]\n          [[ -c /dev/kvm ]]',
         "[[ -c /dev/kvm ]]",
         "sudo chmod 0600 /dev/kvm",
         "[[ -r /dev/kvm && -w /dev/kvm ]]",
