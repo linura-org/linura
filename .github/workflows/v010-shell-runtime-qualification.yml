@@ -189,6 +189,77 @@ jobs:
           key: ${{ steps.prepared-substrate.outputs.cache-primary-key }}
 
 
+
+  display-build:
+    name: exact-source pinned Hyprland display build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.sha }}
+
+      - name: Load repository toolchain contract
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
+
+      - name: Prepare guarded qualification storage
+        env:
+          LINURA_STORAGE_ROOT: ${{ vars.LINURA_STORAGE_ROOT }}
+          LINURA_STORAGE_ID: ${{ vars.LINURA_STORAGE_ID }}
+        run: bash scripts/prepare_qualification_storage.sh arch-hyprland-runtime
+
+      - name: Assert exact source and display build contract
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          python3 tools/check_v010_shell_runtime_qualification.py
+
+      - name: Install disposable display builder dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cloud-image-utils openssh-client qemu-system-x86 qemu-utils
+
+      - name: Verify display build KVM access
+        run: |
+          set -euo pipefail
+          [[ -c /dev/kvm ]]
+          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          sudo chmod 0600 /dev/kvm
+          test "$(stat -c '%u:%g:%a:%F' /dev/kvm)" = "$(id -u):$(id -g):600:character special file"
+          [[ -r /dev/kvm && -w /dev/kvm ]]
+
+      - name: Build exact-source display integration with pinned Arch SDK
+        run: |
+          set -euo pipefail
+          python3 tools/hyprland_display_build.py ci-build \
+            --run "${LINURA_RUN_ID}-display" \
+            --diagnostics "$LINURA_WORK_DIR" \
+            --acceleration kvm --memory-mib 4096 --jobs 1
+
+      - name: Upload S21 compositor build diagnostics
+        if: ${{ always() && steps.toolchain_data.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linura-s21-display-build-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}-unqualified-diagnostics
+          path: |
+            ${{ env.LINURA_WORK_DIR }}/s21-prepare.log
+            ${{ env.LINURA_WORK_DIR }}/s21-build.log
+            ${{ env.LINURA_WORK_DIR }}/s21-qemu.log
+            ${{ env.LINURA_WORK_DIR }}/s21-build-result.json
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 6
+
   runtime:
     name: exact-source Arch/Hyprland/Quickshell runtime
     needs: substrate

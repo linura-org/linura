@@ -20,8 +20,17 @@ import time
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES = ("core", "shell", "editor", "bindings", "vm", "image", "visual")
-QT_MODULES = ("Qt6Core", "Qt6DBus", "Qt6Qml", "Qt6Quick", "Qt6QuickControls2")
+PROFILES = (
+    "core",
+    "shell",
+    "editor",
+    "bindings",
+    "vm",
+    "image",
+    "visual",
+    "hyprland-build",
+)
+QT_MODULES = ("Qt6Core", "Qt6DBus", "Qt6Gui", "Qt6Qml", "Qt6Quick", "Qt6QuickControls2")
 
 
 @dataclass(frozen=True)
@@ -184,6 +193,101 @@ def pinned_python_ready(tool_root: Path, env: dict[str, str], major_minor: str) 
     return True
 
 
+def hyprland_build_checks(env: dict[str, str]) -> list[Check]:
+    """Read-only SDK checks inside the pinned Arch build environment.
+
+    This standalone C++ profile does not require Rust, QML editor imports, a
+    running compositor or physical hardware. Actual builds and Level A/B/C
+    evidence remain separate. Generic host preparation must not substitute its
+    current distribution packages for this source-pinned SDK.
+    """
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tools.hyprland_display_environment import CONTRACT, REQUIRED, load_contract
+
+    contract = load_contract(CONTRACT)
+    checks: list[Check] = []
+    remedy = "Prepare the S21 pinned SDK with tools/hyprland_display_build.py prepare; run this profile inside that environment. Readiness is not qualification."
+
+    def add(name: str, ready: bool, status: str = "unverified") -> None:
+        checks.append(
+            Check("hyprland-build", name, ready, remedy, "ready" if ready else status)
+        )
+
+    try:
+        arch = platform.freedesktop_os_release().get("ID") == "arch"
+    except OSError:
+        arch = False
+    add(
+        "pinned-arch-host",
+        arch and platform.system() == "Linux" and platform.machine() == "x86_64",
+        "incompatible",
+    )
+    inventory = probe(["pacman", "-Q"], env) if arch else None
+    installed: dict[str, str] = {}
+    valid = inventory is not None
+    for line in (inventory or "").splitlines():
+        fields = line.split()
+        if len(fields) != 2 or fields[0] in installed:
+            valid = False
+            break
+        installed[fields[0]] = fields[1]
+    build_packages = [
+        record
+        for record in contract["package"]
+        if record["name"] in REQUIRED | {"python"}
+    ]
+    for record in [*build_packages, contract["archived_package"]]:
+        add(
+            "sdk-package-" + record["name"],
+            valid and installed.get(record["name"]) == record["version"],
+            "incompatible" if inventory is not None else "unverified",
+        )
+    for binary in ("cmake", "ctest", "ninja", "c++", "pkg-config", "wayland-scanner"):
+        add(binary, shutil.which(binary, path=env["PATH"]) is not None, "missing")
+    compiler = probe(["c++", "-dumpfullversion"], env)
+    expected_gcc = next(
+        record["version"] for record in contract["package"] if record["name"] == "gcc"
+    ).split("+")[0]
+    add(
+        "pinned-cxx-compiler",
+        compiler == expected_gcc,
+        "incompatible" if compiler is not None else "unverified",
+    )
+    cmake = probe(["cmake", "--version"], env)
+    version = re.search(r"cmake version (\d+)\.(\d+)", cmake or "")
+    add("cmake-minimum", bool(version and tuple(map(int, version.groups())) >= (3, 30)))
+    add(
+        "gles3-egl-headers",
+        Path("/usr/include/GLES3/gl3.h").is_file()
+        and Path("/usr/include/EGL/egl.h").is_file(),
+        "missing",
+    )
+    add(
+        "native-sdk-modules",
+        probe(
+            [
+                "pkg-config",
+                "--exists",
+                "glesv2",
+                "egl",
+                "wayland-server",
+                "wayland-protocols",
+                "aquamarine",
+                "hyprutils",
+                "hyprgraphics",
+                "hyprlang",
+                "hyprcursor",
+                "hyprwire",
+                "libeis-1.0",
+            ],
+            env,
+        )
+        is not None,
+    )
+    return checks
+
+
 def inventory(selected: set[str]) -> list[Check]:
     pins = versions()
     env = os.environ.copy()
@@ -194,6 +298,8 @@ def inventory(selected: set[str]) -> list[Check]:
     # Diagnostic Rust calls cannot trigger downloads or toolchain self-updates.
     env["RUSTUP_AUTO_INSTALL"] = "0"
     env["CARGO_NET_OFFLINE"] = "true"
+    if selected == {"hyprland-build"}:
+        return hyprland_build_checks(env)
     checks: list[Check] = []
 
     def add(
@@ -383,7 +489,7 @@ def inventory(selected: set[str]) -> list[Check]:
 
     qt_sdk_version: str | None = None
     if "shell" in selected or "editor" in selected or "image" in selected:
-        commands("shell", ("cmake", "ninja", "pkg-config", "c++"))
+        commands("shell", ("cmake", "ctest", "ninja", "pkg-config", "c++"))
         commands("shell", ("wayland-scanner",))
         for module, requirement in (
             ("wayland-client", "wayland-client"),
@@ -391,6 +497,7 @@ def inventory(selected: set[str]) -> list[Check]:
             ("wayland-protocols", "wayland-protocols >= 1.34"),
             ("xkbcommon", "xkbcommon >= 1.6"),
             ("polkit-agent-1", "polkit-agent-1"),
+            ("glib-2.0", "glib-2.0"),
         ):
             add(
                 "shell",
@@ -399,6 +506,24 @@ def inventory(selected: set[str]) -> list[Check]:
                 f"Prepare {requirement} for native security-owner component builds; "
                 "a successful probe is not runtime qualification.",
             )
+        add(
+            "shell",
+            "native-pam-header",
+            probe_status(
+                [
+                    "c++",
+                    "-std=c++20",
+                    "-fsyntax-only",
+                    "-x",
+                    "c++",
+                    "-include",
+                    "security/pam_appl.h",
+                    "/dev/null",
+                ],
+                env,
+            ),
+            "Prepare PAM development headers for the native security-owner authentication helper; run full CMake/CTest separately.",
+        )
         cmake = probe(["cmake", "--version"], env)
         match = re.search(r"cmake version (\d+)\.(\d+)", cmake or "")
         add(
@@ -564,6 +689,8 @@ def inventory(selected: set[str]) -> list[Check]:
         )
     if "visual" in selected:
         commands("visual", ("compare", "ffmpeg", "ffprobe"))
+    if "hyprland-build" in selected:
+        checks.extend(hyprland_build_checks(env))
     return checks
 
 
@@ -574,7 +701,8 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     selected = set(PROFILES if args.all else (args.profile or ["core"]))
-    selected.add("core")
+    if selected != {"hyprland-build"}:
+        selected.add("core")
     if "image" in selected:
         selected.add("shell")
     try:

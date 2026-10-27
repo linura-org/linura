@@ -134,6 +134,19 @@ SPECIALIZED = {
         ".github/workflows/v010-qualification.yml",
         (
             "apps/linura-shell/bridge/CMakeLists.txt",
+            "apps/linura-hyprland-display/CMakeLists.txt",
+            "contracts/hyprland-display-integration.toml",
+            "tools/hyprland_display_source.py",
+            "contracts/s21-hyprland-build-environment.toml",
+            "tools/hyprland_display_environment.py",
+            "tools/hyprland_display_build.py",
+            "tools/codex/native-profiles.toml",
+            "tools/codex/native.py",
+            "tests/tooling/test_codex_readiness.py",
+            "tests/tooling/test_codex_native.py",
+            "tests/tooling/test_hyprland_display_environment.py",
+            "tests/tooling/test_hyprland_display_build.py",
+            "tests/tooling/test_hyprland_display_source.py",
             "contracts/v010-workstation-slices.toml",
             "qualification/v010/shell-runtime/run-shell-runtime.sh",
             "qualification/v010/shell-runtime/native-keyboard.c",
@@ -786,6 +799,9 @@ REVIEWED_STEP_CONDITIONS = {
         "Collect QEMU diagnostics": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
         "Upload unqualified v0.10 shell diagnostics": "${{ failure() && steps.toolchain_data.outcome == 'success' }}",
     },
+    ("v010-reusable", "display-build"): {
+        "Upload S21 compositor build diagnostics": "${{ always() && steps.toolchain_data.outcome == 'success' }}",
+    },
 }
 
 
@@ -1259,7 +1275,7 @@ REVIEWED_SHELL_EXECUTION = {
     # recorder paths and callback helpers. Here-doc data is conservatively
     # included in the scan; the digest also binds those opaque bodies.
     "scripts/prepare_qualification_storage.sh": "4967e7217aeb4644fb645f47e1f47c4983785e4a134c146ab1dbea770bd55546",
-    "qualification/v010/shell-runtime/prepare-substrate.sh": "3343b0bb022e493a9cba6f28d22aa2c31625d2fd43d7671d96edba3afccda3b9",
+    "qualification/v010/shell-runtime/prepare-substrate.sh": "4d5123c8f3337fd0cb6bc14e2e7bd066b4c3e18b6bf057e68e25e215c42c51ea",
     "qualification/v010/shell-runtime/run-shell-runtime.sh": "69c489d06175c89840e38adbc80ecdbea7486d8ff6a955f3a68e1073c05d8755",
     "qualification/v010/shell-runtime/start-vm.sh": "c2f516674ee155d6cd6f25caab2cd90d6aaa264fc4ddb997a0d4c036dbd6267b",
     "qualification/v010/workstation-acceptance/capture-hardware-session.sh": "ce2257338be8b6b1f9b07248102f28808bbbecf83277f886163127e244d11ad3",
@@ -3559,7 +3575,7 @@ def check(root: Path = ROOT) -> list[str]:
             workflow + ": missing exact-source executable binding",
         )
 
-    # The reusable workflow has its own two checkouts. A correctly bound
+    # Every reusable job has its own checkout. A correctly bound
     # caller cannot compensate for an overridden checkout in either callee job.
     reusable = read(".github/workflows/v010-shell-runtime-qualification.yml")
     reusable_jobs = section(reusable, "jobs") or ""
@@ -3574,6 +3590,7 @@ def check(root: Path = ROOT) -> list[str]:
     for job_name, assertion in (
         ("substrate", "Assert exact source and substrate contract"),
         ("runtime", "Assert exact source and runtime contract"),
+        ("display-build", "Assert exact source and display build contract"),
     ):
         body = section(reusable_jobs, job_name, 2)
         step = workflow_step(body or "", 4, "name", assertion)
@@ -3604,6 +3621,25 @@ def check(root: Path = ROOT) -> list[str]:
             + job_name
             + ": missing exact-source executable binding",
         )
+    display_build = section(reusable_jobs, "display-build", 2) or ""
+    build_step = workflow_step(
+        display_build,
+        4,
+        "name",
+        "Build exact-source display integration with pinned Arch SDK",
+    )
+    require(
+        step_is_unconditional(build_step, 4)
+        and executable_run_block(build_step, 4)
+        == (
+            "set -euo pipefail",
+            "python3 tools/hyprland_display_build.py ci-build \\",
+            '  --run "${LINURA_RUN_ID}-display" \\',
+            '  --diagnostics "$LINURA_WORK_DIR" \\',
+            "  --acceleration kvm --memory-mib 4096 --jobs 1",
+        ),
+        "v0.10 display build: pinned SDK/compositor build cannot be skipped or substituted",
+    )
     for filename, job, environment in (
         ("vm-acceptance.yml", "vm", "generic-vm"),
         ("v04-durability-vm.yml", "durability", "generic-vm"),
@@ -3613,6 +3649,11 @@ def check(root: Path = ROOT) -> list[str]:
         ("v09-adversarial-security.yml", "exact-guest", "generic-vm"),
         ("v010-shell-runtime-qualification.yml", "substrate", "arch-hyprland-runtime"),
         ("v010-shell-runtime-qualification.yml", "runtime", "arch-hyprland-runtime"),
+        (
+            "v010-shell-runtime-qualification.yml",
+            "display-build",
+            "arch-hyprland-runtime",
+        ),
     ):
         text = read(".github/workflows/" + filename)
         body = section(text, job, 2) or ""

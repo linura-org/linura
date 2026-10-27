@@ -716,6 +716,7 @@ execution_lanes = ["v010-workstation-contract","v010-shell-runtime"]
 required_jobs = [
   "v0.10 exact-source workstation contract",
   "v0.10 shell runtime qualification / prepared immutable Arch runtime substrate",
+  "v0.10 shell runtime qualification / exact-source pinned Hyprland display build",
   "v0.10 shell runtime qualification / exact-source Arch/Hyprland/Quickshell runtime",
 ]
 paths = [
@@ -736,6 +737,19 @@ paths = [
   "contracts/v010-workstation-acceptance.toml",
   "schemas/v010-maintained-workstation-fixture.v1.schema.json",
   "apps/linura-shell/**",
+  "apps/linura-hyprland-display/**",
+  "contracts/hyprland-display-integration.toml",
+  "tools/hyprland_display_source.py",
+  "contracts/s21-hyprland-build-environment.toml",
+  "tools/hyprland_display_environment.py",
+  "tools/hyprland_display_build.py",
+  "tools/codex/native-profiles.toml",
+  "tools/codex/native.py",
+  "tests/tooling/test_codex_readiness.py",
+  "tests/tooling/test_codex_native.py",
+  "tests/tooling/test_hyprland_display_environment.py",
+  "tests/tooling/test_hyprland_display_build.py",
+  "tests/tooling/test_hyprland_display_source.py",
   "!apps/linura-shell/AGENTS.md",
   "!apps/linura-shell/README.md",
   "apps/linurad/**",
@@ -1108,6 +1122,11 @@ path = "crates/linura-control"
 gates = ["control1-plan-preview","v04-durability","v06-managed-lifecycle","v08-agent","v09-qualification","v010-workstation"]
 
 [[component]]
+id = "linura-hyprland-display"
+path = "apps/linura-hyprland-display"
+gates = ["v010-workstation"]
+
+[[component]]
 id = "linura-bootstrap"
 path = "crates/linura-bootstrap"
 gates = ["vm-acceptance","v09-qualification"]
@@ -1258,6 +1277,10 @@ path = "contracts/v010-s21-design.toml"
 gates = ["v010-workstation"]
 
 [[contract]]
+path = "contracts/hyprland-display-integration.toml"
+gates = ["v010-workstation"]
+
+[[contract]]
 path = "contracts/v09-qualification-routing.toml"
 gates = ["v09-qualification"]
 [[contract]]
@@ -1395,3 +1418,7 @@ gates = ["control1-plan-preview","v06-managed-lifecycle","v09-qualification"]
 [[contract]]
 path = "interfaces/dbus/org.linura.Authority1.xml"
 gates = ["control1-plan-preview","v06-managed-lifecycle","v09-qualification"]
+
+[[contract]]
+path = "contracts/s21-hyprland-build-environment.toml"
+gates = ["v010-workstation"]

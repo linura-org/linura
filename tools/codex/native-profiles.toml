@@ -40,3 +40,48 @@ arch = ["archiso"]
 requires = ["core"]
 ubuntu = ["ffmpeg", "imagemagick"]
 arch = ["ffmpeg", "imagemagick"]
+
+# Inventory inside the pinned S21 SDK. Generic host preparation cannot replace
+# its archived dependencies with current rolling packages or downgrade a host.
+[profile.hyprland-build]
+requires = []
+supported = ["arch"]
+preparation = "s21-pinned-substrate"
+ubuntu = []
+arch = [
+  "aquamarine",
+  "base-devel",
+  "cairo",
+  "cmake",
+  "gcc",
+  "git",
+  "glslang",
+  "gtest",
+  "hyprcursor",
+  "hyprgraphics",
+  "hyprland",
+  "hyprland-protocols",
+  "hyprlang",
+  "hyprutils",
+  "hyprwayland-scanner",
+  "hyprwire",
+  "lcms2",
+  "libdrm",
+  "libei",
+  "libglvnd",
+  "libinput",
+  "lua",
+  "mesa",
+  "meson",
+  "muparser",
+  "ninja",
+  "pango",
+  "pixman",
+  "pkgconf",
+  "python",
+  "re2",
+  "tomlplusplus",
+  "wayland",
+  "wayland-protocols",
+  "xorgproto",
+]

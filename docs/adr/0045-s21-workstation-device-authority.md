@@ -82,12 +82,70 @@ independent output rejects mutation planning.
 
 The trusted registry now registers `operation:display.layout.apply` with managed,
 security-sensitive semantics. Draft protected-journal phase records, an
-unconnected display lifecycle controller, native command formatting and a
-bounded peer-checked compositor IPC mechanism exist. Registration and component
+unconnected display lifecycle controller, candidate formatter fixtures and
+bounded peer-checked read-only compositor IPC exist. Registration and component
 code do **not** activate an authorized executor, independently timed rollback,
 restart-safe restoration or a public display mutation endpoint. The display
 mutation route must remain disabled until the complete native execution and
 recovery contract passes pinned-runtime and adversarial qualification.
+
+The managed controller validates the entire reserved/dispatch/decision/terminal
+chain before either status classification or continuation. Native attempt facts
+cannot renew their freshness while independent verification runs. Verified
+restoration uses a fresh invocation of the same canonical display planner to
+prove the exact retained baseline, then closes the original desired-state
+transaction in its existing `RecoveryBlocked` state. The desired layout did not
+commit and cannot reprepare/replay; an immutable display `Restored` phase records
+the compensated baseline separately. A crash between these writes reconciles
+fresh facts and finishes bookkeeping without any apply. No released transaction
+schema/state is reinterpreted as successful execution.
+
+The native attempt gate and Qt watchdog are component mechanisms. They reserve
+apply and baseline restoration separately before write construction, compare
+both suspend-inclusive and wall-clock deadlines, retain fences on uncertainty,
+and require fresh full-layout/coverage proof to clear recovery. An acknowledged
+restore remains `Restoring`; an uncertain acknowledgement can be resolved by
+independent baseline evidence without retry. Ordinary watchdog teardown cannot
+silently remove an armed timer. These components remain unconnected to production
+dispatch. A timer in one process does not establish recovery after that process
+or compositor dies: independent recovery-owner integration and real crash
+qualification remain mandatory before activation.
+
+The candidate `keyword monitor` writer was removed before activation after
+review of pinned upstream v0.56.2. Legacy `handleMonitor` constructs a new monitor
+rule and `CMonitorRuleManager::add` replaces the prior named rule. Consequently
+an apparently bounded layout write can also reset color, VRR, ICC or reserved
+area settings outside the reviewed `LNDI:1` intent. The standard output-management
+override preserves unrelated rule fields but supplies no mirroring request.
+Finishing the native executor therefore requires a qualified typed mechanism
+that preserves unmanaged fields while supporting every required layout effect;
+merely restoring the string writer or treating mirrored geometry as mirroring is
+not an acceptable activation path.
+
+The S21-2 candidate therefore uses an exact-source integration into Hyprland
+v0.56.2, pinned by `contracts/hyprland-display-integration.toml`. It introduces a
+bounded private typed adapter, a compositor-owned BOOTTIME restoration timer and
+a monitor-rule overlay preserving unmanaged fields. This is a static integration,
+not a dynamically loaded plugin ABI. Component fixtures and source staging do
+not qualify the integration. Actual private-header compilation, whole-compositor
+linking, live build/protocol identity, native mutation/restoration and S17 coverage
+must pass before activation or merge.
+
+Development readiness reuses `core`/`shell`/`editor`; `shell` already covers the
+security-owner prerequisites, with full native CMake/CTest required separately.
+The standalone `hyprland-build` inventory checks the source-pinned Arch SDK and
+does not require Rust or QML editor tooling inside it. The SDK driver reuses the
+existing disposable Arch substrate builder, native pacman signature protection
+and guarded storage. A missing GLES3/library/ABI prerequisite belongs to S21-2,
+not S21-7. No generic host installer may replace these pins with rolling packages
+or downgrade a maintained host to satisfy the SDK check.
+
+These are three build-readiness contexts, not a new environment or acceptance
+hierarchy. Extend existing Level A for display execution, rollback, process loss,
+hotplug and S17 lock coverage in S21-2. Preserve optional Level B and maintained
+physical Level C/Q11 as defined by the existing acceptance contract. Full display
+UI convergence remains S21-6; cross-domain and physical qualification remain
+S21-7/release. General S17 historical-acceptance reconciliation is separate work.
 
 ### Native backlight
 

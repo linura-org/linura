@@ -750,6 +750,28 @@ for the current implementation status.
 
 ### S21 device identity substitution, insecure output topology and media loss
 
+- A source-pinned compositor integration is a bounded native mechanism, never
+  policy or privileged execution authority. The production caller must retain
+  canonical Rust planning, authenticated principal binding, managed durable
+  prepare/revalidation and fresh independent verification. Correlation fields
+  cannot authorize a display change or let another connection confirm one.
+- A pending attempt's BOOTTIME timer belongs to the compositor, survives native
+  client disconnect, and reserves baseline compensation once before dispatch.
+  Acknowledgements cannot establish restoration. Compositor loss, stale native
+  lifetimes, coverage gaps and failed compensation remain indeterminate until
+  independently reconciled; they cannot silently replay or renew authority.
+- Compile against the exact reviewed Hyprland source/API and preserve unrelated
+  monitor-rule fields. Reject mismatched integration identities, missing
+  GLES3/EGL/SDK dependencies, unsupported environments and unverified native
+  outcomes. Preserve the upstream security-context global filter: sandboxed
+  clients must not acquire the new privileged display global. Native negative
+  qualification must exercise this boundary, beyond generic protocol fixtures.
+- SDK/package inventories and development caches are not native or physical
+  evidence. Reuse the existing Level A/B/C contracts, with display execution,
+  restoration and S17 lock coverage required in S21-2 and physical Q11 separately
+  maintained. No build profile, self-reported phase or old-head result promotes
+  readiness to runtime acceptance or release support.
+
 A client, provider or stale resource alias may retarget approved operations to
 another compositor output, physical backlight, removable drive or login session;
 a partial write or lost reply may be misrepresented as verified completion.
