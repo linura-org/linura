@@ -50,16 +50,4 @@ observeNativeHyprlandLock(const QString &nativeSocketPath, const NativeSessionBi
 [[nodiscard]] std::optional<QByteArray>
 observeNativeHyprlandOutputs(const QString &nativeSocketPath, const NativeSessionBinding &binding);
 
-struct NativeDisplayWriteResult final
-{
-    bool attempted = false;
-    bool allAcknowledged = false;
-};
-// A closed typed display mechanism, never a raw command/argv API. The native
-// runtime may call it only after its prepared caller and recovery gates hold.
-// Acknowledgement is not a postcondition or an atomicity promise.
-[[nodiscard]] NativeDisplayWriteResult
-applyNativeHyprlandLayout(const NativeDisplayLayout &layout, const NativeDisplaySnapshot &snapshot,
-                          const QString &nativeSocketPath, const NativeSessionBinding &binding);
-
 } // namespace Linura::SecurityOwner

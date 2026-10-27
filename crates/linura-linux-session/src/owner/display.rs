@@ -13,6 +13,7 @@ use linura_observation::{
     ObservedValue, display_observation_attributes,
 };
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use super::{
     ENDPOINT, INTERFACE, NativeSessionChannel, NativeSessionRole, boot_ms, current_boot,
@@ -20,6 +21,24 @@ use super::{
 };
 
 type Wire = (String, String, String, u64, String, String, bool);
+
+fn sample_digest(sample: &Wire) -> linura_provider_sdk::ComponentDigest {
+    let (resource, compositor, seat, _, topology, monitors, secure) = sample;
+    let mut hash = Sha256::new();
+    for field in [
+        "linura.native.display-sample.v1",
+        resource,
+        compositor,
+        seat,
+        topology,
+        monitors,
+        if *secure { "true" } else { "false" },
+    ] {
+        hash.update((field.len() as u64).to_be_bytes());
+        hash.update(field.as_bytes());
+    }
+    linura_provider_sdk::ComponentDigest::from_bytes(hash.finalize().into())
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -263,6 +282,99 @@ fn project(
 }
 
 impl NativeSessionChannel {
+    /// Executor-only read/validation. Returned digest and conservative boot time
+    /// correlate the strict decoder with the owner's immediate native recheck;
+    /// neither is a prepared permit or a reusable mutation credential.
+    pub fn validate_prepared_display(
+        &self,
+        material: &str,
+        sequence: u64,
+    ) -> Result<(linura_provider_sdk::ComponentDigest, u64), String> {
+        self.require_role(NativeSessionRole::Executor)?;
+        let material =
+            linura_core::DisplayLayoutMaterial::decode(material).map_err(|e| e.to_string())?;
+        let started = Instant::now();
+        let boot = current_boot()?;
+        let identity = self.discover(material.lock().epoch().uid(), started)?;
+        let reply = self.call_with_budget(
+            &identity.unique_name,
+            ENDPOINT,
+            INTERFACE,
+            "ObservePreparedDisplay",
+            &(),
+            owner_reply_budget(started.elapsed())?,
+        )?;
+        if reply.body().signature().to_string() != "((ssstssb)s)" {
+            return Err("prepared native display observation signature mismatch".into());
+        }
+        let ((sample, digest),): ((Wire, String),) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "prepared native display observation codec mismatch")?;
+        if sample.0.len() > 256
+            || sample.1.len() > 36
+            || sample.2.len() > 32
+            || sample.4.len() > 64 * 1024
+            || sample.5.len() > 256 * 1024
+        {
+            return Err("prepared native display sample exceeds its bound".into());
+        }
+        let digest =
+            linura_provider_sdk::ComponentDigest::parse_hex(&digest).map_err(|e| e.to_string())?;
+        if sample_digest(&sample) != digest {
+            return Err("prepared native display sample correlation mismatch".into());
+        }
+        self.revalidate_observation(&identity, &boot, started)?;
+        let now = unix_ms()?;
+        let coverage = observation(
+            &identity,
+            &boot,
+            &sample.0,
+            sample.6,
+            sample.3,
+            boot_ms()?,
+            now,
+            sequence,
+        )?;
+        if coverage.resource != material.lock().resource_id().map_err(|e| e.to_string())? {
+            return Err("prepared display lock generation changed".into());
+        }
+        let (display, coverage) = project(coverage, &sample.1, &sample.2, &sample.4, &sample.5)?;
+        let active = coverage.attributes.get("observed_outputs");
+        let covered = coverage.attributes.get("covered_outputs");
+        if sample.6 && active != covered
+            || !sample.6 && covered != Some(&ObservedValue::Text(String::new()))
+        {
+            return Err("prepared display has incomplete independent lock coverage".into());
+        }
+        let facts = linura_observation::DisplayObservationFacts::from_envelope(
+            &display,
+            material.topology(),
+            unix_ms()?,
+        )
+        .map_err(|e| e.to_string())?;
+        let intent = material
+            .validate_native(facts.inventory(), facts.capabilities())
+            .map_err(|e| e.to_string())?;
+        if facts.layout() != intent.baseline()
+            || !facts.has_powered_independent_output()
+            || !intent.desired().outputs().iter().any(|row| {
+                matches!(row,
+                DisplayOutputLayout::Enabled { output, mirror: None, .. }
+                    if facts.powered_outputs().contains(output))
+            })
+        {
+            return Err("prepared display baseline or visible recovery output changed".into());
+        }
+        if started.elapsed() >= crate::bus::PROBE_BUDGET {
+            return Err("prepared display validation exceeded its original deadline".into());
+        }
+        display
+            .require_current(unix_ms()?)
+            .map_err(|e| e.to_string())?;
+        Ok((digest, sample.3))
+    }
+
     fn native_display_sample(
         &self,
         uid: u32,
@@ -340,6 +452,25 @@ impl NativeSessionChannel {
             return Err("native display lock generation was replaced".into());
         }
         Ok(coverage)
+    }
+    /// One coherent native sample projected into two canonical capabilities.
+    /// Neither result is an executor receipt or permission to change outputs.
+    pub fn observe_display_pair(
+        &self,
+        topology: &DisplayTopologyId,
+        lock: &SessionLockId,
+        sequence: u64,
+    ) -> Result<(ObservationEnvelope, ObservationEnvelope), String> {
+        if topology.session() != lock.epoch() {
+            return Err("display and lock refer to different sessions".into());
+        }
+        let (display, coverage) = self.native_display_sample(topology.session().uid(), sequence)?;
+        if display.resource != topology.resource_id().map_err(|e| e.to_string())?
+            || coverage.resource != lock.resource_id().map_err(|e| e.to_string())?
+        {
+            return Err("native display or lock generation was replaced".into());
+        }
+        Ok((display, coverage))
     }
 }
 

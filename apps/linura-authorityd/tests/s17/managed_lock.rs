@@ -679,17 +679,18 @@ fn leave_dispatched_lock_ambiguous(
     );
     let mut executor = ScriptedExecutor::failure(calls.clone());
     let mut verifier = ScriptedVerifier::new([]);
-    assert!(matches!(
-        control.converge_session_lock(
-            principal(),
-            actor(true),
-            request.clone(),
-            &approval(),
-            &mut executor,
-            &mut verifier
-        ),
-        Err(ManagedLifecycleError::Executor(_))
-    ));
+    let result = control.converge_session_lock(
+        principal(),
+        actor(true),
+        request.clone(),
+        &approval(),
+        &mut executor,
+        &mut verifier,
+    );
+    assert!(
+        matches!(result, Err(ManagedLifecycleError::Executor(_))),
+        "expected an ambiguous executor handoff, got {result:?}"
+    );
 }
 
 #[test]

@@ -82,6 +82,11 @@ impl Record {
     ) -> Result<Self, ManagedLifecycleError> {
         if deadline_unix_ms == 0
             || recorded_at_unix_ms == 0
+            || matches!(phase, Phase::Reserved | Phase::Dispatched)
+                && recorded_at_unix_ms >= deadline_unix_ms
+            || phase == Phase::Reserved
+                && deadline_unix_ms.saturating_sub(recorded_at_unix_ms)
+                    > crate::managed_lifecycle::DISPLAY_CONFIRMATION_WINDOW_MS
             || request_digest == ContentDigest::zero()
             || previous.as_ref() == Some(&ContentDigest::zero())
             || observation_digest.as_ref() == Some(&ContentDigest::zero())
@@ -99,6 +104,7 @@ impl Record {
             ) && observation_digest.is_none()
             || dispatch_digest.as_ref().is_some_and(|digest| {
                 digest.len() != 64
+                    || digest == &"0".repeat(64)
                     || !digest
                         .bytes()
                         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))

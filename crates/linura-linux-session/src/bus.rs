@@ -19,6 +19,18 @@ pub(crate) const MAX_REPLY_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_DISPLAY_REPLY_BYTES: usize = 384 * 1024;
 pub(crate) const INTERACTION_BUDGET: Duration = Duration::from_secs(60);
 
+fn reply_limit(role: NativeSessionRole, path: &str, interface: &str, method: &str) -> usize {
+    if path == "/org/linura/SecurityOwner1"
+        && interface == "org.linura.SecurityOwner1"
+        && ((method == "ObserveDisplay" && role == NativeSessionRole::Control)
+            || (method == "ObservePreparedDisplay" && role == NativeSessionRole::Executor))
+    {
+        MAX_DISPLAY_REPLY_BYTES
+    } else {
+        MAX_REPLY_BYTES
+    }
+}
+
 pub(crate) enum NativeCallError {
     TransitionPending,
     CredentialPeerVanished,
@@ -411,15 +423,7 @@ impl NativeSessionChannel {
                 )))
             },
         ))?;
-        let maximum = if path == "/org/linura/SecurityOwner1"
-            && interface == "org.linura.SecurityOwner1"
-            && method == "ObserveDisplay"
-            && self.role == NativeSessionRole::Control
-        {
-            MAX_DISPLAY_REPLY_BYTES
-        } else {
-            MAX_REPLY_BYTES
-        };
+        let maximum = reply_limit(self.role, path, interface, method);
         if reply.body().len() > maximum {
             return Err(NativeCallError::other(
                 "native session reply exceeded its size bound",
@@ -595,6 +599,38 @@ where
 
 #[cfg(test)]
 mod diagnostic_tests {
+    #[test]
+    fn expanded_display_reply_bound_requires_exact_role_endpoint_and_method() {
+        use super::*;
+        for role in [NativeSessionRole::Control, NativeSessionRole::Executor] {
+            for path in ["/org/linura/SecurityOwner1", "/org/linura/Other"] {
+                for interface in ["org.linura.SecurityOwner1", "org.linura.Other"] {
+                    for method in [
+                        "ObserveDisplay",
+                        "ObservePreparedDisplay",
+                        "ObserveLock",
+                        "GetAll",
+                    ] {
+                        let admitted = path == "/org/linura/SecurityOwner1"
+                            && interface == "org.linura.SecurityOwner1"
+                            && matches!(
+                                (role, method),
+                                (NativeSessionRole::Control, "ObserveDisplay")
+                                    | (NativeSessionRole::Executor, "ObservePreparedDisplay")
+                            );
+                        assert_eq!(
+                            reply_limit(role, path, interface, method),
+                            if admitted {
+                                MAX_DISPLAY_REPLY_BYTES
+                            } else {
+                                MAX_REPLY_BYTES
+                            }
+                        );
+                    }
+                }
+            }
+        }
+    }
     use super::*;
 
     fn property_reply(value: OwnedValue) -> Result<zbus::Message, zbus::Error> {

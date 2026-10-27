@@ -233,6 +233,17 @@ Control; existing methods and error replies retain their previous bounds.
 Unknown schemas, incomplete inventories and mismatched independent facts fail
 closed. This method creates no output configuration or execution authority.
 
+The separate private `ObservePreparedDisplay` method admits only the supervised
+session executor and returns `((ssstssb)s)`: the same bounded sample plus a
+length-framed SHA-256 content correlation. Rust checks the digest, typed complete
+native inventory, original baseline, available desired options, visible recovery
+output and independent per-output coverage before retaining this precondition.
+The digest excludes probe time because it correlates two distinct native probes;
+each conservative boot-clock deadline is checked independently. Neither a sample
+nor its digest is approval or prepared dispatch authority. Only this exact
+method/role pair receives the larger reply cap; errors and other endpoints retain
+their existing limits. This read-only addition does not activate a display write.
+
 ### Session1 bounded transient-effect contract
 
 `org.linura.Session1` is a distinct Experimental **session-bus transient-effect** contract introduced for the v0.10 workstation line. It is hosted by the same unprivileged `linurad` process and well-known session-bus service as Control1, but it is a separate object/interface and does not widen the historical non-executable Control1 method surface.

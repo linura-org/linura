@@ -156,6 +156,15 @@ fn attempt_state(
     request: &PlanDesiredStateRequest,
     dispatched: &Record,
 ) -> Result<String, ManagedLifecycleError> {
+    attempt_state_at(observation, request, dispatched, now_ms()?)
+}
+
+fn attempt_state_at(
+    observation: &ObservationEnvelope,
+    request: &PlanDesiredStateRequest,
+    dispatched: &Record,
+    now: u64,
+) -> Result<String, ManagedLifecycleError> {
     let fail = || {
         ManagedLifecycleError::Verification(
             "native display attempt evidence is stale, malformed or substituted".into(),
@@ -173,13 +182,14 @@ fn attempt_state(
     observation
         .validate(&provider, &resource, &capability)
         .map_err(|_| fail())?;
-    let now = now_ms()?;
     if observation.authority != ObservationAuthority::NativeApi
+        || observation.attributes.len() != 6
         || observation.sequence == 0
         || observation.observed_at_unix_ms == 0
         || observation.valid_for_ms == 0
         || observation.valid_for_ms > 2000
         || observation.observed_at_unix_ms > now
+        || observation.observed_at_unix_ms <= dispatched.recorded_at_unix_ms
         || observation
             .observed_at_unix_ms
             .checked_add(observation.valid_for_ms)
@@ -234,18 +244,126 @@ fn attempt_state(
     }
 }
 
+/// One checked history for queries AND continuations. A valid dispatch payload
+/// alone cannot stand in for its durable reservation and transaction anchor.
+struct DisplayHistory {
+    reserved: Record,
+    dispatched: Option<Record>,
+    confirmation: Option<Record>,
+    revert: Option<Record>,
+    confirmed: Option<Record>,
+    restored: Option<Record>,
+}
+impl DisplayHistory {
+    fn load(
+        journal: &dyn ApprovedRequestJournal,
+        principal: &PrincipalId,
+        digest: &linura_transaction::ContentDigest,
+        transaction: &TransactionId,
+        state: TransactionState,
+        now: u64,
+    ) -> Result<Self, ManagedLifecycleError> {
+        let read = |phase| Record::load(journal, principal, digest, phase);
+        let reserved = read(Phase::Reserved)?.ok_or_else(|| {
+            ManagedLifecycleError::Authority("display recovery reservation is missing".into())
+        })?;
+        reserved.validate_after(None)?;
+        if &reserved.transaction_id != transaction {
+            return Err(ManagedLifecycleError::Authority(
+                "display recovery reservation belongs to another transaction".into(),
+            ));
+        }
+        let history = Self {
+            reserved,
+            dispatched: read(Phase::Dispatched)?,
+            confirmation: read(Phase::ConfirmRequested)?,
+            revert: read(Phase::RevertRequested)?,
+            confirmed: read(Phase::Confirmed)?,
+            restored: read(Phase::Restored)?,
+        };
+        if std::iter::once(&history.reserved)
+            .chain(
+                [
+                    &history.dispatched,
+                    &history.confirmation,
+                    &history.revert,
+                    &history.confirmed,
+                    &history.restored,
+                ]
+                .into_iter()
+                .flatten(),
+            )
+            .any(|record| record.recorded_at_unix_ms > now)
+        {
+            return Err(ManagedLifecycleError::Authority(
+                "display recovery clock precedes retained history".into(),
+            ));
+        }
+        if history.confirmation.is_some() && history.revert.is_some()
+            || history.confirmed.is_some() && history.restored.is_some()
+        {
+            return Err(ManagedLifecycleError::Authority(
+                "display recovery history forked".into(),
+            ));
+        }
+        let Some(dispatched) = &history.dispatched else {
+            if history.confirmation.is_some()
+                || history.revert.is_some()
+                || history.confirmed.is_some()
+                || history.restored.is_some()
+            {
+                return Err(ManagedLifecycleError::Authority(
+                    "display recovery history is missing its dispatch reservation".into(),
+                ));
+            }
+            return Ok(history);
+        };
+        dispatched.validate_after(Some(&history.reserved))?;
+        if !matches!(
+            state,
+            TransactionState::Indeterminate
+                | TransactionState::Verified
+                | TransactionState::Committed
+                | TransactionState::RecoveryBlocked
+        ) {
+            return Err(ManagedLifecycleError::Authority(
+                "display dispatch history contradicts durable authority".into(),
+            ));
+        }
+        for decision in [&history.confirmation, &history.revert]
+            .into_iter()
+            .flatten()
+        {
+            decision.validate_after(Some(dispatched))?;
+        }
+        if let Some(confirmed) = &history.confirmed {
+            confirmed.validate_after(history.confirmation.as_ref())?;
+            validate_terminal_display_history(Phase::Confirmed, state)?;
+        }
+        if let Some(restored) = &history.restored {
+            restored.validate_after(
+                history
+                    .confirmation
+                    .as_ref()
+                    .or(history.revert.as_ref())
+                    .or(Some(dispatched)),
+            )?;
+            validate_terminal_display_history(Phase::Restored, state)?;
+        }
+        Ok(history)
+    }
+}
+
 fn validate_terminal_display_history(
     phase: Phase,
     state: TransactionState,
 ) -> Result<(), ManagedLifecycleError> {
     match (phase, state) {
         (Phase::Confirmed, TransactionState::Committed) => Ok(()),
-        (Phase::Restored, TransactionState::Committed) | (Phase::Confirmed, _) => {
-            Err(ManagedLifecycleError::Authority(
-                "display terminal record contradicts the durable authority state".into(),
-            ))
-        }
-        (Phase::Restored, _) => Ok(()),
+        (Phase::Restored, TransactionState::RecoveryBlocked) => Ok(()),
+        (Phase::Restored, _) | (Phase::Confirmed, _) => Err(ManagedLifecycleError::Authority(
+            "display terminal record contradicts the durable authority state".into(),
+        )),
         _ => Err(ManagedLifecycleError::Authority(
             "display journal supplied a non-terminal phase as terminal".into(),
         )),
@@ -289,6 +407,11 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .display_journal()?
             .load(&principal_id, request_id)
             .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+        if retained.principal() != &principal_id || retained.request_id() != request_id {
+            return Err(ManagedLifecycleError::Authority(
+                "display journal substituted the retained request identity".into(),
+            ));
+        }
         let request = crate::retained_request::decode(&retained)?;
         require_owner(principal, &request)?;
         if retained.digest() != &crate::durable_authority::digest_request(&request)? {
@@ -469,29 +592,20 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let principal_id = PrincipalId::new(principal.as_str())
             .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
         let digest = crate::durable_authority::digest_request(&request)?;
-        let reserved = Record::load(
+        self.authority
+            .assert_request_matches(&principal, &request)?;
+        let transaction = TransactionId::for_namespace(&principal_id, request_id);
+        let snapshot = self.authority.snapshot(&transaction)?;
+        let history = DisplayHistory::load(
             self.display_journal()?,
             &principal_id,
             &digest,
-            Phase::Reserved,
-        )?
-        .ok_or_else(|| {
-            ManagedLifecycleError::Authority("display recovery reservation is missing".into())
-        })?;
-        reserved.validate_after(None)?;
-        let snapshot = self.authority.snapshot(&reserved.transaction_id)?;
-        if snapshot.principal != principal_id || snapshot.request_id != request.request_id {
-            return Err(ManagedLifecycleError::Authority(
-                "display transaction scope changed".into(),
-            ));
-        }
-        let Some(dispatched) = Record::load(
-            self.display_journal()?,
-            &principal_id,
-            &digest,
-            Phase::Dispatched,
-        )?
-        else {
+            &transaction,
+            snapshot.state,
+            now_ms()?,
+        )?;
+        let reserved = history.reserved;
+        let Some(dispatched) = history.dispatched else {
             return Ok(receipt(
                 &request,
                 reserved.deadline_unix_ms,
@@ -506,68 +620,24 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 &principal_id,
             ));
         };
-        dispatched.validate_after(Some(&reserved))?;
-        let confirmation = Record::load(
-            self.display_journal()?,
-            &principal_id,
-            &digest,
-            Phase::ConfirmRequested,
-        )?;
-        let revert = Record::load(
-            self.display_journal()?,
-            &principal_id,
-            &digest,
-            Phase::RevertRequested,
-        )?;
-        if confirmation.is_some() && revert.is_some() {
-            return Err(ManagedLifecycleError::Authority(
-                "display confirmation/reversion history forked".into(),
+        if history.confirmed.is_some() || history.restored.is_some() {
+            return Ok(receipt(
+                &request,
+                reserved.deadline_unix_ms,
+                if history.confirmed.is_some() {
+                    DisplayLayoutState::Confirmed
+                } else {
+                    DisplayLayoutState::Restored
+                },
+                &principal_id,
             ));
         }
-        for decision in [&confirmation, &revert].into_iter().flatten() {
-            decision.validate_after(Some(&dispatched))?;
-        }
+        let confirmation = history.confirmation;
+        let revert = history.revert;
         let predecessor = confirmation
             .as_ref()
             .or(revert.as_ref())
             .unwrap_or(&dispatched);
-        let confirmed = Record::load(
-            self.display_journal()?,
-            &principal_id,
-            &digest,
-            Phase::Confirmed,
-        )?;
-        let restored = Record::load(
-            self.display_journal()?,
-            &principal_id,
-            &digest,
-            Phase::Restored,
-        )?;
-        if confirmed.is_some() && restored.is_some() {
-            return Err(ManagedLifecycleError::Authority(
-                "display confirmation and restoration are conflicting terminal histories".into(),
-            ));
-        }
-        if let Some(confirmed) = confirmed {
-            confirmed.validate_after(confirmation.as_ref())?;
-            validate_terminal_display_history(Phase::Confirmed, snapshot.state)?;
-            return Ok(receipt(
-                &request,
-                reserved.deadline_unix_ms,
-                DisplayLayoutState::Confirmed,
-                &principal_id,
-            ));
-        }
-        if let Some(restored) = restored {
-            restored.validate_after(Some(predecessor))?;
-            validate_terminal_display_history(Phase::Restored, snapshot.state)?;
-            return Ok(receipt(
-                &request,
-                reserved.deadline_unix_ms,
-                DisplayLayoutState::Restored,
-                &principal_id,
-            ));
-        }
         let observed = match port.observe_attempt(&request, reserved.transaction_id.as_str()) {
             Ok(observation) => observation,
             Err(_) => {
@@ -581,9 +651,19 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         };
         let state = attempt_state(&observed, &request, &dispatched)?;
         let after = observed.observed_at_unix_ms;
-        let verified = |verifier: &mut V, restoration| matches!(verifier.verify_layout(&request, restoration, after), Ok(result) if result.disposition == VerificationDisposition::Satisfied);
+        let verified = |verifier: &mut V, restoration| {
+            matches!(verifier.verify_layout(&request, restoration, after), Ok(result) if result.disposition == VerificationDisposition::Satisfied)
+                && attempt_state(&observed, &request, &dispatched).is_ok()
+        };
         let state = match state.as_str() {
             "restored" if verified(verifier, true) => {
+                let terminal = self.authority.retire_restored_display_without_replay(
+                    &mut self.previews,
+                    principal.clone(),
+                    actor.clone(),
+                    &request,
+                )?;
+                validate_terminal_display_history(Phase::Restored, terminal.state)?;
                 let restored = Record::new(
                     digest,
                     reserved.transaction_id,
@@ -684,25 +764,33 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let principal_id = PrincipalId::new(principal.as_str())
             .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?;
         let digest = crate::durable_authority::digest_request(&request)?;
-        for phase in [
-            Phase::ConfirmRequested,
-            Phase::RevertRequested,
-            Phase::Confirmed,
-            Phase::Restored,
-        ] {
-            if Record::load(self.display_journal()?, &principal_id, &digest, phase)?.is_some() {
-                return self.display_layout_status(principal, actor, request_id, port, verifier);
-            }
-        }
-        let dispatched = Record::load(
+        self.authority
+            .assert_request_matches(&principal, &request)?;
+        let transaction = TransactionId::for_namespace(&principal_id, request_id);
+        let snapshot = self.authority.snapshot(&transaction)?;
+        let history = DisplayHistory::load(
             self.display_journal()?,
             &principal_id,
             &digest,
-            Phase::Dispatched,
-        )?
-        .ok_or_else(|| {
+            &transaction,
+            snapshot.state,
+            now_ms()?,
+        )?;
+        if history.confirmation.is_some()
+            || history.revert.is_some()
+            || history.confirmed.is_some()
+            || history.restored.is_some()
+        {
+            return self.display_layout_status(principal, actor, request_id, port, verifier);
+        }
+        let dispatched = history.dispatched.ok_or_else(|| {
             ManagedLifecycleError::Authority("display has no durable dispatch reservation".into())
         })?;
+        if snapshot.state != TransactionState::Indeterminate {
+            return Err(ManagedLifecycleError::Authority(
+                "display decision has no active indeterminate transaction".into(),
+            ));
+        }
         if now_ms()? >= dispatched.deadline_unix_ms {
             return self.display_layout_status(principal, actor, request_id, port, verifier);
         }
@@ -727,6 +815,13 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         } else {
             Phase::RevertRequested
         };
+        // The independent probe may have consumed the original native attempt
+        // deadline. Never stamp its completion time onto expired decision facts.
+        if attempt_state(&observed, &request, &dispatched)? != "pending" {
+            return Err(ManagedLifecycleError::Verification(
+                "display attempt changed before decision".into(),
+            ));
+        }
         let decision = Record::new(
             digest,
             dispatched.transaction_id.clone(),
@@ -771,12 +866,168 @@ mod terminal_history_tests {
                 .is_err()
         );
         assert!(
-            validate_terminal_display_history(Phase::Restored, TransactionState::Indeterminate,)
+            validate_terminal_display_history(Phase::Restored, TransactionState::RecoveryBlocked,)
                 .is_ok()
         );
         assert!(
             validate_terminal_display_history(Phase::Dispatched, TransactionState::Committed,)
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+    use linura_transaction::{ContentDigest, RetainedRequest, TransactionStoreError};
+
+    #[derive(Debug, Default)]
+    struct Journal(BTreeMap<(PrincipalId, RequestId), RetainedRequest>);
+    impl ApprovedRequestJournal for Journal {
+        fn retain(&mut self, record: &RetainedRequest) -> Result<(), TransactionStoreError> {
+            let key = (record.principal().clone(), record.request_id().clone());
+            if self.0.get(&key).is_some_and(|old| old != record) {
+                return Err(TransactionStoreError::AuthorityRejected);
+            }
+            self.0.insert(key, record.clone());
+            Ok(())
+        }
+        fn load(
+            &self,
+            principal: &PrincipalId,
+            request: &RequestId,
+        ) -> Result<RetainedRequest, TransactionStoreError> {
+            self.0
+                .get(&(principal.clone(), request.clone()))
+                .cloned()
+                .ok_or(TransactionStoreError::NotFound)
+        }
+        fn integrity_check(&self) -> Result<(), TransactionStoreError> {
+            Ok(())
+        }
+    }
+    fn id<T, E: Debug>(result: Result<T, E>) -> T {
+        result.unwrap_or_else(|error| unreachable!("{error:?}"))
+    }
+    fn fixture() -> (PrincipalId, ContentDigest, Record, Record) {
+        let principal = id(PrincipalId::new("unix:uid:1000"));
+        let request = id(RequestId::new("request:v010:display-layout:history"));
+        let digest =
+            linura_transaction::digest_parts("display-history-test", [b"request".as_slice()]);
+        let transaction = TransactionId::for_namespace(&principal, &request);
+        let reserved = id(Record::new(
+            digest.clone(),
+            transaction.clone(),
+            Phase::Reserved,
+            200,
+            100,
+            None,
+            None,
+            None,
+        ));
+        let dispatched = id(Record::new(
+            digest.clone(),
+            transaction,
+            Phase::Dispatched,
+            200,
+            110,
+            Some("a".repeat(64)),
+            Some(reserved.digest().clone()),
+            None,
+        ));
+        (principal, digest, reserved, dispatched)
+    }
+    fn next(prior: &Record, phase: Phase, at: u64) -> Record {
+        id(Record::new(
+            prior.request_digest.clone(),
+            prior.transaction_id.clone(),
+            phase,
+            prior.deadline_unix_ms,
+            at,
+            prior.dispatch_digest.clone(),
+            Some(prior.digest().clone()),
+            Some(linura_transaction::digest_parts(
+                "display-history-observation-test",
+                [b"observation".as_slice()],
+            )),
+        ))
+    }
+    fn load(
+        journal: &Journal,
+        p: &PrincipalId,
+        r: &Record,
+        state: TransactionState,
+    ) -> Result<DisplayHistory, ManagedLifecycleError> {
+        DisplayHistory::load(
+            journal,
+            p,
+            &r.request_digest,
+            &r.transaction_id,
+            state,
+            1000,
+        )
+    }
+
+    #[test]
+    fn missing_or_substituted_reservation_blocks_continuation_history() {
+        let (p, _, reserved, dispatched) = fixture();
+        let mut journal = Journal::default();
+        // Payload and dispatch key are valid; the required parent is absent.
+        id(dispatched.append(&mut journal, p.clone(), Some(&reserved)));
+        assert!(load(&journal, &p, &reserved, TransactionState::Indeterminate).is_err());
+        id(reserved.append(&mut journal, p.clone(), None));
+        assert!(load(&journal, &p, &reserved, TransactionState::Indeterminate).is_ok());
+        let other = id(TransactionId::new("transaction:substituted"));
+        assert!(
+            DisplayHistory::load(
+                &journal,
+                &p,
+                &reserved.request_digest,
+                &other,
+                TransactionState::Indeterminate,
+                1000,
+            )
+            .is_err()
+        );
+        assert!(load(&journal, &p, &reserved, TransactionState::Prepared).is_err());
+    }
+
+    #[test]
+    fn orphan_decision_is_rejected_even_when_no_dispatch_key_is_present() {
+        let (p, _, reserved, dispatched) = fixture();
+        let mut journal = Journal::default();
+        id(reserved.append(&mut journal, p.clone(), None));
+        let decision = next(&dispatched, Phase::ConfirmRequested, 120);
+        id(decision.append(&mut journal, p.clone(), Some(&dispatched)));
+        assert!(load(&journal, &p, &reserved, TransactionState::Prepared).is_err());
+    }
+
+    #[test]
+    fn confirmation_and_reversion_fork_never_becomes_a_continuation() {
+        let (p, _, reserved, dispatched) = fixture();
+        let mut journal = Journal::default();
+        id(reserved.append(&mut journal, p.clone(), None));
+        id(dispatched.append(&mut journal, p.clone(), Some(&reserved)));
+        for phase in [Phase::ConfirmRequested, Phase::RevertRequested] {
+            id(next(&dispatched, phase, 120).append(&mut journal, p.clone(), Some(&dispatched)));
+        }
+        assert!(load(&journal, &p, &reserved, TransactionState::Indeterminate).is_err());
+    }
+
+    #[test]
+    fn terminal_restore_is_incompatible_with_commit_and_dual_terminal_history() {
+        let (p, _, reserved, dispatched) = fixture();
+        let mut journal = Journal::default();
+        id(reserved.append(&mut journal, p.clone(), None));
+        id(dispatched.append(&mut journal, p.clone(), Some(&reserved)));
+        let decision = next(&dispatched, Phase::ConfirmRequested, 120);
+        id(decision.append(&mut journal, p.clone(), Some(&dispatched)));
+        let restored = next(&decision, Phase::Restored, 220);
+        id(restored.append(&mut journal, p.clone(), Some(&decision)));
+        assert!(load(&journal, &p, &reserved, TransactionState::RecoveryBlocked).is_ok());
+        assert!(load(&journal, &p, &reserved, TransactionState::Indeterminate).is_err());
+        assert!(load(&journal, &p, &reserved, TransactionState::Committed).is_err());
+        id(next(&decision, Phase::Confirmed, 150).append(&mut journal, p.clone(), Some(&decision)));
+        assert!(load(&journal, &p, &reserved, TransactionState::Committed).is_err());
     }
 }

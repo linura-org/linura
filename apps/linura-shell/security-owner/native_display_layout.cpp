@@ -7,6 +7,33 @@
 
 namespace Linura::SecurityOwner {
 namespace {
+// Syntax validation only. Native connection attestation supplies the actual
+// compositor and session identity; this parser cannot mint that authority.
+std::optional<QStringList> topologyParts(const QString &value)
+{
+    if (value.size() > 256)
+        return std::nullopt;
+    const auto parts = value.split(QLatin1Char(':'), Qt::KeepEmptyParts);
+    if (parts.size() != 9 || parts[0] != QLatin1String("display") ||
+        parts[1] != QLatin1String("topology") || parts[6].isEmpty() || parts[6].size() > 32 ||
+        parts[6] == QLatin1String("self") || parts[6] == QLatin1String("auto") ||
+        parts[6] == QLatin1String("current") ||
+        !std::all_of(parts[6].cbegin(), parts[6].cend(), [](QChar c) {
+            const auto n = c.unicode();
+            return (n >= 'a' && n <= 'z') || (n >= 'A' && n <= 'Z') || (n >= '0' && n <= '9') ||
+                   n == '_' || n == '-';
+        }))
+        return std::nullopt;
+    // Reuse the exact epoch/UUID/decimal scalar validation without treating the
+    // compositor UUID as an actual security-owner invocation.
+    const auto syntax = NativeLockIdentity::parse(
+        QStringLiteral("session:lock:") + parts[2] + QLatin1Char(':') + parts[3] +
+        QLatin1Char(':') + parts[4] + QLatin1Char(':') + parts[5] + QLatin1Char(':') + parts[7] +
+        QLatin1Char(':') + parts[8]);
+    if (!syntax || syntax->generation == std::numeric_limits<quint64>::max())
+        return std::nullopt;
+    return parts;
+}
 std::optional<quint64> unsignedNumber(const QString &value)
 {
     bool okay = false;
@@ -73,8 +100,7 @@ std::optional<NativeDisplayLayout> layout(const QStringList &tokens, qsizetype &
         return std::nullopt;
     NativeDisplayLayout result;
     result.topology = tokens[position++];
-    if (!result.topology.startsWith(QLatin1String("display:topology:")) ||
-        result.topology.toUtf8().size() > 256)
+    if (!topologyParts(result.topology))
         return std::nullopt;
     quint64 previous = 0;
     bool first = true;
@@ -153,6 +179,10 @@ std::optional<NativeDisplayIntent> NativeDisplayIntent::parse(const QString &mat
         baseline->topology != desired->topology ||
         baseline->outputs.size() != desired->outputs.size())
         return std::nullopt;
+    const auto scope = topologyParts(baseline->topology);
+    if (!scope || (*scope)[2] != lock->boot || (*scope)[3] != QString::number(lock->uid) ||
+        (*scope)[4] != lock->session || (*scope)[5] != QString::number(lock->createdMonotonicUs))
+        return std::nullopt;
     for (std::size_t index = 0; index < baseline->outputs.size(); ++index)
         if (baseline->outputs[index].handle != desired->outputs[index].handle ||
             baseline->outputs[index].generation != desired->outputs[index].generation)
@@ -162,8 +192,9 @@ std::optional<NativeDisplayIntent> NativeDisplayIntent::parse(const QString &mat
 }
 bool NativeDisplayLayout::nativeOptions(const NativeDisplaySnapshot &snapshot) const
 {
-    if (snapshot.generation == 0 || outputs.size() != snapshot.heads.size() || outputs.empty() ||
-        outputs.size() > 16)
+    const auto scope = topologyParts(topology);
+    if (!scope || (*scope)[8] != QString::number(snapshot.generation) || snapshot.generation == 0 ||
+        outputs.size() != snapshot.heads.size() || outputs.empty() || outputs.size() > 16)
         return false;
     // No inferred identity from an ambiguous or stale native inventory,
     // including a caller-created snapshot outside the live Wayland tracker.
@@ -192,7 +223,10 @@ bool NativeDisplayLayout::nativeOptions(const NativeDisplaySnapshot &snapshot) c
         if (!row.enabled)
             continue;
         if (row.scaleMilli < 500 || row.scaleMilli > 4000 || row.scaleMilli % 125 != 0 ||
-            row.transform > 7 || row.x < -65536 || row.x > 65536 || row.y < -65536 || row.y > 65536)
+            row.transform > 7 || row.x < -65536 || row.x > 65536 || row.y < -65536 ||
+            row.y > 65536 || row.mode.width <= 0 || row.mode.width > 32768 ||
+            row.mode.height <= 0 || row.mode.height > 32768 || row.mode.refresh <= 0 ||
+            row.mode.refresh > 1'000'000)
             return false;
         if (std::find(head->modes.begin(), head->modes.end(), row.mode) == head->modes.end())
             return false;
@@ -209,7 +243,7 @@ bool NativeDisplayLayout::nativeOptions(const NativeDisplaySnapshot &snapshot) c
                            candidate.generation == row.mirror->second;
                 });
             if (root == outputs.end() || !root->enabled || root->mirror ||
-                root->handle == row.handle)
+                root->handle == row.handle || root->x != row.x || root->y != row.y)
                 return false;
         } else
             independent = true;
@@ -237,7 +271,8 @@ bool NativeDisplayLayout::matchesGeometry(const NativeDisplaySnapshot &snapshot)
         if (row.enabled &&
             (!head.current || *head.current != row.mode || head.x != row.x || head.y != row.y ||
              head.transform != static_cast<qint32>(row.transform) ||
-             head.scaleFixed * 1000 != static_cast<qint32>(row.scaleMilli * 256)))
+             static_cast<qint64>(head.scaleFixed) * 1000 !=
+                 static_cast<qint64>(row.scaleMilli) * 256))
             return false;
     }
     return true;

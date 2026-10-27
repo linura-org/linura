@@ -50,6 +50,16 @@ QDBusArgument &operator<<(QDBusArgument &wire, const NativeDisplayObservationWir
 const QDBusArgument &operator>>(const QDBusArgument &wire,
                                 NativeDisplayObservationWire &observation);
 
+struct NativePreparedDisplayObservationWire final
+{
+    NativeDisplayObservationWire sample;
+    QString sampleDigest;
+};
+QDBusArgument &operator<<(QDBusArgument &wire,
+                          const NativePreparedDisplayObservationWire &observation);
+const QDBusArgument &operator>>(const QDBusArgument &wire,
+                                NativePreparedDisplayObservationWire &observation);
+
 // Adapter only, on the owner's authenticated canonical system-bus connection.
 // It owns no planner/policy/prepare logic. The runtime checks the actual message
 // sender against the independently supervised Control or session executor.
@@ -73,6 +83,8 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "<method name=\"ObserveLock\"><arg name=\"observation\" type=\"(sbt)\" "
         "direction=\"out\"/></method>"
         "<method name=\"ObserveDisplay\"><arg name=\"observation\" type=\"(ssstssb)\" "
+        "direction=\"out\"/></method>"
+        "<method name=\"ObservePreparedDisplay\"><arg name=\"observation\" type=\"((ssstssb)s)\" "
         "direction=\"out\"/></method>"
         "<method name=\"ObservePowerPermission\"><arg name=\"resource\" type=\"s\" "
         "direction=\"in\"/>"
@@ -113,6 +125,7 @@ class NativeEndpoint final : public QObject, protected QDBusContext
     void CancelApproval();
     NativeLockObservationWire ObserveLock();
     NativeDisplayObservationWire ObserveDisplay();
+    NativePreparedDisplayObservationWire ObservePreparedDisplay();
     NativePowerPermissionWire ObservePowerPermission(const QString &resource);
     bool FencePreparedTransition(const QString &resource);
     bool CancelUndispatchedTransition(const QString &resource);
@@ -136,3 +149,4 @@ Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeApprovalWire)
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeLockObservationWire)
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativePowerPermissionWire)
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeDisplayObservationWire)
+Q_DECLARE_METATYPE(Linura::SecurityOwner::NativePreparedDisplayObservationWire)

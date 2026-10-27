@@ -23,6 +23,39 @@ pub struct DisplayLayoutSafetyReview {
 }
 
 impl DisplayLayoutSafetyReview {
+    /// Independently re-observed current postcondition for a retained exact
+    /// intent, including restoration after restart. This does not grant apply,
+    /// continuation or commit authority. All contributing samples must originate
+    /// strictly after the event being checked, with their original deadlines.
+    #[allow(clippy::too_many_arguments)]
+    pub fn review_current_postcondition(
+        principal: &AuthenticatedPrincipal,
+        expected: &DisplayLayout,
+        lock: &SessionLockId,
+        display: &ObservationEnvelope,
+        session: &ObservationEnvelope,
+        locker: &ObservationEnvelope,
+        after_unix_ms: u64,
+        now_unix_ms: u64,
+    ) -> Result<Self, DisplaySafetyError> {
+        if after_unix_ms == 0
+            || after_unix_ms >= now_unix_ms
+            || [display, session, locker]
+                .into_iter()
+                .any(|sample| sample.observed_at_unix_ms <= after_unix_ms)
+        {
+            return Err(DisplaySafetyError::Freshness);
+        }
+        let review = Self::review(principal, expected, display, session, locker, now_unix_ms)?;
+        if &review.lock != lock {
+            return Err(DisplaySafetyError::LockCoverage);
+        }
+        if &review.last_known_good != expected {
+            return Err(DisplaySafetyError::Postcondition);
+        }
+        Ok(review)
+    }
+
     /// All three envelopes must come through trusted observation composition.
     /// A generic S17 secure=true bit or a screen count does not bind a display
     /// topology. Require the independently attested exact output generations.

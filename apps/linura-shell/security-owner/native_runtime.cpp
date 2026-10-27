@@ -13,6 +13,8 @@
 #include "session_bootstrap.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QtEndian>
 #include <QGuiApplication>
 #include <QDBusPendingCallWatcher>
 #include <QThread>
@@ -725,7 +727,33 @@ std::optional<NativeObservedLockState> NativeRuntime::observe(const QDBusMessage
 
 std::optional<NativeDisplaySample> NativeRuntime::observeDisplay(const QDBusMessage &received)
 {
-    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    return displaySample(received, NativePeerPurpose::ControlApproval);
+}
+
+std::optional<NativeDisplaySample>
+NativeRuntime::observePreparedDisplay(const QDBusMessage &received)
+{
+    return displaySample(received, NativePeerPurpose::PreparedSessionDispatch);
+}
+
+QString NativeDisplaySample::correlationDigest() const
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const auto &field :
+         {QStringLiteral("linura.native.display-sample.v1"), resource, compositor, seat, topology,
+          monitors, secure ? QStringLiteral("true") : QStringLiteral("false")}) {
+        const auto bytes = field.toUtf8();
+        const auto size = qToBigEndian(static_cast<quint64>(bytes.size()));
+        hash.addData(QByteArrayView(reinterpret_cast<const char *>(&size), sizeof(size)));
+        hash.addData(bytes);
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+
+std::optional<NativeDisplaySample> NativeRuntime::displaySample(const QDBusMessage &received,
+                                                                NativePeerPurpose purpose)
+{
+    const auto peer = impl_->caller(received, purpose);
     if (!peer || !impl_->binding || impl_->binding->seat.isEmpty())
         return std::nullopt;
     const auto before = impl_->backend->observeDisplayTopology();
@@ -734,7 +762,7 @@ std::optional<NativeDisplaySample> NativeRuntime::observeDisplay(const QDBusMess
     const auto independent = impl_->independentState();
     const auto monitors = observeNativeHyprlandOutputs(impl_->compositorSocket, *impl_->binding);
     if (!independent || !monitors || monitors->isEmpty() || !impl_->currentSession() ||
-        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        !impl_->peers->stillCurrent(purpose, *peer))
         return std::nullopt;
     const auto after = impl_->backend->observeDisplayTopology();
     const auto settled = nativeObservedLockState(*independent, impl_->protocol->inspect(),

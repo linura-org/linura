@@ -451,6 +451,43 @@ class OperationSemanticsContractTests(unittest.TestCase):
                 )
             )
 
+    def test_display_registration_cannot_downgrade_or_accept_arbitrary_native_material(
+        self,
+    ) -> None:
+        for field, replacement in (
+            (
+                'class = "managed-external-effect"',
+                'class = "transient-external-effect"',
+            ),
+            ('risk_floor = "security-sensitive"', 'risk_floor = "user-state"'),
+            ('provider = "hyprland"', 'provider = "shell"'),
+            ('resource_prefix = "display:topology:"', 'resource_prefix = "display:"'),
+            ('change_keys = ["layout"]', 'change_keys = ["command"]'),
+        ):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                self._copy_fixture(root)
+                contract = root / "contracts/operation-semantics.toml"
+                source = contract.read_text(encoding="utf-8")
+                start = source.index("[registered_operations.managed-display-layout]")
+                end = source.find("\n[", start + 1)
+                if end < 0:
+                    end = len(source)
+                table = source[start:end]
+                self.assertIn(field, table)
+                contract.write_text(
+                    source[:start]
+                    + table.replace(field, replacement, 1)
+                    + source[end:],
+                    encoding="utf-8",
+                )
+                self.assertTrue(
+                    any(
+                        "registered_operations drifted" in failure
+                        for failure in check_operation_semantics.validate(root)
+                    )
+                )
+
     def test_registered_managed_systemd_contract_cannot_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

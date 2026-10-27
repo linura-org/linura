@@ -60,20 +60,23 @@ int main()
 
     auto second = root;
     second.handle = 2;
-    second.generation = 4;
+    second.generation = 3;
     second.name = QStringLiteral("HDMI-A-1");
     observed.heads.push_back(second);
-    observed.generation = 4;
+    observed.generation = 3;
     const auto twoBaseline =
-        QString(baseline).append(QStringLiteral("2:4:enabled:1920:1080:60000:1000:0:1920:0:-;"));
+        QString(baseline).append(QStringLiteral("2:3:enabled:1920:1080:60000:1000:0:1920:0:-;"));
     const auto mirrored =
-        QString(baseline).append(QStringLiteral("2:4:enabled:1920:1080:60000:1000:0:0:0:1,2;"));
+        QString(baseline).append(QStringLiteral("2:3:enabled:1920:1080:60000:1000:0:0:0:1,2;"));
     const auto mirrorIntent = NativeDisplayIntent::parse(
         QStringLiteral("LNDI:1;") + lock->resource + QLatin1Char(';') + twoBaseline + mirrored);
     assert(mirrorIntent && mirrorIntent->nativeOptions(observed, scope, *lock));
     const auto mirrorCommands = mirrorIntent->desired.commands(observed);
     assert(mirrorCommands.size() == 2 && mirrorCommands[1].endsWith(",mirror,DP-1"));
     auto repeated = mirrorIntent->desired;
+    repeated.outputs[1].x = 1920;
+    assert(!repeated.nativeOptions(observed));
+    repeated = mirrorIntent->desired;
     repeated.outputs[1] = repeated.outputs[0];
     assert(!repeated.nativeOptions(observed));
     assert(repeated.commands(observed).empty());
@@ -94,7 +97,7 @@ int main()
             .replace(QStringLiteral("1:2:enabled:1920:1080:60000:1000:0:0:0:-;"),
                      QStringLiteral("1:2:enabled:1920:1080:60000:1000:0:0:0:2,4;")));
     assert(cyclic && !cyclic->nativeOptions(observed, scope, *lock));
-    const auto disabled = QString(baseline).append(QStringLiteral("2:4:disabled;"));
+    const auto disabled = QString(baseline).append(QStringLiteral("2:3:disabled;"));
     const auto disabledIntent = NativeDisplayIntent::parse(
         QStringLiteral("LNDI:1;") + lock->resource + QLatin1Char(';') + twoBaseline + disabled);
     assert(disabledIntent && disabledIntent->nativeOptions(observed, scope, *lock));

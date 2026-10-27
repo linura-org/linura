@@ -13,11 +13,14 @@
 
 namespace Linura::SecurityOwner {
 
+enum class NativePeerPurpose;
+
 enum class NativeObservedLockState { Unlocked, Secure, Acquiring, Releasing };
 struct NativeDisplaySample final
 {
     QString resource, compositor, seat, topology, monitors;
     bool secure = false;
+    [[nodiscard]] QString correlationDigest() const;
 };
 [[nodiscard]] std::optional<NativeObservedLockState>
 nativeObservedLockState(NativeCompositorLockState compositor, LockMechanism::State mechanism,
@@ -41,6 +44,8 @@ class NativeRuntime final : public QObject
                                         const NativeLockIdentity &identity, bool secure);
     [[nodiscard]] std::optional<NativeObservedLockState> observe(const QDBusMessage &received);
     [[nodiscard]] std::optional<NativeDisplaySample> observeDisplay(const QDBusMessage &received);
+    [[nodiscard]] std::optional<NativeDisplaySample>
+    observePreparedDisplay(const QDBusMessage &received);
     [[nodiscard]] bool fencePreparedTransition(const QDBusMessage &received,
                                                const NativeTransitionIdentity &target);
     [[nodiscard]] bool cancelUndispatchedTransition(const QDBusMessage &received,
@@ -75,6 +80,8 @@ class NativeRuntime final : public QObject
     void recoverNativeUnlock();
     void recoverNativeTransition();
     void recoverNativeSleepEntry();
+    [[nodiscard]] std::optional<NativeDisplaySample> displaySample(const QDBusMessage &received,
+                                                                   NativePeerPurpose purpose);
     class Impl;
     std::unique_ptr<Impl> impl_;
 };

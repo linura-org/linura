@@ -1,5 +1,4 @@
 #include "compositor_probe.h"
-#include "native_display_layout.h"
 
 #include <QByteArray>
 #include <QElapsedTimer>
@@ -11,7 +10,6 @@
 #include <unistd.h>
 
 #include <array>
-#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <limits>
@@ -226,33 +224,6 @@ std::optional<QByteArray> observeNativeHyprlandOutputs(const QString &path,
                                                        const NativeSessionBinding &binding)
 {
     return nativeExchange(path, binding, "j/monitors all", 256 * 1024, ProbeBudgetMs, nullptr);
-}
-
-NativeDisplayWriteResult applyNativeHyprlandLayout(const NativeDisplayLayout &layout,
-                                                   const NativeDisplaySnapshot &snapshot,
-                                                   const QString &path,
-                                                   const NativeSessionBinding &binding)
-{
-    const auto commands = layout.commands(snapshot);
-    if (commands.empty() || commands.size() > 16)
-        return {};
-    QElapsedTimer total;
-    total.start();
-    NativeDisplayWriteResult result;
-    for (const auto &command : commands) {
-        const qint64 remaining = 1500 - total.elapsed();
-        if (remaining <= 0)
-            return result;
-        // Set before entering the exchange: failure after connect/write may
-        // hide an effect. The runtime's recovery timer is already armed.
-        result.attempted = true;
-        const auto reply =
-            nativeExchange(path, binding, command, 64, std::min(remaining, ProbeBudgetMs), nullptr);
-        if (!reply || (*reply != "ok" && *reply != "ok\n"))
-            return result;
-    }
-    result.allAcknowledged = true;
-    return result;
 }
 
 } // namespace Linura::SecurityOwner

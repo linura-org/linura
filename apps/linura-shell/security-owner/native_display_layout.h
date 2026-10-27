@@ -24,8 +24,9 @@ struct NativeDisplayLayout final
     [[nodiscard]] QString encode() const;
     [[nodiscard]] bool nativeOptions(const NativeDisplaySnapshot &snapshot) const;
     [[nodiscard]] bool matchesGeometry(const NativeDisplaySnapshot &snapshot) const;
-    // The caller separately validates native mirroring/DPMS metadata. This
-    // closed formatter accepts only typed targets and native inventory names.
+    // Candidate formatter fixtures only. The pinned keyword API replaces the
+    // complete monitor rule, including unmanaged properties; these strings are
+    // NOT eligible for native dispatch. No compositor writer consumes them.
     [[nodiscard]] std::vector<QByteArray> commands(const NativeDisplaySnapshot &snapshot) const;
 };
 struct NativeDisplayIntent final

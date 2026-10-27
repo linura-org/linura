@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod display_adapter;
 mod runtime;
 mod session_adapter;
 mod session_approval;

@@ -130,6 +130,16 @@ EXPECTED_LOCAL_OPERATIONS = {
     }
 }
 EXPECTED_REGISTERED_OPERATIONS = {
+    "managed-display-layout": {
+        "operation_id": "operation:display.layout.apply",
+        "class": "managed-external-effect",
+        "risk_floor": "security-sensitive",
+        "risk_floor_rule_id": "operation-registry.managed-display-layout.risk-floor",
+        "provider": "hyprland",
+        "observation_capability": "display.outputs.observe",
+        "resource_prefix": "display:topology:",
+        "change_keys": ["layout"],
+    },
     "managed-session-lock": {
         "operation_id": "operation:session.lock.set-secure",
         "class": "managed-external-effect",

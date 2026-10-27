@@ -325,3 +325,38 @@ fn settled_unlocked_coverage_is_empty_and_incomplete_secure_coverage_is_visible(
         .is_err()
     );
 }
+
+#[test]
+fn prepared_sample_digest_matches_native_framing_and_binds_every_raw_fact() {
+    let sample: Wire = (
+        "session:lock:fixture".into(),
+        "id".into(),
+        "seat0".into(),
+        100,
+        "{}".into(),
+        "[]".into(),
+        false,
+    );
+    let digest = sample_digest(&sample);
+    assert_eq!(
+        digest.to_hex(),
+        "44b57ddd19b647a800af370d9c77da32ca2ee684d62b906773639292c9367c57"
+    );
+    for field in 0..6 {
+        let mut changed = sample.clone();
+        match field {
+            0 => changed.0.push('x'),
+            1 => changed.1.push('x'),
+            2 => changed.2.push('x'),
+            3 => changed.4.push(' '),
+            4 => changed.5.push(' '),
+            _ => changed.6 = true,
+        }
+        assert_ne!(sample_digest(&changed), digest);
+    }
+    // Probe time is separately checked against the original native boot-clock
+    // deadline. It cannot be in a content digest compared across two probes.
+    let mut sampled_later = sample;
+    sampled_later.3 += 1;
+    assert_eq!(sample_digest(&sampled_later), digest);
+}

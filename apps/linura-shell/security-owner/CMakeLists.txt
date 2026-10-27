@@ -24,6 +24,8 @@ add_library(linura-security-owner-foundation STATIC
     session_bootstrap.cpp
     compositor_probe.cpp
     native_display_layout.cpp native_display_layout.h
+    native_display_attempt.cpp native_display_attempt.h
+    native_display_watchdog.cpp native_display_watchdog.h
     native_wayland_readiness.cpp
 )
 target_include_directories(linura-security-owner-foundation PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -204,6 +206,18 @@ endif()
 include(CTest)
 if(BUILD_TESTING)
     pkg_check_modules(WAYLAND_SERVER REQUIRED IMPORTED_TARGET wayland-server)
+
+    add_executable(linura-security-owner-display-attempt-tests tests/native_display_attempt.cpp)
+    target_link_libraries(linura-security-owner-display-attempt-tests PRIVATE linura-security-owner-foundation)
+    target_compile_options(linura-security-owner-display-attempt-tests PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
+    add_test(NAME security-owner-display-attempt-boundary COMMAND linura-security-owner-display-attempt-tests)
+    set_tests_properties(security-owner-display-attempt-boundary PROPERTIES TIMEOUT 10)
+
+    add_executable(linura-security-owner-display-watchdog-tests tests/native_display_watchdog.cpp)
+    target_link_libraries(linura-security-owner-display-watchdog-tests PRIVATE linura-security-owner-foundation)
+    target_compile_options(linura-security-owner-display-watchdog-tests PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
+    add_test(NAME security-owner-display-watchdog-boundary COMMAND linura-security-owner-display-watchdog-tests)
+    set_tests_properties(security-owner-display-watchdog-boundary PROPERTIES TIMEOUT 10)
 
     add_executable(linura-security-owner-display-layout-tests tests/native_display_layout.cpp)
     target_link_libraries(linura-security-owner-display-layout-tests PRIVATE linura-security-owner-wayland)

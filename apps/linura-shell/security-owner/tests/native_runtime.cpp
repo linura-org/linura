@@ -575,11 +575,22 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 14 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 15 && signals == 1 && annotations == 3);
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));
     NativeEndpoint::registerWireTypes();
+    const NativeDisplaySample digestSample{QStringLiteral("session:lock:fixture"),
+                                           QStringLiteral("id"),
+                                           QStringLiteral("seat0"),
+                                           QStringLiteral("{}"),
+                                           QStringLiteral("[]"),
+                                           false};
+    assert(digestSample.correlationDigest() ==
+           QStringLiteral("44b57ddd19b647a800af370d9c77da32ca2ee684d62b906773639292c9367c57"));
+    auto changedDigestSample = digestSample;
+    changedDigestSample.monitors += QLatin1Char(' ');
+    assert(changedDigestSample.correlationDigest() != digestSample.correlationDigest());
     qDBusRegisterMetaType<HistoricalStatus>();
     qDBusRegisterMetaType<TransitionHistoricalStatus>();
     assert(QByteArray(QDBusMetaType::typeToSignature(QMetaType::fromType<NativeApprovalWire>())) ==
@@ -590,6 +601,8 @@ int main(int argc, char **argv)
                QMetaType::fromType<NativePowerPermissionWire>())) == "(sst)");
     assert(QByteArray(QDBusMetaType::typeToSignature(
                QMetaType::fromType<NativeDisplayObservationWire>())) == "(ssstssb)");
+    assert(QByteArray(QDBusMetaType::typeToSignature(
+               QMetaType::fromType<NativePreparedDisplayObservationWire>())) == "((ssstssb)s)");
     NativeApprovalWire scope{QStringLiteral("session:lock:abcd1234-1234-4567-89ab-0123456789ab:"
                                             "1000:2:42:98765432-1234-4567-89ab-0123456789ab:1"),
                              QStringLiteral("unix:uid:1000"),

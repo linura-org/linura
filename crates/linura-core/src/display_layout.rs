@@ -453,18 +453,23 @@ impl DisplayLayout {
         }
 
         // Every mirrored target must be an independently enabled root. No
-        // chains/cycles, and never mirror an output that is disabled.
+        // chains/cycles, and never mirror an output that is disabled. Mirrors
+        // share their root's logical origin; an independent position would
+        // describe a different layout than the native mirror operation.
         if visible == 0 {
             return Err(DisplayLayoutError::NoIndependentVisibleOutput);
         }
         for layout in result.values() {
             if let DisplayOutputLayout::Enabled {
                 mirror: Some(target),
+                x,
+                y,
                 ..
             } = layout
                 && !matches!(
                     result.get(target),
-                    Some(DisplayOutputLayout::Enabled { mirror: None, .. })
+                    Some(DisplayOutputLayout::Enabled { mirror: None, x: root_x, y: root_y, .. })
+                        if root_x == x && root_y == y
                 )
             {
                 return Err(DisplayLayoutError::InvalidMirror);
@@ -532,7 +537,9 @@ impl Display for DisplayLayoutError {
             Self::UnsupportedMode => "requested output mode was not independently observed",
             Self::InvalidPosition => "display output position is outside the bounded range",
             Self::InvalidGeometry => "display output geometry is not finite and visible",
-            Self::InvalidMirror => "mirror target is missing, disabled or is itself mirrored",
+            Self::InvalidMirror => {
+                "mirror target is missing, disabled, mirrored or has a different origin"
+            }
             Self::NoIndependentVisibleOutput => "display layout removes every visible root",
         })
     }
@@ -789,6 +796,34 @@ mod tests {
                 vec![enabled(&first, 0, None), enabled(&second, 0, Some(first))],
             )
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn mirror_origin_must_match_the_enabled_root() {
+        let (observed, caps) = test_outputs();
+        let first = observed.outputs()[0].clone();
+        let second = observed.outputs()[1].clone();
+        for x in [-1920, 1920] {
+            assert_eq!(
+                DisplayLayout::new(
+                    &observed,
+                    &caps,
+                    vec![
+                        enabled(&first, 0, None),
+                        enabled(&second, x, Some(first.clone()))
+                    ],
+                ),
+                Err(DisplayLayoutError::InvalidMirror)
+            );
+        }
+        let mut mirrored = enabled(&second, 0, Some(first.clone()));
+        if let DisplayOutputLayout::Enabled { y, .. } = &mut mirrored {
+            *y = 1;
+        }
+        assert_eq!(
+            DisplayLayout::new(&observed, &caps, vec![enabled(&first, 0, None), mirrored]),
+            Err(DisplayLayoutError::InvalidMirror)
         );
     }
 

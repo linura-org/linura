@@ -117,6 +117,23 @@ const QDBusArgument &operator>>(const QDBusArgument &wire,
     return wire;
 }
 
+QDBusArgument &operator<<(QDBusArgument &wire,
+                          const NativePreparedDisplayObservationWire &observation)
+{
+    wire.beginStructure();
+    wire << observation.sample << observation.sampleDigest;
+    wire.endStructure();
+    return wire;
+}
+const QDBusArgument &operator>>(const QDBusArgument &wire,
+                                NativePreparedDisplayObservationWire &observation)
+{
+    wire.beginStructure();
+    wire >> observation.sample >> observation.sampleDigest;
+    wire.endStructure();
+    return wire;
+}
+
 NativeEndpoint::NativeEndpoint(NativeRuntime &runtime) : QObject(&runtime), runtime_(runtime)
 {
     connect(&runtime, &NativeRuntime::approvalInteractionCompleted, this,
@@ -132,6 +149,7 @@ void NativeEndpoint::registerWireTypes()
     qDBusRegisterMetaType<NativeLockObservationWire>();
     qDBusRegisterMetaType<NativePowerPermissionWire>();
     qDBusRegisterMetaType<NativeDisplayObservationWire>();
+    qDBusRegisterMetaType<NativePreparedDisplayObservationWire>();
 }
 bool NativeEndpoint::ArmApproval(const NativeApprovalWire &wire)
 {
@@ -191,6 +209,24 @@ NativeDisplayObservationWire NativeEndpoint::ObserveDisplay()
     }
     return {};
 }
+NativePreparedDisplayObservationWire NativeEndpoint::ObservePreparedDisplay()
+{
+    if (calledFromDBus()) {
+        const auto sampled = bootMilliseconds();
+        const auto state = runtime_.observePreparedDisplay(message());
+        const auto completed = bootMilliseconds();
+        if (sampled && completed && state &&
+            NativeLockObservationWire{state->resource, state->secure, *sampled}.freshAtBootMs(
+                *completed))
+            return {{state->resource, state->compositor, state->seat, *sampled, state->topology,
+                     state->monitors, state->secure},
+                    state->correlationDigest()};
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Native prepared display evidence unavailable"));
+    }
+    return {};
+}
+
 bool NativeEndpoint::DispatchPreparedLock(const QString &resource, bool secure)
 {
     const auto lock = NativeLockIdentity::parse(resource);

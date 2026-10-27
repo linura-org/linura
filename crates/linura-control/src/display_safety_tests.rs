@@ -226,6 +226,58 @@ fn exact_safety_review_preserves_recovery_candidate_and_independent_postconditio
 }
 
 #[test]
+fn restart_postcondition_requires_exact_lock_layout_and_all_new_native_facts() {
+    let before = Fixture::new();
+    let after = before.after();
+    let lock = id(SessionLockId::from_resource(&before.locker.resource));
+    let verify = |f: &Fixture, lock: &SessionLockId, since| {
+        DisplayLayoutSafetyReview::review_current_postcondition(
+            &f.principal,
+            &f.desired,
+            lock,
+            &f.display,
+            &f.session,
+            &f.locker,
+            since,
+            1400,
+        )
+    };
+    assert!(verify(&after, &lock, 1200).is_ok());
+    assert_eq!(
+        verify(&before, &lock, 900),
+        Err(DisplaySafetyError::Postcondition)
+    );
+    for since in [0, 1300, 1400, u64::MAX] {
+        assert_eq!(
+            verify(&after, &lock, since),
+            Err(DisplaySafetyError::Freshness)
+        );
+    }
+    let replaced = id(SessionLockId::new(
+        lock.epoch().clone(),
+        lock.security_owner_invocation().clone(),
+        lock.generation() + 1,
+    ));
+    assert_eq!(
+        verify(&after, &replaced, 1200),
+        Err(DisplaySafetyError::LockCoverage)
+    );
+    for source in 0..3 {
+        let mut mixed = after.clone();
+        let sample = match source {
+            0 => &mut mixed.display,
+            1 => &mut mixed.session,
+            _ => &mut mixed.locker,
+        };
+        sample.observed_at_unix_ms = 1200;
+        assert_eq!(
+            verify(&mixed, &lock, 1200),
+            Err(DisplaySafetyError::Freshness)
+        );
+    }
+}
+
+#[test]
 fn principal_session_seat_and_native_lock_substitutions_fail_closed() {
     let original = Fixture::new();
     for principal in [

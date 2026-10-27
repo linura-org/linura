@@ -31,6 +31,11 @@
     <method name="ObserveDisplay">
       <arg name="observation" type="(ssstssb)" direction="out"/>
     </method>
+    <!-- Read-only, admitted only for the independently supervised session executor.
+         sampleDigest correlates strictly parsed raw facts; it is not authority. -->
+    <method name="ObservePreparedDisplay">
+      <arg name="observation" type="((ssstssb)s)" direction="out"/>
+    </method>
     <method name="ObservePowerPermission">
       <arg name="resource" type="s" direction="in"/>
       <arg name="observation" type="(sst)" direction="out"/>

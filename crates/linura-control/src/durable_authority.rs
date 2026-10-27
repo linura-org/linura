@@ -758,6 +758,79 @@ where
         )
     }
 
+    /// Close the original desired-state transaction after independently proven
+    /// display compensation. The requested desired layout did not commit: its
+    /// existing RecoveryBlocked state forbids reprepare/replay, while the
+    /// separate immutable display journal records the verified restored baseline.
+    /// This creates no permit and changes no released persistence format.
+    pub(crate) fn retire_restored_display_without_replay(
+        &mut self,
+        previews: &mut PlanPreviewControl,
+        principal: AuthenticatedPrincipal,
+        actor: Actor,
+        request: &PlanDesiredStateRequest,
+    ) -> Result<TransactionSnapshot, DurableAuthorityError> {
+        self.assert_request_matches(&principal, request)?;
+        let principal_id = PrincipalId::new(principal.as_str())
+            .map_err(|e| DurableAuthorityError::Preview(e.to_string()))?;
+        let transaction = TransactionId::for_namespace(&principal_id, &request.request_id);
+        let anchor = self.transactions.recovery_anchor(&transaction)?;
+        if !matches!(
+            anchor.snapshot.state,
+            TransactionState::Indeterminate | TransactionState::RecoveryBlocked
+        ) {
+            return Err(DurableAuthorityError::RecoveryNotIndeterminate);
+        }
+        // Re-enter the same canonical display factory; a verifier result or a
+        // native attempt flag alone cannot close durable authority history.
+        let (plan, observation) = previews.build_fresh_display_plan(&principal, actor, request)?;
+        if plan.status != linura_planner::PlanStatus::ChangeProposed || plan.execution_authorized()
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        let material = linura_core::DisplayLayoutMaterial::decode(
+            request
+                .desired_state
+                .get("layout")
+                .ok_or(DurableAuthorityError::AuthorityChanged)?,
+        )
+        .map_err(|_| DurableAuthorityError::AuthorityChanged)?;
+        let mut native = observation.clone();
+        native.attributes.remove("control.display_session_digest");
+        native.attributes.remove("control.display_coverage_digest");
+        let facts = linura_observation::DisplayObservationFacts::from_envelope(
+            &native,
+            material.topology(),
+            self.authority_now_unix_ms()?,
+        )
+        .map_err(|_| DurableAuthorityError::AuthorityChanged)?;
+        let intent = material
+            .validate_native(facts.inventory(), facts.capabilities())
+            .map_err(|_| DurableAuthorityError::AuthorityChanged)?;
+        if facts.layout() != intent.baseline() || facts.layout() == intent.desired() {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        let at = self.authority_now_unix_ms()?;
+        observation
+            .require_current(at)
+            .map_err(|_| DurableAuthorityError::AuthorityChanged)?;
+        if anchor.snapshot.state == TransactionState::RecoveryBlocked {
+            return Ok(anchor.snapshot);
+        }
+        let recovery = self.authority_signer.authorize_recovery(
+            &anchor.snapshot,
+            RecoveryResolution::ConflictingState {
+                observation_digest: digest_observation(&observation)?,
+            },
+            at,
+            observation_expires_at_unix_ms(&observation)?,
+        )?;
+        match self.transactions.recover(&recovery)? {
+            RecoveryOutcome::Blocked(snapshot) => Ok(snapshot),
+            _ => Err(DurableAuthorityError::AuthorityChanged),
+        }
+    }
+
     fn recover_indeterminate_inner(
         &mut self,
         previews: &mut PlanPreviewControl,
