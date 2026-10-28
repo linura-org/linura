@@ -1,6 +1,73 @@
 //! Experimental S21-2 client intent and truthful lifecycle reports. These types
 //! contain no principal, policy decision, prepared authority or native handle.
-use linura_core::{DisplayLayoutIntent, DisplayLayoutMaterial, RequestId, ResourceId};
+use std::collections::BTreeSet;
+
+use linura_core::{
+    DisplayLayout, DisplayLayoutIntent, DisplayLayoutMaterial, DisplayOutputId, DisplayOutputSet,
+    NativeOutputCapabilities, RequestId, ResourceId, SessionLockId,
+};
+
+/// Read-only client projection of a freshly observed own-login topology. This
+/// is neither an observation envelope nor approval, a prepared effect or proof
+/// of physical visibility/secure-lock coverage. Mutations re-observe in Control.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisplaySnapshot {
+    pub lock: SessionLockId,
+    pub layout: DisplayLayout,
+    pub capabilities: Vec<NativeOutputCapabilities>,
+    pub powered_outputs: BTreeSet<DisplayOutputId>,
+    pub observed_at_unix_ms: u64,
+    pub valid_for_ms: u64,
+}
+
+impl DisplaySnapshot {
+    /// Validate the complete report without turning it into current authority.
+    /// Preserve the original native timestamp and expiry, including in clients.
+    pub fn validate(&self, now_unix_ms: u64) -> Result<(), String> {
+        if self.lock.epoch() != self.layout.topology().session()
+            || self.lock.epoch().uid() == 0
+            || self.observed_at_unix_ms == 0
+            || self.valid_for_ms == 0
+            || self.valid_for_ms > 2_000
+            || self
+                .observed_at_unix_ms
+                .checked_add(self.valid_for_ms)
+                .is_none_or(|end| end > i64::MAX as u64)
+            || now_unix_ms
+                .checked_sub(self.observed_at_unix_ms)
+                .is_none_or(|elapsed| elapsed >= self.valid_for_ms)
+        {
+            return Err("display snapshot identity or original freshness is invalid".into());
+        }
+        let inventory = DisplayOutputSet::new(
+            self.layout.topology().clone(),
+            self.layout
+                .outputs()
+                .iter()
+                .map(|row| row.output().clone())
+                .collect(),
+        )
+        .map_err(|e| e.to_string())?;
+        let validated = DisplayLayout::new(
+            &inventory,
+            &self.capabilities,
+            self.layout.outputs().to_vec(),
+        )
+        .map_err(|e| e.to_string())?;
+        if validated != self.layout
+            || self.powered_outputs.iter().any(|output| {
+                !self
+                    .layout
+                    .outputs()
+                    .iter()
+                    .any(|row| row.output() == output && row.enabled())
+            })
+        {
+            return Err("display snapshot inventory, capabilities or power facts disagree".into());
+        }
+        Ok(())
+    }
+}
 
 pub const DISPLAY_LAYOUT_REQUEST_PREFIX: &str = "request:v010:display-layout:";
 

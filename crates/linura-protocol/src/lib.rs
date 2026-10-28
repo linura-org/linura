@@ -3,7 +3,7 @@
 mod display;
 pub use display::{
     DISPLAY_LAYOUT_REQUEST_PREFIX, DisplayLayoutReceipt, DisplayLayoutRequest, DisplayLayoutState,
-    display_layout_request_id,
+    DisplaySnapshot, display_layout_request_id,
 };
 
 use std::collections::BTreeMap;

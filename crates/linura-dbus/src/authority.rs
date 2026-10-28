@@ -123,6 +123,12 @@ pub struct Authority1SessionContext {
 }
 
 pub trait Authority1Handler: Send + 'static {
+    fn own_display_snapshot(
+        &mut self,
+        _context: Authority1SessionContext,
+    ) -> Result<linura_protocol::DisplaySnapshot, String> {
+        Err("native display discovery is unsupported in this authority composition".into())
+    }
     // Unsupported is explicit for authority compositions without the complete
     // qualified native display admission/execution/recovery ports. Registering
     // this transport contract must never silently activate a native effect.
@@ -679,6 +685,26 @@ impl Authority1Service {
         let context = session_context(connection, &header).await?;
         self.with_handler(move |handler| handler.own_session_lock(context))
             .await
+    }
+
+    /// Read-only discovery; the caller cannot choose a UID, session or output.
+    #[zbus(out_args("snapshot"))]
+    async fn get_own_display_snapshot(
+        &self,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<(crate::authority_display::DisplaySnapshotWire,)> {
+        let context = session_context(connection, &header).await?;
+        self.with_handler(move |handler| {
+            let principal = context.principal.as_str().to_owned();
+            crate::authority_display::encode_snapshot(
+                handler.own_display_snapshot(context)?,
+                &principal,
+                crate::authority_display::now_ms()?,
+            )
+            .map(|snapshot| (snapshot,))
+        })
+        .await
     }
 
     #[zbus(out_args("receipt"))]
@@ -1244,6 +1270,7 @@ mod tests {
             "GetProtectiveLockSetting",
             "GetProtectiveLockSettingRequestStatus",
             "GetOwnSessionLock",
+            "GetOwnDisplaySnapshot",
             "ConvergeSessionLock",
             "RecoverSessionLock",
             "GetOwnSessionTransition",
@@ -1257,6 +1284,7 @@ mod tests {
             assert!(live.contains(&marker), "live {method}");
         }
         for (method, shape) in [
+            ("GetOwnDisplaySnapshot", "(sstta(ttba(uuu)b))"),
             ("BeginDisplayLayout", "(sssst)"),
             ("GetDisplayLayoutStatus", "(sssst)"),
             ("ConfirmDisplayLayout", "(sssst)"),

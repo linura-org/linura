@@ -839,6 +839,11 @@ for the current implementation status.
   inode against the retained binary digest. This fixture cannot install on a
   host, supply a public updater, cache Linura outputs as a substrate, grant
   execution authority or promote the candidate to display/recovery/S17 support.
+- Candidate handoff binds the canonical runtime package contract as well as the
+  build SDK. Require the runtime's declared package set and exact SDK versions
+  for every installed package; do not require build-only tools to be installed
+  in a runtime guest. Wrong snapshot/base/architecture, missing runtime packages,
+  version drift and unbound additional providers all remain unsupported.
 - The native owner binds the private output protocol on its existing attested
   Wayland connection and requires the live pinned upstream/source identities.
   Stable compositor/output lifetimes survive owner reconnection for observation;
@@ -846,7 +851,16 @@ for the current implementation status.
   inventory, geometry, original timestamps and exact float/fixed scale evidence
   must agree independently. Retiring terminal wire objects preserves one-use
   correlation tombstones; resource reclamation is not permission to replay.
-- The public display methods accept only bounded typed intent or a same-request
+- Read-only own-display discovery has no UID/session/target input. Control
+  binds one native display/owner sample to independent active local logind
+  evidence for the transport principal and exact seat/epoch. Original sample
+  time and earliest expiry survive projection and client decoding. Deny stale,
+  unsupported, duplicate, incomplete and replaced-generation reports; no cached
+  fallback or retry. A report of powered-off outputs is diagnostic state, not
+  a visible recovery guarantee, lock coverage, approval or execution authority.
+  Its bounded 16-output/128-mode inventory uses a dedicated 64 KiB reply cap;
+  existing Authority1 methods retain their 16 KiB cap.
+- The public display mutation methods accept only bounded typed intent or a same-request
   lifecycle decision. Principal identity remains transport-derived. Receipt
   decoding requires the exact structure, request namespace, canonical topology,
   transaction and closed state; history is never current layout or protection.

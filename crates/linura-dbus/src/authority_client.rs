@@ -148,7 +148,12 @@ impl Authority1Client {
             method,
             body,
         )?;
-        if reply.body().len() > MAX_REPLY_BYTES {
+        let limit = if method == "GetOwnDisplaySnapshot" {
+            crate::authority_display::MAX_DISPLAY_REPLY_BYTES
+        } else {
+            MAX_REPLY_BYTES
+        };
+        if reply.body().len() > limit {
             return Err(TransportError::new("Authority1 reply exceeds its bound"));
         }
         Ok(reply)
@@ -157,6 +162,24 @@ impl Authority1Client {
     pub fn own_session_lock(&self) -> Result<SessionLockId, TransportError> {
         let resource: String = self.call("GetOwnSessionLock", &())?.body().deserialize()?;
         parse_lock(&resource)
+    }
+
+    /// Fresh caller-bound topology and advertised modes. No effects, approvals
+    /// or hidden retries; clients must refresh expired reports before use.
+    pub fn own_display_snapshot(&self) -> Result<linura_protocol::DisplaySnapshot, TransportError> {
+        let reply = self.call("GetOwnDisplaySnapshot", &())?;
+        if reply.body().signature().to_string() != "(sstta(ttba(uuu)b))" {
+            return Err(TransportError::new(
+                "display snapshot reply signature mismatch",
+            ));
+        }
+        let (wire,): (crate::authority_display::DisplaySnapshotWire,) =
+            reply.body().deserialize()?;
+        crate::authority_display::decode_snapshot(
+            wire,
+            crate::authority_display::now_ms().map_err(TransportError::new)?,
+        )
+        .map_err(TransportError::new)
     }
 
     /// Process-retained machine-wide diagnostics, not current protection or a

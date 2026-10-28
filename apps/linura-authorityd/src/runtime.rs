@@ -426,6 +426,29 @@ impl Authority1Handler for ManagedRuntime {
         Ok(observation.resource.as_str().into())
     }
 
+    fn own_display_snapshot(
+        &mut self,
+        context: Authority1SessionContext,
+    ) -> Result<linura_protocol::DisplaySnapshot, String> {
+        let uid = own_uid(&context.principal)?;
+        // Independent logind and native owner facts are combined inward by
+        // Control. No policy/approval/executor or durable mutation is involved.
+        linura_control::DisplayLayoutSafetyReview::query_own_display_snapshot(
+            &context.principal,
+            || self.session_channel.observe_current_display(uid, 1),
+            |epoch| {
+                self.session_verifier
+                    .transitions
+                    .observe_authoritative(
+                        &epoch.resource_id().map_err(|e| e.to_string())?,
+                        &CapabilityId::new("session.epoch.observe").map_err(|e| e.to_string())?,
+                    )
+                    .map_err(|e| e.to_string())
+            },
+        )
+        .map_err(|e| e.to_string())
+    }
+
     fn converge_session_lock(
         &mut self,
         context: Authority1SessionContext,

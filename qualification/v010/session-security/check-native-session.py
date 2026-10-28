@@ -94,6 +94,59 @@ def properties(*args: str) -> dict[str, str]:
     return values
 
 
+def validate_display_discovery(
+    text: str, lock: str, topology_prefix: str, now_ms: int
+) -> None:
+    """Check the actual typed client report, never assert effect/coverage proof."""
+    if len(text.encode("utf-8")) > 65536:
+        raise RuntimeError("native display discovery exceeds its report bound")
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        key, delimiter, value = line.partition("=")
+        if not delimiter or key in fields:
+            raise RuntimeError("native display discovery is malformed or duplicated")
+        fields[key] = value
+    base = {
+        "lock_resource",
+        "layout",
+        "observed_at_unix_ms",
+        "valid_for_ms",
+        "execution_authority",
+    }
+    if (
+        fields.get("lock_resource") != lock
+        or fields.get("execution_authority") != "none"
+        or not fields.get("layout", "").startswith(topology_prefix)
+    ):
+        raise RuntimeError("native display discovery does not bind the real login")
+    for key in ("observed_at_unix_ms", "valid_for_ms"):
+        if re.fullmatch(r"[1-9][0-9]{0,18}", fields.get(key, "")) is None:
+            raise RuntimeError(
+                "native display discovery original freshness is malformed"
+            )
+    sampled = int(fields["observed_at_unix_ms"])
+    validity = int(fields["valid_for_ms"])
+    if not 0 <= now_ms - sampled < validity <= 2000:
+        raise RuntimeError("native display discovery is stale or future")
+    count, remainder = divmod(len(fields) - len(base), 5)
+    if remainder or not 1 <= count <= 16:
+        raise RuntimeError("native display discovery inventory is incomplete")
+    expected = base | {
+        f"output.{index}.{key}"
+        for index in range(count)
+        for key in ("handle", "generation", "can_disable", "powered", "modes")
+    }
+    if set(fields) != expected:
+        raise RuntimeError("native display discovery inventory is incomplete")
+    for index in range(count):
+        if (
+            not fields[f"output.{index}.modes"]
+            or fields[f"output.{index}.can_disable"] not in {"true", "false"}
+            or fields[f"output.{index}.powered"] not in {"true", "false"}
+        ):
+            raise RuntimeError("native display discovery capabilities are missing")
+
+
 def validate_session(facts: dict[str, str], uid: int, leader: int) -> None:
     required = {
         "User": str(uid),
@@ -441,6 +494,18 @@ def inspect() -> dict[str, object]:
     # A cold boot has no provisioning-time daemon; attest its fresh supervised
     # identity after that normal activation, before accepting any bootstrap.
     native_polkit = inspect_native_polkit()
+    # Execute the real public no-model discovery client against the exact built
+    # compositor. This is a read-only bootstrap assertion, not S21 execution,
+    # restoration, hotplug, physical visibility or secure-coverage acceptance.
+    discovery = command(
+        "runuser", "-u", "linura", "--", "/usr/bin/linuractl", "own-display-snapshot"
+    )
+    validate_display_discovery(
+        discovery,
+        lock.removeprefix("resource="),
+        f"LNDL:1;display:topology:{boot}:{uid}:{facts['Id']}:{facts['TimestampMonotonic']}:{facts['Seat']}:",
+        time.time_ns() // 1_000_000,
+    )
     return {
         "schema_version": 1,
         "claim": "native-session-bootstrap-only",

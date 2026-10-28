@@ -23,6 +23,103 @@ pub struct DisplayLayoutSafetyReview {
 }
 
 impl DisplayLayoutSafetyReview {
+    /// Control owns the two-probe discovery schedule and aggregate budget.
+    /// Adapters supply bounded mechanisms; there is no retry, retained cache,
+    /// partial result or durable/external mutation on this query path.
+    pub fn query_own_display_snapshot<D, S>(
+        principal: &AuthenticatedPrincipal,
+        display_probe: D,
+        session_probe: S,
+    ) -> Result<linura_protocol::DisplaySnapshot, DisplaySafetyError>
+    where
+        D: FnOnce() -> Result<(ObservationEnvelope, SessionLockId), String>,
+        S: FnOnce(&linura_core::SessionEpoch) -> Result<ObservationEnvelope, String>,
+    {
+        let started = std::time::Instant::now();
+        let (display, lock) = display_probe().map_err(|_| DisplaySafetyError::Display)?;
+        // Each concrete mechanism has its existing two-second bound. Preserve
+        // those bounds and cap their aggregate; original evidence expiry is
+        // independently checked below, so four seconds never means freshening.
+        if started.elapsed() >= std::time::Duration::from_secs(2) {
+            return Err(DisplaySafetyError::Freshness);
+        }
+        if principal.as_str() != format!("unix:uid:{}", lock.epoch().uid()) {
+            return Err(DisplaySafetyError::Session);
+        }
+        let session = session_probe(lock.epoch()).map_err(|_| DisplaySafetyError::Session)?;
+        if started.elapsed() >= std::time::Duration::from_secs(4) {
+            return Err(DisplaySafetyError::Freshness);
+        }
+        let now = u64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| DisplaySafetyError::Freshness)?
+                .as_millis(),
+        )
+        .map_err(|_| DisplaySafetyError::Freshness)?;
+        Self::own_display_snapshot(principal, &lock, &display, &session, now)
+    }
+
+    /// Caller-bound read-only discovery. Unlike mutation safety review, this
+    /// may report no powered outputs, and makes no secure-coverage claim. The
+    /// native composition supplies one coherent display/owner sample plus an
+    /// independent current logind sample; neither is cached or client-authored.
+    fn own_display_snapshot(
+        principal: &AuthenticatedPrincipal,
+        lock: &SessionLockId,
+        display: &ObservationEnvelope,
+        session: &ObservationEnvelope,
+        now_unix_ms: u64,
+    ) -> Result<linura_protocol::DisplaySnapshot, DisplaySafetyError> {
+        let topology = linura_core::DisplayTopologyId::from_resource(&display.resource)
+            .map_err(|_| DisplaySafetyError::Display)?;
+        if lock.epoch() != topology.session() {
+            return Err(DisplaySafetyError::Session);
+        }
+        validate_active_session(
+            principal,
+            topology.session(),
+            session,
+            "session.epoch.observe",
+            now_unix_ms,
+        )
+        .map_err(|_| DisplaySafetyError::Session)?;
+        if session.observed_at_unix_ms == 0
+            || session.attributes.get("seat") != Some(&ObservedValue::Text(topology.seat().into()))
+        {
+            return Err(DisplaySafetyError::Session);
+        }
+        let facts = DisplayObservationFacts::from_envelope(display, &topology, now_unix_ms)
+            .map_err(|_| DisplaySafetyError::Display)?;
+        let end = display
+            .observed_at_unix_ms
+            .checked_add(display.valid_for_ms)
+            .zip(
+                session
+                    .observed_at_unix_ms
+                    .checked_add(session.valid_for_ms),
+            )
+            .map(|(display, session)| display.min(session))
+            .ok_or(DisplaySafetyError::Freshness)?;
+        // Preserve the earlier acquisition time and earliest contributing
+        // expiry. A later logind read cannot freshen old native output facts.
+        let observed_at_unix_ms = display.observed_at_unix_ms.min(session.observed_at_unix_ms);
+        let snapshot = linura_protocol::DisplaySnapshot {
+            lock: lock.clone(),
+            layout: facts.layout().clone(),
+            capabilities: facts.capabilities().to_vec(),
+            powered_outputs: facts.powered_outputs().clone(),
+            observed_at_unix_ms,
+            valid_for_ms: end
+                .checked_sub(observed_at_unix_ms)
+                .ok_or(DisplaySafetyError::Freshness)?,
+        };
+        snapshot
+            .validate(now_unix_ms)
+            .map_err(|_| DisplaySafetyError::Freshness)?;
+        Ok(snapshot)
+    }
+
     /// Independently re-observed current postcondition for a retained exact
     /// intent, including restoration after restart. This does not grant apply,
     /// continuation or commit authority. All contributing samples must originate

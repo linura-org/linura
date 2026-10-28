@@ -27,6 +27,166 @@ struct Fixture {
     locker: ObservationEnvelope,
 }
 
+#[test]
+fn own_display_discovery_preserves_native_facts_without_asserting_mutation_safety() {
+    let mut f = Fixture::new();
+    let lock = id(SessionLockId::from_resource(&f.locker.resource));
+    // A report may explain DPMS-off state without claiming a visible recovery
+    // output, safe mutation, lock coverage or successful execution.
+    for index in 0..2 {
+        f.display.attributes.insert(
+            format!("output.{index}.powered"),
+            ObservedValue::Bool(false),
+        );
+    }
+    f.session.observed_at_unix_ms = 1100;
+    f.session.valid_for_ms = 500;
+    let snapshot = id(DisplayLayoutSafetyReview::own_display_snapshot(
+        &f.principal,
+        &lock,
+        &f.display,
+        &f.session,
+        1200,
+    ));
+    assert_eq!(snapshot.observed_at_unix_ms, 1000);
+    assert_eq!(snapshot.valid_for_ms, 600);
+    assert!(snapshot.powered_outputs.is_empty());
+    assert_eq!(snapshot.capabilities.len(), 2);
+    assert_eq!(snapshot.layout.topology(), f.desired.topology());
+    assert!(snapshot.validate(1600).is_err());
+    assert!(
+        DisplayLayoutSafetyReview::review(
+            &f.principal,
+            &f.desired,
+            &f.display,
+            &f.session,
+            &f.locker,
+            1200,
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn own_display_discovery_rejects_other_principals_stale_native_and_ineligible_sessions() {
+    let f = Fixture::new();
+    let lock = id(SessionLockId::from_resource(&f.locker.resource));
+    for principal in ["unix:uid:0", "unix:uid:1001", "unix:uid:01000"] {
+        let principal = id(AuthenticatedPrincipal::new(principal));
+        assert!(
+            DisplayLayoutSafetyReview::own_display_snapshot(
+                &principal, &lock, &f.display, &f.session, 1200,
+            )
+            .is_err()
+        );
+    }
+    for now in [999, 3000, u64::MAX] {
+        assert!(
+            DisplayLayoutSafetyReview::own_display_snapshot(
+                &f.principal,
+                &lock,
+                &f.display,
+                &f.session,
+                now,
+            )
+            .is_err()
+        );
+    }
+    for (key, value) in [
+        ("active", ObservedValue::Bool(false)),
+        ("remote", ObservedValue::Bool(true)),
+        ("leader_present", ObservedValue::Bool(false)),
+        ("seat", ObservedValue::Text("seat1".into())),
+        ("created_monotonic_us", ObservedValue::U64(43)),
+    ] {
+        let mut session = f.session.clone();
+        session.attributes.insert(key.into(), value);
+        assert!(
+            DisplayLayoutSafetyReview::own_display_snapshot(
+                &f.principal,
+                &lock,
+                &f.display,
+                &session,
+                1200,
+            )
+            .is_err(),
+            "{key}"
+        );
+    }
+    for synthetic in [false, true] {
+        let mut display = f.display.clone();
+        if synthetic {
+            display.authority = ObservationAuthority::SyntheticTest;
+        } else {
+            display
+                .attributes
+                .insert("unexpected".into(), ObservedValue::Bool(true));
+        }
+        assert!(
+            DisplayLayoutSafetyReview::own_display_snapshot(
+                &f.principal,
+                &lock,
+                &display,
+                &f.session,
+                1200,
+            )
+            .is_err()
+        );
+    }
+    let replaced_epoch = id(SessionEpoch::new(
+        lock.epoch().boot().clone(),
+        1000,
+        "c2",
+        43,
+    ));
+    let replaced = id(SessionLockId::new(
+        replaced_epoch,
+        lock.security_owner_invocation().clone(),
+        lock.generation(),
+    ));
+    assert!(
+        DisplayLayoutSafetyReview::own_display_snapshot(
+            &f.principal,
+            &replaced,
+            &f.display,
+            &f.session,
+            1200,
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn own_display_query_stops_at_unavailable_or_wrong_owner_mechanisms_without_retry() {
+    let f = Fixture::new();
+    let lock = id(SessionLockId::from_resource(&f.locker.resource));
+    assert_eq!(
+        DisplayLayoutSafetyReview::query_own_display_snapshot(
+            &f.principal,
+            || Err("native owner unavailable".into()),
+            |_| unreachable!("a failed native query must not fan out or retry"),
+        ),
+        Err(DisplaySafetyError::Display)
+    );
+    let other = id(AuthenticatedPrincipal::new("unix:uid:1001"));
+    assert_eq!(
+        DisplayLayoutSafetyReview::query_own_display_snapshot(
+            &other,
+            || Ok((f.display.clone(), lock.clone())),
+            |_| unreachable!("another login must not be queried"),
+        ),
+        Err(DisplaySafetyError::Session)
+    );
+    assert_eq!(
+        DisplayLayoutSafetyReview::query_own_display_snapshot(
+            &f.principal,
+            || Ok((f.display.clone(), lock.clone())),
+            |_| Err("native session unavailable".into()),
+        ),
+        Err(DisplaySafetyError::Session)
+    );
+}
+
 impl Fixture {
     fn new() -> Self {
         let epoch = id(SessionEpoch::new(

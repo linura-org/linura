@@ -52,15 +52,15 @@ pub use linura_observation::{
 };
 pub use linura_protocol::{
     CapabilitySnapshot, DisplayLayoutReceipt, DisplayLayoutRequest, DisplayLayoutState,
-    ExplainResponse, ExplainTarget, IntentCommand, NativeSleepGateState, NativeSleepGateStatus,
-    ObservationExplanation, ObservationRequest, ObservationResponse, ObservationSystemSnapshot,
-    PROTOCOL_MAJOR, PlanDesiredStateRequest, PlanPreview, PlanPreviewChange, PlanPreviewFinding,
-    PlanPreviewFindingLevel, PlanPreviewStatus, PlanReview, PlanReviewApprovalClass,
-    PlanReviewDecision, PortableProfileExport, PortableSetupExport, ProfileAdoptionRequest,
-    ProfileAdoptionResponse, ProtectiveLockSettingReceipt, ProtectiveLockSettingRequest,
-    ProtocolVersion, ProviderSnapshot, SessionLockReceipt, SessionLockRequest,
-    SessionLockRequestStatus, SessionTransitionCompletion, SessionTransitionReceipt,
-    SessionTransitionRequest, SessionTransitionRequestStatus, SetupAdoptionRequest,
-    SetupAdoptionResponse, SystemSnapshot, display_layout_request_id,
+    DisplaySnapshot, ExplainResponse, ExplainTarget, IntentCommand, NativeSleepGateState,
+    NativeSleepGateStatus, ObservationExplanation, ObservationRequest, ObservationResponse,
+    ObservationSystemSnapshot, PROTOCOL_MAJOR, PlanDesiredStateRequest, PlanPreview,
+    PlanPreviewChange, PlanPreviewFinding, PlanPreviewFindingLevel, PlanPreviewStatus, PlanReview,
+    PlanReviewApprovalClass, PlanReviewDecision, PortableProfileExport, PortableSetupExport,
+    ProfileAdoptionRequest, ProfileAdoptionResponse, ProtectiveLockSettingReceipt,
+    ProtectiveLockSettingRequest, ProtocolVersion, ProviderSnapshot, SessionLockReceipt,
+    SessionLockRequest, SessionLockRequestStatus, SessionTransitionCompletion,
+    SessionTransitionReceipt, SessionTransitionRequest, SessionTransitionRequestStatus,
+    SetupAdoptionRequest, SetupAdoptionResponse, SystemSnapshot, display_layout_request_id,
 };
 pub use linura_provenance::{ProvenanceKind, ProvenanceRecord, WhyChain};

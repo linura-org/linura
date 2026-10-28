@@ -37,6 +37,7 @@ INPUTS = (
     "contracts/hyprland-display-integration.toml",
     "contracts/s21-hyprland-build-environment.toml",
     "apps/linura-hyprland-display/source_integration.py",
+    "contracts/v010-shell-runtime-substrate.toml",
 )
 
 
@@ -219,10 +220,40 @@ def verify_runtime_packages(root: Path, candidate: Path, inventory: str) -> str:
         candidate / "prepared-substrate.json", FILES["prepared-substrate.json"]
     )
     expected = dict(row.split(" ", 1) for row in prepared["package_versions"])
-    contract = tomllib.loads(read_bounded(root / INPUTS[1], 65536).decode())
+    contract = tomllib.loads(read_bounded(root / INPUTS[3], 65536).decode())
+    sdk = tomllib.loads(read_bounded(root / INPUTS[1], 65536).decode())
+    required = contract.get("runtime_packages")
+    if (
+        contract.get("schema_version") != 1
+        or contract.get("id") != "qualification/v010-shell-runtime-substrate"
+        or not isinstance(required, list)
+        or not 0 < len(required) <= 100
+        or any(
+            not isinstance(name, str)
+            or not re.fullmatch(r"[a-z0-9@_+][a-z0-9@._+-]*", name)
+            for name in required
+        )
+        or len(set(required)) != len(required)
+        or any(
+            contract.get(key) != sdk.get(key)
+            for key in (
+                "architecture",
+                "base_image_url",
+                "base_image_checksum_url",
+                "arch_archive_snapshot",
+                "arch_archive_url",
+            )
+        )
+    ):
+        raise ValueError(
+            "runtime contract differs from the pinned compositor environment"
+        )
     if (
         len(observed) != len(rows)
-        or not set(contract["runtime_packages"]) <= observed.keys()
+        # The SDK contract's install list also contains build-only tools. Native
+        # execution requires the canonical runtime set, not those extra tools.
+        # Every installed runtime package still must match the full SDK exactly.
+        or not set(required) <= observed.keys()
         or any(expected.get(name) != version for name, version in observed.items())
     ):
         raise ValueError("runtime packages differ from the pinned compositor SDK")

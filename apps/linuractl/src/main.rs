@@ -22,6 +22,11 @@ struct CommandInfo {
 
 const COMMANDS: &[CommandInfo] = &[
     CommandInfo {
+        name: "own-display-snapshot",
+        summary: "Query fresh own-login display identities, layout and exact supported modes",
+        offline: false,
+    },
+    CommandInfo {
         name: "begin-display-layout",
         summary: "Request an exact bounded display intent through managed authority",
         offline: false,
@@ -334,6 +339,54 @@ fn run() -> Result<(), Box<dyn Error>> {
             require_arity(&args, 1, "own-session-lock")?;
             let lock = LocalAuthorityClient::connect()?.own_session_lock()?;
             field("resource", lock.resource_id()?.as_str());
+        }
+        Some("own-display-snapshot") => {
+            require_arity(&args, 1, "own-display-snapshot")?;
+            let snapshot = LocalAuthorityClient::connect()?.own_display_snapshot()?;
+            field("lock_resource", snapshot.lock.resource_id()?.as_str());
+            field("layout", &snapshot.layout.canonical_text()?);
+            field(
+                "observed_at_unix_ms",
+                &snapshot.observed_at_unix_ms.to_string(),
+            );
+            field("valid_for_ms", &snapshot.valid_for_ms.to_string());
+            for (index, row) in snapshot.layout.outputs().iter().enumerate() {
+                let cap = snapshot
+                    .capabilities
+                    .iter()
+                    .find(|cap| cap.output() == row.output())
+                    .ok_or_else(|| std::io::Error::other("display capabilities are missing"))?;
+                field(
+                    &format!("output.{index}.handle"),
+                    &row.output().handle().to_string(),
+                );
+                field(
+                    &format!("output.{index}.generation"),
+                    &row.output().generation().to_string(),
+                );
+                field(
+                    &format!("output.{index}.can_disable"),
+                    &cap.can_disable().to_string(),
+                );
+                field(
+                    &format!("output.{index}.powered"),
+                    &snapshot.powered_outputs.contains(row.output()).to_string(),
+                );
+                let modes: Vec<_> = cap
+                    .modes()
+                    .iter()
+                    .map(|mode| {
+                        format!(
+                            "{},{},{}",
+                            mode.width(),
+                            mode.height(),
+                            mode.refresh_millihz()
+                        )
+                    })
+                    .collect();
+                field(&format!("output.{index}.modes"), &modes.join(";"));
+            }
+            field("execution_authority", "none");
         }
         Some("lock-session" | "unlock-session") => {
             require_arity(
@@ -1048,6 +1101,7 @@ fn print_help() {
     println!("  explain-plan-review <plan-id>");
     println!("  set-audio-output-volume <request-id> <node-id> <volume-percent> <reason>");
     println!("  own-session-lock");
+    println!("  own-display-snapshot");
     println!("  native-sleep-gate-status");
     println!("  configure-protective-lock <enable|revoke> <operation-id> <exact-lock-resource>");
     println!("  protective-lock-setting <exact-session-epoch-resource>");
@@ -1223,6 +1277,7 @@ mod tests {
             "protective-lock-setting",
             "protective-lock-setting-status",
             "own-session-lock",
+            "own-display-snapshot",
             "begin-display-layout",
             "display-layout-status",
             "confirm-display-layout",

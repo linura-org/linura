@@ -236,7 +236,25 @@ class HyprlandDisplayCandidateTests(unittest.TestCase):
 
     def test_runtime_can_omit_build_only_packages_but_cannot_change_providers(self):
         self.retain()
-        inventory = "\n".join(self.prepared["package_versions"][:-1])
+        runtime = tomllib.loads((self.root / candidate.INPUTS[3]).read_text())
+        required = set(runtime["runtime_packages"])
+        # Reproduce the actual Arch guest: no git/meson/private protocol build
+        # tools or Glaze. Removing only the last Glaze row missed this mismatch.
+        inventory = "\n".join(
+            row
+            for row in self.prepared["package_versions"]
+            if row.split(" ", 1)[0] in required
+        )
+        for build_only in (
+            "git",
+            "meson",
+            "hyprland-protocols",
+            "hyprwayland-scanner",
+            "glaze",
+        ):
+            self.assertNotIn(
+                build_only, {row.split(" ", 1)[0] for row in inventory.splitlines()}
+            )
         self.assertEqual(
             len(
                 candidate.verify_runtime_packages(
@@ -257,6 +275,43 @@ class HyprlandDisplayCandidateTests(unittest.TestCase):
         ):
             with self.subTest(length=len(wrong)), self.assertRaises(ValueError):
                 candidate.verify_runtime_packages(self.root, self.destination, wrong)
+
+        for name in required:
+            incomplete = "\n".join(
+                row for row in inventory.splitlines() if not row.startswith(name + " ")
+            )
+            with self.subTest(missing=name), self.assertRaises(ValueError):
+                candidate.verify_runtime_packages(
+                    self.root, self.destination, incomplete
+                )
+
+    def test_runtime_contract_requires_same_frozen_environment_and_complete_declaration(
+        self,
+    ):
+        self.retain()
+        path = self.root / candidate.INPUTS[3]
+        original = path.read_text()
+        inventory = "\n".join(self.prepared["package_versions"])
+        for changed in (
+            original.replace('architecture = "x86_64"', 'architecture = "aarch64"'),
+            original.replace(
+                'arch_archive_snapshot = "2026-09-16"',
+                'arch_archive_snapshot = "2026-09-17"',
+            ),
+            original.replace(
+                'id = "qualification/v010-shell-runtime-substrate"', 'id = "other"'
+            ),
+            original.replace('  "wayland",', '  "wayland",\n  "wayland",'),
+            original.replace(
+                '  "wayland",', '  "wayland",\n  "missing-runtime-provider",'
+            ),
+        ):
+            path.write_text(changed)
+            with self.subTest(changed=changed), self.assertRaises(ValueError):
+                candidate.verify_runtime_packages(
+                    self.root, self.destination, inventory
+                )
+        path.write_text(original)
 
 
 if __name__ == "__main__":

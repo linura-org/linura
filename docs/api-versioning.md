@@ -247,6 +247,16 @@ the complete native admission/execution/recovery ports explicitly refuse these
 methods. The current production composition remains unsupported; publishing the
 contract is not activation or S21-2 completion.
 
+The separate Experimental `GetOwnDisplaySnapshot` is an `AuthoritativeQuery`
+with no input arguments. Its `(sstta(ttba(uuu)b))` report carries the lock
+resource, complete canonical layout, original acquisition time/validity and
+ordered output capability rows (handle, generation, disable capability, exact
+mode tuples, power state). Control binds the native sample to the caller's
+independent active local logind epoch/seat; the client validates the closed
+shape, complete inventory and original expiry. Only this method has a 64 KiB
+client reply budget; existing replies retain their 16 KiB limit. Discovery may
+report no powered outputs and grants no mutation, coverage or approval authority.
+
 The owner display projection uses private schema 2, binding the exact native
 thousandth scale and its IEEE float bits to the independent wlr 24.8 projection.
 The pinned compositor's UUID/output lifetimes replace owner-generated display

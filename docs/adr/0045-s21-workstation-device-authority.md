@@ -48,6 +48,19 @@ advertisements, mirroring and DPMS state, and rejects duplicate known fields.
 Hyprland's rounded available-mode strings do not establish exact native mode
 support when the current refresh tuple differs; do not round it into eligibility.
 
+Read-only client discovery is the separate `AuthoritativeQuery`
+`Authority1.GetOwnDisplaySnapshot`, surfaced through the SDK and no-model CLI.
+It has no target/principal input and binds native owner/output evidence to the
+authenticated caller's independent current local active logind epoch and seat.
+Control schedules one probe of each mechanism, with their existing two-second
+bounds and a four-second aggregate cap. Projection preserves the original
+earlier sample time and earliest expiry; the report remains valid for at most
+two seconds and may expire before it reaches the client. No cached fallback,
+retry or partial report is returned. A complete report may have no powered
+outputs and cannot satisfy mutation safety, secure coverage, approval or durable
+recovery. The client receives typed generation-bound layouts and exact bounded
+mode inventories, never a native handle, command or executable plan.
+
 `PlanPreviewControl::plan_display_layout` coordinates separate display, logind
 and security-owner observations and derives the canonical non-executable
 `ReconciliationPlan`. Existing preview request limits, principal namespacing,

@@ -50,6 +50,13 @@
     <method name="GetOwnSessionLock">
       <arg name="resource" type="s" direction="out"/>
     </method>
+    <!-- AuthoritativeQuery: current own-login display report, never effect or
+         coverage/approval authority. No caller-selected principal or target.
+         Each output row is handle, generation, can_disable, exact mode tuples,
+         powered. Original acquisition time/validity are retained. -->
+    <method name="GetOwnDisplaySnapshot">
+      <arg name="snapshot" type="(sstta(ttba(uuu)b))" direction="out"/>
+    </method>
     <!-- Historical durable status, not current lock coverage or replay permission. -->
     <method name="GetSessionLockRequestStatus">
       <arg name="request_id" type="s" direction="in"/>
