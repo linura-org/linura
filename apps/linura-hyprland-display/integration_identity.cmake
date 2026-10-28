@@ -8,6 +8,7 @@ function(linura_display_integration_identity source_dir output_dir)
         integration_identity.cmake
         pinned_backend.cpp pinned_integration.h rule_overlay.h native_scale.h
         native_power_inhibitor.cpp native_power_inhibitor.h
+        native_inhibitor_fd.h
         native_owner_admission.cpp native_owner_admission.h owner_identity.cpp
         native_output_identity.h
         wire_endpoint.cpp wire_endpoint.h

@@ -23,6 +23,7 @@ void initialize(wl_display &, wl_event_loop &);
 void shutdown();
 void lockReleased();
 void commitObserved(Monitor::CMonitor *, bool success);
+[[nodiscard]] bool ownedCommitAllowed();
 [[nodiscard]] bool ownsMonitor(Monitor::CMonitor *);
 [[nodiscard]] Config::CMonitorRule overlayRule(Monitor::CMonitor *, Config::CMonitorRule);
 [[nodiscard]] Backend *nativeBackend();

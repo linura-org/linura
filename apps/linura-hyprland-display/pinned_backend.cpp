@@ -96,7 +96,7 @@ class PinnedBackend final : public Backend
     [[nodiscard]] std::optional<Snapshot> snapshot() override
     {
         if (!supported || instance.empty() || !State::monitorState() || !g_pSessionLockManager ||
-            !refresh())
+            (powerInhibitor.retained() && !powerInhibitor.held()) || !refresh())
             return std::nullopt;
         Snapshot sample;
         sample.generation = generation;
@@ -155,7 +155,8 @@ class PinnedBackend final : public Backend
     [[nodiscard]] bool applyOwnedLayout(const Layout &targets, const Snapshot &expected) override
     {
         const auto fresh = snapshot();
-        if (writing || !fresh || fresh->generation != expected.generation ||
+        if (writing || !powerInhibitor.held() || !fresh ||
+            fresh->generation != expected.generation ||
             fresh->securityEpoch != expected.securityEpoch || !sameCurrent(*fresh, expected) ||
             !DisplayTransaction::validLayout(targets, *fresh) || !Config::monitorRuleMgr())
             return false;
@@ -225,7 +226,7 @@ class PinnedBackend final : public Backend
     bool setTarget(const Target &target)
     {
         const auto monitor = monitorFor(target.output);
-        if (!monitor)
+        if (!monitor || !powerInhibitor.held())
             return false;
         overlay[monitor.get()] = target;
         return true;
@@ -346,6 +347,16 @@ void commitObserved(Monitor::CMonitor *, bool success)
 {
     if (backend && backend->writing && !success)
         backend->commitFailed = true;
+}
+bool ownedCommitAllowed()
+{
+    // A modeset can invoke native callbacks after apply's initial revalidation.
+    // Recheck immediately before the actual output commit, without another bus
+    // call or wait. A lost retained fence also blocks deferred commits after
+    // writing returns: pending native state can still contain an owned modeset.
+    // No retained transaction means ordinary rendering remains unchanged.
+    return !backend || (!backend->writing && !backend->powerInhibitor.retained()) ||
+           backend->powerInhibitor.held();
 }
 Config::CMonitorRule overlayRule(Monitor::CMonitor *monitor, Config::CMonitorRule current)
 {

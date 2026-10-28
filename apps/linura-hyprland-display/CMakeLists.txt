@@ -64,6 +64,12 @@ target_compile_options(linura-hyprland-display-owner PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(linura-hyprland-display-inhibitor-tests tests/native_inhibitor_fd.cpp)
+    target_include_directories(linura-hyprland-display-inhibitor-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(linura-hyprland-display-inhibitor-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-display-inhibitor-lifetime COMMAND linura-hyprland-display-inhibitor-tests)
+    set_tests_properties(hyprland-display-inhibitor-lifetime PROPERTIES TIMEOUT 5)
     find_package(Threads REQUIRED)
     pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client>=1.22)
     add_executable(linura-hyprland-display-owner-tests tests/native_owner_admission.cpp)

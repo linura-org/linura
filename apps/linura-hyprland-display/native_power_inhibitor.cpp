@@ -94,16 +94,21 @@ NativePowerInhibitor::~NativePowerInhibitor()
 {
     release();
 }
+bool NativePowerInhibitor::held() const noexcept
+{
+    return descriptor_.held();
+}
+bool NativePowerInhibitor::retained() const noexcept
+{
+    return descriptor_.retained();
+}
 void NativePowerInhibitor::release() noexcept
 {
-    if (descriptor_ >= 0) {
-        close(descriptor_);
-        descriptor_ = -1;
-    }
+    descriptor_.release();
 }
 bool NativePowerInhibitor::acquire()
 {
-    if (descriptor_ >= 0)
+    if (descriptor_.retained())
         return false; // A retained unresolved recovery is never a new admission.
     Probe probe;
     if (!probe.initialize() || !probe.notPreparing("PreparingForSleep") ||
@@ -130,7 +135,14 @@ bool NativePowerInhibitor::acquire()
         close(retained);
         return false;
     }
-    descriptor_ = retained;
+    if (!descriptor_.retain(retained)) {
+        close(retained);
+        return false;
+    }
+    if (!held()) {
+        release();
+        return false;
+    }
     return true;
 }
 

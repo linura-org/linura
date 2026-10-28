@@ -119,3 +119,14 @@ or over-budget metadata makes the inventory unavailable. Layout/DPMS results
 are separate from identity, so an approved mutation does not invalidate itself.
 Exact-SDK regressions exercise these facts on the actual Aquamarine output type;
 they do not replace live hotplug or protected-frame qualification.
+
+The retained native inhibitor is checked with a zero-wait FIFO/CLOEXEC/liveness
+probe after acquisition, on snapshots and before owned writes, including the
+last native commit boundary and both direct-scanout paths. Peer loss, invalid
+descriptors and unexpected input latch the lease as lost, refusing further
+commits or successful verification even if a FIFO peer subsequently reopens.
+Pending output state cannot escape through a later renderer commit. This cannot
+silently reacquire a fence or replay compensation. Normal rendering with no
+retained transaction or a healthy fence remains available. Kernel FIFO tests
+cover both peer-loss directions and reopen without lease revival; full native
+logind restart/race qualification and durable recovery remain required.

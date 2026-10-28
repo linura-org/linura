@@ -187,6 +187,9 @@ def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str
     text = replace_exact(
         text,
         "    bool ret = m_owner->m_output->commit();\n    return ret;",
+        "    if (!Linura::HyprlandDisplay::ownedCommitAllowed()) {\n"
+        "        Linura::HyprlandDisplay::commitObserved(m_owner, false);\n"
+        "        return false;\n    }\n"
         "    bool ret = m_owner->m_output->commit();\n"
         "    Linura::HyprlandDisplay::commitObserved(m_owner, ret);\n    return ret;",
     )
@@ -198,6 +201,25 @@ def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str
         "        clearModeRetry();\n        return;\n    }",
     )
     outputs[monitor] = include + text
+
+    # Direct scanout bypasses CMonitorState::commit and can consume pending
+    # output state after an earlier refused modeset. Fence both paths too.
+    text = replace_exact(
+        outputs[monitor],
+        "            if (!m_output->commit()) {",
+        "            if (!Linura::HyprlandDisplay::ownedCommitAllowed()) {\n"
+        "                Linura::HyprlandDisplay::commitObserved(this, false);\n"
+        "                return false;\n            }\n"
+        "            if (!m_output->commit()) {",
+    )
+    outputs[monitor] = replace_exact(
+        text,
+        "    bool ok = m_output->commit();",
+        "    if (!Linura::HyprlandDisplay::ownedCommitAllowed()) {\n"
+        "        Linura::HyprlandDisplay::commitObserved(this, false);\n"
+        "        return false;\n    }\n"
+        "    bool ok = m_output->commit();",
+    )
 
     cmake = "CMakeLists.txt"
     text = outputs[cmake]
