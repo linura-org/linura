@@ -9,6 +9,7 @@ function(linura_display_integration_identity source_dir output_dir)
         pinned_backend.cpp pinned_integration.h rule_overlay.h native_scale.h
         native_power_inhibitor.cpp native_power_inhibitor.h
         native_owner_admission.cpp native_owner_admission.h owner_identity.cpp
+        native_output_identity.h
         wire_endpoint.cpp wire_endpoint.h
         protocols/linura-display-management-v1.xml
     )

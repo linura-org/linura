@@ -109,3 +109,13 @@ Component tests exercise transaction and timer boundaries. They are not a
 substitute for the exact pinned compositor build or native execution, rollback,
 process-loss, hotplug and S17 coverage qualification. Required unexecuted checks
 keep PR #259 incomplete and draft.
+
+Output bindings additionally compare bounded native connector, EDID, physical
+size and advertised color/HDR facts on every inventory refresh. An in-place
+identity change advances both the output generation and topology generation;
+unchanged object pointers and mode lists cannot preserve the old identity.
+Missing optional EDID remains supported, including headless outputs. Malformed
+or over-budget metadata makes the inventory unavailable. Layout/DPMS results
+are separate from identity, so an approved mutation does not invalidate itself.
+Exact-SDK regressions exercise these facts on the actual Aquamarine output type;
+they do not replace live hotplug or protected-frame qualification.

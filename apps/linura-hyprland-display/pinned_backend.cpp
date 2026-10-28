@@ -4,6 +4,7 @@
 #include "wire_endpoint.h"
 #include "native_power_inhibitor.h"
 #include "native_owner_admission.h"
+#include "native_output_identity.h"
 #include "linura-display-integration-build.h"
 
 #include "src/Compositor.hpp"
@@ -70,6 +71,7 @@ class PinnedBackend final : public Backend
         PHLMONITORREF monitor;
         WP<Aquamarine::IOutput> output;
         std::vector<Mode> modes;
+        NativeOutputIdentity identity;
     };
     std::uint64_t generation = 1, securityEpoch = 1, nextHandle = 1;
     std::vector<Binding> bindings;
@@ -260,6 +262,9 @@ class PinnedBackend final : public Backend
                 monitor->m_output->nonDesktop || monitor->m_output->modes.empty() ||
                 monitor->m_output->modes.size() > DisplayTransaction::MaxModes)
                 return false;
+            const auto identity = nativeOutputIdentity(*monitor->m_output);
+            if (!identity)
+                return false;
             std::vector<Mode> modes;
             std::set<Mode> unique;
             for (const auto &candidate : monitor->m_output->modes) {
@@ -276,18 +281,18 @@ class PinnedBackend final : public Backend
             if (retained == bindings.end()) {
                 if (nextHandle == std::numeric_limits<std::uint64_t>::max())
                     return supported = false;
-                next.push_back(
-                    {OutputKey{nextHandle++, 1}, monitor, monitor->m_output, std::move(modes)});
+                next.push_back({OutputKey{nextHandle++, 1}, monitor, monitor->m_output,
+                                std::move(modes), *identity});
                 changed = true;
             } else {
                 auto key = retained->key;
-                if (retained->modes != modes) {
+                if (retained->modes != modes || retained->identity != *identity) {
                     if (key.generation >= std::numeric_limits<std::uint64_t>::max() - 1)
                         return supported = false;
                     ++key.generation;
                     changed = true;
                 }
-                next.push_back({key, monitor, monitor->m_output, std::move(modes)});
+                next.push_back({key, monitor, monitor->m_output, std::move(modes), *identity});
             }
         }
         if (changed) {

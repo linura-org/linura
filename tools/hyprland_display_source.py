@@ -217,7 +217,8 @@ target_include_directories(hyprland_lib PRIVATE "${LINURA_DISPLAY_INTEGRATION_DI
 target_link_libraries(hyprland_lib PUBLIC linura-hyprland-display-owner PkgConfig::LINURA_DISPLAY_SYSTEMD)
 if(TARGET hyprland_gtests)
   target_sources(hyprland_gtests PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_rule_overlay.cpp"
-    "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_owner_admission.cpp")
+    "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_owner_admission.cpp"
+    "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_output_identity.cpp")
   target_include_directories(hyprland_gtests PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}")
 endif()
 """
