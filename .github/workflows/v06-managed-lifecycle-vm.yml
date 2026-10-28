@@ -364,7 +364,7 @@ jobs:
                   "native session executor is installed and running inside the guest",
                   "native session D-Bus and Polkit boundary denies direct ordinary/root callers",
                   "native pre-kernel suspend drop-in is effective and unsupervised helper invocation fails closed",
-                  "56-case complete deterministic stale/failure/recovery/reconciliation matrix passes inside guest; S21 native labels are simulated component fixtures",
+                  "59-case complete deterministic stale/failure/recovery/reconciliation matrix passes inside guest; S21 native labels are simulated component fixtures",
                   "11-case original managed-lifecycle matrix passes separately inside guest without exclusions beyond S17 and S21 components",
               ],
               "fault_matrix": {
@@ -381,7 +381,7 @@ jobs:
                   "destructive_transition_performed": False,
               },
               "expanded_fault_matrix": {
-                  "cases": 56,
+                  "cases": 59,
                   "includes_original_cases": 11,
               },
               "base_image": {

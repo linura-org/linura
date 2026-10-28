@@ -13,6 +13,7 @@ struct wl_display;
 namespace Linura::SecurityOwner {
 
 class SecretEntry;
+struct NativeDisplayCorrelation;
 
 // Owns its exclusive actual Wayland connection. The private runtime factory must
 // attest this SAME connection/session and secure-exec protection before binding
@@ -53,6 +54,9 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     // Read-only sync-fenced native inventory and per-output lock-surface facts.
     // Absence means unsupported/incomplete; it never weakens S17 lock coverage.
     [[nodiscard]] std::optional<NativeDisplaySnapshot> observeDisplayTopology();
+    // Original owned/attested connection; this sends get_status only. It never
+    // configures, confirms, restores or acquires continuation rights.
+    [[nodiscard]] std::optional<quint32> observeDisplayAttempt(const NativeDisplayCorrelation &);
     [[nodiscard]] const QString &displayInvocation() const noexcept;
     // Private native interaction, not an effect/approval credential. The runtime
     // arms the exact reviewed NativeApprovalScope first and consumes its fresh

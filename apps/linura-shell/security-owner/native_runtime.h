@@ -5,6 +5,7 @@
 #include "native_startup.h"
 #include "compositor_probe.h"
 #include "lock_mechanism.h"
+#include "native_display_connection.h"
 
 #include <QDBusMessage>
 #include <QObject>
@@ -21,6 +22,13 @@ struct NativeDisplaySample final
     QString resource, compositor, seat, topology, monitors;
     bool secure = false;
     [[nodiscard]] QString correlationDigest() const;
+};
+struct NativeDisplayAttemptSample final
+{
+    QString lock, topology, transaction;
+    quint64 deadlineUnixMs = 0;
+    quint32 phase = 7;
+    bool secure = false;
 };
 [[nodiscard]] std::optional<NativeObservedLockState>
 nativeObservedLockState(NativeCompositorLockState compositor, LockMechanism::State mechanism,
@@ -46,6 +54,9 @@ class NativeRuntime final : public QObject
     [[nodiscard]] std::optional<NativeDisplaySample> observeDisplay(const QDBusMessage &received);
     [[nodiscard]] std::optional<NativeDisplaySample>
     observePreparedDisplay(const QDBusMessage &received);
+    [[nodiscard]] std::optional<NativeDisplayAttemptSample>
+    observeDisplayAttempt(const QDBusMessage &, const NativeDisplayIntent &,
+                          const NativeDisplayCorrelation &);
     [[nodiscard]] bool fencePreparedTransition(const QDBusMessage &received,
                                                const NativeTransitionIdentity &target);
     [[nodiscard]] bool cancelUndispatchedTransition(const QDBusMessage &received,

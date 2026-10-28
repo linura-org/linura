@@ -60,6 +60,23 @@ QDBusArgument &operator<<(QDBusArgument &wire,
 const QDBusArgument &operator>>(const QDBusArgument &wire,
                                 NativePreparedDisplayObservationWire &observation);
 
+struct NativeDisplayAttemptQueryWire final
+{
+    QString intent, transaction, effectDigest, dispatchDigest;
+    quint64 deadlineUnixMs = 0;
+};
+QDBusArgument &operator<<(QDBusArgument &, const NativeDisplayAttemptQueryWire &);
+const QDBusArgument &operator>>(const QDBusArgument &, NativeDisplayAttemptQueryWire &);
+struct NativeDisplayAttemptObservationWire final
+{
+    QString lock, topology, transaction;
+    quint64 deadlineUnixMs = 0, sampledBootMs = 0;
+    quint32 phase = 7;
+    bool secure = false;
+};
+QDBusArgument &operator<<(QDBusArgument &, const NativeDisplayAttemptObservationWire &);
+const QDBusArgument &operator>>(const QDBusArgument &, NativeDisplayAttemptObservationWire &);
+
 // Adapter only, on the owner's authenticated canonical system-bus connection.
 // It owns no planner/policy/prepare logic. The runtime checks the actual message
 // sender against the independently supervised Control or session executor.
@@ -85,6 +102,9 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "<method name=\"ObserveDisplay\"><arg name=\"observation\" type=\"(ssstssb)\" "
         "direction=\"out\"/></method>"
         "<method name=\"ObservePreparedDisplay\"><arg name=\"observation\" type=\"((ssstssb)s)\" "
+        "direction=\"out\"/></method>"
+        "<method name=\"ObserveDisplayAttempt\"><arg name=\"query\" type=\"(sssst)\" "
+        "direction=\"in\"/><arg name=\"observation\" type=\"(sssttub)\" "
         "direction=\"out\"/></method>"
         "<method name=\"ObservePowerPermission\"><arg name=\"resource\" type=\"s\" "
         "direction=\"in\"/>"
@@ -126,6 +146,8 @@ class NativeEndpoint final : public QObject, protected QDBusContext
     NativeLockObservationWire ObserveLock();
     NativeDisplayObservationWire ObserveDisplay();
     NativePreparedDisplayObservationWire ObservePreparedDisplay();
+    NativeDisplayAttemptObservationWire
+    ObserveDisplayAttempt(const NativeDisplayAttemptQueryWire &);
     NativePowerPermissionWire ObservePowerPermission(const QString &resource);
     bool FencePreparedTransition(const QString &resource);
     bool CancelUndispatchedTransition(const QString &resource);
@@ -150,3 +172,5 @@ Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeLockObservationWire)
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativePowerPermissionWire)
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeDisplayObservationWire)
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativePreparedDisplayObservationWire)
+Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeDisplayAttemptQueryWire)
+Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeDisplayAttemptObservationWire)

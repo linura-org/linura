@@ -264,6 +264,18 @@ nor its digest is approval or prepared dispatch authority. Only this exact
 method/role pair receives the larger reply cap; errors and other endpoints retain
 their existing limits. This read-only addition does not activate a display write.
 
+`SecurityOwner1.ObserveDisplayAttempt` is a separate read-only Control probe.
+Its `(sssst)` query carries the retained canonical intent and exact native
+transaction/effect/dispatch/deadline correlation. The `(sssttub)` response binds
+the current lock and topology, original transaction/deadline, conservative
+BOOTTIME sample, closed native phase and settled lock state. Discovery, peer and
+boot revalidation and the reply share the original two-second deadline. This
+small reply retains the existing reply cap. No configure/keep/restore request is
+sent, and reconnecting acquires no continuation right. The Rust adapter projects
+only `display.layout-attempt.observe` into the canonical envelope; native phase
+is neither independent layout verification, protected approval nor permission to
+replay. Production dispatch and full recovery remain unqualified and unsupported.
+
 ### Session1 bounded transient-effect contract
 
 `org.linura.Session1` is a distinct Experimental **session-bus transient-effect** contract introduced for the v0.10 workstation line. It is hosted by the same unprivileged `linurad` process and well-known session-bus service as Control1, but it is a separate object/interface and does not widen the historical non-executable Control1 method surface.

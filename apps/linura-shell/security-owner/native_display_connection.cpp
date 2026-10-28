@@ -490,6 +490,10 @@ std::optional<quint32> NativeDisplayConnection::status(const NativeDisplayCorrel
     linura_display_attempt_v1_get_status(attempt->native);
     return impl_->completed(*attempt);
 }
+bool NativeDisplayCorrelation::valid() const
+{
+    return correlation(*this);
+}
 std::optional<quint32> NativeDisplayConnection::decide(const NativeDisplayCorrelation &bound,
                                                        bool confirm)
 {

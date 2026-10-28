@@ -36,6 +36,13 @@
     <method name="ObservePreparedDisplay">
       <arg name="observation" type="((ssstssb)s)" direction="out"/>
     </method>
+    <!-- Read-only; supervised Control only. Complete canonical intent and
+         immutable native correlation scope this get_status probe. Phases are
+         native facts, never verified layout, approval or replay permission. -->
+    <method name="ObserveDisplayAttempt">
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="observation" type="(sssttub)" direction="out"/>
+    </method>
     <method name="ObservePowerPermission">
       <arg name="resource" type="s" direction="in"/>
       <arg name="observation" type="(sst)" direction="out"/>

@@ -6,7 +6,7 @@ fn value<T, E: std::fmt::Debug>(result: Result<T, E>) -> T {
     result.unwrap_or_else(|error| unreachable!("{error:?}"))
 }
 const COMPOSITOR: &str = "33333333-3333-4333-8333-333333333333";
-fn coverage(secure: bool) -> ObservationEnvelope {
+pub(super) fn coverage(secure: bool) -> ObservationEnvelope {
     let boot = value(BootId::new("11111111-1111-4111-8111-111111111111"));
     let invocation = value(SecurityOwnerInvocationId::new(
         "22222222-2222-4222-8222-222222222222",

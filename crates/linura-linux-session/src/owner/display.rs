@@ -19,6 +19,7 @@ use super::{
     ENDPOINT, INTERFACE, NativeSessionChannel, NativeSessionRole, boot_ms, current_boot,
     observation, owner_reply_budget, unix_ms,
 };
+mod attempt;
 
 type Wire = (String, String, String, u64, String, String, bool);
 

@@ -139,6 +139,39 @@ NativeEndpoint::NativeEndpoint(NativeRuntime &runtime) : QObject(&runtime), runt
     connect(&runtime, &NativeRuntime::approvalInteractionCompleted, this,
             &NativeEndpoint::ApprovalInteractionCompleted);
 }
+QDBusArgument &operator<<(QDBusArgument &wire, const NativeDisplayAttemptQueryWire &query)
+{
+    wire.beginStructure();
+    wire << query.intent << query.transaction << query.effectDigest << query.dispatchDigest
+         << query.deadlineUnixMs;
+    wire.endStructure();
+    return wire;
+}
+const QDBusArgument &operator>>(const QDBusArgument &wire, NativeDisplayAttemptQueryWire &query)
+{
+    wire.beginStructure();
+    wire >> query.intent >> query.transaction >> query.effectDigest >> query.dispatchDigest >>
+        query.deadlineUnixMs;
+    wire.endStructure();
+    return wire;
+}
+QDBusArgument &operator<<(QDBusArgument &wire, const NativeDisplayAttemptObservationWire &sample)
+{
+    wire.beginStructure();
+    wire << sample.lock << sample.topology << sample.transaction << sample.deadlineUnixMs
+         << sample.sampledBootMs << sample.phase << sample.secure;
+    wire.endStructure();
+    return wire;
+}
+const QDBusArgument &operator>>(const QDBusArgument &wire,
+                                NativeDisplayAttemptObservationWire &sample)
+{
+    wire.beginStructure();
+    wire >> sample.lock >> sample.topology >> sample.transaction >> sample.deadlineUnixMs >>
+        sample.sampledBootMs >> sample.phase >> sample.secure;
+    wire.endStructure();
+    return wire;
+}
 QString NativeEndpoint::objectPath()
 {
     return QStringLiteral("/org/linura/SecurityOwner1");
@@ -150,6 +183,8 @@ void NativeEndpoint::registerWireTypes()
     qDBusRegisterMetaType<NativePowerPermissionWire>();
     qDBusRegisterMetaType<NativeDisplayObservationWire>();
     qDBusRegisterMetaType<NativePreparedDisplayObservationWire>();
+    qDBusRegisterMetaType<NativeDisplayAttemptQueryWire>();
+    qDBusRegisterMetaType<NativeDisplayAttemptObservationWire>();
 }
 bool NativeEndpoint::ArmApproval(const NativeApprovalWire &wire)
 {
@@ -224,6 +259,31 @@ NativePreparedDisplayObservationWire NativeEndpoint::ObservePreparedDisplay()
         sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
                        QStringLiteral("Native prepared display evidence unavailable"));
     }
+    return {};
+}
+
+NativeDisplayAttemptObservationWire
+NativeEndpoint::ObserveDisplayAttempt(const NativeDisplayAttemptQueryWire &query)
+{
+    if (calledFromDBus() && query.intent.size() <= 4096 && query.transaction.size() <= 256 &&
+        query.effectDigest.size() == 64 && query.dispatchDigest.size() == 64) {
+        const auto intent = NativeDisplayIntent::parse(query.intent);
+        const NativeDisplayCorrelation correlation{query.transaction, query.effectDigest,
+                                                   query.dispatchDigest, query.deadlineUnixMs};
+        const auto sampled = bootMilliseconds();
+        const auto result = intent && correlation.valid()
+                                ? runtime_.observeDisplayAttempt(message(), *intent, correlation)
+                                : std::nullopt;
+        const auto completed = bootMilliseconds();
+        if (sampled && completed && result &&
+            NativeLockObservationWire{result->lock, result->secure, *sampled}.freshAtBootMs(
+                *completed))
+            return {result->lock, result->topology, result->transaction, result->deadlineUnixMs,
+                    *sampled,     result->phase,    result->secure};
+    }
+    if (calledFromDBus())
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Native display attempt evidence unavailable"));
     return {};
 }
 

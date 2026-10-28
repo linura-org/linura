@@ -924,10 +924,10 @@ jobs:
         )
         self.assertIn('"fault_matrix": {\n                  "cases": 11,', workflow)
         self.assertIn(
-            '"expanded_fault_matrix": {\n                  "cases": 56,', workflow
+            '"expanded_fault_matrix": {\n                  "cases": 59,', workflow
         )
 
-        for count, filtered in ((56, 0), (11, 45)):
+        for count, filtered in ((59, 0), (11, 48)):
             with self.subTest(count=count, filtered=filtered):
                 good = (
                     f"running {count} tests\n"

@@ -809,6 +809,53 @@ std::optional<NativeDisplaySample> NativeRuntime::displaySample(const QDBusMessa
                                *settled == NativeObservedLockState::Secure};
 }
 
+std::optional<NativeDisplayAttemptSample>
+NativeRuntime::observeDisplayAttempt(const QDBusMessage &received,
+                                     const NativeDisplayIntent &intent,
+                                     const NativeDisplayCorrelation &correlation)
+{
+    const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
+    if (!peer || !impl_->binding || !correlation.valid() || intent.lock != identity() ||
+        !NativeDisplayIntent::parse(intent.encode()))
+        return std::nullopt;
+    const auto before = impl_->backend->observeDisplayTopology();
+    if (!before)
+        return std::nullopt;
+    const auto &lock = identity();
+    const auto topology = QStringLiteral("display:topology:%1:%2:%3:%4:%5:%6:%7")
+                              .arg(lock.boot)
+                              .arg(lock.uid)
+                              .arg(lock.session)
+                              .arg(lock.createdMonotonicUs)
+                              .arg(impl_->binding->seat)
+                              .arg(impl_->backend->displayInvocation())
+                              .arg(before->generation);
+    if (!intent.nativeOptions(*before, topology, lock))
+        return std::nullopt;
+    const auto phase = impl_->backend->observeDisplayAttempt(correlation);
+    const auto independent = impl_->independentState();
+    if (!phase || *phase < 2 || *phase > 7 || !independent || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+        return std::nullopt;
+    const auto after = impl_->backend->observeDisplayTopology();
+    const auto settled = nativeObservedLockState(*independent, impl_->protocol->inspect(),
+                                                 impl_->backend->requestedSecure(),
+                                                 impl_->backend->secureCoverage());
+    if (!after || *after != *before || !settled ||
+        (*settled != NativeObservedLockState::Secure &&
+         *settled != NativeObservedLockState::Unlocked))
+        return std::nullopt;
+    // The native protocol matches the complete immutable correlation. Echoed
+    // query data alone is not evidence; only its bounded native phase is used.
+    // Layout and per-output coverage are independently verified by Control.
+    return NativeDisplayAttemptSample{lock.resource,
+                                      topology,
+                                      correlation.transaction,
+                                      correlation.deadlineUnixMs,
+                                      *phase,
+                                      *settled == NativeObservedLockState::Secure};
+}
+
 bool NativeRuntime::fencePreparedTransition(const QDBusMessage &received,
                                             const NativeTransitionIdentity &target)
 {

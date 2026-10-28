@@ -553,6 +553,7 @@ int main(int argc, char **argv)
                                "observePowerPermission()", "exportNativeEndpoint()", "identity()"})
         assert(NativeRuntime::staticMetaObject.indexOfMethod(method) == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("retainedVerifiedRelease()") == -1);
+    assert(NativeRuntime::staticMetaObject.indexOfMethod("observeDisplayAttempt()") == -1);
 
     const int index = NativeEndpoint::staticMetaObject.indexOfClassInfo("D-Bus Introspection");
     assert(index >= 0);
@@ -575,7 +576,7 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 15 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 16 && signals == 1 && annotations == 3);
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));
@@ -603,6 +604,10 @@ int main(int argc, char **argv)
                QMetaType::fromType<NativeDisplayObservationWire>())) == "(ssstssb)");
     assert(QByteArray(QDBusMetaType::typeToSignature(
                QMetaType::fromType<NativePreparedDisplayObservationWire>())) == "((ssstssb)s)");
+    assert(QByteArray(QDBusMetaType::typeToSignature(
+               QMetaType::fromType<NativeDisplayAttemptQueryWire>())) == "(sssst)");
+    assert(QByteArray(QDBusMetaType::typeToSignature(
+               QMetaType::fromType<NativeDisplayAttemptObservationWire>())) == "(sssttub)");
     NativeApprovalWire scope{QStringLiteral("session:lock:abcd1234-1234-4567-89ab-0123456789ab:"
                                             "1000:2:42:98765432-1234-4567-89ab-0123456789ab:1"),
                              QStringLiteral("unix:uid:1000"),
@@ -714,6 +719,32 @@ int main(int argc, char **argv)
            displayDecoded.seat == displayObserved.seat && displayDecoded.sampledBootMs == 12345 &&
            displayDecoded.topology == displayObserved.topology &&
            displayDecoded.monitors == displayObserved.monitors && displayDecoded.secure);
+
+    const NativeDisplayAttemptQueryWire attemptQuery{
+        QStringLiteral("LNDI:1;component"), QStringLiteral("transaction:component"),
+        QString(64, QLatin1Char('1')), QString(64, QLatin1Char('2')), 25000};
+    const auto queryDecoded =
+        qdbus_cast<NativeDisplayAttemptQueryWire>(roundTrip(QVariant::fromValue(attemptQuery)));
+    assert(queryDecoded.intent == attemptQuery.intent &&
+           queryDecoded.transaction == attemptQuery.transaction &&
+           queryDecoded.effectDigest == attemptQuery.effectDigest &&
+           queryDecoded.dispatchDigest == attemptQuery.dispatchDigest &&
+           queryDecoded.deadlineUnixMs == attemptQuery.deadlineUnixMs);
+    const NativeDisplayAttemptObservationWire attemptObserved{
+        scope.resource,
+        QStringLiteral("display:topology:component"),
+        attemptQuery.transaction,
+        25000,
+        12345,
+        2,
+        true};
+    const auto attemptDecoded = qdbus_cast<NativeDisplayAttemptObservationWire>(
+        roundTrip(QVariant::fromValue(attemptObserved)));
+    assert(attemptDecoded.lock == attemptObserved.lock &&
+           attemptDecoded.topology == attemptObserved.topology &&
+           attemptDecoded.transaction == attemptObserved.transaction &&
+           attemptDecoded.deadlineUnixMs == 25000 && attemptDecoded.sampledBootMs == 12345 &&
+           attemptDecoded.phase == 2 && attemptDecoded.secure);
 
     const auto suffix = scope.resource.mid(qsizetype(sizeof("session:lock:") - 1));
     for (const auto &action : {"suspend", "reboot", "power-off", "logout"}) {

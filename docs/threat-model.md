@@ -750,6 +750,16 @@ for the current implementation status.
 
 ### S21 device identity substitution, insecure output topology and media loss
 
+- Native attempt status is obtained only through the independently supervised
+  Control caller and the owner's retained attested compositor connection. Exact
+  canonical intent, current lock/topology and original effect/dispatch/deadline
+  scope must match around the native get_status read. The adapter preserves the
+  conservative sample time and original probe deadline; unknown phases, changed
+  owner/boot/output inventory and substituted wire scope fail closed. Native
+  terminal flags remain separate from independent layout verification and
+  protected human decisions. Querying or reconnecting grants no continuation or
+  effect-replay right.
+
 - A client can authenticate as the session owner and still be unable to prove a
   new protected keep/revert decision. Control requires a separate consumed human
   proof bound to the already prepared canonical request, durable authority

@@ -771,6 +771,14 @@ int NativeWaylandLock::actualDisplayFd() const noexcept
 {
     return impl_->display ? wl_display_get_fd(impl_->display) : -1;
 }
+std::optional<quint32>
+NativeWaylandLock::observeDisplayAttempt(const NativeDisplayCorrelation &correlation)
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping || !correlation.valid())
+        return std::nullopt;
+    return impl_->displayConnection->status(correlation);
+}
 bool NativeWaylandLock::available() const noexcept
 {
     return impl_->initialized;
