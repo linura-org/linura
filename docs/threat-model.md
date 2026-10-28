@@ -750,6 +750,19 @@ for the current implementation status.
 
 ### S21 device identity substitution, insecure output topology and media loss
 
+- A client can authenticate as the session owner and still be unable to prove a
+  new protected keep/revert decision. Control requires a separate consumed human
+  proof bound to the already prepared canonical request, durable authority
+  generation/binding, dispatch record, exact action, fresh native attempt and
+  original deadline. Original apply approval, cached proof, opposite-action
+  proof and ordinary caller provenance do not satisfy this boundary. A newer
+  attempt probe follows interaction, and keeping also requires a new independent
+  layout check. Protected decisions retain their challenge correlation in an
+  explicit v2 journal frame; legacy v1 decisions are retained but rejected for
+  protected authority rather than silently upgraded. Lost replies and durable
+  reservations remain observe-only. Native interaction and end-to-end recovery
+  qualification remain required before production activation.
+
 - A same-UID Wayland client must not reach display writes by constructing private
   protocol messages or exhaust all protected-owner slots. Private-global binding
   attests the owner before allocating any slot; apply reattests the bound

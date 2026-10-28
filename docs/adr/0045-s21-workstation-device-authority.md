@@ -107,6 +107,28 @@ the compensated baseline separately. A crash between these writes reconciles
 fresh facts and finishes bookkeeping without any apply. No released transaction
 schema/state is reinterpreted as successful execution.
 
+Keep/revert is a separate protected human interaction over the already prepared
+canonical display transaction. Control creates a sealed `DisplayDecisionChallenge`
+from the retained request, authenticated principal, durable authority binding and
+generation, dispatch record, fresh pending-attempt evidence, exact decision and
+original deadline. It is a continuation projection, not another executable plan
+or policy subject. Original apply approval, human caller provenance, a UID and
+ordinary client confirmation cannot satisfy it. A non-cloneable consumed proof
+must match that exact challenge. After interaction, Control acquires a newer
+attempt sample and independently rechecks the desired layout before keeping it.
+Changed facts, cancellation, proof substitution and expiration prevent dispatch.
+
+Decision phases with consumed protected proof use the explicitly versioned
+`linura.display.recovery-protected-decision.v2` framing around the unchanged v1
+phase bytes and challenge digest. Other phases retain their existing encoding.
+Legacy v1 decisions remain readable as retained data, but cannot be promoted to
+protected decision authority: lifecycle admission reports independent recovery
+required without rewriting, deleting or replaying them. Neither journal format
+contains a reusable native proof or executor credential. A late durable append
+cannot extend the native deadline. This Control boundary remains a component
+implementation until the actual native protected-interaction adapter, production
+dispatch and complete recovery composition are connected and qualified.
+
 The native attempt gate and Qt watchdog are component mechanisms. They reserve
 apply and baseline restoration separately before write construction, compare
 both suspend-inclusive and wall-clock deadlines, retain fences on uncertainty,

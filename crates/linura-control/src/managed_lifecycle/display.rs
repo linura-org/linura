@@ -8,6 +8,8 @@ use linura_observation::{ObservationAuthority, ObservationEnvelope, ObservedValu
 
 pub const DISPLAY_CONFIRMATION_WINDOW_MS: u64 = 15_000;
 use linura_protocol::{DisplayLayoutReceipt, DisplayLayoutState};
+mod decision;
+pub use decision::{DisplayDecisionAuthorizer, DisplayDecisionChallenge, TrustedDisplayDecision};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DisplayContinuationAction {
     Confirm,
@@ -23,6 +25,7 @@ pub struct AuthorizedDisplayContinuation {
     transaction_id: TransactionId,
     dispatch_digest: String,
     decision_digest: String,
+    protected_decision_digest: String,
     action: DisplayContinuationAction,
 }
 impl AuthorizedDisplayContinuation {
@@ -41,6 +44,10 @@ impl AuthorizedDisplayContinuation {
     #[must_use]
     pub fn decision_digest(&self) -> &str {
         &self.decision_digest
+    }
+    #[must_use]
+    pub fn protected_decision_digest(&self) -> &str {
+        &self.protected_decision_digest
     }
     #[must_use]
     pub const fn action(&self) -> DisplayContinuationAction {
@@ -307,6 +314,11 @@ impl DisplayHistory {
             .flatten()
         {
             decision.validate_after(Some(dispatched))?;
+            if decision.protected_decision_digest.is_none() {
+                return Err(ManagedLifecycleError::ApprovalBoundary(
+                    "legacy display decision has no protected proof; independent recovery is required".into(),
+                ));
+            }
         }
         if let Some(confirmed) = &history.confirmed {
             confirmed.validate_after(history.confirmation.as_ref())?;
@@ -718,12 +730,14 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
 
     /// A repeat after an uncertain continuation reply observes only. It never
     /// sends the phase again or issues another layout apply.
+    #[allow(clippy::too_many_arguments)]
     pub fn decide_display_layout<P: DisplayTransactionPort, V: IndependentDisplayVerifier>(
         &mut self,
         principal: AuthenticatedPrincipal,
         actor: Actor,
         request_id: &RequestId,
         action: DisplayContinuationAction,
+        decision_authorizer: &dyn DisplayDecisionAuthorizer,
         port: &mut P,
         verifier: &mut V,
     ) -> Result<DisplayLayoutReceipt, ManagedLifecycleError> {
@@ -787,9 +801,62 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         } else {
             Phase::RevertRequested
         };
+        // Caller provenance and the original apply approval are not a fresh
+        // human keep/revert decision. Consume a separate protected proof bound
+        // to this canonical request, durable authority and native attempt.
+        let challenge =
+            DisplayDecisionChallenge::new(&request, &snapshot, &dispatched, &observed, action)?;
+        let interaction_started = std::time::Instant::now();
+        let interaction_now = now_ms()?;
+        let remaining = dispatched
+            .deadline_unix_ms
+            .checked_sub(interaction_now)
+            .filter(|remaining| *remaining != 0)
+            .ok_or_else(|| {
+                ManagedLifecycleError::ApprovalBoundary(
+                    "protected display decision deadline expired".into(),
+                )
+            })?;
+        decision_authorizer
+            .authorize_decision(&challenge)
+            .and_then(|proof| proof.consume(&challenge))
+            .map_err(ManagedLifecycleError::ApprovalBoundary)?;
+        let interaction_completed = now_ms()?;
+        if interaction_completed < interaction_now
+            || interaction_completed >= dispatched.deadline_unix_ms
+            || interaction_started.elapsed() >= Duration::from_millis(remaining)
+        {
+            return Err(ManagedLifecycleError::ApprovalBoundary(
+                "protected display decision exceeded its original deadline".into(),
+            ));
+        }
+        // Human interaction may outlive the first probe. Obtain fresh evidence;
+        // never stamp its completion time onto the pre-interaction observation.
+        let fresh = port
+            .observe_attempt(&request, dispatched.transaction_id.as_str())
+            .map_err(ManagedLifecycleError::Verification)?;
+        if fresh.observed_at_unix_ms < interaction_completed
+            || fresh.sequence <= observed.sequence
+            || fresh.attributes != observed.attributes
+            || attempt_state(&fresh, &request, &dispatched)? != "pending"
+        {
+            return Err(ManagedLifecycleError::Verification(
+                "native display attempt changed during protected interaction".into(),
+            ));
+        }
+        if action == DisplayContinuationAction::Confirm
+            && !matches!(verifier.verify_layout(&request, false, fresh.observed_at_unix_ms), Ok(result) if result.disposition == VerificationDisposition::Satisfied)
+        {
+            return Ok(receipt(
+                &request,
+                dispatched.deadline_unix_ms,
+                DisplayLayoutState::Indeterminate,
+                &principal_id,
+            ));
+        }
         // The independent probe may have consumed the original native attempt
         // deadline. Never stamp its completion time onto expired decision facts.
-        if attempt_state(&observed, &request, &dispatched)? != "pending" {
+        if attempt_state(&fresh, &request, &dispatched)? != "pending" {
             return Err(ManagedLifecycleError::Verification(
                 "display attempt changed before decision".into(),
             ));
@@ -802,9 +869,18 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             now_ms()?,
             dispatched.dispatch_digest.clone(),
             Some(dispatched.digest().clone()),
-            Some(crate::durable_authority::digest_observation(&observed)?),
+            Some(crate::durable_authority::digest_observation(&fresh)?),
+        )?
+        .with_protected_decision(
+            linura_transaction::ContentDigest::new(challenge.digest())
+                .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?,
         )?;
         self.append_display_record(&decision, principal_id, Some(&dispatched))?;
+        if now_ms()? >= dispatched.deadline_unix_ms {
+            // Reservation is already durable. Observe only; a slow journal may
+            // not extend the deadline or cause this decision to be replayed.
+            return self.display_layout_status(principal, actor, request_id, port, verifier);
+        }
         let continuation = AuthorizedDisplayContinuation {
             request,
             transaction_id: dispatched.transaction_id,
@@ -812,6 +888,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 ManagedLifecycleError::Contract("display dispatch digest is missing".into())
             })?,
             decision_digest: decision.digest().as_str().into(),
+            protected_decision_digest: challenge.digest().into(),
             action,
         };
         let _ = port.continue_layout(continuation);
@@ -910,7 +987,7 @@ mod history_tests {
         (principal, digest, reserved, dispatched)
     }
     fn next(prior: &Record, phase: Phase, at: u64) -> Record {
-        id(Record::new(
+        let record = id(Record::new(
             prior.request_digest.clone(),
             prior.transaction_id.clone(),
             phase,
@@ -922,7 +999,17 @@ mod history_tests {
                 "display-history-observation-test",
                 [b"observation".as_slice()],
             )),
-        ))
+        ));
+        if matches!(phase, Phase::ConfirmRequested | Phase::RevertRequested) {
+            id(
+                record.with_protected_decision(linura_transaction::digest_parts(
+                    "display-history-protected-proof-test",
+                    [b"protected".as_slice()],
+                )),
+            )
+        } else {
+            record
+        }
     }
     fn load(
         journal: &Journal,
@@ -962,6 +1049,41 @@ mod history_tests {
             .is_err()
         );
         assert!(load(&journal, &p, &reserved, TransactionState::Prepared).is_err());
+    }
+
+    #[test]
+    fn legacy_decision_remains_retained_but_cannot_be_upgraded_to_protected_authority() {
+        let (p, _, reserved, dispatched) = fixture();
+        let mut journal = Journal::default();
+        id(reserved.append(&mut journal, p.clone(), None));
+        id(dispatched.append(&mut journal, p.clone(), Some(&reserved)));
+        let legacy = id(Record::new(
+            dispatched.request_digest.clone(),
+            dispatched.transaction_id.clone(),
+            Phase::ConfirmRequested,
+            200,
+            120,
+            dispatched.dispatch_digest.clone(),
+            Some(dispatched.digest().clone()),
+            Some(linura_transaction::digest_parts(
+                "legacy-observation-test",
+                [b"native".as_slice()],
+            )),
+        ));
+        id(legacy.append(&mut journal, p.clone(), Some(&dispatched)));
+        assert!(matches!(
+            load(&journal, &p, &reserved, TransactionState::Indeterminate),
+            Err(ManagedLifecycleError::ApprovalBoundary(_))
+        ));
+        assert_eq!(
+            id(Record::load(
+                &journal,
+                &p,
+                &reserved.request_digest,
+                Phase::ConfirmRequested
+            )),
+            Some(legacy)
+        );
     }
 
     #[test]

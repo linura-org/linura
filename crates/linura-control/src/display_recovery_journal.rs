@@ -7,6 +7,7 @@ use linura_transaction::{
 };
 
 const DOMAIN: &str = "linura.display.recovery-phase.v1";
+const PROTECTED_DECISION_DOMAIN: &str = "linura.display.recovery-protected-decision.v2";
 const MAX_BYTES: usize = 2048;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -53,6 +54,7 @@ pub(crate) struct Record {
     pub(crate) dispatch_digest: Option<String>,
     pub(crate) previous: Option<ContentDigest>,
     pub(crate) observation_digest: Option<ContentDigest>,
+    pub(crate) protected_decision_digest: Option<ContentDigest>,
     digest: ContentDigest,
     canonical: Vec<u8>,
 }
@@ -60,6 +62,17 @@ fn invalid() -> ManagedLifecycleError {
     ManagedLifecycleError::Authority(
         "display recovery journal is malformed, conflicting or unsupported".into(),
     )
+}
+fn read_frame<'a>(rest: &mut &'a [u8], maximum: usize) -> Result<&'a [u8], ManagedLifecycleError> {
+    let (size, tail) = rest.split_at_checked(8).ok_or_else(invalid)?;
+    let size = usize::try_from(u64::from_be_bytes(size.try_into().map_err(|_| invalid())?))
+        .map_err(|_| invalid())?;
+    if size > maximum {
+        return Err(invalid());
+    }
+    let (field, tail) = tail.split_at_checked(size).ok_or_else(invalid)?;
+    *rest = tail;
+    Ok(field)
 }
 fn optional_digest(value: &str) -> Result<Option<ContentDigest>, ManagedLifecycleError> {
     if value.is_empty() {
@@ -152,9 +165,43 @@ impl Record {
             dispatch_digest,
             previous,
             observation_digest,
+            protected_decision_digest: None,
             digest,
             canonical,
         })
+    }
+    /// Add the consumed protected challenge correlation to a decision phase.
+    /// This distinct persisted version preserves v1 bytes and their meaning;
+    /// reading legacy unprotected decisions never manufactures a human proof.
+    pub(crate) fn with_protected_decision(
+        mut self,
+        proof: ContentDigest,
+    ) -> Result<Self, ManagedLifecycleError> {
+        if !matches!(self.phase, Phase::ConfirmRequested | Phase::RevertRequested)
+            || self.protected_decision_digest.is_some()
+            || proof == ContentDigest::zero()
+        {
+            return Err(invalid());
+        }
+        let mut canonical = Vec::new();
+        for bytes in [
+            PROTECTED_DECISION_DOMAIN.as_bytes(),
+            self.canonical.as_slice(),
+            proof.as_str().as_bytes(),
+        ] {
+            canonical.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+            canonical.extend_from_slice(bytes);
+        }
+        if canonical.len() > MAX_BYTES {
+            return Err(invalid());
+        }
+        self.digest = linura_transaction::digest_parts(
+            "linura.display.recovery-protected-decision.digest.v2",
+            [canonical.as_slice()],
+        );
+        self.canonical = canonical;
+        self.protected_decision_digest = Some(proof);
+        Ok(self)
     }
     pub(crate) fn digest(&self) -> &ContentDigest {
         &self.digest
@@ -170,6 +217,29 @@ impl Record {
     fn decode(bytes: &[u8]) -> Result<Self, ManagedLifecycleError> {
         if bytes.is_empty() || bytes.len() > MAX_BYTES {
             return Err(invalid());
+        }
+        // Version 2 wraps the original phase bytes plus a challenge digest.
+        // No rewriting, automatic approval upgrade or destructive migration.
+        let mut framed = bytes;
+        let domain = read_frame(&mut framed, 256)?;
+        if domain == PROTECTED_DECISION_DOMAIN.as_bytes() {
+            let legacy = read_frame(&mut framed, MAX_BYTES)?;
+            let proof =
+                std::str::from_utf8(read_frame(&mut framed, 256)?).map_err(|_| invalid())?;
+            if !framed.is_empty() {
+                return Err(invalid());
+            }
+            // Nested wrappers are invalid, even within the aggregate byte cap.
+            let mut inner = legacy;
+            if read_frame(&mut inner, 256)? != DOMAIN.as_bytes() {
+                return Err(invalid());
+            }
+            let result = Self::decode(legacy)?
+                .with_protected_decision(ContentDigest::new(proof).map_err(|_| invalid())?)?;
+            if result.canonical != bytes {
+                return Err(invalid());
+            }
+            return Ok(result);
         }
         let mut rest = bytes;
         let mut read = || -> Result<&str, ManagedLifecycleError> {
@@ -316,6 +386,49 @@ mod tests {
             None,
         ));
         (principal, digest, record)
+    }
+
+    #[test]
+    fn protected_decision_has_an_explicit_roundtripping_persisted_version() {
+        let (_, request, reserved) = fixture();
+        let legacy = id(Record::new(
+            request,
+            reserved.transaction_id.clone(),
+            Phase::ConfirmRequested,
+            200,
+            120,
+            Some("a".repeat(64)),
+            Some(reserved.digest().clone()),
+            Some(linura_transaction::digest_parts(
+                "decision-observation-test",
+                [b"native".as_slice()],
+            )),
+        ));
+        let proof =
+            linura_transaction::digest_parts("decision-proof-test", [b"protected".as_slice()]);
+        let protected = id(legacy.clone().with_protected_decision(proof.clone()));
+        assert_ne!(protected.digest(), legacy.digest());
+        assert_eq!(id(Record::decode(&legacy.canonical)), legacy);
+        assert_eq!(id(Record::decode(&protected.canonical)), protected);
+        assert_eq!(protected.protected_decision_digest, Some(proof.clone()));
+        assert!(
+            protected
+                .clone()
+                .with_protected_decision(proof.clone())
+                .is_err()
+        );
+        assert!(reserved.with_protected_decision(proof).is_err());
+        assert!(
+            legacy
+                .with_protected_decision(ContentDigest::zero())
+                .is_err()
+        );
+        let mut appended = protected.canonical.clone();
+        appended.push(0);
+        assert!(Record::decode(&appended).is_err());
+        for size in [0, 7, 50, protected.canonical.len() - 1] {
+            assert!(Record::decode(&protected.canonical[..size]).is_err());
+        }
     }
 
     #[derive(Debug)]
