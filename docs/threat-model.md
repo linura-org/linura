@@ -796,6 +796,14 @@ for the current implementation status.
   Acknowledgements cannot establish restoration. Compositor loss, stale native
   lifetimes, coverage gaps and failed compensation remain indeterminate until
   independently reconciled; they cannot silently replay or renew authority.
+- Compensation must restore original ownership and automatic rule behavior,
+  not leave numeric baseline overlays installed. The compositor reserves its
+  prior overlay/rule checkpoint before its first write; a different baseline,
+  replaced output or changed underlying owned rule refuses restoration. Current
+  unrelated rule settings are retained. Independent numeric geometry cannot
+  retire the recovery fence unless the native ownership check also passes.
+  This in-process checkpoint cannot survive compositor death or substitute for
+  the still-required durable last-known-good/restart reconciliation path.
 - The compositor acquires the fixed native logind sleep/shutdown block inhibitor
   before any display write, independently checks the root service and current
   preparation state, and revalidates captured output facts and deadlines after

@@ -79,6 +79,11 @@ class Backend
     // expensive native work prevents a pre-probe timestamp extending authority.
     [[nodiscard]] virtual std::optional<ClockSample> clock() = 0;
     [[nodiscard]] virtual bool applyOwnedLayout(const Layout &, const Snapshot &) = 0;
+    // Compensation restores the previous ownership/automatic-rule semantics.
+    // Re-applying numeric baseline targets would leave new explicit overrides.
+    [[nodiscard]] virtual bool restoreOwnedLayout(const Layout &, const Snapshot &) = 0;
+    // Independent native property check in addition to fresh layout geometry.
+    [[nodiscard]] virtual bool restoredOwnedState() = 0;
     // The compositor retains the actual native sleep/shutdown inhibitor, not
     // its client. Denial, an already preparing transition or unknown service
     // state must refuse BEFORE a display write. A failed recovery keeps it.

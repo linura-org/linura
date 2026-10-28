@@ -225,7 +225,7 @@ void DisplayTransaction::restore()
             phase_ = Phase::RecoveryFailed;
             return;
         }
-        if (!backend_.applyOwnedLayout(baseline_, *sample))
+        if (!backend_.restoreOwnedLayout(baseline_, *sample))
             phase_ = Phase::RecoveryFailed;
     } catch (...) {
         phase_ = Phase::RecoveryFailed;
@@ -239,7 +239,8 @@ void DisplayTransaction::verifyRestoration()
         return;
     try {
         const auto sample = backend_.snapshot();
-        if (sample && scopeMatches(*sample) && matches(baseline_, *sample)) {
+        if (sample && scopeMatches(*sample) && matches(baseline_, *sample) &&
+            backend_.restoredOwnedState()) {
             phase_ = Phase::Restored;
             backend_.releasePowerInhibitor();
         }

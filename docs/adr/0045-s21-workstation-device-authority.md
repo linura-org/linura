@@ -160,6 +160,16 @@ not qualify the integration. Actual private-header compilation, whole-compositor
 linking, live build/protocol identity, native mutation/restoration and S17 coverage
 must pass before activation or merge.
 
+In-process compensation reserves the previous overlay ownership, underlying
+owned-rule semantics and exact numeric baseline before its first native write.
+It establishes a baseline independent root, revalidates native scope/rules, then
+resumes the prior overlay or the native automatic rules. It does not synthesize
+new explicit baseline overlays as the final restored state. A changed underlying
+owned rule or replaced output refuses compensation; unrelated current rule
+settings are preserved. Fresh numeric baseline geometry and native ownership
+must both match before retiring the inhibitor/checkpoint. This volatile
+checkpoint does not satisfy durable compositor-death recovery requirements.
+
 The exact upstream hook transformations live in the native integration source
 tree as `source_integration.py`. The shared owner/compositor CMake identity hashes
 that recipe alongside the native implementation and protocol. Changing only a

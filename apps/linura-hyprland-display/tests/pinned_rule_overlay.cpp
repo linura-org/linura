@@ -91,4 +91,131 @@ TEST(LinuraDisplayPinnedRule, DisableChangesOnlyTheDisabledField)
     EXPECT_EQ(actual.m_drmMode.clock, before.m_drmMode.clock);
     EXPECT_EQ(actual.m_mirrorOf, before.m_mirrorOf);
 }
+TEST(LinuraDisplayPinnedRule, RestorationResumesAutomaticRulesAndRetainsUnrelatedDrift)
+{
+    using Checkpoint = RuleOverlayCheckpoint<int, Config::CMonitorRule>;
+    const auto before = originalRule();
+    const Target baseline{OutputKey{1, 1}, true, Mode{1920, 1080, 75000}, 2000, 0, 0, 0, {}};
+    const Target desired{OutputKey{1, 1}, true, Mode{1280, 720, 60000}, 1250, 1, 50, 60, {}};
+    Checkpoint checkpoint;
+    ASSERT_TRUE(checkpoint.capture({}, {{10, before}}, {baseline}));
+    EXPECT_EQ(overlayDisplayFields(before, desired, "").m_autoDir, Config::DIR_AUTO_NONE);
+    auto current = before;
+    current.m_iccFile = "fixture/new-profile.icc";
+    current.m_vrr = 1;
+    current.m_sdrBrightness = 1.1F;
+    auto restored = checkpoint.restoration({baseline}, {{10, current}},
+                                           sameOwnedDisplayFields<Config::CMonitorRule>);
+    ASSERT_TRUE(restored);
+    EXPECT_TRUE(restored->empty()); // Empty ownership resumes the live native rule.
+    EXPECT_EQ(current.m_autoDir, before.m_autoDir);
+    EXPECT_EQ(current.m_scale, -1.F);
+    EXPECT_EQ(current.m_drmMode.clock, before.m_drmMode.clock);
+    EXPECT_EQ(current.m_mirrorOf, before.m_mirrorOf);
+    EXPECT_NE(current.m_iccFile, before.m_iccFile);
+    EXPECT_NE(current.m_vrr, before.m_vrr);
+    EXPECT_TRUE(checkpoint.restored(*restored, {{10, current}},
+                                    sameOwnedDisplayFields<Config::CMonitorRule>));
+    Checkpoint priorOwned;
+    const Checkpoint::Overlay previous{{10, baseline}};
+    ASSERT_TRUE(priorOwned.capture(previous, {{10, before}}, {baseline}));
+    restored = priorOwned.restoration({baseline}, {{10, current}},
+                                      sameOwnedDisplayFields<Config::CMonitorRule>);
+    ASSERT_TRUE(restored);
+    EXPECT_EQ(*restored, previous);
+    const auto effective = overlayDisplayFields(current, restored->at(10), "");
+    EXPECT_EQ(effective.m_iccFile, current.m_iccFile);
+    EXPECT_EQ(effective.m_vrr, current.m_vrr);
+}
+TEST(LinuraDisplayPinnedRule, OwnedRuleDriftAndCustomModelineChangesRefuseRestoration)
+{
+    using Checkpoint = RuleOverlayCheckpoint<int, Config::CMonitorRule>;
+    const auto before = originalRule();
+    const Target baseline{OutputKey{1, 1}, true, Mode{1920, 1080, 75000}, 2000, 0, 0, 0, {}};
+    Checkpoint checkpoint;
+    ASSERT_TRUE(checkpoint.capture({}, {{10, before}}, {baseline}));
+    for (int field = 0; field != 25; ++field) {
+        auto changed = before;
+        switch (field) {
+        case 0:
+            changed.m_disabled = true;
+            break;
+        case 1:
+            changed.m_resolution.x += 1;
+            break;
+        case 2:
+            changed.m_refreshRate += 1;
+            break;
+        case 3:
+            changed.m_offset.x += 1;
+            break;
+        case 4:
+            changed.m_autoDir = Config::DIR_AUTO_RIGHT;
+            break;
+        case 5:
+            changed.m_scale = 1;
+            break;
+        case 6:
+            changed.m_transform = WL_OUTPUT_TRANSFORM_NORMAL;
+            break;
+        case 7:
+            changed.m_mirrorOf.clear();
+            break;
+        case 8:
+            ++changed.m_drmMode.clock;
+            break;
+        case 9:
+            ++changed.m_drmMode.hdisplay;
+            break;
+        case 10:
+            ++changed.m_drmMode.hsync_start;
+            break;
+        case 11:
+            ++changed.m_drmMode.hsync_end;
+            break;
+        case 12:
+            ++changed.m_drmMode.htotal;
+            break;
+        case 13:
+            ++changed.m_drmMode.hskew;
+            break;
+        case 14:
+            ++changed.m_drmMode.vdisplay;
+            break;
+        case 15:
+            ++changed.m_drmMode.vsync_start;
+            break;
+        case 16:
+            ++changed.m_drmMode.vsync_end;
+            break;
+        case 17:
+            ++changed.m_drmMode.vtotal;
+            break;
+        case 18:
+            ++changed.m_drmMode.vscan;
+            break;
+        case 19:
+            ++changed.m_drmMode.vrefresh;
+            break;
+        case 20:
+            ++changed.m_drmMode.flags;
+            break;
+        case 21:
+            ++changed.m_drmMode.type;
+            break;
+        case 22:
+            ++changed.m_drmMode.name[31];
+            break;
+        case 23:
+            changed.m_resolution.y += 1;
+            break;
+        case 24:
+            changed.m_offset.y += 1;
+            break;
+        }
+        EXPECT_FALSE(checkpoint.restoration({baseline}, {{10, changed}},
+                                            sameOwnedDisplayFields<Config::CMonitorRule>))
+            << field;
+    }
+}
 } // namespace

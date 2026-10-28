@@ -20,6 +20,14 @@ class NativeFixture final : public Backend
 {
   public:
     bool inhibited = false;
+    bool restoredOwnedState() override
+    {
+        return true;
+    }
+    bool restoreOwnedLayout(const Layout &layout, const Snapshot &expected) override
+    {
+        return applyOwnedLayout(layout, expected);
+    }
     [[nodiscard]] bool inhibitPowerTransitions() override
     {
         assert(!inhibited);

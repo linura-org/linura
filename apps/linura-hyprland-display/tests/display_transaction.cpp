@@ -36,6 +36,17 @@ class Fixture final : public Backend
     bool expireAfterWrite = false;
     bool permitInhibitor = true, inhibited = false, changeDuringInhibition = false;
     unsigned inhibitorReleases = 0;
+    unsigned restores = 0;
+    bool ownedStateRestored = true;
+    [[nodiscard]] bool restoredOwnedState() override
+    {
+        return ownedStateRestored;
+    }
+    [[nodiscard]] bool restoreOwnedLayout(const Layout &layout, const Snapshot &expected) override
+    {
+        ++restores;
+        return applyOwnedLayout(layout, expected);
+    }
     [[nodiscard]] bool inhibitPowerTransitions() override
     {
         if (!permitInhibitor || inhibited)
@@ -411,6 +422,54 @@ void powerCoordinationBeforeWriteAndThroughRecovery()
         assert(native.inhibited && native.inhibitorReleases == 0 && native.writes == 1);
     }
 }
+void numericBaselineCannotSubstituteForRestoredOwnership()
+{
+    Fixture native;
+    const auto baseline = native.baseline();
+    auto attempt =
+        DisplayTransaction::start(native, Bound, baseline, native.desired(), native.facts, Start);
+    assert(attempt);
+    native.ownedStateRestored = false;
+    attempt->restore();
+    assert(native.baseline() == baseline && native.restores == 1);
+    attempt->tick(Start);
+    assert(attempt->phase() == DisplayTransaction::Phase::Restoring && native.inhibited);
+    attempt->restore();
+    assert(native.restores == 1 && native.writes == 2);
+    native.ownedStateRestored = true;
+    attempt->tick(Start);
+    assert(attempt->phase() == DisplayTransaction::Phase::Restored && !native.inhibited);
+    assert(native.restores == 1 && native.writes == 2);
+}
+void overlayCheckpointCannotBeReplacedOrRetargeted()
+{
+    Fixture native;
+    using Checkpoint = RuleOverlayCheckpoint<int, int>;
+    Checkpoint checkpoint;
+    Checkpoint::Overlay previous{{10, native.baseline()[0]}};
+    const Checkpoint::Rules rules{{10, 100}, {20, 200}};
+    const auto same = [](int a, int b) { return a == b; };
+    assert(checkpoint.capture(previous, rules, native.baseline()));
+    assert(!checkpoint.capture({}, rules, native.desired()));
+    assert(!checkpoint.restoration(native.desired(), rules, same));
+    auto changed = rules;
+    changed[10] = 101;
+    assert(!checkpoint.restoration(native.baseline(), changed, same));
+    changed = rules;
+    changed.erase(10);
+    changed.emplace(30, 100);
+    assert(!checkpoint.restoration(native.baseline(), changed, same));
+    assert(!checkpoint.restored({}, rules, same));
+    const auto restored = checkpoint.restoration(native.baseline(), rules, same);
+    assert(restored && *restored == previous && checkpoint.restored(*restored, rules, same));
+    assert(checkpoint.retained() && checkpoint.owns(10, native.baseline()[0].output));
+    assert(!checkpoint.owns(30, native.baseline()[0].output));
+    auto replaced = native.baseline()[0].output;
+    ++replaced.generation;
+    assert(!checkpoint.owns(10, replaced));
+    checkpoint.retire();
+    assert(!checkpoint.retained() && !checkpoint.restoration(native.baseline(), rules, same));
+}
 } // namespace
 
 int main()
@@ -424,4 +483,6 @@ int main()
     exactNativeScaleRoundTrip();
     preserveUnmanagedRuleFields();
     powerCoordinationBeforeWriteAndThroughRecovery();
+    numericBaselineCannotSubstituteForRestoredOwnership();
+    overlayCheckpointCannotBeReplacedOrRetargeted();
 }

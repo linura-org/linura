@@ -16,6 +16,14 @@ class NativeFixture final : public Backend
     Target current{OutputKey{0, 1}, true, full, 1000, 0, 0, 0, {}};
     int writes = 0;
     bool inhibited = false;
+    [[nodiscard]] bool restoredOwnedState() override
+    {
+        return true;
+    }
+    [[nodiscard]] bool restoreOwnedLayout(const Layout &layout, const Snapshot &expected) override
+    {
+        return applyOwnedLayout(layout, expected);
+    }
     [[nodiscard]] bool inhibitPowerTransitions() override
     {
         assert(!inhibited);

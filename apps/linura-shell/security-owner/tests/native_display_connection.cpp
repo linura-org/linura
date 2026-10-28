@@ -40,6 +40,14 @@ class Fixture final : public Backend
                    Coverage::Unlocked};
     std::atomic<unsigned> writes{0};
     bool inhibited = false;
+    bool restoredOwnedState() override
+    {
+        return true;
+    }
+    bool restoreOwnedLayout(const Layout &layout, const Snapshot &expected) override
+    {
+        return applyOwnedLayout(layout, expected);
+    }
     std::optional<ClockSample> clock() override
     {
         return compositorClock();

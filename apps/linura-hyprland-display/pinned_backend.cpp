@@ -76,8 +76,10 @@ class PinnedBackend final : public Backend
     std::uint64_t generation = 1, securityEpoch = 1, nextHandle = 1;
     std::vector<Binding> bindings;
     std::map<Monitor::CMonitor *, Target> overlay;
+    using RuleCheckpoint = RuleOverlayCheckpoint<Monitor::CMonitor *, Config::CMonitorRule>;
+    RuleCheckpoint checkpoint;
     const std::string instance = instanceId();
-    bool writing = false, commitFailed = false, supported = true;
+    bool writing = false, commitFailed = false, supported = true, readingBaseRules = false;
     NativePowerInhibitor powerInhibitor;
 
     [[nodiscard]] bool inhibitPowerTransitions() override
@@ -87,6 +89,7 @@ class PinnedBackend final : public Backend
     void releasePowerInhibitor() noexcept override
     {
         powerInhibitor.release();
+        checkpoint.retire();
     }
 
     [[nodiscard]] std::optional<ClockSample> clock() override
@@ -155,7 +158,7 @@ class PinnedBackend final : public Backend
     [[nodiscard]] bool applyOwnedLayout(const Layout &targets, const Snapshot &expected) override
     {
         const auto fresh = snapshot();
-        if (writing || !powerInhibitor.held() || !fresh ||
+        if (writing || checkpoint.retained() || !powerInhibitor.held() || !fresh ||
             fresh->generation != expected.generation ||
             fresh->securityEpoch != expected.securityEpoch || !sameCurrent(*fresh, expected) ||
             !DisplayTransaction::validLayout(targets, *fresh) || !Config::monitorRuleMgr())
@@ -170,6 +173,12 @@ class PinnedBackend final : public Backend
                 writing = false;
             }
         } finish{writing};
+        const auto rules = baseRules();
+        Layout baseline;
+        for (const auto &head : fresh->heads)
+            baseline.push_back(head.current);
+        if (!rules || !checkpoint.capture(overlay, *rules, baseline))
+            return false;
         // Start with actual current owned fields, preserving every underlying
         // rule. Establish the desired independent roots before removing any old
         // visible root; then mirrors, and only then output disable operations.
@@ -207,6 +216,70 @@ class PinnedBackend final : public Backend
                    targets.begin(), targets.end(), observed->heads.begin(), observed->heads.end(),
                    [](const Target &target, const Head &head) { return target == head.current; });
     }
+    [[nodiscard]] bool restoreOwnedLayout(const Layout &targets, const Snapshot &expected) override
+    {
+        const auto fresh = snapshot();
+        if (writing || !powerInhibitor.held() || !fresh ||
+            fresh->generation != expected.generation ||
+            fresh->securityEpoch != expected.securityEpoch || !sameCurrent(*fresh, expected) ||
+            !DisplayTransaction::validLayout(targets, *fresh) || !Config::monitorRuleMgr())
+            return false;
+        if (!checkpoint.retained()) {
+            // Initial admission may have failed before any owned rule changed.
+            return std::equal(
+                targets.begin(), targets.end(), fresh->heads.begin(), fresh->heads.end(),
+                [](const Target &target, const Head &head) { return target == head.current; });
+        }
+        const auto rules = baseRules();
+        auto prior = rules ? checkpoint.restoration(targets, *rules,
+                                                    sameOwnedDisplayFields<Config::CMonitorRule>)
+                           : std::nullopt;
+        if (!prior)
+            return false; // Changed native layout rules cannot be silently overwritten.
+        writing = true;
+        commitFailed = false;
+        struct Finish final
+        {
+            bool &writing;
+            ~Finish()
+            {
+                writing = false;
+            }
+        } finish{writing};
+        // Establish a baseline independent root before dropping temporary
+        // ownership. Native automatic mode/scale/position rules resume only
+        // after their exact owned semantics have been revalidated.
+        for (const auto &target : targets)
+            if (target.enabled && !target.mirror && !setTarget(target))
+                return false;
+        Config::monitorRuleMgr()->ensureMonitorStatus();
+        const auto roots = snapshot();
+        const auto currentRules = baseRules();
+        if (commitFailed || !roots || roots->generation != expected.generation ||
+            roots->securityEpoch != expected.securityEpoch ||
+            !hasDesiredPoweredRoot(targets, *roots) || !currentRules ||
+            !checkpoint.restoration(targets, *currentRules,
+                                    sameOwnedDisplayFields<Config::CMonitorRule>))
+            return false;
+        overlay = std::move(*prior);
+        Config::monitorRuleMgr()->ensureMonitorStatus();
+        const auto observed = snapshot();
+        return !commitFailed && observed && observed->generation == expected.generation &&
+               observed->securityEpoch == expected.securityEpoch &&
+               std::equal(
+                   targets.begin(), targets.end(), observed->heads.begin(), observed->heads.end(),
+                   [](const Target &target, const Head &head) { return target == head.current; });
+    }
+    [[nodiscard]] bool restoredOwnedState() override
+    {
+        if (writing || !powerInhibitor.held())
+            return false;
+        if (!checkpoint.retained())
+            return true; // No owned write passed initial admission.
+        const auto rules = baseRules();
+        return rules &&
+               checkpoint.restored(overlay, *rules, sameOwnedDisplayFields<Config::CMonitorRule>);
+    }
     [[nodiscard]] PHLMONITOR monitorFor(OutputKey key) const
     {
         const auto found = std::find_if(bindings.begin(), bindings.end(),
@@ -223,6 +296,35 @@ class PinnedBackend final : public Backend
     }
 
   private:
+    [[nodiscard]] std::optional<RuleCheckpoint::Rules> baseRules()
+    {
+        if (readingBaseRules || !Config::monitorRuleMgr())
+            return std::nullopt;
+        readingBaseRules = true;
+        struct Finish final
+        {
+            bool &reading;
+            ~Finish()
+            {
+                reading = false;
+            }
+        } finish{readingBaseRules};
+        RuleCheckpoint::Rules rules;
+        for (const auto &binding : bindings) {
+            const auto monitor = monitorFor(binding.key);
+            if (!monitor)
+                return std::nullopt;
+            auto rule = Config::monitorRuleMgr()->get(monitor);
+            if (!std::isfinite(rule.m_scale) || !std::isfinite(rule.m_refreshRate) ||
+                !std::isfinite(rule.m_offset.x) || !std::isfinite(rule.m_offset.y) ||
+                !std::isfinite(rule.m_resolution.x) || !std::isfinite(rule.m_resolution.y) ||
+                rule.m_mirrorOf.size() > 4096 || rule.m_name.size() > 4096 ||
+                rule.m_iccFile.size() > 4096)
+                return std::nullopt;
+            rules.emplace(monitor.get(), std::move(rule));
+        }
+        return rules;
+    }
     bool setTarget(const Target &target)
     {
         const auto monitor = monitorFor(target.output);
@@ -360,7 +462,7 @@ bool ownedCommitAllowed()
 }
 Config::CMonitorRule overlayRule(Monitor::CMonitor *monitor, Config::CMonitorRule current)
 {
-    if (!backend || !backend->refreshBindings())
+    if (!backend || backend->readingBaseRules || !backend->refreshBindings())
         return current;
     const auto found = backend->overlay.find(monitor);
     if (found == backend->overlay.end())
@@ -381,6 +483,11 @@ bool ownsMonitor(Monitor::CMonitor *monitor)
 {
     if (!backend || !monitor)
         return false;
+    for (const auto &binding : backend->bindings)
+        if (binding.monitor.lock().get() == monitor &&
+            backend->monitorFor(binding.key).get() == monitor &&
+            backend->checkpoint.owns(monitor, binding.key))
+            return true;
     const auto found = backend->overlay.find(monitor);
     return found != backend->overlay.end() &&
            backend->monitorFor(found->second.output).get() == monitor;
