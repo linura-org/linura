@@ -69,7 +69,7 @@ pub struct ReadOnlyStorageInventory {
     pub blocks: Vec<ReadOnlyBlock>,
 }
 
-fn valid_owner(owner: &str) -> bool {
+pub(crate) fn valid_owner(owner: &str) -> bool {
     owner.starts_with(':')
         && owner.len() <= 128
         && owner[1..].split('.').count() >= 2
@@ -417,7 +417,7 @@ fn require_stable_session(
     Ok(())
 }
 
-fn native_logind_scope(
+pub(crate) fn native_logind_scope(
     connection: &Connection,
     session_id: &str,
     expected_uid: u32,
@@ -680,7 +680,7 @@ fn require_stable_inventory(
 
 /// Reads bounded native state from a root-owned system bus and a stable,
 /// unique root-owned UDisks2 service. It never issues a mutating call.
-fn connect_native_bus() -> Result<Connection, ProviderError> {
+pub(crate) fn connect_native_bus() -> Result<Connection, ProviderError> {
     let stream = crate::platform_discovery::connect_unix_with_deadline(
         Path::new("/run/dbus/system_bus_socket"),
         TIMEOUT,
@@ -822,10 +822,10 @@ mod tests {
         changed.physical.blocks[0].disk_sequence = 43;
         assert!(require_stable_scoped_kernel_drive(&witness, &changed).is_err());
         changed = witness.clone();
-        changed.kernel_mount.mount_points_by_device.insert(
-            2048,
-            std::collections::BTreeSet::from(["/run/media/test".into()]),
-        );
+        changed
+            .kernel_mount
+            .mount_points_by_device
+            .insert(2048, BTreeSet::from(["/run/media/test".into()]));
         assert!(require_stable_scoped_kernel_drive(&witness, &changed).is_err());
     }
 
