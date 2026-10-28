@@ -7,6 +7,7 @@ import "../power" as Power
 ColumnLayout {
     id: root
     required property var controller
+    property string idleAdvisory: qsTr("Compositor idle observation unavailable.")
     signal focusEntered(var item)
     spacing: theme.spacingMd
 
@@ -39,6 +40,7 @@ ColumnLayout {
     Power.PowerControls {
         Layout.fillWidth: true
         controller: root.controller
+        idleAdvisory: root.idleAdvisory
         onFocusEntered: item => root.focusEntered(item)
     }
 
@@ -69,6 +71,16 @@ ColumnLayout {
             root.focusEntered(this)
         Accessible.name: text
         Accessible.description: qsTr("Secure this session, then authenticate as its owner to revoke this login's protective-lock permission. Does not unlock or authorize sleep.")
+    }
+
+    LinuraText {
+        Layout.fillWidth: true
+        objectName: "nativeIdleDiagnostic"
+        text: root.controller.nativeIdleStatusText
+        wrapMode: Text.WordWrap
+        Accessible.role: Accessible.StaticText
+        Accessible.name: text
+        Accessible.description: qsTr("Read-only native logind idle hint. Never current secure-lock coverage, activity proof, or authorization.")
     }
 
     LinuraText {

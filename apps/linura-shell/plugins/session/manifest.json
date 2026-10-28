@@ -12,6 +12,9 @@
   ],
   "protocol_requirements": [
     "org.linura.Authority1.GetOwnNativeSleepGateStatus",
+    "org.linura.Authority1.GetOwnNativeIdleStatus",
+    "org.linura.Authority1.GetOwnIdleAdvisoryPreference",
+    "org.linura.Authority1.SetOwnIdleAdvisoryPreference",
     "org.linura.Authority1.GetOwnSessionLock",
     "org.linura.Authority1.ConvergeSessionLock",
     "org.linura.Authority1.RecoverSessionLock",
