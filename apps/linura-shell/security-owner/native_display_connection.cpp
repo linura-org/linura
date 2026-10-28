@@ -402,6 +402,15 @@ bool NativeDisplayConnection::advertised() const noexcept
 {
     return impl_->global != 0;
 }
+bool NativeDisplayConnection::securityTransitionAllowed(bool currentlySecure)
+{
+    if (!impl_->display || !impl_->healthy || wl_display_get_error(impl_->display) != 0)
+        return false;
+    if (!advertised())
+        return true;
+    const auto current = sample();
+    return current && !current->fenced && current->coverage == (currentlySecure ? 1U : 0U);
+}
 std::optional<NativePinnedDisplaySample> NativeDisplayConnection::sample()
 {
     if (!impl_->healthy || !impl_->manager)

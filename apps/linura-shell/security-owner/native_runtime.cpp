@@ -617,7 +617,10 @@ bool NativeRuntime::armApproval(const QDBusMessage &received, const NativeApprov
         return false;
     NativeDeadline deadline(std::chrono::milliseconds(5'000), NativeDeadline::Stage::ApprovalArm);
     const auto state = impl_->independentState();
-    if (!state || !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
+    if (!state ||
+        (scope.purpose != ApprovalPurpose::ConfirmLock &&
+         !impl_->backend->displayAllowsSecurityTransition()) ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::ControlApproval, *peer))
         return false;
     const auto mechanism = impl_->protocol->inspect();
     const bool secure = *state == NativeCompositorLockState::Locked;
@@ -671,6 +674,14 @@ bool NativeRuntime::consumeApproval(const QDBusMessage &received, const NativeAp
     const auto expected = scope.purpose == ApprovalPurpose::ConfirmLock
                               ? NativeCompositorLockState::Unlocked
                               : NativeCompositorLockState::Locked;
+    // This probe drains the owned Wayland connection and may deliver hotplug,
+    // configure or protected-input events. It must precede the final proof/input
+    // generation checks; no pre-probe eligibility survives those callbacks.
+    if (scope.purpose != ApprovalPurpose::ConfirmLock &&
+        !impl_->backend->displayAllowsSecurityTransition()) {
+        impl_->clearApproval();
+        return false;
+    }
     if (impl_->approvalInputGeneration != impl_->backend->protectedInputGeneration()) {
         impl_->clearApproval();
         return false;
@@ -703,7 +714,8 @@ bool NativeRuntime::dispatchPrepared(const QDBusMessage &received, const NativeL
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
     if (!peer || lock != identity() || impl_->approvalScope || impl_->transitionFence.active() ||
-        impl_->sleepFence.active())
+        impl_->sleepFence.active() ||
+        (!secure && !impl_->backend->displayAllowsSecurityTransition()))
         return false;
     // Only the separately attested root session executor can call this. A human
     // approval or its identifiers never reach dispatch as reusable authority.
@@ -861,14 +873,15 @@ bool NativeRuntime::fencePreparedTransition(const QDBusMessage &received,
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
     if (!peer || impl_->approvalScope || impl_->sleepFence.active() || impl_->unlockRequestLock ||
-        !impl_->transitionRequest || impl_->transitionRequest->first != target ||
+        !impl_->backend->displayAllowsSecurityTransition() || !impl_->transitionRequest ||
+        impl_->transitionRequest->first != target ||
         impl_->protocol->inspect() != LockMechanism::State::Secure ||
         impl_->independentState() != NativeCompositorLockState::Locked)
         return false;
     const auto cycles = target.transition == NativeSessionTransition::Suspend
                             ? nativeSuccessfulSuspendCycles()
                             : std::nullopt;
-    if (!impl_->currentSession() ||
+    if (!impl_->currentSession() || !impl_->backend->displayAllowsSecurityTransition() ||
         !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
         return false;
     const bool armed = impl_->transitionFence.arm(target, identity(), true, cycles);
@@ -961,6 +974,8 @@ bool NativeRuntime::fenceSleepEntry(const QDBusMessage &received,
         return runtimeUnavailable("native-sleep-owner-denied reason=binding\n");
     if (impl_->approvalScope || impl_->unlockRequestLock)
         return runtimeUnavailable("native-sleep-owner-denied reason=scope\n");
+    if (!impl_->backend->displayAllowsSecurityTransition())
+        return runtimeUnavailable("native-sleep-owner-denied reason=display\n");
     if (impl_->protocol->inspect() != LockMechanism::State::Secure)
         return runtimeUnavailable("native-sleep-owner-denied reason=mechanism\n");
     if (impl_->independentState() != NativeCompositorLockState::Locked)
@@ -982,6 +997,8 @@ bool NativeRuntime::fenceSleepEntry(const QDBusMessage &received,
         return runtimeUnavailable("native-sleep-owner-denied reason=counter-generation\n");
     if (impl_->independentState() != NativeCompositorLockState::Locked)
         return runtimeUnavailable("native-sleep-owner-denied reason=coverage\n");
+    if (!impl_->backend->displayAllowsSecurityTransition())
+        return runtimeUnavailable("native-sleep-owner-denied reason=display-generation\n");
     // This is solely a fence around already-verified coverage. It cannot make
     // the pre-start helper's receipt into lock, power or unlock authority.
     const bool fenced = impl_->sleepFence.arm(event, lock, true, cycles, *unit);

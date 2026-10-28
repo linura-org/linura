@@ -727,6 +727,21 @@ const QString &NativeWaylandLock::displayInvocation() const noexcept
 {
     return impl_->displayInvocation;
 }
+bool NativeWaylandLock::displayAllowsSecurityTransition()
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping || !impl_->displayConnection)
+        return false;
+    const bool secure = secureCoverage();
+    if (requestedSecure() != secure || !impl_->displayConnection->securityTransitionAllowed(secure))
+        return false;
+    // The fresh read can deliver hotplug/configure events. Global compositor
+    // coverage does not prove our newly configured output frames are ready.
+    // Reuse the protected-input predicate AFTER that read, without requiring a
+    // keyboard or focus for an automatic sleep fence.
+    return requestedSecure() == secure && secureCoverage() == secure &&
+           (!secure || impl_->inputCovered());
+}
 std::optional<NativeDisplaySnapshot> NativeWaylandLock::observeDisplayTopology()
 {
     if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||

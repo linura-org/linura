@@ -73,13 +73,15 @@ def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str
     text = replace_exact(
         outputs[lock],
         "        PROTO::sessionLock->m_locked = false;",
-        "        Linura::HyprlandDisplay::lockReleased();\n"
+        "        if (!Linura::HyprlandDisplay::lockReleased())\n"
+        "            return;\n"
         "        PROTO::sessionLock->m_locked = false;",
     )
     text = replace_exact(
         text,
         "    m_locked = false;",
-        "    Linura::HyprlandDisplay::lockReleased();\n    m_locked = false;",
+        "    if (!Linura::HyprlandDisplay::lockReleased())\n"
+        "        return;\n    m_locked = false;",
     )
     outputs[lock] = include + text
 

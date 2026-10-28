@@ -811,6 +811,20 @@ for the current implementation status.
   Its descriptor outlives clients and remains held through ambiguous/failed
   restoration. Only native full-layout verification retires it; this does not
   establish recovery after compositor termination or bypass S17's power policy.
+- S17 approval/release/power/pre-kernel admission re-reads the native display
+  fence, including attempts created by a prior owner. Pending/restoring/failed,
+  unknown or mismatched native state cannot authorize a security transition.
+  Wayland draining precedes final proof/input-generation checks so a hotplug
+  callback during the probe cannot leave old eligibility intact. The secure
+  owner's per-output configured/committed/flushed predicate is rechecked after
+  the read, including outputs awaiting configure despite a global lock ack.
+  The exact
+  pinned normal and forced unlock paths also reject release while fenced before
+  clearing locked state or changing the security epoch. Exclusion is published
+  before initial inhibition/modeset callbacks, before the transaction object has
+  returned to its supervisor. Reentrant admission cannot use that interval to
+  acquire a second reservation. Component tests are not proof of real first-frame
+  safety, overlap or restart reconciliation.
 - Protected input requires committed and flushed frames for every current lock
   surface, not merely the global lock acknowledgement. Output add/remove/resize
   cancels the old prompt and invalidates unconsumed proofs. A completed proof is

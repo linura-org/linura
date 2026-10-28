@@ -436,14 +436,16 @@ void shutdown()
     service.reset(); // Compensation while monitor/rule/lock managers still exist.
     backend.reset();
 }
-void lockReleased()
+bool lockReleased()
 {
-    if (!backend)
-        return;
-    if (backend->securityEpoch >= std::numeric_limits<std::uint64_t>::max() - 1)
+    if (!backend || !service || service->fenced())
+        return false;
+    if (backend->securityEpoch >= std::numeric_limits<std::uint64_t>::max() - 1) {
         backend->supported = false;
-    else
-        ++backend->securityEpoch;
+        return false;
+    }
+    ++backend->securityEpoch;
+    return true;
 }
 void commitObserved(Monitor::CMonitor *, bool success)
 {

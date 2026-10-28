@@ -104,6 +104,18 @@ CompositorDisplayService::Begin CompositorDisplayService::begin(const Correlatio
     const auto entry = reservations_.emplace(
         correlation.transaction, Reservation{correlation, baseline, desired, Phase::Pending});
     dispatches_.insert(correlation.dispatchDigest);
+    // start() invokes native inhibition/modeset callbacks before returning its
+    // transaction object. Publish exclusion BEFORE entering those callbacks,
+    // not only after active_ has received the completed handoff.
+    starting_ = true;
+    struct StartingFence final
+    {
+        bool &active;
+        ~StartingFence()
+        {
+            active = false;
+        }
+    } startingFence{starting_};
     active_ = DisplayTransaction::start(backend_, correlation, baseline, desired, capturedSnapshot,
                                         captured);
     if (!active_) {
@@ -139,7 +151,7 @@ bool CompositorDisplayService::restore(const Correlation &correlation)
 }
 bool CompositorDisplayService::fenced() const noexcept
 {
-    return active_ && active_->fenced();
+    return starting_ || (active_ && active_->fenced());
 }
 void CompositorDisplayService::recordPhase()
 {

@@ -1,6 +1,7 @@
 // Official client/server wire-component harness only. It does not attest a
 // compositor, login session, PAM account, deployed owner or native qualification.
 #include "native_wayland_lock.h"
+#include "native_wayland_readiness.h"
 #include "native_lock_protocol.h"
 #include "secret_entry.h"
 #include "native_presentation.h"
@@ -53,6 +54,7 @@ enum class Case {
     MissingManager,
     ProbeProgress,
     ProbeStarvation,
+    SecurityTransitionFrames,
     ProtectedInput,
     InputLateCoverage,
     InputLateFocusLoss,
@@ -479,6 +481,18 @@ struct WireServer final
     }
     void command(unsigned char value)
     {
+        if (scenario == Case::SecurityTransitionFrames) {
+            if (value == 1) {
+                assert(wl_global_create(display, &wl_output_interface, 3, this, bindOutput));
+            } else {
+                assert(value == 2 && roles.size() == 2);
+                for (const auto &[native, role] : roles) {
+                    if (role->acknowledged == 0)
+                        ext_session_lock_surface_v1_send_configure(native, role->serial, 32, 24);
+                }
+            }
+            return;
+        }
         assert(inputCase(scenario) && keyboard && !roles.empty());
         if (scenario == Case::InputLateFocusLoss && value == 4) {
             wl_keyboard_send_leave(keyboard, 20, roles.begin()->second->surface->native);
@@ -638,6 +652,10 @@ struct WireServer final
             destroy, ack
         };
         wl_resource_set_implementation(native, &implementation, role, roleDestroyed);
+        // Keep the hotplugged output unconfigured until the test explicitly
+        // releases it. The original global lock acknowledgement stays secure.
+        if (self.scenario == Case::SecurityTransitionFrames && self.roles.size() == 2)
+            return;
         const uint32_t width =
             self.scenario == Case::InvalidSize ? 0 : static_cast<uint32_t>(role->width);
         ext_session_lock_surface_v1_send_configure(native, role->serial, width,
@@ -862,6 +880,7 @@ void client(Case scenario, int descriptor, int commands)
             return scenario != Case::PaintFailure && (!presentation || presentation->paint(frame));
         });
         ownedBackend = &backend;
+        assert(!backend.displayAllowsSecurityTransition()); // Not initialized.
         if (presentation)
             QObject::connect(presentation.get(), &NativePresentation::repaintRequested, &backend,
                              &NativeWaylandLock::repaint, Qt::QueuedConnection);
@@ -895,6 +914,7 @@ void client(Case scenario, int descriptor, int commands)
             return;
         }
         assert(initialized && backend.available());
+        assert(backend.displayAllowsSecurityTransition()); // Healthy unlocked legacy peer.
         if (entry)
             assert(backend.protectedInputAvailable() &&
                    !backend.bindProtectedInput(*entry, {}, {}));
@@ -1039,6 +1059,21 @@ void client(Case scenario, int descriptor, int commands)
         assert(backend.dispatchNative(true));
         waitUntil([&] { return backend.secureCoverage() && paints > 0; });
         assert(backend.requestedSecure() && gates == 1);
+        if (scenario == Case::SecurityTransitionFrames) {
+            assert(backend.displayAllowsSecurityTransition());
+            const auto generation = backend.protectedInputGeneration();
+            unsigned char value = 1;
+            assert(write(commands, &value, 1) == 1);
+            waitUntil([&] { return backend.protectedInputGeneration() != generation; });
+            assert(backend.secureCoverage() && backend.requestedSecure());
+            assert(!backend.displayAllowsSecurityTransition());
+            // Drain the surface creation before permitting its configure event.
+            assert(waitForNativeWaylandReady(display, 250ms));
+            value = 2;
+            assert(write(commands, &value, 1) == 1);
+            waitUntil([&] { return paints >= 2; });
+            assert(backend.displayAllowsSecurityTransition());
+        }
         if (pointerCase(scenario)) {
             waitUntil([&] { return backend.protectedInputFocused(); });
             unsigned submissions = 0, cancellations = 0;
@@ -1338,6 +1373,7 @@ int main(int argc, char **argv)
     run(Case::Repaint, 0, 1, 1);
     run(Case::ResizePressure, 0, 1, 1);
     run(Case::Hotplug, 0, 1, 1);
+    run(Case::SecurityTransitionFrames, 0, 1, 1);
     run(Case::ManagedFence, 0, 2, 2);
     run(Case::DirectRelease, NativeLockProtocol::NativeLockFaultExit, 1, 0);
     run(Case::NoGate, 0, 0, 0);

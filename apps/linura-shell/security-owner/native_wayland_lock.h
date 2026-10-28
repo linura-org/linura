@@ -54,6 +54,7 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     // Read-only sync-fenced native inventory and per-output lock-surface facts.
     // Absence means unsupported/incomplete; it never weakens S17 lock coverage.
     [[nodiscard]] std::optional<NativeDisplaySnapshot> observeDisplayTopology();
+    [[nodiscard]] bool displayAllowsSecurityTransition();
     // Original owned/attested connection; this sends get_status only. It never
     // configures, confirms, restores or acquires continuation rights.
     [[nodiscard]] std::optional<quint32> observeDisplayAttempt(const NativeDisplayCorrelation &);

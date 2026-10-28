@@ -39,6 +39,7 @@ class Fixture final : public Backend
                      false}},
                    Coverage::Unlocked};
     std::atomic<unsigned> writes{0};
+    std::atomic<bool> failRestore{false};
     bool inhibited = false;
     bool restoredOwnedState() override
     {
@@ -46,6 +47,8 @@ class Fixture final : public Backend
     }
     bool restoreOwnedLayout(const Layout &layout, const Snapshot &expected) override
     {
+        if (failRestore.load())
+            return false;
         return applyOwnedLayout(layout, expected);
     }
     std::optional<ClockSample> clock() override
@@ -87,33 +90,35 @@ class Harness final
     std::atomic<bool> stopped{false};
     std::thread worker;
     enum class BuildMismatch { None, Upstream, SourceRecipe };
-    explicit Harness(BuildMismatch mismatch = BuildMismatch::None)
+    explicit Harness(BuildMismatch mismatch = BuildMismatch::None, bool publishIntegration = true)
     {
         assert(display);
         auto *loop = wl_display_get_event_loop(display);
         service = std::make_unique<CompositorDisplayService>(*loop, backend);
-        endpoint = std::make_unique<WireEndpoint>(
-            *display, backend, *service,
-            NativeBuildIdentity{Instance,
-                                mismatch == BuildMismatch::Upstream
-                                    ? std::string(40, 'a')
-                                    : "efb50993780079460b0cbed1363e2166a2de1d9f",
-                                mismatch == BuildMismatch::SourceRecipe ? std::string(64, 'a')
-                                                                        : IntegrationSourceDigest},
-            [](OutputKey key) -> std::optional<std::string> {
-                if (key == OutputKey{1, 1})
-                    return "DP-1";
-                if (key == OutputKey{2, 1})
-                    return "HDMI-A-1";
-                return std::nullopt;
-            },
-            [](pid_t pid, uid_t uid) -> std::optional<WireEndpoint::OwnerInvocation> {
-                assert(pid == getpid() && uid == getuid());
-                WireEndpoint::OwnerInvocation invocation{};
-                invocation[0] = 1;
-                return invocation;
-            });
-        assert(endpoint->available());
+        if (publishIntegration)
+            endpoint = std::make_unique<WireEndpoint>(
+                *display, backend, *service,
+                NativeBuildIdentity{Instance,
+                                    mismatch == BuildMismatch::Upstream
+                                        ? std::string(40, 'a')
+                                        : "efb50993780079460b0cbed1363e2166a2de1d9f",
+                                    mismatch == BuildMismatch::SourceRecipe
+                                        ? std::string(64, 'a')
+                                        : IntegrationSourceDigest},
+                [](OutputKey key) -> std::optional<std::string> {
+                    if (key == OutputKey{1, 1})
+                        return "DP-1";
+                    if (key == OutputKey{2, 1})
+                        return "HDMI-A-1";
+                    return std::nullopt;
+                },
+                [](pid_t pid, uid_t uid) -> std::optional<WireEndpoint::OwnerInvocation> {
+                    assert(pid == getpid() && uid == getuid());
+                    WireEndpoint::OwnerInvocation invocation{};
+                    invocation[0] = 1;
+                    return invocation;
+                });
+        assert(!publishIntegration || (endpoint && endpoint->available()));
         for (int i = 0; i < 3; ++i) {
             int pair[2];
             assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair) == 0);
@@ -143,7 +148,7 @@ class Client final
     wl_display *display;
     wl_registry *registry;
     std::unique_ptr<NativeDisplayConnection> connection;
-    explicit Client(int descriptor)
+    explicit Client(int descriptor, bool expectedIntegration = true)
     {
         display = wl_display_connect_to_fd(descriptor);
         assert(display);
@@ -160,7 +165,7 @@ class Client final
             }};
         assert(wl_registry_add_listener(registry, &listener, this) == 0);
         assert(waitForNativeWaylandReady(display, 250ms));
-        assert(connection->advertised());
+        assert(connection->advertised() == expectedIntegration);
     }
     ~Client()
     {
@@ -188,6 +193,8 @@ void identityAndContinuationOwnership()
 {
     Harness harness;
     Client owner(harness.descriptors[0]), observer(harness.descriptors[1]);
+    assert(owner.connection->securityTransitionAllowed(false));
+    assert(observer.connection->securityTransitionAllowed(false));
     auto correlation = bound(QStringLiteral("transaction:private-client"));
     const auto captured = owner.connection->sample(), other = observer.connection->sample();
     assert(captured && other && captured->compositor == other->compositor &&
@@ -197,6 +204,8 @@ void identityAndContinuationOwnership()
     desired.outputs[0].x = 100;
     assert(owner.connection->apply(correlation, prior, desired) == 2);
     assert(harness.backend.writes == 1);
+    assert(!owner.connection->securityTransitionAllowed(false));
+    assert(!observer.connection->securityTransitionAllowed(false));
     assert(observer.connection->status(correlation) == 2);
     assert(!observer.connection->decide(correlation, true));
     assert(!observer.connection->apply(correlation, prior, desired));
@@ -205,6 +214,8 @@ void identityAndContinuationOwnership()
     substituted.dispatchDigest[0] = QLatin1Char('c');
     assert(!owner.connection->status(substituted));
     assert(owner.connection->decide(correlation, true) == 4);
+    assert(owner.connection->securityTransitionAllowed(false));
+    assert(observer.connection->securityTransitionAllowed(false));
     assert(!owner.connection->decide(correlation, false));
     assert(observer.connection->status(correlation) == 4 && harness.backend.writes == 1);
     const auto current = observer.connection->sample();
@@ -224,6 +235,7 @@ void clientLossDoesNotDisarmNativeRecovery()
         assert(owner.connection->apply(correlation, prior, desired) == 2);
     }
     Client replacement(harness.descriptors[1]);
+    assert(!replacement.connection->securityTransitionAllowed(false));
     assert(!replacement.connection->decide(correlation, false));
     const auto deadline = std::chrono::steady_clock::now() + 3s;
     while (replacement.connection->status(correlation) != 5) {
@@ -233,6 +245,7 @@ void clientLossDoesNotDisarmNativeRecovery()
     const auto restored = replacement.connection->sample();
     assert(restored && restored->current.outputs[0].x == 0 && !restored->fenced &&
            harness.backend.writes == 2);
+    assert(replacement.connection->securityTransitionAllowed(false));
 }
 void unsupportedBuildAndSubstitutedSnapshotCannotWrite()
 {
@@ -241,6 +254,7 @@ void unsupportedBuildAndSubstitutedSnapshotCannotWrite()
         Client owner(harness.descriptors[0]);
         assert(!owner.connection->sample());
         assert(!owner.connection->sample());
+        assert(!owner.connection->securityTransitionAllowed(false));
         assert(harness.backend.writes == 0);
     }
     Harness harness;
@@ -293,6 +307,8 @@ void compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage()
     Client owner(harness.descriptors[0]);
     const auto sampled = owner.connection->sample();
     assert(sampled && sampled->coverage == 1 && sampled->topology.heads.size() == 2);
+    assert(owner.connection->securityTransitionAllowed(true));
+    assert(!owner.connection->securityTransitionAllowed(false));
     // Actual wire decoding retains compositor fence semantics; projection must
     // discard them even for a disabled head with no wl_output/owner surface.
     assert(sampled->topology.heads[0].covered && sampled->topology.heads[1].covered &&
@@ -316,6 +332,44 @@ void compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage()
     assert(!projectOwnerDisplayCoverage(sampled->topology, {{"", true}}));
     assert(harness.backend.writes == 0); // Observation cannot configure anything.
 }
+
+void securityAdmissionRejectsUnknownStateAndRetainsFailedRecoveryFence()
+{
+    NativeDisplayConnection unavailable(nullptr);
+    assert(!unavailable.securityTransitionAllowed(false));
+    {
+        // A completed registry read on an otherwise valid legacy compositor
+        // has no S21 mutation mechanism; preserve its qualified S17 behavior.
+        Harness legacy(Harness::BuildMismatch::None, false);
+        Client plain(legacy.descriptors[0], false);
+        assert(plain.connection->securityTransitionAllowed(false));
+        assert(!plain.connection->sample());
+        assert(plain.connection->securityTransitionAllowed(false));
+    }
+    Harness harness;
+    Client owner(harness.descriptors[0]), observer(harness.descriptors[1]);
+    for (const auto coverage : {Coverage::Transitioning, Coverage::Unknown, Coverage::Unlocked}) {
+        {
+            const std::lock_guard lock(harness.backend.mutex);
+            harness.backend.facts.coverage = coverage;
+        }
+        assert(owner.connection->securityTransitionAllowed(false) ==
+               (coverage == Coverage::Unlocked));
+    }
+    const auto captured = owner.connection->sample();
+    assert(captured);
+    auto prior = baseline(*captured), desired = prior;
+    desired.outputs[0].x = 100;
+    const auto correlation = bound(QStringLiteral("transaction:failed-restoration-fence"));
+    assert(owner.connection->apply(correlation, prior, desired) == 2);
+    harness.backend.failRestore = true;
+    assert(owner.connection->decide(correlation, false) == 6);
+    assert(!owner.connection->securityTransitionAllowed(false));
+    assert(!observer.connection->securityTransitionAllowed(false));
+    assert(observer.connection->status(correlation) == 6);
+    assert(!observer.connection->securityTransitionAllowed(false));
+    assert(harness.backend.writes == 1); // Admission reads never compensate/replay.
+}
 } // namespace
 int main()
 {
@@ -324,4 +378,5 @@ int main()
     unsupportedBuildAndSubstitutedSnapshotCannotWrite();
     terminalWireObjectsRetireWithoutEvictingOneUseReservations();
     compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage();
+    securityAdmissionRejectsUnknownStateAndRetainsFailedRecoveryFence();
 }

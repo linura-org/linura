@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <csignal>
+#include <functional>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
@@ -16,6 +17,7 @@ class NativeFixture final : public Backend
     Target current{OutputKey{0, 1}, true, full, 1000, 0, 0, 0, {}};
     int writes = 0;
     bool inhibited = false;
+    std::function<void()> duringInhibition, duringWrite;
     [[nodiscard]] bool restoredOwnedState() override
     {
         return true;
@@ -27,6 +29,8 @@ class NativeFixture final : public Backend
     [[nodiscard]] bool inhibitPowerTransitions() override
     {
         assert(!inhibited);
+        if (duringInhibition)
+            duringInhibition();
         return inhibited = true;
     }
     void releasePowerInhibitor() noexcept override
@@ -47,6 +51,8 @@ class NativeFixture final : public Backend
     {
         ++writes;
         assert(inhibited);
+        if (duringWrite)
+            duringWrite();
         current = targets[0];
         return true;
     }
@@ -179,10 +185,42 @@ void admissionAndReservationLimits()
     }
     wl_event_loop_destroy(loop);
 }
+void exclusionPrecedesEveryInitialBackendCallback()
+{
+    auto *loop = wl_event_loop_create();
+    assert(loop);
+    {
+        NativeFixture native;
+        CompositorDisplayService service(*loop, native);
+        const Layout baseline{native.current};
+        auto desired = baseline;
+        desired[0].mode = native.small;
+        const auto original = bound("transaction:initial-native-exclusion", 15'000);
+        auto nested = bound("transaction:reentrant-native-exclusion", 15'000);
+        nested.dispatchDigest = std::string(64, 'c');
+        unsigned calls = 0;
+        auto inspect = [&] {
+            assert(service.fenced());
+            ++calls;
+            assert(begin(service, native, nested, baseline, desired) ==
+                   CompositorDisplayService::Begin::Rejected);
+            assert(!service.status(nested));
+        };
+        native.duringInhibition = inspect;
+        native.duringWrite = inspect;
+        assert(begin(service, native, original, baseline, desired) ==
+               CompositorDisplayService::Begin::Started);
+        assert(calls == 2 && native.writes == 1 && service.fenced());
+        assert(service.confirm(original));
+        assert(!service.fenced() && !native.inhibited && native.writes == 1);
+    }
+    wl_event_loop_destroy(loop);
+}
 } // namespace
 
 int main()
 {
     independentTimerAfterClientDeath();
     admissionAndReservationLimits();
+    exclusionPrecedesEveryInitialBackendCallback();
 }

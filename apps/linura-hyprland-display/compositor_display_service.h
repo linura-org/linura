@@ -60,6 +60,7 @@ class CompositorDisplayService final
     std::map<std::string, Reservation> reservations_;
     std::set<std::string> dispatches_;
     std::unique_ptr<DisplayTransaction> active_;
+    bool starting_ = false;
 };
 
 } // namespace Linura::HyprlandDisplay

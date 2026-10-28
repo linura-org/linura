@@ -21,7 +21,9 @@ inline constexpr char UpstreamVersion[] = "0.56.2";
 // compositor, not symbol hooks, a generic eval interface or a plugin ABI.
 void initialize(wl_display &, wl_event_loop &);
 void shutdown();
-void lockReleased();
+// Atomic compositor-thread admission: a live/failed display reservation cannot
+// lose protected lock state or change its security epoch before restoration.
+[[nodiscard]] bool lockReleased();
 void commitObserved(Monitor::CMonitor *, bool success);
 [[nodiscard]] bool ownedCommitAllowed();
 [[nodiscard]] bool ownsMonitor(Monitor::CMonitor *);

@@ -218,6 +218,29 @@ failed compensation or client loss cannot. This coordinates the pending mechanis
 with native power without adding another power authority or force path. Compositor
 death still requires durable Control reconciliation and cannot count as restored.
 
+S17 release and power admission also observe the compositor-owned display fence
+on the original attested connection. Fresh pending/restoring/failed reservations,
+unknown coverage, source mismatch or a previously advertised integration becoming
+unavailable refuse protected approval, lock release, transition fencing and the
+pre-kernel sleep gate. A replacement owner has no local attempt object but still
+observes that native fence. A compositor which never advertised the display
+integration preserves the established S17 path; it has no supported Linura display
+mutation mechanism. Probes run before final protected-input/proof-generation
+checks because draining Wayland may deliver hotplug/configure events. They grant
+no approval and never restore or replay effects. After that read, a secure owner
+also requires every current lock surface's configured, committed and flushed
+frame generation; the global acknowledgement alone cannot admit a transition
+while a hotplugged output is awaiting configure. No keyboard focus is required
+for this frame-only automatic-sleep check. Independently, both the normal
+protocol unlock and forced-unlock hooks refuse to clear native locked state or
+advance its security epoch while the compositor display reservation is fenced.
+That compositor-thread guard closes the interval after the owner's last read.
+The reservation becomes fenced before entering initial inhibition/modeset
+callbacks, including the interval before the transaction object is published;
+reentrant admission cannot see a false idle state during the first write.
+These exclusions still require native overlap qualification and do not establish
+per-output scanout/first-frame protection or compositor-death durability.
+
 The native owner separately binds protected interactions to output configuration
 and keyboard generations. Every active output needs a configured, committed and
 flushed lock frame before input becomes eligible. Hotplug/resize cancels pending

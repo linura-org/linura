@@ -41,6 +41,10 @@ class NativeDisplayConnection final
     void removed(quint32 name);
     [[nodiscard]] bool advertised() const noexcept;
     [[nodiscard]] std::optional<NativePinnedDisplaySample> sample();
+    // Fresh read only. S17 may keep its established behavior if this compositor
+    // never advertised S21. Once advertised, unknown/replaced/busy state denies
+    // release/power admission; a replacement owner cannot ignore a live attempt.
+    [[nodiscard]] bool securityTransitionAllowed(bool currentlySecure);
     // Must immediately follow a fresh sample from this object. Its immutable
     // native snapshot and all heads stay alive through the one-use wire apply.
     [[nodiscard]] std::optional<quint32> apply(const NativeDisplayCorrelation &,
