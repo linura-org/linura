@@ -18,11 +18,32 @@ class ClientFixture : public QObject
     Q_PROPERTY(QString statusText MEMBER status NOTIFY changed)
     Q_PROPERTY(QString requestId MEMBER requestId NOTIFY changed)
     Q_PROPERTY(QString nativeSleepStatusText MEMBER sleepStatus NOTIFY changed)
+    Q_PROPERTY(QString nativeIdleStatusText MEMBER idleStatus NOTIFY changed)
+    Q_PROPERTY(QString idlePreferenceStatus MEMBER preferenceStatus NOTIFY changed)
+    Q_PROPERTY(bool idlePreferenceReady MEMBER preferenceReady NOTIFY changed)
+    Q_PROPERTY(bool idlePreferenceBusy MEMBER preferenceBusy NOTIFY changed)
+    Q_PROPERTY(int idleAdvisorySeconds MEMBER preferredSeconds NOTIFY changed)
   public:
     bool busy = false;
     bool pending = false;
     QString status = QStringLiteral("Component fixture; not authoritative native evidence.");
     QString requestId;
+    bool preferenceReady = true;
+    bool preferenceBusy = false;
+    int preferredSeconds = 300;
+    QString preferenceStatus = QStringLiteral("Five-minute advisory only.");
+    QSet<int> preferredRequests;
+    int preferenceRefreshes = 0;
+    Q_INVOKABLE void refreshIdleAdvisoryPreference()
+    {
+        ++preferenceRefreshes;
+    }
+    Q_INVOKABLE void setIdleAdvisorySeconds(int seconds)
+    {
+        preferredRequests.insert(seconds);
+    }
+    QString idleStatus =
+        QStringLiteral("Native logind idle hint unavailable. No activity is inferred.");
     QString sleepStatus = QStringLiteral(
         "Sleep protection failed; this computer may still be running. Keep it ventilated.");
     QSet<int> actions;
@@ -91,12 +112,30 @@ int main(int argc, char **argv)
         !diagnosticAccessible ||
         diagnosticAccessible->text(QAccessible::Name) != controller.sleepStatus)
         return failure(11, "sleep-failure warning or accessible label is missing");
+    auto *idleDiagnostic = root->findChild<QObject *>(QStringLiteral("nativeIdleDiagnostic"));
+    if (!idleDiagnostic || idleDiagnostic->property("text").toString() != controller.idleStatus)
+        return failure(16, "native idle diagnostic not bound");
+    controller.idleStatus = QStringLiteral("Logind idle is advisory only; no authorization.");
     controller.sleepStatus = QStringLiteral("Diagnostics unavailable; protection not verified.");
     emit controller.changed();
     QCoreApplication::processEvents();
     if (diagnostic->property("text").toString() != controller.sleepStatus ||
+        idleDiagnostic->property("text").toString() != controller.idleStatus ||
         !controller.actions.empty())
         return failure(12, "diagnostic refresh started an effect or retained a stale warning");
+    // A read-only compositor hint must update accessible presentation without
+    // requesting any managed lock/power or local consent operation.
+    auto *idleAdvisory = root->findChild<QObject *>(QStringLiteral("idleInputAdvisory"));
+    if (!idleAdvisory || idleAdvisory->property("text").toString().isEmpty())
+        return failure(13, "read-only input idle advisory missing");
+    const QString advisory = QStringLiteral("Compositor idle hint; no authority or effect.");
+    if (!root->setProperty("idleAdvisory", advisory))
+        return failure(14, "idle advisory receiver property is missing");
+    QCoreApplication::processEvents();
+    auto *idleAccessible = QAccessible::queryAccessibleInterface(idleAdvisory);
+    if (idleAdvisory->property("text").toString() != advisory || !idleAccessible ||
+        idleAccessible->text(QAccessible::Name) != advisory || !controller.actions.empty())
+        return failure(15, "idle hint altered authority or accessible text did not update");
     QList<QObject *> actions;
     for (auto *object : visualDescendants(item)) {
         if (!object->inherits("QQuickAbstractButton") || !object->property("visible").toBool())
@@ -110,11 +149,13 @@ int main(int argc, char **argv)
         if (!QMetaObject::invokeMethod(object, "clicked"))
             return failure(6, "component click signal failed");
     }
-    if (actions.size() != 7 || controller.actions != QSet<int>{0, 1, 2, 3, 4, 5, 6}) {
+    if (actions.size() != 12 || controller.actions != QSet<int>{0, 1, 2, 3, 4, 5, 6} ||
+        controller.preferenceRefreshes != 1 ||
+        controller.preferredRequests != QSet<int>{300, 600, 900, 1800}) {
         std::cerr << "visible actions=" << actions.size()
                   << " typed actions=" << controller.actions.size() << '\n';
         return failure(
-            7, "the five exact session/power actions and two consent controls were not presented");
+            7, "the seven managed/consent controls and four advisory presets were not presented");
     }
     controller.busy = true;
     emit controller.changed();

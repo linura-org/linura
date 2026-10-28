@@ -53,6 +53,8 @@ Sixteen existing qualification and authority-sensitive source files intentionall
 - `apps/linura-shell/bridge/audio_session_controller.cpp` — exactly reviewed audio authority retry/dispatched control-flow fragments.
 - `apps/linura-shell/bridge/audio_session_controller.h` — exact lifecycle-feedback signal declaration and typed Qt API.
 
+S21-5's read-only compositor inactivity advisory deliberately updates the two protected QML sources (`apps/linura-shell/shell.qml` and `apps/linura-shell/plugins/quick-settings/QuickSettingsPanel.qml`). The exact-source SHA-256 fingerprints are re-bound to the consolidated, reviewed code, including the S21-5 Control-verified advisory timeout binding, while retaining the existing closed input, S17 authority, no-autodispatch and runtime qualification boundaries. The previous per-file fingerprint is never treated as valid evidence for the changed source. 
+
 Any deliberate source edit requires an architectural review of every dependent proof, negative test and source hash, followed by a separately reviewed update to the expected SHA-256. Do not loosen a verifier to satisfy a generic formatter. No unprotected shell or Lua file has a blanket exemption.
 
 The canonical QML checker mirrors each tracked QML path beneath a temporary root containing the exact checked-in `.qmlformat.ini`; it does not format an orphaned file with missing style settings. Extensionless Bash qualification helpers and shell shebangs (including scripts with non-shell suffixes and `env -S`) undergo the same shfmt check as `.sh` inputs. Tracked-file inventory rejects symlinked source or ancestor substitution. These boundaries have adversarial tests.

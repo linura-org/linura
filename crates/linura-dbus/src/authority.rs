@@ -122,6 +122,20 @@ pub struct Authority1SessionContext {
 }
 
 pub trait Authority1Handler: Send + 'static {
+    fn own_native_idle_status(
+        &mut self,
+        context: Authority1SessionContext,
+    ) -> Result<(String, String, bool, u64), String>;
+    fn own_idle_advisory_preference(
+        &mut self,
+        context: Authority1SessionContext,
+    ) -> Result<(u32, u64), String>;
+    fn set_own_idle_advisory_preference(
+        &mut self,
+        context: Authority1SessionContext,
+        seconds: u32,
+        expected_revision: u64,
+    ) -> Result<(u32, u64), String>;
     fn own_native_sleep_gate_status(
         &mut self,
         context: Authority1SessionContext,
@@ -279,6 +293,54 @@ async fn session_context(
 
 #[zbus::interface(name = "org.linura.Authority1")]
 impl Authority1Service {
+    #[zbus(out_args("preference"))]
+    async fn get_own_idle_advisory_preference(
+        &self,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<((u32, u64),)> {
+        let context = session_context(connection, &header).await?;
+        self.with_handler(move |handler| handler.own_idle_advisory_preference(context))
+            .await
+            .map(|record| (record,))
+    }
+
+    #[zbus(out_args("preference"))]
+    async fn set_own_idle_advisory_preference(
+        &self,
+        seconds: u32,
+        expected_revision: u64,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<((u32, u64),)> {
+        let context = session_context(connection, &header).await?;
+        self.with_handler(move |handler| {
+            handler.set_own_idle_advisory_preference(context, seconds, expected_revision)
+        })
+        .await
+        .map(|record| (record,))
+    }
+
+    #[zbus(out_args("status"))]
+    async fn get_own_native_idle_status(
+        &self,
+        #[zbus(connection)] connection: &zbus::Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<((String, String, bool, u64),)> {
+        let context = session_context(connection, &header).await?;
+        let handler = self.handler.clone();
+        blocking::unblock(move || {
+            let mut handler = handler
+                .try_lock()
+                .map_err(|_| fdo_failed("native idle observation busy or unavailable"))?;
+            let status = handler
+                .own_native_idle_status(context)
+                .map_err(fdo_failed)?;
+            Ok((status,))
+        })
+        .await
+    }
+
     #[zbus(out_args("status"))]
     async fn get_own_native_sleep_gate_status(
         &self,
@@ -907,6 +969,26 @@ mod tests {
     struct NeverCalled;
 
     impl Authority1Handler for NeverCalled {
+        fn own_native_idle_status(
+            &mut self,
+            _: Authority1SessionContext,
+        ) -> Result<(String, String, bool, u64), String> {
+            Err("introspection must not query native idle".into())
+        }
+        fn own_idle_advisory_preference(
+            &mut self,
+            _: Authority1SessionContext,
+        ) -> Result<(u32, u64), String> {
+            Err("introspection must not query idle preferences".into())
+        }
+        fn set_own_idle_advisory_preference(
+            &mut self,
+            _: Authority1SessionContext,
+            _: u32,
+            _: u64,
+        ) -> Result<(u32, u64), String> {
+            Err("introspection must not change idle preferences".into())
+        }
         fn own_native_sleep_gate_status(
             &mut self,
             _: Authority1SessionContext,
@@ -1099,6 +1181,9 @@ mod tests {
         assert_eq!(canonical.matches(receipt).count(), 5, "canonical receipts");
         assert_eq!(live.matches(receipt).count(), 5, "live receipts");
         for method in [
+            "GetOwnIdleAdvisoryPreference",
+            "SetOwnIdleAdvisoryPreference",
+            "GetOwnNativeIdleStatus",
             "GetOwnNativeSleepGateStatus",
             "ConfigureProtectiveLock",
             "GetProtectiveLockSetting",
@@ -1117,6 +1202,9 @@ mod tests {
             assert!(live.contains(&marker), "live {method}");
         }
         for (method, shape) in [
+            ("GetOwnIdleAdvisoryPreference", "(ut)"),
+            ("SetOwnIdleAdvisoryPreference", "(ut)"),
+            ("GetOwnNativeIdleStatus", "(ssbt)"),
             ("GetOwnNativeSleepGateStatus", "(ss)"),
             ("ConfigureProtectiveLock", "(ssbsstb)"),
             ("GetProtectiveLockSetting", "a(ssbsstb)"),
