@@ -64,6 +64,12 @@ target_compile_options(linura-hyprland-display-owner PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    add_test(NAME hyprland-display-integration-identity
+        COMMAND "${CMAKE_COMMAND}"
+            "-DNATIVE_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DTEST_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration_identity.cmake")
+    set_tests_properties(hyprland-display-integration-identity PROPERTIES TIMEOUT 10)
     add_executable(linura-hyprland-display-inhibitor-tests tests/native_inhibitor_fd.cpp)
     target_include_directories(linura-hyprland-display-inhibitor-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_options(linura-hyprland-display-inhibitor-tests PRIVATE

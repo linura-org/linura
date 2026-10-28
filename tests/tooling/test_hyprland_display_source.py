@@ -28,6 +28,31 @@ def archive_bytes(entries: list[tuple[str, bytes | str, bytes]]) -> bytes:
 
 
 class HyprlandDisplaySourceTests(unittest.TestCase):
+    def test_recipe_drift_and_symlink_are_refused_before_source_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            recipe = root / "source_integration.py"
+            recipe.write_bytes(
+                source.RECIPE.read_bytes() + b"\n# changed native hook\n"
+            )
+            with (
+                patch.object(source, "RECIPE", recipe),
+                patch.object(source, "extract_verified_archive") as extract,
+            ):
+                with self.assertRaisesRegex(source.SourceError, "recipe changed"):
+                    source.stage(root / "archive", root / "staged")
+                extract.assert_not_called()
+            recipe.write_bytes(source.RECIPE.read_bytes())
+            linked = root / "linked.py"
+            linked.symlink_to(recipe)
+            with (
+                patch.object(source, "RECIPE", linked),
+                patch.object(source, "extract_verified_archive") as extract,
+            ):
+                with self.assertRaisesRegex(source.SourceError, "recipe changed"):
+                    source.stage(root / "archive", root / "staged")
+                extract.assert_not_called()
+
     def extract(self, directory: Path, data: bytes, digest: str | None = None) -> Path:
         archive = directory / "source.tar.gz"
         archive.write_bytes(data)
@@ -155,9 +180,11 @@ class HyprlandDisplaySourceTests(unittest.TestCase):
     def test_integration_points_must_match_exactly_without_fuzzy_fallback(self) -> None:
         for text in ["other", "point\npoint"]:
             with self.subTest(text=text), self.assertRaises(source.SourceError):
-                source.replace_exact(text, "point", "replacement")
+                source.integration.replace_exact(text, "point", "replacement")
         self.assertEqual(
-            source.replace_exact("before\npoint\nafter", "point", "replacement"),
+            source.integration.replace_exact(
+                "before\npoint\nafter", "point", "replacement"
+            ),
             "before\nreplacement\nafter",
         )
 
@@ -166,7 +193,7 @@ class HyprlandDisplaySourceTests(unittest.TestCase):
     ) -> None:
         commit = "a" * 40
         template = f'#define GIT_COMMIT_HASH    "{commit}"\n#define GIT_DIRTY          "clean"\n#define GIT_TAG            "v0.56.2"\n'
-        stamped = source.stamp_version_template(template, commit)
+        stamped = source.integration.stamp_version_template(template, commit)
         self.assertIn(commit, stamped)
         self.assertIn('"linura-display-integration"', stamped)
         self.assertIn('"v0.56.2+linura-display-v1"', stamped)
@@ -180,7 +207,7 @@ class HyprlandDisplaySourceTests(unittest.TestCase):
                 self.subTest(candidate=candidate, pin=pin),
                 self.assertRaises(source.SourceError),
             ):
-                source.stamp_version_template(candidate, pin)
+                source.integration.stamp_version_template(candidate, pin)
 
 
 if __name__ == "__main__":

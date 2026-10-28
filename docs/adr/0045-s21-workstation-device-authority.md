@@ -160,6 +160,16 @@ not qualify the integration. Actual private-header compilation, whole-compositor
 linking, live build/protocol identity, native mutation/restoration and S17 coverage
 must pass before activation or merge.
 
+The exact upstream hook transformations live in the native integration source
+tree as `source_integration.py`. The shared owner/compositor CMake identity hashes
+that recipe alongside the native implementation and protocol. Changing only a
+hook therefore changes the live identity; matching the upstream commit alone is
+insufficient. The stager executes this one repository-owned recipe, checks that
+its bytes remain unchanged and retains its digest with the exact patched-file
+manifest. Archive admission and build orchestration remain tooling. This source
+binding is not a substitute for qualifying the actual immutable compositor
+binary and its pinned SDK in the runtime guest.
+
 The private native endpoint admits effects only from the kernel PID/UID of the
 exact root-supervised protected owner launch. One 250 ms fixed system-bus probe
 requires a root unique systemd owner, the immutable packaged service/image, no

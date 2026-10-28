@@ -13,6 +13,8 @@ import hashlib
 import io
 import json
 import os
+import runpy
+from types import SimpleNamespace
 from pathlib import Path, PurePosixPath
 import shutil
 import stat
@@ -26,8 +28,28 @@ MAX_UNPACKED = 512 * 1024 * 1024
 MAX_MEMBERS = 100_000
 
 
-class SourceError(ValueError):
-    pass
+RECIPE = ROOT / "apps/linura-hyprland-display/source_integration.py"
+if (
+    RECIPE.is_symlink()
+    or not RECIPE.is_file()
+    or RECIPE.stat().st_size > 2 * 1024 * 1024
+):
+    raise ValueError("native integration recipe is absent, substituted or oversized")
+RECIPE_SHA256 = hashlib.sha256(RECIPE.read_bytes()).hexdigest()
+integration = SimpleNamespace(**runpy.run_path(str(RECIPE)))
+if hashlib.sha256(RECIPE.read_bytes()).hexdigest() != RECIPE_SHA256:
+    raise ValueError("native integration recipe changed while loading")
+SourceError = integration.SourceError
+
+
+def require_loaded_recipe() -> None:
+    if (
+        RECIPE.is_symlink()
+        or not RECIPE.is_file()
+        or RECIPE.stat().st_size > 2 * 1024 * 1024
+        or hashlib.sha256(RECIPE.read_bytes()).hexdigest() != RECIPE_SHA256
+    ):
+        raise SourceError("native integration recipe changed after loading")
 
 
 def extract_verified_archive(
@@ -104,151 +126,8 @@ def extract_verified_archive(
     return destination / top
 
 
-def replace_exact(text: str, old: str, new: str, count: int = 1) -> str:
-    if text.count(old) != count:
-        raise SourceError("reviewed native integration point no longer matches")
-    return text.replace(old, new)
-
-
-def stamp_version_template(text: str, upstream_commit: str) -> str:
-    # The release archive contains literal Git metadata in this template;
-    # assigning CMake variables does not change those literals. Keep the actual
-    # upstream revision and identify our modified compositor honestly.
-    if text.count(f'#define GIT_COMMIT_HASH    "{upstream_commit}"') != 1:
-        raise SourceError("pinned version template has another upstream identity")
-    text = replace_exact(
-        text,
-        '#define GIT_DIRTY          "clean"',
-        '#define GIT_DIRTY          "linura-display-integration"',
-    )
-    return replace_exact(
-        text,
-        '#define GIT_TAG            "v0.56.2"',
-        '#define GIT_TAG            "v0.56.2+linura-display-v1"',
-    )
-
-
-def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str]:
-    """Construct all outputs before any write. No fuzzy patches or symbol hooks."""
-    outputs = dict(inputs)
-    outputs["src/version.h.in"] = stamp_version_template(
-        outputs["src/version.h.in"], upstream_commit
-    )
-    include = '#include "pinned_integration.h"\n'
-    manager = "src/config/shared/monitor/MonitorRuleManager.cpp"
-    text = outputs[manager]
-    start = text.index("CMonitorRule CMonitorRuleManager::get(")
-    end = text.index("const std::vector<CMonitorRule>&", start)
-    getter = replace_exact(
-        text[start:end],
-        "return rule;",
-        "return Linura::HyprlandDisplay::overlayRule(PMONITOR.get(), std::move(rule));",
-        2,
-    )
-    outputs[manager] = include + text[:start] + getter + text[end:]
-
-    compositor = "src/Compositor.cpp"
-    text = replace_exact(
-        outputs[compositor],
-        "    m_wlEventLoop = wl_display_get_event_loop(m_wlDisplay);",
-        "    m_wlEventLoop = wl_display_get_event_loop(m_wlDisplay);\n"
-        "    Linura::HyprlandDisplay::initialize(*m_wlDisplay, *m_wlEventLoop);",
-    )
-    text = replace_exact(
-        text,
-        "void CCompositor::cleanup() {\n    if (!m_wlDisplay)\n        return;",
-        "void CCompositor::cleanup() {\n    if (!m_wlDisplay)\n        return;\n"
-        "    Linura::HyprlandDisplay::shutdown();",
-    )
-    outputs[compositor] = include + text
-
-    lock = "src/protocols/SessionLock.cpp"
-    text = replace_exact(
-        outputs[lock],
-        "        PROTO::sessionLock->m_locked = false;",
-        "        Linura::HyprlandDisplay::lockReleased();\n"
-        "        PROTO::sessionLock->m_locked = false;",
-    )
-    text = replace_exact(
-        text,
-        "    m_locked = false;",
-        "    Linura::HyprlandDisplay::lockReleased();\n    m_locked = false;",
-    )
-    outputs[lock] = include + text
-
-    monitor = "src/output/Monitor.cpp"
-    text = replace_exact(
-        outputs[monitor],
-        "bool CMonitorState::commit() {\n    if (!updateSwapchain())\n        return false;",
-        "bool CMonitorState::commit() {\n    if (!updateSwapchain()) {\n"
-        "        Linura::HyprlandDisplay::commitObserved(m_owner, false);\n"
-        "        return false;\n    }",
-    )
-    text = replace_exact(
-        text,
-        "    bool ret = m_owner->m_output->commit();\n    return ret;",
-        "    if (!Linura::HyprlandDisplay::ownedCommitAllowed()) {\n"
-        "        Linura::HyprlandDisplay::commitObserved(m_owner, false);\n"
-        "        return false;\n    }\n"
-        "    bool ret = m_owner->m_output->commit();\n"
-        "    Linura::HyprlandDisplay::commitObserved(m_owner, ret);\n    return ret;",
-    )
-    text = replace_exact(
-        text,
-        "void CMonitor::scheduleModeRetry() {",
-        "void CMonitor::scheduleModeRetry() {\n"
-        "    if (Linura::HyprlandDisplay::ownsMonitor(this)) {\n"
-        "        clearModeRetry();\n        return;\n    }",
-    )
-    outputs[monitor] = include + text
-
-    # Direct scanout bypasses CMonitorState::commit and can consume pending
-    # output state after an earlier refused modeset. Fence both paths too.
-    text = replace_exact(
-        outputs[monitor],
-        "            if (!m_output->commit()) {",
-        "            if (!Linura::HyprlandDisplay::ownedCommitAllowed()) {\n"
-        "                Linura::HyprlandDisplay::commitObserved(this, false);\n"
-        "                return false;\n            }\n"
-        "            if (!m_output->commit()) {",
-    )
-    outputs[monitor] = replace_exact(
-        text,
-        "    bool ok = m_output->commit();",
-        "    if (!Linura::HyprlandDisplay::ownedCommitAllowed()) {\n"
-        "        Linura::HyprlandDisplay::commitObserved(this, false);\n"
-        "        return false;\n    }\n"
-        "    bool ok = m_output->commit();",
-    )
-
-    cmake = "CMakeLists.txt"
-    text = outputs[cmake]
-    outputs[cmake] = (
-        text
-        + "\n"
-        + """# Exact-source Linura integration; no unqualified fallback build.
-if(NOT IS_DIRECTORY "${LINURA_DISPLAY_INTEGRATION_DIR}")
-  message(FATAL_ERROR "LINURA_DISPLAY_INTEGRATION_DIR must name the reviewed Linura native source")
-endif()
-add_subdirectory("${LINURA_DISPLAY_INTEGRATION_DIR}" "${CMAKE_BINARY_DIR}/linura-display")
-pkg_check_modules(LINURA_DISPLAY_SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
-target_sources(hyprland_lib PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}/pinned_backend.cpp"
-  "${LINURA_DISPLAY_INTEGRATION_DIR}/native_power_inhibitor.cpp"
-  "${LINURA_DISPLAY_INTEGRATION_DIR}/native_owner_admission.cpp")
-target_include_directories(hyprland_lib PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}" "${CMAKE_SOURCE_DIR}")
-target_link_libraries(hyprland_lib PUBLIC linura-hyprland-display-owner PkgConfig::LINURA_DISPLAY_SYSTEMD)
-if(TARGET hyprland_gtests)
-  target_sources(hyprland_gtests PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_rule_overlay.cpp"
-    "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_owner_admission.cpp"
-    "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_output_identity.cpp")
-  target_include_directories(hyprland_gtests PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}")
-endif()
-"""
-    )
-    return outputs
-
-
 def stage(archive: Path, destination: Path, root: Path = ROOT) -> dict[str, object]:
+    require_loaded_recipe()
     pin = tomllib.loads((root / PIN).read_text(encoding="utf-8"))
     if (
         pin.get("schema_version") != 1
@@ -267,7 +146,8 @@ def stage(archive: Path, destination: Path, root: Path = ROOT) -> dict[str, obje
         if hashlib.sha256(data).hexdigest() != item["sha256"]:
             raise SourceError("reviewed upstream source checksum mismatch")
         inputs[path.as_posix()] = data.decode("utf-8")
-    outputs = patch_sources(inputs, pin["upstream_commit"])
+    outputs = integration.patch_sources(inputs, pin["upstream_commit"])
+    require_loaded_recipe()
     digests = {}
     for name, text in outputs.items():
         (source / name).write_text(text, encoding="utf-8")
@@ -278,6 +158,7 @@ def stage(archive: Path, destination: Path, root: Path = ROOT) -> dict[str, obje
         "upstream_commit": pin["upstream_commit"],
         "source_sha256": pin["source_sha256"],
         "patched_files": digests,
+        "integration_recipe_sha256": RECIPE_SHA256,
         "qualification_evidence": False,
     }
     (destination / "linura-display-source.json").write_text(

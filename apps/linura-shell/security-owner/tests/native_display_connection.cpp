@@ -78,7 +78,8 @@ class Harness final
     std::vector<int> descriptors;
     std::atomic<bool> stopped{false};
     std::thread worker;
-    explicit Harness(bool validIdentity = true)
+    enum class BuildMismatch { None, Upstream, SourceRecipe };
+    explicit Harness(BuildMismatch mismatch = BuildMismatch::None)
     {
         assert(display);
         auto *loop = wl_display_get_event_loop(display);
@@ -86,9 +87,11 @@ class Harness final
         endpoint = std::make_unique<WireEndpoint>(
             *display, backend, *service,
             NativeBuildIdentity{Instance,
-                                validIdentity ? "efb50993780079460b0cbed1363e2166a2de1d9f"
-                                              : std::string(40, 'a'),
-                                IntegrationSourceDigest},
+                                mismatch == BuildMismatch::Upstream
+                                    ? std::string(40, 'a')
+                                    : "efb50993780079460b0cbed1363e2166a2de1d9f",
+                                mismatch == BuildMismatch::SourceRecipe ? std::string(64, 'a')
+                                                                        : IntegrationSourceDigest},
             [](OutputKey key) -> std::optional<std::string> {
                 if (key == OutputKey{1, 1})
                     return "DP-1";
@@ -225,8 +228,8 @@ void clientLossDoesNotDisarmNativeRecovery()
 }
 void unsupportedBuildAndSubstitutedSnapshotCannotWrite()
 {
-    {
-        Harness harness(false);
+    for (auto mismatch : {Harness::BuildMismatch::Upstream, Harness::BuildMismatch::SourceRecipe}) {
+        Harness harness(mismatch);
         Client owner(harness.descriptors[0]);
         assert(!owner.connection->sample());
         assert(!owner.connection->sample());
