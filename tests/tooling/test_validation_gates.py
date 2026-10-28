@@ -5625,6 +5625,46 @@ class ValidationGateTests(unittest.TestCase):
                 )
         path.write_text(original)
 
+    def test_native_compositor_handoff_cannot_use_another_attempt_or_skip_verification(
+        self,
+    ):
+        path = self.root / ".github/workflows/v010-shell-runtime-qualification.yml"
+        original = path.read_text()
+        for before, after in (
+            ("needs: [substrate, display-build]", "needs: substrate"),
+            (
+                "-attempt-${{ github.run_attempt }}-unqualified-candidate",
+                "-unqualified-candidate",
+            ),
+            ("          if-no-files-found: error", "          if-no-files-found: warn"),
+            (
+                "python3 tools/hyprland_display_candidate.py",
+                "true # candidate unchecked",
+            ),
+            ('--source-sha "$SOURCE_SHA"', "--source-sha stale"),
+            (
+                "      - name: Verify exact-source compositor candidate before runtime",
+                "      - name: Verify exact-source compositor candidate before runtime\n        if: false",
+            ),
+            (
+                "      - name: Download this workflow attempt's compositor candidate",
+                "      - name: Download this workflow attempt's compositor candidate\n        continue-on-error: true",
+            ),
+        ):
+            with self.subTest(after=after):
+                self.assertIn(before, original)
+                path.write_text(original.replace(before, after, 1))
+                errors = gates.check(self.root)
+                self.assertTrue(
+                    any(
+                        "native runtime:" in error
+                        or "required qualification step guard" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+        path.write_text(original)
+
     def test_reusable_shell_runtime_jobs_require_exact_source(self):
         workflow = ".github/workflows/v010-shell-runtime-qualification.yml"
         target = self.root / workflow

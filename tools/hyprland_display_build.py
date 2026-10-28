@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tools import development_storage as storage  # noqa: E402
 from tools import hyprland_display_source as source  # noqa: E402
+from tools import hyprland_display_candidate as candidate  # noqa: E402
 from tools.hyprland_display_environment import CONTRACT, load_contract  # noqa: E402
 
 ENVIRONMENT = "arch-hyprland-runtime"
@@ -219,6 +220,7 @@ version_runtime="$(mktemp -d "$PWD/hyprland-version-runtime.XXXXXX")"
 XDG_RUNTIME_DIR="$version_runtime" ./compositor-build/Hyprland --version
 ldd ./compositor-build/Hyprland
 sha256sum ./compositor-build/Hyprland
+cmp mechanism-build/linura-display-integration-build.h compositor-build/linura-display/linura-display-integration-build.h
 """
 
 
@@ -249,6 +251,40 @@ def package_inputs(archive: Path, temporary: Path) -> Path:
                 recursive=False,
             )
     return packed
+
+
+def export_candidate(
+    ssh: list[str], temporary: Path, prepared: Path, record: dict, log
+) -> None:
+    """Export only fixed public build outputs before the disposable guest exits."""
+    incoming = temporary / "candidate-inputs"
+    incoming.mkdir(mode=0o700)
+    inputs = {
+        "prepared-substrate.json": prepared,
+        "staged-source.json": temporary / "upstream/linura-display-source.json",
+    }
+    for name, guest_path in (
+        ("Hyprland", "/home/linura/s21/compositor-build/Hyprland"),
+        (
+            "integration-build.h",
+            "/home/linura/s21/compositor-build/linura-display/linura-display-integration-build.h",
+        ),
+    ):
+        destination = incoming / name
+        # Limit the remote stream as well as checking the retained file. No
+        # caller path, archive, guest home directory or credential is exported.
+        with destination.open("xb") as output:
+            run(
+                [*ssh, "head", "-c", str(candidate.FILES[name] + 1), "--", guest_path],
+                stdout=output,
+                stderr=log,
+                timeout=180,
+            )
+        candidate.regular(destination, candidate.FILES[name])
+        inputs[name] = destination
+    candidate.retain(
+        ROOT, temporary / "candidate", record["source_sha"], inputs, record
+    )
 
 
 def cloud_config(public_key: str, run_id: str) -> str:
@@ -575,6 +611,16 @@ def ci_build(args: argparse.Namespace) -> int:
             timeout=15000,
         )
         require_source_unchanged(sha)
+        completed = json.loads((build_temporary / "build-result.json").read_text())
+        candidate.verify(ROOT, build_temporary / "candidate", sha)
+        candidate.retain(
+            ROOT,
+            diagnostics / "s21-candidate",
+            sha,
+            {name: build_temporary / "candidate" / name for name in candidate.FILES},
+            completed,
+        )
+        require_source_unchanged(sha)
         return 0
     finally:
         for name, path in logs.items():
@@ -862,6 +908,11 @@ ethernets:
                 require_source_unchanged(sha)
             if args.command == "build":
                 record["build_passed"] = True
+                if not args.development:
+                    export_candidate(
+                        ssh, temporary, args.prepared_manifest, record, build_log
+                    )
+                    require_source_unchanged(sha)
             result.write_text(json.dumps(record, indent=2) + "\n")
             run(
                 [*ssh, "sudo", "-n", "systemctl", "poweroff"],

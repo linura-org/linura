@@ -140,12 +140,15 @@ SPECIALIZED = {
             "contracts/s21-hyprland-build-environment.toml",
             "tools/hyprland_display_environment.py",
             "tools/hyprland_display_build.py",
+            "tools/hyprland_display_candidate.py",
+            "tools/qualification_build_artifacts.py",
             "tools/codex/native-profiles.toml",
             "tools/codex/native.py",
             "tests/tooling/test_codex_readiness.py",
             "tests/tooling/test_codex_native.py",
             "tests/tooling/test_hyprland_display_environment.py",
             "tests/tooling/test_hyprland_display_build.py",
+            "tests/tooling/test_hyprland_display_candidate.py",
             "tests/tooling/test_hyprland_display_source.py",
             "contracts/v010-workstation-slices.toml",
             "qualification/v010/shell-runtime/run-shell-runtime.sh",
@@ -3622,6 +3625,58 @@ def check(root: Path = ROOT) -> list[str]:
             + ": missing exact-source executable binding",
         )
     display_build = section(reusable_jobs, "display-build", 2) or ""
+    native_runtime = section(reusable_jobs, "runtime", 2) or ""
+    require(
+        re.findall(r"(?m)^    needs: (.+)$", native_runtime)
+        == ["[substrate, display-build]"],
+        "v0.10 native runtime: exact-source compositor build must be a required dependency",
+    )
+    candidate_name = (
+        "linura-s21-compositor-${{ inputs.source_sha || github.sha }}"
+        "-attempt-${{ github.run_attempt }}-unqualified-candidate"
+    )
+    for body, name, action, extra in (
+        (
+            display_build,
+            "Retain exact-source compositor candidate for this runtime",
+            "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2",
+            "          if-no-files-found: error\n          retention-days: 7\n          compression-level: 1",
+        ),
+        (
+            native_runtime,
+            "Download this workflow attempt's compositor candidate",
+            "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2",
+            "",
+        ),
+    ):
+        step = workflow_step(body, 4, "name", name)
+        expected = (
+            "      - name: " + name + "\n"
+            "        uses: " + action + "\n"
+            "        with:\n"
+            "          name: " + candidate_name + "\n"
+            "          path: ${{ env.LINURA_WORK_DIR }}/s21-candidate/\n" + extra
+        )
+        require(
+            step_is_unconditional(step, 4) and (step or "").strip() == expected.strip(),
+            "v0.10 native runtime: candidate handoff must bind this exact workflow attempt",
+        )
+    candidate_check = workflow_step(
+        native_runtime,
+        4,
+        "name",
+        "Verify exact-source compositor candidate before runtime",
+    )
+    require(
+        step_is_unconditional(candidate_check, 4)
+        and executable_run_block(candidate_check, 4)
+        == (
+            "set -euo pipefail",
+            "python3 tools/hyprland_display_candidate.py \\",
+            '  --candidate "$LINURA_WORK_DIR/s21-candidate" --source-sha "$SOURCE_SHA"',
+        ),
+        "v0.10 native runtime: compositor candidate verification cannot be skipped or substituted",
+    )
     build_step = workflow_step(
         display_build,
         4,

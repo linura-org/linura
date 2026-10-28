@@ -348,6 +348,7 @@ def inspect() -> dict[str, object]:
         "/usr/bin/Hyprland"
     ):
         raise RuntimeError("the real compositor is not the service's executing leader")
+    native_display_candidate = provision.inspect_display_candidate(leader)
     deadline = time.monotonic() + 20
     facts: dict[str, str] | None = None
     while time.monotonic() < deadline:
@@ -445,6 +446,7 @@ def inspect() -> dict[str, object]:
         "claim": "native-session-bootstrap-only",
         "session": facts,
         "compositor_pid": leader,
+        "native_display_compositor_build": native_display_candidate,
         "native_owner_pid": owner_pid,
         "native_polkit_supervision": native_polkit,
         "lock_resource": lock.removeprefix("resource="),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import configparser
+import hashlib
 import importlib.util
 import io
 import json
@@ -14,6 +15,8 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, call, patch
+
+from tools import hyprland_display_candidate as display_build
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "qualification/v010/session-security"
@@ -36,6 +39,150 @@ same_uid_runner = load("run-same-uid-probes")
 
 
 class S17NativeSessionFixtureTests(unittest.TestCase):
+    def test_candidate_installer_refuses_host_before_loading_or_copying(self):
+        with (
+            patch.object(
+                provision, "require_disposable_guest", side_effect=RuntimeError("host")
+            ),
+            patch.object(provision, "display_candidate") as candidate,
+            patch.object(provision.os, "replace") as replace,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "host"):
+                provision.install_display_candidate(Path("/unread/header"))
+            candidate.assert_not_called()
+            replace.assert_not_called()
+
+    def test_candidate_installation_copies_verified_bytes_and_keeps_actual_owner_header(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            built = root / "candidate"
+            built.mkdir()
+            binary, header = built / "Hyprland", root / "configured-owner.h"
+            binary.write_bytes(b"component fixture compositor output")
+            header.write_bytes(b"component fixture configured owner identity")
+            installed, owner_header = root / "Hyprland", root / "owner-build.h"
+            installed.write_bytes(b"old reference compositor")
+            old_inode = installed.stat().st_ino
+            metadata = {
+                "files": {
+                    "Hyprland": {
+                        "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+                        "size": binary.stat().st_size,
+                    }
+                }
+            }
+            with (
+                patch.object(provision, "require_disposable_guest"),
+                patch.object(provision, "require_root_file"),
+                patch.object(
+                    provision,
+                    "display_candidate",
+                    return_value=(display_build, metadata),
+                ) as verify,
+                patch.object(provision, "COMPOSITOR", installed),
+                patch.object(provision, "CANDIDATE_ROOT", built),
+                patch.object(provision, "OWNER_BUILD_HEADER", owner_header),
+                patch.object(provision.Path, "glob", return_value=[]),
+            ):
+                provision.install_display_candidate(header)
+            verify.assert_called_once_with(header)
+            self.assertEqual(installed.read_bytes(), binary.read_bytes())
+            self.assertNotEqual(installed.stat().st_ino, old_inode)
+            self.assertEqual(stat.S_IMODE(installed.stat().st_mode), 0o755)
+            self.assertEqual(owner_header.read_bytes(), header.read_bytes())
+            self.assertEqual(stat.S_IMODE(owner_header.stat().st_mode), 0o644)
+
+    def test_running_or_deleted_reference_compositor_blocks_candidate_copy(self):
+        for suffix in ("", " (deleted)"):
+            with (
+                self.subTest(suffix=suffix),
+                patch.object(provision, "require_disposable_guest"),
+                patch.object(provision, "require_root_file"),
+                patch.object(
+                    provision, "display_candidate", return_value=(display_build, {})
+                ),
+                patch.object(
+                    provision.Path,
+                    "glob",
+                    return_value=[
+                        SimpleNamespace(
+                            readlink=lambda: Path("/usr/bin/Hyprland" + suffix)
+                        )
+                    ],
+                ),
+                patch.object(display_build.artifacts, "_bind_file") as copy,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "reference compositor must exit"
+                ):
+                    provision.install_display_candidate(Path("/configured/header"))
+                copy.assert_not_called()
+
+    def test_native_probe_rejects_different_running_compositor_inode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            installed = Path(directory) / "Hyprland"
+            installed.write_bytes(b"installed candidate")
+            other = SimpleNamespace(
+                st_dev=installed.stat().st_dev, st_ino=installed.stat().st_ino + 1
+            )
+            with (
+                patch.object(provision, "require_disposable_guest"),
+                patch.object(provision, "require_root_file"),
+                patch.object(
+                    provision, "display_candidate", return_value=(display_build, {})
+                ),
+                patch.object(provision, "COMPOSITOR", installed),
+                patch.object(
+                    provision, "Path", return_value=SimpleNamespace(stat=lambda: other)
+                ),
+                patch.object(display_build.artifacts, "_bind_file") as bind,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "not executing the installed"
+                ):
+                    provision.inspect_display_candidate(123)
+                bind.assert_not_called()
+
+    def test_native_probe_hashes_executing_candidate_and_rejects_changed_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            installed = Path(directory) / "Hyprland"
+            installed.write_bytes(b"installed candidate")
+            metadata = {
+                "source_sha": "a" * 40,
+                "integration_source_digest": "b" * 64,
+                "files": {
+                    "Hyprland": {
+                        "sha256": hashlib.sha256(installed.read_bytes()).hexdigest(),
+                        "size": installed.stat().st_size,
+                    }
+                },
+            }
+            with (
+                patch.object(provision, "require_disposable_guest"),
+                patch.object(provision, "require_root_file"),
+                patch.object(
+                    provision,
+                    "display_candidate",
+                    return_value=(display_build, metadata),
+                ),
+                patch.object(provision, "COMPOSITOR", installed),
+                patch.object(
+                    provision, "Path", return_value=SimpleNamespace(stat=installed.stat)
+                ),
+            ):
+                report = provision.inspect_display_candidate(123)
+                self.assertEqual(
+                    report["binary_sha256"], metadata["files"]["Hyprland"]["sha256"]
+                )
+                self.assertIs(report["native_display_execution_qualified"], False)
+                installed.write_bytes(b"changed candidate")
+                with self.assertRaisesRegex(
+                    RuntimeError, "differs from the built candidate"
+                ):
+                    provision.inspect_display_candidate(123)
+
     def test_sleep_asset_reader_rejects_mutability_links_oversize_and_read_drift(self):
         path = Path("/usr/lib/linura/s17-test-asset")
         payload = b"bounded component bytes"
@@ -693,7 +840,12 @@ class S17NativeSessionFixtureTests(unittest.TestCase):
         for failure in (None, "daemon unavailable", "supervised identity changed"):
             with self.subTest(failure=failure):
                 guard = Mock()
-                guest = SimpleNamespace(require_disposable_guest=guard)
+                compositor_candidate = {"binary_sha256": "c" * 64}
+                candidate_probe = Mock(return_value=compositor_candidate)
+                guest = SimpleNamespace(
+                    require_disposable_guest=guard,
+                    inspect_display_candidate=candidate_probe,
+                )
                 spec = SimpleNamespace(loader=SimpleNamespace(exec_module=Mock()))
                 commands = []
                 polkit_identity = {"pid": 789, "invocation": "b" * 32}
@@ -753,6 +905,11 @@ class S17NativeSessionFixtureTests(unittest.TestCase):
                         self.assertEqual(
                             report["native_polkit_supervision"], polkit_identity
                         )
+                        self.assertEqual(
+                            report["native_display_compositor_build"],
+                            compositor_candidate,
+                        )
+                    candidate_probe.assert_called_once_with(123)
                     watcher.assert_called_once_with(1000)
                     polkit.assert_called_once()
                 self.assertFalse(

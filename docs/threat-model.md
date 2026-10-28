@@ -822,6 +822,15 @@ for the current implementation status.
   restoration and S17 lock coverage required in S21-2 and physical Q11 separately
   maintained. No build profile, self-reported phase or old-head result promotes
   readiness to runtime acceptance or release support.
+- The native runtime consumes a compositor build candidate only from the same
+  exact-source workflow attempt. Its closed file inventory, streamed size/hash
+  checks and source/recipe/contract/SDK bindings are checked again inside the
+  root-immutable disposable Arch guest. Its freshly configured protected owner
+  must have the same integration identity. The stopped reference executable is
+  replaced atomically only inside that guest, and bootstrap checks the running
+  inode against the retained binary digest. This fixture cannot install on a
+  host, supply a public updater, cache Linura outputs as a substrate, grant
+  execution authority or promote the candidate to display/recovery/S17 support.
 - The native owner binds the private output protocol on its existing attested
   Wayland connection and requires the live pinned upstream/source identities.
   Stable compositor/output lifetimes survive owner reconnection for observation;

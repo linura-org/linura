@@ -155,6 +155,7 @@ def classify(path: Path, content: bytes) -> str:
         "apps/linura-shell/security-owner/CMakeLists.txt",
         "apps/linura-hyprland-display/CMakeLists.txt",
         "apps/linura-hyprland-display/integration_identity.cmake",
+        "apps/linura-hyprland-display/tests/integration_identity.cmake",
         "qualification/v010/session-security/CMakeLists.txt",
         "tools/codex/container/Dockerfile",
     }:

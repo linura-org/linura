@@ -40,12 +40,15 @@ on:
       - "contracts/s21-hyprland-build-environment.toml"
       - "tools/hyprland_display_environment.py"
       - "tools/hyprland_display_build.py"
+      - "tools/hyprland_display_candidate.py"
+      - "tools/qualification_build_artifacts.py"
       - "tools/codex/native-profiles.toml"
       - "tools/codex/native.py"
       - "tests/tooling/test_codex_readiness.py"
       - "tests/tooling/test_codex_native.py"
       - "tests/tooling/test_hyprland_display_environment.py"
       - "tests/tooling/test_hyprland_display_build.py"
+      - "tests/tooling/test_hyprland_display_candidate.py"
       - "tests/tooling/test_hyprland_display_source.py"
       # Presentation-only contributor guidance is not shell implementation.
       # GitHub evaluates exclusions in order; later functional paths still match.

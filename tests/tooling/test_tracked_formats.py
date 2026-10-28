@@ -47,6 +47,16 @@ class TrackedFormatsTests(unittest.TestCase):
             "unclassified",
         )
 
+    def test_native_identity_test_is_classified_without_allowing_unknown_cmake(self):
+        path = Path("apps/linura-hyprland-display/tests/integration_identity.cmake")
+        self.assertEqual(formats.classify(path, (ROOT / path).read_bytes()), "build")
+        self.assertEqual(
+            formats.classify(
+                Path("unreviewed/test.cmake"), b"message(FATAL_ERROR x)\n"
+            ),
+            "unclassified",
+        )
+
     def test_reviewed_development_container_inputs_are_explicit_not_globally_allowed(
         self,
     ) -> None:

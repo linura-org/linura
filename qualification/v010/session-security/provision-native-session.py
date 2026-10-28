@@ -22,6 +22,10 @@ from pathlib import Path
 
 SOURCE_ROOT = Path("/opt/linura-source")
 BINARY_ROOT = Path("/tmp/linura-s17-binaries")
+CANDIDATE_ROOT = Path("/opt/linura-s21-candidate")
+SOURCE_SHA_FILE = Path("/etc/linura-qualification/s21-source-sha")
+OWNER_BUILD_HEADER = Path("/etc/linura-qualification/s21-owner-build.h")
+COMPOSITOR = Path("/usr/bin/Hyprland")
 
 
 def command(*args: str) -> str:
@@ -108,8 +112,118 @@ def load_image_module():
     return image
 
 
+def require_root_file(path: Path) -> None:
+    for parent in path.parents:
+        metadata = parent.lstat()
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != 0
+            or metadata.st_mode & 0o022
+        ):
+            raise RuntimeError("candidate installation parent is not root immutable")
+    metadata = path.lstat()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != 0
+        or metadata.st_nlink != 1
+        or metadata.st_mode & 0o022
+    ):
+        raise RuntimeError("candidate installation asset is not root immutable")
+
+
+def display_candidate(owner_header: Path | None = None):
+    # Called only after the disposable-guest/root-immutable-source guard. Import
+    # the checked repository helper; no caller-selected module or installer.
+    sys.path.insert(0, str(SOURCE_ROOT))
+    from tools import hyprland_display_candidate as candidate
+
+    for name in (*candidate.FILES, candidate.MANIFEST):
+        require_root_file(CANDIDATE_ROOT / name)
+    require_root_file(SOURCE_SHA_FILE)
+    sha = candidate.read_bounded(SOURCE_SHA_FILE, 41).decode("ascii").removesuffix("\n")
+    metadata = candidate.verify(SOURCE_ROOT, CANDIDATE_ROOT, sha, owner_header)
+    candidate.verify_runtime_packages(
+        SOURCE_ROOT, CANDIDATE_ROOT, command("/usr/bin/pacman", "-Q")
+    )
+    return candidate, metadata
+
+
+def install_display_candidate(owner_header: Path) -> None:
+    require_disposable_guest()
+    candidate, metadata = display_candidate(owner_header)
+    require_root_file(COMPOSITOR)
+    processes = list(Path("/proc").glob("[0-9]*/exe"))
+    if len(processes) > 4096:
+        raise RuntimeError("cannot bound compositor process enumeration")
+    for process in processes:
+        try:
+            executable = process.readlink()
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        if str(executable).removesuffix(" (deleted)") == str(COMPOSITOR):
+            raise RuntimeError(
+                "reference compositor must exit before candidate installation"
+            )
+    staged = COMPOSITOR.with_name(".linura-s21-Hyprland")
+    copied = candidate.artifacts._bind_file(
+        CANDIDATE_ROOT / "Hyprland", staged, max_size=candidate.FILES["Hyprland"]
+    )
+    expected = metadata["files"]["Hyprland"]
+    if copied != (expected["sha256"], expected["size"]):
+        staged.unlink()
+        raise RuntimeError("compositor candidate changed during installation")
+    # Retain the actual freshly configured owner identity across guest reboots.
+    candidate.artifacts._bind_file(
+        owner_header,
+        OWNER_BUILD_HEADER,
+        max_size=candidate.FILES["integration-build.h"],
+    )
+    OWNER_BUILD_HEADER.chmod(0o644)
+    staged.chmod(0o755)
+    os.replace(staged, COMPOSITOR)
+    descriptor = os.open(COMPOSITOR.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def inspect_display_candidate(compositor_pid: int) -> dict:
+    require_disposable_guest()
+    require_root_file(OWNER_BUILD_HEADER)
+    require_root_file(COMPOSITOR)
+    candidate, metadata = display_candidate(OWNER_BUILD_HEADER)
+    process_image = Path(f"/proc/{compositor_pid}/exe")
+    before = COMPOSITOR.stat()
+    running = process_image.stat()
+    if (running.st_dev, running.st_ino) != (before.st_dev, before.st_ino):
+        raise RuntimeError(
+            "native session is not executing the installed compositor candidate"
+        )
+    observed = candidate.artifacts._bind_file(
+        COMPOSITOR, max_size=candidate.FILES["Hyprland"]
+    )
+    expected = metadata["files"]["Hyprland"]
+    after = process_image.stat()
+    if observed != (expected["sha256"], expected["size"]) or (
+        after.st_dev,
+        after.st_ino,
+    ) != (before.st_dev, before.st_ino):
+        raise RuntimeError(
+            "executing native compositor differs from the built candidate"
+        )
+    return {
+        "claim": "executing-exact-source-compositor-candidate",
+        "source_sha": metadata["source_sha"],
+        "binary_sha256": observed[0],
+        "integration_source_digest": metadata["integration_source_digest"],
+        "native_display_execution_qualified": False,
+    }
+
+
 def provision() -> None:
     require_disposable_guest()
+    display_candidate()
     # Reuse the actual image asset graph instead of a looser qualification-only
     # runtime. Build outputs are installed afresh; never cached as substrate.
     image = load_image_module()
@@ -155,6 +269,7 @@ def provision() -> None:
             native_owner_build_command(build_root),
             timeout=900,
         )
+        install_display_candidate(build_root / "linura-display-integration-build.h")
         subprocess.run(
             ["cmake", "--install", str(build_root), "--prefix", "/usr"],
             check=True,

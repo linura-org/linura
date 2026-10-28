@@ -222,6 +222,48 @@ class HyprlandDisplayBuildTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "source changed"):
                         build.require_source_unchanged(sha)
 
+    def test_candidate_export_reads_only_fixed_bounded_public_build_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            commands = []
+
+            def exported(command, **kwargs):
+                commands.append(command)
+                kwargs["stdout"].write(b"bounded build fixture")
+                return subprocess.CompletedProcess(command, 0)
+
+            record = {"source_sha": "1" * 40}
+            with (
+                patch.object(build, "run", side_effect=exported),
+                patch.object(build.candidate, "retain") as retain,
+            ):
+                build.export_candidate(
+                    ["ssh", "fixed-guest"],
+                    root,
+                    root / "prepared.json",
+                    record,
+                    io.BytesIO(),
+                )
+            self.assertEqual(len(commands), 2)
+            self.assertEqual(
+                commands[0][2:6],
+                ["head", "-c", str(build.candidate.FILES["Hyprland"] + 1), "--"],
+            )
+            self.assertEqual(
+                commands[0][-1], "/home/linura/s21/compositor-build/Hyprland"
+            )
+            self.assertEqual(
+                commands[1][-1],
+                "/home/linura/s21/compositor-build/linura-display/linura-display-integration-build.h",
+            )
+            retained = retain.call_args.args
+            self.assertEqual(retained[1], root / "candidate")
+            self.assertEqual(set(retained[3]), set(build.candidate.FILES))
+            self.assertEqual(
+                retained[3]["staged-source.json"],
+                root / "upstream/linura-display-source.json",
+            )
+
     def test_native_symlink_is_never_copied_into_guest_source(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
