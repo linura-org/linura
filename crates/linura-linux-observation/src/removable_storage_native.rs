@@ -570,6 +570,84 @@ pub fn observe_scoped_native_storage(
     })
 }
 
+/// An independently corroborated, still NON-AUTHORIZING physical drive
+/// candidate. Exact native owner, active session, physical children,
+/// kernel mount namespace and disk sequences are observed twice. This value
+/// must never be accepted by a privileged executor as an authorization token.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScopedReadOnlyKernelDrive {
+    pub session: ReadOnlySessionScope,
+    pub inventory: ReadOnlyStorageInventory,
+    pub kernel_mount: crate::removable_storage_kernel::KernelMountView,
+    pub physical: crate::removable_storage_kernel_device::KernelDriveGroupEvidence,
+}
+
+fn require_stable_scoped_kernel_drive(
+    first: &ScopedReadOnlyKernelDrive,
+    second: &ScopedReadOnlyKernelDrive,
+) -> Result<(), ProviderError> {
+    if first.session != second.session
+        || first.inventory != second.inventory
+        || first.kernel_mount != second.kernel_mount
+    {
+        return Err(ProviderError::Unavailable(
+            "storage provider, session or kernel mounts changed between native reads".into(),
+        ));
+    }
+    crate::removable_storage_kernel_device::review_stable_kernel_group(
+        &first.physical,
+        &second.physical,
+    )
+}
+
+/// Stronger read-only candidate observation for one selected removable drive.
+/// The session selector must originate in the authenticated Authority1 peer.
+/// The actual caller's mount namespace and Polkit subject remain unproven;
+/// ScopedReadOnlyKernelDrive is neither a Control plan nor a dispatch permit.
+pub fn observe_scoped_kernel_drive(
+    session_id: &str,
+    expected_uid: u32,
+    selected_drive: &str,
+) -> Result<ScopedReadOnlyKernelDrive, ProviderError> {
+    let started = Instant::now();
+    let observe_once = || -> Result<ScopedReadOnlyKernelDrive, ProviderError> {
+        let scoped = observe_scoped_native_storage(session_id, expected_uid)?;
+        let kernel_mount = crate::removable_storage_kernel::sample_kernel_mountinfo()?;
+        if crate::removable_storage_kernel::review_udisks_kernel_mount_state(
+            &scoped.inventory,
+            &kernel_mount,
+        )
+        .decision
+            != crate::removable_storage_kernel::KernelMountDecision::CandidateConsistent
+        {
+            return Err(ProviderError::InvalidState(
+                "kernel mount state contradicts the native provider".into(),
+            ));
+        }
+        let physical = crate::removable_storage_kernel_device::inspect_kernel_group(
+            &scoped.inventory,
+            &kernel_mount,
+            selected_drive,
+            &scoped.session.seat_id,
+        )?;
+        Ok(ScopedReadOnlyKernelDrive {
+            session: scoped.session,
+            inventory: scoped.inventory,
+            kernel_mount,
+            physical,
+        })
+    };
+    let first = observe_once()?;
+    let second = observe_once()?;
+    require_stable_scoped_kernel_drive(&first, &second)?;
+    if started.elapsed() >= Duration::from_secs(8) {
+        return Err(ProviderError::Unavailable(
+            "kernel-correlated storage observation exceeded its deadline".into(),
+        ));
+    }
+    Ok(second)
+}
+
 /// Repeated native observations must agree, but are not Polkit approval,
 /// an execution permit, or independent physical-device generation proof.
 fn read_snapshot(
@@ -694,6 +772,61 @@ mod tests {
         second = first.clone();
         second.uid = 1001;
         assert!(require_stable_session(&first, &second).is_err());
+    }
+
+    #[test]
+    fn scoped_kernel_drive_does_not_survive_identity_or_mount_change() {
+        use crate::removable_storage_kernel::KernelMountView;
+        use crate::removable_storage_kernel_device::{
+            KernelBlockIdentity, KernelDriveGroupEvidence,
+        };
+        let witness = ScopedReadOnlyKernelDrive {
+            session: ReadOnlySessionScope {
+                logind_unique_owner: ":1.5".into(),
+                boot_id: "d3cd25af-38f2-4829-b42d-ef2bd35af042".into(),
+                session_id: "c2".into(),
+                seat_id: "seat0".into(),
+                uid: 1000,
+            },
+            inventory: ReadOnlyStorageInventory {
+                unique_owner: ":1.42".into(),
+                drives: Vec::new(),
+                blocks: Vec::new(),
+            },
+            kernel_mount: KernelMountView {
+                mount_points_by_device: Default::default(),
+            },
+            physical: KernelDriveGroupEvidence {
+                selected_drive: "/org/freedesktop/UDisks2/drives/usb".into(),
+                sibling_id: "group".into(),
+                blocks: vec![KernelBlockIdentity {
+                    block_path: "usb".into(),
+                    device_number: 2048,
+                    disk_sequence: 42,
+                    canonical_sysfs: "/sys/devices/pci/block/sdb".into(),
+                    physical_parent: "/sys/devices/pci/block/sdb".into(),
+                    mounted_as_root: false,
+                    swap_in_use: false,
+                    has_holders: false,
+                }],
+            },
+        };
+        assert!(require_stable_scoped_kernel_drive(&witness, &witness).is_ok());
+        let mut changed = witness.clone();
+        changed.session.seat_id = "seat1".into();
+        assert!(require_stable_scoped_kernel_drive(&witness, &changed).is_err());
+        changed = witness.clone();
+        changed.inventory.unique_owner = ":1.43".into();
+        assert!(require_stable_scoped_kernel_drive(&witness, &changed).is_err());
+        changed = witness.clone();
+        changed.physical.blocks[0].disk_sequence = 43;
+        assert!(require_stable_scoped_kernel_drive(&witness, &changed).is_err());
+        changed = witness.clone();
+        changed.kernel_mount.mount_points_by_device.insert(
+            2048,
+            std::collections::BTreeSet::from(["/run/media/test".into()]),
+        );
+        assert!(require_stable_scoped_kernel_drive(&witness, &changed).is_err());
     }
 
     #[test]

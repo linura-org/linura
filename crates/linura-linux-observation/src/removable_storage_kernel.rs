@@ -126,7 +126,7 @@ pub fn parse_mountinfo(source: &str) -> Result<KernelMountView, ProviderError> {
             return Err(invalid("mountinfo entry count exceeds the bound"));
         }
         let fields: Vec<_> = line.split_ascii_whitespace().collect();
-        if fields.len() < 10 || !fields.iter().any(|field| *field == "-") {
+        if fields.len() < 10 || !fields.contains(&"-") {
             return Err(invalid("mountinfo record has invalid structure"));
         }
         let (major, minor) = fields[2]
