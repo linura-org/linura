@@ -3,6 +3,8 @@
 mod logind;
 pub mod platform_discovery;
 pub mod removable_storage;
+pub mod removable_storage_kernel;
+pub mod removable_storage_native;
 pub use logind::{
     LOGIND_POWER_CAPABILITY, LOGIND_POWER_CONDITIONS_CAPABILITY, LOGIND_SESSION_CAPABILITY,
     LOGIND_SESSION_PROVIDER, LOGIND_TRANSITION_CAPABILITY, LogindSessionObserver,
