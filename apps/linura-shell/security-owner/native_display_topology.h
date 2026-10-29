@@ -43,6 +43,8 @@ struct NativeDisplaySnapshot final
     quint64 generation = 0;
     std::vector<NativeDisplayHead> heads;
     [[nodiscard]] QString encode() const;
+    // Original canonical baseline comparison; never an execution credential.
+    [[nodiscard]] std::optional<QString> baselineGuard(const QString &baseline) const;
     bool operator==(const NativeDisplaySnapshot &) const = default;
 };
 

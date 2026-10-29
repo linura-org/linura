@@ -77,15 +77,15 @@ pub use durable_authority::{
     DurableRecoveryOutcome, FreshRecoveryApproval, PreparedDurableAuthority,
 };
 pub use managed_lifecycle::{
-    AuthorizedDisplayContinuation, AuthorizedEffect, AuthorizedEffectExecutor,
-    DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery, DisplayContinuationAction,
-    DisplayDecisionAuthorizer, DisplayDecisionChallenge, DisplayTransactionPort,
-    IndependentDisplayVerifier, IndependentManagedVerifier, MANAGED_SYSTEMD_CAPABILITY,
-    MANAGED_SYSTEMD_INTENT_ORIGIN, MANAGED_SYSTEMD_OPERATION, MANAGED_SYSTEMD_PROVIDER,
-    MANAGED_SYSTEMD_REGISTERED_OPERATION_ID, MANAGED_SYSTEMD_UNIT_PREFIX,
-    ManagedApprovalAuthorizer, ManagedApprovalChallenge, ManagedApprovalClass,
-    ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt, TrustedDisplayDecision,
-    TrustedHumanApproval, managed_request_id,
+    AuthorizedDisplayApplication, AuthorizedDisplayContinuation, AuthorizedEffect,
+    AuthorizedEffectExecutor, DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery,
+    DisplayContinuationAction, DisplayDecisionAuthorizer, DisplayDecisionChallenge,
+    DisplayTransactionPort, DisplayVerificationTarget, IndependentDisplayVerifier,
+    IndependentManagedVerifier, MANAGED_SYSTEMD_CAPABILITY, MANAGED_SYSTEMD_INTENT_ORIGIN,
+    MANAGED_SYSTEMD_OPERATION, MANAGED_SYSTEMD_PROVIDER, MANAGED_SYSTEMD_REGISTERED_OPERATION_ID,
+    MANAGED_SYSTEMD_UNIT_PREFIX, ManagedApprovalAuthorizer, ManagedApprovalChallenge,
+    ManagedApprovalClass, ManagedLifecycleControl, ManagedLifecycleError, ManagedMutationReceipt,
+    TrustedDisplayDecision, TrustedHumanApproval, managed_request_id,
 };
 pub use operation_registry::{
     MANAGED_SESSION_LOCK_CAPABILITY, MANAGED_SESSION_LOCK_OPERATION_ID,

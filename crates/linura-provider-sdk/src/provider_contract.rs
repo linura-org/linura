@@ -171,7 +171,7 @@ fn validate_component_token(
     Ok(())
 }
 
-fn hash_parts(domain: &[u8], parts: &[&[u8]]) -> ComponentDigest {
+pub(super) fn hash_parts(domain: &[u8], parts: &[&[u8]]) -> ComponentDigest {
     let mut hasher = Sha256::new();
     hasher.update((domain.len() as u64).to_be_bytes());
     hasher.update(domain);

@@ -2,10 +2,10 @@
 //! NativeApi labels are simulated here; these are not compositor qualification.
 use super::*;
 use linura_control::{
-    AuthorizedDisplayContinuation, DisplayContinuationAction, DisplayDecisionAuthorizer,
-    DisplayDecisionChallenge, DisplayLayoutPlanRequest, DisplayTransactionPort,
-    IndependentDisplayVerifier, ManagedApprovalAuthorizer, ManagedApprovalChallenge,
-    TrustedDisplayDecision,
+    AuthorizedDisplayApplication, AuthorizedDisplayContinuation, DisplayContinuationAction,
+    DisplayDecisionAuthorizer, DisplayDecisionChallenge, DisplayLayoutPlanRequest,
+    DisplayTransactionPort, DisplayVerificationTarget, IndependentDisplayVerifier,
+    ManagedApprovalAuthorizer, ManagedApprovalChallenge, TrustedDisplayDecision,
 };
 use linura_core::{
     CompositorInvocationId, DisplayLayout, DisplayMode, DisplayOutputId, DisplayOutputLayout,
@@ -31,6 +31,8 @@ struct Machine {
     journal_failures: usize,
     lose_checkpoint: bool,
     read_only_outputs: bool,
+    native_base_drift: bool,
+    original_native_guard: Option<linura_provider_sdk::ComponentDigest>,
 }
 fn layouts() -> (
     DisplayLayout,
@@ -146,9 +148,18 @@ impl Observer for LiveFixtureObserver {
             }
         }
         if machine.desired && sample.provider.as_str() == "hyprland" {
+            sample
+                .attributes
+                .insert("output.0.linura_owned".into(), ObservedValue::Bool(true));
             sample.attributes.insert(
                 "layout".into(),
                 ObservedValue::Text(value(layouts().1.canonical_text())),
+            );
+        }
+        if machine.native_base_drift && sample.provider.as_str() == "hyprland" {
+            sample.attributes.insert(
+                "output.0.base_configuration_digest".into(),
+                ObservedValue::Text("c".repeat(64)),
             );
         }
         Ok(sample)
@@ -273,10 +284,15 @@ struct Port(Arc<Mutex<Machine>>);
 impl DisplayTransactionPort for Port {
     fn dispatch_layout(
         &mut self,
-        authorization: AuthorizedEffect,
+        application: AuthorizedDisplayApplication,
         request: &PlanDesiredStateRequest,
         deadline: u64,
     ) -> Result<ExecutionOutcome, String> {
+        let (authorization, native_guard) = application.into_executor_request();
+        assert_ne!(
+            native_guard,
+            linura_provider_sdk::ComponentDigest::from_bytes([0; 32])
+        );
         let (effect, binding) = authorization.into_executor_request();
         if effect != linura_provider_sdk::display_layout_effect(&request.desired_state["layout"])? {
             return Err("fixture substituted intent".into());
@@ -287,6 +303,7 @@ impl DisplayTransactionPort for Port {
             .lock()
             .unwrap_or_else(|_| unreachable!("fixture poisoned"));
         m.applies += 1;
+        m.original_native_guard = Some(native_guard);
         m.desired = true;
         m.state = Some("pending");
         m.deadline = deadline;
@@ -406,13 +423,20 @@ impl IndependentDisplayVerifier for Verifier {
     fn verify_layout(
         &mut self,
         _: &PlanDesiredStateRequest,
-        restoration: bool,
+        target: DisplayVerificationTarget,
         _: u64,
     ) -> Result<VerificationOutcome, String> {
         let m = self
             .0
             .lock()
             .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        let restoration = matches!(target, DisplayVerificationTarget::Restored { .. });
+        if let DisplayVerificationTarget::Restored {
+            native_baseline_guard,
+        } = target
+        {
+            assert_eq!(Some(native_baseline_guard), m.original_native_guard);
+        }
         VerificationOutcome::new(
             if m.desired != restoration {
                 VerificationDisposition::Satisfied
@@ -911,7 +935,32 @@ fn autonomous_restoration_reconciles_after_restart_without_any_continuation() {
                 .unwrap_or_else(|_| unreachable!("fixture poisoned"));
             m.state = Some("restored");
             m.desired = false;
+            m.native_base_drift = true;
         }
+        // Even a verifier reporting satisfied numeric geometry cannot retire
+        // recovery after the independently observed native rule identity drifts.
+        assert!(
+            control
+                .display_layout_status(
+                    principal(),
+                    actor(true),
+                    &request.request_id,
+                    &mut port,
+                    &mut verifier
+                )
+                .is_err()
+        );
+        assert_eq!(
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .applies,
+            1
+        );
+        machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+            .native_base_drift = false;
         drop(control);
         let mut control = open(database.path(), &machine, 0);
         if reconcile_on_begin {

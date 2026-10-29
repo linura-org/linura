@@ -288,18 +288,19 @@ NativeEndpoint::ObserveDisplayAttempt(const NativeDisplayAttemptQueryWire &query
 }
 
 quint32 NativeEndpoint::DispatchPreparedDisplay(const NativeDisplayAttemptQueryWire &query,
-                                                const QString &sampleDigest, quint64 sampledBootMs)
+                                                const QString &sampleDigest, quint64 sampledBootMs,
+                                                const QString &nativeBaselineGuard)
 {
     if (calledFromDBus() && query.intent.size() <= 4096 && query.transaction.size() <= 256 &&
         query.effectDigest.size() == 64 && query.dispatchDigest.size() == 64 &&
-        sampleDigest.size() == 64) {
+        sampleDigest.size() == 64 && nativeBaselineGuard.size() == 64) {
         const auto intent = NativeDisplayIntent::parse(query.intent);
         const NativeDisplayCorrelation correlation{query.transaction, query.effectDigest,
                                                    query.dispatchDigest, query.deadlineUnixMs};
-        const auto result = intent
-                                ? runtime_.dispatchPreparedDisplay(message(), *intent, correlation,
-                                                                   sampleDigest, sampledBootMs)
-                                : std::nullopt;
+        const auto result =
+            intent ? runtime_.dispatchPreparedDisplay(message(), *intent, correlation, sampleDigest,
+                                                      sampledBootMs, nativeBaselineGuard)
+                   : std::nullopt;
         if (result)
             return *result;
     }

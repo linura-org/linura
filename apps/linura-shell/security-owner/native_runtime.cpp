@@ -824,7 +824,8 @@ std::optional<NativeDisplaySample> NativeRuntime::displaySample(const QDBusMessa
 
 std::optional<quint32> NativeRuntime::dispatchPreparedDisplay(
     const QDBusMessage &received, const NativeDisplayIntent &intent,
-    const NativeDisplayCorrelation &correlation, const QString &sampleDigest, quint64 sampledBootMs)
+    const NativeDisplayCorrelation &correlation, const QString &sampleDigest, quint64 sampledBootMs,
+    const QString &nativeBaselineGuard)
 {
     NativeDeadline deadline(std::chrono::milliseconds(2000),
                             NativeDeadline::Stage::DisplayDispatch);
@@ -850,7 +851,8 @@ std::optional<quint32> NativeRuntime::dispatchPreparedDisplay(
     // No Qt/D-Bus event processing or caller callbacks intervene. The backend
     // samples once more and reserves exactly one private native apply. A lost
     // response is ambiguity, never permission to invoke this call again.
-    return impl_->backend->dispatchPreparedDisplay(intent, correlation, sampledBootMs);
+    return impl_->backend->dispatchPreparedDisplay(intent, correlation, sampledBootMs,
+                                                   nativeBaselineGuard);
 }
 
 std::optional<NativeDisplayAttemptSample>

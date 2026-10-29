@@ -33,6 +33,7 @@ struct PreparedSample {
     started: Instant,
     digest: linura_provider_sdk::ComponentDigest,
     sampled_boot_ms: u64,
+    native_baseline_guard: Option<linura_provider_sdk::ComponentDigest>,
 }
 
 fn sample_digest(sample: &Wire) -> linura_provider_sdk::ComponentDigest {
@@ -544,6 +545,10 @@ impl NativeSessionChannel {
             started,
             digest,
             sampled_boot_ms: sample.3,
+            native_baseline_guard: facts
+                .recovery_metadata()
+                .map(|_| linura_provider_sdk::display_baseline_guard(&facts))
+                .transpose()?,
         })
     }
 

@@ -61,9 +61,9 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     [[nodiscard]] std::optional<quint32> observeDisplayAttempt(const NativeDisplayCorrelation &);
     // Private prepared runtime only. One fresh snapshot and one apply on the
     // original owned connection; no reconnection, retry or continuation.
-    [[nodiscard]] std::optional<quint32> dispatchPreparedDisplay(const NativeDisplayIntent &,
-                                                                 const NativeDisplayCorrelation &,
-                                                                 quint64 validatedSampledBootMs);
+    [[nodiscard]] std::optional<quint32>
+    dispatchPreparedDisplay(const NativeDisplayIntent &, const NativeDisplayCorrelation &,
+                            quint64 validatedSampledBootMs, const QString &nativeBaselineGuard);
     [[nodiscard]] const QString &displayInvocation() const noexcept;
     // Private native interaction, not an effect/approval credential. The runtime
     // arms the exact reviewed NativeApprovalScope first and consumes its fresh

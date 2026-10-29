@@ -37,6 +37,7 @@
       <arg name="authority_use_digest" type="s" direction="in"/>
       <arg name="effect_digest" type="s" direction="in"/>
       <arg name="dispatch_digest" type="s" direction="in"/>
+      <arg name="native_baseline_guard" type="s" direction="in"/>
       <arg name="outcome" type="(sss)" direction="out"/>
     </method>
   </interface>

@@ -6,6 +6,8 @@
 // `Result<ObservationEnvelope, ProviderError>`.
 mod provider_contract;
 pub use provider_contract::*;
+mod display_baseline;
+pub use display_baseline::display_baseline_guard;
 
 mod capabilityless_adapter;
 pub use capabilityless_adapter::CapabilitylessInterpretationAdapter;

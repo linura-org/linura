@@ -59,6 +59,7 @@ pub(crate) fn require_baseline(
 #[derive(Debug)]
 pub(crate) struct Checkpoint {
     canonical: Vec<u8>,
+    pub(crate) native_guard: linura_provider_sdk::ComponentDigest,
 }
 
 impl Checkpoint {
@@ -131,7 +132,24 @@ impl Checkpoint {
                 ObservedValue::I64(_) => return Err(invalid()),
             }
         }
-        Ok(Self { canonical })
+        let mut native = observation.clone();
+        native.attributes.remove("control.display_session_digest");
+        native.attributes.remove("control.display_coverage_digest");
+        let material =
+            DisplayLayoutMaterial::decode(request.desired_state.get("layout").ok_or_else(invalid)?)
+                .map_err(|_| invalid())?;
+        let facts = DisplayObservationFacts::from_envelope(
+            &native,
+            material.topology(),
+            native.observed_at_unix_ms,
+        )
+        .map_err(|_| invalid())?;
+        let native_guard =
+            linura_provider_sdk::display_baseline_guard(&facts).map_err(|_| invalid())?;
+        Ok(Self {
+            canonical,
+            native_guard,
+        })
     }
 
     pub(crate) fn append(

@@ -91,14 +91,14 @@ baseline="LNDL:1;$topology;1:2:enabled:1920:1080:60000:1000:0:0:0:-;"
 desired="LNDL:1;$topology;1:2:enabled:1920:1080:60000:1000:0:100:0:-;"
 material="LNDI:1;$resource;$baseline$desired"
 call_display() {
-    busctl --system call "$destination" "$path" "$interface" ApplyDisplayLayout ststtssss \
+    busctl --system call "$destination" "$path" "$interface" ApplyDisplayLayout ststtsssss \
         "$material" 15000 "transaction:v06:display-direct" 0 1 \
-        "$digest" "$digest" "$digest" "$digest"
+        "$digest" "$digest" "$digest" "$digest" "$digest"
 }
 call_display_root() {
-    sudo -n busctl --system call "$destination" "$path" "$interface" ApplyDisplayLayout ststtssss \
+    sudo -n busctl --system call "$destination" "$path" "$interface" ApplyDisplayLayout ststtsssss \
         "$material" 15000 "transaction:v06:display-root-direct" 0 1 \
-        "$digest" "$digest" "$digest" "$digest"
+        "$digest" "$digest" "$digest" "$digest" "$digest"
 }
 # These prove live bus-policy denial, before body/binding/native processing.
 # The Rust executor fixture separately supplies a valid binding to service denial.

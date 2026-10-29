@@ -3,8 +3,9 @@
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use linura_control::{
-    AuthenticatedPrincipal, AuthorizedDisplayContinuation, AuthorizedEffect, DisplayAttemptQuery,
-    DisplayLayoutSafetyReview, DisplayTransactionPort, IndependentDisplayVerifier,
+    AuthenticatedPrincipal, AuthorizedDisplayApplication, AuthorizedDisplayContinuation,
+    DisplayAttemptQuery, DisplayLayoutSafetyReview, DisplayTransactionPort,
+    DisplayVerificationTarget, IndependentDisplayVerifier,
 };
 use linura_core::{CapabilityId, DisplayLayoutMaterial};
 use linura_observation::DisplayObservationFacts;
@@ -16,11 +17,12 @@ use crate::session_adapter::{FreshSessionVerifier, SessionExecutorClient};
 impl DisplayTransactionPort for SessionExecutorClient {
     fn dispatch_layout(
         &mut self,
-        authorization: AuthorizedEffect,
+        application: AuthorizedDisplayApplication,
         request: &PlanDesiredStateRequest,
         deadline_unix_ms: u64,
     ) -> Result<linura_provider_sdk::ExecutionOutcome, String> {
         let material = display_material(request)?;
+        let (authorization, native_guard) = application.into_executor_request();
         let (effect, binding) = authorization.into_executor_request();
         if effect != linura_provider_sdk::display_layout_effect(material)? {
             return Err(
@@ -29,7 +31,7 @@ impl DisplayTransactionPort for SessionExecutorClient {
         }
         binding.validate_for(&effect).map_err(|e| e.to_string())?;
         self.channel
-            .handoff_prepared_display(material, &binding, deadline_unix_ms)
+            .handoff_prepared_display(material, &binding, deadline_unix_ms, &native_guard)
     }
 
     fn observe_attempt(
@@ -86,7 +88,7 @@ impl IndependentDisplayVerifier for FreshSessionVerifier {
     fn verify_layout(
         &mut self,
         request: &PlanDesiredStateRequest,
-        restoration: bool,
+        target: DisplayVerificationTarget,
         after_unix_ms: u64,
     ) -> Result<VerificationOutcome, String> {
         let started = Instant::now();
@@ -151,10 +153,33 @@ impl IndependentDisplayVerifier for FreshSessionVerifier {
         let intent = material
             .validate_native(facts.inventory(), facts.capabilities())
             .map_err(|e| e.to_string())?;
-        let expected = if restoration {
-            intent.baseline()
-        } else {
-            intent.desired()
+        let restoration = matches!(target, DisplayVerificationTarget::Restored { .. });
+        let expected = match target {
+            DisplayVerificationTarget::Restored {
+                native_baseline_guard,
+            } => {
+                if linura_provider_sdk::display_baseline_guard(&facts)? != native_baseline_guard {
+                    return VerificationOutcome::new(
+                        VerificationDisposition::NotSatisfied,
+                        "fresh native baseline ownership differs from the original checkpoint",
+                    )
+                    .map_err(|e| e.to_string());
+                }
+                intent.baseline()
+            }
+            DisplayVerificationTarget::Desired => {
+                if facts
+                    .recovery_metadata()
+                    .is_none_or(|metadata| metadata.values().any(|output| !output.linura_owned()))
+                {
+                    return VerificationOutcome::new(
+                        VerificationDisposition::NotSatisfied,
+                        "fresh native desired layout has no complete Linura overlay ownership",
+                    )
+                    .map_err(|e| e.to_string());
+                }
+                intent.desired()
+            }
         };
         let principal =
             AuthenticatedPrincipal::new(format!("unix:uid:{}", intent.lock().epoch().uid()))

@@ -907,6 +907,7 @@ where
         principal: AuthenticatedPrincipal,
         actor: Actor,
         request: &PlanDesiredStateRequest,
+        native_baseline_guard: &linura_provider_sdk::ComponentDigest,
     ) -> Result<TransactionSnapshot, DurableAuthorityError> {
         self.assert_request_matches(&principal, request)?;
         let principal_id = PrincipalId::new(principal.as_str())
@@ -946,6 +947,12 @@ where
             .validate_native(facts.inventory(), facts.capabilities())
             .map_err(|_| DurableAuthorityError::AuthorityChanged)?;
         if facts.layout() != intent.baseline() || facts.layout() == intent.desired() {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        if linura_provider_sdk::display_baseline_guard(&facts)
+            .map_err(|_| DurableAuthorityError::AuthorityChanged)?
+            != *native_baseline_guard
+        {
             return Err(DurableAuthorityError::AuthorityChanged);
         }
         let at = self.authority_now_unix_ms()?;

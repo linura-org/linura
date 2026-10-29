@@ -37,10 +37,16 @@ impl NativeSessionChannel {
         material: &str,
         binding: &ExecutionBinding,
         deadline_unix_ms: u64,
+        native_baseline_guard: &linura_provider_sdk::ComponentDigest,
     ) -> Result<u32, String> {
         self.require_role(NativeSessionRole::Executor)?;
         validate_handoff(material, binding, deadline_unix_ms, unix_ms()?)?;
         let sample = self.prepared_display_sample(material, 1)?;
+        if sample.native_baseline_guard.as_ref() != Some(native_baseline_guard) {
+            return Err(
+                "original canonical native baseline changed before executor dispatch".into(),
+            );
+        }
         self.revalidate_observation(&sample.owner, &sample.boot, sample.started)?;
         validate_handoff(material, binding, deadline_unix_ms, unix_ms()?)?;
         let now_boot_ms = boot_ms()?;
@@ -59,7 +65,12 @@ impl NativeSessionChannel {
             ENDPOINT,
             INTERFACE,
             "DispatchPreparedDisplay",
-            &(query, sample.digest.to_hex(), sample.sampled_boot_ms),
+            &(
+                query,
+                sample.digest.to_hex(),
+                sample.sampled_boot_ms,
+                native_baseline_guard.to_hex(),
+            ),
             owner_reply_budget(sample.started.elapsed())?,
         )?;
         if reply

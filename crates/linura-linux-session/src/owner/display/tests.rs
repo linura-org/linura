@@ -137,6 +137,97 @@ fn overlay_checkpoint_requires_exact_owned_target_without_hiding_partial_layouts
         assert!(decode(&bad, &monitors).is_err());
     }
 }
+
+#[test]
+fn original_native_baseline_guard_has_cross_language_vectors_and_rejects_drift() {
+    let (mut topology, monitors) = inputs();
+    let guard = |topology: &Value| {
+        let (display, _) = value(decode(topology, &monitors));
+        let scope = value(DisplayTopologyId::from_resource(&display.resource));
+        let facts = value(linura_observation::DisplayObservationFacts::from_envelope(
+            &display, &scope, 10000,
+        ));
+        value(linura_provider_sdk::display_baseline_guard(&facts)).to_hex()
+    };
+    assert_eq!(
+        guard(&topology),
+        "3982e30fe93e501fb6940d694fe0e19da3d66c3dee2c3f23cd7165ff3b2f6948"
+    );
+    topology["heads"][0]["linura_owned"] = json!(true);
+    topology["heads"][0]["owned_target"] = json!("LNOT:1;1;2;1;1920;1080;59940;1250;0;0;0;0;0;");
+    let original = guard(&topology);
+    assert_eq!(
+        original,
+        "706b46fd9ed14f8a56238057e390924b131c5c134935e532faff42763292b21b"
+    );
+    for key in ["base_rule_digest", "output_identity_digest"] {
+        let mut changed = topology.clone();
+        changed["heads"][0][key] = json!("c".repeat(64));
+        assert_ne!(guard(&changed), original);
+    }
+    let (mut two, mut monitors) = inputs();
+    let mut second = two["heads"][0].clone();
+    for (key, value) in [
+        ("handle", json!("2")),
+        ("generation", json!("3")),
+        ("name", json!("DP-2")),
+        ("enabled", json!(false)),
+        ("covered", json!(false)),
+        ("current_mode", json!(null)),
+        ("scale_fixed", json!(0)),
+        ("scale_milli", json!(0)),
+        ("scale_float_bits", json!(0)),
+        ("linura_owned", json!(true)),
+        ("base_rule_digest", json!("c".repeat(64))),
+        ("output_identity_digest", json!("d".repeat(64))),
+        ("owned_target", json!("LNOT:1;2;3;0;0;0;0;0;0;0;0;0;0;")),
+    ] {
+        second[key] = value;
+    }
+    two["heads"]
+        .as_array_mut()
+        .unwrap_or_else(|| unreachable!("heads"))
+        .push(second);
+    monitors
+        .as_array_mut()
+        .unwrap_or_else(|| unreachable!("monitors"))
+        .push(json!({
+        "id":1,"name":"DP-2","disabled":true,"dpmsStatus":false,"mirrorOf":"none"}));
+    let (display, _) = value(decode(&two, &monitors));
+    let scope = value(DisplayTopologyId::from_resource(&display.resource));
+    let facts = value(linura_observation::DisplayObservationFacts::from_envelope(
+        &display, &scope, 10000,
+    ));
+    assert_eq!(
+        value(linura_provider_sdk::display_baseline_guard(&facts)).to_hex(),
+        "568c84130da7712c595748f4dc80408d63ef01f64cca8486ddb5907cccaea21d"
+    );
+    for (key, value) in [
+        ("enabled", json!(true)),
+        ("covered", json!(true)),
+        ("current_mode", json!([1920, 1080, 59940])),
+        ("scale_fixed", json!(320)),
+        ("scale_milli", json!(1250)),
+        ("scale_float_bits", json!(1.25_f32.to_bits())),
+        (
+            "owned_target",
+            json!("LNOT:1;2;3;1;1920;1080;59940;1250;0;0;0;1;2;"),
+        ),
+    ] {
+        two["heads"][1][key] = value;
+    }
+    monitors[1]["disabled"] = json!(false);
+    monitors[1]["dpmsStatus"] = json!(true);
+    monitors[1]["mirrorOf"] = json!("0");
+    let (display, _) = value(decode(&two, &monitors));
+    let facts = value(linura_observation::DisplayObservationFacts::from_envelope(
+        &display, &scope, 10000,
+    ));
+    assert_eq!(
+        value(linura_provider_sdk::display_baseline_guard(&facts)).to_hex(),
+        "f5284e6c0630a02c97f4bf8c2ccadf9282e835e4285b28d2baec0e10ee691721"
+    );
+}
 #[test]
 fn closed_native_schema_rejects_missing_unknown_duplicate_and_wrong_types() {
     let (topology, monitors) = inputs();

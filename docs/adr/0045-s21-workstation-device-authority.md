@@ -167,6 +167,25 @@ oversized or inconsistent recovery data cannot reach the native effect. Its
 historical timestamp is preserved: reading it after restart never refreshes an
 observation, reconstructs approval or authorizes replay.
 
+The ORIGINAL checkpoint's comparison digest travels with the one-use
+`AuthorizedDisplayApplication` from Control to the admitted root executor and
+original native owner. It covers the complete canonical baseline, sorted output
+lifetimes, overlay ownership, base/identity digests and prior owned targets. These
+facts already belong to the canonical plan's native findings and observation
+binding; the digest is a refusal-only precondition, not a second executable plan,
+approval or credential. Root's fresh strict projection must match it, and the
+owner compares it again on its last retained snapshot before compositor apply.
+The compositor validates that entire immutable snapshot before reservation and
+continues fencing underlying rule/identity drift. A later native sample cannot
+silently replace the original LKG ownership/configuration. Service/principal,
+policy and managed handoff requirements are unchanged.
+Independent restoration verification receives the ORIGINAL baseline guard, not
+just numeric geometry. Control rechecks it against another fresh canonical
+observation before durable retirement; even a verifier's satisfied flag cannot
+override ownership/rule drift. Desired-layout verification separately requires
+complete current Linura overlay ownership. These comparisons create no recovery
+execution authority and cannot retarget a replacement compositor.
+
 The pinned private native schema3 supplies mandatory ownership comparison data;
 the protected owner hashes native rule and identity preimages before projecting
 them into canonical observations. Canonical display schema2 has complete typed

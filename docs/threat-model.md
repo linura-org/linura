@@ -815,6 +815,14 @@ for the current implementation status.
   physical continuity, retarget prior authority, restore an old permit or authorize
   cross-compositor replay. Native replacement restoration remains independently
   qualified work; a persisted checkpoint is data, not recovery execution.
+- Control seals the ORIGINAL native baseline comparison alongside its consumed
+  effect in a private-constructor application object. The admitted root executor
+  compares it with fresh typed facts; the original owner checks the same digest
+  again immediately before native apply. It binds canonical baseline, exact output
+  lifetimes, original overlay targets/ownership and rule/identity digests. A fresh
+  sample with changed ownership cannot replace the approved checkpoint. Copied
+  digest strings grant no service admission, policy approval, effect or replay;
+  all existing principal and durable handoff checks remain mandatory.
 - A replacement compositor's empty reservation map cannot erase durable display
   ambiguity. New mutations check authenticated pending authority and retained
   intent for the seat before approval, handoff and dispatch. One observe-only

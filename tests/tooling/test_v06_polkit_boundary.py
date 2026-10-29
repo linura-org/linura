@@ -152,7 +152,7 @@ matrix() {
             "native-session-display-ordinary-denied",
             "native-session-display-root-denied",
             "native-session-display-polkit-ordinary-denied",
-            "ApplyDisplayLayout ststtssss",
+            "ApplyDisplayLayout ststtsssss",
             "systemd-suspend.service --value -p ExecStartPre",
             "non-supervised-sleep-helper",
             "native-session-live-boundary=qualified",

@@ -786,10 +786,9 @@ int NativeWaylandLock::actualDisplayFd() const noexcept
 {
     return impl_->display ? wl_display_get_fd(impl_->display) : -1;
 }
-std::optional<quint32>
-NativeWaylandLock::dispatchPreparedDisplay(const NativeDisplayIntent &intent,
-                                           const NativeDisplayCorrelation &correlation,
-                                           quint64 validatedSampledBootMs)
+std::optional<quint32> NativeWaylandLock::dispatchPreparedDisplay(
+    const NativeDisplayIntent &intent, const NativeDisplayCorrelation &correlation,
+    quint64 validatedSampledBootMs, const QString &nativeBaselineGuard)
 {
     if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
         impl_->pumping || !correlation.valid() || requestedSecure() != secureCoverage())
@@ -803,7 +802,9 @@ NativeWaylandLock::dispatchPreparedDisplay(const NativeDisplayIntent &intent,
         secureCoverage() != secure || (secure && !impl_->inputCovered()) ||
         current->compositor != impl_->displayInvocation || current->topology.generation == 0 ||
         intent.baseline.topology.section(QLatin1Char(':'), 8, 8) !=
-            QString::number(current->topology.generation))
+            QString::number(current->topology.generation) ||
+        current->topology.baselineGuard(intent.baseline.encode()) !=
+            std::optional{nativeBaselineGuard})
         return std::nullopt;
     // apply revalidates the complete exact baseline (including mirrors) and
     // native inventory against this same retained immutable snapshot. It

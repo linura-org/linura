@@ -58,6 +58,7 @@ trait SessionDispatch: Clone + Send + Sync + 'static {
         material: &str,
         binding: &ExecutionBinding,
         deadline_unix_ms: u64,
+        native_baseline_guard: &ComponentDigest,
     ) -> Result<u32, String>;
 }
 impl SessionDispatch for NativeSessionChannel {
@@ -75,8 +76,9 @@ impl SessionDispatch for NativeSessionChannel {
         material: &str,
         binding: &ExecutionBinding,
         deadline_unix_ms: u64,
+        native_baseline_guard: &ComponentDigest,
     ) -> Result<u32, String> {
-        self.dispatch_prepared_display(material, binding, deadline_unix_ms)
+        self.dispatch_prepared_display(material, binding, deadline_unix_ms, native_baseline_guard)
     }
 }
 
@@ -292,6 +294,7 @@ impl<C: SessionDispatch> SessionExecutor<C> {
         authority_use_digest: &str,
         effect_digest: &str,
         dispatch_digest: &str,
+        native_baseline_guard: &str,
         #[zbus(header)] header: Header<'_>,
     ) -> zbus::fdo::Result<(OutcomeWire,)> {
         let sender = header
@@ -310,6 +313,7 @@ impl<C: SessionDispatch> SessionExecutor<C> {
                 authority_use_digest,
                 effect_digest,
                 dispatch_digest,
+                native_baseline_guard,
             ]
             .iter()
             .any(|value| value.len() != 64)
@@ -337,6 +341,7 @@ impl<C: SessionDispatch> SessionExecutor<C> {
             .validate_for(&effect)
             .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))?;
         let material = material.to_owned();
+        let native_baseline_guard = parse(native_baseline_guard)?;
         let channel = self.channel.clone();
         blocking::unblock(move || {
             channel
@@ -350,8 +355,12 @@ impl<C: SessionDispatch> SessionExecutor<C> {
             // The bounded native adapter independently validates full metadata,
             // preserves its original sample time/owner and makes ONE apply.
             // Any uncertain result remains durable ambiguity, with no retry.
-            let (disposition, detail) =
-                display_disposition(channel.display(&material, &binding, deadline_unix_ms));
+            let (disposition, detail) = display_disposition(channel.display(
+                &material,
+                &binding,
+                deadline_unix_ms,
+                &native_baseline_guard,
+            ));
             Ok(((
                 disposition.into(),
                 binding.dispatch_digest.to_hex(),
@@ -460,7 +469,13 @@ mod tests {
         fn transition(&self, _: &SessionTransitionId) -> Result<bool, String> {
             unreachable!("untrusted calls must never dispatch a transition")
         }
-        fn display(&self, _: &str, _: &ExecutionBinding, _: u64) -> Result<u32, String> {
+        fn display(
+            &self,
+            _: &str,
+            _: &ExecutionBinding,
+            _: u64,
+            _: &ComponentDigest,
+        ) -> Result<u32, String> {
             unreachable!("untrusted calls must never dispatch a display layout")
         }
     }
@@ -593,6 +608,7 @@ mod tests {
                 &binding.authority_use_digest.to_hex(),
                 digest,
                 &binding.dispatch_digest.to_hex(),
+                &ComponentDigest::from_bytes([3; 32]).to_hex(),
                 message.header(),
             ))
         };

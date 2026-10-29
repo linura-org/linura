@@ -1,5 +1,6 @@
 // Strict native adapter data/formatter fixtures only. No command is dispatched.
 #include "native_display_layout.h"
+#include <algorithm>
 #include <cassert>
 
 using namespace Linura::SecurityOwner;
@@ -24,6 +25,62 @@ int main()
     root.scaleMilli = 1000;
     root.scaleFloatBits = 0x3f800000U;
     observed.heads.push_back(root);
+    // Shared Rust/native vectors bind original ownership, rules, identity and
+    // exact numeric baseline. Hashes alone cannot prove current geometry.
+    const auto guardBaseline = QStringLiteral("LNDL:1;") + scope +
+                               QStringLiteral(";1:2:enabled:1920:1080:59940:1250:0:0:0:-;");
+    assert(!observed.baselineGuard(guardBaseline));
+    auto guarded = observed;
+    guarded.heads[0].baseRuleDigest = QString(64, QLatin1Char('a'));
+    guarded.heads[0].outputIdentityDigest = QString(64, QLatin1Char('b'));
+    assert(guarded.baselineGuard(guardBaseline) ==
+           std::optional{
+               QStringLiteral("3982e30fe93e501fb6940d694fe0e19da3d66c3dee2c3f23cd7165ff3b2f6948")});
+    guarded.heads[0].linuraOwned = true;
+    assert(!guarded.baselineGuard(guardBaseline));
+    guarded.heads[0].ownedTarget = QStringLiteral("LNOT:1;1;2;1;1920;1080;59940;1250;0;0;0;0;0;");
+    const auto originalGuard = guarded.baselineGuard(guardBaseline);
+    assert(originalGuard ==
+           std::optional{
+               QStringLiteral("706b46fd9ed14f8a56238057e390924b131c5c134935e532faff42763292b21b")});
+    auto drifted = guarded;
+    drifted.heads[0].baseRuleDigest = QString(64, QLatin1Char('c'));
+    assert(drifted.baselineGuard(guardBaseline) != originalGuard);
+    drifted = guarded;
+    drifted.heads[0].outputIdentityDigest = QString(64, QLatin1Char('c'));
+    assert(drifted.baselineGuard(guardBaseline) != originalGuard);
+    drifted = guarded;
+    drifted.heads[0].ownedTarget.replace(QStringLiteral(";1250;"), QStringLiteral(";1000;"));
+    assert(drifted.baselineGuard(guardBaseline) != originalGuard);
+    drifted = guarded;
+    drifted.heads[0].baseRuleDigest = QString(64, QLatin1Char('A'));
+    assert(!drifted.baselineGuard(guardBaseline));
+    auto twoGuarded = guarded;
+    twoGuarded.heads[0].linuraOwned = false;
+    twoGuarded.heads[0].ownedTarget.clear();
+    auto disabledHead = guarded.heads[0];
+    disabledHead.handle = 2;
+    disabledHead.generation = 3;
+    disabledHead.baseRuleDigest = QString(64, QLatin1Char('c'));
+    disabledHead.outputIdentityDigest = QString(64, QLatin1Char('d'));
+    disabledHead.ownedTarget = QStringLiteral("LNOT:1;2;3;0;0;0;0;0;0;0;0;0;0;");
+    twoGuarded.heads.push_back(disabledHead);
+    const auto twoGuardBaseline = guardBaseline + QStringLiteral("2:3:disabled;");
+    const auto twoGuard = twoGuarded.baselineGuard(twoGuardBaseline);
+    assert(twoGuard == std::optional{QStringLiteral(
+                           "568c84130da7712c595748f4dc80408d63ef01f64cca8486ddb5907cccaea21d")});
+    std::reverse(twoGuarded.heads.begin(), twoGuarded.heads.end());
+    assert(twoGuarded.baselineGuard(twoGuardBaseline) == twoGuard);
+    twoGuarded.heads[0].ownedTarget =
+        QStringLiteral("LNOT:1;2;3;1;1920;1080;59940;1250;0;0;0;1;2;");
+    const auto mirrorGuardBaseline =
+        guardBaseline + QStringLiteral("2:3:enabled:1920:1080:59940:1250:0:0:0:1,2;");
+    assert(twoGuarded.baselineGuard(mirrorGuardBaseline) ==
+           std::optional{
+               QStringLiteral("f5284e6c0630a02c97f4bf8c2ccadf9282e835e4285b28d2baec0e10ee691721")});
+    drifted = guarded;
+    drifted.heads.push_back(drifted.heads[0]);
+    assert(!drifted.baselineGuard(guardBaseline));
     const auto baseline = QStringLiteral("LNDL:1;") + scope +
                           QStringLiteral(";1:2:enabled:1920:1080:60000:1000:0:0:0:-;");
     const auto desired = QStringLiteral("LNDL:1;") + scope +

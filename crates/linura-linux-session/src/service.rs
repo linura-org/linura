@@ -271,6 +271,7 @@ impl NativeSessionChannel {
         material: &str,
         binding: &ExecutionBinding,
         deadline_unix_ms: u64,
+        native_baseline_guard: &ComponentDigest,
     ) -> Result<ExecutionOutcome, String> {
         self.require_role(NativeSessionRole::Control)?;
         let effect = linura_provider_sdk::display_layout_effect(material)?;
@@ -294,6 +295,7 @@ impl NativeSessionChannel {
                 binding.authority_use_digest.to_hex(),
                 binding.effect_digest.to_hex(),
                 binding.dispatch_digest.to_hex(),
+                native_baseline_guard.to_hex(),
             ),
             Duration::from_secs(10),
         )?;

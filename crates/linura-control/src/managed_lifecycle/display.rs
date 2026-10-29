@@ -111,10 +111,23 @@ impl<'a> DisplayAttemptQuery<'a> {
     }
 }
 
+/// Control seals the original canonical native precondition together with its
+/// one-use effect. The digest is comparison data, never independent authority.
+#[derive(Debug)]
+pub struct AuthorizedDisplayApplication {
+    authorization: AuthorizedEffect,
+    native_baseline_guard: ComponentDigest,
+}
+impl AuthorizedDisplayApplication {
+    #[must_use]
+    pub fn into_executor_request(self) -> (AuthorizedEffect, ComponentDigest) {
+        (self.authorization, self.native_baseline_guard)
+    }
+}
 pub trait DisplayTransactionPort: Debug + Send {
     fn dispatch_layout(
         &mut self,
-        authorization: AuthorizedEffect,
+        application: AuthorizedDisplayApplication,
         request: &PlanDesiredStateRequest,
         deadline_unix_ms: u64,
     ) -> Result<ExecutionOutcome, String>;
@@ -127,13 +140,20 @@ pub trait DisplayTransactionPort: Debug + Send {
         continuation: AuthorizedDisplayContinuation,
     ) -> Result<(), String>;
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DisplayVerificationTarget {
+    Desired,
+    Restored {
+        native_baseline_guard: ComponentDigest,
+    },
+}
 pub trait IndependentDisplayVerifier: Debug + Send {
     /// A single fresh native probe; scheduling and all retry limits stay here
     /// in Control. Restoration checks the retained baseline, not executor flags.
     fn verify_layout(
         &mut self,
         request: &PlanDesiredStateRequest,
-        restoration: bool,
+        target: DisplayVerificationTarget,
         after_unix_ms: u64,
     ) -> Result<VerificationOutcome, String>;
 }
@@ -802,7 +822,11 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             ));
         }
         self.require_display_recovery_settled(&principal_id, &request)?;
-        match port.dispatch_layout(authorization, &request, deadline) {
+        let application = AuthorizedDisplayApplication {
+            authorization,
+            native_baseline_guard: checkpoint.native_guard,
+        };
+        match port.dispatch_layout(application, &request, deadline) {
             Ok(outcome) if outcome.dispatch_digest.to_hex() != dispatch_digest => {
                 return Err(ManagedLifecycleError::Contract(
                     "display executor substituted the dispatch digest".into(),
@@ -865,7 +889,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 &principal_id,
             ));
         };
-        crate::display_checkpoint::Checkpoint::load(
+        let checkpoint = crate::display_checkpoint::Checkpoint::load(
             self.display_journal()?,
             &request,
             &snapshot,
@@ -905,7 +929,14 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let state = attempt_state(&observed, &request, &dispatched)?;
         let after = observed.observed_at_unix_ms;
         let verified = |verifier: &mut V, restoration| {
-            matches!(verifier.verify_layout(&request, restoration, after), Ok(result) if result.disposition == VerificationDisposition::Satisfied)
+            let target = if restoration {
+                DisplayVerificationTarget::Restored {
+                    native_baseline_guard: checkpoint.native_guard,
+                }
+            } else {
+                DisplayVerificationTarget::Desired
+            };
+            matches!(verifier.verify_layout(&request, target, after), Ok(result) if result.disposition == VerificationDisposition::Satisfied)
                 && attempt_state(&observed, &request, &dispatched).is_ok()
         };
         let state = match state.as_str() {
@@ -915,6 +946,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                     principal.clone(),
                     actor.clone(),
                     &request,
+                    &checkpoint.native_guard,
                 )?;
                 validate_terminal_display_history(Phase::Restored, terminal.state)?;
                 let restored = Record::new(
@@ -1065,7 +1097,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             return self.display_layout_status(principal, actor, request_id, port, verifier);
         }
         if action == DisplayContinuationAction::Confirm
-            && !matches!(verifier.verify_layout(&request, false, observed.observed_at_unix_ms), Ok(result) if result.disposition == VerificationDisposition::Satisfied)
+            && !matches!(verifier.verify_layout(&request, DisplayVerificationTarget::Desired, observed.observed_at_unix_ms), Ok(result) if result.disposition == VerificationDisposition::Satisfied)
         {
             return Ok(receipt(
                 &request,
@@ -1123,7 +1155,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             ));
         }
         if action == DisplayContinuationAction::Confirm
-            && !matches!(verifier.verify_layout(&request, false, fresh.observed_at_unix_ms), Ok(result) if result.disposition == VerificationDisposition::Satisfied)
+            && !matches!(verifier.verify_layout(&request, DisplayVerificationTarget::Desired, fresh.observed_at_unix_ms), Ok(result) if result.disposition == VerificationDisposition::Satisfied)
         {
             return Ok(receipt(
                 &request,
