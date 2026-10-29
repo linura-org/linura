@@ -393,6 +393,7 @@ impl DisplayTransactionPort for Port {
         let binding = m.binding.as_ref().ok_or("simulated attempt absent")?;
         if continuation.transaction_id() != binding.transaction_id
             || continuation.dispatch_digest() != binding.dispatch_digest.to_hex()
+            || continuation.deadline_unix_ms() != m.deadline
             || m.state != Some("pending")
         {
             return Err("fixture continuation scope mismatch".into());

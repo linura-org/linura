@@ -36,6 +36,7 @@ pub struct AuthorizedDisplayContinuation {
     dispatch_digest: String,
     decision_digest: String,
     protected_decision_digest: String,
+    deadline_unix_ms: u64,
     action: DisplayContinuationAction,
 }
 impl AuthorizedDisplayContinuation {
@@ -58,6 +59,10 @@ impl AuthorizedDisplayContinuation {
     #[must_use]
     pub fn protected_decision_digest(&self) -> &str {
         &self.protected_decision_digest
+    }
+    #[must_use]
+    pub const fn deadline_unix_ms(&self) -> u64 {
+        self.deadline_unix_ms
     }
     #[must_use]
     pub const fn action(&self) -> DisplayContinuationAction {
@@ -1207,6 +1212,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             })?,
             decision_digest: decision.digest().as_str().into(),
             protected_decision_digest: challenge.digest().into(),
+            deadline_unix_ms: dispatched.deadline_unix_ms,
             action,
         };
         let _ = port.continue_layout(continuation);

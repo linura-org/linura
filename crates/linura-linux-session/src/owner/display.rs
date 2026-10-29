@@ -21,7 +21,9 @@ use super::{
     observation, owner_reply_budget, unix_ms,
 };
 mod attempt;
+mod continuation;
 mod prepared;
+pub use continuation::NativeDisplayContinuation;
 
 type Wire = (String, String, String, u64, String, String, bool);
 

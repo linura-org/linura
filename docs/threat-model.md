@@ -850,6 +850,17 @@ for the current implementation status.
   without requiring adapter memory, creating another effect or adopting a prior
   connection's continuation. Component fixtures and live bus-denial cases do not
   establish complete native display execution, recovery or support.
+- Keep/Revert transport consumes only Control's sealed, already durably reserved
+  protected decision for the original operation. The root executor attests the
+  current Control service around its default-deny display policy; the native
+  owner separately attests the executor and checks session, topology, settled
+  lock/input coverage and the complete desired layout before Keep. Neither
+  decision hash nor challenge hash is a credential. No replacement connection
+  adopts a reservation, and neither action can construct another apply. Final
+  native clocks retain the original dispatch window, including suspend and wall
+  rollback; one-use reservation precedes wire I/O. Lost/unknown replies cannot
+  replay or imply independent verification. Missing native protected interaction
+  still prevents public activation; this transport introduces no weaker fallback.
 - The compositor acquires the fixed native logind sleep/shutdown block inhibitor
   before any display write, independently checks the root service and current
   preparation state, and revalidates captured output facts and deadlines after

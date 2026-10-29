@@ -232,9 +232,33 @@ Legacy v1 decisions remain readable as retained data, but cannot be promoted to
 protected decision authority: lifecycle admission reports independent recovery
 required without rewriting, deleting or replaying them. Neither journal format
 contains a reusable native proof or executor credential. A late durable append
-cannot extend the native deadline. This Control boundary remains a component
-implementation until the actual native protected-interaction adapter, production
-dispatch and complete recovery composition are connected and qualified.
+cannot extend the native deadline.
+
+The production continuation adapter consumes that sealed Control value and
+retains the original deadline through `Executor.Session1.ContinueDisplayLayout`
+and private `SecurityOwner1.ContinuePreparedDisplay`. It cannot choose another
+layout, principal, reservation or new apply. The executor requires the current
+independently supervised Control sender before and after the same default-deny
+display service policy; the protected owner independently requires the current
+supervised executor. Decision/challenge hashes are bounded comparison data, not
+transport credentials or substitutes for protected human input. Ordinary/root
+bus callers cannot reach either privileged effect path merely by copying them.
+
+The owner rechecks the current session, settled independent lock state, exact
+topology, input/surface coverage and original mechanism deadline. Keep additionally
+requires the complete current desired layout, including mirror/disabled targets.
+The original Wayland connection must still own its single decision reservation;
+replacement owners may observe but cannot adopt it. Final wire admission checks
+both wall and suspend-inclusive clocks against the ORIGINAL native dispatch, so
+clock rollback, suspend or late IPC cannot extend it. Reservation is consumed
+before writing. Denial, unknown phase and lost replies stay ambiguous; Control
+only observes thereafter and requires independent verification before retirement.
+
+This connected continuation is not activation evidence. Production mutation and
+public Keep/Revert remain unsupported until actual native protected interaction,
+compositor-loss restoration and full native qualification are complete. There is
+no fallback from missing protected input to Polkit, original approval, ordinary
+client confirmation or a local/root identity.
 
 The native attempt gate and Qt watchdog are component mechanisms. They reserve
 apply and baseline restoration separately before write construction, compare

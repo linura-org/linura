@@ -58,6 +58,9 @@ class NativeRuntime final : public QObject
     dispatchPreparedDisplay(const QDBusMessage &, const NativeDisplayIntent &,
                             const NativeDisplayCorrelation &, const QString &sampleDigest,
                             quint64 sampledBootMs, const QString &nativeBaselineGuard);
+    [[nodiscard]] std::optional<quint32> continuePreparedDisplay(const QDBusMessage &,
+                                                                 const NativeDisplayIntent &,
+                                                                 const NativeDisplayDecision &);
     [[nodiscard]] std::optional<NativeDisplayAttemptSample>
     observeDisplayAttempt(const QDBusMessage &, const NativeDisplayIntent &,
                           const NativeDisplayCorrelation &);

@@ -6,6 +6,7 @@
 #include "wire_endpoint.h"
 #include "linura-display-integration-build.h"
 #include <atomic>
+#include <array>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -14,6 +15,7 @@
 #include <chrono>
 #include <cstring>
 #include <mutex>
+#include <limits>
 #include <thread>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -252,6 +254,55 @@ void clientLossDoesNotDisarmNativeRecovery()
            harness.backend.writes == 2);
     assert(replacement.connection->securityTransitionAllowed(false));
 }
+void explicitRevertCannotBecomeAnotherApplyOrDecision()
+{
+    Harness harness;
+    Client owner(harness.descriptors[0]);
+    const auto correlation = bound(QStringLiteral("transaction:private-revert"));
+    const auto captured = owner.connection->sample();
+    assert(captured);
+    auto prior = baseline(*captured), desired = prior;
+    desired.outputs[0].x = 100;
+    assert(owner.connection->apply(correlation, prior, desired) == 2);
+    assert(owner.connection->decide(correlation, false) == 3); // Acknowledged, not verified.
+    assert(!owner.connection->decide(correlation, false));
+    assert(!owner.connection->decide(correlation, true));
+    assert(!owner.connection->apply(correlation, prior, desired));
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (owner.connection->status(correlation) != 5) {
+        assert(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(10ms);
+    }
+    const auto restored = owner.connection->sample();
+    assert(restored && restored->current.outputs[0].x == 0 && !restored->fenced &&
+           harness.backend.writes == 2);
+}
+void expiredDecisionLeavesTheIndependentNativeTimerResponsible()
+{
+    Harness harness;
+    Client owner(harness.descriptors[0]);
+    const auto correlation = bound(QStringLiteral("transaction:expired-decision"), 1000);
+    const auto captured = owner.connection->sample();
+    assert(captured);
+    auto prior = baseline(*captured), desired = prior;
+    desired.outputs[0].x = 100;
+    assert(owner.connection->apply(correlation, prior, desired) == 2);
+    // Expiry cannot disarm or extend the timer. Both actions remain refused
+    // locally even if the client has not observed the restoration reply.
+    const auto expiryBudget = std::chrono::steady_clock::now() + 2s;
+    while (compositorClock()->unixMs <= correlation.deadlineUnixMs) {
+        assert(std::chrono::steady_clock::now() < expiryBudget);
+        std::this_thread::sleep_for(10ms);
+    }
+    assert(!owner.connection->decide(correlation, true));
+    assert(!owner.connection->decide(correlation, false));
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (owner.connection->status(correlation) != 5) {
+        assert(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(10ms);
+    }
+    assert(harness.backend.writes == 2);
+}
 void unsupportedBuildAndSubstitutedSnapshotCannotWrite()
 {
     for (auto mismatch : {Harness::BuildMismatch::Upstream, Harness::BuildMismatch::SourceRecipe}) {
@@ -467,8 +518,36 @@ int main()
     assert(!window.dispatchWindow(1000, 1000, 9999));
     assert(!window.dispatchWindow(1000, 1000, 25'000));
     assert(!window.dispatchWindow(1000, 1000, 0));
+    assert(window.decisionWindow(10'000, 1000, 10'000, 1000));
+    assert(window.decisionWindow(10'000, 1000, 24'999, 15'999));
+    for (const auto &clock : std::vector<std::array<quint64, 4>>{
+             {0, 1000, 10'000, 1000},
+             {10'000, 0, 10'000, 1000},
+             {9999, 1000, 10'000, 1000},
+             {10'000, 1000, 9999, 1000},
+             {10'000, 1000, 10'000, 999},
+             {25'000, 1000, 25'000, 1000},
+             {10'000, 1000, 25'000, 1000},
+             {10'000, 1000, 10'000, 16'000},
+             {10'000, 1000, 10'000, std::numeric_limits<quint64>::max()}})
+        assert(!window.decisionWindow(clock[0], clock[1], clock[2], clock[3]));
+    NativeDisplayDecision decision{window, QString(64, QLatin1Char('c')),
+                                   QString(64, QLatin1Char('d')), true};
+    assert(decision.valid());
+    for (const auto &bad :
+         {QString{}, QString(64, QLatin1Char('0')), QString(64, QLatin1Char('A')),
+          QString(65, QLatin1Char('a')), QString(63, QLatin1Char('a')) + QLatin1Char('\n')}) {
+        auto changed = decision;
+        changed.decisionDigest = bad;
+        assert(!changed.valid());
+        changed = decision;
+        changed.protectedDecisionDigest = bad;
+        assert(!changed.valid());
+    }
     identityAndContinuationOwnership();
     clientLossDoesNotDisarmNativeRecovery();
+    explicitRevertCannotBecomeAnotherApplyOrDecision();
+    expiredDecisionLeavesTheIndependentNativeTimerResponsible();
     unsupportedBuildAndSubstitutedSnapshotCannotWrite();
     terminalWireObjectsRetireWithoutEvictingOneUseReservations();
     finalNativePowerStateCannotReuseAnEarlierVisibilityReview();

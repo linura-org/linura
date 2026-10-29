@@ -113,6 +113,17 @@ verify a layout or authorize keep/revert. Production status uses validated
 durable correlation and cannot replay. Public mutation remains disabled pending
 protected decisions, durable compositor-loss restoration and native acceptance.
 
+The production continuation transport now carries Control's consumed, durably
+recorded protected choice through the independently supervised root executor.
+The owner rechecks session, topology, settled lock/input coverage and the complete
+desired target before Keep, then uses only the original connection's single
+decision reservation. Both native clocks retain the original dispatch deadline;
+expiry, clock rollback, replacement or a duplicate cannot renew it. Revert first
+acknowledges Restoring; a later native observation and independent Control
+verification must prove restoration. Decision hashes and acknowledgements are
+not credentials or postconditions. Missing native protected interaction still
+blocks public activation; no ordinary UI or original-approval fallback exists.
+
 Component tests exercise transaction and timer boundaries. They are not a
 substitute for the exact pinned compositor build or native execution, rollback,
 process-loss, hotplug and S17 coverage qualification. Required unexecuted checks

@@ -108,6 +108,18 @@ expect_failure native-session-display-root-denied call_display_root
 grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
 expect_failure native-session-display-polkit-ordinary-denied \
     pkcheck --action-id org.linura.executor.session.apply-display-layout --process "$$"
+call_display_decision() {
+    busctl --system call "$destination" "$path" "$interface" ContinueDisplayLayout ssstssb \
+        "$material" "transaction:v06:display-decision" "$digest" 15000 "$digest" "$digest" true
+}
+call_display_decision_root() {
+    sudo -n busctl --system call "$destination" "$path" "$interface" ContinueDisplayLayout ssstssb \
+        "$material" "transaction:v06:display-decision-root" "$digest" 15000 "$digest" "$digest" false
+}
+expect_failure native-session-display-decision-ordinary-denied call_display_decision
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-session-display-decision-root-denied call_display_decision_root
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
 sudo -n systemctl is-active --quiet "$service"
 echo "native-session-direct-denial=qualified"
 

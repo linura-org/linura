@@ -310,6 +310,32 @@ quint32 NativeEndpoint::DispatchPreparedDisplay(const NativeDisplayAttemptQueryW
     return 7; // Unknown, never a no-dispatch acknowledgement.
 }
 
+quint32 NativeEndpoint::ContinuePreparedDisplay(const NativeDisplayAttemptQueryWire &query,
+                                                const QString &decisionDigest,
+                                                const QString &protectedDecisionDigest,
+                                                bool confirm)
+{
+    if (calledFromDBus() && query.intent.size() <= 4096 && query.transaction.size() <= 256 &&
+        query.effectDigest.size() == 64 && query.dispatchDigest.size() == 64 &&
+        decisionDigest.size() == 64 && protectedDecisionDigest.size() == 64) {
+        const auto intent = NativeDisplayIntent::parse(query.intent);
+        const NativeDisplayDecision decision{
+            {query.transaction, query.effectDigest, query.dispatchDigest, query.deadlineUnixMs},
+            decisionDigest,
+            protectedDecisionDigest,
+            confirm};
+        const auto result = intent && decision.valid()
+                                ? runtime_.continuePreparedDisplay(message(), *intent, decision)
+                                : std::nullopt;
+        if (result)
+            return *result;
+    }
+    if (calledFromDBus())
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Native prepared display decision unavailable"));
+    return 7; // No success, independent verification or retry authority.
+}
+
 bool NativeEndpoint::DispatchPreparedLock(const QString &resource, bool secure)
 {
     const auto lock = NativeLockIdentity::parse(resource);

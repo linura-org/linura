@@ -14,6 +14,7 @@ namespace Linura::SecurityOwner {
 
 class SecretEntry;
 struct NativeDisplayCorrelation;
+struct NativeDisplayDecision;
 struct NativeDisplayIntent;
 
 // Owns its exclusive actual Wayland connection. The private runtime factory must
@@ -64,6 +65,9 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     [[nodiscard]] std::optional<quint32>
     dispatchPreparedDisplay(const NativeDisplayIntent &, const NativeDisplayCorrelation &,
                             quint64 validatedSampledBootMs, const QString &nativeBaselineGuard);
+    [[nodiscard]] std::optional<quint32> continuePreparedDisplay(const NativeDisplayIntent &,
+                                                                 const NativeDisplayDecision &,
+                                                                 quint64 originalSampledBootMs);
     [[nodiscard]] const QString &displayInvocation() const noexcept;
     // Private native interaction, not an effect/approval credential. The runtime
     // arms the exact reviewed NativeApprovalScope first and consumes its fresh

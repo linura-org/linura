@@ -1,6 +1,7 @@
 //! Root-supervised native owner discovery and bounded private transport only.
 //! Neither these identities nor successful calls mint policy/dispatch authority.
 mod display;
+pub use display::NativeDisplayContinuation;
 mod polkit;
 mod sleep_fence;
 

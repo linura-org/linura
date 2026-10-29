@@ -55,9 +55,29 @@ impl DisplayTransactionPort for SessionExecutorClient {
 
     fn continue_layout(
         &mut self,
-        _continuation: AuthorizedDisplayContinuation,
+        continuation: AuthorizedDisplayContinuation,
     ) -> Result<(), String> {
-        Err("native protected display decisions are not qualified in this composition".into())
+        let material = display_material(continuation.request())?;
+        let parse = |value: &str| {
+            linura_provider_sdk::ComponentDigest::parse_hex(value).map_err(|e| e.to_string())
+        };
+        let decision_digest = |value: &str| {
+            let value = linura_transaction::ContentDigest::new(value).map_err(|e| e.to_string())?;
+            parse(value.hex())
+        };
+        let native = linura_linux_session::NativeDisplayContinuation::new(
+            material,
+            continuation.transaction_id(),
+            parse(continuation.dispatch_digest())?,
+            continuation.deadline_unix_ms(),
+            decision_digest(continuation.decision_digest())?,
+            decision_digest(continuation.protected_decision_digest())?,
+            continuation.action() == linura_control::DisplayContinuationAction::Confirm,
+        )?;
+        self.channel.handoff_display_continuation(&native)?;
+        // A native phase acknowledges only the attempted decision. Control
+        // obtains independent fresh layout/coverage evidence before retirement.
+        Ok(())
     }
 }
 

@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use linura_core::{ProviderId, ResourceId, SessionLockId, SessionTransitionId};
-use linura_linux_session::{NativeSessionChannel, NativeSessionRole};
+use linura_linux_session::{NativeDisplayContinuation, NativeSessionChannel, NativeSessionRole};
 use linura_provider_sdk::{
     ComponentDigest, EffectDescriptor, ExecutionBinding, ExecutionDisposition,
 };
@@ -60,8 +60,12 @@ trait SessionDispatch: Clone + Send + Sync + 'static {
         deadline_unix_ms: u64,
         native_baseline_guard: &ComponentDigest,
     ) -> Result<u32, String>;
+    fn continue_display(&self, continuation: &NativeDisplayContinuation) -> Result<u32, String>;
 }
 impl SessionDispatch for NativeSessionChannel {
+    fn continue_display(&self, continuation: &NativeDisplayContinuation) -> Result<u32, String> {
+        self.dispatch_display_continuation(continuation)
+    }
     fn require_control(&self, sender: &str) -> Result<(), String> {
         self.require_trusted_control_sender(sender)
     }
@@ -89,6 +93,63 @@ struct SessionExecutor<C: SessionDispatch> {
 
 #[zbus::interface(name = "org.linura.Executor.Session1")]
 impl<C: SessionDispatch> SessionExecutor<C> {
+    #[allow(clippy::too_many_arguments)]
+    #[zbus(out_args("phase"))]
+    async fn continue_display_layout(
+        &self,
+        material: &str,
+        transaction_id: &str,
+        dispatch_digest: &str,
+        deadline_unix_ms: u64,
+        decision_digest: &str,
+        protected_decision_digest: &str,
+        confirm: bool,
+        #[zbus(header)] header: Header<'_>,
+    ) -> zbus::fdo::Result<u32> {
+        let sender = header
+            .sender()
+            .ok_or_else(|| {
+                zbus::fdo::Error::AccessDenied(
+                    "display decision has no authenticated sender".into(),
+                )
+            })?
+            .as_str()
+            .to_owned();
+        // These are comparison hashes, never a policy/prepare bypass. The
+        // native reservation independently binds the exact original effect.
+        let parse = |value: &str| {
+            ComponentDigest::parse_hex(value)
+                .map_err(|e| zbus::fdo::Error::InvalidArgs(e.to_string()))
+        };
+        let continuation = NativeDisplayContinuation::new(
+            material,
+            transaction_id,
+            parse(dispatch_digest)?,
+            deadline_unix_ms,
+            parse(decision_digest)?,
+            parse(protected_decision_digest)?,
+            confirm,
+        )
+        .map_err(zbus::fdo::Error::InvalidArgs)?;
+        let channel = self.channel.clone();
+        blocking::unblock(move || {
+            channel
+                .require_control(&sender)
+                .map_err(zbus::fdo::Error::AccessDenied)?;
+            authorize_service(&sender, ServiceAction::Display)
+                .map_err(zbus::fdo::Error::AccessDenied)?;
+            channel
+                .require_control(&sender)
+                .map_err(zbus::fdo::Error::AccessDenied)?;
+            channel.continue_display(&continuation).map_err(|_| {
+                zbus::fdo::Error::Failed(
+                    "native display decision outcome is indeterminate; no retry".into(),
+                )
+            })
+        })
+        .await
+    }
+
     #[allow(clippy::too_many_arguments)]
     #[zbus(out_args("outcome"))]
     async fn set_secure(
@@ -460,6 +521,9 @@ mod tests {
     #[derive(Clone, Debug)]
     struct DenyNative;
     impl SessionDispatch for DenyNative {
+        fn continue_display(&self, _: &NativeDisplayContinuation) -> Result<u32, String> {
+            unreachable!("untrusted calls must never continue a display attempt")
+        }
         fn require_control(&self, _: &str) -> Result<(), String> {
             Err("component fixture has no trusted Control".into())
         }
@@ -535,8 +599,8 @@ mod tests {
             assert_eq!(live.matches(&marker).count(), 1);
             assert_eq!(canonical.matches(&marker).count(), 1);
         }
-        assert_eq!(live.matches("<method ").count(), 3);
-        assert_eq!(canonical.matches("<method ").count(), 3);
+        assert_eq!(live.matches("<method ").count(), 4);
+        assert_eq!(canonical.matches("<method ").count(), 4);
         for (name, kind, direction) in [
             ("resource", "s", "in"),
             ("material", "s", "in"),
@@ -550,11 +614,20 @@ mod tests {
             ("effect_digest", "s", "in"),
             ("dispatch_digest", "s", "in"),
             ("outcome", "(sss)", "out"),
+            ("decision_digest", "s", "in"),
+            ("protected_decision_digest", "s", "in"),
+            ("confirm", "b", "in"),
+            ("phase", "u", "out"),
         ] {
             let marker = format!("name=\"{name}\" type=\"{kind}\" direction=\"{direction}\"");
             let expected = match name {
-                "secure" | "material" | "deadline_unix_ms" => 1,
-                "resource" => 2,
+                "secure"
+                | "decision_digest"
+                | "protected_decision_digest"
+                | "confirm"
+                | "phase" => 1,
+                "resource" | "material" | "deadline_unix_ms" => 2,
+                "transaction_id" | "dispatch_digest" => 4,
                 _ => 3,
             };
             assert_eq!(live.matches(&marker).count(), expected, "live {name}");
@@ -567,6 +640,33 @@ mod tests {
         assert!(live.contains("<method name=\"SetSecure\">"));
         assert!(live.contains("<method name=\"ExecuteTransition\">"));
         assert!(live.contains("<method name=\"ApplyDisplayLayout\">"));
+        assert!(live.contains("<method name=\"ContinueDisplayLayout\">"));
+        // The actual tuple codecs depend on argument ORDER as well as counts.
+        for contract in [live.as_str(), canonical] {
+            let method = contract
+                .split("<method name=\"ContinueDisplayLayout\">")
+                .nth(1)
+                .and_then(|rest| rest.split("</method>").next())
+                .unwrap_or_else(|| unreachable!("continuation method is absent"));
+            let mut previous = 0;
+            for name in [
+                "material",
+                "transaction_id",
+                "dispatch_digest",
+                "deadline_unix_ms",
+                "decision_digest",
+                "protected_decision_digest",
+                "confirm",
+                "phase",
+            ] {
+                let offset = method
+                    .find(&format!("name=\"{name}\""))
+                    .unwrap_or_else(|| unreachable!("continuation argument is absent"));
+                assert!(offset > previous, "continuation argument order: {name}");
+                previous = offset;
+            }
+            assert_eq!(method.matches("<arg ").count(), 8);
+        }
     }
     #[test]
     fn untrusted_caller_with_valid_display_binding_cannot_dispatch_or_invoke_policy() {
@@ -631,6 +731,79 @@ mod tests {
             ),
             Err(zbus::fdo::Error::InvalidArgs(_))
         ));
+        // Public/ordinary callers cannot turn knowledge of valid correlation
+        // and decision hashes into continuation authority, for either action.
+        for confirm in [false, true] {
+            let continue_call = |material: &str,
+                                 transaction: &str,
+                                 dispatch: &str,
+                                 decision: &str,
+                                 protected: &str| {
+                async_io::block_on(service.continue_display_layout(
+                    material,
+                    transaction,
+                    dispatch,
+                    25_000,
+                    decision,
+                    protected,
+                    confirm,
+                    message.header(),
+                ))
+            };
+            let digest = ComponentDigest::from_bytes([3; 32]).to_hex();
+            assert!(matches!(
+                continue_call(
+                    &material,
+                    &binding.transaction_id,
+                    &binding.dispatch_digest.to_hex(),
+                    &digest,
+                    &digest
+                ),
+                Err(zbus::fdo::Error::AccessDenied(_))
+            ));
+            for (bad_material, transaction, dispatch, decision, protected) in [
+                (
+                    "not an intent",
+                    binding.transaction_id.as_str(),
+                    binding.dispatch_digest.to_hex(),
+                    digest.clone(),
+                    digest.clone(),
+                ),
+                (
+                    &material,
+                    "transaction:UPPER",
+                    binding.dispatch_digest.to_hex(),
+                    digest.clone(),
+                    digest.clone(),
+                ),
+                (
+                    &material,
+                    binding.transaction_id.as_str(),
+                    "0".repeat(64),
+                    digest.clone(),
+                    digest.clone(),
+                ),
+                (
+                    &material,
+                    binding.transaction_id.as_str(),
+                    binding.dispatch_digest.to_hex(),
+                    "0".repeat(64),
+                    digest.clone(),
+                ),
+                (
+                    &material,
+                    binding.transaction_id.as_str(),
+                    binding.dispatch_digest.to_hex(),
+                    digest.clone(),
+                    "0".repeat(64),
+                ),
+            ] {
+                assert!(matches!(
+                    continue_call(bad_material, transaction, &dispatch, &decision, &protected),
+                    Err(zbus::fdo::Error::InvalidArgs(_))
+                ));
+            }
+        }
     }
 
     #[test]

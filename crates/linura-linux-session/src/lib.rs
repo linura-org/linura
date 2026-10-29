@@ -20,7 +20,8 @@ pub use bus::{NativeSessionChannel, NativeSessionRole};
 pub use display_observer::NativeDisplayObserver;
 pub use observer::{NativeLockObserver, NativePowerPermissionObserver};
 pub use owner::{
-    NativeApprovalPurpose, NativeApprovalRequest, NativeAuthenticationSubject, NativeOwnerIdentity,
+    NativeApprovalPurpose, NativeApprovalRequest, NativeAuthenticationSubject,
+    NativeDisplayContinuation, NativeOwnerIdentity,
 };
 pub use service::protect_before_native_sleep;
 pub use sleep_gate::NativeSleepEntry;

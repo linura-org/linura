@@ -25,7 +25,18 @@ struct NativeDisplayCorrelation final
     [[nodiscard]] bool valid() const;
     [[nodiscard]] bool dispatchWindow(quint64 sampledBootMs, quint64 nowBootMs,
                                       quint64 nowUnixMs) const;
+    [[nodiscard]] bool decisionWindow(quint64 startedUnixMs, quint64 startedBootMs,
+                                      quint64 nowUnixMs, quint64 nowBootMs) const;
     bool operator==(const NativeDisplayCorrelation &) const = default;
+};
+// Immutable comparison data from the attested Control continuation. Neither
+// digest authenticates a caller, supplies human input or grants a new effect.
+struct NativeDisplayDecision final
+{
+    NativeDisplayCorrelation correlation;
+    QString decisionDigest, protectedDecisionDigest;
+    bool confirm = false;
+    [[nodiscard]] bool valid() const;
 };
 
 // Adapter-private client on the security owner's SAME exclusive, attested

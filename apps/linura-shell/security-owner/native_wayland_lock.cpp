@@ -3,6 +3,7 @@
 #include "native_lock_protocol.h"
 #include "native_keyboard.h"
 #include "native_display_connection.h"
+#include "native_display_watchdog.h"
 #include "native_wayland_readiness.h"
 #include "secret_entry.h"
 #include "ext-session-lock-v1-client-protocol.h"
@@ -810,6 +811,39 @@ std::optional<quint32> NativeWaylandLock::dispatchPreparedDisplay(
     // native inventory against this same retained immutable snapshot. It
     // reserves the one-use wire attempt before any potentially effectful call.
     return impl_->displayConnection->apply(correlation, intent.baseline, intent.desired);
+}
+std::optional<quint32>
+NativeWaylandLock::continuePreparedDisplay(const NativeDisplayIntent &intent,
+                                           const NativeDisplayDecision &decision,
+                                           quint64 originalSampledBootMs)
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping || !decision.valid() || requestedSecure() != secureCoverage())
+        return std::nullopt;
+    const bool secure = secureCoverage();
+    const auto current = impl_->displayConnection->sample();
+    const auto clock = NativeDisplayClock::sample();
+    if (!current || !clock ||
+        !decision.correlation.dispatchWindow(originalSampledBootMs, clock->bootMs, clock->unixMs) ||
+        !current->fenced || current->coverage != (secure ? 1U : 0U) ||
+        requestedSecure() != secure || secureCoverage() != secure ||
+        (secure && !impl_->inputCovered()) || current->compositor != impl_->displayInvocation ||
+        intent.baseline.topology.section(QLatin1Char(':'), 8, 8) !=
+            QString::number(current->topology.generation) ||
+        !intent.baseline.nativeOptions(current->topology) ||
+        !intent.desired.nativeOptions(current->topology))
+        return std::nullopt;
+    if (decision.confirm) {
+        // Include mirroring and disabled rows, not merely rounded wlr geometry.
+        if (intent.desired.outputs.size() != current->current.outputs.size())
+            return std::nullopt;
+        for (std::size_t i = 0; i < intent.desired.outputs.size(); ++i)
+            if (intent.desired.outputs[i].encode() != current->current.outputs[i].encode())
+                return std::nullopt;
+    }
+    // decide retains the ORIGINAL connection-only one-use reservation and
+    // checks both native clocks again. No Qt events/callbacks intervene here.
+    return impl_->displayConnection->decide(decision.correlation, decision.confirm);
 }
 std::optional<quint32>
 NativeWaylandLock::observeDisplayAttempt(const NativeDisplayCorrelation &correlation)

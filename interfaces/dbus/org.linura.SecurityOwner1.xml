@@ -54,6 +54,17 @@
       <arg name="native_baseline_guard" type="s" direction="in"/>
       <arg name="phase" type="u" direction="out"/>
     </method>
+    <!-- Current attested executor only, following Control's consumed/durable
+         protected decision. Original connection/reservation, layout, lock/input
+         coverage and original deadline remain mandatory. No new apply, replay,
+         reconnection privilege or independent verification is provided. -->
+    <method name="ContinuePreparedDisplay">
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="decision_digest" type="s" direction="in"/>
+      <arg name="protected_decision_digest" type="s" direction="in"/>
+      <arg name="confirm" type="b" direction="in"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
     <method name="ObservePowerPermission">
       <arg name="resource" type="s" direction="in"/>
       <arg name="observation" type="(sst)" direction="out"/>

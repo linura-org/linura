@@ -855,6 +855,49 @@ std::optional<quint32> NativeRuntime::dispatchPreparedDisplay(
                                                    nativeBaselineGuard);
 }
 
+// This narrow effect is reachable only from the current supervised executor.
+// Control separately consumed and durably reserved the protected human choice.
+// Comparison hashes never substitute for either authenticated boundary.
+std::optional<quint32> NativeRuntime::continuePreparedDisplay(const QDBusMessage &received,
+                                                              const NativeDisplayIntent &intent,
+                                                              const NativeDisplayDecision &decision)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto clock = NativeDisplayClock::sample();
+    const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
+    if (!peer || !clock || !decision.valid() || intent.lock != identity() || !impl_->binding ||
+        impl_->approvalScope || impl_->transitionFence.active() || impl_->sleepFence.active() ||
+        impl_->unlockRequestLock || impl_->transitionRequest ||
+        !NativeDisplayIntent::parse(intent.encode()))
+        return std::nullopt;
+    const auto independent = impl_->independentState();
+    if (!independent)
+        return std::nullopt;
+    const auto settled = nativeObservedLockState(*independent, impl_->protocol->inspect(),
+                                                 impl_->backend->requestedSecure(),
+                                                 impl_->backend->secureCoverage());
+    if (!settled || (*settled != NativeObservedLockState::Secure &&
+                     *settled != NativeObservedLockState::Unlocked))
+        return std::nullopt;
+    const auto topology = impl_->backend->observeDisplayTopology();
+    const auto &lock = identity();
+    const auto exactTopology = topology ? QStringLiteral("display:topology:%1:%2:%3:%4:%5:%6:%7")
+                                              .arg(lock.boot)
+                                              .arg(lock.uid)
+                                              .arg(lock.session)
+                                              .arg(lock.createdMonotonicUs)
+                                              .arg(impl_->binding->seat)
+                                              .arg(impl_->backend->displayInvocation())
+                                              .arg(topology->generation)
+                                        : QString{};
+    if (!topology || !intent.nativeOptions(*topology, exactTopology, lock) ||
+        !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
+        return std::nullopt;
+    return impl_->backend->continuePreparedDisplay(intent, decision, clock->bootMs);
+}
+
 std::optional<NativeDisplayAttemptSample>
 NativeRuntime::observeDisplayAttempt(const QDBusMessage &received,
                                      const NativeDisplayIntent &intent,

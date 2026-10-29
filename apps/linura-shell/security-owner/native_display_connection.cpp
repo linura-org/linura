@@ -111,6 +111,7 @@ class NativeDisplayConnection::Impl final
         NativeDisplayCorrelation bound;
         std::optional<quint32> phase;
         bool original = false, decisionUsed = false;
+        quint64 startedUnixMs = 0, startedBootMs = 0;
         ~Attempt()
         {
             if (native)
@@ -515,6 +516,8 @@ std::optional<quint32> NativeDisplayConnection::apply(const NativeDisplayCorrela
     // Reserve before every potentially effectful wire request. A lost sync
     // cannot recreate an original attempt or grant another apply/decision.
     attempt->original = true;
+    attempt->startedUnixMs = *wall;
+    attempt->startedBootMs = *boot;
     linura_display_attempt_v1_configure(attempt->native, impl_->capture->native);
     for (const auto &target : desired.outputs) {
         const auto head = impl_->capture->heads.find(target.handle);
@@ -555,6 +558,10 @@ bool NativeDisplayCorrelation::valid() const
 {
     return correlation(*this);
 }
+bool NativeDisplayDecision::valid() const
+{
+    return correlation.valid() && digest(decisionDigest) && digest(protectedDecisionDigest);
+}
 bool NativeDisplayCorrelation::dispatchWindow(quint64 sampledBootMs, quint64 nowBootMs,
                                               quint64 nowUnixMs) const
 {
@@ -562,12 +569,25 @@ bool NativeDisplayCorrelation::dispatchWindow(quint64 sampledBootMs, quint64 now
            nowBootMs - sampledBootMs < 2000 && nowUnixMs != 0 && deadlineUnixMs > nowUnixMs &&
            deadlineUnixMs - nowUnixMs <= 15'000;
 }
+bool NativeDisplayCorrelation::decisionWindow(quint64 startedUnixMs, quint64 startedBootMs,
+                                              quint64 nowUnixMs, quint64 nowBootMs) const
+{
+    return valid() && startedUnixMs != 0 && startedBootMs != 0 && deadlineUnixMs > startedUnixMs &&
+           deadlineUnixMs - startedUnixMs <= 15'000 && nowUnixMs >= startedUnixMs &&
+           nowUnixMs < deadlineUnixMs && nowBootMs >= startedBootMs &&
+           nowBootMs - startedBootMs < deadlineUnixMs - startedUnixMs;
+}
 std::optional<quint32> NativeDisplayConnection::decide(const NativeDisplayCorrelation &bound,
                                                        bool confirm)
 {
     const auto retained = impl_->attempts.find(bound.transaction);
     if (retained == impl_->attempts.end() || retained->second->bound != bound ||
         !retained->second->original || retained->second->decisionUsed || !impl_->healthy)
+        return std::nullopt;
+    const auto wall = milliseconds(CLOCK_REALTIME), boot = milliseconds(CLOCK_BOOTTIME);
+    const auto &original = *retained->second;
+    if (!wall || !boot ||
+        !bound.decisionWindow(original.startedUnixMs, original.startedBootMs, *wall, *boot))
         return std::nullopt;
     auto *current = impl_->attempt(bound);
     if (!current)

@@ -58,6 +58,45 @@ pub fn protect_before_native_sleep() -> Result<(), String> {
 }
 
 impl NativeSessionChannel {
+    /// Continue the already durably reserved operation once. The supplied
+    /// digests correlate Control's retained decision; they grant no authority.
+    pub fn handoff_display_continuation(
+        &self,
+        continuation: &crate::NativeDisplayContinuation,
+    ) -> Result<u32, String> {
+        self.require_role(NativeSessionRole::Control)?;
+        continuation.validate_at(crate::owner::unix_ms()?)?;
+        let started = Instant::now();
+        let identity = self.trusted_service(NativeSessionRole::Executor, started)?;
+        continuation.validate_at(crate::owner::unix_ms()?)?;
+        let reply = self.call_with_budget(
+            &identity.sender,
+            "/org/linura/Executor/Session1",
+            "org.linura.Executor.Session1",
+            "ContinueDisplayLayout",
+            &continuation.wire(),
+            Duration::from_secs(10),
+        )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.sender)
+            || reply.body().signature().to_string() != "u"
+        {
+            return Err("display executor decision reply identity or signature differs".into());
+        }
+        let (phase,): (u32,) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "display executor decision reply is malformed")?;
+        if self.trusted_service(NativeSessionRole::Executor, Instant::now())? != identity
+            || !(2..=6).contains(&phase)
+        {
+            return Err("display executor decision outcome is indeterminate; no retry".into());
+        }
+        Ok(phase)
+    }
+
     fn trusted_service(
         &self,
         role: NativeSessionRole,

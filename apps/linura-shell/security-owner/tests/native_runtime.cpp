@@ -555,6 +555,7 @@ int main(int argc, char **argv)
     assert(NativeRuntime::staticMetaObject.indexOfMethod("retainedVerifiedRelease()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("observeDisplayAttempt()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("dispatchPreparedDisplay()") == -1);
+    assert(NativeRuntime::staticMetaObject.indexOfMethod("continuePreparedDisplay()") == -1);
 
     const int index = NativeEndpoint::staticMetaObject.indexOfClassInfo("D-Bus Introspection");
     assert(index >= 0);
@@ -577,7 +578,8 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 17 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 18 && signals == 1 && annotations == 3);
+    assert(introspection.contains(QStringLiteral("ContinuePreparedDisplay")));
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));
