@@ -30,6 +30,7 @@ pub struct ReadOnlyPolkitCandidate {
     pub pid: u32,
     pub session: ReadOnlySessionScope,
     pub polkit_owner: String,
+    pub caller_mount_namespace: crate::removable_storage_namespace::ReadOnlyCallerMountNamespace,
     pub action: StorageAction,
 }
 
@@ -134,6 +135,7 @@ pub fn inspect_polkit_storage_subject(
     let started = Instant::now();
     let connection = connect_native_bus()?;
     let first = scope_for_peer(&connection, unique_name, uid, pid, session)?;
+    let namespace = crate::removable_storage_namespace::inspect_same_mount_namespace(pid)?;
     let bus = system_bus(&connection)?;
     let polkit_owner = root_owner(&bus, POLKIT)?;
     let authority = Proxy::new(
@@ -163,7 +165,11 @@ pub fn inspect_polkit_storage_subject(
         ));
     }
     let repeated = scope_for_peer(&connection, unique_name, uid, pid, session)?;
-    if first != repeated || root_owner(&bus, POLKIT)? != polkit_owner || started.elapsed() >= BUDGET
+    let fresh_namespace = crate::removable_storage_namespace::inspect_same_mount_namespace(pid)?;
+    if first != repeated
+        || namespace != fresh_namespace
+        || root_owner(&bus, POLKIT)? != polkit_owner
+        || started.elapsed() >= BUDGET
     {
         return Err(ProviderError::Unavailable(
             "PolicyKit owner or authenticated caller changed during read".into(),
@@ -175,6 +181,7 @@ pub fn inspect_polkit_storage_subject(
         pid,
         session: repeated,
         polkit_owner: polkit_owner.clone(),
+        caller_mount_namespace: fresh_namespace,
         action,
     })
 }

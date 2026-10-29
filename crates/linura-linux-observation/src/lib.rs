@@ -5,6 +5,7 @@ pub mod platform_discovery;
 pub mod removable_storage;
 pub mod removable_storage_kernel;
 pub mod removable_storage_kernel_device;
+pub mod removable_storage_namespace;
 pub mod removable_storage_native;
 pub mod removable_storage_polkit;
 pub use logind::{
