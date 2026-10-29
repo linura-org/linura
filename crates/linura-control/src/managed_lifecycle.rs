@@ -487,6 +487,7 @@ where
     authority: DurableAuthorityControl<S>,
     request_journal: Option<Box<dyn ApprovedRequestJournal>>,
     protective_settings: Option<crate::ProtectiveLockSettingsControl>,
+    display_keep_reviews: BTreeMap<TransactionId, display::RetainedKeepReview>,
 }
 
 impl<S> ManagedLifecycleControl<S>
@@ -509,6 +510,7 @@ where
             authority: DurableAuthorityControl::new(store, authority_signer)?,
             request_journal: None,
             protective_settings: None,
+            display_keep_reviews: BTreeMap::new(),
         })
     }
 

@@ -142,6 +142,21 @@ must match that exact challenge. After interaction, Control acquires a newer
 attempt sample and independently rechecks the desired layout before keeping it.
 Changed facts, cancellation, proof substitution and expiration prevent dispatch.
 
+Keep also revalidates the **original ChangeProposed canonical plan**, its trusted
+operation registration, registered risk floor and source classifier revision,
+current policy review, and live original administrator approval. This check runs
+before interaction, after fresh native/layout verification, and after the durable
+decision append before continuation. Planning against the already applied layout
+would produce NoChange and cannot substitute for the original mutation review.
+The bounded process-local review retains no observation envelope, executor handle,
+permit or signer; it cannot issue another apply. Expired/revoked approval, changed
+principal/policy/risk/review, missing retention or clock rollback deny Keep.
+Losing this review or its approval state at Control restart leaves observation
+and independently scoped restoration available; it cannot reconstruct Keep
+authority from durable journal data. Native timeout restoration is still required.
+The display risk binding records both the registered-floor and source classifier
+revision. Existing persisted bindings are not rewritten or silently adopted.
+
 Decision phases with consumed protected proof use the explicitly versioned
 `linura.display.recovery-protected-decision.v2` framing around the unchanged v1
 phase bytes and challenge digest. Other phases retain their existing encoding.

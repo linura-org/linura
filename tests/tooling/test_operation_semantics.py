@@ -556,6 +556,25 @@ class OperationSemanticsContractTests(unittest.TestCase):
                 )
             )
 
+    def test_display_keep_cannot_drop_original_policy_approval_revalidation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_fixture(root)
+            path = root / "crates/linura-control/src/durable_authority.rs"
+            text = path.read_text(encoding="utf-8")
+            original = "original.revalidate(principal, floor, &self.approvals)"
+            self.assertEqual(text.count(original), 1)
+            path.write_text(text.replace(original, "Ok(())", 1), encoding="utf-8")
+            self.assertTrue(
+                any(
+                    "durable authority handoff boundary missing required fragment"
+                    in failure
+                    for failure in check_operation_semantics.validate(root)
+                )
+            )
+
     def test_durable_authority_cannot_drop_floored_policy_review(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

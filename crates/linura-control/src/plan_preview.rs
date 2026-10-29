@@ -876,7 +876,7 @@ fn estimate_input_bytes(input: &NormalizedPlanInput) -> usize {
         )
 }
 
-fn estimate_plan_bytes(plan: &ReconciliationPlan) -> usize {
+pub(crate) fn estimate_plan_bytes(plan: &ReconciliationPlan) -> usize {
     plan.id
         .as_str()
         .len()

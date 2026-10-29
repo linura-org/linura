@@ -804,6 +804,15 @@ for the current implementation status.
   retire the recovery fence unless the native ownership check also passes.
   This in-process checkpoint cannot survive compositor death or substitute for
   the still-required durable last-known-good/restart reconciliation path.
+- Keep cannot downgrade the original layout mutation to a NoChange policy
+  subject after the desired layout is visible. Control retains a bounded
+  historical canonical review with no observation or execution capability and
+  rechecks current operation registration, exact original risk/source revision,
+  policy and approval revocation/expiry before interaction, after independent
+  verification and after durable decision I/O. Lost review/approval at restart
+  denies Keep rather than reconstructing authority from the journal; observation
+  and independently scoped restoration remain available. A denied post-journal
+  decision is observe-only and cannot be replayed as a continuation.
 - Prepared display transport accepts only the independently supervised Control
   sender and separate default-deny executor action. The complete intent must
   reproduce the sealed effect/binding. Root's strict native decoder and the

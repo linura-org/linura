@@ -213,6 +213,109 @@ pub struct PreparedDurableAuthority {
     handed_off: bool,
 }
 
+/// Historical canonical review material after its dispatch permit was spent.
+/// This owns no observation envelope, permit, signer or effect handle. Its sole
+/// use is to refuse keep when CURRENT policy/risk/approval no longer matches the
+/// original mutation. Losing it at restart cannot reconstruct review authority.
+#[derive(Debug)]
+pub(crate) struct DisplayKeepReview {
+    plan: linura_planner::ReconciliationPlan,
+    binding: AuthorityBinding,
+    risk_floor: TrustedRiskFloor,
+    approval_evidence_id: ApprovalEvidenceId,
+    transaction_id: TransactionId,
+    generation: u64,
+}
+impl DisplayKeepReview {
+    fn revalidate(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        floor: TrustedRiskFloor,
+        approvals: &crate::ApprovalReviewControl,
+    ) -> Result<(), DurableAuthorityError> {
+        if principal.as_str() != self.binding.principal().as_str()
+            || self.risk_floor != floor
+            || self.plan.status != linura_planner::PlanStatus::ChangeProposed
+            || self.plan.provider.as_str() != linura_observation::DISPLAY_PROVIDER
+            || self.plan.observation_capability.as_str()
+                != linura_observation::DISPLAY_OUTPUTS_CAPABILITY
+            || !matches!(self.plan.changes.as_slice(), [change] if change.key == "layout")
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        let classification = classify_plan_risk_with_floor(&self.plan, floor.risk, floor.rule_id);
+        let risk = risk_provenance_for_plan(&self.plan, &classification)?;
+        if risk.risk != self.binding.trusted_risk()
+            || risk.revision != self.binding.risk_policy_revision()
+            || risk.rule_ids != self.binding.risk_rule_ids()
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        let review = review_plan_with_classification(principal, &self.plan, classification)
+            .map_err(|error| DurableAuthorityError::Preview(format!("{error:?}")))?;
+        if digest_review(&review)? != *self.binding.review_digest()
+            || review.binding().policy_id != *self.binding.policy_id()
+            || review.binding().policy_revision_id != *self.binding.policy_revision_id()
+            || !matches!(
+                review.decision(),
+                PolicyDecision::RequireApproval {
+                    class: ApprovalClass::Administrator,
+                    ..
+                }
+            )
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        let validation = approvals
+            .validate(&self.approval_evidence_id, &review)
+            .map_err(map_approval_error)?;
+        if validation != ApprovalValidation::Satisfied {
+            return Err(DurableAuthorityError::ApprovalUnsatisfied(validation));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn estimated_bytes(prepared: &PreparedDurableAuthority) -> usize {
+        crate::plan_preview::estimate_plan_bytes(prepared.plan())
+            .saturating_add(prepared.binding().canonical_bytes().len().saturating_mul(2))
+            .saturating_add(1024)
+    }
+
+    pub(crate) fn from_spent(
+        prepared: PreparedDurableAuthority,
+    ) -> Result<Self, DurableAuthorityError> {
+        if !prepared.handed_off
+            || prepared.candidate.protective.is_some()
+            || prepared.candidate.plan.provider.as_str() != linura_observation::DISPLAY_PROVIDER
+            || prepared.candidate.plan.observation_capability.as_str()
+                != linura_observation::DISPLAY_OUTPUTS_CAPABILITY
+            || prepared.candidate.plan.status != linura_planner::PlanStatus::ChangeProposed
+            || !matches!(prepared.candidate.plan.changes.as_slice(), [change] if change.key == "layout")
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        Ok(Self {
+            plan: prepared.candidate.plan,
+            binding: prepared.binding,
+            risk_floor: prepared
+                .candidate
+                .risk_floor
+                .ok_or(DurableAuthorityError::AuthorityChanged)?,
+            approval_evidence_id: prepared
+                .approval_evidence_id
+                .ok_or(DurableAuthorityError::MissingApproval)?,
+            transaction_id: prepared.snapshot.transaction_id,
+            generation: prepared.snapshot.current_generation,
+        })
+    }
+    pub(crate) fn plan(&self) -> &linura_planner::ReconciliationPlan {
+        &self.plan
+    }
+    pub(crate) fn risk(&self) -> RiskClass {
+        self.binding.trusted_risk()
+    }
+}
+
 impl PreparedDurableAuthority {
     #[must_use]
     pub fn snapshot(&self) -> &TransactionSnapshot {
@@ -340,6 +443,35 @@ impl<S> DurableAuthorityControl<S>
 where
     S: TransactionStore,
 {
+    /// Re-review ONLY the original canonical mutation. Its historical evidence
+    /// is not marked current, re-observed, re-prepared or converted into a new
+    /// permit. The display controller separately requires newer native attempt,
+    /// layout/coverage and protected-decision facts before any continuation.
+    pub(crate) fn revalidate_display_keep(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+        request: &PlanDesiredStateRequest,
+        original: &DisplayKeepReview,
+        floor: TrustedRiskFloor,
+        expected: &TransactionSnapshot,
+    ) -> Result<(), DurableAuthorityError> {
+        let _now = self.authority_now_unix_ms()?;
+        let current = self.transactions.snapshot(&original.transaction_id)?;
+        if current != *expected
+            || current.state != TransactionState::Indeterminate
+            || current.current_generation != original.generation
+            || current.binding_digest != *original.binding.digest()
+            || principal.as_str() != original.binding.principal().as_str()
+            || current.principal != *original.binding.principal()
+            || current.request_id != request.request_id
+            || digest_request(request)? != *original.binding.request_digest()
+            || original.risk_floor != floor
+        {
+            return Err(DurableAuthorityError::AuthorityChanged);
+        }
+        original.revalidate(principal, floor, &self.approvals)
+    }
+
     pub fn new(
         store: S,
         authority_signer: TransactionAuthoritySigner,
@@ -422,7 +554,7 @@ where
         }
 
         let classification = classify_candidate_risk(&plan, risk_floor);
-        let risk = risk_provenance(&classification)?;
+        let risk = risk_provenance_for_plan(&plan, &classification)?;
         let review = if let Some(context) = &protective {
             crate::policy_review::review_protective_plan(&principal, &plan, classification, context)
         } else {
@@ -963,7 +1095,7 @@ where
                 }
 
                 let classification = classify_candidate_risk(&plan, risk_floor);
-                let risk = risk_provenance(&classification)?;
+                let risk = risk_provenance_for_plan(&plan, &classification)?;
                 let review = review_plan_with_classification(&principal, &plan, classification)
                     .map_err(|error| DurableAuthorityError::Preview(format!("{error:?}")))?;
                 if review.subject().prospective_risk() != risk.risk {
@@ -1216,7 +1348,7 @@ where
         }
 
         let classification = classify_candidate_risk(&candidate.plan, candidate.risk_floor);
-        let risk = risk_provenance(&classification)?;
+        let risk = risk_provenance_for_plan(&candidate.plan, &classification)?;
         if risk != candidate.risk {
             return Err(DurableAuthorityError::AuthorityChanged);
         }
@@ -1311,6 +1443,22 @@ fn classify_candidate_risk(
         || classify_plan_risk(plan),
         |floor| classify_plan_risk_with_floor(plan, floor.risk, floor.rule_id),
     )
+}
+
+fn risk_provenance_for_plan(
+    plan: &linura_planner::ReconciliationPlan,
+    classification: &RiskClassification,
+) -> Result<RiskProvenance, DurableAuthorityError> {
+    let mut risk = risk_provenance(classification)?;
+    if plan.provider.as_str() == linura_observation::DISPLAY_PROVIDER
+        && risk.revision == crate::risk_classification::REGISTERED_OPERATION_RISK_POLICY_REVISION
+    {
+        // Preserve the actual source classifier revision as well as the
+        // registered-floor revision, even when risk/rule names do not change.
+        let source = risk_provenance(&classify_plan_risk(plan))?;
+        risk.revision = format!("{}/{}", risk.revision, source.revision);
+    }
+    Ok(risk)
 }
 
 fn risk_provenance(
@@ -1695,3 +1843,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "durable_authority/display_keep_tests.rs"]
+mod display_keep_tests;

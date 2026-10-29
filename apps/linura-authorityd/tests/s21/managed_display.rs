@@ -667,75 +667,126 @@ fn a_retained_human_proof_cannot_authorize_a_new_probe_or_opposite_decision() {
 }
 
 #[test]
-fn lost_apply_reply_and_restart_never_reapply_then_confirmation_commits_once() {
-    let database = TestDatabase::new();
-    let machine = Arc::new(Mutex::new(Machine {
-        lose_apply_reply: true,
-        lose_decision_reply: true,
-        ..Machine::default()
-    }));
-    let mut port = Port(machine.clone());
-    let mut verifier = Verifier(machine.clone());
-    let request = display_request("lost-reply");
-    let mut control = open(database.path(), &machine, 0);
-    assert_eq!(
-        value(control.begin_display_layout(
-            principal(),
-            actor(true),
-            request.clone(),
-            &approval(),
-            &mut port,
-            &mut verifier
-        ))
-        .state,
-        DisplayLayoutState::AwaitingConfirmation
-    );
-    drop(control);
-    let mut control = open(database.path(), &machine, 0);
-    assert_eq!(
-        value(control.begin_display_layout(
-            principal(),
-            actor(true),
-            request.clone(),
-            &Deny,
-            &mut port,
-            &mut verifier
-        ))
-        .state,
-        DisplayLayoutState::AwaitingConfirmation
-    );
-    assert_eq!(
-        value(control.decide_display_layout(
+fn lost_apply_reply_never_replays_and_restart_cannot_reconstruct_keep_review() {
+    for recovery in ["keep", "timer", "revert"] {
+        let restart = recovery != "keep";
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine {
+            lose_apply_reply: true,
+            lose_decision_reply: true,
+            ..Machine::default()
+        }));
+        let mut port = Port(machine.clone());
+        let mut verifier = Verifier(machine.clone());
+        let request = display_request("lost-reply");
+        let mut control = open(database.path(), &machine, 0);
+        assert_eq!(
+            value(control.begin_display_layout(
+                principal(),
+                actor(true),
+                request.clone(),
+                &approval(),
+                &mut port,
+                &mut verifier
+            ))
+            .state,
+            DisplayLayoutState::AwaitingConfirmation
+        );
+        if restart {
+            drop(control);
+            control = open(database.path(), &machine, 0);
+        }
+        assert_eq!(
+            value(control.begin_display_layout(
+                principal(),
+                actor(true),
+                request.clone(),
+                &Deny,
+                &mut port,
+                &mut verifier
+            ))
+            .state,
+            DisplayLayoutState::AwaitingConfirmation
+        );
+        let human = Decision::approve(&machine);
+        let decision = control.decide_display_layout(
             principal(),
             actor(true),
             &request.request_id,
             DisplayContinuationAction::Confirm,
-            &Decision::approve(&machine),
+            &human,
             &mut port,
-            &mut verifier
-        ))
-        .state,
-        DisplayLayoutState::Confirmed
-    );
-    drop(control);
-    let mut control = open(database.path(), &machine, 0);
-    assert_eq!(
-        value(control.decide_display_layout(
-            principal(),
-            actor(true),
-            &request.request_id,
-            DisplayContinuationAction::Revert,
-            &Decision::approve(&machine),
-            &mut port,
-            &mut verifier
-        ))
-        .state,
-        DisplayLayoutState::Confirmed
-    );
-    let m = machine
-        .lock()
-        .unwrap_or_else(|_| unreachable!("fixture poisoned"));
-    assert_eq!((m.applies, m.decisions), (1, 1));
+            &mut verifier,
+        );
+        let expected = if restart {
+            assert!(
+                matches!(decision, Err(ManagedLifecycleError::ApprovalBoundary(ref detail)) if detail.contains("original display review is unavailable"))
+            );
+            assert_eq!(human.calls.load(Ordering::SeqCst), 0);
+            if recovery == "revert" {
+                assert_eq!(
+                    value(control.decide_display_layout(
+                        principal(),
+                        actor(true),
+                        &request.request_id,
+                        DisplayContinuationAction::Revert,
+                        &Decision::approve(&machine),
+                        &mut port,
+                        &mut verifier,
+                    ))
+                    .state,
+                    DisplayLayoutState::Restored
+                );
+            } else {
+                // Simulate the separately owned native timer's restored facts.
+                // Restart may observe/retire them, never manufacture a keep review.
+                let mut m = machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+                assert_eq!((m.applies, m.decisions), (1, 0));
+                m.desired = false;
+                m.state = Some("restored");
+            }
+            assert_eq!(
+                value(control.display_layout_status(
+                    principal(),
+                    actor(true),
+                    &request.request_id,
+                    &mut port,
+                    &mut verifier
+                ))
+                .state,
+                DisplayLayoutState::Restored
+            );
+            DisplayLayoutState::Restored
+        } else {
+            assert_eq!(value(decision).state, DisplayLayoutState::Confirmed);
+            assert_eq!(human.calls.load(Ordering::SeqCst), 1);
+            DisplayLayoutState::Confirmed
+        };
+        drop(control);
+        let mut control = open(database.path(), &machine, 0);
+        assert_eq!(
+            value(control.decide_display_layout(
+                principal(),
+                actor(true),
+                &request.request_id,
+                DisplayContinuationAction::Revert,
+                &Decision::approve(&machine),
+                &mut port,
+                &mut verifier
+            ))
+            .state,
+            expected
+        );
+        let m = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(
+            (m.applies, m.decisions),
+            (1, usize::from(recovery != "timer"))
+        );
+    }
 }
 
 #[test]
