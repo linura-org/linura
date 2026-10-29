@@ -94,7 +94,7 @@ fn encoded_device_number(major: u32, minor: u32) -> u64 {
     ((major & 0xfff) << 8) | (minor & 0xff) | ((major & !0xfff) << 32) | ((minor & !0xff) << 12)
 }
 
-fn sysfs_device(path: &Path) -> Result<u64, ProviderError> {
+pub(crate) fn sysfs_device(path: &Path) -> Result<u64, ProviderError> {
     let device = read_bounded(&path.join("dev"), MAX_SYSFS_FIELD_BYTES)?;
     let (major, minor) = device
         .trim_end_matches('\n')
@@ -340,6 +340,9 @@ pub fn inspect_kernel_group(
             ));
         }
     }
+    // Independently check the complete kernel USB physical-device group,
+    // not only the provider's SiblingId and selected partition list.
+    crate::removable_storage_usb_group::review_whole_usb_device(&blocks)?;
     blocks.sort_by(|a, b| a.block_path.cmp(&b.block_path));
     Ok(KernelDriveGroupEvidence {
         selected_drive: selected_drive.into(),
