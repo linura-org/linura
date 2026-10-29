@@ -56,6 +56,7 @@ class AuthenticationAgent final : public QObject
     [[nodiscard]] bool armDisplay(const NativeApprovalScope &scope,
                                   const NativeDisplayPromptStatus &presentation,
                                   quint64 remainingMs, const NativePeerIdentity &controlPeer);
+    [[nodiscard]] bool bindDisplayPromptPresentation(PolkitConversation::PromptPresentation);
     [[nodiscard]] bool consume(const NativeApprovalScope &scope);
     [[nodiscard]] bool advanceIdentity(const NativeLockIdentity &identity);
     // Same-UID native subject query, with NO interaction or custom details.
@@ -85,6 +86,8 @@ class AuthenticationAgent final : public QObject
     struct Registration;
     struct IdentitySelection;
     void selectIdentity(quint32 uid);
+    void prepareIdentityPresentation(quint64 token);
+    void identityPresented(const NativeApprovalScope &, quint64 token, bool ready);
     void finishNative(bool success);
 
     NativeLockIdentity identity_;
@@ -99,6 +102,8 @@ class AuthenticationAgent final : public QObject
     quint32 compositorPid_ = 0;
     quint64 compositorStartTicks_ = 0;
     std::optional<NativeApprovalScope> scope_;
+    PolkitConversation::PromptPresentation displayPresentation_;
+    std::optional<quint64> identityPresentationToken_;
     GTask *task_ = nullptr;
     bool deniedPresentation_ = false;
     QTimer eventTimer_;

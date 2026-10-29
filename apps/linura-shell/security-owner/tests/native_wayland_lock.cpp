@@ -25,6 +25,7 @@
 #include <cassert>
 #include <chrono>
 #include <functional>
+#include <poll.h>
 #include <map>
 #include <memory>
 #include <string>
@@ -574,6 +575,12 @@ struct WireServer final
     }
     void command(unsigned char value)
     {
+        if (scenario == Case::DisplayPrompt && (value == 99 || value == 100)) {
+            stroke(value == 99 ? 108U : 28U); // Native Down / Return edges.
+            wl_display_flush_clients(display);
+            assert(send(commands, &value, 1, MSG_NOSIGNAL) == 1);
+            return;
+        }
         if (scenario == Case::SecurityTransitionFrames) {
             if (value == 1) {
                 assert(wl_global_create(display, &wl_output_interface, 3, this, bindOutput));
@@ -1231,21 +1238,84 @@ void client(Case scenario, int descriptor, int commands)
             assert(status->epoch == 9 && backend.requestedSecure() == locked &&
                    backend.secureCoverage() == locked && gates == (locked ? 1U : 0U));
             const auto firstEpoch = status->epoch;
+            const auto prepared = entry->prepareNativePrompt(NativePromptKind::Password, 1, 1000);
+            assert(prepared && entry->preparedNativePromptMatches(*prepared));
+            assert(!entry->acceptsInput());
             assert(!backend.refreshProtectedDisplay(prompt, firstEpoch - 1));
             if (scenario == Case::DisplayPromptRevisionDrift) {
                 (void)backend.refreshProtectedDisplay(prompt, firstEpoch);
                 assert(!backend.protectedDisplayStatus());
                 assert(!backend.consumeProtectedDisplay(prompt, firstEpoch + 2));
+                assert(!entry->preparedNativePromptMatches(*prepared));
+                assert(!entry->activatePreparedNativePrompt(*prepared));
                 assert(!backend.requestedSecure() && !backend.secureCoverage() && gates == 0);
                 return;
             }
             assert(backend.refreshProtectedDisplay(prompt, firstEpoch));
+            assert(entry->preparedNativePromptMatches(*prepared) && !entry->acceptsInput());
             assert(!backend.consumeProtectedDisplay(prompt, firstEpoch));
             waitUntil([&] {
                 status = backend.protectedDisplayStatus();
                 return status && status->phase == NativeDisplayPromptStatus::Phase::Ready &&
                        status->epoch > firstEpoch && backend.protectedInputFocused();
             });
+            assert(entry->preparedNativePromptMatches(*prepared));
+            assert(entry->activatePreparedNativePrompt(*prepared));
+            assert(entry->acceptsInput() && !entry->activatePreparedNativePrompt(*prepared));
+            entry->cancelNativePrompt();
+            if (scenario == Case::DisplayPrompt) {
+                const auto selection = entry->prepareNativeIdentitySelection({0, 1001, 1002});
+                assert(selection);
+                const auto present = [&](quint64 token) {
+                    const auto before = backend.protectedDisplayStatus();
+                    assert(before && before->phase == NativeDisplayPromptStatus::Phase::Ready);
+                    assert(backend.refreshProtectedDisplay(prompt, before->epoch));
+                    waitUntil([&] {
+                        status = backend.protectedDisplayStatus();
+                        return status && status->phase == NativeDisplayPromptStatus::Phase::Ready &&
+                               status->epoch > before->epoch && backend.protectedInputFocused();
+                    });
+                    assert(entry->preparedNativePromptMatches(token));
+                    assert(entry->activatePreparedNativePrompt(token));
+                };
+                present(*selection);
+                std::optional<quint64> revision;
+                unsigned selected = 0;
+                quint32 selectedUid = 9999;
+                const auto revisionConnection =
+                    QObject::connect(entry, &SecretEntry::identityPresentationRequested, entry,
+                                     [&](quint64 token) { revision = token; });
+                const auto selectedConnection = QObject::connect(
+                    entry, &SecretEntry::identitySelected, entry, [&](quint32 uid) {
+                        ++selected;
+                        selectedUid = uid;
+                        entry->cancelNativePrompt();
+                    });
+                const auto sendCommand = [&](unsigned char value) {
+                    assert(write(commands, &value, 1) == 1);
+                    pollfd ready{commands, POLLIN, 0};
+                    assert(poll(&ready, 1, 1000) == 1 && ready.revents == POLLIN);
+                    unsigned char acknowledged = 0;
+                    assert(recv(commands, &acknowledged, 1, 0) == 1 && acknowledged == value);
+                    // Server has flushed the actual key edges before this
+                    // same-connection sync. No delayed key can cross the next
+                    // configure and be mistaken for post-presentation input.
+                    assert(waitForNativeWaylandReady(display, 1000ms));
+                };
+                sendCommand(99);
+                waitUntil([&] { return revision.has_value(); });
+                assert(*revision > *selection && entry->preparedNativePromptMatches(*revision));
+                assert(entry->nativeAccessibleName().contains(QStringLiteral("UID 1001")));
+                assert(!entry->acceptsInput() && selected == 0);
+                sendCommand(100);
+                assert(selected == 0 && unlockRequests == 0 && !entry->acceptsInput());
+                present(*revision);
+                sendCommand(100);
+                waitUntil([&] { return selected != 0; });
+                assert(selected == 1 && selectedUid == 1001 && !entry->acceptsInput());
+                QObject::disconnect(revisionConnection);
+                QObject::disconnect(selectedConnection);
+            }
             if (scenario == Case::DisplayPromptStale)
                 assert(!backend.consumeProtectedDisplay(prompt, status->epoch - 1));
             else {

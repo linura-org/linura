@@ -208,6 +208,7 @@ class NativeWaylandLock::Impl final
     quint64 protectedTopology = 0;
     quint64 protectedRevisionEpoch = 0;
     bool protectedPollPending = false, protectedConsumed = false;
+    bool protectedRevisionPending = false;
     std::map<quint64, std::unique_ptr<Output>> protectedOutputs;
     QTimer protectedTimer;
 
@@ -243,7 +244,7 @@ class NativeWaylandLock::Impl final
             keyboard->resetFocus();
         protectedStatus.reset();
         protectedScope.reset();
-        protectedPollPending = protectedConsumed = false;
+        protectedPollPending = protectedConsumed = protectedRevisionPending = false;
         protectedOutputs.clear();
         if (protectedInteraction)
             linura_protected_display_interaction_v1_destroy(protectedInteraction);
@@ -299,11 +300,13 @@ class NativeWaylandLock::Impl final
                 return;
             }
             if (self.protectedStatus && self.protectedStatus->epoch != epoch)
-                self.invalidateOutputConfiguration();
+                self.invalidateOutputConfiguration(self.protectedRevisionPending);
             self.protectedStatus = NativeDisplayPromptStatus{
                 topology, epoch, static_cast<NativeDisplayPromptStatus::Phase>(phase)};
             self.protectedStatusBootMs = self.protectedLast.bootMs;
             self.protectedPollPending = false;
+            if (phase == 1)
+                self.protectedRevisionPending = false;
             if (phase == 3)
                 self.cancelProtected();
         });
@@ -320,7 +323,7 @@ class NativeWaylandLock::Impl final
                 self.cancelProtected();
                 return;
             }
-            self.invalidateOutputConfiguration();
+            self.invalidateOutputConfiguration(self.protectedRevisionPending);
             self.protectedStatus.reset();
             output.serial = serial;
             output.width = width;
@@ -351,13 +354,13 @@ class NativeWaylandLock::Impl final
     bool acquisitionAllSurfacesFlushed = false;
     quint64 inputGeneration = 1;
 
-    void invalidateOutputConfiguration()
+    void invalidateOutputConfiguration(bool preservePreparedPrompt = false)
     {
         if (inputGeneration == std::numeric_limits<quint64>::max())
             failClosed();
         ++inputGeneration;
         if (keyboard)
-            keyboard->invalidateOutputConfiguration();
+            keyboard->invalidateOutputConfiguration(preservePreparedPrompt);
     }
     bool inputCovered() const
     {
@@ -436,7 +439,7 @@ class NativeWaylandLock::Impl final
                     output->flushedConfigureGeneration = output->committedConfigureGeneration;
             }
             if (keyboard)
-                keyboard->refreshProtectedFocus();
+                keyboard->refreshProtectedFocus(protectedRevisionPending);
             if (acquisitionFrameQueued && !acquisitionFrameFlushed) {
                 acquisitionFrameFlushed = true;
                 reportLockProgress(LockProgress::FrameFlushed);
@@ -1002,7 +1005,7 @@ std::optional<NativeDisplayPromptStatus> NativeWaylandLock::protectedDisplayStat
         !impl_->protectedInteraction || !impl_->protectedWindow() || !impl_->protectedStatus)
         return std::nullopt;
     if (impl_->keyboard)
-        impl_->keyboard->refreshProtectedFocus();
+        impl_->keyboard->refreshProtectedFocus(impl_->protectedRevisionPending);
     return impl_->protectedStatus;
 }
 bool NativeWaylandLock::refreshProtectedDisplay(const NativeDisplayPromptScope &scope,
@@ -1020,7 +1023,8 @@ bool NativeWaylandLock::refreshProtectedDisplay(const NativeDisplayPromptScope &
     if (outputs == 0 || originalEpoch >= std::numeric_limits<quint64>::max() - outputs - 1)
         return false;
     impl_->protectedRevisionEpoch = originalEpoch + outputs;
-    impl_->invalidateOutputConfiguration();
+    impl_->protectedRevisionPending = true;
+    impl_->invalidateOutputConfiguration(true);
     impl_->protectedStatus.reset();
     linura_protected_display_interaction_v1_refresh_presentation(impl_->protectedInteraction);
     impl_->flush();
@@ -1271,7 +1275,8 @@ bool NativeWaylandLock::bindProtectedInput(SecretEntry &entry, UnlockRequest req
     // Publish the same fresh native focus to protected accessibility metadata.
     connect(
         this, &NativeManagedLockBackend::nativeStateChanged, this,
-        [this] { impl_->keyboard->refreshProtectedFocus(); }, Qt::DirectConnection);
+        [this] { impl_->keyboard->refreshProtectedFocus(impl_->protectedRevisionPending); },
+        Qt::DirectConnection);
     return true;
 }
 void NativeWaylandLock::refreshNativeState()

@@ -53,11 +53,11 @@ class NativeKeyboard final
     void forgetSurface(wl_surface *surface);
     void resetFocus();
     // Recheck only the bound compositor focus and coverage; never synthesize input.
-    void refreshProtectedFocus();
+    void refreshProtectedFocus(bool preservePreparedPrompt = false);
     // Drop the live prompt/compose/click state without inventing a new enter
     // or forgetting physically held keys. Coverage may settle on the same
     // native focus, but an old response or held submit cannot migrate there.
-    void invalidateOutputConfiguration();
+    void invalidateOutputConfiguration(bool preservePreparedPrompt = false);
     void paintPointer(wl_surface *surface, QImage &frame) const;
     // Private pre-lock confirmation only. No text is decoded or delivered while
     // this target is selected. A new unmodified Enter/Escape press is required;

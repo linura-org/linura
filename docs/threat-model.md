@@ -1061,3 +1061,13 @@ revision. Consumed presentation can remain covered while a prepared handoff is
 pending, without rearming one-use proof or extending clocks. This mechanism does
 not complete production PAM presentation, receipt redemption, cross-compositor
 restoration or adversarial native qualification, and does not activate mutations.
+
+Prepared S21 authentication metadata accepts no response or primary-action input.
+Native-only activation compares the exact field token and original BOOTTIME
+window after protected presentation. Expected revisions preserve metadata only;
+actual focus loss and ordinary cancellation still wipe it. Delayed/reentrant
+callbacks cannot activate a replacement prompt, and a later pending MFA prompt
+prevents premature native authentication success. Official administrator identity
+selection remains explicit and bounded, with a new protected revision for each
+selected-UID change. This does not convert presentation callbacks into approval,
+permit or effect authority, and does not activate the unfinished production path.

@@ -198,6 +198,8 @@ AuthenticationAgent::AuthenticationAgent(NativeLockIdentity identity,
             &AuthenticationAgent::finishNative);
     if (entry_) {
         connect(entry_, &SecretEntry::identitySelected, this, &AuthenticationAgent::selectIdentity);
+        connect(entry_, &SecretEntry::identityPresentationRequested, this,
+                &AuthenticationAgent::prepareIdentityPresentation);
         connect(entry_, &SecretEntry::cancellationRequested, this, [this] {
             if (identitySelection_)
                 cancelInteraction();
@@ -222,8 +224,12 @@ AuthenticationAgent::AuthenticationAgent(NativeLockIdentity identity,
             deniedPresentation_ = false;
             Q_EMIT presentationChanged();
         }
-        if (identitySelection_ && (!task_ || !entry_ || !entry_->acceptsInput() ||
-                                   g_cancellable_is_cancelled(g_task_get_cancellable(task_)))) {
+        if (identitySelection_ &&
+            (!task_ || !entry_ ||
+             (identityPresentationToken_
+                  ? !entry_->preparedNativePromptMatches(*identityPresentationToken_)
+                  : !entry_->acceptsInput()) ||
+             g_cancellable_is_cancelled(g_task_get_cancellable(task_)))) {
             finishNative(false);
             return;
         }
@@ -378,6 +384,7 @@ bool AuthenticationAgent::armDisplay(const NativeApprovalScope &scope,
                                      quint64 remainingMs, const NativePeerIdentity &controlPeer)
 {
     if (QThread::currentThread() != thread() || !registered() || scope_ || !peerGuard_ ||
+        !displayPresentation_ ||
         !peerGuard_->stillCurrent(NativePeerPurpose::ControlApproval, controlPeer) ||
         !approval_.beginDisplay(scope, presentation, remainingMs))
         return false;
@@ -385,6 +392,17 @@ bool AuthenticationAgent::armDisplay(const NativeApprovalScope &scope,
     controlPeer_ = controlPeer;
     deniedPresentation_ = false;
     Q_EMIT presentationChanged();
+    return true;
+}
+
+bool AuthenticationAgent::bindDisplayPromptPresentation(
+    PolkitConversation::PromptPresentation presentation)
+{
+    if (QThread::currentThread() != thread() || !registered() || scope_ || task_ ||
+        displayPresentation_ || !presentation ||
+        !conversation_.bindDisplayPromptPresentation(presentation))
+        return false;
+    displayPresentation_ = std::move(presentation);
     return true;
 }
 
@@ -563,7 +581,13 @@ void AuthenticationAgent::initiateNative(PolkitAgentListener *, const char *acti
         selection->identities.append({uid, POLKIT_IDENTITY(g_object_ref(item->data))});
     }
     identitySelection_ = std::move(selection);
-    if (!entry_->beginNativeIdentitySelection(*choices))
+    if (scope_->isDisplay()) {
+        const auto token = entry_->prepareNativeIdentitySelection(*choices);
+        if (!token)
+            finishNative(false);
+        else
+            prepareIdentityPresentation(*token);
+    } else if (!entry_->beginNativeIdentitySelection(*choices))
         finishNative(false);
     Q_EMIT presentationChanged();
 }
@@ -571,7 +595,7 @@ void AuthenticationAgent::initiateNative(PolkitAgentListener *, const char *acti
 void AuthenticationAgent::selectIdentity(quint32 uid)
 {
     if (!identitySelection_ || !scope_ || !task_ || !entry_ || !peerGuard_ || !polkitPeer_ ||
-        !controlPeer_ || QThread::currentThread() != thread() ||
+        !controlPeer_ || identityPresentationToken_ || QThread::currentThread() != thread() ||
         approval_.state() != NativeApproval::State::Authenticating ||
         g_cancellable_is_cancelled(g_task_get_cancellable(task_)) ||
         !peerGuard_->stillCurrent(NativePeerPurpose::NativeAuthenticationDaemon, *polkitPeer_) ||
@@ -600,8 +624,59 @@ void AuthenticationAgent::selectIdentity(quint32 uid)
     Q_EMIT presentationChanged();
 }
 
+void AuthenticationAgent::prepareIdentityPresentation(quint64 token)
+{
+    if (QThread::currentThread() != thread() || !identitySelection_ || !scope_ ||
+        !scope_->isDisplay() || !task_ || !entry_ || !displayPresentation_ ||
+        identityPresentationToken_ || !entry_->preparedNativePromptMatches(token) ||
+        approval_.state() != NativeApproval::State::Authenticating) {
+        finishNative(false);
+        return;
+    }
+    identityPresentationToken_ = token;
+    const auto expected = *scope_;
+    QPointer<AuthenticationAgent> live(this);
+    try {
+        displayPresentation_(expected, token, [live, expected, token](bool ready) {
+            if (!live)
+                return;
+            QMetaObject::invokeMethod(
+                live,
+                [live, expected, token, ready] {
+                    if (live)
+                        live->identityPresented(expected, token, ready);
+                },
+                Qt::QueuedConnection);
+        });
+    } catch (...) {
+        if (live)
+            live->finishNative(false);
+    }
+}
+
+void AuthenticationAgent::identityPresented(const NativeApprovalScope &expected, quint64 token,
+                                            bool ready)
+{
+    if (QThread::currentThread() != thread() || !scope_ || *scope_ != expected ||
+        !identityPresentationToken_ || *identityPresentationToken_ != token)
+        return;
+    identityPresentationToken_.reset(); // Reserve before activation callbacks.
+    if (!ready || !identitySelection_ || !task_ || !entry_ || !peerGuard_ || !polkitPeer_ ||
+        !controlPeer_ || approval_.state() != NativeApproval::State::Authenticating ||
+        g_cancellable_is_cancelled(g_task_get_cancellable(task_)) ||
+        !peerGuard_->stillCurrent(NativePeerPurpose::NativeAuthenticationDaemon, *polkitPeer_) ||
+        !peerGuard_->stillCurrent(NativePeerPurpose::ControlApproval, *controlPeer_) ||
+        !entry_->activatePreparedNativePrompt(token) || !scope_ || *scope_ != expected ||
+        !identitySelection_ || !entry_ || !entry_->acceptsInput()) {
+        finishNative(false);
+        return;
+    }
+    Q_EMIT presentationChanged();
+}
+
 void AuthenticationAgent::finishNative(bool success)
 {
+    identityPresentationToken_.reset();
     if (identitySelection_ && entry_)
         entry_->cancelNativePrompt();
     identitySelection_.reset();

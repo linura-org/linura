@@ -509,3 +509,23 @@ Ready or reusable; failed presentation, reconfigure or duplicate consumption sti
 invalidates it. Production page progression, per-PAM-prompt presentation admission,
 continuous mutation/decision handoff and native acceptance remain required before
 this candidate can be enabled.
+
+Display PAM prompt admission stages fixed prompt-kind/UID/step metadata without
+accepting input. A native-only monotonically increasing token binds activation to
+that exact prepared field; the original BOOTTIME and timer windows are preserved.
+Only an expected protected presentation revision may retain this zero-input
+metadata. Actual focus loss, topology/epoch drift, visibility loss, cancellation
+or timeout still wipes it. Active response bytes never survive reconfiguration.
+Reentrant preparation cannot return a replacement field's token, and prepared
+Return input cannot fall through into an ordinary primary/unlock request.
+
+The official native Polkit adapter awaits the separate protected-frame admission
+before activating a display response. Stale/duplicate callbacks cannot activate a
+new prompt or complete PAM. An official completion while a later MFA prompt is
+still awaiting presentation is denial, not authentication success. Multiple
+eligible administrators retain explicit bounded selection; each selected-UID
+revision is presented before Return can select it, without renewing the original
+window. S17's existing direct prompt/identity-selection behavior remains distinct.
+These are native mechanism guarantees. Production Control challenge transport,
+page progression, final dispatch receipt redemption and actual native PAM/mutation
+acceptance must still be completed before enabling the display operation.

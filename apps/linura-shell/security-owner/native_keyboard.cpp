@@ -310,6 +310,9 @@ class NativeKeyboard::Impl final
             } else if (self.entry->acceptsInput() && self.protectedFocus()) {
                 self.entry->nativeKey(primary ? Qt::Key_Return : Qt::Key_Escape, Qt::NoModifier,
                                       {});
+            } else if (self.entry->prepared_ && self.protectedFocus()) {
+                if (!primary)
+                    self.entry->cancelFromInteraction();
             } else if (primary && !self.entry->acceptsInput() && self.coverage && self.coverage() &&
                        self.unlockRequest && self.primaryAvailable && self.primaryAvailable())
                 self.unlockRequest();
@@ -503,6 +506,11 @@ class NativeKeyboard::Impl final
             // before delivering a fresh press, never from the old enter flag.
             self.entry->setNativeKeyboardFocus(self.protectedFocus());
             if (!self.entry->acceptsInput()) {
+                if (self.entry->prepared_) {
+                    if (symbol == XKB_KEY_Escape)
+                        self.entry->cancelFromInteraction();
+                    return; // A prepared field cannot become a primary action.
+                }
                 // A native press requests typed intent through Control. It is
                 // not PAM success, approval, prepared dispatch or an unlock.
                 if ((symbol == XKB_KEY_Return || symbol == XKB_KEY_KP_Enter) &&
@@ -643,18 +651,25 @@ quint64 NativeKeyboard::interactionGeneration() const noexcept
 {
     return impl_->generation;
 }
-void NativeKeyboard::refreshProtectedFocus()
+void NativeKeyboard::refreshProtectedFocus(bool preservePreparedPrompt)
 {
     impl_->checkThread();
-    impl_->entry->setNativeKeyboardFocus(impl_->protectedFocus());
+    const bool focused = impl_->protectedFocus();
+    if (!focused && preservePreparedPrompt)
+        impl_->entry->suspendForExpectedPresentation();
+    else
+        impl_->entry->setNativeKeyboardFocus(focused);
 }
-void NativeKeyboard::invalidateOutputConfiguration()
+void NativeKeyboard::invalidateOutputConfiguration(bool preservePreparedPrompt)
 {
     impl_->checkThread();
     impl_->pointerPress.reset();
     if (impl_->compose)
         xkb_compose_state_reset(impl_->compose);
-    impl_->entry->setNativeKeyboardFocus(false);
+    if (preservePreparedPrompt)
+        impl_->entry->suspendForExpectedPresentation();
+    else
+        impl_->entry->setNativeKeyboardFocus(false);
     if (impl_->confirmation) {
         // Keep held-key suppression even when cancelling a pre-lock dialog.
         const auto held = impl_->pressed;
