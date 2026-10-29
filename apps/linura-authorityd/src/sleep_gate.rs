@@ -40,6 +40,7 @@ impl NativeSleepGate {
             sessions: LogindSessionObserver::connect().map_err(|e| e.to_string())?,
             executor: SessionExecutorClient {
                 channel: channel.clone(),
+                display_sequence: 0,
             },
             verifier: FreshSessionVerifier {
                 channel,

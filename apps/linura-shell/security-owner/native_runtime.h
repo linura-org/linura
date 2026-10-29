@@ -54,6 +54,11 @@ class NativeRuntime final : public QObject
     [[nodiscard]] std::optional<NativeDisplaySample> observeDisplay(const QDBusMessage &received);
     [[nodiscard]] std::optional<NativeDisplaySample>
     observePreparedDisplay(const QDBusMessage &received);
+    [[nodiscard]] std::optional<quint32> dispatchPreparedDisplay(const QDBusMessage &,
+                                                                 const NativeDisplayIntent &,
+                                                                 const NativeDisplayCorrelation &,
+                                                                 const QString &sampleDigest,
+                                                                 quint64 sampledBootMs);
     [[nodiscard]] std::optional<NativeDisplayAttemptSample>
     observeDisplayAttempt(const QDBusMessage &, const NativeDisplayIntent &,
                           const NativeDisplayCorrelation &);

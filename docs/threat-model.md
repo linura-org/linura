@@ -804,6 +804,16 @@ for the current implementation status.
   retire the recovery fence unless the native ownership check also passes.
   This in-process checkpoint cannot survive compositor death or substitute for
   the still-required durable last-known-good/restart reconciliation path.
+- Prepared display transport accepts only the independently supervised Control
+  sender and separate default-deny executor action. The complete intent must
+  reproduce the sealed effect/binding. Root's strict native decoder and the
+  owner's immediate raw-sample recheck retain the same owner, boot and original
+  sample deadline through one apply; copied digests are correlation, not grants.
+  Native unknown/denied/lost replies remain ambiguity, never verified success or
+  permission to retry. Status uses the original validated durable dispatch scope
+  without requiring adapter memory, creating another effect or adopting a prior
+  connection's continuation. Component fixtures and live bus-denial cases do not
+  establish complete native display execution, recovery or support.
 - The compositor acquires the fixed native logind sleep/shutdown block inhibitor
   before any display write, independently checks the root service and current
   preparation state, and revalidates captured output facts and deadlines after

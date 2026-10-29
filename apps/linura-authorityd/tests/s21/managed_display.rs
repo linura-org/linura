@@ -269,9 +269,10 @@ impl DisplayTransactionPort for Port {
     }
     fn observe_attempt(
         &mut self,
-        request: &PlanDesiredStateRequest,
-        transaction: &str,
+        query: &linura_control::DisplayAttemptQuery<'_>,
     ) -> Result<ObservationEnvelope, String> {
+        let request = query.request();
+        let transaction = query.transaction_id();
         // Ensure a strictly post-dispatch native sample at millisecond precision.
         std::thread::sleep(std::time::Duration::from_millis(2));
         let mut m = self
@@ -279,7 +280,10 @@ impl DisplayTransactionPort for Port {
             .lock()
             .unwrap_or_else(|_| unreachable!("fixture poisoned"));
         let binding = m.binding.clone().ok_or("simulated native attempt absent")?;
-        if transaction != binding.transaction_id {
+        if transaction != binding.transaction_id
+            || query.dispatch_digest() != binding.dispatch_digest.to_hex()
+            || query.deadline_unix_ms() != m.deadline
+        {
             return Err("fixture transaction mismatch".into());
         }
         m.sequence += 1;

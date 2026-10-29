@@ -287,6 +287,28 @@ NativeEndpoint::ObserveDisplayAttempt(const NativeDisplayAttemptQueryWire &query
     return {};
 }
 
+quint32 NativeEndpoint::DispatchPreparedDisplay(const NativeDisplayAttemptQueryWire &query,
+                                                const QString &sampleDigest, quint64 sampledBootMs)
+{
+    if (calledFromDBus() && query.intent.size() <= 4096 && query.transaction.size() <= 256 &&
+        query.effectDigest.size() == 64 && query.dispatchDigest.size() == 64 &&
+        sampleDigest.size() == 64) {
+        const auto intent = NativeDisplayIntent::parse(query.intent);
+        const NativeDisplayCorrelation correlation{query.transaction, query.effectDigest,
+                                                   query.dispatchDigest, query.deadlineUnixMs};
+        const auto result = intent
+                                ? runtime_.dispatchPreparedDisplay(message(), *intent, correlation,
+                                                                   sampleDigest, sampledBootMs)
+                                : std::nullopt;
+        if (result)
+            return *result;
+    }
+    if (calledFromDBus())
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Native prepared display dispatch unavailable"));
+    return 7; // Unknown, never a no-dispatch acknowledgement.
+}
+
 bool NativeEndpoint::DispatchPreparedLock(const QString &resource, bool secure)
 {
     const auto lock = NativeLockIdentity::parse(resource);

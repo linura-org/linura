@@ -259,13 +259,13 @@ void unsupportedBuildAndSubstitutedSnapshotCannotWrite()
     }
     Harness harness;
     Client owner(harness.descriptors[0]);
+    const auto correlation = bound(QStringLiteral("transaction:substituted-capture"));
     const auto captured = owner.connection->sample();
     assert(captured);
     auto prior = baseline(*captured), desired = prior;
     desired.outputs[0].x = 100;
     auto wrongBaseline = prior;
     wrongBaseline.outputs[0].x = -100;
-    const auto correlation = bound(QStringLiteral("transaction:substituted-capture"));
     assert(!owner.connection->apply(correlation, wrongBaseline, desired));
     desired.outputs[0].generation++;
     assert(!owner.connection->apply(correlation, prior, desired));
@@ -290,6 +290,42 @@ void terminalWireObjectsRetireWithoutEvictingOneUseReservations()
         assert(!owner.connection->apply(correlation, prior, desired));
     }
     assert(harness.backend.writes == 70);
+}
+void finalNativePowerStateCannotReuseAnEarlierVisibilityReview()
+{
+    Harness harness;
+    Client owner(harness.descriptors[0]);
+    const auto earlier = owner.connection->sample();
+    assert(earlier);
+    auto prior = baseline(*earlier), desired = prior;
+    desired.outputs[0].x = 100;
+    {
+        const std::lock_guard lock(harness.backend.mutex);
+        harness.backend.facts.heads[0].powered = false;
+    }
+    const auto drift = bound(QStringLiteral("transaction:dpms-drift"));
+    const auto fresh = owner.connection->sample();
+    assert(fresh && fresh->topology == earlier->topology &&
+           fresh->current.outputs[0].encode() == earlier->current.outputs[0].encode());
+    assert(!owner.connection->apply(drift, prior, desired));
+    assert(harness.backend.writes == 0 && !fresh->fenced);
+    {
+        const std::lock_guard lock(harness.backend.mutex);
+        harness.backend.facts.heads[0].powered = true;
+    }
+    // A separate deliberate fixture attempt, never an automatic effect retry.
+    const auto next = bound(QStringLiteral("transaction:powered-root"));
+    assert(owner.connection->sample());
+    assert(owner.connection->apply(next, prior, desired) == 2);
+    assert(owner.connection->decide(next, false) == 3); // Restoration is not yet verification.
+    const auto deadline = std::chrono::steady_clock::now() + 3s;
+    while (owner.connection->status(next) != 5) {
+        assert(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::sleep_for(10ms);
+    }
+    const auto restored = owner.connection->sample();
+    assert(restored && !restored->fenced && restored->current.outputs[0].x == 0);
+    assert(harness.backend.writes == 2);
 }
 void compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage()
 {
@@ -356,11 +392,11 @@ void securityAdmissionRejectsUnknownStateAndRetainsFailedRecoveryFence()
         assert(owner.connection->securityTransitionAllowed(false) ==
                (coverage == Coverage::Unlocked));
     }
+    const auto correlation = bound(QStringLiteral("transaction:failed-restoration-fence"));
     const auto captured = owner.connection->sample();
     assert(captured);
     auto prior = baseline(*captured), desired = prior;
     desired.outputs[0].x = 100;
-    const auto correlation = bound(QStringLiteral("transaction:failed-restoration-fence"));
     assert(owner.connection->apply(correlation, prior, desired) == 2);
     harness.backend.failRestore = true;
     assert(owner.connection->decide(correlation, false) == 6);
@@ -373,10 +409,22 @@ void securityAdmissionRejectsUnknownStateAndRetainsFailedRecoveryFence()
 } // namespace
 int main()
 {
+    const NativeDisplayCorrelation window{QStringLiteral("transaction:prepared-window"),
+                                          QString(64, QLatin1Char('a')),
+                                          QString(64, QLatin1Char('b')), 25'000};
+    assert(window.dispatchWindow(1000, 1000, 10'000));
+    assert(window.dispatchWindow(1000, 2999, 24'999));
+    assert(!window.dispatchWindow(1000, 3000, 10'000));
+    assert(!window.dispatchWindow(1000, 999, 10'000));
+    assert(!window.dispatchWindow(0, 1000, 10'000));
+    assert(!window.dispatchWindow(1000, 1000, 9999));
+    assert(!window.dispatchWindow(1000, 1000, 25'000));
+    assert(!window.dispatchWindow(1000, 1000, 0));
     identityAndContinuationOwnership();
     clientLossDoesNotDisarmNativeRecovery();
     unsupportedBuildAndSubstitutedSnapshotCannotWrite();
     terminalWireObjectsRetireWithoutEvictingOneUseReservations();
+    finalNativePowerStateCannotReuseAnEarlierVisibilityReview();
     compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage();
     securityAdmissionRejectsUnknownStateAndRetainsFailedRecoveryFence();
 }

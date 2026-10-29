@@ -27,5 +27,17 @@
       <arg name="dispatch_digest" type="s" direction="in"/>
       <arg name="outcome" type="(sss)" direction="out"/>
     </method>
+    <method name="ApplyDisplayLayout">
+      <arg name="material" type="s" direction="in"/>
+      <arg name="deadline_unix_ms" type="t" direction="in"/>
+      <arg name="transaction_id" type="s" direction="in"/>
+      <arg name="generation" type="t" direction="in"/>
+      <arg name="state_version" type="t" direction="in"/>
+      <arg name="authority_binding_digest" type="s" direction="in"/>
+      <arg name="authority_use_digest" type="s" direction="in"/>
+      <arg name="effect_digest" type="s" direction="in"/>
+      <arg name="dispatch_digest" type="s" direction="in"/>
+      <arg name="outcome" type="(sss)" direction="out"/>
+    </method>
   </interface>
 </node>

@@ -5,9 +5,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 mod display;
 pub use display::{
-    AuthorizedDisplayContinuation, DISPLAY_CONFIRMATION_WINDOW_MS, DisplayContinuationAction,
-    DisplayDecisionAuthorizer, DisplayDecisionChallenge, DisplayTransactionPort,
-    IndependentDisplayVerifier, TrustedDisplayDecision,
+    AuthorizedDisplayContinuation, DISPLAY_CONFIRMATION_WINDOW_MS, DisplayAttemptQuery,
+    DisplayContinuationAction, DisplayDecisionAuthorizer, DisplayDecisionChallenge,
+    DisplayTransactionPort, IndependentDisplayVerifier, TrustedDisplayDecision,
 };
 
 use linura_core::{

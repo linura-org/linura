@@ -9,6 +9,7 @@
 #include "native_unlock_status.h"
 #include "native_assistive.h"
 #include "native_transition_fence.h"
+#include "native_display_watchdog.h"
 #include "peer_guard.h"
 #include "session_bootstrap.h"
 
@@ -819,6 +820,37 @@ std::optional<NativeDisplaySample> NativeRuntime::displaySample(const QDBusMessa
                                topology,
                                metadata,
                                *settled == NativeObservedLockState::Secure};
+}
+
+std::optional<quint32> NativeRuntime::dispatchPreparedDisplay(
+    const QDBusMessage &received, const NativeDisplayIntent &intent,
+    const NativeDisplayCorrelation &correlation, const QString &sampleDigest, quint64 sampledBootMs)
+{
+    NativeDeadline deadline(std::chrono::milliseconds(2000),
+                            NativeDeadline::Stage::DisplayDispatch);
+    const auto peer = impl_->caller(received, NativePeerPurpose::PreparedSessionDispatch);
+    const auto clock = NativeDisplayClock::sample();
+    if (!peer || !clock || intent.lock != identity() || impl_->approvalScope ||
+        impl_->transitionFence.active() || impl_->sleepFence.active() || impl_->unlockRequestLock ||
+        impl_->transitionRequest ||
+        !correlation.dispatchWindow(sampledBootMs, clock->bootMs, clock->unixMs) ||
+        !NativeDisplayIntent::parse(intent.encode()))
+        return std::nullopt;
+    // Root's strict Rust decoder validated this exact raw native sample, not
+    // merely a connector name, client layout, epoch or digest credential. Read
+    // again on the same owned connection; drift invalidates the handoff.
+    const auto sample = displaySample(received, NativePeerPurpose::PreparedSessionDispatch);
+    if (!sample || sampleDigest != sample->correlationDigest() || !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
+        return std::nullopt;
+    const auto finalClock = NativeDisplayClock::sample();
+    if (!finalClock ||
+        !correlation.dispatchWindow(sampledBootMs, finalClock->bootMs, finalClock->unixMs))
+        return std::nullopt;
+    // No Qt/D-Bus event processing or caller callbacks intervene. The backend
+    // samples once more and reserves exactly one private native apply. A lost
+    // response is ambiguity, never permission to invoke this call again.
+    return impl_->backend->dispatchPreparedDisplay(intent, correlation, sampledBootMs);
 }
 
 std::optional<NativeDisplayAttemptSample>

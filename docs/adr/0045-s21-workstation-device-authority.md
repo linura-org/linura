@@ -98,16 +98,27 @@ native deadlines are narrowed and their exact evidence digests enter Control's
 authority binding. A changed baseline or loss of the final currently powered
 independent output rejects mutation planning.
 
-The trusted registry now registers `operation:display.layout.apply` with managed,
-security-sensitive semantics. Draft protected-journal phase records, an
-unconnected display lifecycle controller, candidate formatter fixtures and
-bounded peer-checked read-only compositor IPC exist. Registration and component
-code do **not** activate an authorized executor, restart-safe restoration or a
-production display mutation composition. Typed Authority1 begin/status/confirm/
-revert, SDK and CLI contracts are present, with explicit unsupported results
-until qualified native ports are connected. The display
-mutation route must remain disabled until the complete native execution and
-recovery contract passes pinned-runtime and adversarial qualification.
+The trusted registry registers `operation:display.layout.apply` with managed,
+security-sensitive semantics. The native transaction port consumes Control's
+sealed effect, recomputes its descriptor from the retained complete intent and
+hands the exact binding to the separately supervised root session executor.
+Its fixed display action is default-deny; the dedicated authority identity must
+also pass fresh service attestation before and after that policy check. Root
+strictly validates native metadata and retains the same owner, boot, original
+sample timestamp and digest through its single prepared owner handoff. The
+owner independently rechecks the raw sample, native scope, per-output frames
+and original deadline, then reserves one private compositor apply. Neither
+correlation hashes nor a native reply are approval or postcondition evidence.
+
+Typed Authority1 begin/confirm/revert, SDK and CLI contracts remain explicitly
+unsupported until protected decisions, durable compositor-loss restoration and
+native qualification are complete. Authority1 status is connected for retained
+requests only: Control supplies the exact original dispatch digest and deadline
+from validated durable history, independently observes and reconciles without
+any apply or continuation. An adapter restart cannot guess correlation from a
+transaction name or recreate an executor permit. Public display mutation stays
+disabled until the complete execution/recovery contract passes pinned-runtime
+and adversarial qualification.
 
 The managed controller validates the entire reserved/dispatch/decision/terminal
 chain before either status classification or continuation. Native attempt facts

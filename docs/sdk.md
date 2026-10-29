@@ -29,6 +29,10 @@ retry, executor handle, approval assertion or client-selected principal.
 The begin material is a bounded complete `LNDI:1` intent, not a command string.
 Receipts report the explicit lifecycle state and original deadline; they never
 report a pending attempt as completion or history as current native layout.
+Production `display_layout_status` observes only exact retained requests owned
+by the authenticated caller. Its original dispatch scope comes from validated
+durable history, including after adapter restart; it cannot apply or continue a
+layout. An unknown request is an error, never an invitation to recreate it.
 The current production authority composition refuses these display mutations
 until its complete prepared native admission and recovery ports are connected
 and qualified. These client/transport contracts alone are not usable production

@@ -149,6 +149,10 @@ matrix() {
             "pkaction --action-id org.linura.executor.session",
             "access.*denied|permission.*denied",
             "native-session-ordinary-denied",
+            "native-session-display-ordinary-denied",
+            "native-session-display-root-denied",
+            "native-session-display-polkit-ordinary-denied",
+            "ApplyDisplayLayout ststtssss",
             "systemd-suspend.service --value -p ExecStartPre",
             "non-supervised-sleep-helper",
             "native-session-live-boundary=qualified",
@@ -157,6 +161,34 @@ matrix() {
         self.assertNotIn("systemctl suspend", guest)
         self.assertNotIn("systemctl reboot", guest)
         self.assertNotIn("systemctl poweroff", guest)
+
+    def test_display_executor_keeps_default_deny_and_exact_service_only_rule(
+        self,
+    ) -> None:
+        actions = ET.parse(
+            ROOT / "packaging/polkit-1/actions/org.linura.executor.session.policy"
+        ).getroot()
+        action_id = "org.linura.executor.session.apply-display-layout"
+        action = actions.find(f"action[@id='{action_id}']")
+        self.assertIsNotNone(action)
+        assert action is not None
+        for name in ("allow_any", "allow_inactive", "allow_active"):
+            self.assertEqual(action.findtext(f"defaults/{name}"), "no")
+        rule = (
+            ROOT / "packaging/polkit-1/rules.d/50-linura-executor-session.rules"
+        ).read_text()
+        self.assertIn(f'action.id === "{action_id}"', rule)
+        self.assertIn('subject.user === "linura-authority"', rule)
+        self.assertNotIn('subject.user === "root"', rule)
+        policy = ET.parse(
+            ROOT / "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf"
+        ).getroot()
+        for scope in ("policy[@context='default']", "policy[@user='root']"):
+            self.assertIsNotNone(
+                policy.find(
+                    f"{scope}/deny[@send_destination='org.linura.Executor.Session1'][@send_interface='org.linura.Executor.Session1']"
+                )
+            )
 
     def test_native_denial_capture_rejects_unrelated_failures(self) -> None:
         guest = (ROOT / "tests/acceptance/v06/qualify-native-session.sh").read_text(

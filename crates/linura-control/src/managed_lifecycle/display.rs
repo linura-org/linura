@@ -54,6 +54,53 @@ impl AuthorizedDisplayContinuation {
         self.action
     }
 }
+/// Read-only projection of the validated durable dispatch record. A transaction
+/// name alone cannot recover its exact native correlation after adapter restart.
+/// This query is not a permit, approval, effect or continuation credential.
+#[derive(Debug)]
+pub struct DisplayAttemptQuery<'a> {
+    request: &'a PlanDesiredStateRequest,
+    transaction_id: &'a str,
+    dispatch_digest: &'a str,
+    deadline_unix_ms: u64,
+}
+impl<'a> DisplayAttemptQuery<'a> {
+    fn new(
+        request: &'a PlanDesiredStateRequest,
+        dispatched: &'a Record,
+    ) -> Result<Self, ManagedLifecycleError> {
+        if dispatched.phase != Phase::Dispatched {
+            return Err(ManagedLifecycleError::Contract(
+                "display query has no dispatched record".into(),
+            ));
+        }
+        Ok(Self {
+            request,
+            transaction_id: dispatched.transaction_id.as_str(),
+            dispatch_digest: dispatched.dispatch_digest.as_deref().ok_or_else(|| {
+                ManagedLifecycleError::Contract("display dispatch digest is missing".into())
+            })?,
+            deadline_unix_ms: dispatched.deadline_unix_ms,
+        })
+    }
+    #[must_use]
+    pub const fn request(&self) -> &PlanDesiredStateRequest {
+        self.request
+    }
+    #[must_use]
+    pub const fn transaction_id(&self) -> &str {
+        self.transaction_id
+    }
+    #[must_use]
+    pub const fn dispatch_digest(&self) -> &str {
+        self.dispatch_digest
+    }
+    #[must_use]
+    pub const fn deadline_unix_ms(&self) -> u64 {
+        self.deadline_unix_ms
+    }
+}
+
 pub trait DisplayTransactionPort: Debug + Send {
     fn dispatch_layout(
         &mut self,
@@ -63,8 +110,7 @@ pub trait DisplayTransactionPort: Debug + Send {
     ) -> Result<ExecutionOutcome, String>;
     fn observe_attempt(
         &mut self,
-        request: &PlanDesiredStateRequest,
-        transaction_id: &str,
+        query: &DisplayAttemptQuery<'_>,
     ) -> Result<ObservationEnvelope, String>;
     fn continue_layout(
         &mut self,
@@ -622,7 +668,8 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .as_ref()
             .or(revert.as_ref())
             .unwrap_or(&dispatched);
-        let observed = match port.observe_attempt(&request, reserved.transaction_id.as_str()) {
+        let observed = match port.observe_attempt(&DisplayAttemptQuery::new(&request, &dispatched)?)
+        {
             Ok(observation) => observation,
             Err(_) => {
                 return Ok(receipt(
@@ -781,7 +828,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             return self.display_layout_status(principal, actor, request_id, port, verifier);
         }
         let observed = port
-            .observe_attempt(&request, dispatched.transaction_id.as_str())
+            .observe_attempt(&DisplayAttemptQuery::new(&request, &dispatched)?)
             .map_err(ManagedLifecycleError::Verification)?;
         if attempt_state(&observed, &request, &dispatched)? != "pending" {
             return self.display_layout_status(principal, actor, request_id, port, verifier);
@@ -833,7 +880,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         // Human interaction may outlive the first probe. Obtain fresh evidence;
         // never stamp its completion time onto the pre-interaction observation.
         let fresh = port
-            .observe_attempt(&request, dispatched.transaction_id.as_str())
+            .observe_attempt(&DisplayAttemptQuery::new(&request, &dispatched)?)
             .map_err(ManagedLifecycleError::Verification)?;
         if fresh.observed_at_unix_ms < interaction_completed
             || fresh.sequence <= observed.sequence

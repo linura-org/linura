@@ -138,6 +138,7 @@ impl ManagedRuntime {
                 verifier: FreshSystemdVerifier::connect()?,
                 session_executor: SessionExecutorClient {
                     channel: channel.clone(),
+                    display_sequence: 0,
                 },
                 session_verifier: FreshSessionVerifier {
                     channel: channel.clone(),
@@ -447,6 +448,28 @@ impl Authority1Handler for ManagedRuntime {
             },
         )
         .map_err(|e| e.to_string())
+    }
+
+    fn display_layout_status(
+        &mut self,
+        context: Authority1SessionContext,
+        request_id: RequestId,
+    ) -> Result<linura_protocol::DisplayLayoutReceipt, String> {
+        let _uid = own_uid(&context.principal)?;
+        // Exact retained owner/request/history is checked inward. This path
+        // independently observes and reconciles bookkeeping; it cannot apply,
+        // confirm or restore a layout, including after adapter/Control restart.
+        self.control
+            .lock()
+            .map_err(|_| "managed Control state is poisoned")?
+            .display_layout_status(
+                context.principal,
+                context.actor,
+                &request_id,
+                &mut self.session_executor,
+                &mut self.session_verifier,
+            )
+            .map_err(|e| e.to_string())
     }
 
     fn converge_session_lock(

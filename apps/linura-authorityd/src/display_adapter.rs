@@ -3,14 +3,84 @@
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use linura_control::{
-    AuthenticatedPrincipal, DisplayLayoutSafetyReview, IndependentDisplayVerifier,
+    AuthenticatedPrincipal, AuthorizedDisplayContinuation, AuthorizedEffect, DisplayAttemptQuery,
+    DisplayLayoutSafetyReview, DisplayTransactionPort, IndependentDisplayVerifier,
 };
 use linura_core::{CapabilityId, DisplayLayoutMaterial};
 use linura_observation::DisplayObservationFacts;
 use linura_protocol::PlanDesiredStateRequest;
 use linura_provider_sdk::{Observer, VerificationDisposition, VerificationOutcome};
 
-use crate::session_adapter::FreshSessionVerifier;
+use crate::session_adapter::{FreshSessionVerifier, SessionExecutorClient};
+
+impl DisplayTransactionPort for SessionExecutorClient {
+    fn dispatch_layout(
+        &mut self,
+        authorization: AuthorizedEffect,
+        request: &PlanDesiredStateRequest,
+        deadline_unix_ms: u64,
+    ) -> Result<linura_provider_sdk::ExecutionOutcome, String> {
+        let material = display_material(request)?;
+        let (effect, binding) = authorization.into_executor_request();
+        if effect != linura_provider_sdk::display_layout_effect(material)? {
+            return Err(
+                "prepared display effect differs from its canonical structured request".into(),
+            );
+        }
+        binding.validate_for(&effect).map_err(|e| e.to_string())?;
+        self.channel
+            .handoff_prepared_display(material, &binding, deadline_unix_ms)
+    }
+
+    fn observe_attempt(
+        &mut self,
+        query: &DisplayAttemptQuery<'_>,
+    ) -> Result<linura_observation::ObservationEnvelope, String> {
+        let material = display_material(query.request())?;
+        self.display_sequence = self
+            .display_sequence
+            .checked_add(1)
+            .ok_or("native display attempt sequence exhausted")?;
+        self.channel.observe_display_attempt(
+            material,
+            query.transaction_id(),
+            &linura_provider_sdk::ComponentDigest::parse_hex(query.dispatch_digest())
+                .map_err(|e| e.to_string())?,
+            query.deadline_unix_ms(),
+            self.display_sequence,
+        )
+    }
+
+    fn continue_layout(
+        &mut self,
+        _continuation: AuthorizedDisplayContinuation,
+    ) -> Result<(), String> {
+        Err("native protected display decisions are not qualified in this composition".into())
+    }
+}
+
+fn display_material(request: &PlanDesiredStateRequest) -> Result<&str, String> {
+    if request.provider.as_str() != linura_observation::DISPLAY_PROVIDER
+        || request.observation_capability.as_str() != linura_observation::DISPLAY_OUTPUTS_CAPABILITY
+        || request.desired_state.len() != 1
+    {
+        return Err("display adapter received an unsupported canonical effect shape".into());
+    }
+    let text = request
+        .desired_state
+        .get("layout")
+        .ok_or("display intent is missing")?;
+    let material = DisplayLayoutMaterial::decode(text).map_err(|e| e.to_string())?;
+    if material
+        .topology()
+        .resource_id()
+        .map_err(|e| e.to_string())?
+        != request.resource
+    {
+        return Err("display adapter resource differs from its complete intent".into());
+    }
+    Ok(text)
+}
 
 impl IndependentDisplayVerifier for FreshSessionVerifier {
     fn verify_layout(

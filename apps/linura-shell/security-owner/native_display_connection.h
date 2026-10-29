@@ -23,6 +23,8 @@ struct NativeDisplayCorrelation final
     QString transaction, effectDigest, dispatchDigest;
     quint64 deadlineUnixMs = 0;
     [[nodiscard]] bool valid() const;
+    [[nodiscard]] bool dispatchWindow(quint64 sampledBootMs, quint64 nowBootMs,
+                                      quint64 nowUnixMs) const;
     bool operator==(const NativeDisplayCorrelation &) const = default;
 };
 

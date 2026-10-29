@@ -43,6 +43,15 @@
       <arg name="query" type="(sssst)" direction="in"/>
       <arg name="observation" type="(sssttub)" direction="out"/>
     </method>
+    <!-- Prepared executor only. The strict Rust decoder's exact sample digest
+         and ORIGINAL boot timestamp must survive a same-owner fresh recheck.
+         One apply only; a phase is not independent verification or keep authority. -->
+    <method name="DispatchPreparedDisplay">
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="sample_digest" type="s" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
     <method name="ObservePowerPermission">
       <arg name="resource" type="s" direction="in"/>
       <arg name="observation" type="(sst)" direction="out"/>

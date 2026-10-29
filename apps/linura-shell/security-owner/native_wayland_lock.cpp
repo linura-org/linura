@@ -787,6 +787,30 @@ int NativeWaylandLock::actualDisplayFd() const noexcept
     return impl_->display ? wl_display_get_fd(impl_->display) : -1;
 }
 std::optional<quint32>
+NativeWaylandLock::dispatchPreparedDisplay(const NativeDisplayIntent &intent,
+                                           const NativeDisplayCorrelation &correlation,
+                                           quint64 validatedSampledBootMs)
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping || !correlation.valid() || requestedSecure() != secureCoverage())
+        return std::nullopt;
+    const bool secure = secureCoverage();
+    const auto current = impl_->displayConnection->sample();
+    const auto nowBootMs = bootMilliseconds();
+    if (!current || validatedSampledBootMs == 0 || nowBootMs < validatedSampledBootMs ||
+        nowBootMs - validatedSampledBootMs >= 2000 || current->fenced ||
+        current->coverage != (secure ? 1U : 0U) || requestedSecure() != secure ||
+        secureCoverage() != secure || (secure && !impl_->inputCovered()) ||
+        current->compositor != impl_->displayInvocation || current->topology.generation == 0 ||
+        intent.baseline.topology.section(QLatin1Char(':'), 8, 8) !=
+            QString::number(current->topology.generation))
+        return std::nullopt;
+    // apply revalidates the complete exact baseline (including mirrors) and
+    // native inventory against this same retained immutable snapshot. It
+    // reserves the one-use wire attempt before any potentially effectful call.
+    return impl_->displayConnection->apply(correlation, intent.baseline, intent.desired);
+}
+std::optional<quint32>
 NativeWaylandLock::observeDisplayAttempt(const NativeDisplayCorrelation &correlation)
 {
     if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||

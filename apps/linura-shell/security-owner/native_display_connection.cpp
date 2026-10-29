@@ -81,7 +81,7 @@ class NativeDisplayConnection::Impl final
         linura_display_head_v1 *native = nullptr;
         NativeDisplayHead facts;
         NativeDisplayTarget current;
-        bool currentReceived = false, mirrorReceived = false, done = false;
+        bool currentReceived = false, mirrorReceived = false, done = false, powered = false;
         ~Head()
         {
             if (native)
@@ -207,6 +207,7 @@ class NativeDisplayConnection::Impl final
                 return;
             }
             head.currentReceived = true;
+            head.powered = powered != 0;
             head.current = {head.facts.handle,
                             head.facts.generation,
                             enabled != 0,
@@ -448,6 +449,15 @@ std::optional<quint32> NativeDisplayConnection::apply(const NativeDisplayCorrela
         baseline.outputs.size() != impl_->capture->sample.current.outputs.size() ||
         impl_->attempts.contains(bound.transaction))
         return std::nullopt;
+    // Rust's independently validated visibility precondition must still hold
+    // in this last native snapshot. DPMS can change without a topology epoch or
+    // layout diff; do not remove the only currently powered independent root.
+    if (!std::any_of(desired.outputs.begin(), desired.outputs.end(), [&](const auto &target) {
+            const auto head = impl_->capture->heads.find(target.handle);
+            return target.enabled && !target.mirror && head != impl_->capture->heads.end() &&
+                   head->second->facts.generation == target.generation && head->second->powered;
+        }))
+        return std::nullopt;
     const auto wall = milliseconds(CLOCK_REALTIME), boot = milliseconds(CLOCK_BOOTTIME);
     const auto &sample = impl_->capture->sample;
     if (!wall || !boot || *wall < sample.sampledUnixMs || *boot < sample.sampledBootMs ||
@@ -502,6 +512,13 @@ std::optional<quint32> NativeDisplayConnection::status(const NativeDisplayCorrel
 bool NativeDisplayCorrelation::valid() const
 {
     return correlation(*this);
+}
+bool NativeDisplayCorrelation::dispatchWindow(quint64 sampledBootMs, quint64 nowBootMs,
+                                              quint64 nowUnixMs) const
+{
+    return valid() && sampledBootMs != 0 && nowBootMs >= sampledBootMs &&
+           nowBootMs - sampledBootMs < 2000 && nowUnixMs != 0 && deadlineUnixMs > nowUnixMs &&
+           deadlineUnixMs - nowUnixMs <= 15'000;
 }
 std::optional<quint32> NativeDisplayConnection::decide(const NativeDisplayCorrelation &bound,
                                                        bool confirm)

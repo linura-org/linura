@@ -105,6 +105,14 @@ Linura's production caller must separately pass Control's canonical
 managed authority and prepared native-owner admission. The private protocol is
 an adapter mechanism, not a policy grant or public SDK.
 
+The private prepared handoff now carries Control's exact sealed effect through
+the root session executor. Rust validates the full native sample; the protected
+owner immediately rechecks its digest and original timestamp on the same
+connection before a one-use apply. A response can acknowledge an attempt, never
+verify a layout or authorize keep/revert. Production status uses validated
+durable correlation and cannot replay. Public mutation remains disabled pending
+protected decisions, durable compositor-loss restoration and native acceptance.
+
 Component tests exercise transaction and timer boundaries. They are not a
 substitute for the exact pinned compositor build or native execution, rollback,
 process-loss, hotplug and S17 coverage qualification. Required unexecuted checks

@@ -106,6 +106,10 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "<method name=\"ObserveDisplayAttempt\"><arg name=\"query\" type=\"(sssst)\" "
         "direction=\"in\"/><arg name=\"observation\" type=\"(sssttub)\" "
         "direction=\"out\"/></method>"
+        "<method name=\"DispatchPreparedDisplay\"><arg name=\"query\" type=\"(sssst)\" "
+        "direction=\"in\"/><arg name=\"sample_digest\" type=\"s\" direction=\"in\"/>"
+        "<arg name=\"sampled_boot_ms\" type=\"t\" direction=\"in\"/>"
+        "<arg name=\"phase\" type=\"u\" direction=\"out\"/></method>"
         "<method name=\"ObservePowerPermission\"><arg name=\"resource\" type=\"s\" "
         "direction=\"in\"/>"
         "<arg name=\"observation\" type=\"(sst)\" direction=\"out\"/></method>"
@@ -148,6 +152,8 @@ class NativeEndpoint final : public QObject, protected QDBusContext
     NativePreparedDisplayObservationWire ObservePreparedDisplay();
     NativeDisplayAttemptObservationWire
     ObserveDisplayAttempt(const NativeDisplayAttemptQueryWire &);
+    quint32 DispatchPreparedDisplay(const NativeDisplayAttemptQueryWire &,
+                                    const QString &sample_digest, quint64 sampled_boot_ms);
     NativePowerPermissionWire ObservePowerPermission(const QString &resource);
     bool FencePreparedTransition(const QString &resource);
     bool CancelUndispatchedTransition(const QString &resource);

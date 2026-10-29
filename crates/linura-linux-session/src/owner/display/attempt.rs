@@ -6,7 +6,7 @@ use linura_provider_sdk::{ComponentDigest, display_layout_effect};
 
 type AttemptWire = (String, String, String, u64, u64, u32, bool);
 
-struct Query<'a> {
+pub(super) struct Query<'a> {
     intent: DisplayLayoutMaterial<'a>,
     transaction: &'a str,
     dispatch: &'a ComponentDigest,
@@ -14,7 +14,7 @@ struct Query<'a> {
     deadline: u64,
 }
 impl<'a> Query<'a> {
-    fn new(
+    pub(super) fn new(
         material: &'a str,
         transaction: &'a str,
         dispatch: &'a ComponentDigest,

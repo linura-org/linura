@@ -20,8 +20,19 @@ use super::{
     observation, owner_reply_budget, unix_ms,
 };
 mod attempt;
+mod prepared;
 
 type Wire = (String, String, String, u64, String, String, bool);
+
+// Process-local, one-call correlation with the exact owner/boot sampled by the
+// strict native decoder. This is never serialized or reusable authority.
+struct PreparedSample {
+    owner: super::NativeOwnerIdentity,
+    boot: linura_core::BootId,
+    started: Instant,
+    digest: linura_provider_sdk::ComponentDigest,
+    sampled_boot_ms: u64,
+}
 
 fn sample_digest(sample: &Wire) -> linura_provider_sdk::ComponentDigest {
     let (resource, compositor, seat, _, topology, monitors, secure) = sample;
@@ -300,6 +311,15 @@ impl NativeSessionChannel {
         material: &str,
         sequence: u64,
     ) -> Result<(linura_provider_sdk::ComponentDigest, u64), String> {
+        let sample = self.prepared_display_sample(material, sequence)?;
+        Ok((sample.digest, sample.sampled_boot_ms))
+    }
+
+    fn prepared_display_sample(
+        &self,
+        material: &str,
+        sequence: u64,
+    ) -> Result<PreparedSample, String> {
         self.require_role(NativeSessionRole::Executor)?;
         let material =
             linura_core::DisplayLayoutMaterial::decode(material).map_err(|e| e.to_string())?;
@@ -314,6 +334,15 @@ impl NativeSessionChannel {
             &(),
             owner_reply_budget(started.elapsed())?,
         )?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != identity.unique_name)
+        {
+            return Err(
+                "prepared native display sample has a different authenticated sender".into(),
+            );
+        }
         if reply.body().signature().to_string() != "((ssstssb)s)" {
             return Err("prepared native display observation signature mismatch".into());
         }
@@ -382,7 +411,13 @@ impl NativeSessionChannel {
         display
             .require_current(unix_ms()?)
             .map_err(|e| e.to_string())?;
-        Ok((digest, sample.3))
+        Ok(PreparedSample {
+            owner: identity,
+            boot,
+            started,
+            digest,
+            sampled_boot_ms: sample.3,
+        })
     }
 
     fn native_display_sample(
