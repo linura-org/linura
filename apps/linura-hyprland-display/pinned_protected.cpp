@@ -134,7 +134,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         SP<ISurfaceRole> role;
         ProtectedScene::Configure configure;
         std::uint32_t serial = 0;
-        bool acknowledged = false, selectedFrame = false, pendingFrame = false, submitted = false;
+        bool acknowledged = false, contentCommitted = false, selectedFrame = false,
+             pendingFrame = false, submitted = false;
         SP<Aquamarine::IBuffer> renderedBuffer;
         std::uint64_t commitId = 0;
         CHyprSignalListener commit, destroy, present, result;
@@ -357,6 +358,7 @@ class PinnedScene final : public ProtectedScene
             }
             if (!resource->m_mapped)
                 resource->map();
+            surface.contentCommitted = true;
             live->damage();
         });
         surface.result = monitor->m_output->events.commitResult.listen(
@@ -404,6 +406,32 @@ class PinnedScene final : public ProtectedScene
         if (at == data->surfaces.end() || serial != at->second.serial || at->second.acknowledged)
             return false;
         at->second.acknowledged = true;
+        return true;
+    }
+    bool refreshPresentation() override
+    {
+        if (!data->refresh() || data->interaction.phase() != ProtectedInteraction::Phase::Ready ||
+            data->surfaces.empty())
+            return false;
+        // Change every configure/input epoch before any callback can publish a
+        // revision. No original Ready frame can attest the replacement content.
+        for (auto &[key, surface] : data->surfaces) {
+            surface.serial = wl_display_next_serial(g_pCompositor->m_wlDisplay);
+            surface.acknowledged = surface.contentCommitted = surface.selectedFrame =
+                surface.pendingFrame = surface.submitted = false;
+            surface.renderedBuffer.reset();
+            surface.commitId = 0;
+            if (!data->interaction.configure(key, surface.serial))
+                return false;
+        }
+        for (auto &[key, surface] : data->surfaces) {
+            const auto monitor = surface.monitor.lock();
+            if (!monitor || !surface.configure)
+                return false;
+            surface.configure(surface.serial, static_cast<std::uint32_t>(monitor->m_size.x),
+                              static_cast<std::uint32_t>(monitor->m_size.y));
+        }
+        data->damage();
         return true;
     }
     std::optional<ProtectedSceneStatus> status() override
@@ -561,7 +589,8 @@ bool renderProtectedDisplay(Monitor::CMonitor *monitor, const Time::steady_tp &n
     if (!data->refresh() || !surface)
         return true;
     const auto resource = surface->resource.lock();
-    if (!surface->acknowledged || !resource || !resource->m_mapped || !resource->m_current.texture)
+    if (!surface->acknowledged || !surface->contentCommitted || !resource || !resource->m_mapped ||
+        !resource->m_current.texture)
         return true;
     CSurfacePassElement::SRenderData frame{monitor->m_self, now, monitor->m_position, {}};
     frame.surface = resource;

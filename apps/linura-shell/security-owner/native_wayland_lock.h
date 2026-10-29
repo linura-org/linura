@@ -75,6 +75,8 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     [[nodiscard]] bool showProtectedDisplay(const NativeDisplayPromptScope &,
                                             const NativeDisplayIntent &);
     [[nodiscard]] std::optional<NativeDisplayPromptStatus> protectedDisplayStatus();
+    [[nodiscard]] bool refreshProtectedDisplay(const NativeDisplayPromptScope &,
+                                               quint64 originalEpoch);
     [[nodiscard]] bool consumeProtectedDisplay(const NativeDisplayPromptScope &,
                                                quint64 originalEpoch);
     void cancelProtectedDisplay();

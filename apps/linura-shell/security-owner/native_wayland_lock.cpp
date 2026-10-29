@@ -206,6 +206,7 @@ class NativeWaylandLock::Impl final
     NativeDisplayClock protectedLast{};
     quint64 protectedBootDeadline = 0, protectedStatusBootMs = 0, protectedPollBootMs = 0;
     quint64 protectedTopology = 0;
+    quint64 protectedRevisionEpoch = 0;
     bool protectedPollPending = false, protectedConsumed = false;
     std::map<quint64, std::unique_ptr<Output>> protectedOutputs;
     QTimer protectedTimer;
@@ -247,7 +248,8 @@ class NativeWaylandLock::Impl final
         if (protectedInteraction)
             linura_protected_display_interaction_v1_destroy(protectedInteraction);
         protectedInteraction = nullptr;
-        protectedTopology = protectedBootDeadline = protectedStatusBootMs = protectedPollBootMs = 0;
+        protectedTopology = protectedBootDeadline = protectedStatusBootMs = protectedPollBootMs =
+            protectedRevisionEpoch = 0;
         protectedLast = {};
     }
     void pollProtected()
@@ -290,6 +292,7 @@ class NativeWaylandLock::Impl final
                 QString::fromLatin1(instance) != self.displayInvocation ||
                 topology != self.protectedTopology || epoch == 0 ||
                 epoch == std::numeric_limits<quint64>::max() || phase > 3 ||
+                (self.protectedRevisionEpoch != 0 && epoch != self.protectedRevisionEpoch) ||
                 !self.protectedWindow() || (self.protectedConsumed && phase != 2) ||
                 (!self.protectedConsumed && phase == 2)) {
                 self.cancelProtected();
@@ -1002,6 +1005,31 @@ std::optional<NativeDisplayPromptStatus> NativeWaylandLock::protectedDisplayStat
         impl_->keyboard->refreshProtectedFocus();
     return impl_->protectedStatus;
 }
+bool NativeWaylandLock::refreshProtectedDisplay(const NativeDisplayPromptScope &scope,
+                                                quint64 originalEpoch)
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping || !impl_->protectedScope || *impl_->protectedScope != scope ||
+        impl_->protectedConsumed)
+        return false;
+    const auto fresh = protectedDisplayStatus();
+    if (!fresh || fresh->phase != NativeDisplayPromptStatus::Phase::Ready ||
+        fresh->epoch != originalEpoch || !impl_->protectedInteraction)
+        return false;
+    const auto outputs = static_cast<quint64>(impl_->protectedOutputs.size());
+    if (outputs == 0 || originalEpoch >= std::numeric_limits<quint64>::max() - outputs - 1)
+        return false;
+    impl_->protectedRevisionEpoch = originalEpoch + outputs;
+    impl_->invalidateOutputConfiguration();
+    impl_->protectedStatus.reset();
+    linura_protected_display_interaction_v1_refresh_presentation(impl_->protectedInteraction);
+    impl_->flush();
+    // No old Ready reply may be reused for the new content. Readiness is
+    // subsequently established by a fresh status and matching configure/frame.
+    return waitForNativeWaylandReady(impl_->display, std::chrono::milliseconds(250)) &&
+           impl_->protectedInteraction && impl_->protectedWindow();
+}
+
 bool NativeWaylandLock::consumeProtectedDisplay(const NativeDisplayPromptScope &scope,
                                                 quint64 originalEpoch)
 {

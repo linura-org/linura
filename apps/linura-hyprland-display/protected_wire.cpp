@@ -298,6 +298,23 @@ class ProtectedWireEndpoint::Impl final
             linura_protected_display_interaction_v1_send_denied(resource);
         }
     }
+    static void refreshPresentation(wl_client *, wl_resource *resource)
+    {
+        auto &interaction = object<Interaction>(resource);
+        try {
+            const auto &state = interaction.state;
+            if (!state || !state->scene || state->closed ||
+                !interaction.owner.current(interaction) || !state->scene->refreshPresentation()) {
+                if (state)
+                    state->close();
+                linura_protected_display_interaction_v1_send_denied(resource);
+            }
+        } catch (...) {
+            if (interaction.state)
+                interaction.state->close();
+            linura_protected_display_interaction_v1_send_denied(resource);
+        }
+    }
     static void consume(wl_client *, wl_resource *resource, const char *scope, std::uint32_t high,
                         std::uint32_t low)
     {
@@ -330,7 +347,7 @@ const struct linura_protected_display_manager_v1_interface ProtectedWireEndpoint
 const struct linura_protected_display_interaction_v1_interface
     ProtectedWireEndpoint::Impl::interactionImpl
 {
-    destroy, getSurface, status, consume
+    destroy, getSurface, status, refreshPresentation, consume
 };
 const struct linura_protected_display_surface_v1_interface ProtectedWireEndpoint::Impl::surfaceImpl
 {

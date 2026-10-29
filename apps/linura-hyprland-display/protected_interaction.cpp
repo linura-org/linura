@@ -130,8 +130,8 @@ bool ProtectedInteraction::commit(OutputKey output, std::uint64_t serial,
                                   std::uint64_t nativeCommitId)
 {
     const auto frame = frames_.find(output);
-    if (phase_ == Phase::Cancelled || phase_ == Phase::Consumed || frame == frames_.end() ||
-        serial == 0 || serial != frame->second.configure || nativeCommitId == 0 ||
+    if (phase_ == Phase::Cancelled || frame == frames_.end() || serial == 0 ||
+        serial != frame->second.configure || nativeCommitId == 0 ||
         nativeCommitId <= frame->second.highWater) {
         cancel();
         return false;
@@ -146,7 +146,7 @@ bool ProtectedInteraction::commit(OutputKey output, std::uint64_t serial,
 void ProtectedInteraction::presented(OutputKey output, std::uint64_t nativeCommitId,
                                      bool hardwareCompleted)
 {
-    if (phase_ == Phase::Cancelled || phase_ == Phase::Consumed)
+    if (phase_ == Phase::Cancelled)
         return;
     const auto frame = frames_.find(output);
     if (frame == frames_.end()) {

@@ -114,6 +114,28 @@ void purposeAndProofCannotBeSubstitutedOrReused()
         assert(value.phase() == ProtectedInteraction::Phase::Cancelled);
     }
 }
+void consumedPresentationCanRepaintWithoutRearmingProof()
+{
+    for (unsigned fault = 0; fault != 4; ++fault) {
+        auto value = conversation();
+        ready(value);
+        const auto epoch = value.epoch();
+        assert(value.consume(scope(), epoch, inventory(), {10'001, 1001}));
+        assert(value.commit(One, 1, 21));
+        value.presented(One, 21, true);
+        assert(value.phase() == ProtectedInteraction::Phase::Consumed && value.epoch() == epoch);
+        assert(!value.eligible(epoch, inventory(), {10'002, 1002}));
+        if (fault == 0)
+            value.presented(One, 21, false);
+        if (fault == 1)
+            assert(!value.configure(One, 3));
+        if (fault == 2)
+            assert(!value.commit(One, 1, 20));
+        if (fault == 3)
+            assert(!value.consume(scope(), epoch, inventory(), {10'002, 1002}));
+        assert(value.phase() == ProtectedInteraction::Phase::Cancelled);
+    }
+}
 void focusInputAndNativeLifetimeDriftInvalidateTheProof()
 {
     for (unsigned which = 0; which < 13; ++which) {
@@ -242,6 +264,7 @@ int main()
     everyOutputNeedsCorrelatedPresentation();
     backendCommitIdsCannotBeReused();
     purposeAndProofCannotBeSubstitutedOrReused();
+    consumedPresentationCanRepaintWithoutRearmingProof();
     focusInputAndNativeLifetimeDriftInvalidateTheProof();
     malformedOrUnqualifiedStateIsNeverReady();
 }

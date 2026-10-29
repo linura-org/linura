@@ -1049,3 +1049,15 @@ an old input lifetime from adopting replacement storage. A dedicated cursor fenc
 suppresses/clears hardware cursors without borrowing shared software-lock counters
 which hotplug can unbalance. These component mechanisms still require actual
 native execution and failure/interaction acceptance before activation.
+
+S21 protected review revisions bind the complete native display material and the
+original canonical policy-review lineage to a separate display-only PAM admission
+path. S17's lock/unlock approval entry rejects display purposes. A typed bounded
+first-party review describes each output and the request's quoted reason; neither
+pages nor a digest can approve or dispatch an effect. Each new page requires new
+per-output configures, post-ack content and independently correlated hardware
+presentation. Old buffers and unexplained focus/epoch changes cannot qualify a
+revision. Consumed presentation can remain covered while a prepared handoff is
+pending, without rearming one-use proof or extending clocks. This mechanism does
+not complete production PAM presentation, receipt redemption, cross-compositor
+restoration or adversarial native qualification, and does not activate mutations.

@@ -20,7 +20,7 @@ namespace {
 constexpr char Instance[] = "74e3ca24-b38b-4b62-9671-ae32dc38fd57";
 struct Counts final
 {
-    std::atomic<unsigned> begin{0}, close{0}, attach{0}, acknowledge{0}, consume{0};
+    std::atomic<unsigned> begin{0}, close{0}, attach{0}, acknowledge{0}, consume{0}, refresh{0};
     std::atomic<bool> throwAttach{false};
 };
 class Scene final : public ProtectedScene
@@ -29,6 +29,8 @@ class Scene final : public ProtectedScene
     Counts &counts;
     ProtectedInteraction::Scope scope;
     bool closed = false, used = false;
+    Configure configured;
+    std::uint32_t serial = 7;
     Scene(Counts &facts, ProtectedInteraction::Scope value) : counts(facts), scope(std::move(value))
     {}
     bool attach(OutputKey key, wl_resource *, Configure configure) override
@@ -38,13 +40,14 @@ class Scene final : public ProtectedScene
             throw std::runtime_error("native fixture failure");
         if (key != OutputKey{1, 2})
             return false;
-        configure(7, 1920, 1080);
+        configured = std::move(configure);
+        configured(serial, 1920, 1080);
         return true;
     }
     bool acknowledge(OutputKey key, std::uint32_t serial) override
     {
         ++counts.acknowledge;
-        return key == OutputKey{1, 2} && serial == 7;
+        return key == OutputKey{1, 2} && serial == this->serial;
     }
     std::optional<ProtectedSceneStatus> status() override
     {
@@ -58,6 +61,14 @@ class Scene final : public ProtectedScene
         if (used || digest != scope.digest || epoch != 4)
             return false;
         return used = true;
+    }
+    bool refreshPresentation() override
+    {
+        ++counts.refresh;
+        if (closed || used || !configured)
+            return false;
+        configured(++serial, 1920, 1080);
+        return true;
     }
     void close() noexcept override
     {
@@ -261,7 +272,7 @@ void ownerReplacement()
 {
     // Every retained mutation/read step reattests the original supervised
     // invocation; same PID/UID cannot migrate a conversation to its successor.
-    for (unsigned operation = 0; operation != 4; ++operation) {
+    for (unsigned operation = 0; operation != 5; ++operation) {
         Harness h;
         Client c(h.descriptor);
         c.begin();
@@ -279,9 +290,13 @@ void ownerReplacement()
                                                             std::string(64, 'a').c_str(), 0, 4);
             c.roundtrip();
         }
+        if (operation == 4) {
+            linura_protected_display_interaction_v1_refresh_presentation(c.interaction);
+            c.roundtrip();
+        }
         c.status();
         assert(c.denied >= 1 && h.counts.close == 1 && h.counts.acknowledge == 0 &&
-               h.counts.consume == 0);
+               h.counts.consume == 0 && h.counts.refresh == 0);
     }
 }
 } // namespace
@@ -318,6 +333,12 @@ int main()
         c.roundtrip();
         c.status();
         assert(c.phase == 0 && h.counts.acknowledge == 1);
+        linura_protected_display_interaction_v1_refresh_presentation(c.interaction);
+        c.roundtrip();
+        assert(c.serial == 8 && h.counts.refresh == 1);
+        linura_protected_display_surface_v1_ack_configure(c.protectedSurface, 8);
+        c.roundtrip();
+        assert(h.counts.acknowledge == 2);
         linura_protected_display_interaction_v1_consume(c.interaction, std::string(64, 'a').c_str(),
                                                         0, 4);
         c.roundtrip();

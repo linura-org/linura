@@ -485,3 +485,27 @@ source-pinned fence and acknowledged clear state, preserving the compositor's
 ordinary software-lock counters across hotplug. Input quarantine feedback,
 continuous Apply-to-decision handoff and real native/adversarial acceptance still
 require completion before production authentication or display mutation activates.
+
+The protected owner separates display authentication admission from S17's
+lock-only approval entry. Its private scope retains the original principal,
+request/plan, request/observation/review digests, complete typed display material,
+purpose, reason and original deadline. A continuation challenge is a separate
+field, never a replacement policy-review digest. The mechanism requires a fresh
+Ready presentation for the exact topology before starting purpose-bound native
+PAM; even a late successful PAM conversation cannot extend the original window.
+This admission mechanism remains separate from activation of the production
+Control authorizer and final prepared-dispatch receipt redemption.
+
+The first-party display review projection bounds the reason into grapheme-safe
+pages and describes every output's previous/requested mode, scale, transform,
+position, enabled state and mirror target using its freshly matched native name.
+Pages expose no authority, QML source or executable provider interface. The private
+presentation refresh request invalidates all output configures before publishing
+new content. Only a new post-ack content commit and independently completed frame
+can qualify that revision. The owner expects exactly the configure-derived epoch
+advance; focus or other unexplained epoch changes cannot be adopted as a page
+transition. A consumed interaction may continue protected redraws without becoming
+Ready or reusable; failed presentation, reconfigure or duplicate consumption still
+invalidates it. Production page progression, per-PAM-prompt presentation admission,
+continuous mutation/decision handoff and native acceptance remain required before
+this candidate can be enabled.

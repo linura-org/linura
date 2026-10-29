@@ -53,6 +53,9 @@ class AuthenticationAgent final : public QObject
     [[nodiscard]] bool setNativeProgress(NativeProbeProgress progress);
     [[nodiscard]] bool arm(const NativeApprovalScope &scope, bool compositorSecure,
                            const NativePeerIdentity &controlPeer);
+    [[nodiscard]] bool armDisplay(const NativeApprovalScope &scope,
+                                  const NativeDisplayPromptStatus &presentation,
+                                  quint64 remainingMs, const NativePeerIdentity &controlPeer);
     [[nodiscard]] bool consume(const NativeApprovalScope &scope);
     [[nodiscard]] bool advanceIdentity(const NativeLockIdentity &identity);
     // Same-UID native subject query, with NO interaction or custom details.

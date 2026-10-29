@@ -1,6 +1,7 @@
 // Strict native adapter data/formatter fixtures only. No command is dispatched.
 #include "native_display_layout.h"
 #include "native_display_prompt.h"
+#include "native_display_review.h"
 #include <algorithm>
 #include <cassert>
 
@@ -128,6 +129,55 @@ int main()
         QStringLiteral("LNDI:1;") + lock->resource + QLatin1Char(';') + baseline + desired;
     const auto intent = NativeDisplayIntent::parse(text);
     assert(intent && intent->encode() == text && intent->nativeOptions(observed, scope, *lock));
+    NativeApprovalScope review{*lock,
+                               QStringLiteral("unix:uid:1000"),
+                               QStringLiteral("request:v010:display-layout:review"),
+                               QStringLiteral("request:v010:display-layout:review"),
+                               QStringLiteral("sha256:") + QString(64, QLatin1Char('1')),
+                               QStringLiteral("sha256:") + QString(64, QLatin1Char('2')),
+                               QStringLiteral("sha256:") + QString(64, QLatin1Char('3')),
+                               ApprovalPurpose::ApplyDisplay};
+    review.display =
+        NativeDisplayApprovalBinding{text, {}, 1000, QStringLiteral("Make text easier to read")};
+    const auto pages = nativeDisplayReviewPages(review, observed);
+    assert(pages && pages->size() == 4);
+    assert(pages->at(0).explanation.contains(QStringLiteral("UID 1000")));
+    assert(pages->at(0).explanation.contains(QStringLiteral("Security-sensitive")));
+    assert(pages->at(1).explanation == review.display->reason);
+    assert(pages->at(2).heading.startsWith(QStringLiteral("DP-1")));
+    assert(pages->at(2).explanation.contains(QStringLiteral("1920 x 1080 at 60.000 Hz")));
+    assert(pages->at(2).explanation.contains(QStringLiteral("1280 x 720 at 59.940 Hz")));
+    assert(pages->at(2).explanation.contains(QStringLiteral("scale 1.250; 90 degrees")));
+    assert(pages->at(2).explanation.contains(QStringLiteral("position (-100, 20)")));
+    assert(pages->back().explanation.contains(QStringLiteral("separate protected decision")));
+    auto changedReview = review;
+    changedReview.display->reason = QString(2048, QLatin1Char('a'));
+    const auto longPages = nativeDisplayReviewPages(changedReview, observed);
+    assert(longPages && longPages->size() == 16);
+    QString completeReason;
+    for (std::size_t i = 1; i + 2 < longPages->size(); ++i)
+        completeReason += longPages->at(i).explanation;
+    assert(completeReason == changedReview.display->reason);
+    changedReview.display->reason += QLatin1Char('a');
+    assert(!nativeDisplayReviewPages(changedReview, observed));
+    changedReview = review;
+    changedReview.display->reason += QChar(0x202e); // Bidi override cannot disguise the effect.
+    assert(!nativeDisplayReviewPages(changedReview, observed));
+    auto staleReview = observed;
+    ++staleReview.heads[0].generation;
+    assert(!nativeDisplayReviewPages(review, staleReview));
+    for (auto purpose : {ApprovalPurpose::KeepDisplay, ApprovalPurpose::RevertDisplay}) {
+        changedReview = review;
+        changedReview.purpose = purpose;
+        assert(!nativeDisplayReviewPages(changedReview, observed));
+        changedReview.display->decisionDigest =
+            QStringLiteral("sha256:") + QString(64, QLatin1Char('4'));
+        const auto decisionPages = nativeDisplayReviewPages(changedReview, observed);
+        assert(decisionPages && decisionPages->size() == pages->size());
+        assert(decisionPages->at(0).heading.startsWith(purpose == ApprovalPurpose::KeepDisplay
+                                                           ? QStringLiteral("Keep")
+                                                           : QStringLiteral("Revert")));
+    }
     assert(intent->baseline.matchesGeometry(observed));
     auto missingPrecision = observed;
     missingPrecision.heads[0].scaleMilli = 0;
@@ -178,6 +228,11 @@ int main()
     const auto mirrorIntent = NativeDisplayIntent::parse(
         QStringLiteral("LNDI:1;") + lock->resource + QLatin1Char(';') + twoBaseline + mirrored);
     assert(mirrorIntent && mirrorIntent->nativeOptions(observed, scope, *lock));
+    review.display->material = mirrorIntent->encode();
+    const auto mirrorPages = nativeDisplayReviewPages(review, observed);
+    assert(mirrorPages && mirrorPages->size() == 5);
+    assert(mirrorPages->at(3).heading.startsWith(QStringLiteral("HDMI-A-1")));
+    assert(mirrorPages->at(3).explanation.contains(QStringLiteral("mirrors DP-1")));
     const auto mirrorCommands = mirrorIntent->desired.commands(observed);
     assert(mirrorCommands.size() == 2 && mirrorCommands[1].endsWith(",mirror,DP-1"));
     auto repeated = mirrorIntent->desired;
@@ -208,6 +263,9 @@ int main()
     const auto disabledIntent = NativeDisplayIntent::parse(
         QStringLiteral("LNDI:1;") + lock->resource + QLatin1Char(';') + twoBaseline + disabled);
     assert(disabledIntent && disabledIntent->nativeOptions(observed, scope, *lock));
+    review.display->material = disabledIntent->encode();
+    const auto disabledPages = nativeDisplayReviewPages(review, observed);
+    assert(disabledPages && disabledPages->at(3).explanation.endsWith(QStringLiteral("Disabled")));
     assert(disabledIntent->desired.commands(observed).back() ==
            "/keyword monitor HDMI-A-1,disable");
 }

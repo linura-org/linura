@@ -43,6 +43,14 @@
       <arg name="generation_lo" type="uint"/>
     </request>
     <request name="get_status"/>
+    <request name="refresh_presentation">
+      <description summary="require a fresh presented revision on every output">
+        Reconfigure all attached surfaces within the original scope and deadline.
+        Input and old proof remain unavailable until every new configure has a
+        matching independently completed native frame. This cannot retarget the
+        scope, renew a deadline or rearm a consumed interaction.
+      </description>
+    </request>
     <request name="consume">
       <arg name="scope_digest" type="string"/>
       <arg name="epoch_hi" type="uint"/>

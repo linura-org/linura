@@ -373,6 +373,21 @@ bool AuthenticationAgent::arm(const NativeApprovalScope &scope, bool compositorS
     return true;
 }
 
+bool AuthenticationAgent::armDisplay(const NativeApprovalScope &scope,
+                                     const NativeDisplayPromptStatus &presentation,
+                                     quint64 remainingMs, const NativePeerIdentity &controlPeer)
+{
+    if (QThread::currentThread() != thread() || !registered() || scope_ || !peerGuard_ ||
+        !peerGuard_->stillCurrent(NativePeerPurpose::ControlApproval, controlPeer) ||
+        !approval_.beginDisplay(scope, presentation, remainingMs))
+        return false;
+    scope_ = scope;
+    controlPeer_ = controlPeer;
+    deniedPresentation_ = false;
+    Q_EMIT presentationChanged();
+    return true;
+}
+
 std::optional<QString>
 AuthenticationAgent::observePowerPermission(const NativeTransitionIdentity &identity)
 {

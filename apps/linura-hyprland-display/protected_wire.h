@@ -27,6 +27,7 @@ class ProtectedScene
     [[nodiscard]] virtual bool attach(OutputKey, wl_resource *surface, Configure) = 0;
     [[nodiscard]] virtual bool acknowledge(OutputKey, std::uint32_t serial) = 0;
     [[nodiscard]] virtual std::optional<ProtectedSceneStatus> status() = 0;
+    [[nodiscard]] virtual bool refreshPresentation() = 0;
     [[nodiscard]] virtual bool consume(const std::string &scopeDigest, std::uint64_t epoch) = 0;
     virtual void close() noexcept = 0;
 };

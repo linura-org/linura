@@ -144,6 +144,88 @@ void approvalNeverUnlocks()
     check(approval.state() == NativeApproval::State::Idle);
 }
 
+void displayApprovalRequiresItsOwnPresentedPurposeAndOriginalDeadline()
+{
+    const auto lock = identity();
+    const QString topology =
+        QStringLiteral("display:topology:abcd1234-1234-4567-89ab-0123456789ab:1000:2:42:seat0:"
+                       "33333333-3333-4333-8333-333333333333:3");
+    const auto layout = [&](int x) {
+        return QStringLiteral("LNDL:1;") + topology +
+               QStringLiteral(";1:2:enabled:1920:1080:60000:1000:0:%1:0:-;").arg(x);
+    };
+    for (const auto purpose : {ApprovalPurpose::ApplyDisplay, ApprovalPurpose::KeepDisplay,
+                               ApprovalPurpose::RevertDisplay}) {
+        auto reviewed = scope(purpose);
+        reviewed.request = reviewed.plan = QStringLiteral("request:v010:display-layout:unit-test");
+        reviewed.display = NativeDisplayApprovalBinding{
+            QStringLiteral("LNDI:1;") + lock.resource + QLatin1Char(';') + layout(0) + layout(100),
+            purpose == ApprovalPurpose::ApplyDisplay
+                ? QString{}
+                : QStringLiteral("sha256:") + QString(64, QLatin1Char('4')),
+            1000, QStringLiteral("Arrange the current session displays")};
+        check(reviewed.valid() && reviewed.isDisplay());
+        check(!reviewed.requiresSessionOwnerAuthentication());
+        check(std::strcmp(reviewed.authenticationAction(),
+                          purpose == ApprovalPurpose::ApplyDisplay
+                              ? "org.linura.authority.apply-display-layout"
+                          : purpose == ApprovalPurpose::KeepDisplay
+                              ? "org.linura.authority.keep-display-layout"
+                              : "org.linura.authority.revert-display-layout") == 0);
+        const auto bound = reviewed.protectedDisplayDigest();
+        check(bound.size() == 64);
+        auto substitute = reviewed;
+        substitute.reviewDigest[7] = QLatin1Char('4');
+        check(substitute.protectedDisplayDigest() != bound);
+        substitute = reviewed;
+        ++substitute.display->deadlineUnixMs;
+        check(substitute.protectedDisplayDigest() != bound);
+        substitute = reviewed;
+        substitute.display->material.replace(QStringLiteral(":100:0:-;"),
+                                             QStringLiteral(":101:0:-;"));
+        check(substitute.valid() && substitute.protectedDisplayDigest() != bound);
+        substitute = reviewed;
+        substitute.display.reset();
+        check(!substitute.valid() && substitute.protectedDisplayDigest().isEmpty());
+        quint64 time = 100;
+        NativeApproval approval(lock, [&] { return time; });
+        check(!approval.begin(reviewed, false) && !approval.begin(reviewed, true));
+        NativeDisplayPromptStatus ready{3, 7, NativeDisplayPromptStatus::Phase::Ready};
+        auto stale = ready;
+        stale.phase = NativeDisplayPromptStatus::Phase::Arming;
+        check(!approval.beginDisplay(reviewed, stale, 1000));
+        stale = ready;
+        stale.epoch = 0;
+        check(!approval.beginDisplay(reviewed, stale, 1000));
+        stale = ready;
+        ++stale.topology;
+        check(!approval.beginDisplay(reviewed, stale, 1000));
+        check(!approval.beginDisplay(scope(), ready, 1000));
+        check(!approval.beginDisplay(reviewed, ready, 0));
+        check(!approval.beginDisplay(reviewed, ready,
+                                     purpose == ApprovalPurpose::ApplyDisplay ? 60'001 : 15'001));
+        check(approval.beginDisplay(reviewed, ready, 1000));
+        check(!approval.confirmHuman(reviewed) && !approval.consume(reviewed));
+        check(approval.nativePrompt(reviewed));
+        time = 1099;
+        check(approval.nativeCompleted(reviewed, true));
+        check(!approval.consume(substitute));
+        time = 1100;
+        check(!approval.consume(reviewed)); // Proof never renews the original window.
+        check(approval.state() == NativeApproval::State::Idle);
+        check(approval.beginDisplay(reviewed, ready, 1000));
+        check(approval.nativePrompt(reviewed) && approval.nativeCompleted(reviewed, true));
+        substitute = reviewed;
+        substitute.purpose = purpose == ApprovalPurpose::KeepDisplay
+                                 ? ApprovalPurpose::RevertDisplay
+                                 : ApprovalPurpose::KeepDisplay;
+        substitute.display->decisionDigest =
+            QStringLiteral("sha256:") + QString(64, QLatin1Char('5'));
+        check(substitute.valid() && !approval.consume(substitute));
+        check(approval.consume(reviewed) && !approval.consume(reviewed));
+    }
+}
+
 void protectiveSettingApprovalIsPurposeBound()
 {
     for (auto purpose :
@@ -946,6 +1028,7 @@ int main(int argc, char **argv)
     try {
         scopeBounds();
         approvalNeverUnlocks();
+        displayApprovalRequiresItsOwnPresentedPurposeAndOriginalDeadline();
         transitionApprovalIsPurposeBound();
         protectiveSettingApprovalIsPurposeBound();
         scopeSubstitution();

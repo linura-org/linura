@@ -67,6 +67,8 @@ void unregisteredAgentCannotConfirm()
     check(agent.metaObject()->indexOfMethod("nativeCompleted(bool)") == -1);
     check(agent.metaObject()->indexOfMethod("consume()") == -1);
     check(agent.metaObject()->indexOfMethod("advanceIdentity()") == -1);
+    check(agent.metaObject()->indexOfMethod("armDisplay()") == -1);
+    check(!agent.armDisplay(reviewed, {3, 7, NativeDisplayPromptStatus::Phase::Ready}, 1000, {}));
     agent.cancelInteraction();
     agent.ownerLost();
     check(!agent.registerNativeSession(0));

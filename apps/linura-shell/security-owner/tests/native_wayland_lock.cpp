@@ -63,6 +63,7 @@ enum class Case {
     DisplayPrompt,
     DisplayPromptStale,
     DisplayPromptLocked,
+    DisplayPromptRevisionDrift,
     ProtectedInput,
     InputLateCoverage,
     InputLateFocusLoss,
@@ -113,7 +114,8 @@ enum class Case {
 bool inputCase(Case scenario)
 {
     return scenario == Case::DisplayPrompt || scenario == Case::DisplayPromptStale ||
-           scenario == Case::DisplayPromptLocked || scenario >= Case::ProtectedInput;
+           scenario == Case::DisplayPromptLocked || scenario == Case::DisplayPromptRevisionDrift ||
+           scenario >= Case::ProtectedInput;
 }
 bool unlockRequestCase(Case scenario)
 {
@@ -856,7 +858,8 @@ struct WireServer final
         initialOutput = wl_global_create(display, &wl_output_interface,
                                          (selected == Case::DisplayPrompt ||
                                           selected == Case::DisplayPromptStale ||
-                                          selected == Case::DisplayPromptLocked)
+                                          (selected == Case::DisplayPromptLocked ||
+                                           selected == Case::DisplayPromptRevisionDrift))
                                              ? 4
                                              : 3,
                                          this, bindOutput);
@@ -884,7 +887,7 @@ struct WireServer final
             assert(wl_global_create(display, &wl_seat_interface, 5, this, bindSeat));
         }
         if (selected == Case::DisplayPrompt || selected == Case::DisplayPromptStale ||
-            selected == Case::DisplayPromptLocked)
+            (selected == Case::DisplayPromptLocked || selected == Case::DisplayPromptRevisionDrift))
             displaySupport = std::make_unique<DisplaySupport>(*this);
         assert(wl_client_create(display, descriptor));
         worker = std::thread([this] {
@@ -959,6 +962,9 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
         ProtectedInteraction::Scope scope;
         std::unique_ptr<Role> role;
         bool closed = false, consumed = false;
+        Configure configured;
+        std::uint64_t epoch = 9;
+        unsigned revisionCommits = 0;
         Scene(WireServer &server, ProtectedInteraction::Scope value)
             : owner(server), scope(std::move(value))
         {}
@@ -983,12 +989,13 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
             role->native = nullptr;
             role->serial = 7;
             surface->role = role.get();
-            configure(7, 32, 24);
+            configured = std::move(configure);
+            configured(7, 32, 24);
             return true;
         }
         bool acknowledge(OutputKey key, std::uint32_t serial) override
         {
-            if (!role || key != OutputKey{1, 1} || serial != 7)
+            if (!role || key != OutputKey{1, 1} || serial != role->serial)
                 return false;
             role->acknowledged = serial;
             return true;
@@ -997,15 +1004,26 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
         {
             if (closed)
                 return std::nullopt;
-            return ProtectedSceneStatus{"74e3ca24-b38b-4b62-9671-ae32dc38fd57", 1, 9,
+            return ProtectedSceneStatus{"74e3ca24-b38b-4b62-9671-ae32dc38fd57", 1, epoch,
                                         consumed ? ProtectedInteraction::Phase::Consumed
-                                        : owner.commits.load() && owner.focusSent
+                                        : owner.commits.load() > revisionCommits && owner.focusSent
                                             ? ProtectedInteraction::Phase::Ready
                                             : ProtectedInteraction::Phase::Arming};
         }
+        bool refreshPresentation() override
+        {
+            if (closed || consumed || !role || !configured)
+                return false;
+            epoch += owner.scenario == Case::DisplayPromptRevisionDrift ? 2 : 1;
+            revisionCommits = owner.commits.load();
+            role->acknowledged = 0;
+            configured(++role->serial, 32, 24);
+            return true;
+        }
         bool consume(const std::string &digest, std::uint64_t epoch) override
         {
-            if (closed || consumed || digest != scope.digest || epoch != 9 || !owner.commits.load())
+            if (closed || consumed || digest != scope.digest || epoch != this->epoch ||
+                owner.commits.load() <= revisionCommits)
                 return false;
             consumed = true;
             return true;
@@ -1157,7 +1175,7 @@ void client(Case scenario, int descriptor, int commands)
         }
         assert(initialized && backend.available());
         if (scenario != Case::DisplayPrompt && scenario != Case::DisplayPromptStale &&
-            scenario != Case::DisplayPromptLocked) {
+            scenario != Case::DisplayPromptLocked && scenario != Case::DisplayPromptRevisionDrift) {
             // Legacy/unsupported peers cannot fall back to an ordinary xdg window,
             // acquire a lock for display approval, or manufacture a consumed epoch.
             const NativeDisplayPromptScope unsupportedPrompt{
@@ -1173,7 +1191,8 @@ void client(Case scenario, int descriptor, int commands)
             assert(backend.protectedInputAvailable() &&
                    !backend.bindProtectedInput(*entry, {}, {}));
         if (scenario == Case::DisplayPrompt || scenario == Case::DisplayPromptStale ||
-            scenario == Case::DisplayPromptLocked) {
+            (scenario == Case::DisplayPromptLocked ||
+             scenario == Case::DisplayPromptRevisionDrift)) {
             const bool locked = scenario == Case::DisplayPromptLocked;
             if (locked) {
                 assert(backend.installManagedEffectGate([&](bool) {
@@ -1211,10 +1230,27 @@ void client(Case scenario, int descriptor, int commands)
             });
             assert(status->epoch == 9 && backend.requestedSecure() == locked &&
                    backend.secureCoverage() == locked && gates == (locked ? 1U : 0U));
+            const auto firstEpoch = status->epoch;
+            assert(!backend.refreshProtectedDisplay(prompt, firstEpoch - 1));
+            if (scenario == Case::DisplayPromptRevisionDrift) {
+                (void)backend.refreshProtectedDisplay(prompt, firstEpoch);
+                assert(!backend.protectedDisplayStatus());
+                assert(!backend.consumeProtectedDisplay(prompt, firstEpoch + 2));
+                assert(!backend.requestedSecure() && !backend.secureCoverage() && gates == 0);
+                return;
+            }
+            assert(backend.refreshProtectedDisplay(prompt, firstEpoch));
+            assert(!backend.consumeProtectedDisplay(prompt, firstEpoch));
+            waitUntil([&] {
+                status = backend.protectedDisplayStatus();
+                return status && status->phase == NativeDisplayPromptStatus::Phase::Ready &&
+                       status->epoch > firstEpoch && backend.protectedInputFocused();
+            });
             if (scenario == Case::DisplayPromptStale)
                 assert(!backend.consumeProtectedDisplay(prompt, status->epoch - 1));
             else {
                 assert(backend.consumeProtectedDisplay(prompt, status->epoch));
+                assert(!backend.refreshProtectedDisplay(prompt, status->epoch));
                 assert(!backend.consumeProtectedDisplay(prompt, status->epoch));
             }
             backend.cancelProtectedDisplay();
@@ -1683,6 +1719,7 @@ int main(int argc, char **argv)
     run(Case::DisplayPrompt, 0, 0, 0);
     run(Case::DisplayPromptStale, 0, 0, 0);
     run(Case::DisplayPromptLocked, 0, 1, 1);
+    run(Case::DisplayPromptRevisionDrift, 0, 0, 0);
     run(Case::Repaint, 0, 1, 1);
     run(Case::ResizePressure, 0, 1, 1);
     run(Case::Hotplug, 0, 1, 1);

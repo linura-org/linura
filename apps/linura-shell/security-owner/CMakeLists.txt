@@ -25,6 +25,7 @@ add_library(linura-security-owner-foundation STATIC
     compositor_probe.cpp
     native_display_layout.cpp native_display_layout.h
     native_display_prompt.cpp native_display_prompt.h
+    native_display_review.cpp native_display_review.h
     native_display_attempt.cpp native_display_attempt.h
     native_display_watchdog.cpp native_display_watchdog.h
     native_wayland_readiness.cpp

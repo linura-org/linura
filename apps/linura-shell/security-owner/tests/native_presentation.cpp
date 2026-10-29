@@ -30,6 +30,7 @@ int main(int argc, char **argv)
     auto &entry = presentation.protectedEntry();
     assert(entry.storageAvailable() && !entry.acceptsInput());
     assert(presentation.metaObject()->indexOfMethod("primaryRequestAvailable()") == -1);
+    assert(presentation.metaObject()->indexOfMethod("presentDisplayReview()") == -1);
     assert(entry.metaObject()->indexOfProperty("text") == -1);
     assert(entry.metaObject()->indexOfProperty("password") == -1);
 
@@ -165,6 +166,58 @@ int main(int argc, char **argv)
         }
         entry.cancelNativePrompt();
     }
+    const auto displayLock = NativeLockIdentity::parse(
+        QStringLiteral("session:lock:11111111-1111-4111-8111-111111111111:1000:c2:42:22222222-2222-"
+                       "4222-8222-222222222222:1"));
+    assert(displayLock);
+    NativeDisplaySnapshot displaySnapshot;
+    displaySnapshot.generation = 3;
+    NativeDisplayHead displayHead;
+    displayHead.handle = 1;
+    displayHead.generation = 2;
+    displayHead.name = QStringLiteral("DP-1");
+    displayHead.modes = {{1920, 1080, 60000}, {1280, 720, 59940}};
+    displaySnapshot.heads.push_back(displayHead);
+    const auto displayTopology =
+        QStringLiteral("display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:seat0:"
+                       "33333333-3333-4333-8333-333333333333:3");
+    NativeApprovalScope displayReview{*displayLock,
+                                      QStringLiteral("unix:uid:1000"),
+                                      QStringLiteral("request:v010:display-layout:review"),
+                                      QStringLiteral("request:v010:display-layout:review"),
+                                      QStringLiteral("sha256:") + QString(64, QLatin1Char('1')),
+                                      QStringLiteral("sha256:") + QString(64, QLatin1Char('2')),
+                                      QStringLiteral("sha256:") + QString(64, QLatin1Char('3')),
+                                      ApprovalPurpose::ApplyDisplay};
+    displayReview.display = NativeDisplayApprovalBinding{
+        QStringLiteral("LNDI:1;") + displayLock->resource + QStringLiteral(";LNDL:1;") +
+            displayTopology + QStringLiteral(";1:2:enabled:1920:1080:60000:1000:0:0:0:-;LNDL:1;") +
+            displayTopology + QStringLiteral(";1:2:enabled:1280:720:59940:1250:1:-100:20:-;"),
+        {},
+        1000,
+        QStringLiteral("Make text easier to read")};
+    const auto displayPages = nativeDisplayReviewPages(displayReview, displaySnapshot);
+    assert(displayPages && displayPages->size() == 4);
+    for (std::size_t page = 0; page < displayPages->size(); ++page) {
+        assert(presentation.presentDisplayReview(displayReview, displaySnapshot, page));
+        assert(presentation.paint(frame) && presentation.primaryRequestAvailable());
+        const auto metadata = presentation.assistiveProjection(true);
+        assert(metadata.heading.contains(displayPages->at(page).heading));
+        assert(metadata.description == displayPages->at(page).explanation);
+        assert(!metadata.accepting && !entry.acceptsInput());
+    }
+    assert(!presentation.presentDisplayReview(displayReview, displaySnapshot, 0, true));
+    assert(
+        !presentation.presentDisplayReview(displayReview, displaySnapshot, displayPages->size()));
+    assert(presentation.presentDisplayReview(displayReview, displaySnapshot,
+                                             displayPages->size() - 1, true));
+    assert(presentation.paint(frame) && !presentation.primaryRequestAvailable());
+    assert(entry.beginNativePrompt());
+    assert(presentation.paint(frame) && presentation.assistiveProjection(true).accepting);
+    entry.cancelNativePrompt();
+    presentation.present(NativePresentation::State::Locked);
+    assert(presentation.paint(frame));
+    assert(!presentation.assistiveProjection(true).heading.contains(QStringLiteral("display")));
     QImage tooSmall(160, 80, QImage::Format_RGB32);
     assert(!presentation.paint(tooSmall)); // No overlapping or clipped security prompt.
     assert(presentation.pointerTarget(tooSmall.size(), QPointF(80, 40)).action ==
