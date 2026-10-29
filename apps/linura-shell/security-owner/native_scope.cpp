@@ -139,13 +139,16 @@ const char *NativeTransitionIdentity::powerPermissionAction() const noexcept
 
 bool NativeApprovalScope::valid() const
 {
+    if (principal.size() > 64 || request.size() > 128 || plan.size() > 128)
+        return false;
     const auto parsed = NativeLockIdentity::parse(lock.resource);
     if (!parsed || *parsed != lock || principal != QStringLiteral("unix:uid:%1").arg(lock.uid) ||
         plan != request || !digest(requestDigest) || !digest(observationDigest) ||
         !digest(reviewDigest))
         return false;
     if (isDisplay()) {
-        if (!display || transition || display->deadlineUnixMs == 0 || display->reason.isEmpty() ||
+        if (!display || transition || display->deadlineUnixMs == 0 ||
+            display->deadlineBootMs == 0 || display->reason.isEmpty() ||
             display->reason.size() > 2048 ||
             std::any_of(display->reason.begin(), display->reason.end(),
                         [](QChar c) {
@@ -275,7 +278,8 @@ QString NativeApprovalScope::protectedDisplayDigest() const
          {QStringLiteral("linura.native.display-approval.v1"), lock.resource, principal, request,
           plan, requestDigest, observationDigest, reviewDigest,
           QString::number(static_cast<unsigned>(purpose)), display->material,
-          display->decisionDigest, QString::number(display->deadlineUnixMs), display->reason}) {
+          display->decisionDigest, QString::number(display->deadlineUnixMs),
+          QString::number(display->deadlineBootMs), display->reason}) {
         const auto bytes = field.toUtf8();
         const auto size = qToBigEndian(static_cast<quint64>(bytes.size()));
         hash.addData(QByteArrayView(reinterpret_cast<const char *>(&size), sizeof(size)));

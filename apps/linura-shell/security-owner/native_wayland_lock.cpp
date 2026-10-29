@@ -207,6 +207,7 @@ class NativeWaylandLock::Impl final
     quint64 protectedBootDeadline = 0, protectedStatusBootMs = 0, protectedPollBootMs = 0;
     quint64 protectedTopology = 0;
     quint64 protectedRevisionEpoch = 0;
+    quint64 protectedReviewEpochUsed = 0;
     bool protectedPollPending = false, protectedConsumed = false;
     bool protectedRevisionPending = false;
     std::map<quint64, std::unique_ptr<Output>> protectedOutputs;
@@ -250,7 +251,7 @@ class NativeWaylandLock::Impl final
             linura_protected_display_interaction_v1_destroy(protectedInteraction);
         protectedInteraction = nullptr;
         protectedTopology = protectedBootDeadline = protectedStatusBootMs = protectedPollBootMs =
-            protectedRevisionEpoch = 0;
+            protectedRevisionEpoch = protectedReviewEpochUsed = 0;
         protectedLast = {};
     }
     void pollProtected()
@@ -1034,6 +1035,35 @@ bool NativeWaylandLock::refreshProtectedDisplay(const NativeDisplayPromptScope &
            impl_->protectedInteraction && impl_->protectedWindow();
 }
 
+bool NativeWaylandLock::armProtectedDisplayReview(const NativeDisplayPromptScope &scope,
+                                                  quint64 originalEpoch,
+                                                  LockConfirmation completion)
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping || !completion || !impl_->keyboard || !impl_->protectedScope ||
+        *impl_->protectedScope != scope || impl_->protectedConsumed ||
+        originalEpoch == impl_->protectedReviewEpochUsed)
+        return false;
+    const auto fresh = protectedDisplayStatus();
+    if (!fresh || fresh->phase != NativeDisplayPromptStatus::Phase::Ready ||
+        fresh->epoch != originalEpoch || !impl_->protectedCovered() || !impl_->keyboard->focused())
+        return false;
+    impl_->protectedReviewEpochUsed = originalEpoch;
+    return impl_->keyboard->setDisplayReviewTarget(
+        [this, scope, originalEpoch, completion = std::move(completion)](bool accepted) {
+            // Retire native input before deferring work out of the Wayland
+            // callback. A page action cannot migrate across queued UI changes.
+            QTimer::singleShot(0, this, [this, scope, originalEpoch, accepted, completion] {
+                const bool same = impl_->protectedScope && *impl_->protectedScope == scope &&
+                                  !impl_->protectedConsumed;
+                const auto fresh = same ? protectedDisplayStatus() : std::nullopt;
+                completion(
+                    accepted && fresh && fresh->phase == NativeDisplayPromptStatus::Phase::Ready &&
+                    fresh->epoch == originalEpoch && impl_->keyboard && impl_->keyboard->focused());
+            });
+        });
+}
+
 bool NativeWaylandLock::consumeProtectedDisplay(const NativeDisplayPromptScope &scope,
                                                 quint64 originalEpoch)
 {
@@ -1243,7 +1273,13 @@ bool NativeWaylandLock::bindProtectedInput(SecretEntry &entry, UnlockRequest req
         [this] {
             return impl_->protectedInteraction ? impl_->protectedCovered() : impl_->inputCovered();
         },
-        std::move(request), std::move(primaryAvailable),
+        std::move(request),
+        [this, primaryAvailable = std::move(primaryAvailable)] {
+            // The private display conversation owns its actions even between
+            // page callbacks. Unarmed/retired review input must never request
+            // an unrelated lock/unlock operation through the generic surface.
+            return !impl_->protectedInteraction && primaryAvailable();
+        },
         hitTest ? NativeKeyboard::PointerHitTest([this, hitTest](wl_surface *surface,
                                                                  const QPointF &position) {
             const Impl::Output *output = nullptr;

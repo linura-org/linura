@@ -14,6 +14,10 @@ struct NativeApprovalWire final
     QString resource, principal, request, plan, requestDigest, observationDigest, reviewDigest;
     quint32 purpose = 0;
     [[nodiscard]] std::optional<NativeApprovalScope> scope() const;
+    [[nodiscard]] std::optional<NativeApprovalScope> displayScope(const QString &material,
+                                                                  const QString &reason,
+                                                                  quint64 deadlineUnixMs,
+                                                                  quint64 deadlineBootMs) const;
 };
 QDBusArgument &operator<<(QDBusArgument &wire, const NativeApprovalWire &scope);
 const QDBusArgument &operator>>(const QDBusArgument &wire, NativeApprovalWire &scope);
@@ -97,6 +101,33 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "direction=\"in\"/>"
         "<arg name=\"consumed\" type=\"b\" direction=\"out\"/></method>"
         "<method name=\"CancelApproval\"/>"
+        "<method name=\"ArmDisplayApproval\"><arg name=\"scope\" type=\"(sssssssu)\" "
+        "direction=\"in\"/>"
+        "<arg name=\"material\" type=\"s\" direction=\"in\"/><arg name=\"reason\" type=\"s\" "
+        "direction=\"in\"/>"
+        "<arg name=\"deadline_unix_ms\" type=\"t\" direction=\"in\"/><arg "
+        "name=\"deadline_boot_ms\" type=\"t\" direction=\"in\"/><arg name=\"armed\" "
+        "type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"DisplayApprovalReady\"><arg name=\"scope\" type=\"(sssssssu)\" "
+        "direction=\"in\"/>"
+        "<arg name=\"material\" type=\"s\" direction=\"in\"/><arg name=\"reason\" type=\"s\" "
+        "direction=\"in\"/>"
+        "<arg name=\"deadline_unix_ms\" type=\"t\" direction=\"in\"/><arg "
+        "name=\"deadline_boot_ms\" type=\"t\" direction=\"in\"/><arg name=\"ready\" "
+        "type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"ConsumeDisplayApproval\"><arg name=\"scope\" type=\"(sssssssu)\" "
+        "direction=\"in\"/>"
+        "<arg name=\"material\" type=\"s\" direction=\"in\"/><arg name=\"reason\" type=\"s\" "
+        "direction=\"in\"/>"
+        "<arg name=\"deadline_unix_ms\" type=\"t\" direction=\"in\"/><arg "
+        "name=\"deadline_boot_ms\" type=\"t\" direction=\"in\"/><arg name=\"consumed\" "
+        "type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"CancelDisplayApproval\"><arg name=\"scope\" type=\"(sssssssu)\" "
+        "direction=\"in\"/><arg name=\"material\" type=\"s\" direction=\"in\"/>"
+        "<arg name=\"reason\" type=\"s\" direction=\"in\"/>"
+        "<arg name=\"deadline_unix_ms\" type=\"t\" direction=\"in\"/><arg "
+        "name=\"deadline_boot_ms\" type=\"t\" direction=\"in\"/>"
+        "<arg name=\"cancelled\" type=\"b\" direction=\"out\"/></method>"
         "<method name=\"ObserveLock\"><arg name=\"observation\" type=\"(sbt)\" "
         "direction=\"out\"/></method>"
         "<method name=\"ObserveDisplay\"><arg name=\"observation\" type=\"(ssstssb)\" "
@@ -153,6 +184,18 @@ class NativeEndpoint final : public QObject, protected QDBusContext
     bool ArmApproval(const NativeApprovalWire &scope);
     bool ConsumeApproval(const NativeApprovalWire &scope);
     void CancelApproval();
+    bool ArmDisplayApproval(const NativeApprovalWire &, const QString &material,
+                            const QString &reason, quint64 deadline_unix_ms,
+                            quint64 deadline_boot_ms);
+    bool DisplayApprovalReady(const NativeApprovalWire &, const QString &material,
+                              const QString &reason, quint64 deadline_unix_ms,
+                              quint64 deadline_boot_ms);
+    bool ConsumeDisplayApproval(const NativeApprovalWire &, const QString &material,
+                                const QString &reason, quint64 deadline_unix_ms,
+                                quint64 deadline_boot_ms);
+    bool CancelDisplayApproval(const NativeApprovalWire &, const QString &material,
+                               const QString &reason, quint64 deadline_unix_ms,
+                               quint64 deadline_boot_ms);
     NativeLockObservationWire ObserveLock();
     NativeDisplayObservationWire ObserveDisplay();
     NativePreparedDisplayObservationWire ObservePreparedDisplay();

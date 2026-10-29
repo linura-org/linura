@@ -163,7 +163,7 @@ void displayApprovalRequiresItsOwnPresentedPurposeAndOriginalDeadline()
             purpose == ApprovalPurpose::ApplyDisplay
                 ? QString{}
                 : QStringLiteral("sha256:") + QString(64, QLatin1Char('4')),
-            1000, QStringLiteral("Arrange the current session displays")};
+            1000, QStringLiteral("Arrange the current session displays"), 1000};
         check(reviewed.valid() && reviewed.isDisplay());
         check(!reviewed.requiresSessionOwnerAuthentication());
         check(std::strcmp(reviewed.authenticationAction(),

@@ -154,6 +154,11 @@ kind = "polkit-action"
 status = "active"
 
 [[identifier]]
+id = "org.linura.authority.apply-display-layout"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
 id = "org.linura.authority.enable-protective-lock"
 kind = "polkit-action"
 status = "active"
@@ -336,6 +341,13 @@ source = "crates/linura-linux-session/src/owner.rs"
 usage = "native-approval-action"
 token = '"org.linura.authority.unlock-session"'
 action = "org.linura.authority.unlock-session"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner/display/approval.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.apply-display-layout"'
+action = "org.linura.authority.apply-display-layout"
 policy = "packaging/polkit-1/actions/org.linura.authority.policy"
 
 [[polkit_binding]]

@@ -165,7 +165,7 @@ QString NativeDisplayIntent::encode() const
 }
 std::optional<NativeDisplayIntent> NativeDisplayIntent::parse(const QString &material)
 {
-    if (material.isEmpty() || material.toUtf8().size() > 4096 ||
+    if (material.isEmpty() || material.size() > 4096 || material.toUtf8().size() > 4096 ||
         std::any_of(material.begin(), material.end(),
                     [](QChar c) { return c.unicode() < 32 || c.unicode() >= 127; }))
         return std::nullopt;

@@ -321,6 +321,26 @@ matrix() {
             self.assertEqual(action.findtext("defaults/allow_active"), active)
             self.assertNotIn("_keep", ET.tostring(action, encoding="unicode"))
 
+    def test_display_apply_requires_nonretained_admin_authentication(self):
+        root = ET.fromstring(
+            (ROOT / "packaging/polkit-1/actions/org.linura.authority.policy").read_text(
+                encoding="utf-8"
+            )
+        )
+        actions = root.findall(
+            "action[@id='org.linura.authority.apply-display-layout']"
+        )
+        self.assertEqual(len(actions), 1)
+        action = actions[0]
+        self.assertEqual(action.findtext("defaults/allow_any"), "no")
+        self.assertEqual(action.findtext("defaults/allow_inactive"), "no")
+        self.assertEqual(action.findtext("defaults/allow_active"), "auth_admin")
+        self.assertEqual(
+            action.findtext("annotate[@key='org.freedesktop.policykit.owner']"),
+            ACTION_OWNER,
+        )
+        self.assertNotIn("_keep", ET.tostring(action, encoding="unicode"))
+
     def test_authority_action_owner_matches_unprivileged_service_identity(self) -> None:
         policy_path = ROOT / "packaging/polkit-1/actions/org.linura.authority.policy"
         root = ET.fromstring(policy_path.read_text(encoding="utf-8"))

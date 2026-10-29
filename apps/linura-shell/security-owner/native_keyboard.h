@@ -65,6 +65,9 @@ class NativeKeyboard final
     using Confirmation = std::function<void(bool)>;
     [[nodiscard]] bool setConfirmationTarget(wl_surface *surface, Confirmation completion);
     void clearConfirmationTarget();
+    // One fresh native review action on current protected focus. Unlike S17's
+    // pre-lock target, this retains held-key state/focus across a page revision.
+    [[nodiscard]] bool setDisplayReviewTarget(Confirmation completion);
 
   private:
     class Impl;

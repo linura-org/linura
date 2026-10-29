@@ -286,6 +286,18 @@ only `display.layout-attempt.observe` into the canonical envelope; native phase
 is neither independent layout verification, protected approval nor permission to
 replay. Production dispatch and full recovery remain unqualified and unsupported.
 
+The private Experimental `SecurityOwner1` Apply handshake additionally exposes
+`ArmDisplayApproval`, `DisplayApprovalReady`, `ConsumeDisplayApproval` and
+`CancelDisplayApproval`. Each takes the original `(sssssssu)` comparison scope,
+complete material, bounded reason and original wall/BOOTTIME deadlines as `(sssssssu)sstt`, and
+returns one boolean. Only purpose 8 (Apply) is admitted; the legacy S17 methods
+continue rejecting display scopes. A retired readiness conversation returns the
+fixed unavailable error rather than indefinite pending. Cancellation compares
+the exact scope even after its deadline and cannot adopt another native owner or
+cancel a newer conversation. These private methods create neither public mutation
+support nor an executor credential. Keep/Revert must continue a retained original
+transaction; they cannot enter through this Apply handshake.
+
 ### Session1 bounded transient-effect contract
 
 `org.linura.Session1` is a distinct Experimental **session-bus transient-effect** contract introduced for the v0.10 workstation line. It is hosted by the same unprivileged `linurad` process and well-known session-bus service as Control1, but it is a separate object/interface and does not widen the historical non-executable Control1 method surface.

@@ -575,8 +575,14 @@ struct WireServer final
     }
     void command(unsigned char value)
     {
-        if (scenario == Case::DisplayPrompt && (value == 99 || value == 100)) {
-            stroke(value == 99 ? 108U : 28U); // Native Down / Return edges.
+        if (scenario == Case::DisplayPrompt && value >= 99 && value <= 104) {
+            if (value == 103) {
+                sendKey(28);
+                sendKey(28); // Held/repeat: no fresh edge.
+            } else if (value == 104)
+                sendKey(28, WL_KEYBOARD_KEY_STATE_RELEASED);
+            else
+                stroke(value == 99 ? 108U : 28U); // Native Down / Return edges.
             wl_display_flush_clients(display);
             assert(send(commands, &value, 1, MSG_NOSIGNAL) == 1);
             return;
@@ -1315,6 +1321,44 @@ void client(Case scenario, int descriptor, int commands)
                 assert(selected == 1 && selectedUid == 1001 && !entry->acceptsInput());
                 QObject::disconnect(revisionConnection);
                 QObject::disconnect(selectedConnection);
+                sendCommand(100); // Ready display page, before its action is armed.
+                assert(unlockRequests == 0);
+                unsigned reviews = 0;
+                bool accepted = false;
+                const auto completion = [&](bool confirmed) {
+                    ++reviews;
+                    accepted = confirmed;
+                };
+                assert(backend.armProtectedDisplayReview(prompt, status->epoch, completion));
+                assert(!backend.armProtectedDisplayReview(prompt, status->epoch, completion));
+                sendCommand(100);
+                waitUntil([&] { return reviews == 1; });
+                assert(accepted &&
+                       !backend.armProtectedDisplayReview(prompt, status->epoch, completion));
+                sendCommand(100); // The retired page cannot fall through to S17.
+                assert(reviews == 1 && unlockRequests == 0);
+                const auto nextReview = [&] {
+                    const auto previous = status->epoch;
+                    assert(backend.refreshProtectedDisplay(prompt, previous));
+                    waitUntil([&] {
+                        status = backend.protectedDisplayStatus();
+                        return status && status->phase == NativeDisplayPromptStatus::Phase::Ready &&
+                               status->epoch > previous && backend.protectedInputFocused();
+                    });
+                    assert(backend.armProtectedDisplayReview(prompt, status->epoch, completion));
+                };
+                nextReview();
+                sendCommand(103);
+                waitUntil([&] { return reviews == 2; });
+                assert(accepted);
+                nextReview();
+                sendCommand(103);
+                QCoreApplication::processEvents();
+                assert(reviews == 2); // Held Enter cannot advance another page.
+                sendCommand(104);
+                sendCommand(100);
+                waitUntil([&] { return reviews == 3; });
+                assert(accepted && unlockRequests == 0);
             }
             if (scenario == Case::DisplayPromptStale)
                 assert(!backend.consumeProtectedDisplay(prompt, status->epoch - 1));

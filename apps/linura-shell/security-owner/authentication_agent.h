@@ -68,6 +68,7 @@ class AuthenticationAgent final : public QObject
     // Only presentation interaction; cannot assert PAM success or unlock.
     Q_INVOKABLE void confirmLock();
     Q_INVOKABLE void cancelInteraction();
+    void cancelScopedInteraction(const NativeApprovalScope &);
 
     // Official listener adapter entry, C++ only. The callback/cookie/identity
     // originate in native Polkit, never an ordinary shell's supplied boolean.

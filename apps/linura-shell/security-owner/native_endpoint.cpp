@@ -67,6 +67,30 @@ std::optional<NativeApprovalScope> NativeApprovalWire::scope() const
         return std::nullopt;
     return candidate;
 }
+std::optional<NativeApprovalScope> NativeApprovalWire::displayScope(const QString &material,
+                                                                    const QString &reason,
+                                                                    quint64 deadlineUnixMs,
+                                                                    quint64 deadlineBootMs) const
+{
+    if (purpose != 8 || material.size() > 4096 || reason.size() > 2048 || principal.size() > 64 ||
+        request.size() > 128 || plan.size() > 128)
+        return std::nullopt;
+    const auto lock = NativeLockIdentity::parse(resource);
+    if (!lock)
+        return std::nullopt;
+    NativeApprovalScope candidate{
+        *lock,
+        principal,
+        request,
+        plan,
+        requestDigest,
+        observationDigest,
+        reviewDigest,
+        ApprovalPurpose::ApplyDisplay,
+        std::nullopt,
+        NativeDisplayApprovalBinding{material, {}, deadlineUnixMs, reason, deadlineBootMs}};
+    return candidate.valid() ? std::optional(candidate) : std::nullopt;
+}
 QDBusArgument &operator<<(QDBusArgument &wire, const NativeApprovalWire &scope)
 {
     wire.beginStructure();
@@ -200,6 +224,42 @@ void NativeEndpoint::CancelApproval()
 {
     if (calledFromDBus())
         runtime_.cancelApproval(message());
+}
+bool NativeEndpoint::ArmDisplayApproval(const NativeApprovalWire &wire, const QString &material,
+                                        const QString &reason, quint64 deadline,
+                                        quint64 deadlineBootMs)
+{
+    const auto scope = wire.displayScope(material, reason, deadline, deadlineBootMs);
+    return calledFromDBus() && scope && runtime_.armDisplayApproval(message(), *scope);
+}
+bool NativeEndpoint::DisplayApprovalReady(const NativeApprovalWire &wire, const QString &material,
+                                          const QString &reason, quint64 deadline,
+                                          quint64 deadlineBootMs)
+{
+    const auto scope = wire.displayScope(material, reason, deadline, deadlineBootMs);
+    const auto ready =
+        calledFromDBus() && scope ? runtime_.displayApprovalReady(message(), *scope) : std::nullopt;
+    if (!ready) {
+        if (calledFromDBus())
+            sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                           QStringLiteral("Native display interaction unavailable"));
+        return false;
+    }
+    return *ready;
+}
+bool NativeEndpoint::ConsumeDisplayApproval(const NativeApprovalWire &wire, const QString &material,
+                                            const QString &reason, quint64 deadline,
+                                            quint64 deadlineBootMs)
+{
+    const auto scope = wire.displayScope(material, reason, deadline, deadlineBootMs);
+    return calledFromDBus() && scope && runtime_.consumeDisplayApproval(message(), *scope);
+}
+bool NativeEndpoint::CancelDisplayApproval(const NativeApprovalWire &wire, const QString &material,
+                                           const QString &reason, quint64 deadlineUnixMs,
+                                           quint64 deadlineBootMs)
+{
+    const auto scope = wire.displayScope(material, reason, deadlineUnixMs, deadlineBootMs);
+    return calledFromDBus() && scope && runtime_.cancelDisplayApproval(message(), *scope);
 }
 NativeLockObservationWire NativeEndpoint::ObserveLock()
 {

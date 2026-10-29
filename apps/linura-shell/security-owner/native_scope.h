@@ -50,6 +50,7 @@ struct NativeDisplayApprovalBinding final
     QString decisionDigest;
     quint64 deadlineUnixMs = 0;
     QString reason = {};
+    quint64 deadlineBootMs = 0;
     bool operator==(const NativeDisplayApprovalBinding &) const = default;
 };
 

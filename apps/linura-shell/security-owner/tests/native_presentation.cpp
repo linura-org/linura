@@ -195,7 +195,8 @@ int main(int argc, char **argv)
             displayTopology + QStringLiteral(";1:2:enabled:1280:720:59940:1250:1:-100:20:-;"),
         {},
         1000,
-        QStringLiteral("Make text easier to read")};
+        QStringLiteral("Make text easier to read"),
+        1000};
     const auto displayPages = nativeDisplayReviewPages(displayReview, displaySnapshot);
     assert(displayPages && displayPages->size() == 4);
     for (std::size_t page = 0; page < displayPages->size(); ++page) {

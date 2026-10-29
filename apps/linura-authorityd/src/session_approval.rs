@@ -26,6 +26,9 @@ impl ManagedApprovalAuthorizer for NativeSessionApprovalAuthorizer {
         if challenge.principal() != &self.principal {
             return Err("native approval challenge has another principal or purpose".into());
         }
+        if challenge.change_key() == "layout" {
+            return crate::display_approval::authorize(&self.channel, &self.principal, challenge);
+        }
         let (lock, transition, purpose) = match (challenge.change_key(), challenge.desired_value())
         {
             ("protective_lock.enabled", desired @ ("true" | "false")) => {
@@ -110,7 +113,7 @@ impl ManagedApprovalAuthorizer for NativeSessionApprovalAuthorizer {
     }
 }
 
-fn digest(value: &str) -> Result<ComponentDigest, String> {
+pub(crate) fn digest(value: &str) -> Result<ComponentDigest, String> {
     let hex = value
         .strip_prefix("sha256:")
         .ok_or("native challenge digest has the wrong domain")?;

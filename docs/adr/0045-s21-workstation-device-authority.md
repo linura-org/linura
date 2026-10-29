@@ -493,8 +493,12 @@ purpose, reason and original deadline. A continuation challenge is a separate
 field, never a replacement policy-review digest. The mechanism requires a fresh
 Ready presentation for the exact topology before starting purpose-bound native
 PAM; even a late successful PAM conversation cannot extend the original window.
-This admission mechanism remains separate from activation of the production
-Control authorizer and final prepared-dispatch receipt redemption.
+The Control composition now derives this Apply request from the sealed canonical
+challenge, requires its exact Administrator class/resource/principal, and retains
+the original request/observation/review digests. A separate fixed Polkit action
+uses non-retained administrator authentication on the same Control connection.
+This composition does not enable the public display operation or qualify native
+execution and recovery.
 
 The first-party display review projection bounds the reason into grapheme-safe
 pages and describes every output's previous/requested mode, scale, transform,
@@ -506,9 +510,11 @@ can qualify that revision. The owner expects exactly the configure-derived epoch
 advance; focus or other unexplained epoch changes cannot be adopted as a page
 transition. A consumed interaction may continue protected redraws without becoming
 Ready or reusable; failed presentation, reconfigure or duplicate consumption still
-invalidates it. Production page progression, per-PAM-prompt presentation admission,
-continuous mutation/decision handoff and native acceptance remain required before
-this candidate can be enabled.
+invalidates it. The native page controller binds each physical page action to its
+exact epoch, presents each PAM prompt/administrator revision before admitting
+input, and retains a consumed receipt for one exact prepared dispatch. Continuous
+mutation/decision handoff and native acceptance remain required before this
+candidate can be enabled.
 
 Display PAM prompt admission stages fixed prompt-kind/UID/step metadata without
 accepting input. A native-only monotonically increasing token binds activation to
@@ -526,6 +532,20 @@ still awaiting presentation is denial, not authentication success. Multiple
 eligible administrators retain explicit bounded selection; each selected-UID
 revision is presented before Return can select it, without renewing the original
 window. S17's existing direct prompt/identity-selection behavior remains distinct.
-These are native mechanism guarantees. Production Control challenge transport,
-page progression, final dispatch receipt redemption and actual native PAM/mutation
-acceptance must still be completed before enabling the display operation.
+Control's bounded readiness polling uses the same original wall/BOOTTIME window;
+neither a native reply nor suspend renews it. An uncertain/late arm, readiness,
+authentication or consume reply cancels only the exact original scope, including
+after expiry. The owner retains the non-serialized consumed receipt, complete
+intent, original transaction namespace and native frame/input generations.
+Prepared root dispatch must redeem that live receipt after independently checking
+its actual transport peer and native baseline, before making any effect.
+Successful Polkit, correlation digests and a previous scene cannot replace it.
+
+Physical key delivery retains releases already delivered to the same private
+owner while a page is arming, aggregates multiple native keyboards, and never
+adopts a held/unready press as a fresh action. This prevents a held Return or
+stale modifier from leaking across review and PAM revisions. These changes have
+component/wire and compile evidence only. Continuous protected modeset and
+Apply-to-Keep/Revert composition, actual cross-compositor restoration, and real
+native PAM/mutation/adversarial acceptance remain incomplete. Public Begin,
+Confirm and Revert therefore still refuse execution; the PR remains draft.

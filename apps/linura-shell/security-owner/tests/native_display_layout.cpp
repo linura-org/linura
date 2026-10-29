@@ -137,9 +137,11 @@ int main()
                                QStringLiteral("sha256:") + QString(64, QLatin1Char('2')),
                                QStringLiteral("sha256:") + QString(64, QLatin1Char('3')),
                                ApprovalPurpose::ApplyDisplay};
-    review.display =
-        NativeDisplayApprovalBinding{text, {}, 1000, QStringLiteral("Make text easier to read")};
+    review.display = NativeDisplayApprovalBinding{
+        text, {}, 1000, QStringLiteral("Make text easier to read"), 1000};
     const auto pages = nativeDisplayReviewPages(review, observed);
+    assert(review.protectedDisplayDigest() ==
+           QStringLiteral("1912667e4c6dda437542c3d34758044bdf6b575ce2aec12b6837e682bf92e907"));
     assert(pages && pages->size() == 4);
     assert(pages->at(0).explanation.contains(QStringLiteral("UID 1000")));
     assert(pages->at(0).explanation.contains(QStringLiteral("Security-sensitive")));

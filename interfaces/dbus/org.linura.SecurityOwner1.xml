@@ -21,6 +21,42 @@
       <arg name="consumed" type="b" direction="out"/>
     </method>
     <method name="CancelApproval"/>
+    <!-- Separate display Apply handshake. Original canonical scope/review,
+         complete material/reason and original deadline are immutable comparison
+         data; no bool or digest becomes prepared execution authority. Keep and
+         Revert must continue the retained original native transaction. -->
+    <method name="ArmDisplayApproval">
+      <arg name="scope" type="(sssssssu)" direction="in"/>
+      <arg name="material" type="s" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="deadline_unix_ms" type="t" direction="in"/>
+      <arg name="deadline_boot_ms" type="t" direction="in"/>
+      <arg name="armed" type="b" direction="out"/>
+    </method>
+    <method name="DisplayApprovalReady">
+      <arg name="scope" type="(sssssssu)" direction="in"/>
+      <arg name="material" type="s" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="deadline_unix_ms" type="t" direction="in"/>
+      <arg name="deadline_boot_ms" type="t" direction="in"/>
+      <arg name="ready" type="b" direction="out"/>
+    </method>
+    <method name="ConsumeDisplayApproval">
+      <arg name="scope" type="(sssssssu)" direction="in"/>
+      <arg name="material" type="s" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="deadline_unix_ms" type="t" direction="in"/>
+      <arg name="deadline_boot_ms" type="t" direction="in"/>
+      <arg name="consumed" type="b" direction="out"/>
+    </method>
+    <method name="CancelDisplayApproval">
+      <arg name="scope" type="(sssssssu)" direction="in"/>
+      <arg name="material" type="s" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="deadline_unix_ms" type="t" direction="in"/>
+      <arg name="deadline_boot_ms" type="t" direction="in"/>
+      <arg name="cancelled" type="b" direction="out"/>
+    </method>
     <method name="ObserveLock">
       <!-- Consistent in-flight acquisition/release returns the fixed private
            NativeTransitionPending error, never secure=false. Other unknown or

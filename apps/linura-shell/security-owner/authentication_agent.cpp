@@ -509,6 +509,12 @@ void AuthenticationAgent::cancelInteraction()
     }
 }
 
+void AuthenticationAgent::cancelScopedInteraction(const NativeApprovalScope &expected)
+{
+    if (QThread::currentThread() == thread() && scope_ && *scope_ == expected)
+        cancelInteraction();
+}
+
 void AuthenticationAgent::ownerLost()
 {
     approval_.ownerLost();

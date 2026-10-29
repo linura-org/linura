@@ -48,6 +48,11 @@ class NativeRuntime final : public QObject
     [[nodiscard]] bool armApproval(const QDBusMessage &received, const NativeApprovalScope &scope);
     [[nodiscard]] bool consumeApproval(const QDBusMessage &received,
                                        const NativeApprovalScope &scope);
+    [[nodiscard]] bool armDisplayApproval(const QDBusMessage &, const NativeApprovalScope &);
+    [[nodiscard]] std::optional<bool> displayApprovalReady(const QDBusMessage &,
+                                                           const NativeApprovalScope &);
+    [[nodiscard]] bool consumeDisplayApproval(const QDBusMessage &, const NativeApprovalScope &);
+    [[nodiscard]] bool cancelDisplayApproval(const QDBusMessage &, const NativeApprovalScope &);
     [[nodiscard]] bool dispatchPrepared(const QDBusMessage &received,
                                         const NativeLockIdentity &identity, bool secure);
     [[nodiscard]] std::optional<NativeObservedLockState> observe(const QDBusMessage &received);

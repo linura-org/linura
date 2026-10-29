@@ -2,6 +2,7 @@
 #include "pinned_integration.h"
 #include "protected_wire.h"
 #include "protected_input_retirement.h"
+#include "protected_key_delivery.h"
 #include "native_owner_admission.h"
 
 #include "src/Compositor.hpp"
@@ -150,6 +151,7 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         CHyprSignalListener changed;
     };
     std::vector<Keyboard> keyboards;
+    ProtectedKeyDelivery keys;
     std::vector<WP<IPointer>> pointers;
     bool closed = false;
     bool escapeDown = false;
@@ -294,6 +296,13 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         const auto facts = backend ? backend->snapshot() : std::nullopt;
         const auto clock = compositorClock();
         return facts && clock && interaction.eligible(interaction.epoch(), *facts, *clock);
+    }
+    bool ownsKeyboardFocus() const
+    {
+        return g_pSeatManager && std::ranges::any_of(surfaces, [&](const auto &item) {
+                   const auto resource = item.second.resource.lock();
+                   return resource && resource == g_pSeatManager->m_state.keyboardFocus;
+               });
     }
 };
 class PinnedScene final : public ProtectedScene
@@ -676,6 +685,9 @@ bool protectedKeyboardKey(const IKeyboard::SKeyEvent &event, const SP<IKeyboard>
     if (!data) {
         if (!inputRetirement.blocked())
             return false;
+        if (event.state != WL_KEYBOARD_KEY_STATE_PRESSED &&
+            event.state != WL_KEYBOARD_KEY_STATE_RELEASED)
+            return true;
         const bool physical =
             nativeKeyboardDevice(keyboard) && keyboard->m_enabled && keyboard->m_allowed;
         if (!inputRetirement.key(physical, event.keycode == KEY_ESC,
@@ -683,6 +695,11 @@ bool protectedKeyboardKey(const IKeyboard::SKeyEvent &event, const SP<IKeyboard>
             return false;
         if (!draining())
             scheduleRefocus();
+        return true;
+    }
+    if (event.state != WL_KEYBOARD_KEY_STATE_PRESSED &&
+        event.state != WL_KEYBOARD_KEY_STATE_RELEASED) {
+        data->close();
         return true;
     }
     if (!nativeKeyboardDevice(keyboard) || !keyboard->m_enabled || !keyboard->m_allowed) {
@@ -703,10 +720,20 @@ bool protectedKeyboardKey(const IKeyboard::SKeyEvent &event, const SP<IKeyboard>
             data->escapeDown = false;
     } else if (event.state == WL_KEYBOARD_KEY_STATE_PRESSED)
         data->exitBootMs = 0;
-    if (ready) {
+    const auto source = std::ranges::find_if(
+        data->keyboards, [&](const auto &bound) { return bound.device.lock() == keyboard; });
+    if (source == data->keyboards.end()) {
+        data->close();
+        return true;
+    }
+    const auto delivery =
+        data->keys.edge(static_cast<std::size_t>(std::distance(data->keyboards.begin(), source)),
+                        event.keycode, event.state == WL_KEYBOARD_KEY_STATE_PRESSED, ready);
+    if (delivery != ProtectedKeyDelivery::Edge::Ignore && data->ownsKeyboardFocus() &&
+        !data->closed && data->interaction.phase() != ProtectedInteraction::Phase::Cancelled) {
         g_pSeatManager->setKeyboard(keyboard);
         g_pSeatManager->sendKeyboardKey(event.timeMs, event.keycode, event.state);
-    } else if (event.keycode == KEY_ESC && event.state == WL_KEYBOARD_KEY_STATE_PRESSED &&
+    } else if (!ready && event.keycode == KEY_ESC && event.state == WL_KEYBOARD_KEY_STATE_PRESSED &&
                data->exitBootMs != 0) {
         data->close(); // Physical cancellation can abandon an unready prompt.
     }
@@ -721,7 +748,17 @@ bool protectedKeyboardModifiers(const SP<IKeyboard> &keyboard)
         data->interaction.cancel();
         return true;
     }
-    if (data->inputReady()) {
+    const bool bound = std::ranges::any_of(
+        data->keyboards, [&](const auto &original) { return original.device.lock() == keyboard; });
+    if (!bound) {
+        data->close();
+        return true;
+    }
+    // Modifier snapshots do not admit a key or a proof. Keep the same private
+    // owner's XKB state current while new presses wait for a replacement frame;
+    // otherwise a dropped Shift release could contaminate the next PAM prompt.
+    if (data->refresh() && data->ownsKeyboardFocus() && !data->closed &&
+        data->interaction.phase() != ProtectedInteraction::Phase::Cancelled) {
         const auto &mods = keyboard->m_modifiersState;
         g_pSeatManager->setKeyboard(keyboard);
         g_pSeatManager->sendKeyboardMods(mods.depressed, mods.latched, mods.locked, mods.group);

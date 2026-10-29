@@ -100,6 +100,8 @@ class NativeKeyboard::Impl final
     wl_surface *focus = nullptr;
     wl_surface *confirmationSurface = nullptr;
     Confirmation confirmation;
+    wl_surface *displayReviewSurface = nullptr;
+    Confirmation displayReview;
     xkb_context *context = nullptr;
     xkb_keymap *map = nullptr;
     xkb_state *state = nullptr;
@@ -166,6 +168,8 @@ class NativeKeyboard::Impl final
     }
     void loseFocus()
     {
+        auto retired = std::move(displayReview);
+        displayReviewSurface = nullptr;
         pointerPress.reset();
         focus = nullptr;
         pressed.fill(false);
@@ -175,6 +179,8 @@ class NativeKeyboard::Impl final
             checkThread();
             entry->setNativeKeyboardFocus(false);
         }
+        if (retired)
+            retired(false);
     }
     bool eligible() const
     {
@@ -302,7 +308,12 @@ class NativeKeyboard::Impl final
                 time - self.pointerPressedAt > 1000 || *pressed != self.currentPointerTarget())
                 return;
             const bool primary = pressed->action == NativePointerTarget::Action::Primary;
-            if (self.pointerFocus == self.confirmationSurface && self.confirmation) {
+            if (self.displayReview && self.protectedFocus() && self.guard &&
+                self.guard(self.pointerFocus)) {
+                auto completion = std::move(self.displayReview);
+                self.displayReviewSurface = nullptr;
+                completion(primary);
+            } else if (self.pointerFocus == self.confirmationSurface && self.confirmation) {
                 auto completion = std::move(self.confirmation);
                 self.confirmationSurface = nullptr;
                 self.loseFocus();
@@ -482,6 +493,21 @@ class NativeKeyboard::Impl final
             }
             const auto nativeCode = code + 8;
             const auto symbol = xkb_state_key_get_one_sym(self.state, nativeCode);
+            if (self.focus == self.displayReviewSurface && self.displayReview) {
+                for (const char *modifier :
+                     {XKB_MOD_NAME_SHIFT, XKB_MOD_NAME_CTRL, XKB_MOD_NAME_ALT, XKB_MOD_NAME_LOGO,
+                      "Mod5", "LevelThree"})
+                    if (xkb_state_mod_name_is_active(self.state, modifier,
+                                                     XKB_STATE_MODS_EFFECTIVE) > 0)
+                        return;
+                if (symbol == XKB_KEY_Return || symbol == XKB_KEY_KP_Enter ||
+                    symbol == XKB_KEY_Escape) {
+                    auto completion = std::move(self.displayReview);
+                    self.displayReviewSurface = nullptr;
+                    completion(symbol != XKB_KEY_Escape);
+                }
+                return; // No review-page input enters the response buffer.
+            }
             if (self.focus == self.confirmationSurface && self.confirmation) {
                 // Confirmation input never calls the protected text path, even
                 // if a stale native prompt is accidentally still open.
@@ -663,6 +689,8 @@ void NativeKeyboard::refreshProtectedFocus(bool preservePreparedPrompt)
 void NativeKeyboard::invalidateOutputConfiguration(bool preservePreparedPrompt)
 {
     impl_->checkThread();
+    auto retired = std::move(impl_->displayReview);
+    impl_->displayReviewSurface = nullptr;
     impl_->pointerPress.reset();
     if (impl_->compose)
         xkb_compose_state_reset(impl_->compose);
@@ -676,6 +704,19 @@ void NativeKeyboard::invalidateOutputConfiguration(bool preservePreparedPrompt)
         impl_->cancelConfirmation();
         impl_->pressed = held;
     }
+    if (retired)
+        retired(false);
+}
+
+bool NativeKeyboard::setDisplayReviewTarget(Confirmation completion)
+{
+    impl_->checkThread();
+    if (!completion || impl_->displayReview || impl_->confirmation || !impl_->protectedFocus() ||
+        impl_->entry->acceptsInput() || impl_->entry->prepared_)
+        return false;
+    impl_->displayReviewSurface = impl_->focus;
+    impl_->displayReview = std::move(completion);
+    return true;
 }
 void NativeKeyboard::forgetSurface(wl_surface *surface)
 {

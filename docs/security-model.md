@@ -136,6 +136,25 @@ permit or continuation, and reconciliation cannot apply/confirm/revert. Public
 begin/confirm/revert remain unsupported until protected decisions, durable
 compositor-loss restoration and required native qualification are complete.
 
+The private Apply review handshake accepts the complete canonical material and
+original principal/request/plan/digests from the supervised Control connection.
+It shows bounded first-party review pages, requires a fresh native action and
+presentation per revision, and presents fixed administrator/PAM metadata before
+accepting input. Control owns bounded readiness polling; the original wall and
+BOOTTIME deadlines cannot be renewed by polling, authentication or suspend.
+The fixed Apply Polkit action uses `auth_admin`, never a retained grant. Its
+positive result must still be followed by consumption of the exact native proof.
+Expired, denied, replaced-owner and uncertain/late calls retire only their exact
+scope. A separate scoped cancellation cannot cancel a newer conversation.
+
+The owner's consumed Apply receipt remains process-local and one-use. Root's
+separately admitted prepared dispatch must match its complete material, original
+transaction and still-live native frame/input generations before redemption.
+No client digest or positive Polkit reply is an executor credential. This private
+composition is not production display support: continuous protected modeset,
+Keep/Revert, replacement restoration and native adversarial acceptance remain
+required before the public display effect can be enabled.
+
 The owner's native peer/session/unit inspectors queue at most 32 fixed
 `Properties.Get` reads per interface before waiting. Each pending call retains
 the existing 500 ms cap from admission, and all batches share their caller's

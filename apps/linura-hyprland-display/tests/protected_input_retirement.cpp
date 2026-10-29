@@ -1,6 +1,7 @@
 // Pure native routing traces. No simulated fact is native qualification,
 // authenticated input, a human approval, a lock release or effect authority.
 #include "protected_input_retirement.h"
+#include "protected_key_delivery.h"
 #include <cassert>
 #include <initializer_list>
 #include <type_traits>
@@ -10,7 +11,31 @@ using Phase = ProtectedInputRetirement::Phase;
 using Held = ProtectedInputRetirement::Held;
 static_assert(!std::is_copy_constructible_v<ProtectedInputRetirement>);
 static_assert(!std::is_move_constructible_v<ProtectedInputRetirement>);
+static_assert(!std::is_copy_constructible_v<ProtectedKeyDelivery>);
+static_assert(!std::is_move_constructible_v<ProtectedKeyDelivery>);
 namespace {
+void deliveredReleasesDrainAcrossAnExpectedFrameWithoutAdmittingHeldPresses()
+{
+    ProtectedKeyDelivery delivery;
+    using Edge = ProtectedKeyDelivery::Edge;
+    assert(delivery.edge(0, 28, true, true) == Edge::Press);
+    assert(delivery.edge(0, 28, true, false) == Edge::Ignore);
+    assert(delivery.edge(0, 28, false, false) == Edge::Release);
+    assert(delivery.edge(0, 28, true, true) == Edge::Press);
+    assert(delivery.edge(0, 28, false, true) == Edge::Release);
+    assert(delivery.edge(0, 30, true, false) == Edge::Ignore);
+    assert(delivery.edge(0, 30, true, true) == Edge::Ignore); // Held at first frame.
+    assert(delivery.edge(0, 30, false, true) == Edge::Ignore);
+    assert(delivery.edge(0, 30, true, true) == Edge::Press);
+    assert(delivery.edge(1, 30, true, true) == Edge::Ignore);
+    assert(delivery.edge(0, 30, false, false) == Edge::Ignore); // Other device still holds.
+    assert(delivery.edge(1, 30, true, true) == Edge::Ignore);
+    assert(delivery.edge(ProtectedKeyDelivery::Devices, 30, false, true) == Edge::Ignore);
+    assert(delivery.edge(1, static_cast<std::uint32_t>(ProtectedKeyDelivery::Keys), false, true) ==
+           Edge::Ignore);
+    assert(delivery.edge(1, 30, false, false) == Edge::Release);
+    assert(delivery.edge(1, 30, true, true) == Edge::Press);
+}
 void unexpectedLossDoesNotRouteTheRestOfAResponseToAnOrdinaryClient()
 {
     ProtectedInputRetirement input;
@@ -86,6 +111,7 @@ void explicitExitStillDrainsBeforeAnotherConversation()
 } // namespace
 int main()
 {
+    deliveredReleasesDrainAcrossAnExpectedFrameWithoutAdmittingHeldPresses();
     unexpectedLossDoesNotRouteTheRestOfAResponseToAnOrdinaryClient();
     heldOrVirtualExitCannotMigrateAcrossLoss();
     explicitExitStillDrainsBeforeAnotherConversation();

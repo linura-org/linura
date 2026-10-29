@@ -84,6 +84,8 @@ class NativeWaylandLock final : public NativeManagedLockBackend
     // arms the exact reviewed NativeApprovalScope first and consumes its fresh
     // confirmation through Control separately. Closing/expiry means denial.
     using LockConfirmation = std::function<void(bool)>;
+    [[nodiscard]] bool armProtectedDisplayReview(const NativeDisplayPromptScope &,
+                                                 quint64 originalEpoch, LockConfirmation);
     [[nodiscard]] bool showLockConfirmation(LockConfirmation completion);
     void cancelLockConfirmation();
     [[nodiscard]] bool lockConfirmationVisible() const noexcept;

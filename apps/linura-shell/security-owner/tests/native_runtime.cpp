@@ -556,6 +556,9 @@ int main(int argc, char **argv)
     assert(NativeRuntime::staticMetaObject.indexOfMethod("observeDisplayAttempt()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("dispatchPreparedDisplay()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("continuePreparedDisplay()") == -1);
+    for (const char *method : {"armDisplayApproval()", "displayApprovalReady()",
+                               "consumeDisplayApproval()", "cancelDisplayApproval()"})
+        assert(NativeRuntime::staticMetaObject.indexOfMethod(method) == -1);
 
     const int index = NativeEndpoint::staticMetaObject.indexOfClassInfo("D-Bus Introspection");
     assert(index >= 0);
@@ -578,7 +581,10 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 18 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 22 && signals == 1 && annotations == 3);
+    for (const char *method : {"ArmDisplayApproval", "DisplayApprovalReady",
+                               "ConsumeDisplayApproval", "CancelDisplayApproval"})
+        assert(introspection.contains(QString::fromLatin1(method)));
     assert(introspection.contains(QStringLiteral("ContinuePreparedDisplay")));
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
@@ -637,6 +643,41 @@ int main(int argc, char **argv)
     substituted.resource += QStringLiteral(":1");
     assert(!substituted.scope());
 
+    auto displayApproval = scope;
+    displayApproval.purpose = 8;
+    displayApproval.request = QStringLiteral("request:v010:display-layout:runtime-component");
+    displayApproval.plan = displayApproval.request;
+    const auto displayTopology =
+        QStringLiteral("display:topology:abcd1234-1234-4567-89ab-0123456789ab:1000:2:42:seat0:"
+                       "33333333-3333-4333-8333-333333333333:3");
+    const auto baseline = QStringLiteral("LNDL:1;") + displayTopology +
+                          QStringLiteral(";1:2:enabled:1920:1080:60000:1000:0:0:0:-;");
+    const auto desired = QStringLiteral("LNDL:1;") + displayTopology +
+                         QStringLiteral(";1:2:enabled:1280:720:59940:1250:0:0:0:-;");
+    const auto material =
+        QStringLiteral("LNDI:1;") + scope.resource + QLatin1Char(';') + baseline + desired;
+    const auto reason = QStringLiteral("Make text easier to read");
+    const auto displayScope = displayApproval.displayScope(material, reason, 12345, 12345);
+    assert(displayScope && displayScope->display->material == material &&
+           displayScope->display->reason == reason &&
+           displayScope->display->deadlineUnixMs == 12345);
+    assert(!displayApproval.scope()); // The S17 entry point never adopts display input.
+    assert(!scope.displayScope(material, reason, 12345, 12345));
+    assert(!displayApproval.displayScope(material, reason, 0, 12345));
+    assert(!displayApproval.displayScope(material, reason, 12345, 0));
+    assert(!displayApproval.displayScope(material, {}, 12345, 12345));
+    assert(!displayApproval.displayScope(material, reason + QChar(0x202e), 12345, 12345));
+    assert(!displayApproval.displayScope(material + QLatin1Char(';'), reason, 12345, 12345));
+    auto wrongDisplay = displayApproval;
+    wrongDisplay.purpose = 9; // Decisions must continue a retained original attempt.
+    assert(!wrongDisplay.displayScope(material, reason, 12345, 12345));
+    wrongDisplay = displayApproval;
+    wrongDisplay.principal = QStringLiteral("unix:uid:0");
+    assert(!wrongDisplay.displayScope(material, reason, 12345, 12345));
+    wrongDisplay = displayApproval;
+    wrongDisplay.plan += QLatin1Char('x');
+    assert(!wrongDisplay.displayScope(material, reason, 12345, 12345));
+
     QTemporaryDir directory;
     assert(directory.isValid());
     QDBusServer server(QStringLiteral("unix:path=") + directory.path() +
@@ -688,6 +729,9 @@ int main(int argc, char **argv)
     };
     const auto approved = qdbus_cast<NativeApprovalWire>(roundTrip(QVariant::fromValue(scope)));
     assert(approved.scope() == scope.scope());
+    const auto displayApproved =
+        qdbus_cast<NativeApprovalWire>(roundTrip(QVariant::fromValue(displayApproval)));
+    assert(displayApproved.displayScope(material, reason, 12345, 12345) == displayScope);
     const auto unknownPurpose =
         qdbus_cast<NativeApprovalWire>(roundTrip(QVariant::fromValue(substituted)));
     assert(!unknownPurpose.scope());

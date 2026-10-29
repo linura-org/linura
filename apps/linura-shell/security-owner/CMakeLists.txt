@@ -184,6 +184,7 @@ if(LINURA_SECURITY_OWNER_NATIVE_AUTH)
         "${CMAKE_CURRENT_SOURCE_DIR}/../../../packaging" CACHE PATH
         "Canonical native-owner deployment assets")
     add_library(linura-security-owner-runtime STATIC
+        native_display_flow.cpp native_display_flow.h
         native_runtime.cpp native_runtime.h
         native_unlock_status.cpp native_unlock_status.h
         native_endpoint.cpp native_endpoint.h
