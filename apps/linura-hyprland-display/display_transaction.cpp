@@ -176,6 +176,8 @@ bool DisplayTransaction::scopeMatches(const Snapshot &sample)
     for (std::size_t i = 0; i < sample.heads.size(); ++i) {
         if (sample.heads[i].key != inventory_.heads[i].key ||
             sample.heads[i].modes != inventory_.heads[i].modes ||
+            sample.heads[i].baseRuleWitness != inventory_.heads[i].baseRuleWitness ||
+            sample.heads[i].outputIdentityWitness != inventory_.heads[i].outputIdentityWitness ||
             (sample.coverage == Coverage::Secure && !sample.heads[i].covered))
             return false;
     }

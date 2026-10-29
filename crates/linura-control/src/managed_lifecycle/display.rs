@@ -505,6 +505,12 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 if material(&retained)?.topology().seat() != target.topology().seat() {
                     continue;
                 }
+                crate::display_checkpoint::Checkpoint::load(
+                    self.display_journal()?,
+                    &retained,
+                    &snapshot,
+                    now_ms()?,
+                )?;
                 // Validate the entire immutable phase chain, including missing
                 // dispatch/decision records and contradictory terminal facts.
                 DisplayHistory::load(
@@ -675,6 +681,11 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             floor,
         )?;
         self.validate_registered_managed_candidate(&candidate)?;
+        crate::display_checkpoint::require_baseline(
+            candidate.display_checkpoint_observation(),
+            &request,
+            now_ms()?,
+        )?;
         let effect = effect_from_request(&request)?;
         if effect_from_candidate(&candidate)? != effect {
             return Err(ManagedLifecycleError::Contract(
@@ -716,6 +727,26 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             .retain(&retained)
             .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
         let mut prepared = self.authority.prepare(candidate, evidence)?;
+        let checkpoint =
+            crate::display_checkpoint::Checkpoint::capture(&prepared, &request, now_ms()?)?;
+        checkpoint.append(
+            self.request_journal
+                .as_mut()
+                .ok_or_else(|| {
+                    ManagedLifecycleError::Authority("display journal is unavailable".into())
+                })?
+                .as_mut(),
+            principal_id.clone(),
+            &request,
+        )?;
+        // Read back the immutable exact binding before spending a permit. A
+        // successful write reply alone cannot substitute retained recovery data.
+        crate::display_checkpoint::Checkpoint::load(
+            self.display_journal()?,
+            &request,
+            prepared.snapshot(),
+            now_ms()?,
+        )?;
         let retained_bytes =
             crate::durable_authority::DisplayKeepReview::estimated_bytes(&prepared);
         self.check_keep_review_capacity(retained_bytes)?;
@@ -834,6 +865,12 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 &principal_id,
             ));
         };
+        crate::display_checkpoint::Checkpoint::load(
+            self.display_journal()?,
+            &request,
+            &snapshot,
+            now_ms()?,
+        )?;
         if history.confirmed.is_some() || history.restored.is_some() {
             self.display_keep_reviews.remove(&transaction);
             return Ok(receipt(
@@ -1004,6 +1041,12 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         let dispatched = history.dispatched.ok_or_else(|| {
             ManagedLifecycleError::Authority("display has no durable dispatch reservation".into())
         })?;
+        crate::display_checkpoint::Checkpoint::load(
+            self.display_journal()?,
+            &request,
+            &snapshot,
+            now_ms()?,
+        )?;
         if snapshot.state != TransactionState::Indeterminate {
             return Err(ManagedLifecycleError::Authority(
                 "display decision has no active indeterminate transaction".into(),

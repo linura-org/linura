@@ -16,7 +16,55 @@ pub const DISPLAY_PROVIDER: &str = "hyprland";
 pub const DISPLAY_OUTPUTS_CAPABILITY: &str = "display.outputs.observe";
 pub const DISPLAY_COVERAGE_CAPABILITY: &str = "session.display-coverage.observe";
 const MAX_VALID_FOR_MS: u64 = 2_000;
-const MAX_ATTRIBUTES: usize = 100;
+const MAX_ATTRIBUTES: usize = 131; // Three inventory fields plus eight per output.
+
+/// Historical native recovery comparison facts, never physical continuity,
+/// execution authority or a replacement for current observation. Owned targets
+/// are exactly the current layout at checkpoint capture; partial configurations
+/// without that equality remain read-only layout evidence.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisplayRecoveryMetadata {
+    linura_owned: bool,
+    base_configuration_digest: String,
+    native_identity_digest: String,
+}
+impl DisplayRecoveryMetadata {
+    pub fn new(
+        linura_owned: bool,
+        base_configuration_digest: String,
+        native_identity_digest: String,
+    ) -> Result<Self, DisplayEvidenceError> {
+        if [&base_configuration_digest, &native_identity_digest]
+            .into_iter()
+            .any(|digest| {
+                digest.len() != 64
+                    || digest.bytes().all(|byte| byte == b'0')
+                    || !digest
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            })
+        {
+            return Err(DisplayEvidenceError::Shape);
+        }
+        Ok(Self {
+            linura_owned,
+            base_configuration_digest,
+            native_identity_digest,
+        })
+    }
+    #[must_use]
+    pub const fn linura_owned(&self) -> bool {
+        self.linura_owned
+    }
+    #[must_use]
+    pub fn base_configuration_digest(&self) -> &str {
+        &self.base_configuration_digest
+    }
+    #[must_use]
+    pub fn native_identity_digest(&self) -> &str {
+        &self.native_identity_digest
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DisplayObservationFacts {
@@ -24,6 +72,7 @@ pub struct DisplayObservationFacts {
     capabilities: Vec<NativeOutputCapabilities>,
     layout: DisplayLayout,
     powered: BTreeSet<DisplayOutputId>,
+    recovery: Option<BTreeMap<DisplayOutputId, DisplayRecoveryMetadata>>,
 }
 
 impl DisplayObservationFacts {
@@ -57,7 +106,8 @@ impl DisplayObservationFacts {
             return Err(DisplayEvidenceError::Freshness);
         }
         let attributes = &observation.attributes;
-        if attributes.len() > MAX_ATTRIBUTES || number(attributes, "display_schema")? != 1 {
+        let schema = number(attributes, "display_schema")?;
+        if attributes.len() > MAX_ATTRIBUTES || !matches!(schema, 1 | 2) {
             return Err(DisplayEvidenceError::Shape);
         }
         let count = number(attributes, "output_count")?;
@@ -67,6 +117,7 @@ impl DisplayObservationFacts {
         let mut outputs = Vec::new();
         let mut capabilities = Vec::new();
         let mut powered = BTreeSet::new();
+        let mut recovery = BTreeMap::new();
         for index in 0..count {
             let prefix = format!("output.{index}");
             let output = DisplayOutputId::new(
@@ -85,6 +136,16 @@ impl DisplayObservationFacts {
             if boolean(attributes, &format!("{prefix}.powered"))? {
                 powered.insert(output.clone());
             }
+            if schema == 2 {
+                recovery.insert(
+                    output.clone(),
+                    DisplayRecoveryMetadata::new(
+                        boolean(attributes, &format!("{prefix}.linura_owned"))?,
+                        text(attributes, &format!("{prefix}.base_configuration_digest"))?.into(),
+                        text(attributes, &format!("{prefix}.native_identity_digest"))?.into(),
+                    )?,
+                );
+            }
             outputs.push(output);
             capabilities.push(cap);
         }
@@ -98,9 +159,18 @@ impl DisplayObservationFacts {
         .map_err(|_| DisplayEvidenceError::Layout)?;
         // Re-encoding checks the entire shape, types, ordering and power facts.
         // Extra/missing fields cannot silently become ignored authority input.
-        if display_observation_attributes(&inventory, &capabilities, &layout, &powered)?
-            != *attributes
-        {
+        let encoded = if schema == 2 {
+            display_recovery_observation_attributes(
+                &inventory,
+                &capabilities,
+                &layout,
+                &powered,
+                &recovery,
+            )?
+        } else {
+            display_observation_attributes(&inventory, &capabilities, &layout, &powered)?
+        };
+        if encoded != *attributes {
             return Err(DisplayEvidenceError::Shape);
         }
         Ok(Self {
@@ -108,6 +178,7 @@ impl DisplayObservationFacts {
             capabilities,
             layout,
             powered,
+            recovery: (schema == 2).then_some(recovery),
         })
     }
 
@@ -131,11 +202,55 @@ impl DisplayObservationFacts {
         &self.powered
     }
 
+    /// Absent for the generic read-only output probe and partial native states.
+    /// Mutation checkpoint capture requires the complete exact native map.
+    #[must_use]
+    pub fn recovery_metadata(&self) -> Option<&BTreeMap<DisplayOutputId, DisplayRecoveryMetadata>> {
+        self.recovery.as_ref()
+    }
+
     #[must_use]
     pub fn has_powered_independent_output(&self) -> bool {
         self.layout.outputs().iter().any(|output| matches!(output,
             DisplayOutputLayout::Enabled { output, mirror: None, .. } if self.powered.contains(output)))
     }
+}
+
+/// Recovery-qualified projection from the pinned native integration. The generic
+/// read-only schema remains closed: extra ownership attributes cannot promote it.
+pub fn display_recovery_observation_attributes(
+    inventory: &DisplayOutputSet,
+    capabilities: &[NativeOutputCapabilities],
+    layout: &DisplayLayout,
+    powered: &BTreeSet<DisplayOutputId>,
+    recovery: &BTreeMap<DisplayOutputId, DisplayRecoveryMetadata>,
+) -> Result<BTreeMap<String, ObservedValue>, DisplayEvidenceError> {
+    if recovery.len() != inventory.outputs().len()
+        || inventory
+            .outputs()
+            .iter()
+            .any(|output| !recovery.contains_key(output))
+    {
+        return Err(DisplayEvidenceError::Identity);
+    }
+    let mut attributes = display_observation_attributes(inventory, capabilities, layout, powered)?;
+    attributes.insert("display_schema".into(), ObservedValue::U64(2));
+    for (index, (_, metadata)) in recovery.iter().enumerate() {
+        let prefix = format!("output.{index}");
+        attributes.insert(
+            format!("{prefix}.linura_owned"),
+            ObservedValue::Bool(metadata.linura_owned),
+        );
+        attributes.insert(
+            format!("{prefix}.base_configuration_digest"),
+            ObservedValue::Text(metadata.base_configuration_digest.clone()),
+        );
+        attributes.insert(
+            format!("{prefix}.native_identity_digest"),
+            ObservedValue::Text(metadata.native_identity_digest.clone()),
+        );
+    }
+    Ok(attributes)
 }
 
 /// Encode only typed semantic facts inside the existing envelope. No connector
@@ -386,6 +501,81 @@ mod tests {
             ))
             .has_powered_independent_output()
         );
+    }
+
+    #[test]
+    fn recovery_metadata_is_exact_complete_and_distinct_from_read_only_probe_facts() {
+        let (topology, mut observation) = fixture();
+        let facts = id(DisplayObservationFacts::from_envelope(
+            &observation,
+            &topology,
+            1100,
+        ));
+        assert!(facts.recovery_metadata().is_none());
+        let output = facts.inventory().outputs()[0].clone();
+        let metadata = id(DisplayRecoveryMetadata::new(
+            true,
+            "a".repeat(64),
+            "b".repeat(64),
+        ));
+        let recovery = BTreeMap::from([(output.clone(), metadata.clone())]);
+        observation.attributes = id(display_recovery_observation_attributes(
+            facts.inventory(),
+            facts.capabilities(),
+            facts.layout(),
+            facts.powered_outputs(),
+            &recovery,
+        ));
+        let decoded = id(DisplayObservationFacts::from_envelope(
+            &observation,
+            &topology,
+            1100,
+        ));
+        assert_eq!(decoded.recovery_metadata(), Some(&recovery));
+        assert!(metadata.linura_owned());
+        assert_eq!(metadata.base_configuration_digest(), "a".repeat(64));
+        assert_eq!(metadata.native_identity_digest(), "b".repeat(64));
+        assert!(
+            display_recovery_observation_attributes(
+                facts.inventory(),
+                facts.capabilities(),
+                facts.layout(),
+                facts.powered_outputs(),
+                &BTreeMap::new(),
+            )
+            .is_err()
+        );
+        for key in [
+            "output.0.linura_owned",
+            "output.0.base_configuration_digest",
+            "output.0.native_identity_digest",
+        ] {
+            let mut missing = observation.clone();
+            missing.attributes.remove(key);
+            assert!(DisplayObservationFacts::from_envelope(&missing, &topology, 1100).is_err());
+        }
+        // Schema1 cannot ignore or adopt partial higher-qualified metadata.
+        let mut downgrade = observation.clone();
+        downgrade
+            .attributes
+            .insert("display_schema".into(), ObservedValue::U64(1));
+        assert!(DisplayObservationFacts::from_envelope(&downgrade, &topology, 1100).is_err());
+        for invalid in [
+            "".into(),
+            "0".repeat(64),
+            "A".repeat(64),
+            "g".repeat(64),
+            "a".repeat(65),
+            "a\n".repeat(32),
+        ] {
+            assert!(DisplayRecoveryMetadata::new(false, invalid.clone(), "b".repeat(64)).is_err());
+            let mut malformed = observation.clone();
+            malformed.attributes.insert(
+                "output.0.native_identity_digest".into(),
+                ObservedValue::Text(invalid),
+            );
+            assert!(DisplayObservationFacts::from_envelope(&malformed, &topology, 1100).is_err());
+        }
     }
 
     #[test]

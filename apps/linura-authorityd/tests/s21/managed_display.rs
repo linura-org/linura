@@ -11,7 +11,7 @@ use linura_core::{
     CompositorInvocationId, DisplayLayout, DisplayMode, DisplayOutputId, DisplayOutputLayout,
     DisplayOutputSet, DisplayScale, DisplayTopologyId, DisplayTransform, NativeOutputCapabilities,
 };
-use linura_observation::display_observation_attributes;
+use linura_observation::{DisplayRecoveryMetadata, display_recovery_observation_attributes};
 use linura_protocol::DisplayLayoutState;
 use linura_provider_sdk::ExecutionBinding;
 use linura_transaction::{ApprovedRequestJournal, RetainedRequest, TransactionStoreError};
@@ -29,6 +29,8 @@ struct Machine {
     sequence: u64,
     wrong_attempt: bool,
     journal_failures: usize,
+    lose_checkpoint: bool,
+    read_only_outputs: bool,
 }
 fn layouts() -> (
     DisplayLayout,
@@ -131,6 +133,18 @@ impl Observer for LiveFixtureObserver {
         let mut sample = self.template.clone();
         sample.observed_at_unix_ms = now_unix_ms();
         sample.sequence = machine.sequence;
+        if machine.read_only_outputs && sample.provider.as_str() == "hyprland" {
+            sample
+                .attributes
+                .insert("display_schema".into(), ObservedValue::U64(1));
+            for key in [
+                "output.0.linura_owned",
+                "output.0.base_configuration_digest",
+                "output.0.native_identity_digest",
+            ] {
+                sample.attributes.remove(key);
+            }
+        }
         if machine.desired && sample.provider.as_str() == "hyprland" {
             sample.attributes.insert(
                 "layout".into(),
@@ -146,11 +160,19 @@ fn previews(machine: &Arc<Mutex<Machine>>) -> PlanPreviewControl {
     display.provider = value(ProviderId::new("hyprland"));
     display.resource = value(baseline.topology().resource_id());
     display.capability = value(CapabilityId::new("display.outputs.observe"));
-    display.attributes = value(display_observation_attributes(
+    display.attributes = value(display_recovery_observation_attributes(
         &inventory,
         &caps,
         &baseline,
         &std::collections::BTreeSet::from([inventory.outputs()[0].clone()]),
+        &BTreeMap::from([(
+            inventory.outputs()[0].clone(),
+            value(DisplayRecoveryMetadata::new(
+                false,
+                "a".repeat(64),
+                "b".repeat(64),
+            )),
+        )]),
     ));
     let mut coverage = s17_managed_lock::lock_observation(false, 1);
     coverage.capability = value(CapabilityId::new(
@@ -182,6 +204,18 @@ struct FailingJournal {
 }
 impl ApprovedRequestJournal for FailingJournal {
     fn retain(&mut self, record: &RetainedRequest) -> Result<(), TransactionStoreError> {
+        if record
+            .request_id()
+            .as_str()
+            .starts_with("request:v010:display-native-baseline:")
+            && self
+                .machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .lose_checkpoint
+        {
+            return Ok(()); // A write acknowledgement cannot replace readback.
+        }
         self.writes += 1;
         if self.writes == self.fail_at {
             self.machine
@@ -952,7 +986,37 @@ fn autonomous_restoration_reconciles_after_restart_without_any_continuation() {
 
 #[test]
 fn every_preeffect_journal_failure_prevents_native_dispatch() {
-    for fail_at in 1..=3 {
+    for lose_checkpoint in [false, true] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine {
+            lose_checkpoint,
+            read_only_outputs: !lose_checkpoint,
+            ..Machine::default()
+        }));
+        let mut control = open(database.path(), &machine, 0);
+        let mut port = Port(machine.clone());
+        let mut verifier = Verifier(machine.clone());
+        let result = control.begin_display_layout(
+            principal(),
+            actor(true),
+            display_request("unqualified-checkpoint"),
+            &approval(),
+            &mut port,
+            &mut verifier,
+        );
+        assert!(
+            matches!(result, Err(ManagedLifecycleError::Authority(reason)) if reason.contains("checkpoint"))
+        );
+        assert_eq!(
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .applies,
+            0
+        );
+    }
+    // Canonical request, native baseline checkpoint, reservation and dispatch.
+    for fail_at in 1..=4 {
         let database = TestDatabase::new();
         let machine = Arc::new(Mutex::new(Machine::default()));
         let mut port = Port(machine.clone());
@@ -1015,7 +1079,7 @@ fn decision_durability_loss_cannot_reach_native_confirmation() {
     let mut port = Port(machine.clone());
     let mut verifier = Verifier(machine.clone());
     let request = display_request("decision-fault");
-    let mut control = open(database.path(), &machine, 4);
+    let mut control = open(database.path(), &machine, 5);
     value(control.begin_display_layout(
         principal(),
         actor(true),
@@ -1184,7 +1248,7 @@ fn crash_gap_after_restoration_retirement_before_terminal_journal_never_replays(
     let mut port = Port(machine.clone());
     let mut verifier = Verifier(machine.clone());
     let request = display_request("terminal-journal-fault");
-    let mut control = open(database.path(), &machine, 4);
+    let mut control = open(database.path(), &machine, 5);
     value(control.begin_display_layout(
         principal(),
         actor(true),

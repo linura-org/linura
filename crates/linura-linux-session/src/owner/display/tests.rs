@@ -32,9 +32,11 @@ fn inputs() -> (Value, Value) {
     let head = json!({"handle":"1", "generation":"2", "name":"DP-1", "enabled":true,
         "covered":true, "modes":[[1920,1080,59940],[1280,720,60000]], "current_mode":[1920,1080,59940],
         "x":0, "y":0, "transform":0, "scale_fixed":320,
-        "scale_milli":1250, "scale_float_bits":1.25_f32.to_bits()});
+        "scale_milli":1250, "scale_float_bits":1.25_f32.to_bits(),
+        "linura_owned":false, "owned_target":"", "base_rule_digest":"a".repeat(64),
+        "output_identity_digest":"b".repeat(64)});
     (
-        json!({"schema":2, "generation":"3", "heads":[head]}),
+        json!({"schema":3, "generation":"3", "heads":[head]}),
         json!([{"id":0,"name":"DP-1",
         "disabled":false,"dpmsStatus":true,"mirrorOf":"none", "availableModes":["1920x1080@59.94Hz"]}]),
     )
@@ -61,6 +63,13 @@ fn exact_native_modes_scale_and_coverage_enter_only_canonical_envelopes() {
     ));
     assert_eq!(facts.inventory().outputs()[0].handle(), 1);
     assert!(facts.has_powered_independent_output());
+    assert!(
+        !value(facts.recovery_metadata().ok_or("missing recovery"))
+            .values()
+            .next()
+            .unwrap_or_else(|| unreachable!("output"))
+            .linura_owned()
+    );
     assert_eq!(coverage.capability.as_str(), DISPLAY_COVERAGE_CAPABILITY);
     assert_eq!(
         coverage.attributes["display_topology"],
@@ -81,6 +90,52 @@ fn exact_native_modes_scale_and_coverage_enter_only_canonical_envelopes() {
             .values()
             .any(|value| value.to_string().contains("DP-1"))
     );
+}
+
+#[test]
+fn overlay_checkpoint_requires_exact_owned_target_without_hiding_partial_layouts() {
+    let (mut topology, monitors) = inputs();
+    topology["heads"][0]["linura_owned"] = json!(true);
+    topology["heads"][0]["owned_target"] = json!("LNOT:1;1;2;1;1920;1080;59940;1250;0;0;0;0;0;");
+    let (display, _) = value(decode(&topology, &monitors));
+    let identity = value(DisplayTopologyId::from_resource(&display.resource));
+    let facts = value(linura_observation::DisplayObservationFacts::from_envelope(
+        &display, &identity, 10000,
+    ));
+    assert!(
+        value(facts.recovery_metadata().ok_or("missing metadata"))
+            .values()
+            .all(|value| value.linura_owned())
+    );
+    // A real partially applied target is observable; it cannot be saved as LKG.
+    topology["heads"][0]["owned_target"] = json!("LNOT:1;1;2;1;1280;720;60000;1000;0;0;0;0;0;");
+    let (partial, _) = value(decode(&topology, &monitors));
+    let partial_facts = value(linura_observation::DisplayObservationFacts::from_envelope(
+        &partial, &identity, 10000,
+    ));
+    assert!(partial_facts.recovery_metadata().is_none());
+    assert_eq!(partial_facts.layout(), facts.layout());
+    for invalid in [
+        "",
+        "LNOT:2;1;2;1;1920;1080;59940;1250;0;0;0;0;0;",
+        "LNOT:1;1;3;1;1920;1080;59940;1250;0;0;0;0;0;",
+        "LNOT:1;1;2;0;1920;1080;59940;1250;0;0;0;0;0;",
+        "LNOT:1;1;2;1;1920;1080;59940;1250;0;-0;0;0;0;",
+        "LNOT:1;1;2;1;1920;1080;59940;1250;0;0;0;1;2;",
+        "LNOT:1;1;2;1;1920;1080;59940;1250;0;0;0;9;2;",
+        "LNOT:1;01;2;1;1920;1080;59940;1250;0;0;0;0;0;",
+    ] {
+        topology["heads"][0]["owned_target"] = json!(invalid);
+        assert!(decode(&topology, &monitors).is_err(), "{invalid}");
+    }
+    for (key, invalid) in [
+        ("base_rule_digest", json!("A".repeat(64))),
+        ("output_identity_digest", json!("0".repeat(64))),
+    ] {
+        let (mut bad, monitors) = inputs();
+        bad["heads"][0][key] = invalid;
+        assert!(decode(&bad, &monitors).is_err());
+    }
 }
 #[test]
 fn closed_native_schema_rejects_missing_unknown_duplicate_and_wrong_types() {
@@ -106,6 +161,10 @@ fn closed_native_schema_rejects_missing_unknown_duplicate_and_wrong_types() {
         "scale_fixed",
         "scale_milli",
         "scale_float_bits",
+        "linura_owned",
+        "owned_target",
+        "base_rule_digest",
+        "output_identity_digest",
     ] {
         let mut bad = topology.clone();
         bad["heads"][0]
@@ -120,10 +179,10 @@ fn closed_native_schema_rejects_missing_unknown_duplicate_and_wrong_types() {
     for raw in [
         topology
             .to_string()
-            .replacen("\"schema\":2", "\"schema\":2,\"schema\":2", 1),
+            .replacen("\"schema\":3", "\"schema\":3,\"schema\":3", 1),
         topology
             .to_string()
-            .replacen("\"schema\":2", "\"schema\":2,\"sch\\u0065ma\":2", 1),
+            .replacen("\"schema\":3", "\"schema\":3,\"sch\\u0065ma\":3", 1),
     ] {
         assert!(
             project(

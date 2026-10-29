@@ -4,6 +4,7 @@
 #include "linura-display-integration-build.h"
 
 #include <QUuid>
+#include <QCryptographicHash>
 #include <algorithm>
 #include <bit>
 #include <chrono>
@@ -81,7 +82,8 @@ class NativeDisplayConnection::Impl final
         linura_display_head_v1 *native = nullptr;
         NativeDisplayHead facts;
         NativeDisplayTarget current;
-        bool currentReceived = false, mirrorReceived = false, done = false, powered = false;
+        bool currentReceived = false, mirrorReceived = false, recoveryReceived = false,
+             done = false, powered = false;
         ~Head()
         {
             if (native)
@@ -242,11 +244,51 @@ class NativeDisplayConnection::Impl final
                 std::pair{joined(handleHi, handleLo), joined(generationHi, generationLo)};
         });
     }
+    static std::optional<QByteArray> witness(const char *raw, const char *prefix,
+                                             std::size_t maximum)
+    {
+        if (!raw)
+            return std::nullopt;
+        const auto size = strnlen(raw, maximum + 1);
+        const auto prefixSize = std::strlen(prefix);
+        if (size <= prefixSize || size > maximum || std::strncmp(raw, prefix, prefixSize) != 0 ||
+            raw[size - 1] != ';' || !std::all_of(raw + prefixSize, raw + size, [](char c) {
+                return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || c == ';' || c == '-';
+            }))
+            return std::nullopt;
+        return QByteArray(raw, static_cast<qsizetype>(size));
+    }
+    static void recoveryWitness(void *data, linura_display_head_v1 *, uint32_t owned,
+                                const char *target, const char *baseRule, const char *identity)
+    {
+        auto &head = *static_cast<Head *>(data);
+        callback(*head.owner, [&] {
+            const auto base = witness(baseRule, "LNDR:1;", 12 * 1024);
+            const auto native = witness(identity, "LNDF:1;", 16 * 1024);
+            const auto overlay = owned == 1 ? witness(target, "LNOT:1;", 512)
+                                            : std::optional<QByteArray>{QByteArray{}};
+            if (head.done || head.recoveryReceived || !head.currentReceived || owned > 1 || !base ||
+                !native || !overlay || !target || (owned == 0 && target[0] != '\0')) {
+                head.owner->invalid = true;
+                return;
+            }
+            head.recoveryReceived = true;
+            head.facts.linuraOwned = owned == 1;
+            head.facts.ownedTarget = QString::fromLatin1(*overlay);
+            // Native identifiers may contain monitor serials. Retain only their
+            // source-versioned digest; never publish raw identity/config bytes.
+            head.facts.baseRuleDigest = QString::fromLatin1(
+                QCryptographicHash::hash(*base, QCryptographicHash::Sha256).toHex());
+            head.facts.outputIdentityDigest = QString::fromLatin1(
+                QCryptographicHash::hash(*native, QCryptographicHash::Sha256).toHex());
+        });
+    }
     static void headDone(void *data, linura_display_head_v1 *)
     {
         auto &head = *static_cast<Head *>(data);
         callback(*head.owner, [&] {
-            if (head.done || !head.currentReceived || head.facts.modes.empty() ||
+            if (head.done || !head.currentReceived || !head.recoveryReceived ||
+                head.facts.modes.empty() ||
                 (head.current.enabled && std::find(head.facts.modes.begin(), head.facts.modes.end(),
                                                    head.current.mode) == head.facts.modes.end()))
                 head.owner->invalid = true;
@@ -280,7 +322,7 @@ class NativeDisplayConnection::Impl final
             }
             head->facts.name = QString::fromLatin1(label);
             static const linura_display_head_v1_listener listener{headMode, current, mirror,
-                                                                  headDone};
+                                                                  recoveryWitness, headDone};
             if (linura_display_head_v1_add_listener(native, &listener, head.get()) != 0)
                 capture.invalid = true;
             capture.heads.emplace(head->facts.handle, std::move(head));

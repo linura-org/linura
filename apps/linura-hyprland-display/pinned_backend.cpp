@@ -1,6 +1,7 @@
 #include "pinned_integration.h"
 #include "native_scale.h"
 #include "rule_overlay.h"
+#include "recovery_witness.h"
 #include "wire_endpoint.h"
 #include "native_power_inhibitor.h"
 #include "native_owner_admission.h"
@@ -114,6 +115,9 @@ class PinnedBackend final : public Backend
             sample.coverage = Coverage::Secure;
         else
             sample.coverage = Coverage::Transitioning;
+        const auto rules = baseRules();
+        if (!rules)
+            return std::nullopt;
         for (const auto &binding : bindings) {
             const auto monitor = binding.monitor.lock();
             if (!monitor || !monitor->m_output)
@@ -149,9 +153,20 @@ class PinnedBackend final : public Backend
             // including outputs without a newly configured client lock surface.
             // This is a compositor safety fence; Control still requires its
             // separate native surface/geometry evidence before commitment.
-            sample.heads.push_back({binding.key, binding.modes, current,
-                                    monitor->m_dpmsStatus && current.enabled,
-                                    sample.coverage == Coverage::Secure});
+            const auto rule = rules->find(monitor.get());
+            if (rule == rules->end())
+                return std::nullopt;
+            const auto base = RecoveryWitness::rule(rule->second);
+            const auto identity = RecoveryWitness::identity(binding.identity);
+            if (!base || !identity)
+                return std::nullopt;
+            const auto owned = overlay.find(monitor.get());
+            const bool activeOwnership =
+                owned != overlay.end() && owned->second.output == binding.key;
+            sample.heads.push_back(
+                {binding.key, binding.modes, current, monitor->m_dpmsStatus && current.enabled,
+                 sample.coverage == Coverage::Secure, activeOwnership, *base, *identity,
+                 activeOwnership ? RecoveryWitness::target(owned->second) : std::string{}});
         }
         return sample;
     }

@@ -218,6 +218,8 @@ class Client final
                std::int32_t, std::uint32_t, std::uint32_t) {},
             [](void *, linura_display_head_v1 *, std::uint32_t, std::uint32_t, std::uint32_t,
                std::uint32_t) {},
+            [](void *, linura_display_head_v1 *, std::uint32_t, const char *, const char *,
+               const char *) {},
             [](void *, linura_display_head_v1 *) {}};
         static const linura_display_snapshot_v1_listener listener{
             [](void *, linura_display_snapshot_v1 *, const char *, const char *, const char *,

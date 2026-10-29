@@ -804,6 +804,17 @@ for the current implementation status.
   retire the recovery fence unless the native ownership check also passes.
   This in-process checkpoint cannot survive compositor death or substitute for
   the still-required durable last-known-good/restart reconciliation path.
+- Before spending the display permit, Control persists and reads back a bounded,
+  immutable native baseline checkpoint joined to the original request, exact
+  transaction/generation, binding and observation digest. Complete native overlay
+  ownership and rule/identity comparison digests are required for every output.
+  A generic read-only probe or partially applied target cannot qualify capture.
+  Native identity/rule preimages stay inside the private compositor/owner adapter;
+  canonical evidence retains bounded digests. Historical timestamps never become
+  fresh evidence after restart. Connector/EDID fingerprint equality cannot prove
+  physical continuity, retarget prior authority, restore an old permit or authorize
+  cross-compositor replay. Native replacement restoration remains independently
+  qualified work; a persisted checkpoint is data, not recovery execution.
 - A replacement compositor's empty reservation map cannot erase durable display
   ambiguity. New mutations check authenticated pending authority and retained
   intent for the seat before approval, handoff and dispatch. One observe-only

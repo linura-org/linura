@@ -9,8 +9,9 @@ use linura_core::{
     NativeOutputCapabilities, ProviderId, SessionLockId,
 };
 use linura_observation::{
-    DISPLAY_COVERAGE_CAPABILITY, DISPLAY_OUTPUTS_CAPABILITY, DISPLAY_PROVIDER, ObservationEnvelope,
-    ObservedValue, display_observation_attributes,
+    DISPLAY_COVERAGE_CAPABILITY, DISPLAY_OUTPUTS_CAPABILITY, DISPLAY_PROVIDER,
+    DisplayRecoveryMetadata, ObservationEnvelope, ObservedValue, display_observation_attributes,
+    display_recovery_observation_attributes,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -76,6 +77,10 @@ struct Head {
     scale_fixed: i32,
     scale_milli: u32,
     scale_float_bits: u32,
+    linura_owned: bool,
+    owned_target: String,
+    base_rule_digest: String,
+    output_identity_digest: String,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,6 +121,100 @@ fn mode(value: [u32; 3]) -> Result<DisplayMode, String> {
     DisplayMode::new(value[0], value[1], value[2]).map_err(|e| e.to_string())
 }
 
+// Private, versioned comparison data. Parse into existing typed values; never
+// interpret the native string as a selector, command or recovery permission.
+fn owned_target(
+    head: &Head,
+    output: &DisplayOutputId,
+    identities: &BTreeMap<u64, DisplayOutputId>,
+) -> Result<Option<DisplayOutputLayout>, String> {
+    if !head.linura_owned {
+        return if head.owned_target.is_empty() {
+            Ok(None)
+        } else {
+            Err("unowned native output carries an overlay target".into())
+        };
+    }
+    if head.owned_target.len() > 512 {
+        return Err("native owned target exceeds its bound".into());
+    }
+    let raw = head
+        .owned_target
+        .strip_prefix("LNOT:1;")
+        .and_then(|value| value.strip_suffix(';'))
+        .ok_or("native owned target version is unsupported")?;
+    let fields: Vec<_> = raw.split(';').collect();
+    let [
+        handle,
+        generation,
+        enabled,
+        width,
+        height,
+        refresh,
+        scale,
+        transform,
+        x,
+        y,
+        mirror_handle,
+        mirror_generation,
+    ] = fields.as_slice()
+    else {
+        return Err("native owned target shape is malformed".into());
+    };
+    if number(handle)? != output.handle() || number(generation)? != output.generation() {
+        return Err("native owned target belongs to another output lifetime".into());
+    }
+    let u32_field = |field: &str| {
+        u32::try_from(number(field)?).map_err(|_| "native target integer overflow".to_string())
+    };
+    let position = |field: &str| -> Result<i32, String> {
+        let parsed: i32 = field
+            .parse()
+            .map_err(|_| "native owned position is malformed")?;
+        if parsed.to_string() != field || !(-65536..=65536).contains(&parsed) {
+            return Err("native owned position is not canonical or bounded".into());
+        }
+        Ok(parsed)
+    };
+    let (mirror_handle, mirror_generation) = (number(mirror_handle)?, number(mirror_generation)?);
+    if *enabled == "0" {
+        if fields[3..].iter().any(|field| *field != "0") {
+            return Err("disabled native overlay retains layout fields".into());
+        }
+        return Ok(Some(DisplayOutputLayout::Disabled {
+            output: output.clone(),
+        }));
+    }
+    if *enabled != "1" {
+        return Err("native owned enabled state is malformed".into());
+    }
+    let mirror = if (mirror_handle, mirror_generation) == (0, 0) {
+        None
+    } else {
+        Some(
+            identities
+                .values()
+                .find(|candidate| {
+                    candidate.handle() == mirror_handle
+                        && candidate.generation() == mirror_generation
+                        && *candidate != output
+                })
+                .ok_or("native owned mirror is absent or replaced")?
+                .clone(),
+        )
+    };
+    Ok(Some(DisplayOutputLayout::Enabled {
+        output: output.clone(),
+        mode: mode([u32_field(width)?, u32_field(height)?, u32_field(refresh)?])?,
+        scale: DisplayScale::new(u32_field(scale)?).map_err(|e| e.to_string())?,
+        transform: DisplayTransform::from_native(u32_field(transform)?)
+            .map_err(|e| e.to_string())?,
+        x: position(x)?,
+        y: position(y)?,
+        mirror,
+    }))
+}
+
 /// Native peer, boot, session, supervisor invocation and deadline must already
 /// have been revalidated by the channel. This decoder grants no authority.
 fn project(
@@ -133,7 +232,7 @@ fn project(
         serde_json::from_str(topology).map_err(|_| "native display topology is malformed")?;
     let metadata: Vec<Monitor> =
         serde_json::from_str(monitors).map_err(|_| "native display metadata is malformed")?;
-    if native.schema != 2
+    if native.schema != 3
         || native.heads.is_empty()
         || native.heads.len() > 16
         || metadata.len() != native.heads.len()
@@ -183,6 +282,8 @@ fn project(
     let mut powered = BTreeSet::new();
     let mut active = BTreeMap::new();
     let mut covered = BTreeMap::new();
+    let mut recovery = BTreeMap::new();
+    let mut checkpoint_eligible = true;
     let secure = match coverage.attributes.get("secure") {
         Some(ObservedValue::Bool(value)) => *value,
         _ => return Err("native lock state is unsupported".into()),
@@ -264,15 +365,41 @@ fn project(
             {
                 return Err("disabled native display retains current layout state".into());
             }
-            layouts.push(DisplayOutputLayout::Disabled { output });
+            layouts.push(DisplayOutputLayout::Disabled {
+                output: output.clone(),
+            });
         }
+        if let Some(owned) = owned_target(head, &output, &identities)? {
+            // Partial apply/compensation must remain independently observable,
+            // but cannot be captured as a fresh last-known-good checkpoint.
+            checkpoint_eligible &= layouts.last() == Some(&owned);
+        }
+        recovery.insert(
+            output,
+            DisplayRecoveryMetadata::new(
+                head.linura_owned,
+                head.base_rule_digest.clone(),
+                head.output_identity_digest.clone(),
+            )
+            .map_err(|e| e.to_string())?,
+        );
     }
     let inventory = DisplayOutputSet::new(topology.clone(), identities.into_values().collect())
         .map_err(|e| e.to_string())?;
     let layout =
         DisplayLayout::new(&inventory, &capabilities, layouts).map_err(|e| e.to_string())?;
-    let attributes = display_observation_attributes(&inventory, &capabilities, &layout, &powered)
-        .map_err(|e| e.to_string())?;
+    let attributes = if checkpoint_eligible {
+        display_recovery_observation_attributes(
+            &inventory,
+            &capabilities,
+            &layout,
+            &powered,
+            &recovery,
+        )
+    } else {
+        display_observation_attributes(&inventory, &capabilities, &layout, &powered)
+    }
+    .map_err(|e| e.to_string())?;
     let display = ObservationEnvelope {
         provider: ProviderId::new(DISPLAY_PROVIDER).map_err(|e| e.to_string())?,
         capability: CapabilityId::new(DISPLAY_OUTPUTS_CAPABILITY).map_err(|e| e.to_string())?,

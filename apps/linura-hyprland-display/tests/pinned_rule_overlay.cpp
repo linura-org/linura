@@ -1,9 +1,11 @@
 // Compiled only by the exact-source Hyprland SDK build, never the generic
 // mechanism build. These are actual upstream rule types, not stand-in structs.
 #include "rule_overlay.h"
+#include "recovery_witness.h"
 #include "src/config/shared/monitor/MonitorRule.hpp"
 
 #include <gtest/gtest.h>
+#include <limits>
 
 using namespace Linura::HyprlandDisplay;
 
@@ -216,6 +218,56 @@ TEST(LinuraDisplayPinnedRule, OwnedRuleDriftAndCustomModelineChangesRefuseRestor
         EXPECT_FALSE(checkpoint.restoration({baseline}, {{10, changed}},
                                             sameOwnedDisplayFields<Config::CMonitorRule>))
             << field;
+        EXPECT_NE(RecoveryWitness::rule(before), RecoveryWitness::rule(changed)) << field;
     }
+}
+
+TEST(LinuraDisplayPinnedRule, RecoveryWitnessPreservesAutomaticSemanticsAndExcludesUnmanagedDrift)
+{
+    const auto before = originalRule();
+    const auto encoded = RecoveryWitness::rule(before);
+    ASSERT_TRUE(encoded);
+    EXPECT_EQ(encoded, RecoveryWitness::rule(before));
+    EXPECT_TRUE(encoded->starts_with("LNDR:1;"));
+    auto changed = before;
+    changed.m_name = "changed selector";
+    changed.m_enable10bit = false;
+    changed.m_cmType = NCMType::CM_SRGB;
+    changed.m_sdrSaturation = 0.9F;
+    changed.m_sdrBrightness = 1.1F;
+    changed.m_reservedArea = Desktop::CReservedArea(1, 2, 3, 4);
+    changed.m_iccFile = "new/profile.icc";
+    changed.m_supportsWideColor = -1;
+    changed.m_supportsHDR = 1;
+    changed.m_minLuminance = 0.3F;
+    changed.m_vrr = 1;
+    EXPECT_TRUE(sameOwnedDisplayFields(before, changed));
+    EXPECT_EQ(encoded, RecoveryWitness::rule(changed));
+    changed.m_scale = 1.F;
+    EXPECT_NE(encoded, RecoveryWitness::rule(changed));
+}
+
+TEST(LinuraDisplayPinnedRule, RecoveryWitnessNormalizesSignedZeroAndRejectsUnboundedOrNonfiniteData)
+{
+    auto a = originalRule(), b = a;
+    a.m_offset.x = 0.0;
+    b.m_offset.x = -0.0;
+    EXPECT_EQ(RecoveryWitness::rule(a), RecoveryWitness::rule(b));
+    b.m_scale = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_FALSE(RecoveryWitness::rule(b));
+    b = a;
+    b.m_refreshRate = std::numeric_limits<float>::infinity();
+    EXPECT_FALSE(RecoveryWitness::rule(b));
+    b = a;
+    b.m_mirrorOf = std::string(4097, 'x');
+    EXPECT_FALSE(RecoveryWitness::rule(b));
+    NativeOutputIdentity identity{};
+    identity.text[0] = "DP-1";
+    const auto first = RecoveryWitness::identity(identity);
+    ASSERT_TRUE(first);
+    identity.text[4] = "another native serial";
+    EXPECT_NE(first, RecoveryWitness::identity(identity));
+    identity.text[1] = std::string(4097, 'x');
+    EXPECT_FALSE(RecoveryWitness::identity(identity));
 }
 } // namespace

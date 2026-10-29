@@ -351,6 +351,9 @@ class WireEndpoint::Impl final
                     linura_display_head_v1_send_mirror(
                         wire->native, high(current.mirror->handle), low(current.mirror->handle),
                         high(current.mirror->generation), low(current.mirror->generation));
+                linura_display_head_v1_send_recovery_witness(
+                    wire->native, head.linuraOwned ? 1U : 0U, head.ownedTargetWitness.c_str(),
+                    head.baseRuleWitness.c_str(), head.outputIdentityWitness.c_str());
                 linura_display_head_v1_send_done(wire->native);
             }
             linura_display_snapshot_v1_send_done(result->native);

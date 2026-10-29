@@ -170,6 +170,9 @@ pub struct DurableAuthorityCandidate {
 }
 
 impl DurableAuthorityCandidate {
+    pub(crate) fn display_checkpoint_observation(&self) -> &ObservationEnvelope {
+        &self.observation
+    }
     pub(crate) fn is_protective(&self) -> bool {
         self.protective.is_some()
     }
@@ -317,6 +320,9 @@ impl DisplayKeepReview {
 }
 
 impl PreparedDurableAuthority {
+    pub(crate) fn display_checkpoint_observation(&self) -> &ObservationEnvelope {
+        &self.candidate.observation
+    }
     #[must_use]
     pub fn snapshot(&self) -> &TransactionSnapshot {
         &self.snapshot

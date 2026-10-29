@@ -155,7 +155,30 @@ bounded matching rows in the same BEGIN IMMEDIATE snapshot. Literal prefix
 matching is not a caller-selected authority route; Control owns namespace and
 recovery classification. Overflow, tampered excluded rows, malformed history or
 inconsistent identity fail closed. This query adds no schema migration or new
-persistent state and does not persist the still-missing native rule checkpoint.
+persistent transaction state.
+
+Before dispatch, Control captures an immutable, purpose-versioned
+`linura.display.native-baseline.v1` record in the same authenticated request
+journal. It binds the original request, transaction/generation, authority binding,
+exact contributing observation digest and original native sample to the complete
+baseline, prior overlay ownership and bounded native rule/identity digests. The
+record is read back and validated before a permit is spent; missing, substituted,
+oversized or inconsistent recovery data cannot reach the native effect. Its
+historical timestamp is preserved: reading it after restart never refreshes an
+observation, reconstructs approval or authorizes replay.
+
+The pinned private native schema3 supplies mandatory ownership comparison data;
+the protected owner hashes native rule and identity preimages before projecting
+them into canonical observations. Canonical display schema2 has complete typed
+recovery metadata for every exact output. Schema1 remains the independently
+useful generic read-only monitor projection; it cannot qualify mutation capture.
+Well-formed partial native geometry remains observable as read-only evidence
+when a retained overlay target differs from actual state. Unknown or malformed
+metadata is rejected. Automatic placement/scale and custom timing participate in
+the rule digest; unrelated ICC/color/VRR/reservation fields do not. Digests and
+EDID/connector facts do not prove authenticated physical continuity across
+compositor replacement. This durable checkpoint alone cannot execute restoration
+in a new compositor; that continuity and recovery path still require qualification.
 
 Keep/revert is a separate protected human interaction over the already prepared
 canonical display transaction. Control creates a sealed `DisplayDecisionChallenge`

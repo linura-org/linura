@@ -196,7 +196,7 @@ void replyLossAndIndependentRestoration()
 
 void identityAndCoverageFences()
 {
-    for (int fault = 0; fault != 8; ++fault) {
+    for (int fault = 0; fault != 10; ++fault) {
         Fixture native;
         native.facts.coverage = Coverage::Secure;
         for (auto &head : native.facts.heads)
@@ -220,6 +220,10 @@ void identityAndCoverageFences()
             native.available = false;
         if (fault == 7)
             ++native.facts.securityEpoch;
+        if (fault == 8)
+            native.facts.heads[1].baseRuleWitness = "LNDR:1;1;";
+        if (fault == 9)
+            native.facts.heads[1].outputIdentityWitness = "LNDF:1;1;";
         assert(!attempt->confirm(Bound, {100'100, 50'100}));
         attempt->restore();
         assert(attempt->phase() == DisplayTransaction::Phase::RecoveryFailed && native.writes == 1);
@@ -319,7 +323,7 @@ struct FixtureRule final
 };
 void staleCapturedInventoryNeverDispatches()
 {
-    for (int changed = 0; changed != 5; ++changed) {
+    for (int changed = 0; changed != 7; ++changed) {
         Fixture native;
         const auto captured = native.facts;
         const auto baseline = native.baseline(), desired = native.desired();
@@ -333,6 +337,10 @@ void staleCapturedInventoryNeverDispatches()
             native.facts.heads[0].powered = false;
         if (changed == 4)
             native.facts.heads[0].modes.pop_back();
+        if (changed == 5)
+            native.facts.heads[0].baseRuleWitness = "LNDR:1;1;";
+        if (changed == 6)
+            native.facts.heads[0].outputIdentityWitness = "LNDF:1;1;";
         assert(!DisplayTransaction::start(native, Bound, baseline, desired, captured, Start));
         assert(native.writes == 0);
     }

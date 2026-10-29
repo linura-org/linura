@@ -8,7 +8,8 @@ use linura_core::{CapabilityId, ProviderId, ResourceId};
 mod display;
 pub use display::{
     DISPLAY_COVERAGE_CAPABILITY, DISPLAY_OUTPUTS_CAPABILITY, DISPLAY_PROVIDER,
-    DisplayEvidenceError, DisplayObservationFacts, display_observation_attributes,
+    DisplayEvidenceError, DisplayObservationFacts, DisplayRecoveryMetadata,
+    display_observation_attributes, display_recovery_observation_attributes,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -31,6 +31,10 @@ struct NativeDisplayHead final
     // Exact pinned compositor facts; wlr's 24.8 projection alone cannot prove
     // an arbitrary thousandth scale. The independent projection is retained.
     quint32 scaleMilli = 0, scaleFloatBits = 0;
+    // Historical native comparison metadata. Hashes are not authenticated
+    // continuity across replacement, permits or current recovery authority.
+    bool linuraOwned = false;
+    QString baseRuleDigest{}, outputIdentityDigest{}, ownedTarget{};
     bool operator==(const NativeDisplayHead &) const = default;
 };
 

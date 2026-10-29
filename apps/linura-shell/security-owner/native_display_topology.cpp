@@ -56,9 +56,13 @@ QString NativeDisplaySnapshot::encode() const
             {"transform", head.transform},
             {"scale_fixed", head.scaleFixed},
             {"scale_milli", static_cast<qint64>(head.scaleMilli)},
-            {"scale_float_bits", static_cast<qint64>(head.scaleFloatBits)}});
+            {"scale_float_bits", static_cast<qint64>(head.scaleFloatBits)},
+            {"linura_owned", head.linuraOwned},
+            {"owned_target", head.ownedTarget},
+            {"base_rule_digest", head.baseRuleDigest},
+            {"output_identity_digest", head.outputIdentityDigest}});
     }
-    const auto bytes = QJsonDocument(QJsonObject{{"schema", 2},
+    const auto bytes = QJsonDocument(QJsonObject{{"schema", 3},
                                                  {"generation", QString::number(generation)},
                                                  {"heads", entries}})
                            .toJson(QJsonDocument::Compact);

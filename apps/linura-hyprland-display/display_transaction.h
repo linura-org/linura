@@ -41,6 +41,9 @@ struct Head final
     // Facts acquired by the compositor from the actual output and session-lock
     // resources, never booleans supplied by a protocol client.
     bool powered = false, covered = false;
+    // Bounded native comparison data, never permission or an executable plan.
+    bool linuraOwned = false;
+    std::string baseRuleWitness{}, outputIdentityWitness{}, ownedTargetWitness{};
     bool operator==(const Head &) const = default;
 };
 enum class Coverage { Unlocked, Secure, Transitioning, Unknown };

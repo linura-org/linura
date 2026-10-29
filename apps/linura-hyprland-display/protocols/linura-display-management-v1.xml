@@ -96,6 +96,17 @@
       <arg name="generation_hi" type="uint"/>
       <arg name="generation_lo" type="uint"/>
     </event>
+    <event name="recovery_witness">
+      <description summary="historical ownership comparison data">
+        Exactly one bounded witness precedes head done. These source-versioned
+        native values prove no continuity after replacement and grant no effect.
+        The protected owner hashes native rule/identity data before publication.
+      </description>
+      <arg name="linura_owned" type="uint"/>
+      <arg name="owned_target" type="string"/>
+      <arg name="base_rule" type="string"/>
+      <arg name="output_identity" type="string"/>
+    </event>
     <event name="done"/>
   </interface>
   <interface name="linura_display_attempt_v1" version="1">

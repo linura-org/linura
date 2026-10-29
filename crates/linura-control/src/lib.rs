@@ -17,6 +17,7 @@ mod agent_interpretation;
 mod approval;
 mod approval_review;
 mod authority_clock;
+mod display_checkpoint;
 mod display_plan;
 mod display_recovery_journal;
 mod display_safety;
