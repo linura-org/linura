@@ -1135,6 +1135,15 @@ pub trait TransactionStore: std::fmt::Debug {
         &self,
         state: TransactionState,
     ) -> Result<Vec<TransactionSnapshot>, TransactionStoreError>;
+    /// A bounded, authenticated snapshot of one opaque request namespace and
+    /// state. Persistence owns query mechanics, never namespace authority or
+    /// recovery classification. Excess matches fail rather than truncate.
+    fn list_state_in_namespace(
+        &self,
+        state: TransactionState,
+        request_prefix: &str,
+        maximum: usize,
+    ) -> Result<Vec<TransactionSnapshot>, TransactionStoreError>;
     fn integrity_check(&self) -> Result<(), TransactionStoreError>;
 }
 

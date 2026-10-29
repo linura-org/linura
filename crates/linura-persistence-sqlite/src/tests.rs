@@ -816,3 +816,83 @@ fn terminal_recovery_defers_final_reserve_shrink_until_sqlite_commit() {
         0,
     );
 }
+
+#[test]
+fn recovery_namespace_query_is_literal_bounded_and_restart_readable() {
+    let db = TestDatabase::new();
+    let (_, mut store) = open_store(&db.path);
+    for request in [
+        "request:display_:one",
+        "request:display_:two",
+        "request:displayX:three",
+    ] {
+        store
+            .prepare(&binding_with_request(request, "namespace-query"))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+    }
+    for _ in 0..2 {
+        let selected = store
+            .list_state_in_namespace(TransactionState::Prepared, "request:display_", 2)
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(selected.len(), 2);
+        assert!(
+            selected
+                .iter()
+                .all(|row| row.request_id.as_str().starts_with("request:display_:"))
+        );
+        assert!(matches!(
+            store.list_state_in_namespace(TransactionState::Prepared, "request:display_", 1),
+            Err(TransactionStoreError::CapacityExceeded)
+        ));
+        for (prefix, maximum) in [
+            ("", 2),
+            ("request:\0", 2),
+            ("request:", 0),
+            ("request:", 4097),
+        ] {
+            assert!(
+                store
+                    .list_state_in_namespace(TransactionState::Prepared, prefix, maximum)
+                    .is_err()
+            );
+        }
+        assert!(
+            store
+                .list_state_in_namespace(TransactionState::Indeterminate, "request:display_", 2)
+                .unwrap_or_else(|error| unreachable!("{error}"))
+                .is_empty()
+        );
+        drop(store);
+        store = open_store(&db.path).1;
+    }
+}
+
+#[test]
+fn recovery_namespace_query_cannot_hide_tampered_unselected_state() {
+    let db = TestDatabase::new();
+    let (_, mut store) = open_store(&db.path);
+    let prepared = prepared_snapshot(
+        store
+            .prepare(&binding_with_request("request:other-scope", "hidden-row"))
+            .unwrap_or_else(|error| unreachable!("{error}")),
+    );
+    let raw = Connection::open(&db.path).unwrap_or_else(|error| unreachable!("{error}"));
+    raw.create_scalar_function(
+        "linura_internal_mutation_gate",
+        0,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_INNOCUOUS,
+        |_| Ok(1_i64),
+    )
+    .unwrap_or_else(|error| unreachable!("{error}"));
+    raw.execute(
+        "UPDATE generations SET state='verified' WHERE transaction_id=?1 AND generation=0",
+        params![prepared.transaction_id.as_str()],
+    )
+    .unwrap_or_else(|error| unreachable!("{error}"));
+    // The selected namespace has no rows. A query that authenticated only its
+    // results would return empty and incorrectly declare recovery settled.
+    assert!(matches!(
+        store.list_state_in_namespace(TransactionState::Indeterminate, "request:display", 2),
+        Err(TransactionStoreError::Corruption(_))
+    ));
+}

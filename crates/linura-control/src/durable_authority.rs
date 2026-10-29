@@ -1222,6 +1222,17 @@ where
         }
     }
 
+    pub(crate) fn recovery_snapshots_in_namespace(
+        &self,
+        state: TransactionState,
+        prefix: &str,
+        maximum: usize,
+    ) -> Result<Vec<TransactionSnapshot>, DurableAuthorityError> {
+        self.transactions
+            .list_state_in_namespace(state, prefix, maximum)
+            .map_err(Into::into)
+    }
+
     pub fn snapshot(
         &self,
         transaction_id: &TransactionId,

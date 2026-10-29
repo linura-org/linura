@@ -791,56 +791,163 @@ fn lost_apply_reply_never_replays_and_restart_cannot_reconstruct_keep_review() {
 
 #[test]
 fn autonomous_restoration_reconciles_after_restart_without_any_continuation() {
-    let database = TestDatabase::new();
-    let machine = Arc::new(Mutex::new(Machine::default()));
-    let mut port = Port(machine.clone());
-    let mut verifier = Verifier(machine.clone());
-    let request = display_request("watchdog");
-    let mut control = open(database.path(), &machine, 0);
-    value(control.begin_display_layout(
-        principal(),
-        actor(true),
-        request.clone(),
-        &approval(),
-        &mut port,
-        &mut verifier,
-    ));
-    {
-        let mut m = machine
-            .lock()
-            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
-        m.state = Some("restored");
-        m.desired = false;
-    }
-    drop(control);
-    let mut control = open(database.path(), &machine, 0);
-    assert_eq!(
-        value(control.display_layout_status(
-            principal(),
-            actor(true),
-            &request.request_id,
-            &mut port,
-            &mut verifier
-        ))
-        .state,
-        DisplayLayoutState::Restored
-    );
-    assert_eq!(
+    for reconcile_on_begin in [false, true] {
+        let database = TestDatabase::new();
+        let machine = Arc::new(Mutex::new(Machine::default()));
+        let mut port = Port(machine.clone());
+        let mut verifier = Verifier(machine.clone());
+        let request = display_request("watchdog");
+        let mut control = open(database.path(), &machine, 0);
         value(control.begin_display_layout(
             principal(),
             actor(true),
-            request,
-            &Deny,
+            request.clone(),
+            &approval(),
             &mut port,
-            &mut verifier
-        ))
-        .state,
-        DisplayLayoutState::Restored
-    );
-    let m = machine
-        .lock()
-        .unwrap_or_else(|_| unreachable!("fixture poisoned"));
-    assert_eq!((m.applies, m.decisions), (1, 0));
+            &mut verifier,
+        ));
+        drop(control);
+        let mut control = open(database.path(), &machine, 0);
+        {
+            // A replacement mechanism may have no reservation or visible pending
+            // bit. Durable ambiguity still belongs to the SEAT, not its old UUID.
+            let mut m = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            m.state = None;
+            m.desired = false;
+        }
+        for (native_state, desired) in [
+            (None, false),
+            (Some("confirmed"), true), // No retained protected Keep proof.
+            (Some("restored"), true),  // Native flag contradicts independent layout.
+        ] {
+            {
+                let mut m = machine
+                    .lock()
+                    .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+                m.state = native_state;
+                m.desired = desired;
+            }
+            for replacement in [false, true] {
+                let mut next = display_request("after-mechanism-loss");
+                if replacement {
+                    let prior = "11223344-1234-4567-89ab-0123456789ab";
+                    let current = "22334455-1234-4567-89ab-0123456789ab";
+                    next.resource = value(ResourceId::new(
+                        next.resource.as_str().replace(prior, current),
+                    ));
+                    let intent = next
+                        .desired_state
+                        .get_mut("layout")
+                        .unwrap_or_else(|| unreachable!("no fixture layout"));
+                    *intent = intent.replace(prior, current);
+                    next.request_id =
+                        value(managed_request_id("after-compositor-replacement", &next));
+                }
+                let admission = control.begin_display_layout(
+                    principal(),
+                    actor(true),
+                    next,
+                    &approval(),
+                    &mut port,
+                    &mut verifier,
+                );
+                assert!(
+                    matches!(admission,
+                Err(ManagedLifecycleError::Indeterminate(ref reason)) if reason.contains("recovery is unresolved")),
+                    "unexpected admission after replacement={replacement}: {admission:?}"
+                );
+                assert_eq!(
+                    value(control.display_layout_status(
+                        principal(),
+                        actor(true),
+                        &request.request_id,
+                        &mut port,
+                        &mut verifier
+                    ))
+                    .state,
+                    DisplayLayoutState::Indeterminate
+                );
+            }
+        }
+        {
+            let mut m = machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+            m.state = Some("restored");
+            m.desired = false;
+        }
+        drop(control);
+        let mut control = open(database.path(), &machine, 0);
+        if reconcile_on_begin {
+            assert_eq!(
+                value(control.begin_display_layout(
+                    principal(),
+                    actor(true),
+                    display_request("on-demand-recovery"),
+                    &approval(),
+                    &mut port,
+                    &mut verifier
+                ))
+                .state,
+                DisplayLayoutState::AwaitingConfirmation
+            );
+        }
+        assert_eq!(
+            value(control.display_layout_status(
+                principal(),
+                actor(true),
+                &request.request_id,
+                &mut port,
+                &mut verifier
+            ))
+            .state,
+            DisplayLayoutState::Restored
+        );
+        assert_eq!(
+            value(control.begin_display_layout(
+                principal(),
+                actor(true),
+                request,
+                &Deny,
+                &mut port,
+                &mut verifier
+            ))
+            .state,
+            DisplayLayoutState::Restored
+        );
+        let m = machine
+            .lock()
+            .unwrap_or_else(|_| unreachable!("fixture poisoned"));
+        assert_eq!(
+            (m.applies, m.decisions),
+            (1 + usize::from(reconcile_on_begin), 0)
+        );
+        drop(m);
+        // Only independently verified, durably retired restoration frees admission.
+        if !reconcile_on_begin {
+            assert_eq!(
+                value(control.begin_display_layout(
+                    principal(),
+                    actor(true),
+                    display_request("after-verified-restoration"),
+                    &approval(),
+                    &mut port,
+                    &mut verifier
+                ))
+                .state,
+                DisplayLayoutState::AwaitingConfirmation
+            );
+        }
+        assert_eq!(
+            machine
+                .lock()
+                .unwrap_or_else(|_| unreachable!("fixture poisoned"))
+                .applies,
+            2
+        );
+    }
 }
 
 #[test]

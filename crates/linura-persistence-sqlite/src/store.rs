@@ -1116,87 +1116,141 @@ impl TransactionStore for SqliteTransactionStore {
         Ok(snapshots)
     }
 
-    fn integrity_check(&self) -> Result<(), TransactionStoreError> {
-        // Every cross-statement validation below must observe one durable
-        // database state. BEGIN IMMEDIATE serializes this complete pass with
-        // all authority writers before the first runtime/schema/capacity read;
-        // filesystem-sidecar reconciliation therefore consumes exactly the
-        // same authenticated state as transaction/generation/audit validation.
+    fn list_state_in_namespace(
+        &self,
+        state: TransactionState,
+        request_prefix: &str,
+        maximum: usize,
+    ) -> Result<Vec<TransactionSnapshot>, TransactionStoreError> {
+        if maximum == 0
+            || maximum > 4096
+            || request_prefix.is_empty()
+            || request_prefix.len() > 256
+            || request_prefix.chars().any(char::is_control)
+        {
+            return Err(TransactionStoreError::CapacityExceeded);
+        }
         with_immediate_validation(&self.connection, || {
-            validate_runtime_settings(&self.connection, self.limits)?;
-            validate_schema_identity(
-                &self.connection,
-                &self.authority_verifier.fingerprint(),
-                &self.integrity_key.fingerprint(),
-            )?;
-            validate_aggregate_capacity(
-                &self.connection,
-                "transactions",
-                self.limits.max_transactions,
-            )?;
-            validate_aggregate_capacity(
-                &self.connection,
-                "generations",
-                self.limits.max_generations,
-            )?;
-            validate_aggregate_capacity(
-                &self.connection,
-                "audit_events",
-                self.limits.max_audit_events,
-            )?;
-            validate_logical_audit_reserve(&self.connection, self.limits)?;
-
-            let integrity: String = self
+            // Authenticate ALL rows before filtering: tampered namespace/state
+            // metadata must not hide a recovery fence. Keep validation and
+            // selection in the SAME SQLite snapshot, including capacity checks.
+            self.validate_integrity_locked()?;
+            let mut statement = self
                 .connection
-                .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+                .prepare(
+                    "SELECT t.transaction_id FROM transactions AS t
+                 JOIN generations AS g ON g.transaction_id = t.transaction_id
+                     AND g.generation = t.current_generation
+                 WHERE g.state = ?1 AND substr(t.request_id, 1, length(?2)) = ?2
+                 ORDER BY t.transaction_id LIMIT ?3",
+                )
                 .map_err(sqlite)?;
-            if integrity != "ok" {
-                return Err(TransactionStoreError::Corruption(format!(
-                    "SQLite integrity_check returned {integrity:?}"
-                )));
-            }
-            let mut foreign = self
-                .connection
-                .prepare("PRAGMA foreign_key_check")
+            let limit =
+                i64::try_from(maximum + 1).map_err(|_| TransactionStoreError::CapacityExceeded)?;
+            let ids = statement
+                .query_map(params![state.as_str(), request_prefix, limit], |row| {
+                    row.get::<_, String>(0)
+                })
                 .map_err(sqlite)?;
-            if foreign
-                .query([])
-                .map_err(sqlite)?
-                .next()
-                .map_err(sqlite)?
-                .is_some()
-            {
-                return Err(TransactionStoreError::Corruption(
-                    "SQLite foreign_key_check reported violations".into(),
-                ));
+            let mut snapshots = Vec::new();
+            for id in ids {
+                if snapshots.len() == maximum {
+                    return Err(TransactionStoreError::CapacityExceeded);
+                }
+                let id = TransactionId::new(id.map_err(sqlite)?)
+                    .map_err(|error| TransactionStoreError::Corruption(error.to_string()))?;
+                let snapshot = self.snapshot(&id)?;
+                if snapshot.state != state
+                    || !snapshot.request_id.as_str().starts_with(request_prefix)
+                {
+                    return Err(TransactionStoreError::Corruption(
+                        "recovery query identity changed".into(),
+                    ));
+                }
+                snapshots.push(snapshot);
             }
-            drop(foreign);
+            Ok(snapshots)
+        })
+    }
 
-            for transaction_id in list_transaction_ids(&self.connection)? {
-                let (transaction, _, _) =
-                    load_current(&self.connection, &self.integrity_key, &transaction_id)?;
-                validate_generation_history(
-                    &self.connection,
-                    &self.integrity_key,
-                    &transaction_id,
-                    transaction.current_generation,
-                    self.limits,
-                )?;
-                validate_audit_chain(
-                    &self.connection,
-                    &self.integrity_key,
-                    &transaction_id,
-                    transaction.current_generation,
-                    transaction.state_version,
-                    self.limits,
-                )?;
-            }
-            validate_physical_reservations_locked(
+    fn integrity_check(&self) -> Result<(), TransactionStoreError> {
+        with_immediate_validation(&self.connection, || self.validate_integrity_locked())
+    }
+}
+
+impl SqliteTransactionStore {
+    // Caller owns BEGIN IMMEDIATE. Shared by full validation and bounded
+    // recovery selection; never call outside an authenticated read snapshot.
+    fn validate_integrity_locked(&self) -> Result<(), TransactionStoreError> {
+        validate_runtime_settings(&self.connection, self.limits)?;
+        validate_schema_identity(
+            &self.connection,
+            &self.authority_verifier.fingerprint(),
+            &self.integrity_key.fingerprint(),
+        )?;
+        validate_aggregate_capacity(
+            &self.connection,
+            "transactions",
+            self.limits.max_transactions,
+        )?;
+        validate_aggregate_capacity(&self.connection, "generations", self.limits.max_generations)?;
+        validate_aggregate_capacity(
+            &self.connection,
+            "audit_events",
+            self.limits.max_audit_events,
+        )?;
+        validate_logical_audit_reserve(&self.connection, self.limits)?;
+
+        let integrity: String = self
+            .connection
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .map_err(sqlite)?;
+        if integrity != "ok" {
+            return Err(TransactionStoreError::Corruption(format!(
+                "SQLite integrity_check returned {integrity:?}"
+            )));
+        }
+        let mut foreign = self
+            .connection
+            .prepare("PRAGMA foreign_key_check")
+            .map_err(sqlite)?;
+        if foreign
+            .query([])
+            .map_err(sqlite)?
+            .next()
+            .map_err(sqlite)?
+            .is_some()
+        {
+            return Err(TransactionStoreError::Corruption(
+                "SQLite foreign_key_check reported violations".into(),
+            ));
+        }
+        drop(foreign);
+
+        for transaction_id in list_transaction_ids(&self.connection)? {
+            let (transaction, _, _) =
+                load_current(&self.connection, &self.integrity_key, &transaction_id)?;
+            validate_generation_history(
                 &self.connection,
                 &self.integrity_key,
-                self.opener_released_for_terminal_recovery,
-            )
-        })
+                &transaction_id,
+                transaction.current_generation,
+                self.limits,
+            )?;
+            validate_audit_chain(
+                &self.connection,
+                &self.integrity_key,
+                &transaction_id,
+                transaction.current_generation,
+                transaction.state_version,
+                self.limits,
+            )?;
+        }
+        validate_physical_reservations_locked(
+            &self.connection,
+            &self.integrity_key,
+            self.opener_released_for_terminal_recovery,
+        )
     }
 }
 

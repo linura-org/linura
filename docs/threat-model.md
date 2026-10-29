@@ -804,6 +804,14 @@ for the current implementation status.
   retire the recovery fence unless the native ownership check also passes.
   This in-process checkpoint cannot survive compositor death or substitute for
   the still-required durable last-known-good/restart reconciliation path.
+- A replacement compositor's empty reservation map cannot erase durable display
+  ambiguity. New mutations check authenticated pending authority and retained
+  intent for the seat before approval, handoff and dispatch. One observe-only
+  reconciliation may retire independently verified prior work; a new request ID,
+  lost mechanism, changed compositor or native terminal flag alone cannot clear
+  the fence. Historical principal data cannot approve the new request. Namespace
+  selection validates the entire store in one protected read snapshot, including
+  unselected rows; bounded overflow or corrupt/missing history denies admission.
 - Keep cannot downgrade the original layout mutation to a NoChange policy
   subject after the desired layout is visible. Control retains a bounded
   historical canonical review with no observation or execution capability and

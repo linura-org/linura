@@ -460,6 +460,115 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         Ok(())
     }
 
+    // The compositor's reservation map is volatile. An owner/compositor
+    // replacement must not make a new request bypass retained ambiguity.
+    // Derive this fence from authenticated durable authority + original intent,
+    // never a process-local cache, elapsed timeout or a fresh compositor's idle bit.
+    fn pending_display_recovery(
+        &self,
+        principal: &PrincipalId,
+        request: &PlanDesiredStateRequest,
+    ) -> Result<Option<(AuthenticatedPrincipal, RequestId)>, ManagedLifecycleError> {
+        const MAX_PENDING: usize = 32;
+        let target = material(request)?;
+        let own = TransactionId::for_namespace(principal, &request.request_id);
+        let mut seen = BTreeSet::new();
+        for state in [TransactionState::Indeterminate, TransactionState::Verified] {
+            let pending = self.authority.recovery_snapshots_in_namespace(
+                state,
+                DISPLAY_REQUEST_PREFIX,
+                MAX_PENDING,
+            )?;
+            for snapshot in pending {
+                if !seen.insert(snapshot.transaction_id.clone()) || seen.len() > MAX_PENDING {
+                    return Err(ManagedLifecycleError::Authority(
+                        "display recovery inventory is ambiguous or exhausted".into(),
+                    ));
+                }
+                if snapshot.transaction_id == own {
+                    continue; // This invocation's sealed, once-only handoff.
+                }
+                let retained_principal =
+                    AuthenticatedPrincipal::new(snapshot.principal.as_str())
+                        .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+                let retained =
+                    self.retained_display_request(&retained_principal, &snapshot.request_id)?;
+                self.authority
+                    .assert_request_matches(&retained_principal, &retained)?;
+                if snapshot.transaction_id
+                    != TransactionId::for_namespace(&snapshot.principal, &snapshot.request_id)
+                {
+                    return Err(ManagedLifecycleError::Authority(
+                        "display recovery inventory substituted a transaction".into(),
+                    ));
+                }
+                if material(&retained)?.topology().seat() != target.topology().seat() {
+                    continue;
+                }
+                // Validate the entire immutable phase chain, including missing
+                // dispatch/decision records and contradictory terminal facts.
+                DisplayHistory::load(
+                    self.display_journal()?,
+                    &snapshot.principal,
+                    &crate::durable_authority::digest_request(&retained)?,
+                    &snapshot.transaction_id,
+                    snapshot.state,
+                    now_ms()?,
+                )?;
+                return Ok(Some((retained_principal, snapshot.request_id)));
+            }
+        }
+        Ok(None)
+    }
+
+    fn require_display_recovery_settled(
+        &self,
+        principal: &PrincipalId,
+        request: &PlanDesiredStateRequest,
+    ) -> Result<(), ManagedLifecycleError> {
+        if self.pending_display_recovery(principal, request)?.is_some() {
+            return Err(ManagedLifecycleError::Indeterminate(
+                "display recovery is unresolved for this seat; reconcile or restore it before another mutation".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn reconcile_prior_display_recovery<
+        P: DisplayTransactionPort,
+        V: IndependentDisplayVerifier,
+    >(
+        &mut self,
+        principal: &PrincipalId,
+        request: &PlanDesiredStateRequest,
+        port: &mut P,
+        verifier: &mut V,
+    ) -> Result<(), ManagedLifecycleError> {
+        if let Some((historical_principal, historical_request)) =
+            self.pending_display_recovery(principal, request)?
+        {
+            // One bounded observe-only reconciliation per explicit request, not
+            // an unbounded startup loop. Historical identity comes ONLY from
+            // authenticated durable authority, never the new client's input.
+            // It can retire freshly verified bookkeeping, never approve/dispatch
+            // another apply, manufacture Keep or adopt a replacement owner.
+            let recovery_actor = Actor {
+                id: linura_core::ActorId::new("actor:linura-control:display-recovery")
+                    .map_err(|e| ManagedLifecycleError::Contract(e.to_string()))?,
+                kind: ActorKind::Service,
+                interactive: false,
+            };
+            let _historical_status = self.display_layout_status(
+                historical_principal,
+                recovery_actor,
+                &historical_request,
+                port,
+                verifier,
+            )?;
+        }
+        self.require_display_recovery_settled(principal, request)
+    }
+
     fn display_journal(&self) -> Result<&dyn ApprovedRequestJournal, ManagedLifecycleError> {
         self.request_journal.as_deref().ok_or_else(|| {
             ManagedLifecycleError::Authority(
@@ -555,6 +664,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
         self.display_journal()?
             .integrity_check()
             .map_err(|e| ManagedLifecycleError::Authority(e.to_string()))?;
+        self.reconcile_prior_display_recovery(&principal_id, &request, port, verifier)?;
         self.check_keep_review_capacity(0)?;
         let floor = self.registered_managed_risk_floor(&request)?;
         let candidate = self.authority.candidate_with_risk_floor(
@@ -626,6 +736,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
             None,
         )?;
         self.append_display_record(&reserved, principal_id.clone(), None)?;
+        self.require_display_recovery_settled(&principal_id, &request)?;
         let permit = self.handoff_registered_managed(&principal, &mut prepared)?;
         let authorization = authorized_effect(effect, permit)?;
         let dispatch_digest = authorization.binding().dispatch_digest.to_hex();
@@ -659,6 +770,7 @@ impl<S: TransactionStore> ManagedLifecycleControl<S> {
                 &principal_id,
             ));
         }
+        self.require_display_recovery_settled(&principal_id, &request)?;
         match port.dispatch_layout(authorization, &request, deadline) {
             Ok(outcome) if outcome.dispatch_digest.to_hex() != dispatch_digest => {
                 return Err(ManagedLifecycleError::Contract(

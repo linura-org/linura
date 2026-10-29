@@ -131,6 +131,32 @@ the compensated baseline separately. A crash between these writes reconciles
 fresh facts and finishes bookkeeping without any apply. No released transaction
 schema/state is reinterpreted as successful execution.
 
+New display requests first enumerate a bounded, authenticated durable recovery
+inventory. An unresolved Indeterminate or Verified display transaction fences its
+seat across Control, owner or compositor replacement; a new request ID, native
+idle state, missing reservation, elapsed client timeout, changed login owner or
+new compositor invocation cannot release it. Scope comparison deliberately uses
+the seat rather than the old volatile compositor/output handles. The historical
+principal/request are joined to their exact durable anchor and validated phase
+chain; they are data for observation, never a recovered approval or permit.
+
+One prior request may be reconciled read-only before a new request seeks human
+approval. Only existing fresh native-attempt, independent layout/coverage and
+canonical verification can retire that prior authority. Unknown state stays
+fenced. The new request then undergoes its own normal fresh review and prepare;
+strict exclusion checks run again before handoff and dispatch. No unbounded
+startup worker, effect retry or automatic Keep is introduced. Committed and
+RecoveryBlocked authority is terminal: restoration retirement already required
+independent proof before RecoveryBlocked, even if final journal bookkeeping was
+interrupted. Observing those terminal facts does not assert current native state.
+
+The persistence namespace query authenticates the complete store, then selects
+bounded matching rows in the same BEGIN IMMEDIATE snapshot. Literal prefix
+matching is not a caller-selected authority route; Control owns namespace and
+recovery classification. Overflow, tampered excluded rows, malformed history or
+inconsistent identity fail closed. This query adds no schema migration or new
+persistent state and does not persist the still-missing native rule checkpoint.
+
 Keep/revert is a separate protected human interaction over the already prepared
 canonical display transaction. Control creates a sealed `DisplayDecisionChallenge`
 from the retained request, authenticated principal, durable authority binding and
