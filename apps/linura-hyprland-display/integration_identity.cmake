@@ -5,8 +5,12 @@ function(linura_display_integration_identity source_dir output_dir)
         CMakeLists.txt
         compositor_display_service.cpp compositor_display_service.h
         display_transaction.cpp display_transaction.h
+        protected_interaction.cpp protected_interaction.h
+        protected_wire.cpp protected_wire.h
+        protocols/linura-protected-display-v1.xml
         integration_identity.cmake source_integration.py
-        pinned_backend.cpp pinned_integration.h rule_overlay.h native_scale.h
+        pinned_backend.cpp pinned_integration.h pinned_protected.cpp pinned_protected.h
+        rule_overlay.h native_scale.h
         native_power_inhibitor.cpp native_power_inhibitor.h
         native_inhibitor_fd.h
         native_owner_admission.cpp native_owner_admission.h owner_identity.cpp

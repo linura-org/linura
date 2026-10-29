@@ -414,3 +414,39 @@ Preserve inherited v0.4, v0.6, v0.9, S17/v0.10 CI and evidence gates. Never set 
 S21 architecture/contracts -> S21-2 display -> S21-3 brightness -> S21-4 UDisks2 -> S21-5 power UX/idle -> S21-6 workstation convergence -> S21-7 native integration and qualification. Independent backend PRs can be developed in parallel after the trusted contract is stable, but integration/merge follows the S17 dependency and reviewed backend requirements.
 
 S21 integration remains dependent on independently accepted S17 session security and power, exact-source negative qualification, recovery proof and protected merged-PR evidence. Proposed contracts and individual domain PRs cannot assert slice acceptance.
+
+### Candidate protected display presentation
+
+An unlocked display change must not acquire `ext-session-lock` merely to display
+its authentication prompt. The pinned compositor candidate therefore provides a
+separate, private `linura_protected_display_manager_v1` surface role and input
+lifetime. Binding and every retained conversation step independently reattest the
+same supervised native owner invocation. The role supplies no approval, principal,
+policy decision, managed permit or display effect; Control remains the sole
+canonical authority. S17's actual lock state remains independent.
+
+The compositor candidate renders an opaque full-output scene containing only the
+owned configured surface, excludes ordinary windows, IME, overlays, direct scanout
+and the ordinary cursor, and gates physical input before capture/keybinding paths.
+Existing plugins or a custom screen shader make protected presentation unsupported.
+Virtual injection and unsupported absolute-pointer input do not become physical
+confirmation. Hotplug, keymap/device replacement, native snapshot drift, foreign
+focus, scope substitution, suspension or either original deadline invalidate the
+conversation. Closing or losing its owner preserves S17 state and drains physical
+held input before ordinary focus can return.
+
+A buffer commit, configure acknowledgement or flushed frame cannot establish
+readiness. The candidate uses accepted Aquamarine queued-commit IDs, separately
+requires successful backend submission, and correlates an actual presented event
+with hardware-completion evidence for every required output. Reused/wrapped IDs
+fail closed across configure generations. Repaint cannot renew the original
+scope, input epoch or deadline. Consumption is one-use comparison data; human
+PAM authentication and final managed dispatch still require their independent
+purpose-bound proof and revalidation.
+
+This candidate scene is not yet connected to the production owner's protected
+Apply/Keep/Revert conversations. Its component/wire tests and fresh private-header
+compilation do not prove native presentation, modeset first-frame safety, durable
+compositor replacement restoration or complete display acceptance. Production
+mutations remain unsupported until those paths and their actual native tests are
+complete. No S21-2 or release support is promoted by this implementation.

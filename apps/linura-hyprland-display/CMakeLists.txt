@@ -27,7 +27,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 include("${CMAKE_CURRENT_SOURCE_DIR}/integration_identity.cmake")
 linura_display_integration_identity("${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
 
-add_library(linura-hyprland-display-mechanism STATIC display_transaction.cpp)
+add_library(linura-hyprland-display-mechanism STATIC display_transaction.cpp protected_interaction.cpp)
 target_include_directories(linura-hyprland-display-mechanism PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_options(linura-hyprland-display-mechanism PRIVATE
     -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
@@ -57,6 +57,22 @@ target_link_libraries(linura-hyprland-display-wire PUBLIC linura-hyprland-displa
 target_compile_options(linura-hyprland-display-wire PRIVATE
     -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
 
+set(PROTECTED_XML "${CMAKE_CURRENT_SOURCE_DIR}/protocols/linura-protected-display-v1.xml")
+set(PROTECTED_SERVER_HEADER "${CMAKE_CURRENT_BINARY_DIR}/linura-protected-display-v1-server-protocol.h")
+set(PROTECTED_CLIENT_HEADER "${CMAKE_CURRENT_BINARY_DIR}/linura-protected-display-v1-client-protocol.h")
+set(PROTECTED_CODE "${CMAKE_CURRENT_BINARY_DIR}/linura-protected-display-v1-protocol.c")
+add_custom_command(OUTPUT "${PROTECTED_SERVER_HEADER}" "${PROTECTED_CLIENT_HEADER}" "${PROTECTED_CODE}"
+    COMMAND "${WAYLAND_SCANNER}" server-header "${PROTECTED_XML}" "${PROTECTED_SERVER_HEADER}"
+    COMMAND "${WAYLAND_SCANNER}" client-header "${PROTECTED_XML}" "${PROTECTED_CLIENT_HEADER}"
+    COMMAND "${WAYLAND_SCANNER}" private-code "${PROTECTED_XML}" "${PROTECTED_CODE}"
+    DEPENDS "${PROTECTED_XML}" VERBATIM)
+add_library(linura-hyprland-protected-wire STATIC
+    protected_wire.cpp "${PROTECTED_SERVER_HEADER}" "${PROTECTED_CODE}")
+target_include_directories(linura-hyprland-protected-wire PUBLIC "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(linura-hyprland-protected-wire PUBLIC linura-hyprland-display-supervisor)
+target_compile_options(linura-hyprland-protected-wire PRIVATE
+    -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+
 add_library(linura-hyprland-display-owner STATIC owner_identity.cpp)
 target_link_libraries(linura-hyprland-display-owner PUBLIC linura-hyprland-display-wire)
 target_compile_options(linura-hyprland-display-owner PRIVATE
@@ -64,6 +80,12 @@ target_compile_options(linura-hyprland-display-owner PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(linura-hyprland-protected-interaction-tests tests/protected_interaction.cpp)
+    target_link_libraries(linura-hyprland-protected-interaction-tests PRIVATE linura-hyprland-display-mechanism)
+    target_compile_options(linura-hyprland-protected-interaction-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-protected-interaction-boundary COMMAND linura-hyprland-protected-interaction-tests)
+    set_tests_properties(hyprland-protected-interaction-boundary PROPERTIES TIMEOUT 5)
     add_test(NAME hyprland-display-integration-identity
         COMMAND "${CMAKE_COMMAND}"
             "-DNATIVE_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
@@ -84,6 +106,13 @@ if(BUILD_TESTING)
         -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
     add_test(NAME hyprland-display-owner-admission COMMAND linura-hyprland-display-owner-tests)
     set_tests_properties(hyprland-display-owner-admission PROPERTIES TIMEOUT 5)
+    add_executable(linura-hyprland-protected-wire-tests tests/protected_wire.cpp "${PROTECTED_CLIENT_HEADER}")
+    target_link_libraries(linura-hyprland-protected-wire-tests PRIVATE
+        linura-hyprland-protected-wire PkgConfig::WAYLAND_CLIENT Threads::Threads)
+    target_compile_options(linura-hyprland-protected-wire-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-protected-display-wire-boundary COMMAND linura-hyprland-protected-wire-tests)
+    set_tests_properties(hyprland-protected-display-wire-boundary PROPERTIES TIMEOUT 15)
     add_executable(linura-hyprland-display-wire-tests tests/wire_endpoint.cpp "${DISPLAY_CLIENT_HEADER}")
     target_link_libraries(linura-hyprland-display-wire-tests PRIVATE
         linura-hyprland-display-wire PkgConfig::WAYLAND_CLIENT Threads::Threads)

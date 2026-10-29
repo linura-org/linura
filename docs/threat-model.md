@@ -1011,3 +1011,29 @@ A session audio client supplies the moving default alias as mutation authority, 
 - the per-user SQLite audit runs in WAL + FULL synchronous mode with bounded retained records and bounded database/WAL growth; opening rejects symlinks, hard-link aliases, oversized files, unexpected schema objects and any column/STRICT-schema drift;
 - Control requires the durable attempt reservation before dispatch, and terminal records are finalized only against the same attempt binding; a non-no-change terminal record without a prior reservation fails closed;
 - Session1 carries typed request material only, requires the authenticated sender UID to match the UID owning the service's session-bus connection, and owns no shell, provider forwarding, policy decision or privileged execution authority.
+
+### Candidate protected display conversation boundary
+
+The separate native display prompt must not borrow an ordinary application window,
+IME, virtual keyboard, stale lock-surface count or compositor acknowledgement as
+protected human input. The private candidate surface role admits only the same
+root-supervised owner's kernel peer and invocation, reattests retained operations,
+and never changes the real S17 lock state. Its scope, purpose, original wall and
+BOOTTIME deadlines, complete topology, configured surfaces, input inventory and
+focus epoch remain bound together. Callback/resource destruction closes the native
+scene once; delayed configure callbacks cannot outlive their resource.
+
+Input eligibility requires successful queued backend submission and a correlated
+hardware-completed presentation for every required output. Ordinary repaint does
+not reauthorize a scope; changed configure or native identity requires new evidence.
+Unrelated native presentation, rejected/cancelled submission, foreign focus, input
+replacement, virtual input, unsupported input families, expiry and owner replacement
+cannot supply a receipt. Password keystrokes bypass ordinary capture, IME and
+keybindings, and held physical input is drained before restoring ordinary focus.
+The native presentation receipt still authenticates no human and grants no effect.
+
+These are candidate mechanisms under PR #259. The production owner does not yet
+use the private scene for display authentication. Native modeset placeholder
+coverage, end-to-end purpose-bound authentication, final receipt redemption,
+compositor-death restoration and adversarial multi-output acceptance remain required
+before activation; compile/component/wire results cannot stand in for those tests.

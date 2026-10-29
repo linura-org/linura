@@ -1,4 +1,5 @@
 #include "pinned_integration.h"
+#include "pinned_protected.h"
 #include "native_scale.h"
 #include "rule_overlay.h"
 #include "recovery_witness.h"
@@ -444,9 +445,11 @@ void initialize(wl_display &display, wl_event_loop &loop)
         display, *backend, *service,
         NativeBuildIdentity{backend->instance, UpstreamCommit, IntegrationSourceDigest},
         nativeOutputName, attestDisplayOwner);
+    initializeProtectedDisplay(display);
 }
 void shutdown()
 {
+    shutdownProtectedDisplay();
     endpoint.reset();
     service.reset(); // Compensation while monitor/rule/lock managers still exist.
     backend.reset();
@@ -521,6 +524,11 @@ std::optional<std::string> nativeOutputName(OutputKey key)
 {
     const auto monitor = backend ? backend->monitorFor(key) : nullptr;
     return monitor ? std::optional(monitor->m_name) : std::nullopt;
+}
+Monitor::CMonitor *nativeOutputMonitor(OutputKey key)
+{
+    const auto monitor = backend ? backend->monitorFor(key) : nullptr;
+    return monitor.get();
 }
 const std::string &compositorInstance()
 {

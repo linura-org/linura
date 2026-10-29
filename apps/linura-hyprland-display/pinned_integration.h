@@ -31,6 +31,7 @@ void commitObserved(Monitor::CMonitor *, bool success);
 [[nodiscard]] Backend *nativeBackend();
 [[nodiscard]] CompositorDisplayService *nativeTransactions();
 [[nodiscard]] std::optional<std::string> nativeOutputName(OutputKey);
+[[nodiscard]] Monitor::CMonitor *nativeOutputMonitor(OutputKey);
 [[nodiscard]] const std::string &compositorInstance();
 
 } // namespace Linura::HyprlandDisplay
