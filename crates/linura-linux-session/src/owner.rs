@@ -527,6 +527,55 @@ impl NativeSessionChannel {
         .map(Some)
     }
 
+    /// Exact, read-only IPC proof from the existing protected per-UID native
+    /// security supervisor. This proves the supervisor's observed login scope,
+    /// NOT that its PID is a member of the graphical logind Session.
+    /// Discovery, owner invocation, BOOTTIME age and post-call identity are
+    /// independently revalidated against the requested canonical lock.
+    ///
+    /// Success means worker identity is currently available, NOT that the
+    /// backlight device, physical minimum, Control effect or IPC dispatch has
+    /// been qualified. Never treat this as an authorization to mutate.
+    pub fn observe_backlight_owner(&self, expected: &SessionLockId) -> Result<(), String> {
+        self.require_role(NativeSessionRole::Control)?;
+        let started = Instant::now();
+        let boot = current_boot()?;
+        if expected.epoch().boot() != &boot {
+            return Err("protected backlight worker belongs to another boot".into());
+        }
+        let identity = self.discover(expected.epoch().uid(), started)?;
+        if identity.invocation != *expected.security_owner_invocation() {
+            return Err("protected backlight worker invocation changed".into());
+        }
+        let reply = self.call_with_budget(
+            &identity.unique_name,
+            ENDPOINT,
+            INTERFACE,
+            "ObserveBacklightOwner",
+            &(),
+            owner_reply_budget(started.elapsed())?,
+        )?;
+        if started.elapsed() >= crate::bus::PROBE_BUDGET
+            || reply.body().len() > crate::bus::MAX_REPLY_BYTES
+            || reply.body().signature().to_string() != "(st)"
+        {
+            return Err("protected backlight worker reply violates its bounds or signature".into());
+        }
+        let ((resource, sampled_boot_ms),): ((String, u64),) = reply
+            .body()
+            .deserialize()
+            .map_err(|_| "protected backlight worker reply codec mismatch".to_owned())?;
+        self.revalidate_observation(&identity, &boot, started)?;
+        validate_backlight_owner_sample(
+            &identity,
+            &boot,
+            expected,
+            &resource,
+            sampled_boot_ms,
+            boot_ms()?,
+        )
+    }
+
     pub fn observe_lock(
         &self,
         lock: &SessionLockId,
@@ -1086,6 +1135,33 @@ pub(crate) fn unique_name(value: &str) -> bool {
         && suffix
             .split('.')
             .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+}
+
+fn validate_backlight_owner_sample(
+    identity: &NativeOwnerIdentity,
+    boot: &BootId,
+    expected: &SessionLockId,
+    resource: &str,
+    sampled_boot_ms: u64,
+    now_boot_ms: u64,
+) -> Result<(), String> {
+    let claimed = SessionLockId::from_resource(
+        &linura_core::ResourceId::new(resource).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let age = now_boot_ms
+        .checked_sub(sampled_boot_ms)
+        .ok_or("protected backlight worker proof is from the future")?;
+    if sampled_boot_ms == 0
+        || age > VALID_FOR_MS
+        || &claimed != expected
+        || claimed.epoch().uid() != identity.uid
+        || claimed.epoch().boot() != boot
+        || claimed.security_owner_invocation() != &identity.invocation
+    {
+        return Err("protected backlight worker proof has stale or substituted identity".into());
+    }
+    Ok(())
 }
 
 fn require_observation_signature(reply: &zbus::Message) -> Result<(), String> {

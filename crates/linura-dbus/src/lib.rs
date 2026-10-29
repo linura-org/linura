@@ -7,12 +7,13 @@ mod authority_client;
 mod planning;
 mod session;
 
-pub use authority_client::Authority1Client;
+pub use authority_client::{Authority1Client, NativeBacklightCandidateStatus};
 
 pub use authority::{
     AUTHORITY_CONTRACT_ID, AUTHORITY_CONTRACT_STABILITY, AUTHORITY_CONTRACT_VERSION,
-    AUTHORITY_INTERFACE_NAME, AUTHORITY_OBJECT_PATH, AUTHORITY_SERVICE_NAME, Authority1Context,
-    Authority1Handler, Authority1ManagedRequest, Authority1SessionContext, AuthorityReceiptWire,
+    AUTHORITY_INTERFACE_NAME, AUTHORITY_OBJECT_PATH, AUTHORITY_SERVICE_NAME,
+    Authority1BacklightContext, Authority1Context, Authority1Handler, Authority1ManagedRequest,
+    Authority1SessionContext, AuthorityReceiptWire, BacklightCandidateWire,
     MANAGE_SYSTEMD_ACTIVE_STATE_ACTION, UNLOCK_SESSION_ACTION, serve_authority1,
 };
 pub use session::{

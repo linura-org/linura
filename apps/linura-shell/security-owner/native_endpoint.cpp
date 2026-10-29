@@ -25,6 +25,28 @@ bool NativeLockObservationWire::freshAtBootMs(quint64 now) const
            now >= sampledBootMs && now - sampledBootMs < 2'000U;
 }
 
+bool NativeBacklightOwnerWire::freshAtBootMs(quint64 now) const
+{
+    return NativeLockIdentity::parse(sessionLock).has_value() && sampledBootMs != 0 &&
+           now >= sampledBootMs && now - sampledBootMs < 2'000U;
+}
+
+QDBusArgument &operator<<(QDBusArgument &wire, const NativeBacklightOwnerWire &observation)
+{
+    wire.beginStructure();
+    wire << observation.sessionLock << observation.sampledBootMs;
+    wire.endStructure();
+    return wire;
+}
+
+const QDBusArgument &operator>>(const QDBusArgument &wire, NativeBacklightOwnerWire &observation)
+{
+    wire.beginStructure();
+    wire >> observation.sessionLock >> observation.sampledBootMs;
+    wire.endStructure();
+    return wire;
+}
+
 bool NativePowerPermissionWire::freshAtBootMs(quint64 now) const
 {
     const auto transition = NativeTransitionIdentity::parse(resource);
@@ -112,6 +134,7 @@ void NativeEndpoint::registerWireTypes()
     qDBusRegisterMetaType<NativeApprovalWire>();
     qDBusRegisterMetaType<NativeLockObservationWire>();
     qDBusRegisterMetaType<NativePowerPermissionWire>();
+    qDBusRegisterMetaType<NativeBacklightOwnerWire>();
 }
 bool NativeEndpoint::ArmApproval(const NativeApprovalWire &wire)
 {
@@ -159,6 +182,26 @@ bool NativeEndpoint::DispatchPreparedLock(const QString &resource, bool secure)
 {
     const auto lock = NativeLockIdentity::parse(resource);
     return calledFromDBus() && lock && runtime_.dispatchPrepared(message(), *lock, secure);
+}
+
+NativeBacklightOwnerWire NativeEndpoint::ObserveBacklightOwner()
+{
+    if (calledFromDBus()) {
+        const auto sampled = bootMilliseconds();
+        // Actual incoming D-Bus message, not a caller-supplied identity. The
+        // protected owner independently authenticates the supervised Control
+        // sender, live session and non-dumpable secure-exec state.
+        const auto worker = runtime_.observeBacklightOwner(message());
+        const auto completed = bootMilliseconds();
+        if (sampled && worker && completed) {
+            NativeBacklightOwnerWire observation{worker->resource, *sampled};
+            if (observation.freshAtBootMs(*completed))
+                return observation;
+        }
+        sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
+                       QStringLiteral("Protected backlight user-session proof unavailable"));
+    }
+    return {}; // No positive proof on a disconnected or unauthenticated call.
 }
 
 NativePowerPermissionWire NativeEndpoint::ObservePowerPermission(const QString &resource)

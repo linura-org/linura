@@ -28,6 +28,13 @@
            bounded post-dispatch verification loop may await a known transition. -->
       <arg name="observation" type="(sbt)" direction="out"/>
     </method>
+    <!-- Original-user protected-process attestation only. An authenticated
+         Control1 sender receives a fresh, exact native login/owner invocation
+         identity. This neither proves physical backlight lineage nor provides
+         a dispatch permit, physical calibration or session-side write. -->
+    <method name="ObserveBacklightOwner">
+      <arg name="observation" type="(st)" direction="out"/>
+    </method>
     <method name="ObservePowerPermission">
       <arg name="resource" type="s" direction="in"/>
       <arg name="observation" type="(sst)" direction="out"/>

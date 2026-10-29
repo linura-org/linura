@@ -516,6 +516,8 @@ dependencies = [
 name = "linura-authorityd"
 version = "0.9.0"
 dependencies = [
+ "async-io",
+ "futures-lite",
  "linura-control",
  "linura-core",
  "linura-dbus",
@@ -534,6 +536,8 @@ dependencies = [
  "linura-provider-sdk",
  "linura-transaction",
  "linura-verifier-systemd",
+ "rustix",
+ "serde",
  "zbus",
 ]
 
@@ -693,6 +697,7 @@ dependencies = [
  "linura-observation",
  "linura-provider-sdk",
  "rustix",
+ "serde",
  "zbus",
 ]
 
