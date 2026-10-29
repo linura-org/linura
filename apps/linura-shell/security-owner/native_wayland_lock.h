@@ -3,6 +3,7 @@
 #include "native_managed_lock_backend.h"
 #include "native_keyboard.h"
 #include "native_display_topology.h"
+#include "native_display_prompt.h"
 #include <QImage>
 #include <QSize>
 #include <cstddef>
@@ -69,6 +70,14 @@ class NativeWaylandLock final : public NativeManagedLockBackend
                                                                  const NativeDisplayDecision &,
                                                                  quint64 originalSampledBootMs);
     [[nodiscard]] const QString &displayInvocation() const noexcept;
+    // Separate native display conversation. The caller must arm the exact
+    // canonical/purpose-bound authentication first. S17 state is independent.
+    [[nodiscard]] bool showProtectedDisplay(const NativeDisplayPromptScope &,
+                                            const NativeDisplayIntent &);
+    [[nodiscard]] std::optional<NativeDisplayPromptStatus> protectedDisplayStatus();
+    [[nodiscard]] bool consumeProtectedDisplay(const NativeDisplayPromptScope &,
+                                               quint64 originalEpoch);
+    void cancelProtectedDisplay();
     // Private native interaction, not an effect/approval credential. The runtime
     // arms the exact reviewed NativeApprovalScope first and consumes its fresh
     // confirmation through Control separately. Closing/expiry means denial.

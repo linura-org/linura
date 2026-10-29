@@ -5,6 +5,11 @@
 #include "native_lock_protocol.h"
 #include "secret_entry.h"
 #include "native_presentation.h"
+#include "native_display_layout.h"
+#include "native_display_watchdog.h"
+#include "protected_wire.h"
+#include "linura-display-integration-build.h"
+#include "wlr-output-management-unstable-v1-server-protocol.h"
 #include "ext-session-lock-v1-server-protocol.h"
 #include "xdg-shell-server-protocol.h"
 #include <QCoreApplication>
@@ -55,6 +60,9 @@ enum class Case {
     ProbeProgress,
     ProbeStarvation,
     SecurityTransitionFrames,
+    DisplayPrompt,
+    DisplayPromptStale,
+    DisplayPromptLocked,
     ProtectedInput,
     InputLateCoverage,
     InputLateFocusLoss,
@@ -104,7 +112,8 @@ enum class Case {
 };
 bool inputCase(Case scenario)
 {
-    return scenario >= Case::ProtectedInput;
+    return scenario == Case::DisplayPrompt || scenario == Case::DisplayPromptStale ||
+           scenario == Case::DisplayPromptLocked || scenario >= Case::ProtectedInput;
 }
 bool unlockRequestCase(Case scenario)
 {
@@ -123,6 +132,61 @@ bool pointerCase(Case scenario)
     return (scenario >= Case::PointerRequest && scenario <= Case::PointerExpired) ||
            scenario >= Case::PrelockPointerConfirm;
 }
+
+// A presentation-port fixture, not a physical frame, PAM or native session.
+class DisplayFacts final : public Linura::HyprlandDisplay::Backend
+{
+  public:
+    std::function<bool()> secure;
+    std::optional<Linura::HyprlandDisplay::ClockSample> clock() override
+    {
+        return Linura::HyprlandDisplay::compositorClock();
+    }
+    std::optional<Linura::HyprlandDisplay::Snapshot> snapshot() override
+    {
+        using namespace Linura::HyprlandDisplay;
+        const Mode large{32, 24, 60000}, small{16, 16, 60000};
+        const bool locked = secure && secure();
+        return Snapshot{1,
+                        1,
+                        {{OutputKey{1, 1},
+                          {large, small},
+                          Target{OutputKey{1, 1}, true, large, 1000, 0, 0, 0, {}},
+                          true,
+                          locked,
+                          false,
+                          "LNDR:1;0;",
+                          "LNDF:1;0;",
+                          ""}},
+                        locked ? Coverage::Secure : Coverage::Unlocked};
+    }
+    bool applyOwnedLayout(const Linura::HyprlandDisplay::Layout &,
+                          const Linura::HyprlandDisplay::Snapshot &) override
+    {
+        assert(false);
+        return false;
+    }
+    bool restoreOwnedLayout(const Linura::HyprlandDisplay::Layout &,
+                            const Linura::HyprlandDisplay::Snapshot &) override
+    {
+        assert(false);
+        return false;
+    }
+    bool restoredOwnedState() override
+    {
+        assert(false);
+        return false;
+    }
+    bool inhibitPowerTransitions() override
+    {
+        assert(false);
+        return false;
+    }
+    void releasePowerInhibitor() noexcept override
+    {
+        assert(false);
+    }
+};
 
 struct WireServer final
 {
@@ -146,6 +210,17 @@ struct WireServer final
         wl_resource *window = nullptr;
         bool desktop = false;
     };
+    struct DisplaySupport final
+    {
+        WireServer &owner;
+        DisplayFacts facts;
+        std::unique_ptr<Linura::HyprlandDisplay::CompositorDisplayService> service;
+        std::unique_ptr<Linura::HyprlandDisplay::WireEndpoint> layout;
+        std::unique_ptr<Linura::HyprlandDisplay::ProtectedWireEndpoint> presentation;
+        explicit DisplaySupport(WireServer &);
+        static void bind(wl_client *, void *, std::uint32_t, std::uint32_t);
+    };
+    std::unique_ptr<DisplaySupport> displaySupport;
     Case scenario;
     wl_display *display = nullptr;
     wl_global *initialOutput = nullptr;
@@ -294,11 +369,22 @@ struct WireServer final
     {
         auto *native = wl_resource_create(client, &wl_surface_interface, 4, id);
         assert(native);
-        static const struct wl_surface_interface implementation
-        {
-            destroy, attach, rectangle, unsupportedFrame, region, region, commit, integer, integer,
-                rectangle, offset
-        };
+        static const struct wl_surface_interface implementation = [] {
+            struct wl_surface_interface callbacks
+            {};
+            callbacks.destroy = destroy;
+            callbacks.attach = attach;
+            callbacks.damage = rectangle;
+            callbacks.frame = unsupportedFrame;
+            callbacks.set_opaque_region = region;
+            callbacks.set_input_region = region;
+            callbacks.commit = commit;
+            callbacks.set_buffer_transform = integer;
+            callbacks.set_buffer_scale = integer;
+            callbacks.damage_buffer = rectangle;
+            callbacks.offset = offset;
+            return callbacks;
+        }();
         wl_resource_set_implementation(native, &implementation,
                                        new Surface{&owner(resource), nullptr, nullptr, native},
                                        surfaceDestroyed);
@@ -308,10 +394,13 @@ struct WireServer final
         auto *resource =
             wl_resource_create(client, &wl_compositor_interface, static_cast<int>(version), id);
         assert(resource);
-        static const struct wl_compositor_interface implementation
-        {
-            createSurface, invalid
-        };
+        static const struct wl_compositor_interface implementation = [] {
+            struct wl_compositor_interface callbacks
+            {};
+            callbacks.create_surface = createSurface;
+            callbacks.create_region = invalid;
+            return callbacks;
+        }();
         wl_resource_set_implementation(resource, &implementation, data, nullptr);
     }
     static void bindOutput(wl_client *client, void *, uint32_t version, uint32_t id)
@@ -324,6 +413,8 @@ struct WireServer final
             destroy
         };
         wl_resource_set_implementation(resource, &implementation, nullptr, nullptr);
+        if (version >= 4)
+            wl_output_send_name(resource, "DP-1");
         wl_output_send_scale(resource, 1);
         wl_output_send_done(resource);
     }
@@ -762,7 +853,13 @@ struct WireServer final
         display = wl_display_create();
         assert(display && wl_display_init_shm(display) == 0);
         assert(wl_global_create(display, &wl_compositor_interface, 4, this, bindCompositor));
-        initialOutput = wl_global_create(display, &wl_output_interface, 3, this, bindOutput);
+        initialOutput = wl_global_create(display, &wl_output_interface,
+                                         (selected == Case::DisplayPrompt ||
+                                          selected == Case::DisplayPromptStale ||
+                                          selected == Case::DisplayPromptLocked)
+                                             ? 4
+                                             : 3,
+                                         this, bindOutput);
         assert(initialOutput);
         if (selected != Case::MissingManager)
             assert(wl_global_create(display, &ext_session_lock_manager_v1_interface, 1, this,
@@ -786,6 +883,9 @@ struct WireServer final
             xkb_context_unref(context);
             assert(wl_global_create(display, &wl_seat_interface, 5, this, bindSeat));
         }
+        if (selected == Case::DisplayPrompt || selected == Case::DisplayPromptStale ||
+            selected == Case::DisplayPromptLocked)
+            displaySupport = std::make_unique<DisplaySupport>(*this);
         assert(wl_client_create(display, descriptor));
         worker = std::thread([this] {
             while (!stop.load()) {
@@ -802,6 +902,7 @@ struct WireServer final
         stop = true;
         worker.join();
         wl_display_destroy_clients(display);
+        displaySupport.reset();
         wl_display_destroy(display);
         close(commands);
         assert(roles.empty());
@@ -830,6 +931,147 @@ class KeyFilter final : public QObject
         return false;
     }
 };
+
+WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
+{
+    using namespace Linura::HyprlandDisplay;
+    facts.secure = [&server] { return server.locks.load() > server.unlocks.load(); };
+    service = std::make_unique<CompositorDisplayService>(*wl_display_get_event_loop(server.display),
+                                                         facts);
+    const auto admit = [](pid_t, uid_t) -> std::optional<WireEndpoint::OwnerInvocation> {
+        WireEndpoint::OwnerInvocation invocation{};
+        invocation[0] = 1;
+        return invocation;
+    };
+    layout = std::make_unique<WireEndpoint>(
+        *server.display, facts, *service,
+        NativeBuildIdentity{"74e3ca24-b38b-4b62-9671-ae32dc38fd57",
+                            "efb50993780079460b0cbed1363e2166a2de1d9f", IntegrationSourceDigest},
+        [](OutputKey key) -> std::optional<std::string> {
+            return key == OutputKey{1, 1} ? std::optional<std::string>("DP-1") : std::nullopt;
+        },
+        admit);
+    assert(layout->available());
+    class Scene final : public ProtectedScene
+    {
+      public:
+        WireServer &owner;
+        ProtectedInteraction::Scope scope;
+        std::unique_ptr<Role> role;
+        bool closed = false, consumed = false;
+        Scene(WireServer &server, ProtectedInteraction::Scope value)
+            : owner(server), scope(std::move(value))
+        {}
+        bool attach(OutputKey key, wl_resource *resource, Configure configure) override
+        {
+            if (key != OutputKey{1, 1} || role)
+                return false;
+            auto *surface = static_cast<Surface *>(wl_resource_get_user_data(resource));
+            if (!surface || surface->role)
+                return false;
+            if (owner.focusSent && owner.keyboard) {
+                for (const auto &[native, prior] : owner.roles) {
+                    (void)native;
+                    if (prior->surface)
+                        wl_keyboard_send_leave(owner.keyboard, 19, prior->surface->native);
+                }
+                owner.focusSent = false;
+            }
+            role = std::make_unique<Role>();
+            role->owner = &owner;
+            role->surface = surface;
+            role->native = nullptr;
+            role->serial = 7;
+            surface->role = role.get();
+            configure(7, 32, 24);
+            return true;
+        }
+        bool acknowledge(OutputKey key, std::uint32_t serial) override
+        {
+            if (!role || key != OutputKey{1, 1} || serial != 7)
+                return false;
+            role->acknowledged = serial;
+            return true;
+        }
+        std::optional<ProtectedSceneStatus> status() override
+        {
+            if (closed)
+                return std::nullopt;
+            return ProtectedSceneStatus{"74e3ca24-b38b-4b62-9671-ae32dc38fd57", 1, 9,
+                                        consumed ? ProtectedInteraction::Phase::Consumed
+                                        : owner.commits.load() && owner.focusSent
+                                            ? ProtectedInteraction::Phase::Ready
+                                            : ProtectedInteraction::Phase::Arming};
+        }
+        bool consume(const std::string &digest, std::uint64_t epoch) override
+        {
+            if (closed || consumed || digest != scope.digest || epoch != 9 || !owner.commits.load())
+                return false;
+            consumed = true;
+            return true;
+        }
+        void close() noexcept override
+        {
+            if (closed)
+                return;
+            closed = true;
+            if (role && role->surface)
+                role->surface->role = nullptr;
+            role.reset();
+        }
+        ~Scene() override
+        {
+            close();
+        }
+    };
+    presentation = std::make_unique<ProtectedWireEndpoint>(
+        *server.display, admit, [&server](const ProtectedInteraction::Scope &scope) {
+            return std::make_unique<Scene>(server, scope);
+        });
+    assert(presentation->available());
+    assert(wl_global_create(server.display, &zwlr_output_manager_v1_interface, 4, this, bind));
+}
+void WireServer::DisplaySupport::bind(wl_client *client, void *, std::uint32_t version,
+                                      std::uint32_t id)
+{
+    auto *manager = wl_resource_create(client, &zwlr_output_manager_v1_interface,
+                                       static_cast<int>(version), id);
+    assert(manager);
+    static const struct zwlr_output_manager_v1_interface requests
+    {
+        [](wl_client *, wl_resource *, std::uint32_t, std::uint32_t) { assert(false); },
+            [](wl_client *, wl_resource *resource) { wl_resource_destroy(resource); }
+    };
+    wl_resource_set_implementation(manager, &requests, nullptr, nullptr);
+    auto *head = wl_resource_create(client, &zwlr_output_head_v1_interface, 4, 0);
+    assert(head);
+    static const struct zwlr_output_head_v1_interface headRequests
+    {
+        WireServer::destroy
+    };
+    wl_resource_set_implementation(head, &headRequests, nullptr, nullptr);
+    zwlr_output_manager_v1_send_head(manager, head);
+    zwlr_output_head_v1_send_name(head, "DP-1");
+    zwlr_output_head_v1_send_enabled(head, 1);
+    zwlr_output_head_v1_send_position(head, 0, 0);
+    zwlr_output_head_v1_send_transform(head, 0);
+    zwlr_output_head_v1_send_scale(head, 256);
+    static const struct zwlr_output_mode_v1_interface modeRequests
+    {
+        WireServer::destroy
+    };
+    for (const auto &size : {std::pair{32, 24}, std::pair{16, 16}}) {
+        auto *mode = wl_resource_create(client, &zwlr_output_mode_v1_interface, 3, 0);
+        assert(mode);
+        wl_resource_set_implementation(mode, &modeRequests, nullptr, nullptr);
+        zwlr_output_head_v1_send_mode(head, mode);
+        zwlr_output_mode_v1_send_size(mode, size.first, size.second);
+        zwlr_output_mode_v1_send_refresh(mode, 60000);
+        if (size.first == 32)
+            zwlr_output_head_v1_send_current_mode(head, mode);
+    }
+    zwlr_output_manager_v1_send_done(manager, 1);
+}
 
 void client(Case scenario, int descriptor, int commands)
 {
@@ -914,10 +1156,78 @@ void client(Case scenario, int descriptor, int commands)
             return;
         }
         assert(initialized && backend.available());
+        if (scenario != Case::DisplayPrompt && scenario != Case::DisplayPromptStale &&
+            scenario != Case::DisplayPromptLocked) {
+            // Legacy/unsupported peers cannot fall back to an ordinary xdg window,
+            // acquire a lock for display approval, or manufacture a consumed epoch.
+            const NativeDisplayPromptScope unsupportedPrompt{
+                QString(64, QLatin1Char('a')), NativeDisplayPromptScope::Purpose::Apply, 1000};
+            assert(!backend.showProtectedDisplay(unsupportedPrompt, NativeDisplayIntent{}));
+            assert(!backend.protectedDisplayStatus());
+            assert(!backend.consumeProtectedDisplay(unsupportedPrompt, 1));
+            backend.cancelProtectedDisplay();
+            assert(!backend.requestedSecure() && !backend.secureCoverage());
+        }
         assert(backend.displayAllowsSecurityTransition()); // Healthy unlocked legacy peer.
         if (entry)
             assert(backend.protectedInputAvailable() &&
                    !backend.bindProtectedInput(*entry, {}, {}));
+        if (scenario == Case::DisplayPrompt || scenario == Case::DisplayPromptStale ||
+            scenario == Case::DisplayPromptLocked) {
+            const bool locked = scenario == Case::DisplayPromptLocked;
+            if (locked) {
+                assert(backend.installManagedEffectGate([&](bool) {
+                    ++gates;
+                    return true;
+                }));
+                assert(backend.dispatchNative(true));
+                waitUntil([&] { return backend.secureCoverage(); });
+            }
+            const auto observed = backend.observeDisplayTopology();
+            assert(observed && observed->heads.size() == 1);
+            const auto topology =
+                QStringLiteral("display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:"
+                               "seat0:74e3ca24-b38b-4b62-9671-ae32dc38fd57:1");
+            const auto material =
+                QStringLiteral("LNDI:1;session:lock:11111111-1111-4111-8111-111111111111:1000:c2:"
+                               "42:22222222-2222-4222-8222-222222222222:1;LNDL:1;") +
+                topology + QStringLiteral(";1:1:enabled:32:24:60000:1000:0:0:0:-;LNDL:1;") +
+                topology + QStringLiteral(";1:1:enabled:16:16:60000:1000:0:0:0:-;");
+            const auto intent = NativeDisplayIntent::parse(material);
+            assert(intent);
+            const auto clock = NativeDisplayClock::sample();
+            assert(clock);
+            const NativeDisplayPromptScope prompt{QString(64, QLatin1Char('a')),
+                                                  NativeDisplayPromptScope::Purpose::Apply,
+                                                  clock->unixMs + 10000};
+            assert(backend.showProtectedDisplay(prompt, *intent));
+            assert(!backend.showProtectedDisplay(prompt, *intent));
+            assert(!backend.displayAllowsSecurityTransition());
+            std::optional<NativeDisplayPromptStatus> status;
+            waitUntil([&] {
+                status = backend.protectedDisplayStatus();
+                return status && status->phase == NativeDisplayPromptStatus::Phase::Ready &&
+                       backend.protectedInputFocused();
+            });
+            assert(status->epoch == 9 && backend.requestedSecure() == locked &&
+                   backend.secureCoverage() == locked && gates == (locked ? 1U : 0U));
+            if (scenario == Case::DisplayPromptStale)
+                assert(!backend.consumeProtectedDisplay(prompt, status->epoch - 1));
+            else {
+                assert(backend.consumeProtectedDisplay(prompt, status->epoch));
+                assert(!backend.consumeProtectedDisplay(prompt, status->epoch));
+            }
+            backend.cancelProtectedDisplay();
+            assert(!backend.protectedDisplayStatus() && backend.requestedSecure() == locked &&
+                   backend.secureCoverage() == locked && gates == (locked ? 1U : 0U));
+            assert(backend.displayAllowsSecurityTransition());
+            if (locked) {
+                assert(backend.dispatchNative(false));
+                waitUntil([&] { return !backend.requestedSecure(); });
+                assert(gates == 2);
+            }
+            return;
+        }
         if (confirmationCase(scenario)) {
             assert(entry && presentation);
             unsigned completions = 0;
@@ -1370,6 +1680,9 @@ int main(int argc, char **argv)
     assert(NativeWaylandLock::boundedFrame(3840, 2160));
     assert(NativeWaylandLock::boundedFrame(4096, 2048));
     assert(!NativeWaylandLock::boundedFrame(4096, 2049));
+    run(Case::DisplayPrompt, 0, 0, 0);
+    run(Case::DisplayPromptStale, 0, 0, 0);
+    run(Case::DisplayPromptLocked, 0, 1, 1);
     run(Case::Repaint, 0, 1, 1);
     run(Case::ResizePressure, 0, 1, 1);
     run(Case::Hotplug, 0, 1, 1);

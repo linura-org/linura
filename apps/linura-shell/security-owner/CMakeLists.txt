@@ -24,6 +24,7 @@ add_library(linura-security-owner-foundation STATIC
     session_bootstrap.cpp
     compositor_probe.cpp
     native_display_layout.cpp native_display_layout.h
+    native_display_prompt.cpp native_display_prompt.h
     native_display_attempt.cpp native_display_attempt.h
     native_display_watchdog.cpp native_display_watchdog.h
     native_wayland_readiness.cpp
@@ -123,10 +124,18 @@ add_custom_command(OUTPUT "${PINNED_DISPLAY_HEADER}" "${PINNED_DISPLAY_CODE}"
     COMMAND "${WAYLAND_SCANNER}" private-code "${PINNED_DISPLAY_XML}" "${PINNED_DISPLAY_CODE}"
     DEPENDS "${PINNED_DISPLAY_XML}" VERBATIM
 )
+set(PROTECTED_DISPLAY_XML "${PINNED_DISPLAY_SOURCE}/protocols/linura-protected-display-v1.xml")
+set(PROTECTED_DISPLAY_HEADER "${CMAKE_CURRENT_BINARY_DIR}/linura-protected-display-v1-client-protocol.h")
+set(PROTECTED_DISPLAY_CODE "${CMAKE_CURRENT_BINARY_DIR}/linura-protected-display-v1-protocol.c")
+add_custom_command(OUTPUT "${PROTECTED_DISPLAY_HEADER}" "${PROTECTED_DISPLAY_CODE}"
+    COMMAND "${WAYLAND_SCANNER}" client-header "${PROTECTED_DISPLAY_XML}" "${PROTECTED_DISPLAY_HEADER}"
+    COMMAND "${WAYLAND_SCANNER}" private-code "${PROTECTED_DISPLAY_XML}" "${PROTECTED_DISPLAY_CODE}"
+    DEPENDS "${PROTECTED_DISPLAY_XML}" VERBATIM)
 add_library(linura-security-owner-wayland STATIC
     native_wayland_lock.cpp native_wayland_lock.h
     native_display_topology.cpp native_display_topology.h
     native_display_connection.cpp native_display_connection.h
+    "${PROTECTED_DISPLAY_HEADER}" "${PROTECTED_DISPLAY_CODE}"
     native_keyboard.cpp native_keyboard.h
     native_compose.cpp native_compose.h
     "${LOCK_HEADER}" "${LOCK_CODE}" "${XDG_HEADER}" "${XDG_CODE}"
@@ -354,11 +363,20 @@ if(BUILD_TESTING)
         COMMAND "${WAYLAND_SCANNER}" server-header "${XDG_XML}" "${XDG_SERVER_HEADER}"
         DEPENDS "${XDG_XML}" VERBATIM
     )
+    set(PROTECTED_DISPLAY_SERVER_HEADER "${CMAKE_CURRENT_BINARY_DIR}/linura-protected-display-v1-server-protocol.h")
+    add_custom_command(OUTPUT "${PROTECTED_DISPLAY_SERVER_HEADER}"
+        COMMAND "${WAYLAND_SCANNER}" server-header "${PROTECTED_DISPLAY_XML}" "${PROTECTED_DISPLAY_SERVER_HEADER}"
+        DEPENDS "${PROTECTED_DISPLAY_XML}" VERBATIM)
     add_executable(linura-security-owner-wayland-tests
         tests/native_wayland_lock.cpp "${LOCK_SERVER_HEADER}" "${XDG_SERVER_HEADER}"
+        "${OUTPUT_SERVER_HEADER}" "${PINNED_DISPLAY_SERVER_HEADER}" "${PROTECTED_DISPLAY_SERVER_HEADER}"
+        "${PINNED_DISPLAY_SOURCE}/display_transaction.cpp"
+        "${PINNED_DISPLAY_SOURCE}/compositor_display_service.cpp"
+        "${PINNED_DISPLAY_SOURCE}/wire_endpoint.cpp"
+        "${PINNED_DISPLAY_SOURCE}/protected_wire.cpp"
     )
     target_include_directories(linura-security-owner-wayland-tests PRIVATE
-        "${CMAKE_CURRENT_BINARY_DIR}"
+        "${CMAKE_CURRENT_BINARY_DIR}" "${PINNED_DISPLAY_SOURCE}"
     )
     target_link_libraries(linura-security-owner-wayland-tests PRIVATE
         linura-security-owner-wayland linura-security-owner-presentation PkgConfig::WAYLAND_SERVER

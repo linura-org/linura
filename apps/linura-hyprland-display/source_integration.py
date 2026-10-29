@@ -195,7 +195,8 @@ def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str
     text = replace_exact(
         text,
         "    endRender();\n\n    TRACY_GPU_COLLECT;",
-        "    const auto linuraRenderedBuffer = m_currentBuffer;\n"
+        "    SP<Aquamarine::IBuffer> linuraRenderedBuffer;\n"
+        "    if (linuraProtected) linuraRenderedBuffer = m_currentBuffer;\n"
         "    endRender();\n"
         "    if (linuraProtected)\n"
         "        Linura::HyprlandDisplay::protectedFrameRendered(pMonitor.get(), linuraRenderedBuffer.get());\n\n"

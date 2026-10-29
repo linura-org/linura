@@ -8,6 +8,7 @@
 #include "secret_entry.h"
 #include "ext-session-lock-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
+#include "linura-protected-display-v1-client-protocol.h"
 
 #include <QSocketNotifier>
 #include <QThread>
@@ -127,6 +128,8 @@ class NativeWaylandLock::Impl final
         wl_output *native = nullptr;
         wl_surface *surface = nullptr;
         ext_session_lock_surface_v1 *lockSurface = nullptr;
+        linura_protected_display_surface_v1 *displayRole = nullptr;
+        quint64 displayHandle = 0, displayGeneration = 0;
         xdg_surface *confirmationRole = nullptr;
         xdg_toplevel *confirmationWindow = nullptr;
         quint32 width = 0;
@@ -144,6 +147,8 @@ class NativeWaylandLock::Impl final
         {
             if (owner && owner->keyboard)
                 owner->keyboard->forgetSurface(surface);
+            if (displayRole)
+                linura_protected_display_surface_v1_destroy(displayRole);
             if (lockSurface)
                 ext_session_lock_surface_v1_destroy(lockSurface);
             if (confirmationWindow)
@@ -160,11 +165,14 @@ class NativeWaylandLock::Impl final
         {
             if (owner && owner->keyboard)
                 owner->keyboard->forgetSurface(surface);
+            if (displayRole)
+                linura_protected_display_surface_v1_destroy(displayRole);
             if (lockSurface)
                 ext_session_lock_surface_v1_destroy(lockSurface);
             if (surface)
                 wl_surface_destroy(surface);
             lockSurface = nullptr;
+            displayRole = nullptr;
             surface = nullptr;
             buffers.clear();
             configured = needsAck = pending = false;
@@ -190,6 +198,134 @@ class NativeWaylandLock::Impl final
         std::make_unique<NativeDisplayTopology>();
     QString displayInvocation;
     std::unique_ptr<NativeDisplayConnection> displayConnection;
+    linura_protected_display_manager_v1 *protectedManager = nullptr;
+    linura_protected_display_interaction_v1 *protectedInteraction = nullptr;
+    quint32 protectedGlobal = 0;
+    std::optional<NativeDisplayPromptScope> protectedScope;
+    std::optional<NativeDisplayPromptStatus> protectedStatus;
+    NativeDisplayClock protectedLast{};
+    quint64 protectedBootDeadline = 0, protectedStatusBootMs = 0, protectedPollBootMs = 0;
+    quint64 protectedTopology = 0;
+    bool protectedPollPending = false, protectedConsumed = false;
+    std::map<quint64, std::unique_ptr<Output>> protectedOutputs;
+    QTimer protectedTimer;
+
+    bool protectedWindow()
+    {
+        if (!protectedScope)
+            return false;
+        const auto now = NativeDisplayClock::sample();
+        if (!now || now->unixMs < protectedLast.unixMs || now->bootMs < protectedLast.bootMs ||
+            now->unixMs >= protectedScope->deadlineUnixMs || now->bootMs >= protectedBootDeadline)
+            return false;
+        protectedLast = *now;
+        return true;
+    }
+    bool protectedCovered()
+    {
+        return protectedInteraction && protectedScope && protectedStatus && protectedWindow() &&
+               protectedStatus->phase == NativeDisplayPromptStatus::Phase::Ready &&
+               protectedLast.bootMs >= protectedStatusBootMs &&
+               protectedLast.bootMs - protectedStatusBootMs <= 250 && !protectedOutputs.empty() &&
+               std::all_of(protectedOutputs.begin(), protectedOutputs.end(), [](const auto &item) {
+                   const auto &output = *item.second;
+                   return output.displayRole && output.configured && !output.needsAck &&
+                          !output.pending;
+               });
+    }
+    void cancelProtected()
+    {
+        if (!protectedInteraction && !protectedScope && protectedOutputs.empty())
+            return;
+        protectedTimer.stop();
+        if (keyboard)
+            keyboard->resetFocus();
+        protectedStatus.reset();
+        protectedScope.reset();
+        protectedPollPending = protectedConsumed = false;
+        protectedOutputs.clear();
+        if (protectedInteraction)
+            linura_protected_display_interaction_v1_destroy(protectedInteraction);
+        protectedInteraction = nullptr;
+        protectedTopology = protectedBootDeadline = protectedStatusBootMs = protectedPollBootMs = 0;
+        protectedLast = {};
+    }
+    void pollProtected()
+    {
+        if (!protectedInteraction)
+            return;
+        if (!protectedWindow() ||
+            (protectedPollPending && (protectedLast.bootMs < protectedPollBootMs ||
+                                      protectedLast.bootMs - protectedPollBootMs >= 250))) {
+            cancelProtected();
+            flush();
+            return;
+        }
+        if (!protectedPollPending) {
+            protectedPollPending = true;
+            protectedPollBootMs = protectedLast.bootMs;
+            linura_protected_display_interaction_v1_get_status(protectedInteraction);
+            flush();
+        }
+    }
+    static void protectedDenied(void *data, linura_protected_display_interaction_v1 *native)
+    {
+        nativeCallback([&] {
+            auto &self = *static_cast<Impl *>(data);
+            if (native != self.protectedInteraction)
+                failClosed();
+            self.cancelProtected();
+        });
+    }
+    static void protectedState(void *data, linura_protected_display_interaction_v1 *native,
+                               const char *instance, quint32 topologyHi, quint32 topologyLo,
+                               quint32 epochHi, quint32 epochLo, quint32 phase)
+    {
+        nativeCallback([&] {
+            auto &self = *static_cast<Impl *>(data);
+            const auto topology = (static_cast<quint64>(topologyHi) << 32U) | topologyLo;
+            const auto epoch = (static_cast<quint64>(epochHi) << 32U) | epochLo;
+            if (native != self.protectedInteraction || !self.protectedScope || !instance ||
+                strnlen(instance, 37) != 36 ||
+                QString::fromLatin1(instance) != self.displayInvocation ||
+                topology != self.protectedTopology || epoch == 0 ||
+                epoch == std::numeric_limits<quint64>::max() || phase > 3 ||
+                !self.protectedWindow() || (self.protectedConsumed && phase != 2) ||
+                (!self.protectedConsumed && phase == 2)) {
+                self.cancelProtected();
+                return;
+            }
+            if (self.protectedStatus && self.protectedStatus->epoch != epoch)
+                self.invalidateOutputConfiguration();
+            self.protectedStatus = NativeDisplayPromptStatus{
+                topology, epoch, static_cast<NativeDisplayPromptStatus::Phase>(phase)};
+            self.protectedStatusBootMs = self.protectedLast.bootMs;
+            self.protectedPollPending = false;
+            if (phase == 3)
+                self.cancelProtected();
+        });
+    }
+    static void protectedConfigured(void *data, linura_protected_display_surface_v1 *native,
+                                    quint32 serial, quint32 width, quint32 height)
+    {
+        nativeCallback([&] {
+            auto &output = *static_cast<Output *>(data);
+            auto &self = *output.owner;
+            if (native != output.displayRole || !self.protectedInteraction ||
+                !self.protectedWindow() || serial == 0 || !boundedFrame(width, height) ||
+                (output.configured && serial <= output.serial)) {
+                self.cancelProtected();
+                return;
+            }
+            self.invalidateOutputConfiguration();
+            self.protectedStatus.reset();
+            output.serial = serial;
+            output.width = width;
+            output.height = height;
+            output.configured = output.needsAck = output.pending = true;
+            self.paint(output);
+        });
+    }
     std::unique_ptr<QSocketNotifier> reader;
     std::unique_ptr<QSocketNotifier> writer;
     std::unique_ptr<NativeKeyboard> keyboard;
@@ -236,6 +372,9 @@ class NativeWaylandLock::Impl final
         : owner(instance), display(connection), painter(std::move(paint)),
           displayConnection(std::make_unique<NativeDisplayConnection>(connection))
     {
+        protectedTimer.setInterval(50);
+        QObject::connect(&protectedTimer, &QTimer::timeout, &owner,
+                         [this] { nativeCallback([&] { pollProtected(); }); });
         confirmationTimer.setInterval(100);
         QObject::connect(&confirmationTimer, &QTimer::timeout, &owner, [this] {
             nativeCallback([&] {
@@ -256,6 +395,9 @@ class NativeWaylandLock::Impl final
         reader.reset();
         writer.reset();
         confirmationTimer.stop();
+        cancelProtected();
+        if (protectedManager)
+            linura_protected_display_manager_v1_destroy(protectedManager);
         confirmation.reset();
         outputs.clear();
         displayConnection.reset();
@@ -377,6 +519,15 @@ class NativeWaylandLock::Impl final
                 self.displayTopology->announce(self.registry, name, version);
             } else if (std::strcmp(interface, "linura_display_manager_v1") == 0) {
                 self.displayConnection->announce(self.registry, name, version);
+            } else if (std::strcmp(interface, "linura_protected_display_manager_v1") == 0) {
+                if (self.protectedManager)
+                    failClosed();
+                self.protectedGlobal = name;
+                self.protectedManager =
+                    static_cast<linura_protected_display_manager_v1 *>(wl_registry_bind(
+                        self.registry, name, &linura_protected_display_manager_v1_interface, 1));
+                if (!self.protectedManager)
+                    failClosed();
             } else if (std::strcmp(interface, "wl_output") == 0) {
                 if (version < 3 || self.outputs.size() >= MaximumOutputs ||
                     self.outputs.contains(name))
@@ -453,8 +604,17 @@ class NativeWaylandLock::Impl final
                 failClosed();
             if (name == self.desktopGlobal)
                 failClosed();
-            if (self.outputs.contains(name))
+            if (name == self.protectedGlobal) {
+                self.cancelProtected();
+                linura_protected_display_manager_v1_destroy(self.protectedManager);
+                self.protectedManager = nullptr;
+                self.protectedGlobal = 0;
+            }
+            if (self.outputs.contains(name)) {
+                if (self.protectedInteraction)
+                    self.cancelProtected();
                 self.invalidateOutputConfiguration();
+            }
             self.outputs.erase(
                 name); // Surface destruction leaves compositor blank, never unlocked.
         });
@@ -526,6 +686,11 @@ class NativeWaylandLock::Impl final
             // callback storage again after repainting starts.
             auto *owner = buffer.owner;
             for (auto &[id, output] : owner->outputs) {
+                (void)id;
+                if (output->pending)
+                    owner->paint(*output);
+            }
+            for (auto &[id, output] : owner->protectedOutputs) {
                 (void)id;
                 if (output->pending)
                     owner->paint(*output);
@@ -701,6 +866,9 @@ class NativeWaylandLock::Impl final
                 ext_session_lock_surface_v1_ack_configure(output.lockSurface, output.serial);
             else if (output.confirmationRole)
                 xdg_surface_ack_configure(output.confirmationRole, output.serial);
+            else if (output.displayRole)
+                linura_protected_display_surface_v1_ack_configure(output.displayRole,
+                                                                  output.serial);
             else
                 failClosed();
             output.needsAck = false;
@@ -720,6 +888,163 @@ class NativeWaylandLock::Impl final
     }
 };
 
+bool NativeWaylandLock::showProtectedDisplay(const NativeDisplayPromptScope &scope,
+                                             const NativeDisplayIntent &intent)
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping || !scope.valid() || !impl_->protectedManager || !impl_->keyboard ||
+        !impl_->keyboard->available() || impl_->confirmation || impl_->protectedInteraction ||
+        impl_->releaseAck || requestedSecure() != secureCoverage() ||
+        !NativeDisplayIntent::parse(intent.encode()))
+        return false;
+    const auto current = impl_->displayConnection->sample();
+    const auto now = NativeDisplayClock::sample();
+    const auto maximum =
+        scope.purpose == NativeDisplayPromptScope::Purpose::Apply ? 60'000U : 15'000U;
+    if (!current || !now || current->compositor != impl_->displayInvocation ||
+        current->coverage != (secureCoverage() ? 1U : 0U) ||
+        intent.baseline.topology.section(QLatin1Char(':'), 7, 7) != current->compositor ||
+        intent.baseline.topology.section(QLatin1Char(':'), 8, 8) !=
+            QString::number(current->topology.generation) ||
+        !intent.baseline.nativeOptions(current->topology) ||
+        !intent.desired.nativeOptions(current->topology) || scope.deadlineUnixMs <= now->unixMs ||
+        scope.deadlineUnixMs - now->unixMs > maximum ||
+        now->bootMs > std::numeric_limits<quint64>::max() - (scope.deadlineUnixMs - now->unixMs))
+        return false;
+    const NativeDisplayLayout *expected = nullptr;
+    if (scope.purpose == NativeDisplayPromptScope::Purpose::Apply) {
+        if (current->fenced)
+            return false;
+        expected = &intent.baseline;
+    } else {
+        if (!current->fenced)
+            return false;
+        if (scope.purpose == NativeDisplayPromptScope::Purpose::Keep)
+            expected = &intent.desired;
+    }
+    if (expected) {
+        if (expected->outputs.size() != current->current.outputs.size())
+            return false;
+        for (std::size_t i = 0; i < expected->outputs.size(); ++i)
+            if (expected->outputs[i].encode() != current->current.outputs[i].encode())
+                return false;
+    }
+    std::map<quint64, std::unique_ptr<Impl::Output>> pendingOutputs;
+    for (const auto &head : current->topology.heads) {
+        if (!head.enabled)
+            continue;
+        const auto native =
+            std::find_if(impl_->outputs.begin(), impl_->outputs.end(),
+                         [&](const auto &item) { return item.second->nativeName == head.name; });
+        if (native == impl_->outputs.end())
+            return false;
+        auto output = std::make_unique<Impl::Output>();
+        output->owner = impl_.get();
+        output->id = native->first;
+        output->nativeName = head.name;
+        output->displayHandle = head.handle;
+        output->displayGeneration = head.generation;
+        pendingOutputs.emplace(head.handle, std::move(output));
+    }
+    if (pendingOutputs.empty())
+        return false;
+    impl_->protectedOutputs = std::move(pendingOutputs);
+    impl_->protectedScope = scope;
+    impl_->protectedLast = *now;
+    impl_->protectedBootDeadline = now->bootMs + (scope.deadlineUnixMs - now->unixMs);
+    impl_->protectedTopology = current->topology.generation;
+    impl_->invalidateOutputConfiguration();
+    const auto digest = scope.digest.toLatin1();
+    impl_->protectedInteraction = linura_protected_display_manager_v1_begin(
+        impl_->protectedManager, digest.constData(), static_cast<quint32>(scope.purpose),
+        static_cast<quint32>(scope.deadlineUnixMs >> 32U),
+        static_cast<quint32>(scope.deadlineUnixMs));
+    static const linura_protected_display_interaction_v1_listener listener{Impl::protectedState,
+                                                                           Impl::protectedDenied};
+    if (!impl_->protectedInteraction ||
+        linura_protected_display_interaction_v1_add_listener(impl_->protectedInteraction, &listener,
+                                                             impl_.get()) != 0) {
+        impl_->cancelProtected();
+        return false;
+    }
+    static const linura_protected_display_surface_v1_listener surfaceListener{
+        Impl::protectedConfigured};
+    for (auto &[handle, output] : impl_->protectedOutputs) {
+        output->surface = wl_compositor_create_surface(impl_->compositor);
+        if (!output->surface) {
+            impl_->cancelProtected();
+            return false;
+        }
+        output->displayRole = linura_protected_display_interaction_v1_get_surface(
+            impl_->protectedInteraction, output->surface, static_cast<quint32>(handle >> 32U),
+            static_cast<quint32>(handle), static_cast<quint32>(output->displayGeneration >> 32U),
+            static_cast<quint32>(output->displayGeneration));
+        if (!output->displayRole || linura_protected_display_surface_v1_add_listener(
+                                        output->displayRole, &surfaceListener, output.get()) != 0) {
+            impl_->cancelProtected();
+            return false;
+        }
+    }
+    impl_->protectedTimer.start();
+    impl_->pollProtected();
+    return impl_->protectedInteraction != nullptr;
+}
+std::optional<NativeDisplayPromptStatus> NativeWaylandLock::protectedDisplayStatus()
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping || !impl_->protectedInteraction || !impl_->protectedWindow())
+        return std::nullopt;
+    impl_->pollProtected();
+    if (!waitForNativeWaylandReady(impl_->display, std::chrono::milliseconds(250)) ||
+        !impl_->protectedInteraction || !impl_->protectedWindow() || !impl_->protectedStatus)
+        return std::nullopt;
+    if (impl_->keyboard)
+        impl_->keyboard->refreshProtectedFocus();
+    return impl_->protectedStatus;
+}
+bool NativeWaylandLock::consumeProtectedDisplay(const NativeDisplayPromptScope &scope,
+                                                quint64 originalEpoch)
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping || !impl_->protectedInteraction || !impl_->protectedScope ||
+        *impl_->protectedScope != scope || impl_->protectedConsumed || !impl_->protectedCovered() ||
+        !impl_->protectedStatus || impl_->protectedStatus->epoch != originalEpoch ||
+        !impl_->keyboard || !impl_->keyboard->focused())
+        return false;
+    // Fence pending poll replies before reserving consumption; otherwise an old
+    // Ready response could be confused with the subsequent Consumed response.
+    const auto inputGeneration = protectedInteractionGeneration();
+    const auto fresh = protectedDisplayStatus();
+    if (!fresh || fresh->phase != NativeDisplayPromptStatus::Phase::Ready ||
+        fresh->epoch != originalEpoch || protectedInteractionGeneration() != inputGeneration ||
+        !impl_->protectedInteraction || !impl_->protectedCovered() || !impl_->keyboard->focused())
+        return false;
+    // Reserve before any wire call. A lost reply never permits another consume.
+    impl_->protectedConsumed = true;
+    impl_->protectedStatus.reset();
+    const auto digest = scope.digest.toLatin1();
+    linura_protected_display_interaction_v1_consume(impl_->protectedInteraction, digest.constData(),
+                                                    static_cast<quint32>(originalEpoch >> 32U),
+                                                    static_cast<quint32>(originalEpoch));
+    impl_->flush();
+    if (!waitForNativeWaylandReady(impl_->display, std::chrono::milliseconds(250)) ||
+        !impl_->protectedInteraction || !impl_->protectedWindow() || !impl_->protectedStatus ||
+        impl_->protectedStatus->phase != NativeDisplayPromptStatus::Phase::Consumed ||
+        impl_->protectedStatus->epoch != originalEpoch) {
+        impl_->cancelProtected();
+        return false;
+    }
+    return true;
+}
+void NativeWaylandLock::cancelProtectedDisplay()
+{
+    if (thread() != QThread::currentThread() || impl_->painting)
+        failClosed();
+    impl_->cancelProtected();
+    if (impl_->display)
+        impl_->flush();
+}
+
 NativeWaylandLock::NativeWaylandLock(wl_display *ownedDisplay, Painter painter)
     : impl_(std::make_unique<Impl>(*this, ownedDisplay, std::move(painter)))
 {}
@@ -731,7 +1056,7 @@ const QString &NativeWaylandLock::displayInvocation() const noexcept
 bool NativeWaylandLock::displayAllowsSecurityTransition()
 {
     if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
-        impl_->pumping || !impl_->displayConnection)
+        impl_->pumping || !impl_->displayConnection || impl_->protectedInteraction)
         return false;
     const bool secure = secureCoverage();
     if (requestedSecure() != secure || !impl_->displayConnection->securityTransitionAllowed(secure))
@@ -871,13 +1196,22 @@ bool NativeWaylandLock::bindProtectedInput(SecretEntry &entry, UnlockRequest req
             if (impl_->confirmation && impl_->confirmation->surface == surface &&
                 impl_->confirmation->configured)
                 return true;
+            if (impl_->protectedInteraction)
+                return std::any_of(impl_->protectedOutputs.begin(), impl_->protectedOutputs.end(),
+                                   [surface](const auto &item) {
+                                       return item.second->surface == surface &&
+                                              item.second->displayRole && item.second->configured;
+                                   });
             return std::any_of(
                 impl_->outputs.begin(), impl_->outputs.end(), [surface](const auto &item) {
                     const auto &output = item.second;
                     return output->surface == surface && output->lockSurface && output->configured;
                 });
         },
-        [this] { return impl_->inputCovered(); }, std::move(request), std::move(primaryAvailable),
+        [this] {
+            return impl_->protectedInteraction ? impl_->protectedCovered() : impl_->inputCovered();
+        },
+        std::move(request), std::move(primaryAvailable),
         hitTest ? NativeKeyboard::PointerHitTest([this, hitTest](wl_surface *surface,
                                                                  const QPointF &position) {
             const Impl::Output *output = nullptr;
@@ -890,6 +1224,12 @@ bool NativeWaylandLock::bindProtectedInput(SecretEntry &entry, UnlockRequest req
                         break;
                     }
                 }
+            if (impl_->protectedInteraction)
+                for (const auto &item : impl_->protectedOutputs)
+                    if (item.second->surface == surface) {
+                        output = item.second.get();
+                        break;
+                    }
             if (!output || !output->configured || !boundedFrame(output->width, output->height))
                 return NativePointerTarget{};
             auto target = hitTest(
@@ -1045,7 +1385,7 @@ bool NativeWaylandLock::applyNative(bool secure)
             return false;
         // An effect may follow only after the private confirmation was consumed
         // by Control. Never acquire while an interactive dialog remains live.
-        if (impl_->confirmation)
+        if (impl_->confirmation || impl_->protectedInteraction)
             return false;
         consumeNativeEffectGate(true);
         impl_->lock = ext_session_lock_manager_v1_lock(impl_->manager);
@@ -1090,6 +1430,11 @@ void NativeWaylandLock::repaint()
     NativeDeadline deadline(std::chrono::milliseconds(500), NativeDeadline::Stage::WaylandRepaint);
     nativeCallback([&] {
         for (auto &[id, output] : impl_->outputs) {
+            (void)id;
+            output->pending = true;
+            impl_->paint(*output);
+        }
+        for (auto &[id, output] : impl_->protectedOutputs) {
             (void)id;
             output->pending = true;
             impl_->paint(*output);

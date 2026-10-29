@@ -1,11 +1,50 @@
 // Strict native adapter data/formatter fixtures only. No command is dispatched.
 #include "native_display_layout.h"
+#include "native_display_prompt.h"
 #include <algorithm>
 #include <cassert>
 
 using namespace Linura::SecurityOwner;
 int main()
 {
+    const NativeDisplayPromptScope validPrompt{QString(64, QLatin1Char('a')),
+                                               NativeDisplayPromptScope::Purpose::Apply, 1000};
+    assert(validPrompt.valid());
+    for (const auto purpose :
+         {NativeDisplayPromptScope::Purpose::Apply, NativeDisplayPromptScope::Purpose::Keep,
+          NativeDisplayPromptScope::Purpose::Revert}) {
+        auto prompt = validPrompt;
+        prompt.purpose = purpose;
+        assert(prompt.valid());
+    }
+    for (unsigned denial = 0; denial != 7; ++denial) {
+        auto prompt = validPrompt;
+        switch (denial) {
+        case 0:
+            prompt.digest = QString(64, QLatin1Char('0'));
+            break;
+        case 1:
+            prompt.digest = QString(64, QLatin1Char('A'));
+            break;
+        case 2:
+            prompt.digest = QString(63, QLatin1Char('a'));
+            break;
+        case 3:
+            prompt.digest[0] = QChar(0x0100);
+            break;
+        case 4:
+            prompt.digest[0] = QChar(0);
+            break;
+        case 5:
+            prompt.deadlineUnixMs = 0;
+            break;
+        default:
+            prompt.purpose = static_cast<NativeDisplayPromptScope::Purpose>(3);
+            break;
+        }
+        assert(!prompt.valid());
+    }
+
     const auto lock = NativeLockIdentity::parse(
         QStringLiteral("session:lock:11111111-1111-4111-8111-111111111111:1000:c2:42:22222222-2222-"
                        "4222-8222-222222222222:1"));

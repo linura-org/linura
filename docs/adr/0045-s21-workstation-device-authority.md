@@ -450,3 +450,18 @@ compilation do not prove native presentation, modeset first-frame safety, durabl
 compositor replacement restoration or complete display acceptance. Production
 mutations remain unsupported until those paths and their actual native tests are
 complete. No S21-2 or release support is promoted by this implementation.
+
+The owner-side candidate now binds that private global on its original exclusive
+connection and creates separate configured opaque surfaces for each currently
+enabled exact native output. It retains the original two-clock window, decodes
+bounded scope/status generations, polls without renewing that window, fences
+pending status replies before reserving one consumption, and denies foreign or
+stale epochs. Its input guard uses private readiness while a display conversation
+exists, independently of real S17 coverage. Cancellation destroys only the private
+roles; an existing lock remains acquired until its established managed release.
+The public display methods, PAM purpose binding and final execution receipt are
+still not activated. Real client/server component cases exercise rendering and
+one-use consumption both unlocked and already locked, using an explicitly
+non-authoritative scene fixture; they do not qualify physical presentation or
+human authentication. S21-2 still requires failure-input isolation, production
+composition, native modeset/recovery and adversarial acceptance before enabling it.
