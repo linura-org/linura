@@ -13,7 +13,8 @@ use linura_control::{
 };
 use linura_core::{CapabilityId, IntentId, PrincipalId, ProviderId, RequestId, SemanticReason};
 use linura_dbus::{
-    Authority1Context, Authority1Handler, Authority1ManagedRequest, Authority1SessionContext,
+    Authority1BacklightContext, Authority1Context, Authority1Handler, Authority1ManagedRequest,
+    Authority1SessionContext,
 };
 use linura_executor_systemd::{ManagedActiveState, ManagedUnitName};
 use linura_linux_observation::{LogindSessionObserver, SystemdObserver};
@@ -150,6 +151,46 @@ impl ManagedRuntime {
 }
 
 impl Authority1Handler for ManagedRuntime {
+    fn own_native_backlight_candidate(
+        &mut self,
+        context: Authority1BacklightContext,
+    ) -> Result<linura_dbus::BacklightCandidateWire, String> {
+        // The selected session comes from the trusted native owner of this
+        // authenticated caller, never a client-supplied session ID, device
+        // string, sysfs path, desired brightness or provider assertion.
+        let uid = own_uid(context.principal())?;
+        let native = self.session_channel.observe_current_lock(uid, 1)?;
+        let lock = linura_core::SessionLockId::from_resource(&native.resource)
+            .map_err(|error| error.to_string())?;
+        if lock.epoch().uid() != uid {
+            return Err("backlight session principal changed".into());
+        }
+        let candidate =
+            linura_linux_observation::backlight::candidate::observe_caller_backlight_candidate(
+                lock.epoch(),
+                context.bus_guid(),
+                context.sender(),
+                context.pid(),
+            )
+            .map_err(|_| "native backlight is unavailable, ambiguous or unsupported")?;
+        if candidate.session.boot_id != lock.epoch().boot().as_str()
+            || candidate.session.created_monotonic_us != lock.epoch().created_monotonic_us()
+        {
+            return Err("native backlight candidate differs from the own-session epoch".into());
+        }
+        let resource = lock
+            .epoch()
+            .resource_id()
+            .map_err(|error| error.to_string())?;
+        Ok((
+            resource.as_str().into(),
+            candidate.kernel.identity.name,
+            candidate.kernel.maximum,
+            candidate.kernel.requested_brightness,
+            candidate.kernel.actual_brightness,
+        ))
+    }
+
     fn own_native_sleep_gate_status(
         &mut self,
         context: Authority1SessionContext,
