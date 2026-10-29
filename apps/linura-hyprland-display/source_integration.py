@@ -236,7 +236,7 @@ def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str
             text,
             signature,
             signature
-            + "\n    if (Linura::HyprlandDisplay::protectedDisplayActive()) return;",
+            + "\n    if (Linura::HyprlandDisplay::protectedInputExclusive()) return;",
         )
     outputs[input_manager] = private_include + text
 
@@ -259,7 +259,7 @@ def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str
                 text,
                 signature,
                 signature
-                + "\n    if (Linura::HyprlandDisplay::protectedDisplayActive()) return;",
+                + "\n    if (Linura::HyprlandDisplay::protectedInputExclusive()) return;",
             )
         outputs[path] = private_include + text
 
@@ -279,6 +279,37 @@ def patch_sources(inputs: dict[str, str], upstream_commit: str) -> dict[str, str
         )
     outputs[seat] = private_include + text
 
+    # Private presentation suppresses hardware cursors directly. Do not borrow
+    # the upstream per-monitor software-lock counters: hotplug changes that set.
+    pointer_header = "src/pointer/PointerManager.hpp"
+    outputs[pointer_header] = replace_exact(
+        outputs[pointer_header],
+        "        void lockSoftwareAll();",
+        "        void refreshProtectedCursorFence();\n"
+        "        bool protectedCursorFenceReady();\n"
+        "        void lockSoftwareAll();",
+    )
+    pointer = "src/pointer/PointerManager.cpp"
+    text = replace_exact(
+        outputs[pointer],
+        "        if (state->softwareLocks > 0 || m->shouldUseSoftwareCursors() || !attemptHardwareCursor(state)) {",
+        "        if (Linura::HyprlandDisplay::protectedDisplayActive() || state->softwareLocks > 0 || m->shouldUseSoftwareCursors() || !attemptHardwareCursor(state)) {",
+    )
+    text = replace_exact(
+        text,
+        "void CPointerManager::updateCursorBackend() {",
+        "void CPointerManager::refreshProtectedCursorFence() { updateCursorBackend(); }\n\n"
+        "bool CPointerManager::protectedCursorFenceReady() {\n"
+        "    if (!Linura::HyprlandDisplay::protectedDisplayActive()) return false;\n"
+        "    for (const auto& monitor : State::monitorState()->monitors()) {\n"
+        "        if (!monitor->m_enabled || !monitor->m_dpmsStatus) continue;\n"
+        "        const auto state = stateFor(monitor);\n"
+        "        if (!state->initialPlaneCleared || state->hwApplied || state->cursorFrontBuffer) return false;\n"
+        "    }\n    return true;\n}\n\n"
+        "void CPointerManager::updateCursorBackend() {",
+    )
+    outputs[pointer] = private_include + text
+
     cmake = "CMakeLists.txt"
     text = outputs[cmake]
     outputs[cmake] = (
@@ -290,12 +321,13 @@ if(NOT IS_DIRECTORY "${LINURA_DISPLAY_INTEGRATION_DIR}")
 endif()
 add_subdirectory("${LINURA_DISPLAY_INTEGRATION_DIR}" "${CMAKE_BINARY_DIR}/linura-display")
 pkg_check_modules(LINURA_DISPLAY_SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
+pkg_check_modules(LINURA_DISPLAY_UDEV REQUIRED IMPORTED_TARGET libudev)
 target_sources(hyprland_lib PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}/pinned_backend.cpp"
   "${LINURA_DISPLAY_INTEGRATION_DIR}/native_power_inhibitor.cpp"
   "${LINURA_DISPLAY_INTEGRATION_DIR}/native_owner_admission.cpp"
   "${LINURA_DISPLAY_INTEGRATION_DIR}/pinned_protected.cpp")
 target_include_directories(hyprland_lib PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}" "${CMAKE_SOURCE_DIR}")
-target_link_libraries(hyprland_lib PUBLIC linura-hyprland-display-owner linura-hyprland-protected-wire PkgConfig::LINURA_DISPLAY_SYSTEMD)
+target_link_libraries(hyprland_lib PUBLIC linura-hyprland-display-owner linura-hyprland-protected-wire PkgConfig::LINURA_DISPLAY_SYSTEMD PkgConfig::LINURA_DISPLAY_UDEV)
 if(TARGET hyprland_gtests)
   target_sources(hyprland_gtests PRIVATE "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_rule_overlay.cpp"
     "${LINURA_DISPLAY_INTEGRATION_DIR}/tests/pinned_owner_admission.cpp"

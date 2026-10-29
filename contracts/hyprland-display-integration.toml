@@ -64,3 +64,11 @@ sha256 = "69a5459b254751a28d2f6df1afb03781ea9b4086a43078d8275c9b165f5e3f7e"
 [[upstream_file]]
 path = "src/managers/input/Tablets.cpp"
 sha256 = "ad276a2e23f8792ff5f2fb43944a4c3c40e7218e77f66047dd754417a6bbc90f"
+
+[[upstream_file]]
+path = "src/pointer/PointerManager.cpp"
+sha256 = "83c69d93f09088f1e2383a9c85a54cf3f55718d9506a1121058afef77911223a"
+
+[[upstream_file]]
+path = "src/pointer/PointerManager.hpp"
+sha256 = "af62bde2f8cf14e0440a99d0e81b361d3845eb95873be549e4ce44f45edb345e"

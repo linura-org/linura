@@ -1,6 +1,7 @@
 #include "pinned_protected.h"
 #include "pinned_integration.h"
 #include "protected_wire.h"
+#include "protected_input_retirement.h"
 #include "native_owner_admission.h"
 
 #include "src/Compositor.hpp"
@@ -17,6 +18,11 @@
 #include "src/render/pass/SurfacePassElement.hpp"
 #include "src/state/MonitorState.hpp"
 
+#include <aquamarine/input/Input.hpp>
+#include <libinput.h>
+#include <libudev.h>
+#include <cstring>
+#include <string_view>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -38,25 +44,66 @@ class PrivateRole final : public ISurfaceRole
 };
 struct NativeData;
 std::weak_ptr<NativeData> active;
+NativeData *activeNative = nullptr;
+ProtectedInputRetirement inputRetirement;
 std::unique_ptr<ProtectedWireEndpoint> endpoint;
 std::uint64_t nextEpoch = 1;
 std::set<std::string> scopes;
-bool drainingKeys = false;
 wl_event_source *drainTimer = nullptr;
-std::set<std::pair<IPointer *, std::uint32_t>> heldButtons;
+std::map<std::pair<IPointer *, std::uint32_t>, WP<IPointer>> heldButtons;
 
+bool nativeInputOrigin(libinput_device *device)
+{
+    if (!device)
+        return false;
+    auto *native = libinput_device_get_udev_device(device);
+    if (!native)
+        return false;
+    const char *path = udev_device_get_syspath(native);
+    const auto length = path ? strnlen(path, 4097) : 0;
+    const std::string_view value =
+        path && length <= 4096 ? std::string_view(path, length) : std::string_view{};
+    // This is the live libinput device's udev object, not a client-supplied
+    // name or a lookup which can adopt a recycled event node. Guest virtio/USB
+    // devices remain native guest input; this makes no physical Q11 claim.
+    const bool accepted =
+        value.starts_with("/sys/devices/") && value.find("/virtual/") == std::string_view::npos;
+    udev_device_unref(native);
+    return accepted;
+}
+bool nativeKeyboardDevice(const SP<IKeyboard> &keyboard)
+{
+    const auto native = keyboard && !keyboard->isVirtual() ? keyboard->aq() : nullptr;
+    return native && nativeInputOrigin(native->getLibinputHandle());
+}
+bool nativePointerDevice(const SP<IPointer> &pointer)
+{
+    const auto native = pointer && !pointer->isVirtual() ? pointer->aq() : nullptr;
+    return native && nativeInputOrigin(native->getLibinputHandle());
+}
+ProtectedInputRetirement::Held heldInput()
+{
+    ProtectedInputRetirement::Held held{!heldButtons.empty(), false, !heldButtons.empty()};
+    if (!g_pInputManager)
+        return {true, false, true};
+    for (const auto &keyboard : g_pInputManager->m_keyboards) {
+        if (!nativeKeyboardDevice(keyboard))
+            continue;
+        for (std::uint32_t key = 0; key <= KEY_MAX; ++key) {
+            if (!keyboard->getPressed(key))
+                continue;
+            held.any = true;
+            if (key == KEY_ESC)
+                held.escape = true;
+            else
+                held.other = true;
+        }
+    }
+    return held;
+}
 bool keysHeld()
 {
-    if (!g_pInputManager)
-        return true;
-    for (const auto &keyboard : g_pInputManager->m_keyboards) {
-        if (!keyboard || keyboard->isVirtual())
-            continue;
-        for (std::uint32_t key = 0; key <= KEY_MAX; ++key)
-            if (keyboard->getPressed(key))
-                return true;
-    }
-    return false;
+    return heldInput().any;
 }
 bool supportedPresentation()
 {
@@ -66,7 +113,7 @@ bool supportedPresentation()
 }
 bool draining()
 {
-    return drainingKeys || !heldButtons.empty();
+    return inputRetirement.blocked() || !heldButtons.empty();
 }
 void scheduleRefocus()
 {
@@ -94,20 +141,35 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     };
     ProtectedInteraction interaction;
     std::map<OutputKey, Surface> surfaces;
-    std::vector<std::pair<WP<IKeyboard>, xkb_keymap *>> keyboards;
+    struct Keyboard final
+    {
+        WP<IKeyboard> device;
+        std::shared_ptr<xkb_keymap> keymap;
+        bool enabled = false, allowed = false;
+        CHyprSignalListener changed;
+    };
+    std::vector<Keyboard> keyboards;
     std::vector<WP<IPointer>> pointers;
-    bool closed = false, cursorLocked = false;
+    bool closed = false;
+    bool escapeDown = false;
+    std::uint64_t exitBootMs = 0, exitEpoch = 0;
     wl_event_source *timer = nullptr;
     NativeData(ProtectedInteraction value) : interaction(std::move(value))
     {
-        for (const auto &keyboard : g_pInputManager->m_keyboards)
-            keyboards.emplace_back(keyboard, keyboard->m_xkbKeymap);
+        for (const auto &keyboard : g_pInputManager->m_keyboards) {
+            std::shared_ptr<xkb_keymap> retained;
+            if (keyboard->m_xkbKeymap)
+                retained = {xkb_keymap_ref(keyboard->m_xkbKeymap), xkb_keymap_unref};
+            keyboards.push_back(
+                {keyboard, std::move(retained), keyboard->m_enabled, keyboard->m_allowed, {}});
+        }
         for (const auto &pointer : g_pInputManager->m_pointers)
             pointers.emplace_back(pointer);
     }
     bool refresh()
     {
-        if (closed || !supportedPresentation())
+        if (closed || !supportedPresentation() || !Pointer::mgr() ||
+            !Pointer::mgr()->protectedCursorFenceReady())
             return false;
         auto *backend = nativeBackend();
         const auto facts = backend ? backend->snapshot() : std::nullopt;
@@ -116,9 +178,11 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
                        pointers.size() == g_pInputManager->m_pointers.size();
         if (devices) {
             for (std::size_t i = 0; i < keyboards.size(); ++i) {
-                const auto keyboard = keyboards[i].first.lock();
+                const auto keyboard = keyboards[i].device.lock();
                 devices = devices && keyboard && keyboard == g_pInputManager->m_keyboards[i] &&
-                          keyboard->m_xkbKeymap == keyboards[i].second;
+                          keyboard->m_xkbKeymap == keyboards[i].keymap.get() &&
+                          keyboard->m_enabled == keyboards[i].enabled &&
+                          keyboard->m_allowed == keyboards[i].allowed;
             }
             for (std::size_t i = 0; i < pointers.size(); ++i)
                 devices = devices && pointers[i].lock() &&
@@ -147,17 +211,17 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
             wl_event_source_remove(timer);
             timer = nullptr;
         }
-        interaction.cancel();
-        const auto current = active.lock();
-        if (current.get() == this) {
+        if (activeNative == this) {
+            const auto clock = compositorClock();
+            const bool explicitExit = exitBootMs != 0 && clock && clock->bootMs >= exitBootMs &&
+                                      clock->bootMs - exitBootMs <= 500 &&
+                                      exitEpoch == interaction.epoch() &&
+                                      interaction.phase() != ProtectedInteraction::Phase::Cancelled;
+            inputRetirement.close(explicitExit, heldInput());
+            activeNative = nullptr;
             active.reset();
-            if (cursorLocked && Pointer::mgr()) {
-                Pointer::mgr()->unlockSoftwareAll();
-                cursorLocked = false;
-            }
-            // Private keys never enter InputManager's ordinary pressed list.
-            // Keep focus empty until physical held keys/buttons have drained.
-            drainingKeys = keysHeld();
+            // Unknown loss also quarantines subsequent typing. Returning to an
+            // ordinary focus needs a new physical Escape and a complete drain.
             if (drainTimer && draining())
                 wl_event_source_timer_update(drainTimer, 100);
             if (g_pSeatManager) {
@@ -165,6 +229,9 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
                 g_pSeatManager->setPointerFocus(nullptr, {});
             }
         }
+        interaction.cancel();
+        if (Pointer::mgr())
+            Pointer::mgr()->refreshProtectedCursorFence();
         for (auto &[key, surface] : surfaces) {
             (void)key;
             surface.commit.reset();
@@ -178,6 +245,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
                 // A closed authentication surface cannot become an application.
             }
         }
+        keyboards.clear();
+        pointers.clear();
         damage();
         if (!draining())
             scheduleRefocus();
@@ -368,12 +437,14 @@ void initializeProtectedDisplay(wl_display &display)
         [](void *) {
             if (!g_pInputManager)
                 return 0;
-            drainingKeys = keysHeld();
             std::erase_if(heldButtons, [](const auto &button) {
-                return !std::ranges::any_of(g_pInputManager->m_pointers, [&](const auto &pointer) {
-                    return pointer.get() == button.first;
-                });
+                const auto original = button.second.lock();
+                return !original ||
+                       !std::ranges::any_of(g_pInputManager->m_pointers, [&](const auto &pointer) {
+                           return pointer == original;
+                       });
             });
+            inputRetirement.poll(heldInput());
             if (draining() && drainTimer)
                 wl_event_source_timer_update(drainTimer, 100);
             else
@@ -395,8 +466,9 @@ void initializeProtectedDisplay(wl_display &display)
                 g_pInputManager->m_pointers.size() > 16 ||
                 !std::ranges::any_of(g_pInputManager->m_keyboards,
                                      [](const auto &keyboard) {
-                                         return keyboard && !keyboard->isVirtual() &&
-                                                keyboard->m_enabled && keyboard->m_allowed;
+                                         return nativeKeyboardDevice(keyboard) &&
+                                                keyboard->m_xkbKeymap && keyboard->m_enabled &&
+                                                keyboard->m_allowed;
                                      }) ||
                 nextEpoch >= std::numeric_limits<std::uint64_t>::max() - 1)
                 return nullptr;
@@ -408,9 +480,26 @@ void initializeProtectedDisplay(wl_display &display)
             if (!interaction)
                 return nullptr;
             auto data = std::make_shared<NativeData>(std::move(*interaction));
+            for (auto &keyboard : data->keyboards) {
+                const auto device = keyboard.device.lock();
+                if (!device)
+                    return nullptr;
+                keyboard.changed = device->m_keyboardEvents.keymap.listen(
+                    [weak = std::weak_ptr<NativeData>(data)](const IKeyboard::SKeymapEvent &) {
+                        if (const auto live = weak.lock())
+                            live->interaction.inputReplaced();
+                    });
+            }
+            auto scene = std::make_unique<PinnedScene>(data);
+            if (!inputRetirement.begin(heldInput()))
+                return nullptr;
+            activeNative = data.get();
             active = data;
-            Pointer::mgr()->lockSoftwareAll();
-            data->cursorLocked = true;
+            Pointer::mgr()->refreshProtectedCursorFence();
+            if (!Pointer::mgr()->protectedCursorFenceReady()) {
+                data->close();
+                return nullptr;
+            }
             scopes.insert(scope.digest);
             data->timer = wl_event_loop_add_timer(
                 g_pCompositor->m_wlEventLoop,
@@ -432,7 +521,7 @@ void initializeProtectedDisplay(wl_display &display)
             g_pSeatManager->setKeyboardFocus(nullptr);
             g_pSeatManager->setPointerFocus(nullptr, {});
             data->damage();
-            return std::make_unique<PinnedScene>(std::move(data));
+            return scene;
         });
 }
 void shutdownProtectedDisplay()
@@ -449,6 +538,10 @@ void shutdownProtectedDisplay()
 bool protectedDisplayActive()
 {
     return !active.expired();
+}
+bool protectedInputExclusive()
+{
+    return !active.expired() || draining();
 }
 bool renderProtectedDisplay(Monitor::CMonitor *monitor, const Time::steady_tp &now)
 {
@@ -552,20 +645,41 @@ bool protectedKeyboardKey(const IKeyboard::SKeyEvent &event, const SP<IKeyboard>
 {
     const auto data = active.lock();
     if (!data) {
-        if (!draining())
+        if (!inputRetirement.blocked())
             return false;
-        drainingKeys = keysHeld();
+        const bool physical =
+            nativeKeyboardDevice(keyboard) && keyboard->m_enabled && keyboard->m_allowed;
+        if (!inputRetirement.key(physical, event.keycode == KEY_ESC,
+                                 event.state == WL_KEYBOARD_KEY_STATE_PRESSED, heldInput()))
+            return false;
         if (!draining())
             scheduleRefocus();
         return true;
     }
-    if (!keyboard || keyboard->isVirtual() || !keyboard->m_enabled || !keyboard->m_allowed) {
+    if (!nativeKeyboardDevice(keyboard) || !keyboard->m_enabled || !keyboard->m_allowed) {
         data->interaction.cancel();
         return true;
     }
-    if (data->inputReady()) {
+    const bool ready = data->inputReady();
+    const auto held = heldInput();
+    if (event.keycode == KEY_ESC) {
+        if (event.state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+            const auto clock = compositorClock();
+            if (!data->escapeDown && !held.other && clock) {
+                data->exitBootMs = clock->bootMs;
+                data->exitEpoch = data->interaction.epoch();
+            }
+            data->escapeDown = true;
+        } else if (!held.escape)
+            data->escapeDown = false;
+    } else if (event.state == WL_KEYBOARD_KEY_STATE_PRESSED)
+        data->exitBootMs = 0;
+    if (ready) {
         g_pSeatManager->setKeyboard(keyboard);
         g_pSeatManager->sendKeyboardKey(event.timeMs, event.keycode, event.state);
+    } else if (event.keycode == KEY_ESC && event.state == WL_KEYBOARD_KEY_STATE_PRESSED &&
+               data->exitBootMs != 0) {
+        data->close(); // Physical cancellation can abandon an unready prompt.
     }
     return true;
 }
@@ -574,7 +688,7 @@ bool protectedKeyboardModifiers(const SP<IKeyboard> &keyboard)
     const auto data = active.lock();
     if (!data)
         return draining();
-    if (!keyboard || keyboard->isVirtual()) {
+    if (!nativeKeyboardDevice(keyboard) || !keyboard->m_enabled || !keyboard->m_allowed) {
         data->interaction.cancel();
         return true;
     }
@@ -617,7 +731,7 @@ bool protectedPointerMove(const IPointer::SMotionEvent &event)
     const auto data = active.lock();
     if (!data)
         return draining();
-    if (!event.device || event.device->isVirtual()) {
+    if (!nativePointerDevice(event.device) || !event.device->m_connected) {
         data->interaction.cancel();
         return true;
     }
@@ -646,17 +760,25 @@ bool protectedPointerButton(const IPointer::SButtonEvent &event, const SP<IPoint
             data->interaction.cancel();
         return true;
     }
+    if (!nativePointerDevice(pointer)) {
+        if (data)
+            data->interaction.cancel();
+        return true;
+    }
     const auto key = std::pair{pointer.get(), event.button};
-    if (event.state == WL_POINTER_BUTTON_STATE_PRESSED)
-        heldButtons.insert(key);
-    else
+    if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+        heldButtons.insert_or_assign(key, pointer);
+        if (data)
+            data->exitBootMs = 0;
+    } else
         heldButtons.erase(key);
+    inputRetirement.poll(heldInput());
     if (!data) {
         if (!draining())
             scheduleRefocus();
         return true;
     }
-    if (!pointer || pointer->isVirtual()) {
+    if (!pointer->m_connected) {
         data->interaction.cancel();
         return true;
     }

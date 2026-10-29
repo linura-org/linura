@@ -465,3 +465,23 @@ one-use consumption both unlocked and already locked, using an explicitly
 non-authoritative scene fixture; they do not qualify physical presentation or
 human authentication. S21-2 still requires failure-input isolation, production
 composition, native modeset/recovery and adversarial acceptance before enabling it.
+
+Unexpected private-surface loss must also isolate subsequent typing, rather than
+only drain the keys held at destruction. The compositor candidate retains a
+non-copyable input-retirement state after cancellation, expiry or owner loss.
+Ordinary focus, input capture and unsupported input families remain unavailable
+until a fresh native Escape is followed by complete physical input retirement.
+A held/repeated Escape and virtual input cannot acknowledge that exit. A fresh
+native cancellation already witnessed by the original scope may drain directly;
+none of these paths releases an S17 lock or authorizes a display decision.
+
+Private input origin is checked on the live libinput device's udev object,
+rejecting protocol-virtual, kernel virtual and unknown sources. This check is
+local mechanism evidence and establishes no physical-workstation/Q11 claim;
+virtio input inside the qualified guest remains guest-native input. Keymap
+references/listeners and current enabled/allowed facts invalidate changed input
+without adopting recycled keymap storage. Cursor protection uses a separate
+source-pinned fence and acknowledged clear state, preserving the compositor's
+ordinary software-lock counters across hotplug. Input quarantine feedback,
+continuous Apply-to-decision handoff and real native/adversarial acceptance still
+require completion before production authentication or display mutation activates.

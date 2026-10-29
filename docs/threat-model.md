@@ -1037,3 +1037,15 @@ use the private scene for display authentication. Native modeset placeholder
 coverage, end-to-end purpose-bound authentication, final receipt redemption,
 compositor-death restoration and adversarial multi-output acceptance remain required
 before activation; compile/component/wire results cannot stand in for those tests.
+
+The candidate now retains compositor-owned input quarantine after unexpected
+private-scene loss. Releases alone do not route subsequent response characters to
+an ordinary client. Exit requires a new native Escape and complete input drain;
+virtual/unknown sources, held Escape, repeats and another held key cannot clear
+it. This is input retirement, without any S17 unlock or display-effect authority.
+Kernel-backed origin comes from the live libinput/udev object; protocol and sysfs
+virtual devices are rejected. A retained keymap and keymap event listener prevent
+an old input lifetime from adopting replacement storage. A dedicated cursor fence
+suppresses/clears hardware cursors without borrowing shared software-lock counters
+which hotplug can unbalance. These component mechanisms still require actual
+native execution and failure/interaction acceptance before activation.

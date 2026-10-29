@@ -27,7 +27,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 include("${CMAKE_CURRENT_SOURCE_DIR}/integration_identity.cmake")
 linura_display_integration_identity("${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
 
-add_library(linura-hyprland-display-mechanism STATIC display_transaction.cpp protected_interaction.cpp)
+add_library(linura-hyprland-display-mechanism STATIC display_transaction.cpp protected_interaction.cpp protected_input_retirement.cpp)
 target_include_directories(linura-hyprland-display-mechanism PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_options(linura-hyprland-display-mechanism PRIVATE
     -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
@@ -80,6 +80,12 @@ target_compile_options(linura-hyprland-display-owner PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(linura-hyprland-protected-retirement-tests tests/protected_input_retirement.cpp)
+    target_link_libraries(linura-hyprland-protected-retirement-tests PRIVATE linura-hyprland-display-mechanism)
+    target_compile_options(linura-hyprland-protected-retirement-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-protected-input-retirement COMMAND linura-hyprland-protected-retirement-tests)
+    set_tests_properties(hyprland-protected-input-retirement PROPERTIES TIMEOUT 5)
     add_executable(linura-hyprland-protected-interaction-tests tests/protected_interaction.cpp)
     target_link_libraries(linura-hyprland-protected-interaction-tests PRIVATE linura-hyprland-display-mechanism)
     target_compile_options(linura-hyprland-protected-interaction-tests PRIVATE

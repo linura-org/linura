@@ -20,6 +20,7 @@ namespace Linura::HyprlandDisplay {
 void initializeProtectedDisplay(wl_display &);
 void shutdownProtectedDisplay();
 [[nodiscard]] bool protectedDisplayActive();
+[[nodiscard]] bool protectedInputExclusive();
 // A true result means that the ordinary scene must not be rendered.
 [[nodiscard]] bool renderProtectedDisplay(Monitor::CMonitor *, const Time::steady_tp &);
 // Engaged only inside a protected scene. A failed queued submission cannot fall
