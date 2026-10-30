@@ -553,6 +553,12 @@ int main(int argc, char **argv)
                                "observePowerPermission()", "exportNativeEndpoint()", "identity()"})
         assert(NativeRuntime::staticMetaObject.indexOfMethod(method) == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("retainedVerifiedRelease()") == -1);
+    assert(NativeRuntime::staticMetaObject.indexOfMethod("observeDisplayAttempt()") == -1);
+    assert(NativeRuntime::staticMetaObject.indexOfMethod("dispatchPreparedDisplay()") == -1);
+    assert(NativeRuntime::staticMetaObject.indexOfMethod("continuePreparedDisplay()") == -1);
+    for (const char *method : {"armDisplayApproval()", "displayApprovalReady()",
+                               "consumeDisplayApproval()", "cancelDisplayApproval()"})
+        assert(NativeRuntime::staticMetaObject.indexOfMethod(method) == -1);
 
     const int index = NativeEndpoint::staticMetaObject.indexOfClassInfo("D-Bus Introspection");
     assert(index >= 0);
@@ -575,11 +581,26 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 13 && signals == 1 && annotations == 3);
+    assert(!xml.hasError() && methods == 22 && signals == 1 && annotations == 3);
+    for (const char *method : {"ArmDisplayApproval", "DisplayApprovalReady",
+                               "ConsumeDisplayApproval", "CancelDisplayApproval"})
+        assert(introspection.contains(QString::fromLatin1(method)));
+    assert(introspection.contains(QStringLiteral("ContinuePreparedDisplay")));
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));
     assert(introspection.contains(QStringLiteral("(sssssssu)")) &&
            introspection.contains(QStringLiteral("(sbt)")));
     NativeEndpoint::registerWireTypes();
+    const NativeDisplaySample digestSample{QStringLiteral("session:lock:fixture"),
+                                           QStringLiteral("id"),
+                                           QStringLiteral("seat0"),
+                                           QStringLiteral("{}"),
+                                           QStringLiteral("[]"),
+                                           false};
+    assert(digestSample.correlationDigest() ==
+           QStringLiteral("44b57ddd19b647a800af370d9c77da32ca2ee684d62b906773639292c9367c57"));
+    auto changedDigestSample = digestSample;
+    changedDigestSample.monitors += QLatin1Char(' ');
+    assert(changedDigestSample.correlationDigest() != digestSample.correlationDigest());
     qDBusRegisterMetaType<HistoricalStatus>();
     qDBusRegisterMetaType<TransitionHistoricalStatus>();
     assert(QByteArray(QDBusMetaType::typeToSignature(QMetaType::fromType<NativeApprovalWire>())) ==
@@ -588,6 +609,14 @@ int main(int argc, char **argv)
                QMetaType::fromType<NativeLockObservationWire>())) == "(sbt)");
     assert(QByteArray(QDBusMetaType::typeToSignature(
                QMetaType::fromType<NativePowerPermissionWire>())) == "(sst)");
+    assert(QByteArray(QDBusMetaType::typeToSignature(
+               QMetaType::fromType<NativeDisplayObservationWire>())) == "(ssstssb)");
+    assert(QByteArray(QDBusMetaType::typeToSignature(
+               QMetaType::fromType<NativePreparedDisplayObservationWire>())) == "((ssstssb)s)");
+    assert(QByteArray(QDBusMetaType::typeToSignature(
+               QMetaType::fromType<NativeDisplayAttemptQueryWire>())) == "(sssst)");
+    assert(QByteArray(QDBusMetaType::typeToSignature(
+               QMetaType::fromType<NativeDisplayAttemptObservationWire>())) == "(sssttub)");
     NativeApprovalWire scope{QStringLiteral("session:lock:abcd1234-1234-4567-89ab-0123456789ab:"
                                             "1000:2:42:98765432-1234-4567-89ab-0123456789ab:1"),
                              QStringLiteral("unix:uid:1000"),
@@ -613,6 +642,41 @@ int main(int argc, char **argv)
     substituted = scope;
     substituted.resource += QStringLiteral(":1");
     assert(!substituted.scope());
+
+    auto displayApproval = scope;
+    displayApproval.purpose = 8;
+    displayApproval.request = QStringLiteral("request:v010:display-layout:runtime-component");
+    displayApproval.plan = displayApproval.request;
+    const auto displayTopology =
+        QStringLiteral("display:topology:abcd1234-1234-4567-89ab-0123456789ab:1000:2:42:seat0:"
+                       "33333333-3333-4333-8333-333333333333:3");
+    const auto baseline = QStringLiteral("LNDL:1;") + displayTopology +
+                          QStringLiteral(";1:2:enabled:1920:1080:60000:1000:0:0:0:-;");
+    const auto desired = QStringLiteral("LNDL:1;") + displayTopology +
+                         QStringLiteral(";1:2:enabled:1280:720:59940:1250:0:0:0:-;");
+    const auto material =
+        QStringLiteral("LNDI:1;") + scope.resource + QLatin1Char(';') + baseline + desired;
+    const auto reason = QStringLiteral("Make text easier to read");
+    const auto displayScope = displayApproval.displayScope(material, reason, 12345, 12345);
+    assert(displayScope && displayScope->display->material == material &&
+           displayScope->display->reason == reason &&
+           displayScope->display->deadlineUnixMs == 12345);
+    assert(!displayApproval.scope()); // The S17 entry point never adopts display input.
+    assert(!scope.displayScope(material, reason, 12345, 12345));
+    assert(!displayApproval.displayScope(material, reason, 0, 12345));
+    assert(!displayApproval.displayScope(material, reason, 12345, 0));
+    assert(!displayApproval.displayScope(material, {}, 12345, 12345));
+    assert(!displayApproval.displayScope(material, reason + QChar(0x202e), 12345, 12345));
+    assert(!displayApproval.displayScope(material + QLatin1Char(';'), reason, 12345, 12345));
+    auto wrongDisplay = displayApproval;
+    wrongDisplay.purpose = 9; // Decisions must continue a retained original attempt.
+    assert(!wrongDisplay.displayScope(material, reason, 12345, 12345));
+    wrongDisplay = displayApproval;
+    wrongDisplay.principal = QStringLiteral("unix:uid:0");
+    assert(!wrongDisplay.displayScope(material, reason, 12345, 12345));
+    wrongDisplay = displayApproval;
+    wrongDisplay.plan += QLatin1Char('x');
+    assert(!wrongDisplay.displayScope(material, reason, 12345, 12345));
 
     QTemporaryDir directory;
     assert(directory.isValid());
@@ -665,6 +729,9 @@ int main(int argc, char **argv)
     };
     const auto approved = qdbus_cast<NativeApprovalWire>(roundTrip(QVariant::fromValue(scope)));
     assert(approved.scope() == scope.scope());
+    const auto displayApproved =
+        qdbus_cast<NativeApprovalWire>(roundTrip(QVariant::fromValue(displayApproval)));
+    assert(displayApproved.displayScope(material, reason, 12345, 12345) == displayScope);
     const auto unknownPurpose =
         qdbus_cast<NativeApprovalWire>(roundTrip(QVariant::fromValue(substituted)));
     assert(!unknownPurpose.scope());
@@ -683,6 +750,48 @@ int main(int argc, char **argv)
     invalid = decoded;
     invalid.resource = QStringLiteral("session:lock:unsupported");
     assert(!invalid.freshAtBootMs(12345));
+
+    NativeDisplayObservationWire displayObserved{
+        scope.resource,
+        QStringLiteral("33333333-3333-4333-8333-333333333333"),
+        QStringLiteral("seat0"),
+        12345,
+        QStringLiteral("{\"schema\":1}"),
+        QStringLiteral("[]"),
+        true};
+    const auto displayDecoded =
+        qdbus_cast<NativeDisplayObservationWire>(roundTrip(QVariant::fromValue(displayObserved)));
+    assert(displayDecoded.resource == displayObserved.resource &&
+           displayDecoded.compositor == displayObserved.compositor &&
+           displayDecoded.seat == displayObserved.seat && displayDecoded.sampledBootMs == 12345 &&
+           displayDecoded.topology == displayObserved.topology &&
+           displayDecoded.monitors == displayObserved.monitors && displayDecoded.secure);
+
+    const NativeDisplayAttemptQueryWire attemptQuery{
+        QStringLiteral("LNDI:1;component"), QStringLiteral("transaction:component"),
+        QString(64, QLatin1Char('1')), QString(64, QLatin1Char('2')), 25000};
+    const auto queryDecoded =
+        qdbus_cast<NativeDisplayAttemptQueryWire>(roundTrip(QVariant::fromValue(attemptQuery)));
+    assert(queryDecoded.intent == attemptQuery.intent &&
+           queryDecoded.transaction == attemptQuery.transaction &&
+           queryDecoded.effectDigest == attemptQuery.effectDigest &&
+           queryDecoded.dispatchDigest == attemptQuery.dispatchDigest &&
+           queryDecoded.deadlineUnixMs == attemptQuery.deadlineUnixMs);
+    const NativeDisplayAttemptObservationWire attemptObserved{
+        scope.resource,
+        QStringLiteral("display:topology:component"),
+        attemptQuery.transaction,
+        25000,
+        12345,
+        2,
+        true};
+    const auto attemptDecoded = qdbus_cast<NativeDisplayAttemptObservationWire>(
+        roundTrip(QVariant::fromValue(attemptObserved)));
+    assert(attemptDecoded.lock == attemptObserved.lock &&
+           attemptDecoded.topology == attemptObserved.topology &&
+           attemptDecoded.transaction == attemptObserved.transaction &&
+           attemptDecoded.deadlineUnixMs == 25000 && attemptDecoded.sampledBootMs == 12345 &&
+           attemptDecoded.phase == 2 && attemptDecoded.secure);
 
     const auto suffix = scope.resource.mid(qsizetype(sizeof("session:lock:") - 1));
     for (const auto &action : {"suspend", "reboot", "power-off", "logout"}) {

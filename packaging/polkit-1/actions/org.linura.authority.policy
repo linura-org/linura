@@ -62,4 +62,10 @@
     <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
     <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_self</allow_active></defaults>
   </action>
+  <action id="org.linura.authority.apply-display-layout">
+    <description>Authorize this exact reviewed native display layout</description>
+    <message>Administrator authentication authorizes applying the displayed complete layout with bounded confirmation and recovery</message>
+    <annotate key="org.freedesktop.policykit.owner">unix-user:linura-authority</annotate>
+    <defaults><allow_any>no</allow_any><allow_inactive>no</allow_inactive><allow_active>auth_admin</allow_active></defaults>
+  </action>
 </policyconfig>

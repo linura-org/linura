@@ -37,16 +37,17 @@ class V06PolkitBoundaryTests(unittest.TestCase):
             script,
         )
         self.assertIn(
-            "--test-threads=1 --nocapture --skip s17_managed_ 2>&1 "
+            "--test-threads=1 --nocapture --skip s17_managed_ --skip s21_managed_ 2>&1 "
             "| tee /tmp/v06-legacy-matrix.log",
             script,
         )
-        self.assertIn("49 passed; 0 failed; 0 ignored;", script)
+        self.assertIn("59 passed; 0 failed; 0 ignored;", script)
         self.assertIn("11 passed; 0 failed; 0 ignored;", script)
 
         mock = """set -euo pipefail
 matrix() {
     if [[ " $* " == *" --skip s17_managed_ "* ]]; then
+        [[ " $* " == *" --skip s21_managed_ "* ]] || return 99
         printf 'test result: ok. %s passed; 0 failed; %s ignored;\\n' "$LINURA_TEST_BASELINE" "$LINURA_BASELINE_IGNORED"
         return "$LINURA_BASELINE_EXIT"
     fi
@@ -55,15 +56,19 @@ matrix() {
 }
 """
         for full, baseline, ignored, baseline_ignored, code, baseline_code, valid in (
-            (49, 11, 0, 0, 0, 0, True),
-            (48, 11, 0, 0, 0, 0, False),
-            (50, 11, 0, 0, 0, 0, False),
-            (49, 10, 0, 0, 0, 0, False),
-            (49, 12, 0, 0, 0, 0, False),
-            (49, 11, 1, 0, 0, 0, False),
-            (49, 11, 0, 1, 0, 0, False),
-            (49, 11, 0, 0, 1, 0, False),
-            (49, 11, 0, 0, 0, 1, False),
+            (59, 11, 0, 0, 0, 0, True),
+            (49, 11, 0, 0, 0, 0, False),
+            (55, 11, 0, 0, 0, 0, False),
+            (56, 11, 0, 0, 0, 0, False),
+            (57, 11, 0, 0, 0, 0, False),
+            (58, 11, 0, 0, 0, 0, False),
+            (60, 11, 0, 0, 0, 0, False),
+            (59, 10, 0, 0, 0, 0, False),
+            (59, 12, 0, 0, 0, 0, False),
+            (59, 11, 1, 0, 0, 0, False),
+            (59, 11, 0, 1, 0, 0, False),
+            (59, 11, 0, 0, 1, 0, False),
+            (59, 11, 0, 0, 0, 1, False),
         ):
             with (
                 self.subTest(
@@ -144,6 +149,13 @@ matrix() {
             "pkaction --action-id org.linura.executor.session",
             "access.*denied|permission.*denied",
             "native-session-ordinary-denied",
+            "native-session-display-ordinary-denied",
+            "native-session-display-root-denied",
+            "native-session-display-polkit-ordinary-denied",
+            "ApplyDisplayLayout ststtsssss",
+            "ContinueDisplayLayout ssstssb",
+            "native-session-display-decision-ordinary-denied",
+            "native-session-display-decision-root-denied",
             "systemd-suspend.service --value -p ExecStartPre",
             "non-supervised-sleep-helper",
             "native-session-live-boundary=qualified",
@@ -152,6 +164,34 @@ matrix() {
         self.assertNotIn("systemctl suspend", guest)
         self.assertNotIn("systemctl reboot", guest)
         self.assertNotIn("systemctl poweroff", guest)
+
+    def test_display_executor_keeps_default_deny_and_exact_service_only_rule(
+        self,
+    ) -> None:
+        actions = ET.parse(
+            ROOT / "packaging/polkit-1/actions/org.linura.executor.session.policy"
+        ).getroot()
+        action_id = "org.linura.executor.session.apply-display-layout"
+        action = actions.find(f"action[@id='{action_id}']")
+        self.assertIsNotNone(action)
+        assert action is not None
+        for name in ("allow_any", "allow_inactive", "allow_active"):
+            self.assertEqual(action.findtext(f"defaults/{name}"), "no")
+        rule = (
+            ROOT / "packaging/polkit-1/rules.d/50-linura-executor-session.rules"
+        ).read_text()
+        self.assertIn(f'action.id === "{action_id}"', rule)
+        self.assertIn('subject.user === "linura-authority"', rule)
+        self.assertNotIn('subject.user === "root"', rule)
+        policy = ET.parse(
+            ROOT / "packaging/dbus-1/system.d/org.linura.Executor.Session1.conf"
+        ).getroot()
+        for scope in ("policy[@context='default']", "policy[@user='root']"):
+            self.assertIsNotNone(
+                policy.find(
+                    f"{scope}/deny[@send_destination='org.linura.Executor.Session1'][@send_interface='org.linura.Executor.Session1']"
+                )
+            )
 
     def test_native_denial_capture_rejects_unrelated_failures(self) -> None:
         guest = (ROOT / "tests/acceptance/v06/qualify-native-session.sh").read_text(
@@ -280,6 +320,26 @@ matrix() {
             self.assertEqual(action.findtext("defaults/allow_inactive"), "no")
             self.assertEqual(action.findtext("defaults/allow_active"), active)
             self.assertNotIn("_keep", ET.tostring(action, encoding="unicode"))
+
+    def test_display_apply_requires_nonretained_admin_authentication(self):
+        root = ET.fromstring(
+            (ROOT / "packaging/polkit-1/actions/org.linura.authority.policy").read_text(
+                encoding="utf-8"
+            )
+        )
+        actions = root.findall(
+            "action[@id='org.linura.authority.apply-display-layout']"
+        )
+        self.assertEqual(len(actions), 1)
+        action = actions[0]
+        self.assertEqual(action.findtext("defaults/allow_any"), "no")
+        self.assertEqual(action.findtext("defaults/allow_inactive"), "no")
+        self.assertEqual(action.findtext("defaults/allow_active"), "auth_admin")
+        self.assertEqual(
+            action.findtext("annotate[@key='org.freedesktop.policykit.owner']"),
+            ACTION_OWNER,
+        )
+        self.assertNotIn("_keep", ET.tostring(action, encoding="unicode"))
 
     def test_authority_action_owner_matches_unprivileged_service_identity(self) -> None:
         policy_path = ROOT / "packaging/polkit-1/actions/org.linura.authority.policy"

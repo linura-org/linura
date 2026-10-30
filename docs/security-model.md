@@ -115,6 +115,46 @@ starts a new budget or freshens a proof. A late reply or failed revalidation fai
 closed, and this allocation changes neither the human-interaction deadline nor executor
 authority.
 
+The S21 prepared display handoff uses that same separation. Only the independently
+attested Control service can reach the root session executor's fixed
+`apply-display-layout` action; ordinary users and root callers remain denied by
+the system-bus policy. Service authorization cannot replace Control's sealed
+managed effect, canonical complete intent or validated execution binding. The
+root adapter preserves one original owner/boot/sample through strict native
+validation, its single private owner call and final identity revalidation, all
+within the original two-second probe clock. The owner rechecks the raw sample
+digest, original boot timestamp, complete baseline, output frames and native
+deadline before reserving one compositor apply. Another owner/connection cannot
+adopt the attempt, and timeout, denied/unknown phase or a lost reply cannot cause
+redelivery or assert verified success. The outer Control-to-root mechanism call
+has its separate fixed ten-second cap for service policy and native handoff;
+it never freshens native facts or extends the original confirmation deadline.
+
+Production display status derives its original dispatch digest and deadline
+from Control-validated durable history. Its native query is read-only, never a
+permit or continuation, and reconciliation cannot apply/confirm/revert. Public
+begin/confirm/revert remain unsupported until protected decisions, durable
+compositor-loss restoration and required native qualification are complete.
+
+The private Apply review handshake accepts the complete canonical material and
+original principal/request/plan/digests from the supervised Control connection.
+It shows bounded first-party review pages, requires a fresh native action and
+presentation per revision, and presents fixed administrator/PAM metadata before
+accepting input. Control owns bounded readiness polling; the original wall and
+BOOTTIME deadlines cannot be renewed by polling, authentication or suspend.
+The fixed Apply Polkit action uses `auth_admin`, never a retained grant. Its
+positive result must still be followed by consumption of the exact native proof.
+Expired, denied, replaced-owner and uncertain/late calls retire only their exact
+scope. A separate scoped cancellation cannot cancel a newer conversation.
+
+The owner's consumed Apply receipt remains process-local and one-use. Root's
+separately admitted prepared dispatch must match its complete material, original
+transaction and still-live native frame/input generations before redemption.
+No client digest or positive Polkit reply is an executor credential. This private
+composition is not production display support: continuous protected modeset,
+Keep/Revert, replacement restoration and native adversarial acceptance remain
+required before the public display effect can be enabled.
+
 The owner's native peer/session/unit inspectors queue at most 32 fixed
 `Properties.Get` reads per interface before waiting. Each pending call retains
 the existing 500 ms cap from admission, and all batches share their caller's

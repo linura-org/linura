@@ -1,3 +1,8 @@
+mod display_observation;
+pub use display_observation::{
+    HyprlandDisplayObservation, HyprlandNativeOutput, HyprlandOutputState, observe_hyprland_outputs,
+};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{Read, Write};

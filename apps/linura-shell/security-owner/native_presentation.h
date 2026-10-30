@@ -6,6 +6,7 @@
 #include "native_scope.h"
 #include "native_keyboard.h"
 #include "native_assistive.h"
+#include "native_display_review.h"
 
 namespace Linura::SecurityOwner {
 class SecretEntry;
@@ -23,7 +24,10 @@ class NativePresentation final : public QObject
         Denied,
         Unavailable,
         Recovering,
-        SleepNotVerified
+        SleepNotVerified,
+        ReviewingDisplay,
+        PreparingDisplay,
+        ApplyingDisplay
     };
     explicit NativePresentation(QObject *parent = nullptr);
     ~NativePresentation() override;
@@ -33,6 +37,9 @@ class NativePresentation final : public QObject
     [[nodiscard]] NativeAssistiveProjection assistiveProjection(bool nativelyVisible) const;
     void present(State state);
     void presentAuthentication(ApprovalPurpose purpose);
+    [[nodiscard]] bool presentDisplayReview(const NativeApprovalScope &,
+                                            const NativeDisplaySnapshot &, std::size_t page,
+                                            bool authenticating = false);
     // Render synchronously into the backend's existing opaque bounded storage.
     // False means the owner must retain native blank coverage, never unlock.
     [[nodiscard]] bool paint(QImage &opaqueFrame);

@@ -77,6 +77,16 @@ observation_capability = "session.secure-lock.observe"
 resource_prefix = "session:lock:"
 change_keys = ["secure"]
 
+[registered_operations.managed-display-layout]
+operation_id = "operation:display.layout.apply"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+risk_floor_rule_id = "operation-registry.managed-display-layout.risk-floor"
+provider = "hyprland"
+observation_capability = "display.outputs.observe"
+resource_prefix = "display:topology:"
+change_keys = ["layout"]
+
 [registered_operations.managed-session-suspend]
 operation_id = "operation:session.suspend"
 class = "managed-external-effect"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import configparser
+import hashlib
 import importlib.util
 import io
 import json
@@ -14,6 +15,8 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, call, patch
+
+from tools import hyprland_display_candidate as display_build
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "qualification/v010/session-security"
@@ -36,6 +39,150 @@ same_uid_runner = load("run-same-uid-probes")
 
 
 class S17NativeSessionFixtureTests(unittest.TestCase):
+    def test_candidate_installer_refuses_host_before_loading_or_copying(self):
+        with (
+            patch.object(
+                provision, "require_disposable_guest", side_effect=RuntimeError("host")
+            ),
+            patch.object(provision, "display_candidate") as candidate,
+            patch.object(provision.os, "replace") as replace,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "host"):
+                provision.install_display_candidate(Path("/unread/header"))
+            candidate.assert_not_called()
+            replace.assert_not_called()
+
+    def test_candidate_installation_copies_verified_bytes_and_keeps_actual_owner_header(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            built = root / "candidate"
+            built.mkdir()
+            binary, header = built / "Hyprland", root / "configured-owner.h"
+            binary.write_bytes(b"component fixture compositor output")
+            header.write_bytes(b"component fixture configured owner identity")
+            installed, owner_header = root / "Hyprland", root / "owner-build.h"
+            installed.write_bytes(b"old reference compositor")
+            old_inode = installed.stat().st_ino
+            metadata = {
+                "files": {
+                    "Hyprland": {
+                        "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+                        "size": binary.stat().st_size,
+                    }
+                }
+            }
+            with (
+                patch.object(provision, "require_disposable_guest"),
+                patch.object(provision, "require_root_file"),
+                patch.object(
+                    provision,
+                    "display_candidate",
+                    return_value=(display_build, metadata),
+                ) as verify,
+                patch.object(provision, "COMPOSITOR", installed),
+                patch.object(provision, "CANDIDATE_ROOT", built),
+                patch.object(provision, "OWNER_BUILD_HEADER", owner_header),
+                patch.object(provision.Path, "glob", return_value=[]),
+            ):
+                provision.install_display_candidate(header)
+            verify.assert_called_once_with(header)
+            self.assertEqual(installed.read_bytes(), binary.read_bytes())
+            self.assertNotEqual(installed.stat().st_ino, old_inode)
+            self.assertEqual(stat.S_IMODE(installed.stat().st_mode), 0o755)
+            self.assertEqual(owner_header.read_bytes(), header.read_bytes())
+            self.assertEqual(stat.S_IMODE(owner_header.stat().st_mode), 0o644)
+
+    def test_running_or_deleted_reference_compositor_blocks_candidate_copy(self):
+        for suffix in ("", " (deleted)"):
+            with (
+                self.subTest(suffix=suffix),
+                patch.object(provision, "require_disposable_guest"),
+                patch.object(provision, "require_root_file"),
+                patch.object(
+                    provision, "display_candidate", return_value=(display_build, {})
+                ),
+                patch.object(
+                    provision.Path,
+                    "glob",
+                    return_value=[
+                        SimpleNamespace(
+                            readlink=lambda: Path("/usr/bin/Hyprland" + suffix)
+                        )
+                    ],
+                ),
+                patch.object(display_build.artifacts, "_bind_file") as copy,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "reference compositor must exit"
+                ):
+                    provision.install_display_candidate(Path("/configured/header"))
+                copy.assert_not_called()
+
+    def test_native_probe_rejects_different_running_compositor_inode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            installed = Path(directory) / "Hyprland"
+            installed.write_bytes(b"installed candidate")
+            other = SimpleNamespace(
+                st_dev=installed.stat().st_dev, st_ino=installed.stat().st_ino + 1
+            )
+            with (
+                patch.object(provision, "require_disposable_guest"),
+                patch.object(provision, "require_root_file"),
+                patch.object(
+                    provision, "display_candidate", return_value=(display_build, {})
+                ),
+                patch.object(provision, "COMPOSITOR", installed),
+                patch.object(
+                    provision, "Path", return_value=SimpleNamespace(stat=lambda: other)
+                ),
+                patch.object(display_build.artifacts, "_bind_file") as bind,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "not executing the installed"
+                ):
+                    provision.inspect_display_candidate(123)
+                bind.assert_not_called()
+
+    def test_native_probe_hashes_executing_candidate_and_rejects_changed_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            installed = Path(directory) / "Hyprland"
+            installed.write_bytes(b"installed candidate")
+            metadata = {
+                "source_sha": "a" * 40,
+                "integration_source_digest": "b" * 64,
+                "files": {
+                    "Hyprland": {
+                        "sha256": hashlib.sha256(installed.read_bytes()).hexdigest(),
+                        "size": installed.stat().st_size,
+                    }
+                },
+            }
+            with (
+                patch.object(provision, "require_disposable_guest"),
+                patch.object(provision, "require_root_file"),
+                patch.object(
+                    provision,
+                    "display_candidate",
+                    return_value=(display_build, metadata),
+                ),
+                patch.object(provision, "COMPOSITOR", installed),
+                patch.object(
+                    provision, "Path", return_value=SimpleNamespace(stat=installed.stat)
+                ),
+            ):
+                report = provision.inspect_display_candidate(123)
+                self.assertEqual(
+                    report["binary_sha256"], metadata["files"]["Hyprland"]["sha256"]
+                )
+                self.assertIs(report["native_display_execution_qualified"], False)
+                installed.write_bytes(b"changed candidate")
+                with self.assertRaisesRegex(
+                    RuntimeError, "differs from the built candidate"
+                ):
+                    provision.inspect_display_candidate(123)
+
     def test_sleep_asset_reader_rejects_mutability_links_oversize_and_read_drift(self):
         path = Path("/usr/lib/linura/s17-test-asset")
         payload = b"bounded component bytes"
@@ -634,6 +781,55 @@ class S17NativeSessionFixtureTests(unittest.TestCase):
                     case_facts, case_argv, case_status, case_uid
                 )
 
+    def test_display_discovery_bootstrap_requires_fresh_complete_caller_bound_report(
+        self,
+    ):
+        lock = "session:lock:11111111-1111-4111-8111-111111111111:1000:c2:42:22222222-2222-4222-8222-222222222222:1"
+        prefix = "LNDL:1;display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:seat0:"
+        fields = {
+            "lock_resource": lock,
+            "layout": prefix
+            + "33333333-3333-4333-8333-333333333333:3;1:2:enabled:1920:1080:60000:1000:0:0:0:-;",
+            "observed_at_unix_ms": "1000",
+            "valid_for_ms": "2000",
+            "execution_authority": "none",
+            "output.0.handle": "1",
+            "output.0.generation": "2",
+            "output.0.can_disable": "true",
+            "output.0.powered": "true",
+            "output.0.modes": "1920,1080,60000",
+        }
+
+        def encode(fields):
+            return "\n".join(f"{key}={value}" for key, value in fields.items())
+
+        text = encode(fields)
+        probe.validate_display_discovery(text, lock, prefix, 1100)
+        for changed in [
+            fields | {"lock_resource": lock.replace(":1000:", ":1001:")},
+            fields | {"layout": fields["layout"].replace("seat0", "seat1")},
+            fields | {"execution_authority": "prepared"},
+            fields | {"observed_at_unix_ms": "1200"},
+            fields | {"observed_at_unix_ms": "01000"},
+            fields | {"valid_for_ms": "2001"},
+            fields | {"valid_for_ms": "0"},
+            fields | {"output.0.modes": ""},
+            fields | {"output.0.powered": "unknown"},
+            fields | {"unexpected": "true"},
+            {
+                key: value
+                for key, value in fields.items()
+                if key != "output.0.generation"
+            },
+        ]:
+            with self.subTest(changed=changed), self.assertRaises(RuntimeError):
+                probe.validate_display_discovery(encode(changed), lock, prefix, 1100)
+        for malformed in [text + "\noutput.0.handle=1", "x" * 65537, "missing"]:
+            with self.assertRaises(RuntimeError):
+                probe.validate_display_discovery(malformed, lock, prefix, 1100)
+        with self.assertRaises(RuntimeError):
+            probe.validate_display_discovery(text, lock, prefix, 3000)
+
     def test_cold_boot_attests_polkit_after_automatic_owner_and_still_fails_closed(
         self,
     ):
@@ -658,6 +854,27 @@ class S17NativeSessionFixtureTests(unittest.TestCase):
         capability = "/usr/lib/linura/linura-security-owner cap_ipc_lock=ep"
         replies = {
             ("id", "-u", "linura"): "1000",
+            (
+                "runuser",
+                "-u",
+                "linura",
+                "--",
+                "/usr/bin/linuractl",
+                "own-display-snapshot",
+            ): "\n".join(
+                [
+                    f"lock_resource={lock.removeprefix('resource=')}",
+                    f"layout=LNDL:1;display:topology:{boot}:1000:c2:123456:seat0:33333333-3333-4333-8333-333333333333:3;1:2:enabled:1920:1080:60000:1000:0:0:0:-;",
+                    "observed_at_unix_ms=1000",
+                    "valid_for_ms=2000",
+                    "execution_authority=none",
+                    "output.0.handle=1",
+                    "output.0.generation=2",
+                    "output.0.can_disable=true",
+                    "output.0.powered=true",
+                    "output.0.modes=1920,1080,60000",
+                ]
+            ),
             (
                 "systemctl",
                 "show",
@@ -693,7 +910,12 @@ class S17NativeSessionFixtureTests(unittest.TestCase):
         for failure in (None, "daemon unavailable", "supervised identity changed"):
             with self.subTest(failure=failure):
                 guard = Mock()
-                guest = SimpleNamespace(require_disposable_guest=guard)
+                compositor_candidate = {"binary_sha256": "c" * 64}
+                candidate_probe = Mock(return_value=compositor_candidate)
+                guest = SimpleNamespace(
+                    require_disposable_guest=guard,
+                    inspect_display_candidate=candidate_probe,
+                )
                 spec = SimpleNamespace(loader=SimpleNamespace(exec_module=Mock()))
                 commands = []
                 polkit_identity = {"pid": 789, "invocation": "b" * 32}
@@ -743,6 +965,7 @@ class S17NativeSessionFixtureTests(unittest.TestCase):
                     ),
                     patch.object(probe.Path, "read_text", return_value=boot),
                     patch.object(probe.time, "monotonic", return_value=100),
+                    patch.object(probe.time, "time_ns", return_value=1_100_000_000),
                     patch.object(probe.subprocess, "run", side_effect=run),
                 ):
                     if failure:
@@ -753,6 +976,11 @@ class S17NativeSessionFixtureTests(unittest.TestCase):
                         self.assertEqual(
                             report["native_polkit_supervision"], polkit_identity
                         )
+                        self.assertEqual(
+                            report["native_display_compositor_build"],
+                            compositor_candidate,
+                        )
+                    candidate_probe.assert_called_once_with(123)
                     watcher.assert_called_once_with(1000)
                     polkit.assert_called_once()
                 self.assertFalse(

@@ -60,6 +60,8 @@ class NativePresentation::Impl final
     SecretEntry entry;
     State state = State::Locked;
     ApprovalPurpose authenticationPurpose = ApprovalPurpose::AuthenticateUnlock;
+    std::optional<NativeDisplayReviewPage> displayPage;
+    QString displayPrimary;
     bool attempted = false;
     bool initialized = false;
     bool rendering = false;
@@ -128,6 +130,11 @@ class NativePresentation::Impl final
                                          "Escape cancels.");
             break;
         case State::Authenticating:
+            if (displayPage) {
+                title = QStringLiteral("Authenticate: ") + displayPage->heading;
+                explanation = displayPage->explanation;
+                break;
+            }
             switch (authenticationPurpose) {
             case ApprovalPurpose::AuthenticateUnlock:
                 title = QStringLiteral("Authenticate to unlock");
@@ -172,6 +179,24 @@ class NativePresentation::Impl final
                 return;
             }
             break;
+        case State::ReviewingDisplay:
+            if (!displayPage) {
+                faulted = true;
+                return;
+            }
+            title = displayPage->heading;
+            explanation = displayPage->explanation;
+            break;
+        case State::PreparingDisplay:
+            title = QStringLiteral("Preparing display change");
+            explanation = QStringLiteral("Authentication completed. Linura is checking this "
+                                         "display change before applying it.");
+            break;
+        case State::ApplyingDisplay:
+            title = QStringLiteral("Applying display layout");
+            explanation = QStringLiteral("Linura is checking each display. Recovery may be "
+                                         "needed if the change cannot be verified.");
+            break;
         case State::Denied:
             title = QStringLiteral("Authentication not completed");
             explanation =
@@ -199,14 +224,17 @@ class NativePresentation::Impl final
         }
         const bool actionable = state == State::Locked || state == State::SleepNotVerified ||
                                 state == State::ConfirmingLock || state == State::Recovering ||
+                                state == State::ReviewingDisplay ||
                                 (state == State::Authenticating && entry.acceptsInput());
         const bool cancellable = state == State::ConfirmingLock ||
+                                 state == State::ReviewingDisplay ||
                                  (state == State::Authenticating && entry.acceptsInput());
         if (!root->setProperty("inputVisible", state == State::Authenticating) ||
             !root->setProperty("heading", title) ||
             !root->setProperty("explanation", explanation) ||
             !root->setProperty("primaryLabel",
-                               state == State::ConfirmingLock   ? QStringLiteral("Lock session")
+                               state == State::ReviewingDisplay ? displayPrimary
+                               : state == State::ConfirmingLock ? QStringLiteral("Lock session")
                                : state == State::Authenticating ? QStringLiteral("Submit response")
                                : state == State::Recovering     ? QStringLiteral("Check recovery")
                                                             : QStringLiteral("Request unlock")) ||
@@ -311,6 +339,8 @@ void NativePresentation::present(State state)
         return;
     }
     impl_->state = state;
+    impl_->displayPage.reset();
+    impl_->displayPrimary.clear();
     impl_->advanceInteraction();
     impl_->setText();
     impl_->schedule();
@@ -324,6 +354,27 @@ void NativePresentation::presentAuthentication(ApprovalPurpose purpose)
     }
     impl_->authenticationPurpose = purpose;
     present(State::Authenticating);
+}
+
+bool NativePresentation::presentDisplayReview(const NativeApprovalScope &scope,
+                                              const NativeDisplaySnapshot &snapshot,
+                                              std::size_t page, bool authenticating)
+{
+    if (!impl_->correctThread() || !ready() || impl_->rendering)
+        return false;
+    const auto pages = nativeDisplayReviewPages(scope, snapshot);
+    if (!pages || page >= pages->size() || (authenticating && page + 1 != pages->size()))
+        return false;
+    impl_->displayPage = pages->at(page);
+    impl_->displayPage->heading += QStringLiteral(" (%1/%2)").arg(page + 1).arg(pages->size());
+    impl_->displayPrimary =
+        page + 1 == pages->size() ? QStringLiteral("Authenticate") : QStringLiteral("Next");
+    impl_->authenticationPurpose = scope.purpose;
+    impl_->state = authenticating ? State::Authenticating : State::ReviewingDisplay;
+    impl_->advanceInteraction();
+    impl_->setText();
+    impl_->schedule();
+    return ready();
 }
 
 bool NativePresentation::paint(QImage &frame)
@@ -380,6 +431,7 @@ bool NativePresentation::primaryRequestAvailable() const
     case State::Locked:
     case State::Recovering:
     case State::SleepNotVerified:
+    case State::ReviewingDisplay:
         break;
     default:
         return false;

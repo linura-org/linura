@@ -254,9 +254,12 @@ printf 'sqlite-integrity=%s\n' "$integrity"
 sudo -n sqlite3 /var/lib/linura-authority/authority.sqlite3 '.tables'
 
 stage deterministic-fault-matrix-inside-disposable-guest
+# Retain all 49 inherited cases plus seven S21 controller/SQLite fixtures.
+# Their simulated native labels do not qualify actual display execution.
 /usr/libexec/linura/v06-qualification-matrix --test-threads=1 --nocapture 2>&1 | tee /tmp/v06-matrix.log
-grep -F 'test result: ok. 49 passed; 0 failed; 0 ignored;' /tmp/v06-matrix.log
-/usr/libexec/linura/v06-qualification-matrix --test-threads=1 --nocapture --skip s17_managed_ 2>&1 | tee /tmp/v06-legacy-matrix.log
+grep -F 'test result: ok. 59 passed; 0 failed; 0 ignored;' /tmp/v06-matrix.log
+# Independently retain the original eleven cases, excluding later domain suites.
+/usr/libexec/linura/v06-qualification-matrix --test-threads=1 --nocapture --skip s17_managed_ --skip s21_managed_ 2>&1 | tee /tmp/v06-legacy-matrix.log
 grep -F 'test result: ok. 11 passed; 0 failed; 0 ignored;' /tmp/v06-legacy-matrix.log
 
 echo "real-authority1-success=qualified"
@@ -265,4 +268,4 @@ echo "real-direct-executor-denial=qualified"
 echo "real-idempotency=qualified"
 echo "real-verification-not-satisfied-explicit-recovery=qualified"
 echo "real-crash-restart-explicit-no-effect-recovery=qualified"
-echo "deterministic-fault-matrix=49/49"
+echo "deterministic-fault-matrix=59/59"

@@ -221,6 +221,83 @@ For Experimental D-Bus changes, these must remain coherent in the same candidate
 A live method not represented in canonical XML, or XML that does not match live signatures, is contract drift and fails qualification rather than being explained away as Experimental flexibility.
 
 
+The private Experimental `SecurityOwner1.ObserveDisplay` method is a read-only
+native display probe, separate from `ObserveLock`. Its `(ssstssb)` structure binds
+the exact native lock resource, compositor connection generation, seat,
+suspend-inclusive sample time, bounded typed topology JSON, bounded native
+monitor metadata and settled independently observed secure state. The Linux
+adapter retains the original two-second probe deadline and projects canonical
+`display.outputs.observe` and `session.display-coverage.observe` evidence.
+The larger reply cap applies only to this exact private method for supervised
+Control; existing methods and error replies retain their previous bounds.
+Unknown schemas, incomplete inventories and mismatched independent facts fail
+closed. This method creates no output configuration or execution authority.
+
+The public Experimental display contract adds `BeginDisplayLayout`,
+`GetDisplayLayoutStatus`, `ConfirmDisplayLayout` and `RevertDisplayLayout` on
+Authority1. The begin request contains only a bounded operation label, complete
+`LNDI:1` intent and semantic reason. The transport derives the principal and
+rejects a foreign-session intent; clients cannot choose policy, trusted risk,
+executor handles or a prepared plan. The single `(sssst)` receipt binds request,
+transaction, topology, closed lifecycle state and the original confirmation
+deadline. Unknown states, substituted requests and different wire shapes fail
+client decoding. Pending, restored and confirmed remain distinct; historical
+reports never assert current native layout or protection. Compositions without
+the complete native admission/execution/recovery ports explicitly refuse these
+methods. The current production composition remains unsupported; publishing the
+contract is not activation or S21-2 completion.
+
+The separate Experimental `GetOwnDisplaySnapshot` is an `AuthoritativeQuery`
+with no input arguments. Its `(sstta(ttba(uuu)b))` report carries the lock
+resource, complete canonical layout, original acquisition time/validity and
+ordered output capability rows (handle, generation, disable capability, exact
+mode tuples, power state). Control binds the native sample to the caller's
+independent active local logind epoch/seat; the client validates the closed
+shape, complete inventory and original expiry. Only this method has a 64 KiB
+client reply budget; existing replies retain their 16 KiB limit. Discovery may
+report no powered outputs and grants no mutation, coverage or approval authority.
+
+The owner display projection uses private schema 2, binding the exact native
+thousandth scale and its IEEE float bits to the independent wlr 24.8 projection.
+The pinned compositor's UUID/output lifetimes replace owner-generated display
+identities. A missing/mismatched live source integration or inconsistent complete
+inventory is unsupported. No schema-1 compatibility path supplies authority.
+
+The separate private `ObservePreparedDisplay` method admits only the supervised
+session executor and returns `((ssstssb)s)`: the same bounded sample plus a
+length-framed SHA-256 content correlation. Rust checks the digest, typed complete
+native inventory, original baseline, available desired options, visible recovery
+output and independent per-output coverage before retaining this precondition.
+The digest excludes probe time because it correlates two distinct native probes;
+each conservative boot-clock deadline is checked independently. Neither a sample
+nor its digest is approval or prepared dispatch authority. Only this exact
+method/role pair receives the larger reply cap; errors and other endpoints retain
+their existing limits. This read-only addition does not activate a display write.
+
+`SecurityOwner1.ObserveDisplayAttempt` is a separate read-only Control probe.
+Its `(sssst)` query carries the retained canonical intent and exact native
+transaction/effect/dispatch/deadline correlation. The `(sssttub)` response binds
+the current lock and topology, original transaction/deadline, conservative
+BOOTTIME sample, closed native phase and settled lock state. Discovery, peer and
+boot revalidation and the reply share the original two-second deadline. This
+small reply retains the existing reply cap. No configure/keep/restore request is
+sent, and reconnecting acquires no continuation right. The Rust adapter projects
+only `display.layout-attempt.observe` into the canonical envelope; native phase
+is neither independent layout verification, protected approval nor permission to
+replay. Production dispatch and full recovery remain unqualified and unsupported.
+
+The private Experimental `SecurityOwner1` Apply handshake additionally exposes
+`ArmDisplayApproval`, `DisplayApprovalReady`, `ConsumeDisplayApproval` and
+`CancelDisplayApproval`. Each takes the original `(sssssssu)` comparison scope,
+complete material, bounded reason and original wall/BOOTTIME deadlines as `(sssssssu)sstt`, and
+returns one boolean. Only purpose 8 (Apply) is admitted; the legacy S17 methods
+continue rejecting display scopes. A retired readiness conversation returns the
+fixed unavailable error rather than indefinite pending. Cancellation compares
+the exact scope even after its deadline and cannot adopt another native owner or
+cancel a newer conversation. These private methods create neither public mutation
+support nor an executor credential. Keep/Revert must continue a retained original
+transaction; they cannot enter through this Apply handshake.
+
 ### Session1 bounded transient-effect contract
 
 `org.linura.Session1` is a distinct Experimental **session-bus transient-effect** contract introduced for the v0.10 workstation line. It is hosted by the same unprivileged `linurad` process and well-known session-bus service as Control1, but it is a separate object/interface and does not widen the historical non-executable Control1 method surface.

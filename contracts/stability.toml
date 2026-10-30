@@ -237,6 +237,11 @@ stability = "experimental"
 
 [[contract]]
 id = "dbus.org.linura.Authority1"
+# Display begin/status/confirm/revert are Experimental typed intent/report
+# contracts. Unsupported native compositions refuse them before preparation;
+# their presence is not display execution or native qualification support.
+# Own-display discovery is a read-only Experimental report with original native
+# freshness; it grants neither effect authority nor secure-coverage guarantees.
 kind = "dbus-interface"
 path = "interfaces/dbus/org.linura.Authority1.xml"
 version = "1"

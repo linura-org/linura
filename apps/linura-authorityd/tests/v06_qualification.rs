@@ -27,6 +27,9 @@ use linura_control::{
     ManagedMutationReceipt, PlanPreviewControl, TrustedHumanApproval, managed_request_id,
 };
 
+#[path = "s21/managed_display.rs"]
+mod s21_managed_display;
+
 const RESOURCE: &str = "systemd:unit:linura-managed-qualification.service";
 #[path = "s17/managed_lock.rs"]
 mod s17_managed_lock;

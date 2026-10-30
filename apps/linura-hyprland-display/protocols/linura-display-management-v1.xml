@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="linura_display_management_v1">
+  <copyright>Copyright 2026 Linura contributors. SPDX-License-Identifier: Apache-2.0</copyright>
+  <interface name="linura_display_manager_v1" version="1">
+    <description summary="private pinned compositor display mechanism">
+      Experimental adapter protocol, compiled with the exact reviewed compositor.
+      This is an unprivileged compositor mechanism, never Linura policy, approval,
+      execution authority or a public client SDK. Linura calls it only from its
+      protected native owner after prepared executor admission. Correlation values
+      are not credentials. A pending attempt and its restoration timer outlive all
+      client resources. Only its original live connection may confirm it.
+    </description>
+    <request name="destroy" type="destructor"/>
+    <request name="get_snapshot">
+      <arg name="snapshot" type="new_id" interface="linura_display_snapshot_v1"/>
+    </request>
+    <request name="get_attempt">
+      <arg name="attempt" type="new_id" interface="linura_display_attempt_v1"/>
+      <arg name="transaction" type="string"/>
+      <arg name="effect_digest" type="string"/>
+      <arg name="dispatch_digest" type="string"/>
+      <arg name="deadline_unix_hi" type="uint"/>
+      <arg name="deadline_unix_lo" type="uint"/>
+    </request>
+  </interface>
+  <interface name="linura_display_snapshot_v1" version="1">
+    <description summary="one immutable, bounded native sample">
+      Identity is followed by at most 16 heads, then done. All unsigned 64-bit
+      numbers use high and low 32-bit words. Snapshot objects, modes and output
+      lifetimes are adapter details. A configuration must use this same client's
+      live snapshot, whose original kernel-clock timestamp remains binding.
+    </description>
+    <enum name="coverage">
+      <entry name="unlocked" value="0"/>
+      <entry name="secure" value="1"/>
+      <entry name="transitioning" value="2"/>
+      <entry name="unknown" value="3"/>
+    </enum>
+    <request name="destroy" type="destructor"/>
+    <event name="identity">
+      <arg name="compositor_instance" type="string"/>
+      <arg name="upstream_commit" type="string"/>
+      <arg name="integration_digest" type="string"/>
+      <arg name="generation_hi" type="uint"/>
+      <arg name="generation_lo" type="uint"/>
+      <arg name="security_epoch_hi" type="uint"/>
+      <arg name="security_epoch_lo" type="uint"/>
+      <arg name="sampled_unix_hi" type="uint"/>
+      <arg name="sampled_unix_lo" type="uint"/>
+      <arg name="sampled_boot_hi" type="uint"/>
+      <arg name="sampled_boot_lo" type="uint"/>
+      <arg name="coverage" type="uint" enum="coverage"/>
+      <arg name="fenced" type="uint"/>
+    </event>
+    <event name="head">
+      <arg name="head" type="new_id" interface="linura_display_head_v1"/>
+      <arg name="handle_hi" type="uint"/>
+      <arg name="handle_lo" type="uint"/>
+      <arg name="generation_hi" type="uint"/>
+      <arg name="generation_lo" type="uint"/>
+      <arg name="name" type="string"/>
+    </event>
+    <event name="done"/>
+    <event name="unavailable"/>
+  </interface>
+  <interface name="linura_display_head_v1" version="1">
+    <description summary="native output lifetime in one snapshot">
+      At most 128 exact advertised mode tuples, one current event, an optional
+      mirror event, then done. Disabled current geometry is all zero. A mirror
+      refers to the exact native handle and generation in the same snapshot.
+      Covered includes the compositor's protective black fallback; Linura still
+      independently verifies its own native lock surfaces before commitment.
+    </description>
+    <request name="destroy" type="destructor"/>
+    <event name="mode">
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="refresh_millihz" type="int"/>
+    </event>
+    <event name="current">
+      <arg name="enabled" type="uint"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="refresh_millihz" type="int"/>
+      <arg name="scale_milli" type="uint"/>
+      <arg name="native_scale_float_bits" type="uint"/>
+      <arg name="transform" type="uint"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="powered" type="uint"/>
+      <arg name="covered" type="uint"/>
+    </event>
+    <event name="mirror">
+      <arg name="handle_hi" type="uint"/>
+      <arg name="handle_lo" type="uint"/>
+      <arg name="generation_hi" type="uint"/>
+      <arg name="generation_lo" type="uint"/>
+    </event>
+    <event name="recovery_witness">
+      <description summary="historical ownership comparison data">
+        Exactly one bounded witness precedes head done. These source-versioned
+        native values prove no continuity after replacement and grant no effect.
+        The protected owner hashes native rule/identity data before publication.
+      </description>
+      <arg name="linura_owned" type="uint"/>
+      <arg name="owned_target" type="string"/>
+      <arg name="base_rule" type="string"/>
+      <arg name="output_identity" type="string"/>
+    </event>
+    <event name="done"/>
+  </interface>
+  <interface name="linura_display_attempt_v1" version="1">
+    <description summary="one bounded display attempt with independent restoration">
+      Configure and target requests stage data and never cause output effects.
+      Apply is one-use and requires the complete exact captured inventory. A
+      repeated get_attempt is observation-only unless it is the original live
+      connection. Lost replies never grant permission to apply again. No status
+      acknowledges success as a substitute for independent native verification.
+    </description>
+    <enum name="phase">
+      <entry name="building" value="0"/>
+      <entry name="rejected_before_dispatch" value="1"/>
+      <entry name="pending" value="2"/>
+      <entry name="restoring" value="3"/>
+      <entry name="confirmed" value="4"/>
+      <entry name="restored" value="5"/>
+      <entry name="recovery_failed" value="6"/>
+      <entry name="unknown" value="7"/>
+      <entry name="denied" value="8"/>
+    </enum>
+    <request name="destroy" type="destructor"/>
+    <request name="configure">
+      <arg name="snapshot" type="object" interface="linura_display_snapshot_v1"/>
+    </request>
+    <request name="enable_head">
+      <arg name="head" type="object" interface="linura_display_head_v1"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="refresh_millihz" type="int"/>
+      <arg name="scale_milli" type="uint"/>
+      <arg name="transform" type="uint"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="mirror" type="object" interface="linura_display_head_v1" allow-null="true"/>
+    </request>
+    <request name="disable_head">
+      <arg name="head" type="object" interface="linura_display_head_v1"/>
+    </request>
+    <request name="apply"/>
+    <request name="confirm"/>
+    <request name="restore"/>
+    <request name="get_status"/>
+    <event name="status">
+      <arg name="phase" type="uint" enum="phase"/>
+    </event>
+  </interface>
+</protocol>

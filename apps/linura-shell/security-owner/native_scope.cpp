@@ -1,10 +1,14 @@
 #include "native_scope.h"
+#include "native_display_layout.h"
 
+#include <QCryptographicHash>
+#include <QtEndian>
 #include <QStringView>
 #include <QStringList>
 #include <QUuid>
 
 #include <limits>
+#include <algorithm>
 
 namespace Linura::SecurityOwner {
 namespace {
@@ -135,10 +139,34 @@ const char *NativeTransitionIdentity::powerPermissionAction() const noexcept
 
 bool NativeApprovalScope::valid() const
 {
+    if (principal.size() > 64 || request.size() > 128 || plan.size() > 128)
+        return false;
     const auto parsed = NativeLockIdentity::parse(lock.resource);
     if (!parsed || *parsed != lock || principal != QStringLiteral("unix:uid:%1").arg(lock.uid) ||
         plan != request || !digest(requestDigest) || !digest(observationDigest) ||
         !digest(reviewDigest))
+        return false;
+    if (isDisplay()) {
+        if (!display || transition || display->deadlineUnixMs == 0 ||
+            display->deadlineBootMs == 0 || display->reason.isEmpty() ||
+            display->reason.size() > 2048 ||
+            std::any_of(display->reason.begin(), display->reason.end(),
+                        [](QChar c) {
+                            return (c.category() == QChar::Other_Control &&
+                                    c != QLatin1Char('\n')) ||
+                                   c.category() == QChar::Other_Format;
+                        }) ||
+            QString::fromUtf8(display->reason.toUtf8()) != display->reason ||
+            (purpose == ApprovalPurpose::ApplyDisplay
+                 ? !display->decisionDigest.isEmpty()
+                 : (!digest(display->decisionDigest) ||
+                    display->decisionDigest ==
+                        QStringLiteral("sha256:") + QString(64, QLatin1Char('0')))))
+            return false;
+        const auto intent = NativeDisplayIntent::parse(display->material);
+        if (!intent || intent->lock != lock || intent->encode() != display->material)
+            return false;
+    } else if (display)
         return false;
     const bool power = purpose == ApprovalPurpose::AuthenticateSuspend ||
                        purpose == ApprovalPurpose::AuthenticateLogout ||
@@ -174,9 +202,10 @@ bool NativeApprovalScope::valid() const
         }
     } else if (transition)
         return false;
-    const QString prefix = power     ? QStringLiteral("request:v010:session-transition:")
-                           : setting ? QStringLiteral("request:v010:protective-lock-setting:")
-                                     : QStringLiteral("request:v010:session-lock:");
+    const QString prefix = isDisplay() ? QStringLiteral("request:v010:display-layout:")
+                           : power     ? QStringLiteral("request:v010:session-transition:")
+                           : setting   ? QStringLiteral("request:v010:protective-lock-setting:")
+                                       : QStringLiteral("request:v010:session-lock:");
     const QStringView slug = QStringView(request).mid(prefix.size());
     if (!request.startsWith(prefix) || slug.isEmpty() || slug.size() > 64 ||
         slug.startsWith(QLatin1Char('-')) || slug.endsWith(QLatin1Char('-')) ||
@@ -197,6 +226,9 @@ bool NativeApprovalScope::valid() const
     case ApprovalPurpose::AuthenticatePowerOff:
     case ApprovalPurpose::EnableProtectiveLock:
     case ApprovalPurpose::RevokeProtectiveLock:
+    case ApprovalPurpose::ApplyDisplay:
+    case ApprovalPurpose::KeepDisplay:
+    case ApprovalPurpose::RevertDisplay:
         return true;
     }
     return false;
@@ -221,8 +253,39 @@ const char *NativeApprovalScope::authenticationAction() const noexcept
         return "org.linura.authority.enable-protective-lock";
     case ApprovalPurpose::RevokeProtectiveLock:
         return "org.linura.authority.revoke-protective-lock";
+    case ApprovalPurpose::ApplyDisplay:
+        return "org.linura.authority.apply-display-layout";
+    case ApprovalPurpose::KeepDisplay:
+        return "org.linura.authority.keep-display-layout";
+    case ApprovalPurpose::RevertDisplay:
+        return "org.linura.authority.revert-display-layout";
     }
     return nullptr;
+}
+
+bool NativeApprovalScope::isDisplay() const noexcept
+{
+    return purpose == ApprovalPurpose::ApplyDisplay || purpose == ApprovalPurpose::KeepDisplay ||
+           purpose == ApprovalPurpose::RevertDisplay;
+}
+
+QString NativeApprovalScope::protectedDisplayDigest() const
+{
+    if (!isDisplay() || !valid())
+        return {};
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const auto &field :
+         {QStringLiteral("linura.native.display-approval.v1"), lock.resource, principal, request,
+          plan, requestDigest, observationDigest, reviewDigest,
+          QString::number(static_cast<unsigned>(purpose)), display->material,
+          display->decisionDigest, QString::number(display->deadlineUnixMs),
+          QString::number(display->deadlineBootMs), display->reason}) {
+        const auto bytes = field.toUtf8();
+        const auto size = qToBigEndian(static_cast<quint64>(bytes.size()));
+        hash.addData(QByteArrayView(reinterpret_cast<const char *>(&size), sizeof(size)));
+        hash.addData(bytes);
+    }
+    return QString::fromLatin1(hash.result().toHex());
 }
 
 bool NativeApprovalScope::requiresSessionOwnerAuthentication() const noexcept

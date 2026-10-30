@@ -6,6 +6,7 @@
 #include <QKeyEvent>
 #include <QMetaMethod>
 #include <QMetaProperty>
+#include <QQuickWindow>
 
 #include <cstring>
 #include <iostream>
@@ -36,7 +37,15 @@ int main(int argc, char **argv)
 {
     QGuiApplication application(argc, argv);
     try {
-        SecretEntry entry;
+        // Visibility restoration requires an actual scene/window on Qt 6.10;
+        // a detached item may stay effectively hidden after setVisible(true).
+        // Exercise cancellation in the same scene ownership shape as the native
+        // renderer, retaining every hide/disable/focus/borrowed-response check.
+        QQuickWindow window;
+        window.resize(1, 1);
+        window.show();
+        application.processEvents();
+        SecretEntry entry(window.contentItem());
         using Linura::SecurityOwner::classifyNativePrompt;
         using Linura::SecurityOwner::nativePromptLabel;
         check(classifyNativePrompt(" Password: ") == NativePromptKind::Password);
@@ -88,6 +97,56 @@ int main(int argc, char **argv)
         check(entry.metaObject()->indexOfProperty("password") == -1);
         check(entry.metaObject()->indexOfMethod("respondToNativePrompt()") == -1);
         check(entry.metaObject()->indexOfMethod("beginNativePrompt()") == -1);
+        check(entry.metaObject()->indexOfMethod("prepareNativePrompt()") == -1);
+        check(entry.metaObject()->indexOfMethod("activatePreparedNativePrompt()") == -1);
+        const auto prepared = entry.prepareNativePrompt(NativePromptKind::Pin, 1, 1000);
+        check(prepared && entry.preparedNativePromptMatches(*prepared));
+        check(!entry.acceptsInput() && entry.maskedLength() == 0);
+        check(entry.nativeAccessibleName() == QStringLiteral("PIN (1) · UID 1000"));
+        key(entry, Qt::Key_A, Qt::NoModifier, QStringLiteral("a"));
+        check(entry.maskedLength() == 0);
+        bool responded = false;
+        check(!entry.respondToNativePrompt([&](const char *) { responded = true; }));
+        check(!responded && !entry.activatePreparedNativePrompt(*prepared));
+        check(!entry.beginNativePrompt() &&
+              !entry.prepareNativePrompt(NativePromptKind::Pin, 1, 1000));
+        entry.cancelNativePrompt();
+        check(!entry.preparedNativePromptMatches(*prepared));
+        check(!entry.activatePreparedNativePrompt(*prepared));
+        const auto replacement =
+            entry.prepareNativePrompt(NativePromptKind::VerificationCode, 2, 0);
+        check(replacement && *replacement > *prepared);
+        check(!entry.preparedNativePromptMatches(*prepared));
+        check(entry.preparedNativePromptMatches(*replacement));
+        entry.setVisible(false);
+        check(!entry.preparedNativePromptMatches(*replacement) && !entry.acceptsInput());
+        entry.setVisible(true);
+        const auto selection = entry.prepareNativeIdentitySelection({0, 1001, 1002});
+        check(selection && entry.preparedNativePromptMatches(*selection));
+        const auto selectionName = entry.nativeAccessibleName();
+        key(entry, Qt::Key_Down);
+        check(entry.nativeAccessibleName() == selectionName && !entry.acceptsInput());
+        entry.cancelNativePrompt();
+        check(!entry.preparedNativePromptMatches(*selection));
+        bool replaced = false;
+        std::optional<quint64> newer;
+        const auto reentrant = QObject::connect(&entry, &SecretEntry::inputChanged, &entry, [&] {
+            if (replaced)
+                return;
+            replaced = true;
+            entry.cancelNativePrompt();
+            newer = entry.prepareNativePrompt(NativePromptKind::VerificationCode, 2, 1001);
+        });
+        const auto older = entry.prepareNativePrompt(NativePromptKind::Password, 1, 1000);
+        QObject::disconnect(reentrant);
+        check(older && newer && *older < *newer);
+        check(!entry.preparedNativePromptMatches(*older));
+        check(entry.preparedNativePromptMatches(*newer));
+        check(!entry.activatePreparedNativePrompt(*older));
+        QFocusEvent preparedFocusLoss(QEvent::FocusOut);
+        QCoreApplication::sendEvent(&entry, &preparedFocusLoss);
+        check(!entry.preparedNativePromptMatches(*newer));
+        check(!entry.activatePreparedNativePrompt(*newer));
         const int property = entry.metaObject()->indexOfProperty("acceptsInput");
         check(property >= 0 && !entry.metaObject()->property(property).isWritable());
         check(entry.beginNativePrompt());

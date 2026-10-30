@@ -804,7 +804,7 @@ class ValidationGateTests(unittest.TestCase):
     def test_graphical_runtime_runner_exception_is_narrow_and_pinned(self):
         workflow = ".github/workflows/v010-shell-runtime-qualification.yml"
         source = (ROOT / workflow).read_text()
-        self.assertEqual(source.count("runs-on: ubuntu-26.04"), 2)
+        self.assertEqual(source.count("runs-on: ubuntu-26.04"), 3)
         self.assertTrue(
             gates.toolchain_data_loads_guarded(
                 source, require_load=True, workflow_name=workflow
@@ -4440,7 +4440,7 @@ class ValidationGateTests(unittest.TestCase):
                 ".github/workflows/v010-shell-runtime-qualification.yml",
                 job,
             )
-            for job in ("substrate", "runtime")
+            for job in ("substrate", "runtime", "display-build")
         )
         for name, workflow, job in lanes:
             target = self.root / workflow
@@ -5593,16 +5593,93 @@ class ValidationGateTests(unittest.TestCase):
                     )
             target.write_text(original, encoding="utf-8")
 
+    def test_display_build_cannot_be_substituted_or_skipped(self):
+        path = self.root / ".github/workflows/v010-shell-runtime-qualification.yml"
+        original = path.read_text()
+        marker = (
+            "      - name: Build exact-source display integration with pinned Arch SDK"
+        )
+        for before, after in (
+            (marker, marker + "\n        if: false"),
+            (marker, marker + "\n        continue-on-error: true"),
+            (
+                "python3 tools/hyprland_display_build.py ci-build",
+                "true # build skipped",
+            ),
+            (
+                "--acceleration kvm --memory-mib 4096 --jobs 1",
+                "--acceleration tcg --memory-mib 4096 --jobs 1",
+            ),
+        ):
+            with self.subTest(after=after):
+                self.assertIn(before, original)
+                path.write_text(original.replace(before, after, 1))
+                errors = gates.check(self.root)
+                self.assertTrue(
+                    any(
+                        "display build: pinned SDK/compositor build" in e
+                        or "required qualification step guard" in e
+                        for e in errors
+                    ),
+                    errors,
+                )
+        path.write_text(original)
+
+    def test_native_compositor_handoff_cannot_use_another_attempt_or_skip_verification(
+        self,
+    ):
+        path = self.root / ".github/workflows/v010-shell-runtime-qualification.yml"
+        original = path.read_text()
+        for before, after in (
+            ("needs: [substrate, display-build]", "needs: substrate"),
+            (
+                "-attempt-${{ github.run_attempt }}-unqualified-candidate",
+                "-unqualified-candidate",
+            ),
+            ("          if-no-files-found: error", "          if-no-files-found: warn"),
+            (
+                "python3 tools/hyprland_display_candidate.py",
+                "true # candidate unchecked",
+            ),
+            ('--source-sha "$SOURCE_SHA"', "--source-sha stale"),
+            (
+                "      - name: Verify exact-source compositor candidate before runtime",
+                "      - name: Verify exact-source compositor candidate before runtime\n        if: false",
+            ),
+            (
+                "      - name: Download this workflow attempt's compositor candidate",
+                "      - name: Download this workflow attempt's compositor candidate\n        continue-on-error: true",
+            ),
+        ):
+            with self.subTest(after=after):
+                self.assertIn(before, original)
+                path.write_text(original.replace(before, after, 1))
+                errors = gates.check(self.root)
+                self.assertTrue(
+                    any(
+                        "native runtime:" in error
+                        or "required qualification step guard" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+        path.write_text(original)
+
     def test_reusable_shell_runtime_jobs_require_exact_source(self):
         workflow = ".github/workflows/v010-shell-runtime-qualification.yml"
         target = self.root / workflow
         original = target.read_text(encoding="utf-8")
         source_ref = "          ref: ${{ inputs.source_sha || github.sha }}\n"
         assert_line = '          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"\n'
-        self.assertEqual(original.count(source_ref), 2)
-        self.assertEqual(original.count(assert_line), 2)
-        for job in ("substrate", "runtime"):
+        self.assertEqual(original.count(source_ref), 3)
+        self.assertEqual(original.count(assert_line), 3)
+        for job in ("substrate", "runtime", "display-build"):
             prefix, body = original.split("  " + job + ":\n", 1)
+            contract_name = {
+                "substrate": "substrate",
+                "runtime": "runtime",
+                "display-build": "display build",
+            }[job]
             for scenario, before, after in (
                 ("changed ref", source_ref, "          ref: main\n"),
                 (
@@ -5614,10 +5691,10 @@ class ValidationGateTests(unittest.TestCase):
                 (
                     "conditional assertion",
                     "      - name: Assert exact source and "
-                    + ("substrate" if job == "substrate" else "runtime")
+                    + contract_name
                     + " contract\n",
                     "      - name: Assert exact source and "
-                    + ("substrate" if job == "substrate" else "runtime")
+                    + contract_name
                     + " contract\n        if: false\n",
                 ),
             ):

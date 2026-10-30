@@ -50,7 +50,7 @@ RUST_ACTION_ARG_PATTERN = re.compile(
     r'"--action-id"(?:\s*\.to_owned\(\))?\s*,\s*([A-Z][A-Z0-9_]*|"[^"]+")'
 )
 RUST_NATIVE_APPROVAL_ACTION_PATTERN = re.compile(
-    r'\bNativeApprovalPurpose::[A-Z][A-Za-z0-9_]*\s*=>\s*(?:\{\s*)?("org\.linura\.authority\.[^"]+")'
+    r'\bNative(?:Display)?ApprovalPurpose::[A-Z][A-Za-z0-9_]*\s*=>\s*(?:\{\s*)?("org\.linura\.authority\.[^"]+")'
 )
 CMAKE_QML_MODULE_PATTERN = re.compile(r"\bqt_add_qml_module\s*\((.*?)\)", re.DOTALL)
 CMAKE_URI_PATTERN = re.compile(r"(?:^|\s)URI\s+([A-Za-z0-9_.]+)(?=\s|$)")

@@ -21,12 +21,85 @@
       <arg name="consumed" type="b" direction="out"/>
     </method>
     <method name="CancelApproval"/>
+    <!-- Separate display Apply handshake. Original canonical scope/review,
+         complete material/reason and original deadline are immutable comparison
+         data; no bool or digest becomes prepared execution authority. Keep and
+         Revert must continue the retained original native transaction. -->
+    <method name="ArmDisplayApproval">
+      <arg name="scope" type="(sssssssu)" direction="in"/>
+      <arg name="material" type="s" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="deadline_unix_ms" type="t" direction="in"/>
+      <arg name="deadline_boot_ms" type="t" direction="in"/>
+      <arg name="armed" type="b" direction="out"/>
+    </method>
+    <method name="DisplayApprovalReady">
+      <arg name="scope" type="(sssssssu)" direction="in"/>
+      <arg name="material" type="s" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="deadline_unix_ms" type="t" direction="in"/>
+      <arg name="deadline_boot_ms" type="t" direction="in"/>
+      <arg name="ready" type="b" direction="out"/>
+    </method>
+    <method name="ConsumeDisplayApproval">
+      <arg name="scope" type="(sssssssu)" direction="in"/>
+      <arg name="material" type="s" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="deadline_unix_ms" type="t" direction="in"/>
+      <arg name="deadline_boot_ms" type="t" direction="in"/>
+      <arg name="consumed" type="b" direction="out"/>
+    </method>
+    <method name="CancelDisplayApproval">
+      <arg name="scope" type="(sssssssu)" direction="in"/>
+      <arg name="material" type="s" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="deadline_unix_ms" type="t" direction="in"/>
+      <arg name="deadline_boot_ms" type="t" direction="in"/>
+      <arg name="cancelled" type="b" direction="out"/>
+    </method>
     <method name="ObserveLock">
       <!-- Consistent in-flight acquisition/release returns the fixed private
            NativeTransitionPending error, never secure=false. Other unknown or
            inconsistent state remains NativeUnavailable. Only Control's existing
            bounded post-dispatch verification loop may await a known transition. -->
       <arg name="observation" type="(sbt)" direction="out"/>
+    </method>
+    <method name="ObserveDisplay">
+      <arg name="observation" type="(ssstssb)" direction="out"/>
+    </method>
+    <!-- Read-only, admitted only for the independently supervised session executor.
+         sampleDigest correlates strictly parsed raw facts; it is not authority. -->
+    <method name="ObservePreparedDisplay">
+      <arg name="observation" type="((ssstssb)s)" direction="out"/>
+    </method>
+    <!-- Read-only; supervised Control only. Complete canonical intent and
+         immutable native correlation scope this get_status probe. Phases are
+         native facts, never verified layout, approval or replay permission. -->
+    <method name="ObserveDisplayAttempt">
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="observation" type="(sssttub)" direction="out"/>
+    </method>
+    <!-- Prepared executor only. The strict Rust decoder's exact sample digest
+         and ORIGINAL boot timestamp must survive a same-owner fresh recheck.
+         The original canonical baseline guard must match final native ownership.
+         One apply only; a phase is not independent verification or keep authority. -->
+    <method name="DispatchPreparedDisplay">
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="sample_digest" type="s" direction="in"/>
+      <arg name="sampled_boot_ms" type="t" direction="in"/>
+      <arg name="native_baseline_guard" type="s" direction="in"/>
+      <arg name="phase" type="u" direction="out"/>
+    </method>
+    <!-- Current attested executor only, following Control's consumed/durable
+         protected decision. Original connection/reservation, layout, lock/input
+         coverage and original deadline remain mandatory. No new apply, replay,
+         reconnection privilege or independent verification is provided. -->
+    <method name="ContinuePreparedDisplay">
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="decision_digest" type="s" direction="in"/>
+      <arg name="protected_decision_digest" type="s" direction="in"/>
+      <arg name="confirm" type="b" direction="in"/>
+      <arg name="phase" type="u" direction="out"/>
     </method>
     <method name="ObservePowerPermission">
       <arg name="resource" type="s" direction="in"/>

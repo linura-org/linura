@@ -20,6 +20,23 @@ Architecture and security requirements are defined by [ADR 0042](../../../docs/a
 
 ## Recorded Level A native evidence
 
+The authentication runner now also requires a read-only S21 display admission
+predicate case. The guest explicitly builds the probe against the same
+`native_owner_admission.cpp` and `owner_identity.cpp` used by the pinned compositor,
+using the guest's native libsystemd. The disposable guest installs the probe
+without file capabilities and executes it as the ordinary session account in a
+separate process/session. It must admit the actual immutable root-supervised
+owner, reject its own same-UID process and unsupported root/PID identities, then
+match independently re-read owner PID, invocation and process-start evidence.
+Unknown/missing checks, substituted identities and completion/support promotion
+claims reject the report. The workflow retains source and probe-binary digests.
+
+This case is implemented but requires a fresh executed native run for evidence.
+It qualifies only the admission predicate on that source/image; actual private
+Wayland binding, authorized display effects, first-frame protection and recovery
+remain separate required S21-2 cases. Component fixtures and the SDK's missing-bus
+denial check do not establish the positive supervised-owner result.
+
 On 2026-10-24 UTC, the [v0.10 exact-source native run](https://github.com/linura-org/linura/actions/runs/40141305916) completed successfully against
 implementation commit `a99511d5bd22afa5dcf7878a3fb9e0feca74c87f`. The
 workflow executed real native session bootstrap, same-UID denial, PAM/Polkit

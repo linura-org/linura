@@ -130,6 +130,16 @@ EXPECTED_LOCAL_OPERATIONS = {
     }
 }
 EXPECTED_REGISTERED_OPERATIONS = {
+    "managed-display-layout": {
+        "operation_id": "operation:display.layout.apply",
+        "class": "managed-external-effect",
+        "risk_floor": "security-sensitive",
+        "risk_floor_rule_id": "operation-registry.managed-display-layout.risk-floor",
+        "provider": "hyprland",
+        "observation_capability": "display.outputs.observe",
+        "resource_prefix": "display:topology:",
+        "change_keys": ["layout"],
+    },
     "managed-session-lock": {
         "operation_id": "operation:session.lock.set-secure",
         "class": "managed-external-effect",
@@ -536,12 +546,15 @@ def validate(root: Path) -> list[str]:
             "review_plan_with_classification",
             "candidate.risk_floor",
             "review.subject().prospective_risk() != risk.risk",
+            "pub(crate) fn revalidate_display_keep(",
+            "original.revalidate(principal, floor, &self.approvals)",
         ):
             if fragment not in durable_text:
                 failures.append(
                     f"durable authority handoff boundary missing required fragment: {fragment}"
                 )
-        expected_review_paths = 3
+        # Candidate, recovery, prepared handoff and original display Keep review.
+        expected_review_paths = 4
         actual_review_paths = durable_text.count("review_plan_with_classification(")
         if actual_review_paths != expected_review_paths:
             failures.append(
