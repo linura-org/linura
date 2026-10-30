@@ -3,6 +3,9 @@
 #include "protected_wire.h"
 #include "protected_input_retirement.h"
 #include "protected_key_delivery.h"
+#include "protected_frame.h"
+#include "protected_scope_history.h"
+#include "protected_opaque_buffer.h"
 #include "native_owner_admission.h"
 
 #include "src/Compositor.hpp"
@@ -15,6 +18,8 @@
 #include "src/pointer/PointerManager.hpp"
 #include "src/protocols/core/Compositor.hpp"
 #include "src/render/Renderer.hpp"
+#include "src/render/OpenGL.hpp"
+#include "src/render/Renderbuffer.hpp"
 #include "src/render/pass/RectPassElement.hpp"
 #include "src/render/pass/SurfacePassElement.hpp"
 #include "src/state/MonitorState.hpp"
@@ -30,7 +35,6 @@
 #include <linux/input-event-codes.h>
 #include <map>
 #include <memory>
-#include <set>
 #include <wayland-server-core.h>
 
 namespace Linura::HyprlandDisplay {
@@ -49,7 +53,7 @@ NativeData *activeNative = nullptr;
 ProtectedInputRetirement inputRetirement;
 std::unique_ptr<ProtectedWireEndpoint> endpoint;
 std::uint64_t nextEpoch = 1;
-std::set<std::string> scopes;
+ProtectedScopeHistory scopes;
 wl_event_source *drainTimer = nullptr;
 std::map<std::pair<IPointer *, std::uint32_t>, WP<IPointer>> heldButtons;
 
@@ -112,6 +116,46 @@ bool supportedPresentation()
     return g_pPluginSystem && g_pPluginSystem->pluginCount() == 0 &&
            ((*shader).empty() || *shader == STRVAL_EMPTY);
 }
+// A modeset placeholder is allocated, not initialized. Render directly into
+// that exact future-size scanout buffer before it can reach the backend. The
+// pinned FULL_FAKE path binds the supplied FB without importing the ordinary
+// scene or committing an output; no nested render pass is permitted here.
+bool renderOpaqueBuffer(Monitor::CMonitor *monitor, const SP<Aquamarine::IBuffer> &buffer)
+{
+    if (!monitor || !monitor->m_output || !buffer || !buffer->good() || !g_pHyprRenderer ||
+        !Render::GL::g_pHyprOpenGL || g_pHyprRenderer->renderData().pMonitor)
+        return false;
+    if (!monitor->m_output->swapchain || !monitor->m_output->swapchain->contains(buffer) ||
+        buffer->lockedByBackend || buffer->backendPinCount() != 0)
+        return false; // Never modify a client buffer or an existing scanout in place.
+    const auto &state = monitor->m_output->state->state();
+    const auto mode = state.mode ? state.mode : state.customMode;
+    if (!state.enabled || !mode || buffer->size != mode->pixelSize || buffer->size.x < 1 ||
+        buffer->size.y < 1 || buffer->size.x > 32768 || buffer->size.y > 32768 ||
+        buffer->size.x * buffer->size.y > 8 * 1024 * 1024 ||
+        buffer->size.x != std::floor(buffer->size.x) ||
+        buffer->size.y != std::floor(buffer->size.y))
+        return false;
+    Render::GL::g_pHyprOpenGL->makeEGLCurrent();
+    if (glGetError() != GL_NO_ERROR || glGetGraphicsResetStatus() != GL_NO_ERROR)
+        return false;
+    const auto renderbuffer = g_pHyprRenderer->getOrCreateRenderbuffer(buffer, state.drmFormat);
+    const auto framebuffer = renderbuffer ? renderbuffer->getFB() : nullptr;
+    if (!framebuffer || framebuffer->m_size != buffer->size)
+        return false;
+    CRegion damage{0, 0, static_cast<int>(buffer->size.x), static_cast<int>(buffer->size.y)};
+    if (!g_pHyprRenderer->beginFullFakeRender(monitor->m_self.lock(), damage, framebuffer))
+        return false;
+    // Clear is independent of the old monitor transform, viewport, damage,
+    // color management and scene contents. Restrictive inherited write masks
+    // cannot leave uninitialized pixels outside the old output geometry.
+    const bool cleared = clearProtectedFramebuffer();
+    g_pHyprRenderer->endRender();
+    // This path has no renderer-produced acquire fence. Complete the actual
+    // write before handing the buffer to queued native submission. Completion
+    // here is NOT a hardware presentation acknowledgement.
+    return cleared && glGetError() == GL_NO_ERROR && glGetGraphicsResetStatus() == GL_NO_ERROR;
+}
 bool draining()
 {
     return inputRetirement.blocked() || !heldButtons.empty();
@@ -135,10 +179,9 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         SP<ISurfaceRole> role;
         ProtectedScene::Configure configure;
         std::uint32_t serial = 0;
-        bool acknowledged = false, contentCommitted = false, selectedFrame = false,
-             pendingFrame = false, submitted = false;
+        bool acknowledged = false, contentCommitted = false, selectedFrame = false;
+        ProtectedFrame frame;
         SP<Aquamarine::IBuffer> renderedBuffer;
-        std::uint64_t commitId = 0;
         CHyprSignalListener commit, destroy, present, result;
     };
     ProtectedInteraction interaction;
@@ -376,15 +419,13 @@ class PinnedScene final : public ProtectedScene
                 if (!live || live->closed)
                     return;
                 auto &surface = live->surfaces.at(key);
-                if (event.id == 0 || event.id != surface.commitId)
-                    return;
-                if (event.status != Aquamarine::IOutput::AQ_OUTPUT_COMMIT_SUBMITTED ||
-                    event.error != 0) {
+                if (!surface.frame.submitted(
+                        event.id, event.status == Aquamarine::IOutput::AQ_OUTPUT_COMMIT_SUBMITTED &&
+                                      event.error == 0)) {
                     live->interaction.cancel();
                     live->damage();
                     return;
                 }
-                surface.submitted = true;
             });
         surface.present = monitor->m_output->events.present.listen(
             [weak, key](const Aquamarine::IOutput::SPresentEvent &event) {
@@ -392,12 +433,18 @@ class PinnedScene final : public ProtectedScene
                 if (!live || !live->refresh())
                     return;
                 auto &surface = live->surfaces.at(key);
-                if (event.commitID == 0 || event.commitID != surface.commitId)
-                    return;
-                live->interaction.presented(
-                    key, event.commitID,
-                    surface.submitted && event.presented &&
+                const auto presentation = surface.frame.presented(
+                    event.commitID,
+                    event.presented &&
                         (event.flags & Aquamarine::IOutput::AQ_OUTPUT_PRESENT_HW_COMPLETION));
+                if (presentation == ProtectedFrame::Presentation::Failed) {
+                    live->interaction.cancel();
+                    live->damage();
+                    return;
+                }
+                if (presentation != ProtectedFrame::Presentation::Content)
+                    return;
+                live->interaction.presented(key, event.commitID, true);
                 const auto focus = live->focused();
                 if (focus && g_pSeatManager)
                     g_pSeatManager->setKeyboardFocus(focus);
@@ -426,10 +473,9 @@ class PinnedScene final : public ProtectedScene
         // revision. No original Ready frame can attest the replacement content.
         for (auto &[key, surface] : data->surfaces) {
             surface.serial = wl_display_next_serial(g_pCompositor->m_wlDisplay);
-            surface.acknowledged = surface.contentCommitted = surface.selectedFrame =
-                surface.pendingFrame = surface.submitted = false;
+            surface.acknowledged = surface.contentCommitted = surface.selectedFrame = false;
+            surface.frame.invalidate();
             surface.renderedBuffer.reset();
-            surface.commitId = 0;
             if (!data->interaction.configure(key, surface.serial))
                 return false;
         }
@@ -494,8 +540,7 @@ void initializeProtectedDisplay(wl_display &display)
     endpoint = std::make_unique<ProtectedWireEndpoint>(
         display, attestDisplayOwner,
         [](const ProtectedInteraction::Scope &scope) -> std::unique_ptr<ProtectedScene> {
-            if (!supportedPresentation() || !active.expired() || draining() ||
-                scopes.size() >= 256 || scopes.contains(scope.digest) || !nativeBackend() ||
+            if (!supportedPresentation() || !active.expired() || draining() || !nativeBackend() ||
                 !g_pInputManager || !g_pSeatManager || !Pointer::mgr() || keysHeld() ||
                 !g_pInputManager->getKeysFromAllKBs().empty() ||
                 g_pInputManager->hasHeldButtons() || g_pInputManager->m_keyboards.empty() ||
@@ -514,7 +559,7 @@ void initializeProtectedDisplay(wl_display &display)
             if (!facts || !clock)
                 return nullptr;
             auto interaction = ProtectedInteraction::start(scope, *facts, *clock, nextEpoch++);
-            if (!interaction)
+            if (!interaction || !scopes.reserve(scope, *clock))
                 return nullptr;
             auto data = std::make_shared<NativeData>(std::move(*interaction));
             for (auto &keyboard : data->keyboards) {
@@ -537,7 +582,6 @@ void initializeProtectedDisplay(wl_display &display)
                 data->close();
                 return nullptr;
             }
-            scopes.insert(scope.digest);
             data->timer = wl_event_loop_add_timer(
                 g_pCompositor->m_wlEventLoop,
                 [](void *context) {
@@ -592,7 +636,8 @@ bool renderProtectedDisplay(Monitor::CMonitor *monitor, const Time::steady_tp &n
     auto *surface = data->forMonitor(monitor);
     if (surface) {
         surface->selectedFrame = false;
-        surface->pendingFrame = false;
+        // A previous rendered-but-unsubmitted buffer cannot be adopted by
+        // this pass. The actual completion callback supplies its own identity.
         surface->renderedBuffer.reset();
     }
     if (!data->refresh() || !surface)
@@ -619,11 +664,15 @@ void protectedFrameRendered(Monitor::CMonitor *monitor, Aquamarine::IBuffer *buf
         return;
     auto *surface = data->forMonitor(monitor);
     const auto current = monitor->m_output->state->state().buffer;
-    if (!surface || !surface->selectedFrame || !current || current.get() != buffer)
+    if (!surface || !current || current.get() != buffer)
         return;
+    if (!surface->frame.rendered(buffer, surface->selectedFrame ? ProtectedFrame::Kind::Content
+                                                                : ProtectedFrame::Kind::Safety)) {
+        data->interaction.cancel();
+        return;
+    }
     surface->selectedFrame = false;
     surface->renderedBuffer = current;
-    surface->pendingFrame = true;
 }
 std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
 {
@@ -631,23 +680,41 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
     if (!data)
         return std::nullopt;
     auto *surface = data->forMonitor(monitor);
-    // Never submit an unrendered swapchain placeholder or a client scanout
-    // buffer in the protected scene. Black-only frames are allowed only after
-    // the renderer has produced a trusted frame for this exact output.
-    if (!data->refresh() || !surface || !surface->pendingFrame || !monitor || !monitor->m_output ||
-        !surface->renderedBuffer ||
-        surface->renderedBuffer != monitor->m_output->state->state().buffer)
+    if (!data->refresh() || !surface || !monitor || !monitor->m_output)
         return false;
-    surface->pendingFrame = false;
-    surface->submitted = false;
+    const auto buffer = monitor->m_output->state->state().buffer;
+    if (!buffer)
+        return false;
+    if (surface->renderedBuffer != buffer || !surface->frame.prepared(buffer.get())) {
+        // Native-owned opaque initialization replaces the former unrendered
+        // placeholder refusal. Inventory/lease checks above stay mandatory;
+        // this does not make an unbound layout mutation eligible.
+        if (!ownedModesetInProgress() ||
+            data->interaction.phase() != ProtectedInteraction::Phase::Consumed ||
+            data->interaction.scope().purpose != ProtectedInteraction::Purpose::Apply ||
+            !renderOpaqueBuffer(monitor, buffer) ||
+            !surface->frame.rendered(buffer.get(), ProtectedFrame::Kind::Safety))
+            return false;
+        surface->renderedBuffer = buffer;
+    }
+    // Revoke old interaction evidence BEFORE a black frame can replace it.
+    // The opaque frame's own hardware event will remain safety-only.
+    if (surface->frame.pendingKind() == ProtectedFrame::Kind::Safety &&
+        !data->interaction.safetyFrame(surface->output))
+        return false;
+    // Rendering/importing the buffer can take time. Neither the original
+    // protection window nor the native power fence may expire during that work.
+    if (!data->refresh() || !ownedCommitAllowed())
+        return false;
     const auto submission = monitor->m_output->commitAsync({});
     surface->renderedBuffer.reset();
     if (submission.id == 0 || submission.error != 0 ||
-        !data->interaction.commit(surface->output, surface->serial, submission.id)) {
+        !surface->frame.queued(buffer.get(), submission.id) ||
+        (surface->frame.queuedKind() == ProtectedFrame::Kind::Content &&
+         !data->interaction.commit(surface->output, surface->serial, submission.id))) {
         data->interaction.cancel();
         return false;
     }
-    surface->commitId = submission.id;
     return true;
 }
 bool focusAllowed(const SP<CWLSurfaceResource> &resource, bool keyboard)

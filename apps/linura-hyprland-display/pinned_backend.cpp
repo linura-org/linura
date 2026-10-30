@@ -470,6 +470,10 @@ void commitObserved(Monitor::CMonitor *, bool success)
     if (backend && backend->writing && !success)
         backend->commitFailed = true;
 }
+bool ownedModesetInProgress()
+{
+    return backend && backend->writing && backend->powerInhibitor.held();
+}
 bool ownedCommitAllowed()
 {
     // A modeset can invoke native callbacks after apply's initial revalidation.

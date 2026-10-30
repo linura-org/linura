@@ -253,6 +253,9 @@ bool NativeDisplayFlow::consume(const NativeApprovalScope &scope)
     consumed_ = true;
     epoch_ = status->epoch;
     inputGeneration_ = backend_.protectedInputGeneration();
+    // The consumed scene can repaint, but cannot rearm proof or route input.
+    // Do not leave an obsolete PAM prompt visible while Control prepares.
+    presentation_.present(NativePresentation::State::PreparingDisplay);
     return true;
 }
 bool NativeDisplayFlow::redeem(const NativeDisplayIntent &intent,
@@ -268,6 +271,7 @@ bool NativeDisplayFlow::redeem(const NativeDisplayIntent &intent,
         proofGeneration_ != backend_.protectedInteractionGeneration())
         return false;
     spent_ = true;
+    presentation_.present(NativePresentation::State::ApplyingDisplay);
     return true;
 }
 void NativeDisplayFlow::cancel()

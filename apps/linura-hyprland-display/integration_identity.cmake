@@ -8,6 +8,9 @@ function(linura_display_integration_identity source_dir output_dir)
         protected_interaction.cpp protected_interaction.h
         protected_input_retirement.cpp protected_input_retirement.h
         protected_key_delivery.h
+        protected_frame.h
+        protected_scope_history.h
+        protected_opaque_buffer.h
         protected_wire.cpp protected_wire.h
         protocols/linura-protected-display-v1.xml
         integration_identity.cmake source_integration.py

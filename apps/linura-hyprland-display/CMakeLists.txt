@@ -80,6 +80,31 @@ target_compile_options(linura-hyprland-display-owner PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    # Mandatory in the real pinned compositor build. Portable mechanism suites
+    # alone do not exercise GLES or qualify actual rendered scanout storage.
+    if(TARGET hyprland_lib)
+        pkg_check_modules(PROTECTED_EGL REQUIRED IMPORTED_TARGET egl>=1.5 glesv2>=3.2)
+        add_executable(linura-hyprland-protected-opaque-buffer-tests tests/protected_opaque_buffer.cpp)
+        target_include_directories(linura-hyprland-protected-opaque-buffer-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+        target_link_libraries(linura-hyprland-protected-opaque-buffer-tests PRIVATE PkgConfig::PROTECTED_EGL)
+        target_compile_options(linura-hyprland-protected-opaque-buffer-tests PRIVATE
+            -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+        add_test(NAME hyprland-protected-opaque-buffer COMMAND linura-hyprland-protected-opaque-buffer-tests)
+        set_tests_properties(hyprland-protected-opaque-buffer PROPERTIES TIMEOUT 15
+            ENVIRONMENT "EGL_PLATFORM=surfaceless;LIBGL_ALWAYS_SOFTWARE=1")
+    endif()
+    add_executable(linura-hyprland-protected-scope-history-tests tests/protected_scope_history.cpp)
+    target_link_libraries(linura-hyprland-protected-scope-history-tests PRIVATE linura-hyprland-display-mechanism)
+    target_compile_options(linura-hyprland-protected-scope-history-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-protected-scope-history COMMAND linura-hyprland-protected-scope-history-tests)
+    set_tests_properties(hyprland-protected-scope-history PROPERTIES TIMEOUT 5)
+    add_executable(linura-hyprland-protected-frame-tests tests/protected_frame.cpp)
+    target_link_libraries(linura-hyprland-protected-frame-tests PRIVATE linura-hyprland-display-mechanism)
+    target_compile_options(linura-hyprland-protected-frame-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-protected-frame-boundary COMMAND linura-hyprland-protected-frame-tests)
+    set_tests_properties(hyprland-protected-frame-boundary PROPERTIES TIMEOUT 5)
     add_executable(linura-hyprland-protected-retirement-tests tests/protected_input_retirement.cpp)
     target_link_libraries(linura-hyprland-protected-retirement-tests PRIVATE linura-hyprland-display-mechanism)
     target_compile_options(linura-hyprland-protected-retirement-tests PRIVATE

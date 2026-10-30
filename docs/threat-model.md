@@ -1071,3 +1071,24 @@ prevents premature native authentication success. Official administrator identit
 selection remains explicit and bounded, with a new protected revision for each
 selected-UID change. This does not convert presentation callbacks into approval,
 permit or effect authority, and does not activate the unfinished production path.
+
+Protected display scanout distinguishes compositor-rendered opaque safety frames
+from configured owner-content frames. Each output retains exact rendered-buffer
+identity, monotonic queued commit ID, successful submission and the matching
+hardware completion. A safety frame invalidates an earlier Ready epoch and cannot
+be substituted for review or authentication content. The compositor may initialize
+a bounded private swapchain placeholder through its pinned renderer only inside
+an owned native write with a consumed Apply scene; client buffers and buffers
+already in scanout are excluded. Native deadlines and power inhibition are checked
+again after rendering. Software GLES readback establishes initialized storage,
+not physical presentation, modeset continuity or mutation authority. Those final
+handoff and native qualification obligations still block activation.
+
+Scope retirement retains all live tombstones, reclaims only entries whose wall
+and BOOTTIME deadlines have both expired, and retains both clock floors across
+reclamation. Clock rollback is terminal for new protected scopes. This prevents a
+BOOTTIME-expired digest from receiving a fresh mapping while its wall deadline is
+still ahead, and avoids permanent session exhaustion from expired reservations.
+Consumed Apply presentation reports preparation/dispatch progress without a
+password field, unlock action or success claim; this fixed feedback grants no
+Keep/Revert authority and does not complete recovery interaction.

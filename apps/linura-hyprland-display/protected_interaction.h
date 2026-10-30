@@ -42,6 +42,9 @@ class ProtectedInteraction final
     // Accepted backend commit IDs must strictly increase per output; reuse or
     // wrap makes this private interaction unsupported.
     [[nodiscard]] bool commit(OutputKey, std::uint64_t serial, std::uint64_t nativeCommitId);
+    // A compositor-rendered opaque safety frame hides content but cannot keep
+    // an old Ready proof alive or stand in for a newly presented owner frame.
+    [[nodiscard]] bool safetyFrame(OutputKey);
     void presented(OutputKey, std::uint64_t nativeCommitId, bool hardwareCompleted);
     void focus(std::optional<OutputKey>);
     void inputReplaced();

@@ -81,6 +81,29 @@ void backendCommitIdsCannotBeReused()
     assert(!value.commit(One, 3, 20));
     assert(value.phase() == ProtectedInteraction::Phase::Cancelled);
 }
+void opaqueSafetyCannotPreserveOrRearmInteractionProof()
+{
+    auto value = conversation();
+    ready(value);
+    const auto readyEpoch = value.epoch();
+    assert(value.safetyFrame(One));
+    assert(value.epoch() != readyEpoch);
+    value.presented(One, 20, true); // Old content event, after the black replacement.
+    assert(!value.eligible(readyEpoch, inventory(), {10'001, 1001}));
+    assert(!value.eligible(value.epoch(), inventory(), {10'001, 1001}));
+    assert(value.commit(One, 1, 21));
+    value.presented(One, 21, true);
+    const auto freshEpoch = value.epoch();
+    assert(value.eligible(freshEpoch, inventory(), {10'002, 1002}));
+    assert(value.consume(scope(), freshEpoch, inventory(), {10'002, 1002}));
+    assert(value.safetyFrame(One));
+    assert(value.phase() == ProtectedInteraction::Phase::Consumed);
+    assert(value.commit(One, 1, 22));
+    value.presented(One, 22, true);
+    assert(!value.eligible(value.epoch(), inventory(), {10'003, 1003}));
+    assert(!value.safetyFrame({99, 99}));
+    assert(value.phase() == ProtectedInteraction::Phase::Cancelled);
+}
 void purposeAndProofCannotBeSubstitutedOrReused()
 {
     for (const auto purpose :
@@ -263,6 +286,7 @@ int main()
     assert(moved.eligible(epoch, inventory(), {10'000, 1000}));
     everyOutputNeedsCorrelatedPresentation();
     backendCommitIdsCannotBeReused();
+    opaqueSafetyCannotPreserveOrRearmInteractionProof();
     purposeAndProofCannotBeSubstitutedOrReused();
     consumedPresentationCanRepaintWithoutRearmingProof();
     focusInputAndNativeLifetimeDriftInvalidateTheProof();

@@ -143,6 +143,21 @@ bool ProtectedInteraction::commit(OutputKey output, std::uint64_t serial,
     updateReady();
     return true;
 }
+bool ProtectedInteraction::safetyFrame(OutputKey output)
+{
+    const auto frame = frames_.find(output);
+    if (phase_ == Phase::Cancelled || frame == frames_.end()) {
+        cancel();
+        return false;
+    }
+    if (phase_ != Phase::Consumed && (frame->second.commit != 0 || frame->second.presented) &&
+        !advance())
+        return false;
+    frame->second.commit = 0;
+    frame->second.presented = false;
+    updateReady();
+    return true;
+}
 void ProtectedInteraction::presented(OutputKey output, std::uint64_t nativeCommitId,
                                      bool hardwareCompleted)
 {

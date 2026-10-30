@@ -26,6 +26,9 @@ void shutdown();
 [[nodiscard]] bool lockReleased();
 void commitObserved(Monitor::CMonitor *, bool success);
 [[nodiscard]] bool ownedCommitAllowed();
+// Comparison with the compositor-thread owned write, never an admission API.
+// Protected buffer initialization must not assist an unrelated IPC modeset.
+[[nodiscard]] bool ownedModesetInProgress();
 [[nodiscard]] bool ownsMonitor(Monitor::CMonitor *);
 [[nodiscard]] Config::CMonitorRule overlayRule(Monitor::CMonitor *, Config::CMonitorRule);
 [[nodiscard]] Backend *nativeBackend();

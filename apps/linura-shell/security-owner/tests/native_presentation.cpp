@@ -124,7 +124,9 @@ int main(int argc, char **argv)
     for (auto state : std::array{
              NativePresentation::State::Locked, NativePresentation::State::ConfirmingLock,
              NativePresentation::State::Denied, NativePresentation::State::Unavailable,
-             NativePresentation::State::Recovering, NativePresentation::State::SleepNotVerified}) {
+             NativePresentation::State::Recovering, NativePresentation::State::SleepNotVerified,
+             NativePresentation::State::PreparingDisplay,
+             NativePresentation::State::ApplyingDisplay}) {
         presentation.present(state);
         assert(presentation.primaryRequestAvailable() ==
                (state == NativePresentation::State::Locked ||
@@ -136,6 +138,24 @@ int main(int argc, char **argv)
             assert(presentation.paint(resized));
             assert(resized.constBits() == pixels && resized.size() == size);
         }
+    }
+    // Display progress is presentation-only, with no password field, generic
+    // unlock action, Cancel action, provider handle or implied success receipt.
+    QImage preparing;
+    for (const auto state : {NativePresentation::State::PreparingDisplay,
+                             NativePresentation::State::ApplyingDisplay}) {
+        presentation.present(state);
+        assert(!entry.acceptsInput() && !presentation.primaryRequestAvailable());
+        assert(presentation.paint(frame));
+        assert(preparing.isNull() || preparing != frame);
+        preparing = frame.copy();
+        const auto projection = presentation.assistiveProjection(true);
+        assert(projection.visible && !projection.accepting);
+        assert(projection.heading.contains(QStringLiteral("display")));
+        for (int y = 0; y < frame.height(); y += 10)
+            for (int x = 0; x < frame.width(); x += 10)
+                assert(presentation.pointerTarget(frame.size(), QPointF(x, y)).action ==
+                       NativePointerTarget::Action::None);
     }
     QImage invalid(640, 480, QImage::Format_ARGB32);
     assert(!presentation.paint(invalid));

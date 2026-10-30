@@ -187,6 +187,16 @@ class NativePresentation::Impl final
             title = displayPage->heading;
             explanation = displayPage->explanation;
             break;
+        case State::PreparingDisplay:
+            title = QStringLiteral("Preparing display change");
+            explanation = QStringLiteral("Authentication completed. Linura is checking this "
+                                         "display change before applying it.");
+            break;
+        case State::ApplyingDisplay:
+            title = QStringLiteral("Applying display layout");
+            explanation = QStringLiteral("Linura is checking each display. Recovery may be "
+                                         "needed if the change cannot be verified.");
+            break;
         case State::Denied:
             title = QStringLiteral("Authentication not completed");
             explanation =
