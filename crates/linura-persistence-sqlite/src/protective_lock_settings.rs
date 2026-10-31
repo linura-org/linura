@@ -45,6 +45,17 @@ fn corrupt() -> TransactionStoreError {
     TransactionStoreError::Corruption("protective-lock policy journal validation failed".into())
 }
 
+// SQLite INTEGER is signed. Preserve the journal's u64 domain encoding while
+// refusing values that cannot be stored without truncation or wraparound.
+fn sql_i64(value: u64) -> Result<i64, TransactionStoreError> {
+    i64::try_from(value).map_err(|_| TransactionStoreError::CapacityExceeded)
+}
+
+fn sql_u64(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
+    let value: i64 = row.get(index)?;
+    u64::try_from(value).map_err(|_| rusqlite::Error::InvalidQuery)
+}
+
 fn now() -> Result<u64, TransactionStoreError> {
     let value = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -221,6 +232,8 @@ impl SqliteProtectiveLockSettingStore {
             return Err(TransactionStoreError::CapacityExceeded);
         }
         let position = snapshot.count + 1;
+        let position_sql = sql_i64(position)?;
+        let expiry_sql = sql_i64(update.expires_at_unix_ms())?;
         let chain = chain_digest(position, &snapshot.tip, record.digest());
         let tag = self.integrity_key.tag(
             RECORD_DOMAIN,
@@ -236,7 +249,7 @@ impl SqliteProtectiveLockSettingStore {
             .execute(
                 "INSERT INTO protective_lock_records VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
                 params![
-                    position,
+                    position_sql,
                     record.owner().as_str(),
                     record
                         .epoch()
@@ -247,7 +260,7 @@ impl SqliteProtectiveLockSettingStore {
                     record.canonical(),
                     record.digest().as_str(),
                     chain.as_str(),
-                    update.expires_at_unix_ms(),
+                    expiry_sql,
                     update.authentication_tag(),
                     tag.as_slice(),
                 ],
@@ -333,14 +346,16 @@ fn write_identity(
         IDENTITY_DOMAIN,
         &identity_material(key, authority, snapshot),
     )?;
+    let count_sql = sql_i64(snapshot.count)?;
+    let last_write_sql = sql_i64(snapshot.last_write)?;
     let affected = if create {
         connection.execute("INSERT INTO protective_lock_identity VALUES (1,?1,?2,?3,?4,?5,?6,?7)", params![
             key.fingerprint().as_str(), authority.fingerprint().as_str(), digest_bytes("linura.sqlite.protective-lock-schema.v1", SCHEMA.as_bytes()).as_str(),
-            snapshot.count, snapshot.tip.as_str(), snapshot.last_write, tag.as_slice(),
+            count_sql, snapshot.tip.as_str(), last_write_sql, tag.as_slice(),
         ])
     } else {
         connection.execute("UPDATE protective_lock_identity SET record_count=?1,chain_tip=?2,last_write_unix_ms=?3,integrity_tag=?4 WHERE singleton=1", params![
-            snapshot.count, snapshot.tip.as_str(), snapshot.last_write, tag.as_slice(),
+            count_sql, snapshot.tip.as_str(), last_write_sql, tag.as_slice(),
         ])
     }.map_err(sqlite)?;
     if affected != 1 {
@@ -402,7 +417,7 @@ fn validate(
     let page_size: i64 = connection
         .pragma_query_value(None, "page_size", |r| r.get(0))
         .map_err(sqlite)?;
-    let identities: u64 = connection
+    let identities: i64 = connection
         .query_row("SELECT count(*) FROM protective_lock_identity", [], |r| {
             r.get(0)
         })
@@ -429,10 +444,10 @@ fn validate(
                     return Err(rusqlite::Error::InvalidQuery);
                 }
                 let snapshot = Snapshot {
-                    count: r.get(4)?,
+                    count: sql_u64(r, 4)?,
                     tip: ContentDigest::new(r.get_ref(5)?.as_str()?)
                         .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                    last_write: r.get(6)?,
+                    last_write: sql_u64(r, 6)?,
                     records: Vec::new(),
                 };
                 if snapshot.count > MAX_RECORDS
@@ -462,10 +477,10 @@ fn validate(
             let record = ProtectiveLockSettingRecord::decode(canonical)
                 .map_err(|_| rusqlite::Error::InvalidQuery)?;
             let chain = r.get_ref(6)?.as_str()?;
-            let expiry: u64 = r.get(7)?;
+            let expiry = sql_u64(r, 7)?;
             let approval = r.get_ref(8)?.as_blob()?;
             let tag = r.get_ref(9)?.as_blob()?;
-            let position: u64 = r.get(0)?;
+            let position = sql_u64(r, 0)?;
             if chain.len() != 71
                 || tag.len() != 32
                 || record.owner().as_str() != r.get_ref(1)?.as_str()?
@@ -576,6 +591,28 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::OnceLock;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn sqlite_integer_boundaries_reject_unsigned_overflow_and_negative_rows() {
+        assert_eq!(sql_i64(0), Ok(0));
+        assert_eq!(sql_i64(i64::MAX as u64), Ok(i64::MAX));
+        assert_eq!(
+            sql_i64(i64::MAX as u64 + 1),
+            Err(TransactionStoreError::CapacityExceeded)
+        );
+        let connection = Connection::open_in_memory().unwrap_or_else(|e| unreachable!("{e}"));
+        for value in [0_i64, 1_i64, i64::MAX] {
+            let result = connection
+                .query_row("SELECT ?1", [value], |row| sql_u64(row, 0))
+                .unwrap_or_else(|e| unreachable!("{e}"));
+            assert_eq!(result, value as u64);
+        }
+        assert!(
+            connection
+                .query_row("SELECT -1", [], |row| sql_u64(row, 0))
+                .is_err()
+        );
+    }
 
     static NEXT: AtomicU64 = AtomicU64::new(0);
     static INTEGRITY_KEY: OnceLock<Vec<u8>> = OnceLock::new();
@@ -1030,11 +1067,14 @@ mod tests {
                     ),
                 )
                 .unwrap_or_else(|e| unreachable!("{e}"));
+            let position_sql = sql_i64(position).unwrap_or_else(|e| unreachable!("{e}"));
+            let expiry_sql =
+                sql_i64(approved.expires_at_unix_ms()).unwrap_or_else(|e| unreachable!("{e}"));
             transaction
                 .execute(
                     "INSERT INTO protective_lock_records VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
                     params![
-                        position,
+                        position_sql,
                         current.owner().as_str(),
                         current
                             .epoch()
@@ -1045,7 +1085,7 @@ mod tests {
                         current.canonical(),
                         current.digest().as_str(),
                         chain.as_str(),
-                        approved.expires_at_unix_ms(),
+                        expiry_sql,
                         approved.authentication_tag(),
                         tag.as_slice()
                     ],

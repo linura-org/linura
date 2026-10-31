@@ -81,7 +81,7 @@ pub(crate) fn configure_connection(
         )));
     }
     connection
-        .pragma_update(None, "max_page_count", limits.max_pages)
+        .pragma_update(None, "max_page_count", as_i64(limits.max_pages)?)
         .map_err(sqlite)?;
     validate_runtime_settings(connection, limits)
 }
