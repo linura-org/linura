@@ -23,8 +23,8 @@ use linura_linux_session::{
 };
 use linura_observation_control::ObservationCoordinator;
 use linura_persistence_sqlite::{
-    SqliteApprovedRequestJournal, SqliteIntegrityKey, SqliteProtectiveLockSettingStore,
-    SqliteTransactionStore, is_physical_storage_exhaustion,
+    SqliteApprovedRequestJournal, SqliteIdleAdvisoryPreferenceStore, SqliteIntegrityKey,
+    SqliteProtectiveLockSettingStore, SqliteTransactionStore, is_physical_storage_exhaustion,
 };
 use linura_protocol::PlanDesiredStateRequest;
 use linura_provider_sdk::Observer;
@@ -47,6 +47,8 @@ const REQUEST_JOURNAL_FILE: &str = "approved-requests.sqlite3";
 const PROTECTIVE_SETTING_AUTHORITY_KEY_FILE: &str = "protective-lock-authority.key";
 const PROTECTIVE_SETTING_INTEGRITY_KEY_FILE: &str = "protective-lock-integrity.key";
 const PROTECTIVE_SETTING_FILE: &str = "protective-lock-settings.sqlite3";
+const IDLE_ADVISORY_INTEGRITY_KEY_FILE: &str = "idle-advisory-integrity.key";
+const IDLE_ADVISORY_FILE: &str = "idle-advisory-settings.sqlite3";
 const SECRET_BYTES: usize = 32;
 const MAX_REASON_BYTES: usize = 1024;
 const SECRET_INSTALL_ATTEMPTS: u32 = 32;
@@ -60,9 +62,50 @@ pub(crate) struct ManagedRuntime {
     session_executor: SessionExecutorClient,
     session_verifier: FreshSessionVerifier,
     sleep_monitor: linura_control::NativeSleepGateMonitor,
+    // Advisory configuration is deliberately nonessential to the security-
+    // critical S17 authority. Its corruption disables only this feature.
+    idle_preferences: Option<SqliteIdleAdvisoryPreferenceStore>,
 }
 
 impl ManagedRuntime {
+    fn require_own_idle_preference_session(
+        &mut self,
+        context: &Authority1SessionContext,
+    ) -> Result<u32, String> {
+        let uid = own_uid(&context.principal)?;
+        let sample = self.session_channel.observe_current_lock(uid, 1)?;
+        let lock = linura_core::SessionLockId::from_resource(&sample.resource)
+            .map_err(|error| error.to_string())?;
+        let native = self
+            .session_verifier
+            .transitions
+            .observe_authoritative(
+                &lock
+                    .epoch()
+                    .resource_id()
+                    .map_err(|error| error.to_string())?,
+                &CapabilityId::new(linura_linux_observation::LOGIND_SESSION_CAPABILITY)
+                    .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+        let now = u64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| "idle preference clock unavailable")?
+                .as_millis(),
+        )
+        .map_err(|_| "idle preference clock overflow")?;
+        linura_control::SessionSafetyReview::review(
+            &context.principal,
+            lock.epoch(),
+            linura_control::SessionAction::Lock,
+            &native,
+            now,
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(uid)
+    }
+
     pub(crate) fn open(
         state_dir: &Path,
         channel: NativeSessionChannel,
@@ -80,6 +123,14 @@ impl ManagedRuntime {
         .map_err(|error| format!("cannot open approved structured request journal: {error}"))?;
 
         let protective_settings = open_protective_settings(state_dir)?;
+        let idle_preferences = (|| -> Result<SqliteIdleAdvisoryPreferenceStore, String> {
+            let key = SqliteIntegrityKey::new(load_or_create_secret(
+                &state_dir.join(IDLE_ADVISORY_INTEGRITY_KEY_FILE),
+            )?)
+            .map_err(|error| error.to_string())?;
+            SqliteIdleAdvisoryPreferenceStore::open(state_dir.join(IDLE_ADVISORY_FILE), key)
+        })()
+        .ok();
 
         let authority_key = TransactionAuthorityKey::new(authority_bytes.clone())
             .map_err(|error| format!("invalid transaction authority key: {error}"))?;
@@ -143,6 +194,7 @@ impl ManagedRuntime {
                 },
                 session_channel: channel,
                 sleep_monitor,
+                idle_preferences,
             },
             gate,
         ))
@@ -150,6 +202,119 @@ impl ManagedRuntime {
 }
 
 impl Authority1Handler for ManagedRuntime {
+    fn own_idle_advisory_preference(
+        &mut self,
+        context: Authority1SessionContext,
+    ) -> Result<(u32, u64), String> {
+        let uid = self.require_own_idle_preference_session(&context)?;
+        let record = self
+            .idle_preferences
+            .as_ref()
+            .ok_or("idle advisory preferences unavailable")?
+            .get(uid)?;
+        Ok((record.seconds, record.revision))
+    }
+
+    fn set_own_idle_advisory_preference(
+        &mut self,
+        context: Authority1SessionContext,
+        seconds: u32,
+        expected_revision: u64,
+    ) -> Result<(u32, u64), String> {
+        let uid = self.require_own_idle_preference_session(&context)?;
+        let record = self
+            .idle_preferences
+            .as_mut()
+            .ok_or("idle advisory preferences unavailable")?
+            .compare_and_set(uid, seconds, expected_revision)?;
+        Ok((record.seconds, record.revision))
+    }
+
+    fn own_native_idle_status(
+        &mut self,
+        context: Authority1SessionContext,
+    ) -> Result<(String, String, bool, u64), String> {
+        use linura_observation::ObservedValue;
+
+        let uid = own_uid(&context.principal)?;
+        let current = self.session_channel.observe_current_lock(uid, 1)?;
+        let lock = linura_core::SessionLockId::from_resource(&current.resource)
+            .map_err(|error| error.to_string())?;
+        let resource = lock
+            .epoch()
+            .resource_id()
+            .map_err(|error| error.to_string())?;
+        let session_cap = CapabilityId::new(linura_linux_observation::LOGIND_SESSION_CAPABILITY)
+            .map_err(|error| error.to_string())?;
+        let idle_cap = CapabilityId::new(linura_linux_observation::LOGIND_IDLE_CAPABILITY)
+            .map_err(|error| error.to_string())?;
+        let native_session = self
+            .session_verifier
+            .transitions
+            .observe_authoritative(&resource, &session_cap)
+            .map_err(|error| error.to_string())?;
+        let idle = self
+            .session_verifier
+            .transitions
+            .observe_authoritative(&resource, &idle_cap)
+            .map_err(|error| error.to_string())?;
+        let now = u64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| "native idle clock unavailable")?
+                .as_millis(),
+        )
+        .map_err(|_| "native idle clock overflow")?;
+        linura_control::SessionSafetyReview::review(
+            &context.principal,
+            lock.epoch(),
+            linura_control::SessionAction::Lock,
+            &native_session,
+            now,
+        )
+        .map_err(|error| error.to_string())?;
+        idle.validate(
+            &ProviderId::new("logind").map_err(|error| error.to_string())?,
+            &resource,
+            &idle_cap,
+        )
+        .map_err(|error| error.to_string())?;
+        idle.require_current(now)
+            .map_err(|error| error.to_string())?;
+        // Bind the native hint to independently reviewed active, local and
+        // exact-session identity. A changed seat or owner never gets relabeled.
+        for key in [
+            "boot_id",
+            "session_id",
+            "uid",
+            "created_monotonic_us",
+            "seat",
+            "session_type",
+            "session_class",
+            "state",
+            "active",
+            "remote",
+            "leader_present",
+        ] {
+            if idle.attributes.get(key) != native_session.attributes.get(key) {
+                return Err("native idle session identity or activity changed".into());
+            }
+        }
+        let seat = match idle.attributes.get("seat") {
+            Some(ObservedValue::Text(seat)) => seat.clone(),
+            _ => return Err("native idle seat unavailable".into()),
+        };
+        let hint = match idle.attributes.get("idle_hint") {
+            Some(ObservedValue::Bool(value)) => *value,
+            _ => return Err("native idle hint unavailable".into()),
+        };
+        let since = match idle.attributes.get("idle_changed_monotonic_us") {
+            Some(ObservedValue::U64(value)) => *value,
+            _ => return Err("native idle timestamp unavailable".into()),
+        };
+        Ok((resource.as_str().into(), seat, hint, since))
+    }
+
     fn own_native_sleep_gate_status(
         &mut self,
         context: Authority1SessionContext,

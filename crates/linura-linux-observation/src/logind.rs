@@ -28,6 +28,7 @@ pub const LOGIND_SESSION_PROVIDER: &str = "logind";
 pub const LOGIND_SESSION_CAPABILITY: &str = "session.epoch.observe";
 pub const LOGIND_POWER_CAPABILITY: &str = "session.power.observe";
 pub const LOGIND_POWER_CONDITIONS_CAPABILITY: &str = "session.power.conditions.observe";
+pub const LOGIND_IDLE_CAPABILITY: &str = "session.idle.observe";
 pub const LOGIND_TRANSITION_CAPABILITY: &str = "session.transition.observe";
 const SERVICE: &str = "org.freedesktop.login1";
 const MANAGER_PATH: &str = "/org/freedesktop/login1";
@@ -573,6 +574,7 @@ impl Observer for LogindSessionObserver {
                 | LOGIND_POWER_CAPABILITY
                 | LOGIND_TRANSITION_CAPABILITY
                 | LOGIND_POWER_CONDITIONS_CAPABILITY
+                | LOGIND_IDLE_CAPABILITY
         )
     }
 
@@ -587,6 +589,7 @@ impl Observer for LogindSessionObserver {
             LOGIND_POWER_CAPABILITY,
             LOGIND_TRANSITION_CAPABILITY,
             LOGIND_POWER_CONDITIONS_CAPABILITY,
+            LOGIND_IDLE_CAPABILITY,
         ]
         .into_iter()
         .map(|id| {
@@ -675,6 +678,19 @@ impl Observer for LogindSessionObserver {
             .map_err(bus_error)?;
         let snapshot = self.snapshot(&owner, path.as_str(), boot.clone())?;
         require_same_epoch(&expected, &snapshot.epoch)?;
+        // Native logind IdleHint is a historical/advisory hint, not proof
+        // of compositor inactivity, protection, authentication or authority.
+        // Sample both sides of identity revalidation to reject stale edges.
+        let idle_before = if capability.as_str() == LOGIND_IDLE_CAPABILITY {
+            let properties = self.properties(&owner, path.as_str(), SESSION_INTERFACE)?;
+            Some(decode_idle_properties(
+                &properties,
+                expected.created_monotonic_us(),
+                monotonic_us()?,
+            )?)
+        } else {
+            None
+        };
         let power = if capability.as_str() == LOGIND_POWER_CAPABILITY {
             Some(self.power_attributes(&owner, &expected, observed_at_unix_ms)?)
         } else if capability.as_str() == LOGIND_POWER_CONDITIONS_CAPABILITY {
@@ -695,6 +711,21 @@ impl Observer for LogindSessionObserver {
         }
         let fresh = self.snapshot(&owner, resolved.as_str(), boot.clone())?;
         require_same_epoch(&expected, &fresh.epoch)?;
+        let idle_after = if idle_before.is_some() {
+            let properties = self.properties(&owner, resolved.as_str(), SESSION_INTERFACE)?;
+            Some(decode_idle_properties(
+                &properties,
+                expected.created_monotonic_us(),
+                monotonic_us()?,
+            )?)
+        } else {
+            None
+        };
+        if idle_before != idle_after {
+            return Err(ProviderError::Unavailable(
+                "native logind idle hint changed while binding session identity".into(),
+            ));
+        }
         require_same_boot(&boot, &current_boot()?)?;
         self.require_same_owner(&owner)?;
         if now_unix_ms()?
@@ -709,6 +740,13 @@ impl Observer for LogindSessionObserver {
         if let Some(power) = power {
             attributes.extend(power);
         }
+        if let Some((idle_hint, changed_monotonic_us)) = idle_after {
+            attributes.insert("idle_hint".into(), ObservedValue::Bool(idle_hint));
+            attributes.insert(
+                "idle_changed_monotonic_us".into(),
+                ObservedValue::U64(changed_monotonic_us),
+            );
+        }
         Ok(ObservationEnvelope {
             provider: self.observer_id(),
             resource: resource.clone(),
@@ -720,6 +758,40 @@ impl Observer for LogindSessionObserver {
             attributes,
         })
     }
+}
+
+fn monotonic_us() -> Result<u64, ProviderError> {
+    let now = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+    let seconds = u64::try_from(now.tv_sec)
+        .map_err(|_| ProviderError::Unavailable("native monotonic clock is invalid".into()))?;
+    let nanoseconds = u64::try_from(now.tv_nsec)
+        .map_err(|_| ProviderError::Unavailable("native monotonic nanoseconds invalid".into()))?;
+    seconds
+        .checked_mul(1_000_000)
+        .and_then(|value| value.checked_add(nanoseconds / 1_000))
+        .ok_or_else(|| ProviderError::Unavailable("native monotonic clock overflow".into()))
+}
+
+/// Do not normalize missing or substituted native D-Bus properties into an
+/// inactivity decision. The supplied clock comes from the local kernel and is
+/// never read from logind or the caller.
+fn decode_idle_properties(
+    properties: &HashMap<String, OwnedValue>,
+    created_monotonic_us: u64,
+    now_monotonic_us: u64,
+) -> Result<(bool, u64), ProviderError> {
+    let hint: bool = snapshot_property(properties, "IdleHint")?;
+    let changed: u64 = snapshot_property(properties, "IdleSinceHintMonotonic")?;
+    if created_monotonic_us == 0
+        || now_monotonic_us < created_monotonic_us
+        || changed > now_monotonic_us
+        || (hint && changed < created_monotonic_us)
+    {
+        return Err(ProviderError::InvalidState(
+            "native logind idle hint has inconsistent monotonic timing".into(),
+        ));
+    }
+    Ok((hint, changed))
 }
 
 fn require_reply_bound(reply: &zbus::Message) -> Result<(), ProviderError> {
@@ -1659,6 +1731,39 @@ mod tests {
             ("LockedHint".into(), value(false)),
             ("Leader".into(), value(99_u32)),
         ])
+    }
+
+    #[test]
+    fn native_idle_hint_requires_typed_monotonic_source_and_bounded_session_epoch() {
+        let mut properties = native_properties();
+        properties.insert("IdleHint".into(), value(true));
+        properties.insert("IdleSinceHintMonotonic".into(), value(43_u64));
+        assert_eq!(id(decode_idle_properties(&properties, 42, 100)), (true, 43));
+        properties.insert("IdleHint".into(), value(false));
+        properties.insert("IdleSinceHintMonotonic".into(), value(0_u64));
+        assert_eq!(id(decode_idle_properties(&properties, 42, 100)), (false, 0));
+        for (hint, changed, created, now) in [
+            (true, 0, 42, 100),
+            (true, 41, 42, 100),
+            (true, 101, 42, 100),
+            (false, 101, 42, 100),
+            (false, 0, 0, 100),
+            (false, 0, 42, 41),
+        ] {
+            properties.insert("IdleHint".into(), value(hint));
+            properties.insert("IdleSinceHintMonotonic".into(), value(changed));
+            assert!(decode_idle_properties(&properties, created, now).is_err());
+        }
+        properties.insert("IdleHint".into(), value(true));
+        properties.insert("IdleSinceHintMonotonic".into(), value(43_u64));
+        for key in ["IdleHint", "IdleSinceHintMonotonic"] {
+            let mut absent = properties.clone();
+            absent.remove(key);
+            assert!(decode_idle_properties(&absent, 42, 100).is_err());
+            let mut substituted = properties.clone();
+            substituted.insert(key.into(), value("not-native-type"));
+            assert!(decode_idle_properties(&substituted, 42, 100).is_err());
+        }
     }
 
     #[test]

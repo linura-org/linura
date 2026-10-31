@@ -476,14 +476,17 @@ def validate(root: Path) -> list[str]:
             failures.append(f"S17 shell completion contract missing: {fragment}")
     sleep_status_body = session_client.split(
         "void SessionController::refreshNativeSleepStatus()", 1
-    )[-1].split("QString SessionController::requestId()", 1)[0]
+    )[-1].split("void SessionController::refreshIdleAdvisoryPreference()", 1)[0]
     for fragment in (
-        "if (nativeSleepQueryPending_)",
+        "if (nativeSleepQueryPending_ || nativeIdleQueryPending_ || "
+        "idlePreferenceQueryPending_ ||",
+        "idlePreferenceBusy_)",
         "nativeSleepQueryPending_ = true;",
         "nativeSleepQueryPending_ = false;",
         'QStringLiteral("GetOwnNativeSleepGateStatus")',
         'reply.signature() == QStringLiteral("(ss)")',
         "validNativeSleepGateStatus(epoch, state)",
+        "refreshNativeIdleStatus();",
         "2000",
     ):
         if fragment not in sleep_status_body:
@@ -2025,6 +2028,9 @@ def validate(root: Path) -> list[str]:
                 "local_operations": ["operation:session.protective-lock.configure"],
                 "protocol_requirements": [
                     "org.linura.Authority1.GetOwnNativeSleepGateStatus",
+                    "org.linura.Authority1.GetOwnNativeIdleStatus",
+                    "org.linura.Authority1.GetOwnIdleAdvisoryPreference",
+                    "org.linura.Authority1.SetOwnIdleAdvisoryPreference",
                     "org.linura.Authority1.GetOwnSessionLock",
                     "org.linura.Authority1.ConvergeSessionLock",
                     "org.linura.Authority1.RecoverSessionLock",
