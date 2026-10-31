@@ -16,6 +16,9 @@ v09-migration-qualification = [
 ]
 
 [dependencies]
+async-io = "2.6"
+futures-lite = "2.6"
+serde = "1.0"
 linura-control = { path = "../../crates/linura-control" }
 linura-core = { path = "../../crates/linura-core" }
 linura-intent = { path = "../../crates/linura-intent", optional = true }
@@ -33,6 +36,7 @@ linura-planner = { path = "../../crates/linura-planner", optional = true }
 linura-protocol = { path = "../../crates/linura-protocol" }
 linura-provider-sdk = { path = "../../crates/linura-provider-sdk" }
 linura-transaction = { path = "../../crates/linura-transaction" }
+rustix = { version = "1.1", features = ["process", "time"] }
 linura-verifier-systemd = { path = "../../verifiers/linura-verifier-systemd" }
 zbus = { version = "=5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
 

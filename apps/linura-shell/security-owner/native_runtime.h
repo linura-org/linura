@@ -44,6 +44,10 @@ class NativeRuntime final : public QObject
     [[nodiscard]] bool fenceSleepEntry(const QDBusMessage &received,
                                        const NativeSleepEntryIdentity &event,
                                        const NativeLockIdentity &lock);
+    // Read-only, attested original-user worker/session proof. This cannot
+    // issue, prepare, consume or execute a backlight effect.
+    [[nodiscard]] std::optional<NativeLockIdentity>
+    observeBacklightOwner(const QDBusMessage &received);
     [[nodiscard]] std::optional<QString>
     observePowerPermission(const QDBusMessage &received, const NativeTransitionIdentity &identity);
     [[nodiscard]] bool verifyReleased(const QDBusMessage &received,

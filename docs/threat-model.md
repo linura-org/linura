@@ -761,6 +761,41 @@ a partial write or lost reply may be misrepresented as verified completion.
   every active output during hotplug and compositor restart.
 - Deny foreign-seat/unknown backlight, unsafe physical brightness bounds,
   implicit software-gamma substitutions and arbitrary privileged sysfs writes.
+- An own-session backlight query must not treat matching numeric UID as proof
+  that its caller belongs to the selected graphical login. Retain the original
+  authenticated sender/PID separately from Actor, require broker-provided live
+  ProcessFD and matching credentials, and bind `GetSessionByPID` to the exact
+  boot/session generation before and after native reads. PID recycling, inherited
+  sockets after caller exit, missing process evidence and sender loss fail closed.
+  The native connection must also match the original authenticated bus GUID;
+  a replacement bus cannot recycle the original unique sender name.
+- Root's special logind brightness permission cannot represent the original
+  user's permission. Observation proof supplies neither protected worker identity
+  nor durable one-shot handoff. Keep the proposed effect unregistered until
+  ADR 0046's worker/isolation, lifecycle and physical safety gates are qualified.
+- A physical backlight name or inode cannot be a durable generation. Canonical
+  resource parsing binds the exact non-root session epoch and a nonzero UUID,
+  but a requester-generated UUID cannot qualify hardware lineage. Keep seat,
+  provider invocation, qualification revision and safe bounds in material
+  canonical evidence. Reject provider/method/resource/payload substitution;
+  a proposed effect descriptor cannot become an authorized handoff.
+- Bind canonical backlight candidates/recovery to the original transport
+  principal, independently of Actor. Refuse every recovery mode capable of
+  reprepare after an uncertain backlight attempt, even with new administrator
+  approval. Recording-store tests cannot substitute for native protected-worker,
+  concrete crash-durability or physical evidence.
+- The inactive original-user mechanism must not inherit an interactive
+  sixty-second native timeout or use suspend-excluding expiry. Its fixed RPCs
+  share the original BOOTTIME/wall budget, use only the remaining bounded time,
+  reject descriptor-bearing or oversized replies, and retain indeterminate
+  disposition after every attempted mutation reply failure. Expired work must
+  not poll a new native future. None of this qualifies the missing protected
+  original-login process, executable grant issuer or cross-process consume-once
+  channel.
+- A late native reply or suspend must not refresh a candidate. Bound credentials,
+  session and kernel reads by the same original BOOTTIME/wall deadline; bound
+  replies before decoding and preserve original acquisition time. No cached
+  candidate or same-UID fallback repairs unsupported identity evidence.
 - Keep UDisks2/Polkit subject authentication, drive/partition/filesystem
   topology, busy or sibling-volume denial, no arbitrary mount options,
   and no replay after unplug or ambiguous eject.
