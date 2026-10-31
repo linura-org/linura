@@ -16,7 +16,7 @@ linura-observation-control = { path = "../../crates/linura-observation-control" 
 linura-protocol = { path = "../../crates/linura-protocol" }
 linura-provider-sdk = { path = "../../crates/linura-provider-sdk" }
 rustix = { version = "1.1", features = ["fs"] }
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 
 [lints]
 workspace = true

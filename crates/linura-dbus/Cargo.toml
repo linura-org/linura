@@ -16,7 +16,7 @@ linura-graph = { path = "../linura-graph" }
 linura-lifecycle = { path = "../linura-lifecycle" }
 linura-observation-control = { path = "../linura-observation-control" }
 linura-protocol = { path = "../linura-protocol" }
-rustix = { version = "=1.1.5", features = ["net"] }
+rustix = { version = "=1.1.6", features = ["net"] }
 serde = "1.0"
 zbus = { version = "=5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
 
