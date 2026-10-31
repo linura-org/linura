@@ -9,7 +9,7 @@ repository.workspace = true
 [dependencies]
 linura-core = { path = "../linura-core" }
 linura-transaction = { path = "../linura-transaction" }
-rusqlite = { version = "0.37", features = ["bundled", "functions"] }
+rusqlite = { version = "0.41", features = ["bundled", "functions"] }
 rustix = { version = "1.1", features = ["fs"] }
 sha2 = "0.11"
 

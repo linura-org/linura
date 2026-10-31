@@ -76,7 +76,7 @@ pub(crate) fn configure_connection(
     let page_size = page_size(connection)?;
     register_filesystem_reserve_functions(connection, page_size)?;
     connection
-        .pragma_update(None, "max_page_count", limits.max_pages)
+        .pragma_update(None, "max_page_count", as_i64(limits.max_pages)?)
         .map_err(sqlite)?;
     validate_runtime_settings(connection, limits)
 }
