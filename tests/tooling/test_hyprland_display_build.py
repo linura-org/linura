@@ -9,7 +9,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from tools import hyprland_display_build as build
 
@@ -25,7 +25,7 @@ class HyprlandDisplayBuildTests(unittest.TestCase):
                     return_value=subprocess.CompletedProcess([], ssh_code),
                 ) as shutdown,
             ):
-                vm = unittest.mock.Mock()
+                vm = Mock()
                 vm.wait.return_value = 0
                 output = io.BytesIO()
                 build.poweroff_guest(["ssh", "qualified-guest"], vm, output)
@@ -47,7 +47,7 @@ class HyprlandDisplayBuildTests(unittest.TestCase):
                     return_value=subprocess.CompletedProcess([], ssh_code),
                 ),
             ):
-                vm = unittest.mock.Mock()
+                vm = Mock()
                 vm.wait.return_value = vm_exit
                 with self.assertRaisesRegex(RuntimeError, "failed to power off"):
                     build.poweroff_guest(["ssh"], vm, io.BytesIO())
@@ -56,7 +56,7 @@ class HyprlandDisplayBuildTests(unittest.TestCase):
             "run",
             return_value=subprocess.CompletedProcess([], 1),
         ):
-            vm = unittest.mock.Mock()
+            vm = Mock()
             with self.assertRaises(subprocess.CalledProcessError):
                 build.poweroff_guest(["ssh"], vm, io.BytesIO())
             vm.wait.assert_not_called()
@@ -65,7 +65,7 @@ class HyprlandDisplayBuildTests(unittest.TestCase):
             "run",
             return_value=subprocess.CompletedProcess([], 255),
         ):
-            vm = unittest.mock.Mock()
+            vm = Mock()
             vm.wait.side_effect = subprocess.TimeoutExpired("qemu", 120)
             with self.assertRaises(subprocess.TimeoutExpired):
                 build.poweroff_guest(["ssh"], vm, io.BytesIO())
