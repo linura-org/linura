@@ -35,9 +35,7 @@ def run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(command, check=True, **kwargs)
 
 
-def poweroff_guest(
-    ssh: list[str], process: subprocess.Popen, build_log
-) -> None:
+def poweroff_guest(ssh: list[str], process: subprocess.Popen, build_log) -> None:
     """Accept SSH disconnect only when QEMU actually exits successfully.
 
     systemd can stop sshd before reporting the poweroff command's exit code.
