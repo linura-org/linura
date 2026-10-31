@@ -35,6 +35,32 @@ def run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(command, check=True, **kwargs)
 
 
+def poweroff_guest(
+    ssh: list[str], process: subprocess.Popen, build_log
+) -> None:
+    """Accept SSH disconnect only when QEMU actually exits successfully.
+
+    systemd can stop sshd before reporting the poweroff command's exit code.
+    Exit 255 alone is *not* success: a stuck, crashed or killed guest fails.
+    """
+    command = [*ssh, "sudo", "-n", "systemctl", "poweroff"]
+    result = subprocess.run(
+        command,
+        check=False,
+        stdout=build_log,
+        stderr=subprocess.STDOUT,
+        timeout=20,
+    )
+    if result.returncode not in (0, 255):
+        raise subprocess.CalledProcessError(result.returncode, command)
+    exit_code = process.wait(timeout=120)
+    if exit_code != 0:
+        raise RuntimeError(
+            f"build guest failed to power off cleanly (qemu exit {exit_code}; "
+            f"ssh exit {result.returncode})"
+        )
+
+
 def reserve_run(run_id: str, development: bool) -> tuple[dict, str, bool]:
     sha = run(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True
@@ -914,13 +940,7 @@ ethernets:
                     )
                     require_source_unchanged(sha)
             result.write_text(json.dumps(record, indent=2) + "\n")
-            run(
-                [*ssh, "sudo", "-n", "systemctl", "poweroff"],
-                stdout=build_log,
-                stderr=subprocess.STDOUT,
-                timeout=20,
-            )
-            process.wait(timeout=120)
+            poweroff_guest(ssh, process, build_log)
     finally:
         if process is not None and process.poll() is None:
             process.terminate()

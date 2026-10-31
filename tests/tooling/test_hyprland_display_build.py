@@ -15,6 +15,61 @@ from tools import hyprland_display_build as build
 
 
 class HyprlandDisplayBuildTests(unittest.TestCase):
+    def test_poweroff_reconciles_ssh_disconnect_with_clean_vm_exit(self) -> None:
+        for ssh_code in (0, 255):
+            with (
+                self.subTest(ssh_code=ssh_code),
+                patch.object(
+                    build.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([], ssh_code),
+                ) as shutdown,
+            ):
+                vm = unittest.mock.Mock()
+                vm.wait.return_value = 0
+                output = io.BytesIO()
+                build.poweroff_guest(["ssh", "qualified-guest"], vm, output)
+                vm.wait.assert_called_once_with(timeout=120)
+                self.assertEqual(
+                    shutdown.call_args.args[0],
+                    ["ssh", "qualified-guest", "sudo", "-n", "systemctl", "poweroff"],
+                )
+                self.assertEqual(shutdown.call_args.kwargs["timeout"], 20)
+                self.assertFalse(shutdown.call_args.kwargs["check"])
+
+    def test_poweroff_never_accepts_disconnection_without_vm_completion(self) -> None:
+        for ssh_code, vm_exit in ((255, 1), (0, -15), (0, 3)):
+            with (
+                self.subTest(ssh_code=ssh_code, vm_exit=vm_exit),
+                patch.object(
+                    build.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([], ssh_code),
+                ),
+            ):
+                vm = unittest.mock.Mock()
+                vm.wait.return_value = vm_exit
+                with self.assertRaisesRegex(RuntimeError, "failed to power off"):
+                    build.poweroff_guest(["ssh"], vm, io.BytesIO())
+        with patch.object(
+            build.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 1),
+        ):
+            vm = unittest.mock.Mock()
+            with self.assertRaises(subprocess.CalledProcessError):
+                build.poweroff_guest(["ssh"], vm, io.BytesIO())
+            vm.wait.assert_not_called()
+        with patch.object(
+            build.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 255),
+        ):
+            vm = unittest.mock.Mock()
+            vm.wait.side_effect = subprocess.TimeoutExpired("qemu", 120)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                build.poweroff_guest(["ssh"], vm, io.BytesIO())
+
     def test_exact_ci_subruns_validate_existing_provider_root_and_reserve_fresh_roles(
         self,
     ) -> None:
