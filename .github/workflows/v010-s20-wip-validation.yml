@@ -1,0 +1,43 @@
+name: S20 WIP validation (non-release)
+
+on:
+  push:
+    branches: ['wip/v010-s20-audio-media']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: s20-wip-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wip-rust-review:
+    name: s20-wip-rustfmt-clippy-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install repository-pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.98.0 --profile minimal --component clippy --component rustfmt
+          rustc +1.98.0 --version
+      - name: Rustfmt exact-head review
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +1.98.0 fmt --all -- --check
+      - name: Clippy all targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +1.98.0 clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Audio graph and MPRIS unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +1.98.0 test --locked -p linura-linux-observation
