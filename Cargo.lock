@@ -687,6 +687,7 @@ dependencies = [
  "linura-observation",
  "linura-provider-sdk",
  "rustix",
+ "sha2",
  "zbus",
 ]
 
