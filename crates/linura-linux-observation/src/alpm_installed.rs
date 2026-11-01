@@ -34,6 +34,7 @@ struct InstalledPackage {
     architecture: String,
     reason: u64,
     installed_size: u64,
+    installed_size_known: bool,
     depends_count: u64,
     provides_count: u64,
     conflicts_count: u64,
@@ -230,6 +231,7 @@ impl Observer for AlpmInstalledObserver {
                 ("architecture".into(), ObservedValue::Text(observed.architecture)),
                 ("reason".into(), ObservedValue::U64(observed.reason)),
                 ("installed_size".into(), ObservedValue::U64(observed.installed_size)),
+                ("installed_size_known".into(), ObservedValue::Bool(observed.installed_size_known)),
                 ("depends_count".into(), ObservedValue::U64(observed.depends_count)),
                 ("provides_count".into(), ObservedValue::U64(observed.provides_count)),
                 ("conflicts_count".into(), ObservedValue::U64(observed.conflicts_count)),
@@ -296,8 +298,11 @@ fn parse_desc(content: &[u8], directory: &str) -> Result<InstalledPackage, Provi
     let name=one("NAME")?;
     let version=one("VERSION")?;
     let architecture=one("ARCH")?;
-    let reason=one("REASON")?;
-    let installed_size=one("ISIZE")?;
+    // ALPM local DB uses %SIZE%; %ISIZE% belongs to the sync/repo DB.
+    // Local %REASON% and %SIZE% are optional in the native specification.
+    let reason=fields.get("REASON").map_or_else(|| Ok("0".to_owned()), |_| one("REASON"))?;
+    let installed_size_known=fields.contains_key("SIZE");
+    let installed_size=if installed_size_known { one("SIZE")? } else { "0".into() };
     if !canonical_package_name(&name) || !valid_version(&version)
         || !(architecture == "any" || (architecture.len() <= 32
           && architecture.bytes().all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))))
@@ -314,7 +319,7 @@ fn parse_desc(content: &[u8], directory: &str) -> Result<InstalledPackage, Provi
     };
     let hash=Sha256::digest(content);
     Ok(InstalledPackage {
-        name, version, architecture, reason, installed_size,
+        name, version, architecture, reason, installed_size, installed_size_known,
         depends_count: count("DEPENDS")?, provides_count: count("PROVIDES")?,
         conflicts_count: count("CONFLICTS")?, replaces_count: count("REPLACES")?,
         directory: directory.into(), desc_sha256: format!("{hash:x}"),
@@ -340,7 +345,7 @@ mod tests {
         assert!(fs::create_dir_all(&dir).is_ok());
         assert!(fs::write(dir.join("desc"),data).is_ok());
     }
-    const VALID: &[u8] = b"%NAME%\nexample\n\n%VERSION%\n1.2-1\n\n%ARCH%\nx86_64\n\n%REASON%\n0\n\n%ISIZE%\n42\n\n%DEPENDS%\nglibc\n\n";
+    const VALID: &[u8] = b"%NAME%\nexample\n\n%VERSION%\n1.2-1\n\n%ARCH%\nx86_64\n\n%REASON%\n0\n\n%SIZE%\n42\n\n%DEPENDS%\nglibc\n\n";
     #[test]
     fn exact_local_inventory_carries_revision_not_signing_authority() {
         let (root,local,lock)=fixture();
@@ -351,6 +356,8 @@ mod tests {
         let row=observer.observe_authoritative(&res,&cap).unwrap_or_else(|e| unreachable!("{e}"));
         assert_eq!(row.attributes["version"],ObservedValue::Text("1.2-1".into()));
         assert_eq!(row.attributes["depends_count"],ObservedValue::U64(1));
+        assert_eq!(row.attributes["installed_size"],ObservedValue::U64(42));
+        assert_eq!(row.attributes["installed_size_known"],ObservedValue::Bool(true));
         assert_eq!(row.attributes["signed_repository_verified"],ObservedValue::Bool(false));
         assert_eq!(row.attributes["effect_authorized"],ObservedValue::Bool(false));
         assert_eq!(observer.resources().unwrap_or_else(|e| unreachable!("{e}")).len(),1);
