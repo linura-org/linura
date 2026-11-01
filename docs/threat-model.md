@@ -748,6 +748,36 @@ for the current implementation status.
   multi-output/hotplug, authentication/account denial and visual/interaction
   evidence are required before activation or final review.
 
+### S19 BlueZ device substitution, pairing consent and unauthorized trust
+
+An untrusted radio peer, stale BlueZ D-Bus object, unrelated client, old
+Agent1 callback or reused Bluetooth name/address may be substituted into a
+reviewed pair/connect/trust/remove action or spoof a protected confirmation.
+- Bind each native operation to the exact BlueZ unique service owner, boot,
+  adapter/controller generation, Device1 parent, address **type**, bond state,
+  authenticated caller and applicable native Polkit/user-session subject.
+  Alias, RSSI, MAC/BSSID, advertised UUID or object path alone cannot authorize.
+- Native ObjectManager inventories must be bounded, duplicate-aware and
+  provider-epoch coherent. BLE random addresses and prebond Just Works do not
+  supply authenticated device identity or MITM protection.
+- Agent1 RequestPasskey/RequestPinCode/RequestConfirmation/
+  RequestAuthorization/AuthorizeService must bind a single live, protected
+  challenge to the genuine BlueZ sender, selected device and current session.
+  Reject foreign/default-agent takeover, unsolicited or stale requests, wrong
+  service UUID and Cancel/Release/session-lock replay.
+- Discovery StopDiscovery must release only Linura's own client-scoped lease,
+  not any other client's scan; shared filter/scan observations are not authority.
+- Keep PIN/passkey and bonding keys outside logs, plans, audit, model context
+  and retained evidence. Require explicit consequence review for Trusted,
+  Blocked and destructive RemoveDevice; no generic bluetoothctl/shell method relay.
+- Lost replies, BlueZ restart and adapter reset can leave persistent bond
+  changes: record indeterminate state, independently re-observe, never replay
+  pairing, trust or removal from historical authorization.
+- Preserve S17 protected input/session/lock, S20 actual audio profile routing
+  and S21 power/display boundaries. VM virtual HCI is not physical RF evidence.
+- See proposed [ADR 0049](adr/0049-s19-bluez-bluetooth-authority.md) and
+  [S19 security qualification](qualification/v0.10.0-s19-security.md).
+
 ### S21 device identity substitution, insecure output topology and media loss
 
 A client, provider or stale resource alias may retarget approved operations to

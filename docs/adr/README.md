@@ -68,3 +68,4 @@ This repairs the ledger identity while preserving the historical decision text. 
 - [0043 — Separate lightweight development from dedicated qualification storage](0043-dedicated-development-and-qualification-storage.md)
 - [0044 — Explicit native development preparation across Ubuntu and Arch](0044-explicit-native-development-preparation.md)
 - [0045 — S21 device effects share trusted Control authority and verified recovery](0045-s21-workstation-device-authority.md)
+- [0049 — S19 BlueZ Bluetooth identity, pairing and trusted Control authority](0049-s19-bluez-bluetooth-authority.md)

@@ -1,0 +1,234 @@
+schema_version = 1
+milestone = "v0.10.0"
+slice = "S19"
+profile = "arch-hyprland-v1"
+dependency = "S16"
+status = "proposed"
+activation = "none"
+register_runtime_operations = false
+implements_effects = false
+runtime_support_promotion = false
+interactive_evidence_ready = false
+indeterminate_replay = false
+provider = "bluez"
+provider_bus = "system"
+provider_well_known_name = "org.bluez"
+provider_object_manager = "org.freedesktop.DBus.ObjectManager"
+identity_binding = "boot-system-bus-unique-owner-adapter-device-bond-generation"
+verification = "independent-native-post-effect-observation"
+existing_semantics = "contracts/operation-semantics.toml"
+architecture = "docs/adr/0049-s19-bluez-bluetooth-authority.md"
+qualification_document = "docs/qualification/v0.10.0-s19.md"
+security_qualification = "docs/qualification/v0.10.0-s19-security.md"
+source_audit = "docs/workstreams/v010-s19-bluetooth-phase1.md"
+unsupported_behavior = "fail-closed"
+no_generic_dbus_forwarding = true
+no_shell_or_bluetoothctl_executor = true
+no_ambient_default_agent_takeover = true
+protected_pairing_input_required = true
+secrets_in_plan_audit_or_model = false
+address_or_alias_grants_authority = false
+unmatched_incoming_agent_requests_allowed = false
+replay_indeterminate_pairing_or_removal = false
+
+[existing_platform_discovery]
+provider = "bluez"
+capability = "platform.provider.bluetooth.observe"
+resource = "platform:provider:bluetooth"
+interface = "org.freedesktop.DBus.Peer"
+path = "/"
+reuse_required = true
+grants_mutation_authority = false
+
+[proposed_observation]
+adapter = "bluez.adapter.observe"
+device = "bluez.device.observe"
+discovery = "bluez.discovery.observe"
+bonding = "bluez.bond.observe"
+require_unique_bluez_owner = true
+require_bounded_object_manager = true
+require_parent_adapter_relationship = true
+require_device_address_type = true
+distinguish_paired_trusted_blocked_connected = true
+distinguish_connected_from_services_resolved = true
+reject_duplicate_native_identity = true
+reject_mixed_owner_epochs = true
+reject_stale_adapter_or_device_generation = true
+control_owns_aggregation = true
+
+[pairing_agent]
+interface = "org.bluez.Agent1"
+manager_interface = "org.bluez.AgentManager1"
+trusted_bluez_sender_only = true
+purpose_bound_registration = true
+current_session_principal_required = true
+protected_native_confirmation = true
+single_live_challenge_per_target = true
+exact_device_and_service_binding = true
+bounded_challenge_deadline = true
+cancel_and_release_invalidate_challenge = true
+no_implicit_just_works_approval = true
+no_default_agent_without_owner_proof = true
+no_raw_passkey_audit = true
+
+[discovery]
+start_stop_own_lease_only = true
+do_not_stop_other_client_sessions = true
+filter_is_not_global_authority = true
+bounded_adapter_and_time = true
+reject_scan_as_passive_query = true
+
+[[candidate_operation]]
+id = "operation:bluetooth.discovery.start"
+provider = "bluez"
+observation = "bluez.discovery.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-provider-adapter-discovery-lease"
+requested_keys = ["active"]
+requires = ["own-client-discovery-lease", "bounded-scan", "native-subject", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:bluetooth.discovery.stop"
+provider = "bluez"
+observation = "bluez.discovery.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-provider-adapter-discovery-lease"
+requested_keys = ["active"]
+requires = ["own-client-discovery-lease", "no-other-client-stop", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:bluetooth.adapter.set-powered"
+provider = "bluez"
+observation = "bluez.adapter.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-adapter-generation"
+requested_keys = ["powered"]
+requires = ["radio-rfkill-state", "session-subject", "dependent-device-impact", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:bluetooth.adapter.set-pairable"
+provider = "bluez"
+observation = "bluez.adapter.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-adapter-generation"
+requested_keys = ["pairable"]
+requires = ["inbound-auth-policy", "session-subject", "bounded-exposure", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:bluetooth.adapter.set-discoverable"
+provider = "bluez"
+observation = "bluez.adapter.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-adapter-generation"
+requested_keys = ["discoverable"]
+requires = ["privacy-exposure-review", "session-subject", "bounded-exposure", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:bluetooth.device.pair"
+provider = "bluez"
+observation = "bluez.bond.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-adapter-device-pairing-epoch"
+requested_keys = ["paired"]
+requires = ["purpose-bound-agent", "protected-confirmation", "subject-and-challenge-generation", "bond-continuity", "no-replay", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:bluetooth.device.cancel-pairing"
+provider = "bluez"
+observation = "bluez.bond.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-provider-adapter-device-pairing-epoch"
+requested_keys = ["pairing_cancel_requested"]
+requires = ["single-owned-pairing-attempt", "cancel-invalidate-challenge", "no-new-pairing", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:bluetooth.device.connect"
+provider = "bluez"
+observation = "bluez.device.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-adapter-device-bond-generation"
+requested_keys = ["connected"]
+requires = ["exact-device-and-transport", "profile-readiness-as-requested", "subject-bound-policy", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:bluetooth.device.disconnect"
+provider = "bluez"
+observation = "bluez.device.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-adapter-device-connection-generation"
+requested_keys = ["connected"]
+requires = ["exact-device-and-transport", "disconnect-impact-review", "subject-bound-policy", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:bluetooth.device.set-trusted"
+provider = "bluez"
+observation = "bluez.bond.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-adapter-device-bond-revision"
+requested_keys = ["trusted"]
+requires = ["authenticated-user-consent", "exact-bond-state", "durable-prepare", "no-replay", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:bluetooth.device.set-blocked"
+provider = "bluez"
+observation = "bluez.bond.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-provider-adapter-device-bond-revision"
+requested_keys = ["blocked"]
+requires = ["authenticated-user-consent", "block-impact-review", "no-replay", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:bluetooth.device.remove"
+provider = "bluez"
+observation = "bluez.bond.observe"
+class = "managed-external-effect"
+risk_floor = "destructive"
+resource = "exact-provider-adapter-device-bond-revision"
+requested_keys = ["removed"]
+requires = ["bond-key-loss-review", "dependents-impact", "authenticated-user-consent", "durable-prepare", "no-replay", "independent-reobserve"]
+enabled = false
+
+[unsupported_extensions]
+arbitrary_device_profiles = false
+raw_gatt_read_write = false
+arbitrary_sdp_control = false
+global_default_agent_takeover = false
+unmatched_incoming_pairing = false
+generic_blueZ_method_relay = false
+passkey_history = false
+privileged_bluetoothctl_proxy = false
+
+[qualification]
+development_level = "level-a-arch-hyprland-exact-source"
+interactive_vm_level = "level-b-arch-hyprland-exact-source"
+physical_release_level = "level-c-maintained-hardware-q11"
+virtual_hci_is_physical = false
+video_is_correctness_oracle = false
+require_adversarial = true
+require_native_bond_and_agent_confirmation = true
+require_physical_radio_for_hardware_claim = true
+require_credential_redaction = true
+require_indeterminate_no_replay = true
+require_keyboard_pointer_accessibility = true
