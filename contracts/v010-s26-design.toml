@@ -1,0 +1,217 @@
+schema_version = 1
+milestone = "v0.10.0"
+slice = "S26"
+profile = "arch-hyprland-v1"
+dependency = "S16"
+downstream_slice = "S27"
+status = "proposed"
+activation = "none"
+register_runtime_operations = false
+implements_new_effects = false
+runtime_support_promotion = false
+interactive_evidence_ready = false
+shadow_library_database_allowed = false
+portable_artifact_grants_authority = false
+imported_actor_is_authenticated_principal = false
+adoption_preflight_is_executable_plan = false
+local_import_applies_machine_configuration = false
+operation_id_is_external_executor_grant = false
+replay_historical_approval_or_effect = false
+use_setup_title_or_latest_alias_as_identity = false
+assume_shared_resource_removable = false
+backup_restore_is_implicit_rollback = false
+generic_apply_setup_executor = false
+remote_sync_enabled = false
+unknown_or_incomplete_closure_is_safe = false
+preserve_released_v07_schema_and_format = true
+reuse_existing_local_library = true
+reuse_native_adoption_preflight = true
+require_authenticated_owner_and_exact_revisions = true
+require_complete_causal_ownership = true
+require_fresh_canonical_machine_plan_for_effects = true
+require_separate_local_commit_and_native_verification = true
+require_no_model_offline_paths = true
+require_sqlite_integrity_backup_and_recovery = true
+unsupported_behavior = "fail-closed"
+architecture = "docs/adr/0054-s26-local-library-workstation-authority.md"
+source_audit = "docs/workstreams/v010-s26-library-phase1.md"
+qualification_document = "docs/qualification/v0.10.0-s26.md"
+security_qualification = "docs/qualification/v0.10.0-s26-security.md"
+existing_semantics = "contracts/operation-semantics.toml"
+
+[existing_local_library]
+crate = "crates/linura-library/src/lib.rs"
+store = "crates/linura-library/src/store.rs"
+adoption = "crates/linura-library/src/adoption.rs"
+portable = "crates/linura-library/src/portable.rs"
+schema = "crates/linura-library/src/schema.rs"
+released_qualification = "crates/linura-library/tests/v07_qualification.rs"
+sqlite_schema_version = 1
+portable_format_version = 1
+reuse_setup_profile_revision_history = true
+reuse_causal_shared_owner_impact = true
+reuse_portable_digest_and_parser = true
+reuse_existing_idempotency_and_cas = true
+reuse_backup_validation_and_restore = true
+not_a_privileged_executor = true
+
+[revision_identity]
+setup_revision_type = "u32"
+profile_revision_type = "u32"
+intent_revision_type = "u64"
+require_immutable_revision_refs = true
+require_canonical_portable_digest = true
+require_source_database_instance_and_schema = true
+require_complete_nested_setup_intent_closure = true
+reject_duplicate_id_with_conflicting_digest = true
+reject_cycles_and_depth_exhaustion = true
+reject_stale_revision_cas = true
+reject_auto_latest_substitution = true
+do_not_treat_titles_as_authoritative_ids = true
+
+[preflight]
+interface = "AdoptionContext"
+report_type = "AdoptionReport"
+requires_plan_field = "requires_plan"
+blocked_field = "is_blocked"
+require_machine_class_compatibility = true
+require_available_secret_refs_by_reference_only = true
+require_supported_capability_resolution = true
+require_collision_and_graph_validation = true
+require_provenance_and_shared_owner_impact = true
+no_machine_mutation_on_dry_run = true
+no_planner_or_policy_approval_in_library_preflight = true
+reject_imported_approval_executor_and_credential_authority = true
+
+[machine_apply]
+source = "canonical-linura-control-planner"
+operation_registry = "contracts/operation-semantics.toml"
+require_current_boot_machine_platform_and_observation = true
+require_target_capability_provider_and_resource_identity = true
+require_exact_selected_library_revision_and_digests = true
+require_trusted_principal_and_current_policy_revision = true
+require_complete_reconciliation_plan = true
+require_domain_specific_narrow_registered_effects = true
+require_independent_native_postcondition = true
+require_per_effect_indeterminate_no_replay = true
+no_generic_profile_execution = true
+no_imported_historical_approval = true
+
+[[candidate_operation]]
+id = "operation:library.setup.save"
+provider = "linura-local-library"
+observation = "linura.library.setup.observe"
+class = "linura-owned-state"
+risk_floor = "user-state"
+resource = "exact-owner-setup-id-base-revision-and-closure-digest"
+requested_keys = ["setup_definition", "base_revision"]
+requires = ["authenticated-owner", "immutable-increment", "complete-reference-closure", "revision-checked", "atomic-local-commit"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:library.profile.save"
+provider = "linura-local-library"
+observation = "linura.library.profile.observe"
+class = "linura-owned-state"
+risk_floor = "user-state"
+resource = "exact-owner-profile-id-base-revision-and-closure-digest"
+requested_keys = ["profile_definition", "base_revision"]
+requires = ["authenticated-owner", "immutable-increment", "machine-class-and-closure", "revision-checked", "atomic-local-commit"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:library.setup.import"
+provider = "linura-local-library"
+observation = "linura.library.setup.observe"
+class = "linura-owned-state"
+risk_floor = "user-state"
+resource = "exact-owner-portable-setup-root-revision-and-digest"
+requested_keys = ["portable_digest"]
+requires = ["authenticated-owner", "safe-bounded-parser", "collision-and-graph-preflight", "no-imported-authority", "operation-id-idempotency", "atomic-local-commit"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:library.profile.import"
+provider = "linura-local-library"
+observation = "linura.library.profile.observe"
+class = "linura-owned-state"
+risk_floor = "user-state"
+resource = "exact-owner-portable-profile-root-revision-and-digest"
+requested_keys = ["portable_digest"]
+requires = ["authenticated-owner", "safe-bounded-parser", "machine-class-and-secret-ref-preflight", "no-imported-authority", "operation-id-idempotency", "atomic-local-commit"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:library.setup.export"
+provider = "local-file-artifact"
+observation = "linura.library.setup.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-owner-setup-revision-digest-export-descriptor"
+requested_keys = ["setup_revision", "destination"]
+requires = ["exact-immutable-source", "safe-user-file-descriptor", "secret-values-excluded", "atomic-publication", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:library.profile.export"
+provider = "local-file-artifact"
+observation = "linura.library.profile.observe"
+class = "managed-external-effect"
+risk_floor = "user-state"
+resource = "exact-owner-profile-revision-digest-export-descriptor"
+requested_keys = ["profile_revision", "destination"]
+requires = ["exact-immutable-source", "safe-user-file-descriptor", "secret-values-excluded", "atomic-publication", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:library.backup.create"
+provider = "local-file-artifact"
+observation = "linura.library.integrity.observe"
+class = "managed-external-effect"
+risk_floor = "security-sensitive"
+resource = "exact-owner-library-db-instance-schema-backup-descriptor"
+requested_keys = ["destination"]
+requires = ["authenticated-owner", "consistent-database-snapshot", "safe-user-file-descriptor", "validated-integrity", "independent-reobserve"]
+enabled = false
+
+[[candidate_operation]]
+id = "operation:library.backup.restore"
+provider = "local-file-artifact"
+observation = "linura.library.integrity.observe"
+class = "managed-external-effect"
+risk_floor = "destructive"
+resource = "exact-owner-target-library-db-instance-and-verified-backup"
+requested_keys = ["backup_digest", "destination_database"]
+requires = ["authenticated-owner", "quiescent-writers-and-readers", "schema-and-integrity-validation", "prior-state-recovery", "durable-prepare", "no-imported-authority", "independent-reobserve"]
+enabled = false
+
+[unsupported_extensions]
+hosted_or_peer_library_sync = false
+unverified_bundle_signatures_as_trust = false
+embedded_secret_values_or_credentials = false
+portable_shell_scripts_or_tool_calls = false
+portable_policy_or_risk_overrides = false
+cross_machine_historical_approval_reuse = false
+arbitrary_setup_native_executor = false
+silent_latest_revision_resolution = false
+automatic_shared_resource_cleanup = false
+arbitrary_database_file_replace = false
+unreviewed_new_sqlite_or_portable_schema = false
+
+[qualification]
+level_a = "exact-source-local-library-sqlite-and-arch-guest"
+level_b = "exact-source-interactive-arch-hyprland-ui"
+level_c = "maintained-physical-workstation-q11"
+static_or_mock_is_native_qualification = false
+vm_ui_proves_physical_effects = false
+video_is_correctness_oracle = false
+require_v07_v08_v09_regression = true
+require_real_sqlite_crash_wal_integrity_and_restore = true
+require_portable_roundtrip_and_newer_schema_rejection = true
+require_adversarial_graph_and_digest_collisions = true
+require_authenticated_owner_and_secret_reference_safety = true
+require_shared_resource_removal_impact = true
+require_cross_machine_supported_capability_replan = true
+require_no_replay_of_imported_acceptance_or_external_effect = true
+require_ui_cli_sdk_accessibility_no_model = true
+require_exact_source_native_and_physical_separation = true

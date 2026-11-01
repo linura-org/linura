@@ -748,6 +748,39 @@ for the current implementation status.
   multi-output/hotplug, authentication/account denial and visual/interaction
   evidence are required before activation or final review.
 
+### S26 portable Library authority laundering, stale revisions and unsafe cleanup
+
+A portable Setup/MachineProfile, cached GUI card, restored database or model
+draft can substitute another revision, grant counterfeit authorization,
+erase shared causal owners or pretend local import applied OS changes.
+- Reuse released LocalLibrary, exact Setup/Profile/Intent revision refs and
+  complete nested closure/digest/causal-generation validation. Titles,
+  filenames and latest-revision aliases are not authoritative identities.
+- Imported bundle SHA integrity is not authenticated signer origin.
+  Imported actors, requirements, approval/audit references, secrets and
+  executor claims remain declarative untrusted data, never fresh Principal,
+  policy, accepted plan, credential or effect permit.
+- Distinguish read-only preflight AdoptionReport, idempotent local SQLite
+  bundle import, separately accepted desired intent, fresh canonical
+  Control machine plan and independently verified per-provider OS effects.
+  A generic "apply Setup" privileged shortcut must remain unavailable.
+- Preserve v0.7 append-only revisions, local request idempotency and
+  transactional SQLite/portable validation; stale CAS, cycles, duplicate
+  conflicting IDs, corrupt WAL/schema and unknown versions fail closed.
+- Shared-resource removal requires complete causal ownership evidence:
+  indeterminate/shared resources cannot be implicitly retired or cleaned.
+- Export/backup requires safe user-file descriptors and independent artifact
+  verification. Restore of the active DB requires verified source/schema,
+  writer/reader quiescence, old-state safeguard and honest recovery; restoring
+  historical approval references cannot reauthorize past OS mutations.
+- Fresh machine/boot/PlatformProfile/provider/capability/policy context and
+  class-specific registered effects remain mandatory, with independent
+  postconditions and no replay after partial/ambiguous native execution.
+- Protect offline/no-model access, escaped untrusted display text, secret
+  references rather than values, S17 lock and S21 device/recovery safety.
+- See proposed [ADR 0054](adr/0054-s26-local-library-workstation-authority.md)
+  and [S26 security qualification](qualification/v0.10.0-s26-security.md).
+
 ### S21 device identity substitution, insecure output topology and media loss
 
 A client, provider or stale resource alias may retarget approved operations to
