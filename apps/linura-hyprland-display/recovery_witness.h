@@ -97,7 +97,13 @@ template <typename Rule> [[nodiscard]] std::optional<std::string> rule(const Rul
 
 [[nodiscard]] inline std::optional<std::string> identity(const NativeOutputIdentity &identity)
 {
-    std::string out = "LNDF:1;";
+    const auto &kernel = identity.kernelDrm;
+    if (kernel != std::array<std::uint32_t, 3>{} &&
+        (kernel[0] != 226 || kernel[1] > 63 || kernel[2] == 0))
+        return std::nullopt;
+    std::string out = "LNDF:2;";
+    for (const auto value : kernel)
+        integer(out, value);
     for (std::size_t i = 0; i < identity.text.size(); ++i) {
         if (identity.text[i].size() > (i == 1 ? 4096U : 256U))
             return std::nullopt;

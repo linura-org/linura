@@ -42,6 +42,10 @@ QString NativeDisplaySnapshot::encode() const
 {
     QJsonArray entries;
     for (const auto &head : heads) {
+        const auto &kernel = head.kernelDrm;
+        if (kernel != std::array<quint32, 3>{} &&
+            (kernel[0] != 226 || kernel[1] > 63 || kernel[2] == 0))
+            return {};
         QJsonArray modes;
         for (const auto &mode : head.modes)
             modes.append(modeWire(mode));
@@ -62,9 +66,12 @@ QString NativeDisplaySnapshot::encode() const
             {"linura_owned", head.linuraOwned},
             {"owned_target", head.ownedTarget},
             {"base_rule_digest", head.baseRuleDigest},
-            {"output_identity_digest", head.outputIdentityDigest}});
+            {"output_identity_digest", head.outputIdentityDigest},
+            {"kernel_drm",
+             QJsonArray{static_cast<qint64>(kernel[0]), static_cast<qint64>(kernel[1]),
+                        static_cast<qint64>(kernel[2])}}});
     }
-    const auto bytes = QJsonDocument(QJsonObject{{"schema", 3},
+    const auto bytes = QJsonDocument(QJsonObject{{"schema", 4},
                                                  {"generation", QString::number(generation)},
                                                  {"heads", entries}})
                            .toJson(QJsonDocument::Compact);

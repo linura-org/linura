@@ -34,9 +34,9 @@ fn inputs() -> (Value, Value) {
         "x":0, "y":0, "transform":0, "scale_fixed":320,
         "scale_milli":1250, "scale_float_bits":1.25_f32.to_bits(),
         "linura_owned":false, "owned_target":"", "base_rule_digest":"a".repeat(64),
-        "output_identity_digest":"b".repeat(64)});
+        "output_identity_digest":"b".repeat(64), "kernel_drm":[226,0,1]});
     (
-        json!({"schema":3, "generation":"3", "heads":[head]}),
+        json!({"schema":4, "generation":"3", "heads":[head]}),
         json!([{"id":0,"name":"DP-1",
         "disabled":false,"dpmsStatus":true,"mirrorOf":"none", "availableModes":["1920x1080@59.94Hz"]}]),
     )
@@ -90,6 +90,51 @@ fn exact_native_modes_scale_and_coverage_enter_only_canonical_envelopes() {
             .values()
             .any(|value| value.to_string().contains("DP-1"))
     );
+}
+#[test]
+fn kernel_bindings_are_closed_unique_and_non_drm_is_read_only() {
+    let (topology, monitors) = inputs();
+    for bad_key in [
+        json!([]),
+        json!([226, 0]),
+        json!([226, 0, 1, 2]),
+        json!(["226", 0, 1]),
+        json!([-1, 0, 1]),
+        json!([226, 64, 1]),
+        json!([0, 0, 1]),
+        json!([226, 0, 0]),
+        json!([225, 0, 1]),
+        json!([226, 0, 4_294_967_296_u64]),
+    ] {
+        let mut bad = topology.clone();
+        bad["heads"][0]["kernel_drm"] = bad_key;
+        assert!(decode(&bad, &monitors).is_err());
+    }
+    let mut non_drm = topology.clone();
+    non_drm["heads"][0]["kernel_drm"] = json!([0, 0, 0]);
+    let (display, _) = value(decode(&non_drm, &monitors));
+    let scope = value(DisplayTopologyId::from_resource(&display.resource));
+    let facts = value(linura_observation::DisplayObservationFacts::from_envelope(
+        &display, &scope, 10000,
+    ));
+    assert!(facts.recovery_metadata().is_none());
+    assert!(linura_provider_sdk::display_baseline_guard(&facts).is_err());
+    let mut two = topology.clone();
+    let mut second = two["heads"][0].clone();
+    second["handle"] = json!("2");
+    second["name"] = json!("DP-2");
+    two["heads"]
+        .as_array_mut()
+        .unwrap_or_else(|| unreachable!("heads"))
+        .push(second);
+    let mut metadata = monitors.clone();
+    metadata
+        .as_array_mut()
+        .unwrap_or_else(|| unreachable!("monitors"))
+        .push(json!({"id":1,"name":"DP-2","disabled":false,"dpmsStatus":true,"mirrorOf":"none"}));
+    assert!(decode(&two, &metadata).is_err()); // Distinct names/handles, same kernel connector.
+    two["heads"][1]["kernel_drm"] = json!([226, 0, 2]);
+    assert!(decode(&two, &metadata).is_ok());
 }
 
 #[test]
@@ -171,6 +216,7 @@ fn original_native_baseline_guard_has_cross_language_vectors_and_rejects_drift()
         ("handle", json!("2")),
         ("generation", json!("3")),
         ("name", json!("DP-2")),
+        ("kernel_drm", json!([226, 0, 2])),
         ("enabled", json!(false)),
         ("covered", json!(false)),
         ("current_mode", json!(null)),
@@ -256,6 +302,7 @@ fn closed_native_schema_rejects_missing_unknown_duplicate_and_wrong_types() {
         "owned_target",
         "base_rule_digest",
         "output_identity_digest",
+        "kernel_drm",
     ] {
         let mut bad = topology.clone();
         bad["heads"][0]
@@ -270,10 +317,10 @@ fn closed_native_schema_rejects_missing_unknown_duplicate_and_wrong_types() {
     for raw in [
         topology
             .to_string()
-            .replacen("\"schema\":3", "\"schema\":3,\"schema\":3", 1),
+            .replacen("\"schema\":4", "\"schema\":4,\"schema\":4", 1),
         topology
             .to_string()
-            .replacen("\"schema\":3", "\"schema\":3,\"sch\\u0065ma\":3", 1),
+            .replacen("\"schema\":4", "\"schema\":4,\"sch\\u0065ma\":4", 1),
     ] {
         assert!(
             project(
@@ -403,6 +450,7 @@ fn mirrors_use_attested_inventory_identity_and_power_is_independent() {
     head["handle"] = json!("2");
     head["generation"] = json!("4");
     head["name"] = json!("HDMI-A-1");
+    head["kernel_drm"] = json!([226, 0, 2]);
     topology["heads"]
         .as_array_mut()
         .unwrap_or_else(|| unreachable!("typed fixture"))
@@ -489,6 +537,7 @@ fn locked_disabled_output_keeps_identity_without_inheriting_surface_coverage() {
         ("handle", json!("2")),
         ("generation", json!("4")),
         ("name", json!("HDMI-A-1")),
+        ("kernel_drm", json!([226, 0, 2])),
         ("enabled", json!(false)),
         ("covered", json!(false)),
         ("current_mode", Value::Null),

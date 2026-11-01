@@ -180,3 +180,11 @@ within a nonrenewable two-second BOOTTIME budget; unavailable, late or unresolve
 restoration cannot advance S17. Prepared lock acquisition also checks the native
 display fence. This mechanism grants no lock/power authority, and its overlap
 behavior still requires real native qualification.
+
+The private native identity witness also carries the actual DRM backend's device
+major/minor and connector object ID, obtained from its retained descriptor and
+output object. The owner validates this source-versioned binding before hashing
+and projecting metadata. Duplicate or malformed bindings fail closed; explicit
+non-DRM outputs remain read-only without mutation checkpoint qualification.
+These facts are required comparison material for recovery, not proof of kernel
+lifetime across compositor replacement. No new restoration write is enabled.

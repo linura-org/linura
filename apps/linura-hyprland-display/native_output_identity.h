@@ -1,11 +1,15 @@
 #pragma once
 
 #include <aquamarine/output/Output.hpp>
+#include <aquamarine/backend/DRM.hpp>
 
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 
 namespace Linura::HyprlandDisplay {
 
@@ -21,8 +25,30 @@ struct NativeOutputIdentity final
     std::optional<std::array<float, 3>> hdrLuminance;
     std::optional<std::array<double, 8>> chromaticity;
     bool supportsPQ = false, supportsBT2020 = false;
+    // Actual native device binding, not a physical-continuity credential.
+    // All zero denotes a non-DRM backend; it cannot support DRM recovery.
+    std::array<std::uint32_t, 3> kernelDrm{};
     bool operator==(const NativeOutputIdentity &) const = default;
 };
+
+[[nodiscard]] inline std::optional<std::array<std::uint32_t, 3>>
+nativeKernelDrmBinding(Aquamarine::IOutput &output)
+{
+    auto *drm = dynamic_cast<Aquamarine::CDRMOutput *>(&output);
+    if (!drm)
+        return std::array<std::uint32_t, 3>{};
+    const auto backend = drm->getBackend();
+    auto *native = dynamic_cast<Aquamarine::CDRMBackend *>(backend.get());
+    struct stat metadata
+    {};
+    const int connector = drm->getConnectorID();
+    if (!native || native->drmFD() < 0 || fstat(native->drmFD(), &metadata) != 0 ||
+        !S_ISCHR(metadata.st_mode) || major(metadata.st_rdev) != 226 ||
+        minor(metadata.st_rdev) > 63 || connector <= 0)
+        return std::nullopt;
+    return std::array<std::uint32_t, 3>{226, static_cast<std::uint32_t>(minor(metadata.st_rdev)),
+                                        static_cast<std::uint32_t>(connector)};
+}
 
 [[nodiscard]] inline std::optional<NativeOutputIdentity>
 nativeOutputIdentity(const Aquamarine::IOutput &output)

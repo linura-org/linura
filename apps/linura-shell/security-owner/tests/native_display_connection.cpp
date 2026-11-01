@@ -46,7 +46,7 @@ class Fixture final : public Backend
                      false,
                      false,
                      "LNDR:1;0;",
-                     "LNDF:1;0;",
+                     "LNDF:2;0;0;0;0;",
                      ""}},
                    Coverage::Unlocked};
     std::atomic<unsigned> writes{0};
@@ -464,7 +464,7 @@ void compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage()
                                                true,
                                                false,
                                                "LNDR:1;1;",
-                                               "LNDF:1;1;",
+                                               "LNDF:2;0;0;0;1;",
                                                ""});
     }
     Client owner(harness.descriptors[0]);
@@ -482,7 +482,7 @@ void compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage()
            projected->heads[1].handle == sampled->topology.heads[1].handle &&
            projected->heads[1].modes == sampled->topology.heads[1].modes);
     const auto encoded = QJsonDocument::fromJson(projected->encode().toUtf8()).object();
-    assert(encoded["schema"].toInt() == 3);
+    assert(encoded["schema"].toInt() == 4);
     const auto heads = encoded["heads"].toArray();
     assert(heads[0].toObject()["covered"].toBool() && !heads[1].toObject()["covered"].toBool());
     const auto missing = projectOwnerDisplayCoverage(sampled->topology, {});
@@ -507,7 +507,7 @@ void recoveryMetadataIsBoundedAndNeverPublishesNativeIdentityPreimages()
     assert(initial->topology.heads[0].baseRuleDigest == base);
     {
         const std::lock_guard lock(harness.backend.mutex);
-        harness.backend.facts.heads[0].outputIdentityWitness = "LNDF:1;abcdef;";
+        harness.backend.facts.heads[0].outputIdentityWitness = "LNDF:2;226;0;1;abcdef;";
         harness.backend.facts.heads[0].linuraOwned = true;
         harness.backend.facts.heads[0].ownedTargetWitness =
             "LNOT:1;1;1;1;1920;1080;60000;1000;0;0;0;0;0;";
@@ -517,11 +517,15 @@ void recoveryMetadataIsBoundedAndNeverPublishesNativeIdentityPreimages()
            owned->topology.heads[0].baseRuleDigest == base &&
            owned->topology.heads[0].outputIdentityDigest !=
                initial->topology.heads[0].outputIdentityDigest);
+    assert((owned->topology.heads[0].kernelDrm == std::array<quint32, 3>{226, 0, 1}));
     const auto serialized = owned->topology.encode();
     assert(!serialized.contains("LNDF:") && !serialized.contains("LNDR:"));
     for (const std::string &bad :
-         {std::string{}, std::string("LNDF:2;0;"), std::string("LNDF:1;\n;"),
-          "LNDF:1;" + std::string(16 * 1024, '0') + ';'}) {
+         {std::string{}, std::string("LNDF:1;0;"), std::string("LNDF:2;0;"),
+          std::string("LNDF:2;226;0;1;\n;"), std::string("LNDF:2;0226;0;1;0;"),
+          std::string("LNDF:2;226;64;1;0;"), std::string("LNDF:2;226;0;0;0;"),
+          std::string("LNDF:2;0;0;1;0;"), std::string("LNDF:2;226;0;4294967296;0;"),
+          "LNDF:2;226;0;1;" + std::string(16 * 1024, '0') + ';'}) {
         Harness invalid;
         {
             const std::lock_guard lock(invalid.backend.mutex);
@@ -531,6 +535,18 @@ void recoveryMetadataIsBoundedAndNeverPublishesNativeIdentityPreimages()
         assert(!rejected.connection->sample());
         assert(invalid.backend.writes == 0);
     }
+    Harness ambiguous;
+    {
+        const std::lock_guard lock(ambiguous.backend.mutex);
+        auto &facts = ambiguous.backend.facts;
+        facts.heads[0].outputIdentityWitness = "LNDF:2;226;0;1;0;";
+        auto duplicate = facts.heads[0];
+        duplicate.key = {2, 1};
+        duplicate.current.output = duplicate.key;
+        facts.heads.push_back(duplicate);
+    }
+    Client rejected(ambiguous.descriptors[0]);
+    assert(!rejected.connection->sample() && ambiguous.backend.writes == 0);
     assert(harness.backend.writes == 0);
 }
 

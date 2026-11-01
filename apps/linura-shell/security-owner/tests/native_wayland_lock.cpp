@@ -159,7 +159,7 @@ class DisplayFacts final : public Linura::HyprlandDisplay::Backend
                           locked,
                           false,
                           "LNDR:1;0;",
-                          "LNDF:1;0;",
+                          "LNDF:2;0;0;0;0;",
                           ""}},
                         locked ? Coverage::Secure : Coverage::Unlocked};
     }

@@ -402,9 +402,11 @@ class PinnedBackend final : public Backend
                 monitor->m_output->nonDesktop || monitor->m_output->modes.empty() ||
                 monitor->m_output->modes.size() > DisplayTransaction::MaxModes)
                 return false;
-            const auto identity = nativeOutputIdentity(*monitor->m_output);
-            if (!identity)
+            auto identity = nativeOutputIdentity(*monitor->m_output);
+            const auto kernel = nativeKernelDrmBinding(*monitor->m_output);
+            if (!identity || !kernel)
                 return false;
+            identity->kernelDrm = *kernel;
             std::vector<Mode> modes;
             std::set<Mode> unique;
             for (const auto &candidate : monitor->m_output->modes) {

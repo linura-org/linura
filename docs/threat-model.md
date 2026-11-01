@@ -1126,6 +1126,15 @@ Neither the decision digest nor the transport request is a credential. The
 public Authority1 mutation composition remains disabled pending replacement
 restoration and real native acceptance.
 
+The versioned private native identity includes the live DRM backend descriptor's
+device major/minor and actual connector object ID. Identity/generation comparisons
+and the baseline's native identity digest include that binding. The receiver
+rejects noncanonical numbers, unsupported device ranges, duplicate bindings and
+partial tuples. All-zero non-DRM bindings remain read-only and cannot qualify a
+native recovery checkpoint. Recycled device numbers or matching connector IDs
+after restart remain insufficient: no kernel lifetime, recovery permission or
+cross-compositor restoration is inferred from this point-in-time sample.
+
 Control's separate display safety preparation cancels only human continuation
 in the current owner/lock generation and lets the compositor perform the
 original baseline compensation. It cannot accept a new target, acquire/release

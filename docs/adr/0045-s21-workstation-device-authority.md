@@ -186,7 +186,7 @@ override ownership/rule drift. Desired-layout verification separately requires
 complete current Linura overlay ownership. These comparisons create no recovery
 execution authority and cannot retarget a replacement compositor.
 
-The pinned private native schema3 supplies mandatory ownership comparison data;
+The pinned private native schema4 supplies mandatory ownership comparison data;
 the protected owner hashes native rule and identity preimages before projecting
 them into canonical observations. Canonical display schema2 has complete typed
 recovery metadata for every exact output. Schema1 remains the independently
@@ -198,6 +198,18 @@ the rule digest; unrelated ICC/color/VRR/reservation fields do not. Digests and
 EDID/connector facts do not prove authenticated physical continuity across
 compositor replacement. This durable checkpoint alone cannot execute restoration
 in a new compositor; that continuity and recovery path still require qualification.
+
+The native identity witness also binds the actual Aquamarine DRM backend's
+character-device major/minor and connector object ID. These values are sampled
+from the retained native DRM descriptor and object, never inferred from an output
+name or EDID. They participate in identity/generation invalidation and the native
+identity digest. The private owner validates their exact versioned encoding and
+rejects duplicate or malformed kernel bindings before projecting facts. This
+candidate supports primary DRM minors 0 through 63 only; other DRM environments
+fail closed. An explicit all-zero tuple identifies a non-DRM backend and retains
+read-only observation, without qualifying a native mutation checkpoint. A fresh
+device tuple is still point-in-time comparison data: it neither establishes
+continuous kernel lifetime nor authorizes adoption after compositor replacement.
 
 Keep/revert is a separate protected human interaction over the already prepared
 canonical display transaction. Control creates a sealed `DisplayDecisionChallenge`

@@ -7,6 +7,7 @@
 #include <QCryptographicHash>
 #include <algorithm>
 #include <bit>
+#include <charconv>
 #include <chrono>
 #include <cstring>
 #include <limits>
@@ -54,6 +55,29 @@ bool correlation(const NativeDisplayCorrelation &value)
                                   c == '-';
                        }) &&
            digest(value.effectDigest) && digest(value.dispatchDigest) && value.deadlineUnixMs != 0;
+}
+std::optional<std::array<quint32, 3>> kernelBinding(const QByteArray &identity)
+{
+    constexpr auto prefix = "LNDF:2;";
+    if (!identity.startsWith(prefix))
+        return std::nullopt;
+    std::array<quint32, 3> key{};
+    const char *next = identity.constData() + std::strlen(prefix);
+    const char *end = identity.constData() + identity.size();
+    for (auto &value : key) {
+        const char *separator = std::find(next, end, ';');
+        if (separator == end || next == separator || separator - next > 10)
+            return std::nullopt;
+        const auto parsed = std::from_chars(next, separator, value);
+        if (parsed.ec != std::errc{} || parsed.ptr != separator ||
+            QByteArray(next, separator - next) != QByteArray::number(value))
+            return std::nullopt;
+        next = separator + 1;
+    }
+    if (next >= end ||
+        (key != std::array<quint32, 3>{} && (key[0] != 226 || key[1] > 63 || key[2] == 0)))
+        return std::nullopt;
+    return key;
 }
 std::optional<quint64> milliseconds(clockid_t clock)
 {
@@ -266,16 +290,18 @@ class NativeDisplayConnection::Impl final
         auto &head = *static_cast<Head *>(data);
         callback(*head.owner, [&] {
             const auto base = witness(baseRule, "LNDR:1;", 12 * 1024);
-            const auto native = witness(identity, "LNDF:1;", 16 * 1024);
+            const auto native = witness(identity, "LNDF:2;", 16 * 1024);
+            const auto kernel = native ? kernelBinding(*native) : std::nullopt;
             const auto overlay = owned == 1 ? witness(target, "LNOT:1;", 512)
                                             : std::optional<QByteArray>{QByteArray{}};
             if (head.done || head.recoveryReceived || !head.currentReceived || owned > 1 || !base ||
-                !native || !overlay || !target || (owned == 0 && target[0] != '\0')) {
+                !native || !kernel || !overlay || !target || (owned == 0 && target[0] != '\0')) {
                 head.owner->invalid = true;
                 return;
             }
             head.recoveryReceived = true;
             head.facts.linuraOwned = owned == 1;
+            head.facts.kernelDrm = *kernel;
             head.facts.ownedTarget = QString::fromLatin1(*overlay);
             // Native identifiers may contain monitor serials. Retain only their
             // source-versioned digest; never publish raw identity/config bytes.
@@ -339,9 +365,12 @@ class NativeDisplayConnection::Impl final
                 return;
             }
             std::set<QString> names;
+            std::set<std::array<quint32, 3>> kernelOutputs;
             for (const auto &[handle, head] : capture.heads) {
                 (void)handle;
-                if (!head->done || !names.insert(head->facts.name).second) {
+                if (!head->done || !names.insert(head->facts.name).second ||
+                    (head->facts.kernelDrm != std::array<quint32, 3>{} &&
+                     !kernelOutputs.insert(head->facts.kernelDrm).second)) {
                     capture.invalid = true;
                     return;
                 }

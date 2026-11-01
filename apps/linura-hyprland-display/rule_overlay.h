@@ -7,6 +7,7 @@
 #include <iterator>
 #include <map>
 #include <optional>
+#include <set>
 #include <type_traits>
 #include <utility>
 
@@ -31,11 +32,11 @@ template <typename Key, typename Rule> class RuleOverlayCheckpoint final
         // membership of each key and output in a historical collection.
         // Otherwise a recycled/swapped monitor binding could inherit an old
         // rule-ownership privilege from a different head.
+        std::set<OutputKey> uniqueOutputs;
         for (const auto &[key, output] : identities) {
-            if (!rules.contains(key) ||
-                std::count_if(baseline.begin(), baseline.end(), [&](const Target &target) {
-                    return target.output == output;
-                }) != 1)
+            if (!rules.contains(key) || !uniqueOutputs.insert(output).second ||
+                std::count_if(baseline.begin(), baseline.end(),
+                              [&](const Target &target) { return target.output == output; }) != 1)
                 return false;
         }
         for (const auto &[key, target] : overlay) {

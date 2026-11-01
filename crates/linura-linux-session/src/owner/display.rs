@@ -90,6 +90,7 @@ struct Head {
     owned_target: String,
     base_rule_digest: String,
     output_identity_digest: String,
+    kernel_drm: [u32; 3],
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -241,7 +242,7 @@ fn project(
         serde_json::from_str(topology).map_err(|_| "native display topology is malformed")?;
     let metadata: Vec<Monitor> =
         serde_json::from_str(monitors).map_err(|_| "native display metadata is malformed")?;
-    if native.schema != 3
+    if native.schema != 4
         || native.heads.is_empty()
         || native.heads.len() > 16
         || metadata.len() != native.heads.len()
@@ -267,8 +268,18 @@ fn project(
     }
     let mut names = BTreeSet::new();
     let mut handles = BTreeSet::new();
+    let mut kernel_outputs = BTreeSet::new();
     let mut identities = BTreeMap::new();
     for head in &native.heads {
+        let kernel = head.kernel_drm;
+        if kernel != [0; 3]
+            && (kernel[0] != 226
+                || kernel[1] > 63
+                || kernel[2] == 0
+                || !kernel_outputs.insert(kernel))
+        {
+            return Err("native DRM output binding is malformed or ambiguous".into());
+        }
         if !name(&head.name)
             || !names.insert(head.name.as_str())
             || !by_name.contains_key(head.name.as_str())
@@ -298,6 +309,9 @@ fn project(
         _ => return Err("native lock state is unsupported".into()),
     };
     for head in &native.heads {
+        // Nested/headless facts remain readable but cannot checkpoint a DRM
+        // mutation or imply continuity of a physical connector after restart.
+        checkpoint_eligible &= head.kernel_drm != [0; 3];
         let metadata = by_name[head.name.as_str()];
         let output = identities[&metadata.id].clone();
         if metadata.disabled == head.enabled

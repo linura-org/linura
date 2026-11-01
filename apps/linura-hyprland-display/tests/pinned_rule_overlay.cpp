@@ -99,14 +99,15 @@ TEST(LinuraDisplayPinnedRule, RestorationResumesAutomaticRulesAndRetainsUnrelate
     const auto before = originalRule();
     const Target baseline{OutputKey{1, 1}, true, Mode{1920, 1080, 75000}, 2000, 0, 0, 0, {}};
     const Target desired{OutputKey{1, 1}, true, Mode{1280, 720, 60000}, 1250, 1, 50, 60, {}};
+    const Checkpoint::Identities identities{{10, baseline.output}};
     Checkpoint checkpoint;
-    ASSERT_TRUE(checkpoint.capture({}, {{10, before}}, {baseline}));
+    ASSERT_TRUE(checkpoint.capture({}, {{10, before}}, {baseline}, identities));
     EXPECT_EQ(overlayDisplayFields(before, desired, "").m_autoDir, Config::DIR_AUTO_NONE);
     auto current = before;
     current.m_iccFile = "fixture/new-profile.icc";
     current.m_vrr = 1;
     current.m_sdrBrightness = 1.1F;
-    auto restored = checkpoint.restoration({baseline}, {{10, current}},
+    auto restored = checkpoint.restoration({baseline}, {{10, current}}, identities,
                                            sameOwnedDisplayFields<Config::CMonitorRule>);
     ASSERT_TRUE(restored);
     EXPECT_TRUE(restored->empty()); // Empty ownership resumes the live native rule.
@@ -116,12 +117,12 @@ TEST(LinuraDisplayPinnedRule, RestorationResumesAutomaticRulesAndRetainsUnrelate
     EXPECT_EQ(current.m_mirrorOf, before.m_mirrorOf);
     EXPECT_NE(current.m_iccFile, before.m_iccFile);
     EXPECT_NE(current.m_vrr, before.m_vrr);
-    EXPECT_TRUE(checkpoint.restored(*restored, {{10, current}},
+    EXPECT_TRUE(checkpoint.restored(*restored, {{10, current}}, identities,
                                     sameOwnedDisplayFields<Config::CMonitorRule>));
     Checkpoint priorOwned;
     const Checkpoint::Overlay previous{{10, baseline}};
-    ASSERT_TRUE(priorOwned.capture(previous, {{10, before}}, {baseline}));
-    restored = priorOwned.restoration({baseline}, {{10, current}},
+    ASSERT_TRUE(priorOwned.capture(previous, {{10, before}}, {baseline}, identities));
+    restored = priorOwned.restoration({baseline}, {{10, current}}, identities,
                                       sameOwnedDisplayFields<Config::CMonitorRule>);
     ASSERT_TRUE(restored);
     EXPECT_EQ(*restored, previous);
@@ -134,8 +135,9 @@ TEST(LinuraDisplayPinnedRule, OwnedRuleDriftAndCustomModelineChangesRefuseRestor
     using Checkpoint = RuleOverlayCheckpoint<int, Config::CMonitorRule>;
     const auto before = originalRule();
     const Target baseline{OutputKey{1, 1}, true, Mode{1920, 1080, 75000}, 2000, 0, 0, 0, {}};
+    const Checkpoint::Identities identities{{10, baseline.output}};
     Checkpoint checkpoint;
-    ASSERT_TRUE(checkpoint.capture({}, {{10, before}}, {baseline}));
+    ASSERT_TRUE(checkpoint.capture({}, {{10, before}}, {baseline}, identities));
     for (int field = 0; field != 25; ++field) {
         auto changed = before;
         switch (field) {
@@ -215,7 +217,7 @@ TEST(LinuraDisplayPinnedRule, OwnedRuleDriftAndCustomModelineChangesRefuseRestor
             changed.m_offset.y += 1;
             break;
         }
-        EXPECT_FALSE(checkpoint.restoration({baseline}, {{10, changed}},
+        EXPECT_FALSE(checkpoint.restoration({baseline}, {{10, changed}}, identities,
                                             sameOwnedDisplayFields<Config::CMonitorRule>))
             << field;
         EXPECT_NE(RecoveryWitness::rule(before), RecoveryWitness::rule(changed)) << field;
@@ -265,6 +267,17 @@ TEST(LinuraDisplayPinnedRule, RecoveryWitnessNormalizesSignedZeroAndRejectsUnbou
     identity.text[0] = "DP-1";
     const auto first = RecoveryWitness::identity(identity);
     ASSERT_TRUE(first);
+    EXPECT_TRUE(first->starts_with("LNDF:2;0;0;0;"));
+    identity.kernelDrm = {226, 0, 1};
+    const auto drm = RecoveryWitness::identity(identity);
+    ASSERT_TRUE(drm);
+    EXPECT_TRUE(drm->starts_with("LNDF:2;226;0;1;"));
+    EXPECT_NE(first, drm);
+    for (const auto key : {std::array<std::uint32_t, 3>{0, 0, 1}, {226, 64, 1}, {226, 0, 0}}) {
+        identity.kernelDrm = key;
+        EXPECT_FALSE(RecoveryWitness::identity(identity));
+    }
+    identity.kernelDrm = {226, 0, 1};
     identity.text[4] = "another native serial";
     EXPECT_NE(first, RecoveryWitness::identity(identity));
     identity.text[1] = std::string(4097, 'x');

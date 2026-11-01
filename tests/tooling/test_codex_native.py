@@ -812,7 +812,12 @@ class NativePreparationTests(unittest.TestCase):
 
     def test_unmanaged_python_alias_refuses_before_system_mutation(self):
         alias = self.home / ".local/linura-tools/python312/bin/python3"
-        alias.parent.mkdir(parents=True, mode=0o700)
+        # mkdir(parents=True) applies mode only to the final component. Declare
+        # every fixture ancestor so a caller's group-write umask cannot trigger
+        # the unrelated unsafe-directory refusal before this alias check.
+        for directory in reversed(alias.parent.relative_to(self.home).parents):
+            (self.home / directory).mkdir(mode=0o700, exist_ok=True)
+        alias.parent.mkdir(mode=0o700)
         outside = self.home / "unmanaged-python"
         outside.write_text("keep existing user alias")
         alias.symlink_to(outside)

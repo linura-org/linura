@@ -6,6 +6,7 @@
 #include <compare>
 #include <optional>
 #include <vector>
+#include <array>
 
 struct wl_registry;
 
@@ -35,6 +36,7 @@ struct NativeDisplayHead final
     // continuity across replacement, permits or current recovery authority.
     bool linuraOwned = false;
     QString baseRuleDigest{}, outputIdentityDigest{}, ownedTarget{};
+    std::array<quint32, 3> kernelDrm{};
     bool operator==(const NativeDisplayHead &) const = default;
 };
 

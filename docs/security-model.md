@@ -175,6 +175,14 @@ to its durable Control authorization. Scoped cancellation cannot retire an
 unrelated conversation. Replacement restoration and native acceptance remain
 incomplete, and public display mutation stays disabled.
 
+Native output identity now includes the actual retained Aquamarine DRM device
+major/minor and connector object ID in its source-versioned identity witness.
+Changing that binding invalidates the native output generation. The private
+receiver rejects malformed, duplicated and unsupported bindings; non-DRM outputs
+remain observable without mutation checkpoint qualification. These point-in-time
+facts do not prove continuity after replacement or grant a restoration effect.
+Independent retained kernel observation and durable restoration remain required.
+
 Before lock/power review or native-sleep coverage coordination, Control's private
 safety preparation cancels display continuation in the exact current owner/lock
 generation. It polls restoration readiness within one two-second BOOTTIME budget,

@@ -99,6 +99,14 @@ TEST(LinuraDisplayPinnedIdentity, CapabilityChangesAreDistinctFromLayoutEffects)
     output.parsedEDID.chromaticityCoords.reset();
     EXPECT_NE(baseline, nativeOutputIdentity(output));
 }
+TEST(LinuraDisplayPinnedIdentity, NonDrmBindingCannotInventARecoveryDevice)
+{
+    Output output;
+    initialize(output);
+    const auto kernel = nativeKernelDrmBinding(output);
+    ASSERT_TRUE(kernel);
+    EXPECT_EQ(*kernel, (std::array<std::uint32_t, 3>{}));
+}
 
 TEST(LinuraDisplayPinnedIdentity, MissingOptionalEdidIsSupportedButMalformedFactsAreNot)
 {
