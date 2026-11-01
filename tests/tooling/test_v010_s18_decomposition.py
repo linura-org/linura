@@ -108,7 +108,13 @@ def validate(plan: dict, design: dict, document: str) -> None:
         actual_operations = set(pr["candidate_operations"])
         assert actual_operations == EXPECTED_ASSIGNMENTS[pr["id"]], pr["id"]
         assert pr["external_effects"] is (index in (4, 5, 6, 7)), pr["id"]
-        assert not any(path.startswith("executors/") for path in pr["owned_paths"])
+        # Narrow native executors are legitimate only in reviewed, inactive
+        # effect-feature boundaries, never core, observation, Control or UX.
+        assert not any(path.startswith("executors/") for path in pr["owned_paths"]) or (
+            pr["id"] in {"S18-6", "S18-7", "S18-8"}
+            and bool(pr["candidate_operations"])
+            and pr["external_effects"] is True
+        )
         assigned.extend(pr["candidate_operations"])
         referenced_requirements.update(pr["requirements"])
         referenced_threats.update(pr["negative_cases"])
