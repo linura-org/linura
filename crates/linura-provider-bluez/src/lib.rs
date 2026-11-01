@@ -60,12 +60,10 @@ impl Inventory {
     fn resources(&self) -> Result<Vec<ResourceId>, ProviderError> {
         self.adapters
             .keys()
-            .map(|path| resource(ADAPTER_RESOURCE, path))
-            .chain(
-                self.devices
-                    .keys()
-                    .map(|path| resource(DEVICE_RESOURCE, path)),
-            )
+            .map(|path| bound_resource(ADAPTER_RESOURCE, path, &self.boot_id, &self.owner))
+            .chain(self.devices.keys().map(|path| {
+                bound_resource(DEVICE_RESOURCE, path, &self.boot_id, &self.owner)
+            }))
             .collect()
     }
 
@@ -74,7 +72,16 @@ impl Inventory {
         resource_id: &ResourceId,
         capability: &CapabilityId,
     ) -> Result<Attributes, ProviderError> {
-        let key = resource_id.as_str();
+        // Resource enumeration and observation are independent native calls. Reject
+        // a reused BlueZ path if the system boot or unique bus owner has changed.
+        // This is a freshness guard, not authentication of a remote Bluetooth peer.
+        let epoch_suffix = format!("@{}@{}", self.boot_id, self.owner);
+        let key = resource_id
+            .as_str()
+            .strip_suffix(&epoch_suffix)
+            .ok_or_else(|| {
+                ProviderError::Unavailable("stale Bluetooth resource owner/boot epoch".into())
+            })?;
         let (path, attributes) = match capability.as_str() {
             ADAPTER_CAPABILITY => {
                 let path = key.strip_prefix(ADAPTER_RESOURCE).ok_or_else(|| {
@@ -308,10 +315,19 @@ fn static_provider() -> ProviderId {
 fn static_capability(value: &str) -> CapabilityId {
     CapabilityId::new(value).unwrap_or_else(|_| unreachable!("invalid static BlueZ capability"))
 }
-fn resource(prefix: &str, path: &str) -> Result<ResourceId, ProviderError> {
-    ResourceId::new(format!("{prefix}{path}")).map_err(|error: ValidationError| {
-        ProviderError::InvalidState(format!("invalid BlueZ resource: {error}"))
-    })
+fn bound_resource(
+    prefix: &str,
+    path: &str,
+    boot_id: &str,
+    owner: &str,
+) -> Result<ResourceId, ProviderError> {
+    // D-Bus object paths contain no '@', so this suffix is unambiguous.
+    // The core ResourceId length budget also bounds the composed identifier.
+    ResourceId::new(format!("{prefix}{path}@{boot_id}@{owner}")).map_err(
+        |error: ValidationError| {
+            ProviderError::InvalidState(format!("invalid BlueZ resource: {error}"))
+        },
+    )
 }
 fn boot_id() -> Result<String, ProviderError> {
     let id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
@@ -668,8 +684,13 @@ mod tests {
     fn exact_owner_and_device_facts_do_not_imply_bond_or_service_readiness() {
         let inventory = parse(snapshot()).unwrap_or_else(|error| unreachable!("{error}"));
         assert_eq!(inventory.resources().unwrap_or_default().len(), 2);
-        let resource = resource(DEVICE_RESOURCE, "/org/bluez/hci0/dev_11_22_33_44_55_66")
-            .unwrap_or_else(|error| unreachable!("{error}"));
+        let resource = bound_resource(
+            DEVICE_RESOURCE,
+            "/org/bluez/hci0/dev_11_22_33_44_55_66",
+            &inventory.boot_id,
+            &inventory.owner,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
         let facts = inventory
             .observe(&resource, &static_capability(DEVICE_CAPABILITY))
             .unwrap_or_else(|error| unreachable!("{error}"));
@@ -763,10 +784,49 @@ mod tests {
         assert!(parse_device(&source).is_err());
     }
     #[test]
+    fn resource_enumeration_cannot_cross_replaced_owner_or_boot_epoch() {
+        let initial = parse(snapshot()).unwrap_or_else(|error| unreachable!("{error}"));
+        let resource = bound_resource(
+            DEVICE_RESOURCE,
+            "/org/bluez/hci0/dev_11_22_33_44_55_66",
+            &initial.boot_id,
+            &initial.owner,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        let changed_owner = parse_inventory(
+            snapshot(),
+            ":1.79".into(),
+            initial.boot_id.clone(),
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(
+            changed_owner
+                .observe(&resource, &static_capability(DEVICE_CAPABILITY))
+                .is_err()
+        );
+        let changed_boot = parse_inventory(
+            snapshot(),
+            initial.owner.clone(),
+            "00000000-0000-0000-0000-000000000001".into(),
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(
+            changed_boot
+                .observe(&resource, &static_capability(DEVICE_CAPABILITY))
+                .is_err()
+        );
+    }
+
+    #[test]
     fn unavailable_device_and_wrong_scope_never_fall_back() {
         let inventory = parse(snapshot()).unwrap_or_else(|error| unreachable!("{error}"));
-        let bad = resource(DEVICE_RESOURCE, "/org/bluez/hci1/dev_11_22_33_44_55_66")
-            .unwrap_or_else(|error| unreachable!("{error}"));
+        let bad = bound_resource(
+            DEVICE_RESOURCE,
+            "/org/bluez/hci1/dev_11_22_33_44_55_66",
+            &inventory.boot_id,
+            &inventory.owner,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
         assert!(
             inventory
                 .observe(&bad, &static_capability(DEVICE_CAPABILITY))
