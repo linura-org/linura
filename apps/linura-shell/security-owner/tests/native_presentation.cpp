@@ -125,12 +125,14 @@ int main(int argc, char **argv)
              NativePresentation::State::Locked, NativePresentation::State::ConfirmingLock,
              NativePresentation::State::Denied, NativePresentation::State::Unavailable,
              NativePresentation::State::Recovering, NativePresentation::State::SleepNotVerified,
+             NativePresentation::State::DisplayRecoveryRequired,
              NativePresentation::State::PreparingDisplay,
              NativePresentation::State::ApplyingDisplay}) {
         presentation.present(state);
         assert(presentation.primaryRequestAvailable() ==
                (state == NativePresentation::State::Locked ||
                 state == NativePresentation::State::Recovering ||
+                state == NativePresentation::State::DisplayRecoveryRequired ||
                 state == NativePresentation::State::SleepNotVerified));
         for (auto size : std::array{QSize(320, 240), QSize(1280, 720), QSize(1920, 1080)}) {
             QImage resized(size, QImage::Format_RGB32);
@@ -139,6 +141,15 @@ int main(int argc, char **argv)
             assert(resized.constBits() == pixels && resized.size() == size);
         }
     }
+    presentation.present(NativePresentation::State::DisplayRecoveryRequired);
+    assert(presentation.primaryRequestAvailable() && presentation.paint(frame));
+    const auto recovery = presentation.assistiveProjection(true);
+    assert(recovery.visible && !recovery.accepting);
+    assert(recovery.heading == QStringLiteral("Display recovery required"));
+    assert(recovery.description.contains(QStringLiteral("never replays")));
+    const auto recoveryPrimary = findTarget(frame.size(), NativePointerTarget::Action::Primary);
+    assert(presentation.pointerTarget(frame.size(), recoveryPrimary).action ==
+           NativePointerTarget::Action::Primary);
     // Display progress is presentation-only, with no password field, generic
     // unlock action, Cancel action, provider handle or implied success receipt.
     QImage preparing;

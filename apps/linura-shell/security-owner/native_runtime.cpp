@@ -60,6 +60,8 @@ class NativeRuntime::Impl final
     std::unique_ptr<AuthenticationAgent> authentication;
     std::unique_ptr<NativeDisplayFlow> display;
     bool displayRetiring = false;
+    // Presentation only: never a native-success flag or permission to replay.
+    bool displayRecoveryNotice = false;
     std::optional<NativePeerIdentity> approvalPeer;
     std::optional<NativeApprovalScope> approvalScope;
     quint64 approvalInputGeneration = 0;
@@ -161,6 +163,8 @@ class NativeRuntime::Impl final
             return; // Display composition owns only its fixed protected view.
         if (displayRetiring || transitionFence.active() || sleepFence.active())
             presentation->present(NativePresentation::State::Recovering);
+        else if (displayRecoveryNotice)
+            presentation->present(NativePresentation::State::DisplayRecoveryRequired);
         else if (approvalScope && approvalScope->purpose != ApprovalPurpose::ConfirmLock)
             presentation->presentAuthentication(approvalScope->purpose);
         else if (authentication->confirmationPending())
@@ -415,8 +419,15 @@ void NativeRuntime::requestNativeUnlock()
     // A canceled display approval is not evidence that its native mutation
     // completed or restored. Refuse a new unlock conversation until the
     // compositor independently reports no retained display safety fence.
-    if (!impl_->backend->displayAllowsSecurityTransition())
+    if (!impl_->backend->displayAllowsSecurityTransition()) {
+        impl_->displayRecoveryNotice = true;
+        impl_->refreshPresentation();
         return;
+    }
+    if (impl_->displayRecoveryNotice) {
+        impl_->displayRecoveryNotice = false;
+        impl_->refreshPresentation();
+    }
     const auto control = impl_->peers->namedPeer(NativePeerPurpose::ControlApproval);
     if (!control) {
         impl_->presentation->present(NativePresentation::State::Unavailable);
@@ -664,8 +675,17 @@ bool NativeRuntime::armDisplayApproval(const QDBusMessage &received,
     // while the compositor still holds a pending/recovery-failed mutation. Do
     // not present another protected approval over that unresolved native fence.
     // This is a refusal-only current-state check, never new mutation authority.
-    if (!impl_->backend->displayAllowsSecurityTransition())
+    if (!impl_->backend->displayAllowsSecurityTransition()) {
+        // Only the settled locked session exposes the recheck input. In an
+        // unlocked session the caller receives an unsupported/blocked result,
+        // without a fake interactive confirmation surface.
+        if (*settled == NativeObservedLockState::Secure) {
+            impl_->displayRecoveryNotice = true;
+            impl_->refreshPresentation();
+        }
         return false;
+    }
+    impl_->displayRecoveryNotice = false;
     impl_->display.reset();
     const auto lock = identity();
     auto display = NativeDisplayFlow::create(
@@ -780,6 +800,7 @@ bool NativeRuntime::retireDisplayForSecurity(const QDBusMessage &received,
     if (ready && impl_->displayRetiring) {
         impl_->display.reset();
         impl_->displayRetiring = false;
+        impl_->displayRecoveryNotice = false;
         impl_->refreshPresentation();
     }
     return ready;

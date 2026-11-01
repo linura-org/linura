@@ -197,6 +197,11 @@ class NativePresentation::Impl final
             explanation = QStringLiteral("Linura is checking each display. Recovery may be "
                                          "needed if the change cannot be verified.");
             break;
+        case State::DisplayRecoveryRequired:
+            title = QStringLiteral("Display recovery required");
+            explanation = QStringLiteral("Display recovery is unresolved. Unlock is blocked. "
+                                         "Check again; Linura never replays changes.");
+            break;
         case State::Denied:
             title = QStringLiteral("Authentication not completed");
             explanation =
@@ -224,20 +229,27 @@ class NativePresentation::Impl final
         }
         const bool actionable = state == State::Locked || state == State::SleepNotVerified ||
                                 state == State::ConfirmingLock || state == State::Recovering ||
+                                state == State::DisplayRecoveryRequired ||
                                 state == State::ReviewingDisplay ||
                                 (state == State::Authenticating && entry.acceptsInput());
         const bool cancellable = state == State::ConfirmingLock ||
                                  state == State::ReviewingDisplay ||
                                  (state == State::Authenticating && entry.acceptsInput());
+        QString primaryLabel = QStringLiteral("Request unlock");
+        if (state == State::ReviewingDisplay)
+            primaryLabel = displayPrimary;
+        else if (state == State::ConfirmingLock)
+            primaryLabel = QStringLiteral("Lock session");
+        else if (state == State::Authenticating)
+            primaryLabel = QStringLiteral("Submit response");
+        else if (state == State::DisplayRecoveryRequired)
+            primaryLabel = QStringLiteral("Check display recovery");
+        else if (state == State::Recovering)
+            primaryLabel = QStringLiteral("Check recovery");
         if (!root->setProperty("inputVisible", state == State::Authenticating) ||
             !root->setProperty("heading", title) ||
             !root->setProperty("explanation", explanation) ||
-            !root->setProperty("primaryLabel",
-                               state == State::ReviewingDisplay ? displayPrimary
-                               : state == State::ConfirmingLock ? QStringLiteral("Lock session")
-                               : state == State::Authenticating ? QStringLiteral("Submit response")
-                               : state == State::Recovering     ? QStringLiteral("Check recovery")
-                                                            : QStringLiteral("Request unlock")) ||
+            !root->setProperty("primaryLabel", primaryLabel) ||
             !root->setProperty("primaryAvailable", actionable) ||
             !root->setProperty("cancelAvailable", cancellable))
             faulted = true;
@@ -433,6 +445,7 @@ bool NativePresentation::primaryRequestAvailable() const
     switch (impl_->state) {
     case State::Locked:
     case State::Recovering:
+    case State::DisplayRecoveryRequired:
     case State::SleepNotVerified:
     case State::ReviewingDisplay:
         break;

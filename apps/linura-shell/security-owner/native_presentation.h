@@ -27,7 +27,8 @@ class NativePresentation final : public QObject
         SleepNotVerified,
         ReviewingDisplay,
         PreparingDisplay,
-        ApplyingDisplay
+        ApplyingDisplay,
+        DisplayRecoveryRequired
     };
     explicit NativePresentation(QObject *parent = nullptr);
     ~NativePresentation() override;
