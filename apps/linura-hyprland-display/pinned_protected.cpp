@@ -1,0 +1,1241 @@
+#include "pinned_protected.h"
+#include "pinned_integration.h"
+#include "protected_wire.h"
+#include "protected_input_retirement.h"
+#include "protected_key_delivery.h"
+#include "protected_frame.h"
+#include "protected_scope_history.h"
+#include "protected_opaque_buffer.h"
+#include "native_owner_admission.h"
+
+#include "src/Compositor.hpp"
+#include "src/config/ConfigValue.hpp"
+#include "src/plugins/PluginSystem.hpp"
+#include "src/managers/input/InputManager.hpp"
+#include "src/managers/SeatManager.hpp"
+#include "src/managers/eventLoop/EventLoopManager.hpp"
+#include "src/output/Monitor.hpp"
+#include "src/pointer/PointerManager.hpp"
+#include "src/protocols/core/Compositor.hpp"
+#include "src/render/Renderer.hpp"
+#include "src/render/OpenGL.hpp"
+#include "src/render/Renderbuffer.hpp"
+#include "src/render/pass/RectPassElement.hpp"
+#include "src/render/pass/SurfacePassElement.hpp"
+#include "src/state/MonitorState.hpp"
+
+#include <aquamarine/input/Input.hpp>
+#include <libinput.h>
+#include <libudev.h>
+#include <cstring>
+#include <string_view>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <linux/input-event-codes.h>
+#include <map>
+#include <memory>
+#include <wayland-server-core.h>
+
+namespace Linura::HyprlandDisplay {
+namespace {
+class PrivateRole final : public ISurfaceRole
+{
+  public:
+    eSurfaceRole role() override
+    {
+        return SURFACE_ROLE_LINURA_PROTECTED;
+    }
+};
+struct NativeData;
+std::weak_ptr<NativeData> active;
+// A failed/abandoned transaction must not drop its fence when wire objects die.
+// Only verified terminal retirement releases this compositor-owned reference.
+std::shared_ptr<NativeData> mutationFence;
+NativeData *activeNative = nullptr;
+ProtectedInputRetirement inputRetirement;
+std::unique_ptr<ProtectedWireEndpoint> endpoint;
+std::uint64_t nextEpoch = 1;
+ProtectedScopeHistory scopes;
+wl_event_source *drainTimer = nullptr;
+std::map<std::pair<IPointer *, std::uint32_t>, WP<IPointer>> heldButtons;
+
+bool nativeInputOrigin(libinput_device *device)
+{
+    if (!device)
+        return false;
+    auto *native = libinput_device_get_udev_device(device);
+    if (!native)
+        return false;
+    const char *path = udev_device_get_syspath(native);
+    const auto length = path ? strnlen(path, 4097) : 0;
+    const std::string_view value =
+        path && length <= 4096 ? std::string_view(path, length) : std::string_view{};
+    // This is the live libinput device's udev object, not a client-supplied
+    // name or a lookup which can adopt a recycled event node. Guest virtio/USB
+    // devices remain native guest input; this makes no physical Q11 claim.
+    const bool accepted =
+        value.starts_with("/sys/devices/") && value.find("/virtual/") == std::string_view::npos;
+    udev_device_unref(native);
+    return accepted;
+}
+bool nativeKeyboardDevice(const SP<IKeyboard> &keyboard)
+{
+    const auto native = keyboard && !keyboard->isVirtual() ? keyboard->aq() : nullptr;
+    return native && nativeInputOrigin(native->getLibinputHandle());
+}
+bool nativePointerDevice(const SP<IPointer> &pointer)
+{
+    const auto native = pointer && !pointer->isVirtual() ? pointer->aq() : nullptr;
+    return native && nativeInputOrigin(native->getLibinputHandle());
+}
+ProtectedInputRetirement::Held heldInput()
+{
+    ProtectedInputRetirement::Held held{!heldButtons.empty(), false, !heldButtons.empty()};
+    if (!g_pInputManager)
+        return {true, false, true};
+    for (const auto &keyboard : g_pInputManager->m_keyboards) {
+        if (!nativeKeyboardDevice(keyboard))
+            continue;
+        for (std::uint32_t key = 0; key <= KEY_MAX; ++key) {
+            if (!keyboard->getPressed(key))
+                continue;
+            held.any = true;
+            if (key == KEY_ESC)
+                held.escape = true;
+            else
+                held.other = true;
+        }
+    }
+    return held;
+}
+bool keysHeld()
+{
+    return heldInput().any;
+}
+bool supportedPresentation()
+{
+    static auto shader = CConfigValue<std::string>("decoration:screen_shader");
+    return g_pPluginSystem && g_pPluginSystem->pluginCount() == 0 &&
+           ((*shader).empty() || *shader == STRVAL_EMPTY);
+}
+// A modeset placeholder is allocated, not initialized. Render directly into
+// that exact future-size scanout buffer before it can reach the backend. The
+// pinned FULL_FAKE path binds the supplied FB without importing the ordinary
+// scene or committing an output; no nested render pass is permitted here.
+bool renderOpaqueBuffer(Monitor::CMonitor *monitor, const SP<Aquamarine::IBuffer> &buffer)
+{
+    if (!monitor || !monitor->m_output || !buffer || !buffer->good() || !g_pHyprRenderer ||
+        !Render::GL::g_pHyprOpenGL || g_pHyprRenderer->renderData().pMonitor)
+        return false;
+    if (!monitor->m_output->swapchain || !monitor->m_output->swapchain->contains(buffer) ||
+        buffer->lockedByBackend || buffer->backendPinCount() != 0)
+        return false; // Never modify a client buffer or an existing scanout in place.
+    const auto &state = monitor->m_output->state->state();
+    const auto mode = state.mode ? state.mode : state.customMode;
+    if (!state.enabled || !mode || buffer->size != mode->pixelSize || buffer->size.x < 1 ||
+        buffer->size.y < 1 || buffer->size.x > 32768 || buffer->size.y > 32768 ||
+        buffer->size.x * buffer->size.y > 8 * 1024 * 1024 ||
+        buffer->size.x != std::floor(buffer->size.x) ||
+        buffer->size.y != std::floor(buffer->size.y))
+        return false;
+    Render::GL::g_pHyprOpenGL->makeEGLCurrent();
+    if (glGetError() != GL_NO_ERROR || glGetGraphicsResetStatus() != GL_NO_ERROR)
+        return false;
+    const auto renderbuffer = g_pHyprRenderer->getOrCreateRenderbuffer(buffer, state.drmFormat);
+    const auto framebuffer = renderbuffer ? renderbuffer->getFB() : nullptr;
+    if (!framebuffer || framebuffer->m_size != buffer->size)
+        return false;
+    CRegion damage{0, 0, static_cast<int>(buffer->size.x), static_cast<int>(buffer->size.y)};
+    if (!g_pHyprRenderer->beginFullFakeRender(monitor->m_self.lock(), damage, framebuffer))
+        return false;
+    // Clear is independent of the old monitor transform, viewport, damage,
+    // color management and scene contents. Restrictive inherited write masks
+    // cannot leave uninitialized pixels outside the old output geometry.
+    const bool cleared = clearProtectedFramebuffer();
+    g_pHyprRenderer->endRender();
+    // This path has no renderer-produced acquire fence. Complete the actual
+    // write before handing the buffer to queued native submission. Completion
+    // here is NOT a hardware presentation acknowledgement.
+    return cleared && glGetError() == GL_NO_ERROR && glGetGraphicsResetStatus() == GL_NO_ERROR;
+}
+bool draining()
+{
+    return inputRetirement.blocked() || !heldButtons.empty();
+}
+void scheduleRefocus()
+{
+    if (g_pEventLoopManager)
+        g_pEventLoopManager->doLater([] {
+            if (!active.expired() || draining() || !g_pInputManager)
+                return;
+            g_pInputManager->refocus();
+        });
+}
+struct NativeData final : std::enable_shared_from_this<NativeData>
+{
+    struct Surface final
+    {
+        OutputKey output;
+        PHLMONITORREF monitor;
+        WP<CWLSurfaceResource> resource;
+        SP<ISurfaceRole> role;
+        ProtectedScene::Configure configure;
+        std::uint32_t serial = 0;
+        bool acknowledged = false, contentCommitted = false, selectedFrame = false;
+        ProtectedFrame frame;
+        std::uint64_t disableCommit = 0;
+        bool disableSubmitted = false;
+        SP<Aquamarine::IBuffer> renderedBuffer;
+        CHyprSignalListener commit, destroy, present, result;
+    };
+    ProtectedInteraction interaction;
+    std::map<OutputKey, Surface> surfaces;
+    struct Keyboard final
+    {
+        WP<IKeyboard> device;
+        std::shared_ptr<xkb_keymap> keymap;
+        bool enabled = false, allowed = false;
+        CHyprSignalListener changed;
+    };
+    std::vector<Keyboard> keyboards;
+    ProtectedKeyDelivery keys;
+    std::vector<WP<IPointer>> pointers;
+    bool closed = false;
+    bool mutation = false, ownerLost = false, mutationFault = false, writing = false;
+    bool decisionActive = false, decisionStarted = false, decisionUsed = false;
+    MutationProtection::Write lastWrite = MutationProtection::Write::Apply;
+    Snapshot mutationInventory, stableInventory;
+    Layout baseline, desired;
+    Correlation bound;
+    std::uint64_t mutationEpoch = 0, mutationDeadlineBootMs = 0;
+    ClockSample mutationClock;
+    bool escapeDown = false;
+    std::uint64_t exitBootMs = 0, exitEpoch = 0;
+    wl_event_source *timer = nullptr;
+    NativeData(ProtectedInteraction value) : interaction(std::move(value))
+    {
+        for (const auto &keyboard : g_pInputManager->m_keyboards) {
+            std::shared_ptr<xkb_keymap> retained;
+            if (keyboard->m_xkbKeymap)
+                retained = {xkb_keymap_ref(keyboard->m_xkbKeymap), xkb_keymap_unref};
+            keyboards.push_back(
+                {keyboard, std::move(retained), keyboard->m_enabled, keyboard->m_allowed, {}});
+        }
+        for (const auto &pointer : g_pInputManager->m_pointers)
+            pointers.emplace_back(pointer);
+    }
+    bool refresh()
+    {
+        if (closed || !supportedPresentation() || !Pointer::mgr() ||
+            !Pointer::mgr()->protectedCursorFenceReady())
+            return false;
+        auto *backend = nativeBackend();
+        const auto facts = backend ? backend->snapshot() : std::nullopt;
+        const auto clock = compositorClock();
+        bool devices = g_pInputManager && keyboards.size() == g_pInputManager->m_keyboards.size() &&
+                       pointers.size() == g_pInputManager->m_pointers.size();
+        if (devices) {
+            for (std::size_t i = 0; i < keyboards.size(); ++i) {
+                const auto keyboard = keyboards[i].device.lock();
+                devices = devices && keyboard && keyboard == g_pInputManager->m_keyboards[i] &&
+                          keyboard->m_xkbKeymap == keyboards[i].keymap.get() &&
+                          keyboard->m_enabled == keyboards[i].enabled &&
+                          keyboard->m_allowed == keyboards[i].allowed;
+            }
+            for (std::size_t i = 0; i < pointers.size(); ++i)
+                devices = devices && pointers[i].lock() &&
+                          pointers[i].lock() == g_pInputManager->m_pointers[i];
+        }
+        if (mutation) {
+            if (!devices) {
+                mutationFault = true; // Retire authority, retain opaque rendering.
+                interaction.cancel();
+            }
+            if (!facts || !clock || !mutationScope(*facts)) {
+                mutationFault = true;
+                return false;
+            }
+            // Geometry may vary only inside this reserved compositor write.
+            // Outside that stack, even a compatible-looking external change
+            // fences the attempt instead of being adopted as desired state.
+            if (!(writing && ownedModesetInProgress()) && *facts != stableInventory) {
+                mutationFault = true;
+                return false;
+            }
+            if (clock->unixMs < mutationClock.unixMs || clock->bootMs < mutationClock.bootMs)
+                mutationFault = true;
+            else
+                mutationClock = *clock;
+            if (decisionActive && !interaction.refresh(*facts, *clock))
+                mutationFault = true;
+            return true;
+        }
+        if (!devices || !facts || !clock || !interaction.refresh(*facts, *clock)) {
+            interaction.cancel();
+            return false;
+        }
+        return true;
+    }
+    void cancelInput() noexcept
+    {
+        interaction.cancel();
+        if (mutation)
+            mutationFault = true;
+    }
+    bool mutationScope(const Snapshot &facts) const
+    {
+        if (facts.generation != mutationInventory.generation ||
+            facts.securityEpoch != mutationInventory.securityEpoch ||
+            facts.heads.size() != mutationInventory.heads.size() ||
+            (facts.coverage != Coverage::Unlocked && facts.coverage != Coverage::Secure) ||
+            (mutationInventory.coverage == Coverage::Secure && facts.coverage != Coverage::Secure))
+            return false;
+        for (std::size_t i = 0; i < facts.heads.size(); ++i) {
+            const auto &head = facts.heads[i];
+            const auto &original = mutationInventory.heads[i];
+            if (head.key != original.key || head.modes != original.modes ||
+                head.baseRuleWitness != original.baseRuleWitness ||
+                head.outputIdentityWitness != original.outputIdentityWitness ||
+                (head.current.enabled && facts.coverage == Coverage::Secure && !head.covered))
+                return false;
+        }
+        return true;
+    }
+    void invalidateFrames()
+    {
+        for (auto &[key, surface] : surfaces) {
+            (void)key;
+            surface.acknowledged = surface.contentCommitted = surface.selectedFrame = false;
+            surface.frame.invalidate();
+            surface.renderedBuffer.reset();
+        }
+        if (g_pSeatManager) {
+            g_pSeatManager->setKeyboardFocus(nullptr);
+            g_pSeatManager->setPointerFocus(nullptr, {});
+        }
+        damage();
+    }
+    void damage()
+    {
+        if (!State::monitorState() || !g_pHyprRenderer)
+            return;
+        for (const auto &monitor : State::monitorState()->monitors())
+            if (monitor && monitor->m_enabled)
+                g_pHyprRenderer->damageMonitor(monitor);
+    }
+    void close() noexcept
+    {
+        if (closed)
+            return;
+        if (mutation) {
+            // Losing authentication/input resources cancels continuation, not
+            // the opaque native fence. The independent transaction timer sees
+            // ownerLost and reserves compensation after the current write.
+            ownerLost = true;
+            interaction.cancel();
+            invalidateFrames();
+            return;
+        }
+        closed = true;
+        if (timer) {
+            wl_event_source_remove(timer);
+            timer = nullptr;
+        }
+        if (activeNative == this) {
+            const auto clock = compositorClock();
+            const bool explicitExit = exitBootMs != 0 && clock && clock->bootMs >= exitBootMs &&
+                                      clock->bootMs - exitBootMs <= 500 &&
+                                      exitEpoch == interaction.epoch() &&
+                                      interaction.phase() != ProtectedInteraction::Phase::Cancelled;
+            inputRetirement.close(explicitExit, heldInput());
+            activeNative = nullptr;
+            active.reset();
+            // Unknown loss also quarantines subsequent typing. Returning to an
+            // ordinary focus needs a new physical Escape and a complete drain.
+            if (drainTimer && draining())
+                wl_event_source_timer_update(drainTimer, 100);
+            if (g_pSeatManager) {
+                g_pSeatManager->setKeyboardFocus(nullptr);
+                g_pSeatManager->setPointerFocus(nullptr, {});
+            }
+        }
+        interaction.cancel();
+        if (Pointer::mgr())
+            Pointer::mgr()->refreshProtectedCursorFence();
+        for (auto &[key, surface] : surfaces) {
+            (void)key;
+            surface.commit.reset();
+            surface.destroy.reset();
+            surface.present.reset();
+            surface.result.reset();
+            if (const auto resource = surface.resource.lock();
+                resource && resource->m_role == surface.role) {
+                resource->unmap();
+                // The private role remains assigned for the wl_surface lifetime.
+                // A closed authentication surface cannot become an application.
+            }
+        }
+        keyboards.clear();
+        pointers.clear();
+        damage();
+        if (!draining())
+            scheduleRefocus();
+    }
+    ~NativeData()
+    {
+        close();
+    }
+    Surface *forMonitor(Monitor::CMonitor *monitor)
+    {
+        for (auto &[key, surface] : surfaces) {
+            (void)key;
+            if (surface.monitor.lock().get() == monitor)
+                return &surface;
+        }
+        return nullptr;
+    }
+    SP<CWLSurfaceResource> focused()
+    {
+        if (!refresh())
+            return nullptr;
+        for (auto &[key, surface] : surfaces) {
+            const auto resource = surface.resource.lock();
+            const auto monitor = surface.monitor.lock();
+            if (resource && monitor && monitor->m_dpmsStatus && !monitor->isMirror() &&
+                surface.acknowledged) {
+                interaction.focus(key);
+                return resource;
+            }
+        }
+        interaction.focus(std::nullopt);
+        return nullptr;
+    }
+    bool inputReady()
+    {
+        if (mutation && !decisionActive)
+            return false;
+        if (!refresh())
+            return false;
+        const auto resource = focused();
+        if (!resource || !g_pSeatManager || g_pSeatManager->m_state.keyboardFocus != resource) {
+            interaction.focus(std::nullopt);
+            return false;
+        }
+        auto *backend = nativeBackend();
+        const auto facts = backend ? backend->snapshot() : std::nullopt;
+        const auto clock = compositorClock();
+        return facts && clock && interaction.eligible(interaction.epoch(), *facts, *clock);
+    }
+    bool ownsKeyboardFocus() const
+    {
+        return g_pSeatManager && std::ranges::any_of(surfaces, [&](const auto &item) {
+                   const auto resource = item.second.resource.lock();
+                   return resource && resource == g_pSeatManager->m_state.keyboardFocus;
+               });
+    }
+};
+class PinnedMutation final : public MutationProtection
+{
+  public:
+    explicit PinnedMutation(std::shared_ptr<NativeData> data) : data_(std::move(data)) {}
+    ~PinnedMutation() override
+    {
+        if (!wrote_)
+            release(); // Rejection before the first possible native write.
+    }
+    bool healthy() override
+    {
+        return data_->mutation && data_->refresh() && !data_->ownerLost && !data_->mutationFault;
+    }
+    bool beginWrite(Write kind, const Snapshot &captured) override
+    {
+        auto *backend = nativeBackend();
+        const auto current = backend ? backend->snapshot() : std::nullopt;
+        if (!data_->mutation || data_->writing || !current || *current != captured ||
+            !data_->mutationScope(*current) || (kind == Write::Apply && (wrote_ || !healthy())))
+            return false;
+        // Compensation remains confined to this original baseline even if the
+        // owner or human proof has gone away. No new client gains an effect.
+        wrote_ = true;
+        data_->lastWrite = kind;
+        data_->writing = true;
+        data_->decisionActive = false;
+        const auto &targets = kind == Write::Apply ? data_->desired : data_->baseline;
+        for (std::size_t i = 0; i < targets.size(); ++i) {
+            auto &surface = data_->surfaces.at(targets[i].output);
+            surface.disableCommit = 0;
+            surface.disableSubmitted = !targets[i].enabled && !captured.heads[i].current.enabled;
+        }
+        data_->invalidateFrames();
+        return true;
+    }
+    void endWrite(Write kind) noexcept override
+    {
+        data_->writing = false;
+        try {
+            const auto sample = nativeBackend()->snapshot();
+            if (!sample || !data_->mutationScope(*sample) || data_->lastWrite != kind)
+                data_->mutationFault = true;
+            else
+                data_->stableInventory = *sample;
+            // A pre-modeset hardware event cannot qualify the restored mode.
+            data_->invalidateFrames();
+        } catch (...) {
+            data_->mutationFault = true;
+        }
+    }
+    bool presented(Write kind) override
+    {
+        if (!data_->mutation || data_->writing || data_->lastWrite != kind || !data_->refresh())
+            return false;
+        const auto &targets = kind == Write::Apply ? data_->desired : data_->baseline;
+        if (targets.size() != data_->stableInventory.heads.size())
+            return false;
+        for (std::size_t i = 0; i < targets.size(); ++i) {
+            const auto &target = targets[i];
+            const auto surface = data_->surfaces.find(target.output);
+            if (target != data_->stableInventory.heads[i].current ||
+                (target.enabled &&
+                 (surface == data_->surfaces.end() || !surface->second.frame.completed())) ||
+                (!target.enabled &&
+                 (surface == data_->surfaces.end() || !surface->second.disableSubmitted)))
+                return false;
+        }
+        return true;
+    }
+    bool consumeKeepDecision() override
+    {
+        return consumeDecision(ProtectedInteraction::Purpose::Keep);
+    }
+    bool consumeRevertDecision() override
+    {
+        return consumeDecision(ProtectedInteraction::Purpose::Revert);
+    }
+    void release() noexcept override
+    {
+        if (!data_->mutation)
+            return;
+        data_->mutation = false;
+        if (mutationFence == data_)
+            mutationFence.reset();
+        data_->close();
+    }
+
+  private:
+    bool consumeDecision(ProtectedInteraction::Purpose purpose)
+    {
+        if (!healthy() || !data_->decisionActive || data_->decisionUsed ||
+            data_->interaction.phase() != ProtectedInteraction::Phase::Consumed ||
+            data_->interaction.scope().purpose != purpose || !presented(Write::Apply))
+            return false;
+        data_->decisionUsed = true;
+        return true;
+    }
+    std::shared_ptr<NativeData> data_;
+    bool wrote_ = false;
+};
+class PinnedScene final : public ProtectedScene
+{
+  public:
+    std::shared_ptr<NativeData> data;
+    explicit PinnedScene(std::shared_ptr<NativeData> native) : data(std::move(native)) {}
+    ~PinnedScene() override
+    {
+        close();
+    }
+    void close() noexcept override
+    {
+        data->close();
+    }
+    std::shared_ptr<MutationProtection>
+    reserveMutation(const Correlation &bound, const Layout &baseline, const Layout &desired,
+                    const Snapshot &captured, ClockSample capturedClock) override
+    {
+        if (data->mutation || mutationFence || !data->refresh() ||
+            data->interaction.phase() != ProtectedInteraction::Phase::Consumed ||
+            data->interaction.scope().purpose != ProtectedInteraction::Purpose::Apply ||
+            data->surfaces.size() != captured.heads.size() || baseline == desired ||
+            !DisplayTransaction::validLayout(baseline, captured) ||
+            !DisplayTransaction::validLayout(desired, captured) || capturedClock.unixMs == 0 ||
+            capturedClock.bootMs == 0 || bound.deadlineUnixMs <= capturedClock.unixMs ||
+            bound.deadlineUnixMs - capturedClock.unixMs > DisplayTransaction::WindowMs ||
+            capturedClock.bootMs > std::numeric_limits<std::uint64_t>::max() -
+                                       (bound.deadlineUnixMs - capturedClock.unixMs))
+            return {};
+        const auto now = nativeBackend()->snapshot();
+        if (!now || *now != captured)
+            return {};
+        for (std::size_t i = 0; i < captured.heads.size(); ++i)
+            if (!data->surfaces.contains(captured.heads[i].key) ||
+                baseline[i] != captured.heads[i].current)
+                return {};
+        auto lease = std::make_shared<PinnedMutation>(data);
+        data->mutationInventory = data->stableInventory = captured;
+        data->baseline = baseline;
+        data->desired = desired;
+        data->bound = bound;
+        data->mutationEpoch = data->interaction.epoch();
+        data->mutationDeadlineBootMs =
+            capturedClock.bootMs + bound.deadlineUnixMs - capturedClock.unixMs;
+        data->mutationClock = capturedClock;
+        data->mutation = true;
+        mutationFence = data;
+        return lease;
+    }
+    bool beginDecision(const ProtectedInteraction::Scope &scope) override
+    {
+        if (!data->mutation || !data->refresh() || data->ownerLost || data->mutationFault ||
+            data->writing || data->decisionStarted ||
+            data->lastWrite != MutationProtection::Write::Apply ||
+            (scope.purpose != ProtectedInteraction::Purpose::Keep &&
+             scope.purpose != ProtectedInteraction::Purpose::Revert) ||
+            scope.digest == data->interaction.scope().digest ||
+            scope.deadlineUnixMs != data->bound.deadlineUnixMs ||
+            scope.deadlineBootMs != data->mutationDeadlineBootMs || heldInput().any)
+            return false;
+        for (std::size_t i = 0; i < data->desired.size(); ++i)
+            if (data->stableInventory.heads[i].current != data->desired[i])
+                return false;
+        const auto clock = compositorClock();
+        const auto epoch = std::max(nextEpoch, data->interaction.epoch() + 1);
+        if (!clock || epoch >= std::numeric_limits<std::uint64_t>::max() - 1)
+            return false;
+        auto decision = ProtectedInteraction::start(scope, data->stableInventory, *clock, epoch);
+        if (!decision || !scopes.reserve(scope, *clock))
+            return false;
+        nextEpoch = epoch + 1;
+        data->decisionStarted = true;
+        data->interaction = std::move(*decision);
+        data->invalidateFrames();
+        data->decisionActive = true;
+        // Retain roles, physical input bindings and native commit high-water
+        // marks. Every enabled head receives a fresh logical-size configure.
+        for (auto &[key, surface] : data->surfaces) {
+            const auto monitor = surface.monitor.lock();
+            if (!monitor || !monitor->m_output || !surface.resource.lock())
+                return false;
+            if (!monitor->m_enabled)
+                continue;
+            if (monitor->m_size.x < 1 || monitor->m_size.x > 32768 || monitor->m_size.y < 1 ||
+                monitor->m_size.y > 32768 || monitor->m_size.x != std::floor(monitor->m_size.x) ||
+                monitor->m_size.y != std::floor(monitor->m_size.y))
+                return false;
+            surface.serial = wl_display_next_serial(g_pCompositor->m_wlDisplay);
+            if (!data->interaction.configure(key, surface.serial))
+                return false;
+        }
+        for (auto &[key, surface] : data->surfaces) {
+            (void)key;
+            const auto monitor = surface.monitor.lock();
+            if (!monitor->m_enabled)
+                continue;
+            surface.resource.lock()->enter(monitor->m_self.lock());
+            surface.configure(surface.serial, static_cast<std::uint32_t>(monitor->m_size.x),
+                              static_cast<std::uint32_t>(monitor->m_size.y));
+        }
+        data->damage();
+        return true;
+    }
+    bool attach(OutputKey key, wl_resource *wire, Configure configure) override
+    {
+        if (!data->refresh() || !configure || data->surfaces.contains(key))
+            return false;
+        const auto resource = CWLSurfaceResource::fromResource(wire);
+        const auto monitor = nativeOutputMonitor(key);
+        if (!resource || !monitor || !monitor->m_output ||
+            (resource->m_role && resource->m_role->role() != SURFACE_ROLE_UNASSIGNED) ||
+            resource->m_current.buffer || resource->m_pending.buffer || resource->m_mapped ||
+            !resource->m_subsurfaces.empty() ||
+            (monitor->m_enabled &&
+             (monitor->m_size.x < 1 || monitor->m_size.y < 1 || monitor->m_size.x > 32768 ||
+              monitor->m_size.y > 32768 || monitor->m_size.x != std::floor(monitor->m_size.x) ||
+              monitor->m_size.y != std::floor(monitor->m_size.y))) ||
+            !(monitor->m_output->commitCapabilities() &
+              Aquamarine::IOutput::AQ_OUTPUT_COMMIT_CAPABILITY_QUEUED))
+            return false;
+        auto [at, inserted] = data->surfaces.try_emplace(key);
+        if (!inserted)
+            return false;
+        auto &surface = at->second;
+        surface.output = key;
+        surface.monitor = monitor->m_self;
+        surface.resource = resource;
+        surface.role = makeShared<PrivateRole>();
+        resource->m_role = surface.role;
+        surface.configure = std::move(configure);
+        surface.serial = wl_display_next_serial(g_pCompositor->m_wlDisplay);
+        if (monitor->m_enabled && !data->interaction.configure(key, surface.serial))
+            return false;
+        const auto weak = std::weak_ptr<NativeData>(data);
+        surface.destroy = resource->m_events.destroy.listen([weak] {
+            if (const auto live = weak.lock())
+                live->close();
+        });
+        surface.commit = resource->m_events.commit.listen([weak, key] {
+            const auto live = weak.lock();
+            if (!live || !live->refresh())
+                return;
+            auto &surface = live->surfaces.at(key);
+            const auto resource = surface.resource.lock();
+            const auto monitor = surface.monitor.lock();
+            if (!resource || !monitor || !surface.acknowledged || !resource->m_current.buffer ||
+                !resource->m_current.texture || resource->m_current.size != monitor->m_size ||
+                !resource->m_subsurfaces.empty()) {
+                live->cancelInput();
+                return;
+            }
+            if (!resource->m_mapped)
+                resource->map();
+            surface.contentCommitted = true;
+            live->damage();
+        });
+        surface.result = monitor->m_output->events.commitResult.listen(
+            [weak, key](const Aquamarine::IOutput::SCommitResult &event) {
+                const auto live = weak.lock();
+                if (!live || live->closed)
+                    return;
+                auto &surface = live->surfaces.at(key);
+                if (event.id != 0 && event.id == surface.disableCommit) {
+                    surface.disableSubmitted =
+                        event.status == Aquamarine::IOutput::AQ_OUTPUT_COMMIT_SUBMITTED &&
+                        event.error == 0;
+                    if (!surface.disableSubmitted)
+                        live->mutationFault = true;
+                    return;
+                }
+                if (!surface.frame.submitted(
+                        event.id, event.status == Aquamarine::IOutput::AQ_OUTPUT_COMMIT_SUBMITTED &&
+                                      event.error == 0)) {
+                    live->cancelInput();
+                    live->damage();
+                    return;
+                }
+            });
+        surface.present = monitor->m_output->events.present.listen(
+            [weak, key](const Aquamarine::IOutput::SPresentEvent &event) {
+                const auto live = weak.lock();
+                if (!live || !live->refresh())
+                    return;
+                auto &surface = live->surfaces.at(key);
+                const auto presentation = surface.frame.presented(
+                    event.commitID,
+                    event.presented &&
+                        (event.flags & Aquamarine::IOutput::AQ_OUTPUT_PRESENT_HW_COMPLETION));
+                if (presentation == ProtectedFrame::Presentation::Failed) {
+                    live->cancelInput();
+                    live->damage();
+                    return;
+                }
+                if (presentation != ProtectedFrame::Presentation::Content)
+                    return;
+                if (live->mutation && !live->decisionActive)
+                    return;
+                live->interaction.presented(key, event.commitID, true);
+                const auto focus = live->focused();
+                if (focus && g_pSeatManager)
+                    g_pSeatManager->setKeyboardFocus(focus);
+            });
+        if (monitor->m_enabled) {
+            resource->enter(monitor->m_self.lock());
+            surface.configure(surface.serial, static_cast<std::uint32_t>(monitor->m_size.x),
+                              static_cast<std::uint32_t>(monitor->m_size.y));
+        }
+        return true;
+    }
+    bool acknowledge(OutputKey key, std::uint32_t serial) override
+    {
+        if (!data->refresh())
+            return false;
+        const auto at = data->surfaces.find(key);
+        if (at == data->surfaces.end() || serial != at->second.serial || at->second.acknowledged)
+            return false;
+        at->second.acknowledged = true;
+        return true;
+    }
+    bool refreshPresentation() override
+    {
+        if (!data->refresh() || data->interaction.phase() != ProtectedInteraction::Phase::Ready ||
+            data->surfaces.empty())
+            return false;
+        // Change every configure/input epoch before any callback can publish a
+        // revision. No original Ready frame can attest the replacement content.
+        for (auto &[key, surface] : data->surfaces) {
+            const auto monitor = surface.monitor.lock();
+            if (!monitor)
+                return false;
+            if (!monitor->m_enabled)
+                continue;
+            surface.serial = wl_display_next_serial(g_pCompositor->m_wlDisplay);
+            surface.acknowledged = surface.contentCommitted = surface.selectedFrame = false;
+            surface.frame.invalidate();
+            surface.renderedBuffer.reset();
+            if (!data->interaction.configure(key, surface.serial))
+                return false;
+        }
+        for (auto &[key, surface] : data->surfaces) {
+            const auto monitor = surface.monitor.lock();
+            if (!monitor || !surface.configure)
+                return false;
+            if (!monitor->m_enabled)
+                continue;
+            surface.configure(surface.serial, static_cast<std::uint32_t>(monitor->m_size.x),
+                              static_cast<std::uint32_t>(monitor->m_size.y));
+        }
+        data->damage();
+        return true;
+    }
+    std::optional<ProtectedSceneStatus> status() override
+    {
+        if (!data->refresh())
+            return std::nullopt;
+        const auto facts = nativeBackend()->snapshot();
+        return facts
+                   ? std::optional(ProtectedSceneStatus{compositorInstance(), facts->generation,
+                                                        data->mutation && !data->decisionActive
+                                                            ? data->mutationEpoch
+                                                            : data->interaction.epoch(),
+                                                        data->mutation && !data->decisionActive
+                                                            ? ProtectedInteraction::Phase::Consumed
+                                                            : data->interaction.phase()})
+                   : std::nullopt;
+    }
+    bool consume(const std::string &digest, std::uint64_t epoch) override
+    {
+        if (!data->inputReady())
+            return false;
+        const auto facts = nativeBackend()->snapshot();
+        const auto clock = compositorClock();
+        auto scope = data->interaction.scope();
+        scope.digest = digest;
+        return facts && clock && data->interaction.consume(scope, epoch, *facts, *clock);
+    }
+};
+} // namespace
+void initializeProtectedDisplay(wl_display &display)
+{
+    if (endpoint)
+        return;
+    drainTimer = wl_event_loop_add_timer(
+        g_pCompositor->m_wlEventLoop,
+        [](void *) {
+            if (!g_pInputManager)
+                return 0;
+            std::erase_if(heldButtons, [](const auto &button) {
+                const auto original = button.second.lock();
+                return !original ||
+                       !std::ranges::any_of(g_pInputManager->m_pointers, [&](const auto &pointer) {
+                           return pointer == original;
+                       });
+            });
+            inputRetirement.poll(heldInput());
+            if (draining() && drainTimer)
+                wl_event_source_timer_update(drainTimer, 100);
+            else
+                scheduleRefocus();
+            return 0;
+        },
+        nullptr);
+    if (!drainTimer)
+        return;
+    endpoint = std::make_unique<ProtectedWireEndpoint>(
+        display, attestDisplayOwner,
+        [](const ProtectedInteraction::Scope &scope) -> std::unique_ptr<ProtectedScene> {
+            if (!supportedPresentation() || !active.expired() || draining() || !nativeBackend() ||
+                !g_pInputManager || !g_pSeatManager || !Pointer::mgr() || keysHeld() ||
+                !g_pInputManager->getKeysFromAllKBs().empty() ||
+                g_pInputManager->hasHeldButtons() || g_pInputManager->m_keyboards.empty() ||
+                g_pInputManager->m_keyboards.size() > 16 ||
+                g_pInputManager->m_pointers.size() > 16 ||
+                !std::ranges::any_of(g_pInputManager->m_keyboards,
+                                     [](const auto &keyboard) {
+                                         return nativeKeyboardDevice(keyboard) &&
+                                                keyboard->m_xkbKeymap && keyboard->m_enabled &&
+                                                keyboard->m_allowed;
+                                     }) ||
+                nextEpoch >= std::numeric_limits<std::uint64_t>::max() - 1)
+                return nullptr;
+            const auto facts = nativeBackend()->snapshot();
+            const auto clock = compositorClock();
+            if (!facts || !clock)
+                return nullptr;
+            auto interaction = ProtectedInteraction::start(scope, *facts, *clock, nextEpoch++);
+            if (!interaction || !scopes.reserve(scope, *clock))
+                return nullptr;
+            auto data = std::make_shared<NativeData>(std::move(*interaction));
+            for (auto &keyboard : data->keyboards) {
+                const auto device = keyboard.device.lock();
+                if (!device)
+                    return nullptr;
+                keyboard.changed = device->m_keyboardEvents.keymap.listen(
+                    [weak = std::weak_ptr<NativeData>(data)](const IKeyboard::SKeymapEvent &) {
+                        if (const auto live = weak.lock())
+                            live->cancelInput();
+                    });
+            }
+            auto scene = std::make_unique<PinnedScene>(data);
+            if (!inputRetirement.begin(heldInput()))
+                return nullptr;
+            activeNative = data.get();
+            active = data;
+            Pointer::mgr()->refreshProtectedCursorFence();
+            if (!Pointer::mgr()->protectedCursorFenceReady()) {
+                data->close();
+                return nullptr;
+            }
+            data->timer = wl_event_loop_add_timer(
+                g_pCompositor->m_wlEventLoop,
+                [](void *context) {
+                    auto &native = *static_cast<NativeData *>(context);
+                    if (!native.refresh()) {
+                        native.close();
+                        return 0;
+                    }
+                    if (native.timer)
+                        wl_event_source_timer_update(native.timer, 100);
+                    return 0;
+                },
+                data.get());
+            if (!data->timer || wl_event_source_timer_update(data->timer, 100) != 0) {
+                data->close();
+                return nullptr;
+            }
+            g_pSeatManager->setKeyboardFocus(nullptr);
+            g_pSeatManager->setPointerFocus(nullptr, {});
+            data->damage();
+            return scene;
+        });
+}
+void shutdownProtectedDisplay()
+{
+    endpoint.reset();
+    if (const auto data = active.lock()) {
+        data->mutation = false; // Compositor teardown, after its compensation.
+        data->close();
+    }
+    mutationFence.reset();
+    active.reset();
+    if (drainTimer) {
+        wl_event_source_remove(drainTimer);
+        drainTimer = nullptr;
+    }
+}
+bool protectedDisplayActive()
+{
+    return !active.expired();
+}
+bool protectedInputExclusive()
+{
+    return !active.expired() || draining();
+}
+bool renderProtectedDisplay(Monitor::CMonitor *monitor, const Time::steady_tp &now)
+{
+    const auto data = active.lock();
+    if (!data || !monitor || !g_pHyprRenderer)
+        return false;
+    CRectPassElement::SRectData black;
+    black.box = {0, 0, monitor->m_transformedSize.x, monitor->m_transformedSize.y};
+    black.color = CHyprColor(0, 0, 0, 1);
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(black));
+    auto *surface = data->forMonitor(monitor);
+    if (surface) {
+        surface->selectedFrame = false;
+        // A previous rendered-but-unsubmitted buffer cannot be adopted by
+        // this pass. The actual completion callback supplies its own identity.
+        surface->renderedBuffer.reset();
+    }
+    if (!data->refresh() || !surface)
+        return true;
+    const auto resource = surface->resource.lock();
+    if (!surface->acknowledged || !surface->contentCommitted || !resource || !resource->m_mapped ||
+        !resource->m_current.texture)
+        return true;
+    CSurfacePassElement::SRenderData frame{monitor->m_self, now, monitor->m_position, {}};
+    frame.surface = resource;
+    frame.texture = resource->m_current.texture;
+    frame.decorate = false;
+    frame.w = monitor->m_size.x;
+    frame.h = monitor->m_size.y;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CSurfacePassElement>(frame));
+    surface->selectedFrame = true;
+    resource->frame(now);
+    return true;
+}
+void protectedFrameRendered(Monitor::CMonitor *monitor, Aquamarine::IBuffer *buffer)
+{
+    const auto data = active.lock();
+    if (!data || !monitor || !monitor->m_output || !buffer || !data->refresh())
+        return;
+    auto *surface = data->forMonitor(monitor);
+    const auto current = monitor->m_output->state->state().buffer;
+    if (!surface || !current || current.get() != buffer)
+        return;
+    if (!surface->frame.rendered(buffer, surface->selectedFrame ? ProtectedFrame::Kind::Content
+                                                                : ProtectedFrame::Kind::Safety)) {
+        data->cancelInput();
+        return;
+    }
+    surface->selectedFrame = false;
+    surface->renderedBuffer = current;
+}
+std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
+{
+    const auto data = active.lock();
+    if (!data)
+        return std::nullopt;
+    auto *surface = data->forMonitor(monitor);
+    if (!data->refresh() || !surface || !monitor || !monitor->m_output)
+        return false;
+    if (!monitor->m_output->state->state().enabled) {
+        if (!data->mutation || !data->writing || !ownedModesetInProgress() || !ownedCommitAllowed())
+            return false;
+        const auto submission = monitor->m_output->commitAsync({});
+        if (submission.id == 0 || submission.error != 0) {
+            data->mutationFault = true;
+            return false;
+        }
+        surface->disableCommit = submission.id;
+        surface->disableSubmitted = false;
+        return true;
+    }
+    const auto buffer = monitor->m_output->state->state().buffer;
+    if (!buffer)
+        return false;
+    if (surface->renderedBuffer != buffer || !surface->frame.prepared(buffer.get())) {
+        // Native-owned opaque initialization replaces the former unrendered
+        // placeholder refusal. Inventory/lease checks above stay mandatory;
+        // this does not make an unbound layout mutation eligible.
+        if (!ownedModesetInProgress() || !data->mutation || !data->writing ||
+            !renderOpaqueBuffer(monitor, buffer) ||
+            !surface->frame.rendered(buffer.get(), ProtectedFrame::Kind::Safety))
+            return false;
+        surface->renderedBuffer = buffer;
+    }
+    // Revoke old interaction evidence BEFORE a black frame can replace it.
+    // The opaque frame's own hardware event will remain safety-only.
+    if ((!data->mutation || data->decisionActive) &&
+        surface->frame.pendingKind() == ProtectedFrame::Kind::Safety &&
+        !data->interaction.safetyFrame(surface->output))
+        return false;
+    // Rendering/importing the buffer can take time. Neither the original
+    // protection window nor the native power fence may expire during that work.
+    if (!data->refresh() || !ownedCommitAllowed())
+        return false;
+    const auto submission = monitor->m_output->commitAsync({});
+    surface->renderedBuffer.reset();
+    if (submission.id == 0 || submission.error != 0 ||
+        !surface->frame.queued(buffer.get(), submission.id) ||
+        ((!data->mutation || data->decisionActive) &&
+         surface->frame.queuedKind() == ProtectedFrame::Kind::Content &&
+         !data->interaction.commit(surface->output, surface->serial, submission.id))) {
+        data->cancelInput();
+        return false;
+    }
+    return true;
+}
+bool focusAllowed(const SP<CWLSurfaceResource> &resource, bool keyboard)
+{
+    const auto data = active.lock();
+    if (!resource) {
+        if (data && keyboard)
+            data->interaction.focus(std::nullopt);
+        return true;
+    }
+    if (!data)
+        return !draining();
+    for (const auto &[key, surface] : data->surfaces) {
+        (void)key;
+        if (surface.resource.lock() == resource) {
+            if (keyboard)
+                data->interaction.focus(key);
+            return true;
+        }
+    }
+    data->interaction.focus(std::nullopt);
+    return false;
+}
+bool protectedKeyboardFocusAllowed(const SP<CWLSurfaceResource> &surface)
+{
+    return focusAllowed(surface, true);
+}
+bool protectedPointerFocusAllowed(const SP<CWLSurfaceResource> &surface)
+{
+    return focusAllowed(surface, false);
+}
+bool protectedKeyboardKey(const IKeyboard::SKeyEvent &event, const SP<IKeyboard> &keyboard)
+{
+    const auto data = active.lock();
+    if (!data) {
+        if (!inputRetirement.blocked())
+            return false;
+        if (event.state != WL_KEYBOARD_KEY_STATE_PRESSED &&
+            event.state != WL_KEYBOARD_KEY_STATE_RELEASED)
+            return true;
+        const bool physical =
+            nativeKeyboardDevice(keyboard) && keyboard->m_enabled && keyboard->m_allowed;
+        if (!inputRetirement.key(physical, event.keycode == KEY_ESC,
+                                 event.state == WL_KEYBOARD_KEY_STATE_PRESSED, heldInput()))
+            return false;
+        if (!draining())
+            scheduleRefocus();
+        return true;
+    }
+    if (event.state != WL_KEYBOARD_KEY_STATE_PRESSED &&
+        event.state != WL_KEYBOARD_KEY_STATE_RELEASED) {
+        data->close();
+        return true;
+    }
+    if (!nativeKeyboardDevice(keyboard) || !keyboard->m_enabled || !keyboard->m_allowed) {
+        data->cancelInput();
+        return true;
+    }
+    const bool ready = data->inputReady();
+    const auto held = heldInput();
+    if (event.keycode == KEY_ESC) {
+        if (event.state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+            const auto clock = compositorClock();
+            if (!data->escapeDown && !held.other && clock) {
+                data->exitBootMs = clock->bootMs;
+                data->exitEpoch = data->interaction.epoch();
+            }
+            data->escapeDown = true;
+        } else if (!held.escape)
+            data->escapeDown = false;
+    } else if (event.state == WL_KEYBOARD_KEY_STATE_PRESSED)
+        data->exitBootMs = 0;
+    const auto source = std::ranges::find_if(
+        data->keyboards, [&](const auto &bound) { return bound.device.lock() == keyboard; });
+    if (source == data->keyboards.end()) {
+        data->close();
+        return true;
+    }
+    const auto delivery =
+        data->keys.edge(static_cast<std::size_t>(std::distance(data->keyboards.begin(), source)),
+                        event.keycode, event.state == WL_KEYBOARD_KEY_STATE_PRESSED, ready);
+    if (delivery != ProtectedKeyDelivery::Edge::Ignore && data->ownsKeyboardFocus() &&
+        !data->closed && data->interaction.phase() != ProtectedInteraction::Phase::Cancelled) {
+        g_pSeatManager->setKeyboard(keyboard);
+        g_pSeatManager->sendKeyboardKey(event.timeMs, event.keycode, event.state);
+    } else if (!ready && event.keycode == KEY_ESC && event.state == WL_KEYBOARD_KEY_STATE_PRESSED &&
+               data->exitBootMs != 0) {
+        data->close(); // Physical cancellation can abandon an unready prompt.
+    }
+    return true;
+}
+bool protectedKeyboardModifiers(const SP<IKeyboard> &keyboard)
+{
+    const auto data = active.lock();
+    if (!data)
+        return draining();
+    if (!nativeKeyboardDevice(keyboard) || !keyboard->m_enabled || !keyboard->m_allowed) {
+        data->cancelInput();
+        return true;
+    }
+    const bool bound = std::ranges::any_of(
+        data->keyboards, [&](const auto &original) { return original.device.lock() == keyboard; });
+    if (!bound) {
+        data->close();
+        return true;
+    }
+    // Modifier snapshots do not admit a key or a proof. Keep the same private
+    // owner's XKB state current while new presses wait for a replacement frame;
+    // otherwise a dropped Shift release could contaminate the next PAM prompt.
+    if (data->refresh() && data->ownsKeyboardFocus() && !data->closed &&
+        data->interaction.phase() != ProtectedInteraction::Phase::Cancelled) {
+        const auto &mods = keyboard->m_modifiersState;
+        g_pSeatManager->setKeyboard(keyboard);
+        g_pSeatManager->sendKeyboardMods(mods.depressed, mods.latched, mods.locked, mods.group);
+    }
+    return true;
+}
+bool protectedPointerRefocus(std::uint32_t time)
+{
+    const auto data = active.lock();
+    if (!data)
+        return draining();
+    const auto focus = data->focused();
+    if (!focus || !data->inputReady()) {
+        g_pSeatManager->setPointerFocus(nullptr, {});
+        return true;
+    }
+    const auto position = g_pInputManager->getMouseCoordsInternal();
+    for (auto &[key, surface] : data->surfaces) {
+        (void)key;
+        const auto monitor = surface.monitor.lock();
+        const auto resource = surface.resource.lock();
+        if (monitor && resource &&
+            CBox{monitor->m_position, monitor->m_size}.containsPoint(position)) {
+            const auto local = position - monitor->m_position;
+            g_pSeatManager->setPointerFocus(resource, local);
+            g_pSeatManager->sendPointerMotion(time, local);
+            g_pSeatManager->sendPointerFrame();
+            return true;
+        }
+    }
+    g_pSeatManager->setPointerFocus(nullptr, {});
+    return true;
+}
+bool protectedPointerMove(const IPointer::SMotionEvent &event)
+{
+    const auto data = active.lock();
+    if (!data)
+        return draining();
+    if (!nativePointerDevice(event.device) || !event.device->m_connected) {
+        data->cancelInput();
+        return true;
+    }
+    Pointer::mgr()->move(event.delta);
+    (void)protectedPointerRefocus(event.timeMs);
+    return true;
+}
+bool protectedPointerWarp(const IPointer::SMotionAbsoluteEvent &event)
+{
+    const auto data = active.lock();
+    if (!data)
+        return draining();
+    // Absolute physical pointers/touch/tablets have distinct device semantics;
+    // they cannot be relabelled as an authenticated physical relative pointer.
+    (void)event;
+    data->cancelInput();
+    return true;
+}
+bool protectedPointerButton(const IPointer::SButtonEvent &event, const SP<IPointer> &pointer)
+{
+    const auto data = active.lock();
+    if (!data && !draining())
+        return false;
+    if (event.button > KEY_MAX) {
+        if (data)
+            data->cancelInput();
+        return true;
+    }
+    if (!nativePointerDevice(pointer)) {
+        if (data)
+            data->cancelInput();
+        return true;
+    }
+    const auto key = std::pair{pointer.get(), event.button};
+    if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+        heldButtons.insert_or_assign(key, pointer);
+        if (data)
+            data->exitBootMs = 0;
+    } else
+        heldButtons.erase(key);
+    inputRetirement.poll(heldInput());
+    if (!data) {
+        if (!draining())
+            scheduleRefocus();
+        return true;
+    }
+    if (!pointer->m_connected) {
+        data->cancelInput();
+        return true;
+    }
+    (void)protectedPointerRefocus(event.timeMs);
+    if (data->inputReady()) {
+        g_pSeatManager->sendPointerButton(event.timeMs, event.button, event.state);
+        g_pSeatManager->sendPointerFrame();
+    }
+    return true;
+}
+} // namespace Linura::HyprlandDisplay

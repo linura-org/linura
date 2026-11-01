@@ -22,6 +22,31 @@ struct CommandInfo {
 
 const COMMANDS: &[CommandInfo] = &[
     CommandInfo {
+        name: "own-display-snapshot",
+        summary: "Query fresh own-login display identities, layout and exact supported modes",
+        offline: false,
+    },
+    CommandInfo {
+        name: "begin-display-layout",
+        summary: "Request an exact bounded display intent through managed authority",
+        offline: false,
+    },
+    CommandInfo {
+        name: "display-layout-status",
+        summary: "Inspect the same display request without replay",
+        offline: false,
+    },
+    CommandInfo {
+        name: "confirm-display-layout",
+        summary: "Request confirmation of the same pending display transaction",
+        offline: false,
+    },
+    CommandInfo {
+        name: "revert-display-layout",
+        summary: "Request restoration of the same retained display baseline",
+        offline: false,
+    },
+    CommandInfo {
         name: "native-sleep-gate-status",
         summary: "Read own-login sleep diagnostics, never current protection or successful sleep",
         offline: false,
@@ -276,10 +301,92 @@ fn run() -> Result<(), Box<dyn Error>> {
             );
             field("effect_replayed", "false");
         }
+        Some("begin-display-layout") => {
+            require_arity(
+                &args,
+                4,
+                "begin-display-layout <operation-id> <canonical-intent> <reason>",
+            )?;
+            let request = linura_sdk::DisplayLayoutRequest::from_material(
+                args[1].clone(),
+                args[2].clone(),
+                args[3].clone(),
+            )
+            .map_err(std::io::Error::other)?;
+            let receipt = LocalAuthorityClient::connect()?.begin_display_layout(&request)?;
+            print_display_receipt(&receipt);
+        }
+        Some(
+            command
+            @ ("display-layout-status" | "confirm-display-layout" | "revert-display-layout"),
+        ) => {
+            require_arity(
+                &args,
+                2,
+                "display-layout-status|confirm-display-layout|revert-display-layout <request-id>",
+            )?;
+            let request =
+                linura_sdk::display_layout_request_id(&args[1]).map_err(std::io::Error::other)?;
+            let client = LocalAuthorityClient::connect()?;
+            let receipt = match command {
+                "display-layout-status" => client.display_layout_status(&request)?,
+                "confirm-display-layout" => client.confirm_display_layout(&request)?,
+                _ => client.revert_display_layout(&request)?,
+            };
+            print_display_receipt(&receipt);
+        }
         Some("own-session-lock") => {
             require_arity(&args, 1, "own-session-lock")?;
             let lock = LocalAuthorityClient::connect()?.own_session_lock()?;
             field("resource", lock.resource_id()?.as_str());
+        }
+        Some("own-display-snapshot") => {
+            require_arity(&args, 1, "own-display-snapshot")?;
+            let snapshot = LocalAuthorityClient::connect()?.own_display_snapshot()?;
+            field("lock_resource", snapshot.lock.resource_id()?.as_str());
+            field("layout", &snapshot.layout.canonical_text()?);
+            field(
+                "observed_at_unix_ms",
+                &snapshot.observed_at_unix_ms.to_string(),
+            );
+            field("valid_for_ms", &snapshot.valid_for_ms.to_string());
+            for (index, row) in snapshot.layout.outputs().iter().enumerate() {
+                let cap = snapshot
+                    .capabilities
+                    .iter()
+                    .find(|cap| cap.output() == row.output())
+                    .ok_or_else(|| std::io::Error::other("display capabilities are missing"))?;
+                field(
+                    &format!("output.{index}.handle"),
+                    &row.output().handle().to_string(),
+                );
+                field(
+                    &format!("output.{index}.generation"),
+                    &row.output().generation().to_string(),
+                );
+                field(
+                    &format!("output.{index}.can_disable"),
+                    &cap.can_disable().to_string(),
+                );
+                field(
+                    &format!("output.{index}.powered"),
+                    &snapshot.powered_outputs.contains(row.output()).to_string(),
+                );
+                let modes: Vec<_> = cap
+                    .modes()
+                    .iter()
+                    .map(|mode| {
+                        format!(
+                            "{},{},{}",
+                            mode.width(),
+                            mode.height(),
+                            mode.refresh_millihz()
+                        )
+                    })
+                    .collect();
+                field(&format!("output.{index}.modes"), &modes.join(";"));
+            }
+            field("execution_authority", "none");
         }
         Some("lock-session" | "unlock-session") => {
             require_arity(
@@ -940,6 +1047,18 @@ fn field(key: &str, value: &str) {
     println!("{}={}", escaped(key), escaped(value));
 }
 
+fn print_display_receipt(receipt: &linura_sdk::DisplayLayoutReceipt) {
+    field("request_id", receipt.request_id.as_str());
+    field("transaction_id", &receipt.transaction_id);
+    field("resource", receipt.resource.as_str());
+    field("display_layout_state", receipt.state.as_str());
+    field(
+        "confirmation_expires_at_unix_ms",
+        &receipt.confirmation_expires_at_unix_ms.to_string(),
+    );
+    field("current_native_layout", "not-queried");
+}
+
 fn escaped(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     for character in value.chars() {
@@ -961,6 +1080,10 @@ fn print_help() {
     );
     println!();
     println!("Commands:");
+    println!("  begin-display-layout <operation-id> <canonical-intent> <reason>");
+    println!("  display-layout-status <request-id>");
+    println!("  confirm-display-layout <request-id>");
+    println!("  revert-display-layout <request-id>");
     println!("  version");
     println!("  commands [--json]");
     println!("  whoami");
@@ -978,6 +1101,7 @@ fn print_help() {
     println!("  explain-plan-review <plan-id>");
     println!("  set-audio-output-volume <request-id> <node-id> <volume-percent> <reason>");
     println!("  own-session-lock");
+    println!("  own-display-snapshot");
     println!("  native-sleep-gate-status");
     println!("  configure-protective-lock <enable|revoke> <operation-id> <exact-lock-resource>");
     println!("  protective-lock-setting <exact-session-epoch-resource>");
@@ -1153,6 +1277,11 @@ mod tests {
             "protective-lock-setting",
             "protective-lock-setting-status",
             "own-session-lock",
+            "own-display-snapshot",
+            "begin-display-layout",
+            "display-layout-status",
+            "confirm-display-layout",
+            "revert-display-layout",
             "lock-session",
             "unlock-session",
             "session-lock-status",

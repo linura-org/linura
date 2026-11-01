@@ -231,6 +231,10 @@ class NativePreparationTests(unittest.TestCase):
         spec = native.load_spec()
         self.assertEqual(set(spec["profile"]), set(doctor.PROFILES))
         self.assertEqual(
+            native.host_preparation_profiles(spec),
+            sorted(name for name in doctor.PROFILES if name != "hyprland-build"),
+        )
+        self.assertEqual(
             native.profiles(["editor", "bindings"], spec),
             ["bindings", "core", "editor", "shell"],
         )
@@ -429,8 +433,11 @@ class NativePreparationTests(unittest.TestCase):
             ),
             patch.object(native, "repository_state", return_value="a" * 64),
         ):
-            current = self.make_plan(list(doctor.PROFILES))
-            self.assertEqual(current["payload"]["profiles"], sorted(doctor.PROFILES))
+            host_profiles = [
+                name for name in doctor.PROFILES if name != "hyprland-build"
+            ]
+            current = self.make_plan(host_profiles)
+            self.assertEqual(current["payload"]["profiles"], sorted(host_profiles))
             self.fake_preparation()
             receipt = install.prepare(current, self.commands)
             self.assertEqual(receipt["status"], "ready")
@@ -445,6 +452,33 @@ class NativePreparationTests(unittest.TestCase):
                 native.PreparationError, "full_system_maintenance"
             ):
                 install.refresh_metadata(["core"], self.commands)
+
+    def test_compositor_sdk_uses_pinned_substrate_without_host_package_effects(self):
+        with patch.object(
+            native,
+            "host",
+            return_value={"id": "arch", "version": "rolling", "architecture": "x86_64"},
+        ):
+            with self.assertRaisesRegex(
+                native.PreparationError, "s21_pinned_substrate"
+            ):
+                self.make_plan(["hyprland-build"])
+        self.assertEqual(self.commands.calls, [])
+        self.assertEqual(self.commands.effects, [])
+        spec = native.load_spec()
+        self.assertIn("libglvnd", spec["profile"]["hyprland-build"]["arch"])
+        self.assertIn("systemd-libs", spec["profile"]["hyprland-build"]["arch"])
+        self.assertNotIn("editor", native.profiles(["hyprland-build"], spec))
+        broken = (
+            native.read_regular(ROOT / native.SPEC)
+            .decode()
+            .replace('  "libglvnd",\n', "")
+        )
+        with patch.object(native, "read_regular", return_value=broken.encode()):
+            with self.assertRaisesRegex(
+                native.PreparationError, "dependency_inventory_drift"
+            ):
+                native.load_spec()
 
     def test_arch_pending_upgrade_fails_before_effects(self):
         self.commands.pending_upgrade = True
@@ -778,7 +812,12 @@ class NativePreparationTests(unittest.TestCase):
 
     def test_unmanaged_python_alias_refuses_before_system_mutation(self):
         alias = self.home / ".local/linura-tools/python312/bin/python3"
-        alias.parent.mkdir(parents=True, mode=0o700)
+        # mkdir(parents=True) applies mode only to the final component. Declare
+        # every fixture ancestor so a caller's group-write umask cannot trigger
+        # the unrelated unsafe-directory refusal before this alias check.
+        for directory in reversed(alias.parent.relative_to(self.home).parents):
+            (self.home / directory).mkdir(mode=0o700, exist_ok=True)
+        alias.parent.mkdir(mode=0o700)
         outside = self.home / "unmanaged-python"
         outside.write_text("keep existing user alias")
         alias.symlink_to(outside)

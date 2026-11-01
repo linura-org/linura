@@ -195,6 +195,25 @@ impl RiskPolicy {
 }
 
 pub(crate) fn classify_plan_risk(plan: &ReconciliationPlan) -> RiskClassification {
+    if plan.provider.as_str() == linura_observation::DISPLAY_PROVIDER {
+        let valid_topology = linura_core::DisplayTopologyId::from_resource(&plan.resource).is_ok();
+        return RiskPolicy {
+            revision: "risk-policy:v0.10:display-layout:1",
+            rules: if valid_topology {
+                vec![RiskRule {
+                    id: "hyprland.display-layout.security-sensitive",
+                    provider: linura_observation::DISPLAY_PROVIDER,
+                    capability: linura_observation::DISPLAY_OUTPUTS_CAPABILITY,
+                    resource_prefix: "display:topology:",
+                    change_keys: &["layout"],
+                    risk: RiskClass::SecuritySensitive,
+                }]
+            } else {
+                vec![]
+            },
+        }
+        .classify(plan);
+    }
     if plan.provider.as_str() == crate::operation_registry::MANAGED_SESSION_TRANSITION_PROVIDER
         && plan.observation_capability.as_str()
             == crate::operation_registry::MANAGED_SESSION_TRANSITION_CAPABILITY
@@ -320,6 +339,49 @@ mod tests {
                 &observation,
             )
             .unwrap_or_else(|error| unreachable!("{error}"))
+    }
+
+    #[test]
+    fn display_layout_has_exact_security_sensitive_rule_and_denies_shape_substitution() {
+        let mut plan = canonical_plan("systemd:unit:test.service");
+        plan.provider = ProviderId::new("hyprland").unwrap_or_else(|e| unreachable!("{e}"));
+        plan.resource = ResourceId::new("display:topology:11111111-1111-4111-8111-111111111111:1000:c2:42:seat0:33333333-3333-4333-8333-333333333333:3").unwrap_or_else(|e| unreachable!("{e}"));
+        plan.observation_capability =
+            CapabilityId::new("display.outputs.observe").unwrap_or_else(|e| unreachable!("{e}"));
+        plan.changes[0].key = "layout".into();
+        assert!(
+            matches!(classify_plan_risk(&plan), RiskClassification::Classified {
+            risk: RiskClass::SecuritySensitive,
+            revision: "risk-policy:v0.10:display-layout:1", ref rule_ids,
+        } if rule_ids == &["hyprland.display-layout.security-sensitive"])
+        );
+        for fault in ["capability", "key", "alias", "generation"] {
+            let mut substituted = plan.clone();
+            match fault {
+                "capability" => {
+                    substituted.observation_capability = CapabilityId::new("display.discovery")
+                        .unwrap_or_else(|e| unreachable!("{e}"))
+                }
+                "key" => substituted.changes[0].key = "command".into(),
+                "alias" => {
+                    substituted.resource = ResourceId::new("display:topology:current")
+                        .unwrap_or_else(|e| unreachable!("{e}"))
+                }
+                _ => {
+                    substituted.resource = ResourceId::new(
+                        plan.resource.as_str().trim_end_matches('3').to_owned() + "0",
+                    )
+                    .unwrap_or_else(|e| unreachable!("{e}"))
+                }
+            }
+            assert!(
+                matches!(
+                    classify_plan_risk(&substituted),
+                    RiskClassification::Unclassified { .. }
+                ),
+                "{fault}"
+            );
+        }
     }
 
     #[test]

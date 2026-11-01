@@ -328,6 +328,7 @@ def _verify_ci_execution_steps(source: str) -> None:
         ("Install Linura Shell bridge build dependencies", {"name", "uses", "with"}),
         ("Build and install Linura Shell QML modules", {"name", "run"}),
         ("Build and test native security-owner foundation", {"name", "run"}),
+        ("Build and test native display mechanism", {"name", "run"}),
         ("Run canonical Linura checks", {"name", "run"}),
         ("Validate CI dependency cache policy before builds", {"name", "run"}),
     ):
@@ -389,6 +390,16 @@ def _verify_ci_execution_steps(source: str) -> None:
             "canonical CI QML build differs from reviewed SHA-256; "
             "re-audit executable source-build commands before updating"
         )
+    display = required("Build and test native display mechanism")
+    if display["fields"].get("run") != "|" or display["run_lines"] != [
+        "set -euo pipefail",
+        'build_dir="$RUNNER_TEMP/linura-native-display-mechanism-build"',
+        'cmake -S apps/linura-hyprland-display -B "$build_dir" -G Ninja \\',
+        "  -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON",
+        'cmake --build "$build_dir" --parallel 2',
+        'ctest --test-dir "$build_dir" --output-on-failure',
+    ]:
+        raise ValueError("canonical CI native display build recipe drifted")
     native = required("Build and test native security-owner foundation")
     if set(native["fields"]) != {"name", "run"} or native["fields"].get("run") != "|":
         raise ValueError(
@@ -405,6 +416,10 @@ def _verify_ci_execution_steps(source: str) -> None:
     ]:
         raise ValueError("canonical CI native security-owner build recipe drifted")
     order = list(named)
+    if order.index("Build and test native display mechanism") + 1 != order.index(
+        "Build and test native security-owner foundation"
+    ):
+        raise ValueError("canonical CI native display execution order drifted")
     if order.index(
         "Build and test native security-owner foundation"
     ) + 1 != order.index("Run canonical Linura checks"):

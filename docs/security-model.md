@@ -115,6 +115,140 @@ starts a new budget or freshens a proof. A late reply or failed revalidation fai
 closed, and this allocation changes neither the human-interaction deadline nor executor
 authority.
 
+The S21 prepared display handoff uses that same separation. Only the independently
+attested Control service can reach the root session executor's fixed
+`apply-display-layout` action; ordinary users and root callers remain denied by
+the system-bus policy. Service authorization cannot replace Control's sealed
+managed effect, canonical complete intent or validated execution binding. The
+root adapter preserves one original owner/boot/sample through strict native
+validation, its single private owner call and final identity revalidation, all
+within the original two-second probe clock. The owner rechecks the raw sample
+digest, original boot timestamp, complete baseline, output frames and native
+deadline before reserving one compositor apply. Another owner/connection cannot
+adopt the attempt, and timeout, denied/unknown phase or a lost reply cannot cause
+redelivery or assert verified success. The outer Control-to-root mechanism call
+has its separate fixed ten-second cap for service policy and native handoff;
+it never freshens native facts or extends the original confirmation deadline.
+
+Production display status derives its original dispatch digest and deadline
+from Control-validated durable history. Its native query is read-only, never a
+permit or continuation, and reconciliation cannot apply/confirm/revert. Public
+begin/confirm/revert remain unsupported until protected decisions, durable
+compositor-loss restoration and required native qualification are complete.
+
+The private Apply review handshake accepts the complete canonical material and
+original principal/request/plan/digests from the supervised Control connection.
+It shows bounded first-party review pages, requires a fresh native action and
+presentation per revision, and presents fixed administrator/PAM metadata before
+accepting input. Control owns bounded readiness polling; the original wall and
+BOOTTIME deadlines cannot be renewed by polling, authentication or suspend.
+The fixed Apply Polkit action uses `auth_admin`, never a retained grant. Its
+positive result must still be followed by consumption of the exact native proof.
+Expired, denied, replaced-owner and uncertain/late calls retire only their exact
+scope. A separate scoped cancellation cannot cancel a newer conversation.
+
+The owner's consumed Apply receipt remains process-local and one-use. Root's
+separately admitted prepared dispatch must match its complete material, original
+transaction and still-live native frame/input generations before redemption.
+No client digest or positive Polkit reply is an executor credential. This private
+composition is not production display support: continuous protected modeset,
+Keep/Revert, replacement restoration and native adversarial acceptance remain
+required before the public display effect can be enabled.
+
+The private native apply request additionally binds the actual consumed protected
+interaction resource on the same re-attested connection. The compositor retains
+its opaque/input fence independently of protocol resources, separating the
+expired human proof from the safety lifetime of an already started effect.
+Only its reserved apply/restore stack permits expected geometry changes; static
+output/rule/session/input drift cannot become new authority. Failure or owner
+loss cancels continuation and reserves original compensation. Native restoration
+requires original ownership, fresh baseline geometry, fresh per-enabled-output
+hardware frames and accepted disable submissions before releasing protection.
+Keep and explicit Revert consume a fresh purpose-bound scope within both original
+attempt deadlines; the old Apply epoch cannot serve as that decision. The
+Control-to-owner decision adapter preserves the sealed original dispatch,
+principal, request, complete material and absolute deadline. A new native
+Keep/Revert review consumes fresh physical input and per-output presentation;
+the retained Apply receipt or positive Polkit result cannot substitute for it.
+The root continuation must redeem this exact one-use owner receipt in addition
+to its durable Control authorization. Scoped cancellation cannot retire an
+unrelated conversation. Replacement restoration and native acceptance remain
+incomplete, and public display mutation stays disabled.
+
+Native output identity now includes the actual retained Aquamarine DRM device
+major/minor and connector object ID in its source-versioned identity witness.
+Changing that binding invalidates the native output generation. The private
+receiver rejects malformed, duplicated and unsupported bindings; non-DRM outputs
+remain observable without mutation checkpoint qualification. These point-in-time
+facts do not prove continuity after replacement or grant a restoration effect.
+Independent retained kernel observation and durable restoration remain required.
+
+The owner accepts a native rule digest only after bounded canonical `LNDR:1`
+decoding. The preimage must reconstruct all owned display fields exactly,
+including automatic placement/scaling and the full custom modeline, without
+float rounding, integer truncation or alternate encodings. Reconstruction copies
+those fields into the current native rule and preserves its selector/precedence
+and unrelated settings. This codec is not a store or an execution boundary:
+durable preimage retention, authenticated continuity and independently verified
+restoration are still required before any replacement compositor may use it.
+
+Only the supervised root executor receives original native rule preimages in
+its prepared observation. Rust matches their complete output/ownership/kernel
+scope and checks their canonical representation independently. The executor
+publishes an exclusive immutable private checkpoint and requires both file and
+directory sync before it can call native apply. Root-owned safe ancestors,
+0700/0600 scope, no-follow descriptor-relative access, serialized admission,
+single-link regular files, bounded history and content digests prevent ordinary
+callers from substituting records. Torn, corrupt, duplicate, unavailable or full
+storage refuses dispatch without automatic cleanup. Persistence never renews
+the original probe or confirmation clocks; both are revalidated before native
+handoff. These are historical preimages, not policy, approval or executable
+recovery authority. Replacement continuity, restoration and independent terminal
+verification remain incomplete; public display mutations remain unavailable.
+
+The executor starts a read-only kernel subscription before native sampling and
+binds it to that sample's actual DRM tuples. Real sysfs/kernfs descriptors and the
+same kernel multicast socket remain outside compositor memory. Every later check
+consumes a bounded stream and compares the kernel sequence watermark; gaps,
+overflows, truncation, bad source/data, DRM changes, changes to a bound bus/driver
+ancestor and failed or changed retained attributes irreversibly poison it. It
+never reopens an attribute after loss to discover a replacement. Original
+continuation checks this witness before and after native dispatch. Service
+restart loses continuity and cannot reconstruct it from historical records.
+The service adds AF_NETLINK reception while retaining PrivateDevices, read-only
+kernel protections, no capabilities, no privilege acquisition and no IP socket
+families. There are no DRM device opens, ioctls, master acquisition, sysfs writes
+or privileged commands. This witness supplies comparison evidence only; it does
+not authorize replacement startup/restoration or supply protected frame proof.
+Real kernel hotplug/reset and modeset acceptance remain required.
+
+The same fixed prepared-checkpoint callback acquires a separate original logind
+`sleep:shutdown`/`block` inhibitor and retains its opaque FIFO in the executor.
+Compositor death cannot release this executor-owned descriptor. Acquisition and
+later checks bind the exact current root logind owner and boot, observe only the
+two fixed preparation properties, and require a live CLOEXEC FIFO with no input,
+hangup or error. Failure permanently poisons the lease; no retry, replacement
+owner or re-open can revive it. Power probes share bounded transport deadlines
+and consume the original display sample/confirmation clocks; kernel evidence is
+rechecked afterward. This protection neither requests a power transition nor
+bypasses power policy/inhibitors. It adds no new credential or public method.
+Retained kernel success/failure suspend counters bracket the original sample
+and subsequent checks; a completed or failed sleep cannot be hidden by current
+logind properties returning to false. Missing/reset/changed counters refuse.
+Only qualified terminal recovery may release retained protection; executor-loss
+startup supervision, terminal cleanup and real power-race qualification remain
+incomplete, and public display mutation remains disabled.
+
+Before lock/power review or native-sleep coverage coordination, Control's private
+safety preparation cancels display continuation in the exact current owner/lock
+generation. It polls restoration readiness within one two-second BOOTTIME budget,
+including final reply revalidation. The compositor retains opaque/input/power
+fences through the original baseline compensation; acknowledgement or numeric
+geometry alone cannot release them. Unknown, expired or failed restoration
+prevents S17 approval and prepared lock dispatch. Successful readiness grants no
+lock, unlock, protective consent or power authority. Native overlap qualification
+remains required.
+
 The owner's native peer/session/unit inspectors queue at most 32 fixed
 `Properties.Get` reads per interface before waiting. Each pending call retains
 the existing 500 ms cap from admission, and all batches share their caller's

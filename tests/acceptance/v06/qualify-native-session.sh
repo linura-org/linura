@@ -64,6 +64,7 @@ test "$(sudo -n systemctl show "$service" --value -p AmbientCapabilities)" = ""
 test "$(sudo -n systemctl show "$service" --value -p CapabilityBoundingSet)" = ""
 pkaction --action-id org.linura.executor.session.set-secure >/dev/null
 pkaction --action-id org.linura.executor.session.execute-transition >/dev/null
+pkaction --action-id org.linura.executor.session.apply-display-layout >/dev/null
 echo "native-session-live-executor=qualified"
 
 stage direct-native-executor-denial
@@ -85,6 +86,40 @@ expect_failure native-session-root-denied call_native_root
 grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
 expect_failure native-session-polkit-ordinary-denied \
     pkcheck --action-id org.linura.executor.session.set-secure --process "$$"
+topology=display:topology:abcd1234-1234-4567-89ab-0123456789ab:1000:c2:42:seat0:11111111-1111-4111-8111-111111111111:3
+baseline="LNDL:1;$topology;1:2:enabled:1920:1080:60000:1000:0:0:0:-;"
+desired="LNDL:1;$topology;1:2:enabled:1920:1080:60000:1000:0:100:0:-;"
+material="LNDI:1;$resource;$baseline$desired"
+call_display() {
+    busctl --system call "$destination" "$path" "$interface" ApplyDisplayLayout ststtsssss \
+        "$material" 15000 "transaction:v06:display-direct" 0 1 \
+        "$digest" "$digest" "$digest" "$digest" "$digest"
+}
+call_display_root() {
+    sudo -n busctl --system call "$destination" "$path" "$interface" ApplyDisplayLayout ststtsssss \
+        "$material" 15000 "transaction:v06:display-root-direct" 0 1 \
+        "$digest" "$digest" "$digest" "$digest" "$digest"
+}
+# These prove live bus-policy denial, before body/binding/native processing.
+# The Rust executor fixture separately supplies a valid binding to service denial.
+expect_failure native-session-display-ordinary-denied call_display
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-session-display-root-denied call_display_root
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-session-display-polkit-ordinary-denied \
+    pkcheck --action-id org.linura.executor.session.apply-display-layout --process "$$"
+call_display_decision() {
+    busctl --system call "$destination" "$path" "$interface" ContinueDisplayLayout ssstssb \
+        "$material" "transaction:v06:display-decision" "$digest" 15000 "$digest" "$digest" true
+}
+call_display_decision_root() {
+    sudo -n busctl --system call "$destination" "$path" "$interface" ContinueDisplayLayout ssstssb \
+        "$material" "transaction:v06:display-decision-root" "$digest" 15000 "$digest" "$digest" false
+}
+expect_failure native-session-display-decision-ordinary-denied call_display_decision
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
+expect_failure native-session-display-decision-root-denied call_display_decision_root
+grep -Eiq 'access.*denied|permission.*denied' <<<"$LAST_FAILURE_OUTPUT"
 sudo -n systemctl is-active --quiet "$service"
 echo "native-session-direct-denial=qualified"
 

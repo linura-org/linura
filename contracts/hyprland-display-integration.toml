@@ -1,0 +1,74 @@
+schema_version = 1
+integration_id = "linura-hyprland-display-v1"
+stability = "experimental"
+upstream_version = "0.56.2"
+upstream_commit = "efb50993780079460b0cbed1363e2166a2de1d9f"
+source_url = "https://github.com/hyprwm/Hyprland/releases/download/v0.56.2/source-v0.56.2.tar.gz"
+source_sha256 = "03ad3f5ef152ff44116ffd56fcf808486211ecabf4f0ba567108ee746ba5cd2e"
+source_top = "hyprland-source"
+native_source = "apps/linura-hyprland-display"
+confirmation_window_ms = 15000
+max_outputs = 16
+max_modes_per_output = 128
+max_attempt_reservations = 256
+timer_clock = "CLOCK_BOOTTIME"
+restoration = "independent-native-verification-required"
+unsupported_environment = "fail-closed"
+
+# Reviewed integration points in the published digest-pinned source archive.
+# The staging tool verifies all of them before constructing any patched source.
+[[upstream_file]]
+path = "CMakeLists.txt"
+sha256 = "97b8028aa342cf6ee6f04b5db2e67e6e4fe6adf5d3fd67bad18005193db36516"
+
+[[upstream_file]]
+path = "src/Compositor.cpp"
+sha256 = "74833ecbf0e2b6f8ad84345ac0716a3295a0e347420a188be0ab4f6a684af7c0"
+
+[[upstream_file]]
+path = "src/config/shared/monitor/MonitorRuleManager.cpp"
+sha256 = "17d46685c2623657f52e71b22a033c0a798cf3903f7bbeb64ceebce87527f016"
+
+[[upstream_file]]
+path = "src/output/Monitor.cpp"
+sha256 = "9cf88e154eb5dae676c79d37b5b055ca6134838857cecdbb89a3b747a6821927"
+
+[[upstream_file]]
+path = "src/protocols/SessionLock.cpp"
+sha256 = "e43ec48906406c1d53aabd7bbfde1abdd57ba9035fdb0633cba970dbfaab0e85"
+
+[[upstream_file]]
+path = "src/version.h.in"
+sha256 = "f2eeea8fb62c08bbc1a7414519b30e3bea2894dffb603f8b46cd5a05185f4d69"
+
+[[upstream_file]]
+path = "src/protocols/types/SurfaceRole.hpp"
+sha256 = "798165986044b905a5a2b7fd7a81bdea7d76fa7595742cb657361566b3823fe6"
+
+[[upstream_file]]
+path = "src/render/Renderer.cpp"
+sha256 = "9af8a74e7dc42ba3c5532303b9bb4ee7c350d4cef2f2c8984e41f2a01b3bdd22"
+
+[[upstream_file]]
+path = "src/managers/input/InputManager.cpp"
+sha256 = "feedf32e2e3d23aeaed7a02ef4ab94be2d66f4b22873b3166026da1e9ece4765"
+
+[[upstream_file]]
+path = "src/managers/SeatManager.cpp"
+sha256 = "bd7485535c7e9f71382e587d92a7c73e048a0d7a5efcf518a1e671a188f94378"
+
+[[upstream_file]]
+path = "src/managers/input/Touch.cpp"
+sha256 = "69a5459b254751a28d2f6df1afb03781ea9b4086a43078d8275c9b165f5e3f7e"
+
+[[upstream_file]]
+path = "src/managers/input/Tablets.cpp"
+sha256 = "ad276a2e23f8792ff5f2fb43944a4c3c40e7218e77f66047dd754417a6bbc90f"
+
+[[upstream_file]]
+path = "src/pointer/PointerManager.cpp"
+sha256 = "83c69d93f09088f1e2383a9c85a54cf3f55718d9506a1121058afef77911223a"
+
+[[upstream_file]]
+path = "src/pointer/PointerManager.hpp"
+sha256 = "af62bde2f8cf14e0440a99d0e81b361d3845eb95873be549e4ce44f45edb345e"

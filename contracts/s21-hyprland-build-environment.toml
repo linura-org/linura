@@ -1,0 +1,372 @@
+schema_version = 1
+id = "qualification/s21-hyprland-build-substrate"
+state = "development-prerequisite"
+claim = "non-evidence-cacheable-substrate"
+cache_namespace = "linura-s21-hyprland-build-v1"
+builder = "qualification/v010/shell-runtime/prepare-substrate.sh"
+verifier = "qualification/v010/shell-runtime/verify-substrate.py"
+build_dependency_verifier = "tools/hyprland_display_environment.py"
+integration_contract = "contracts/hyprland-display-integration.toml"
+base_image_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2"
+base_image_checksum_url = "https://geo.mirror.pkgbuild.com/images/v20260915.594445/Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2.SHA256"
+base_image_sha256 = "d7cc7c86a21b32d6678c001464714f71f4ef7e0d7bbbfca65e99123ac5afc25b"
+arch_archive_snapshot = "2026-09-16"
+arch_archive_url = "https://archive.archlinux.org/repos/2026/09/16/$repo/os/$arch"
+architecture = "x86_64"
+vm_disk_size_gib = 24
+build_type = "Debug"
+fetchcontent_fully_disconnected = true
+runtime_packages = [
+  "base-devel",
+  "cmake",
+  "ninja",
+  "pkgconf",
+  "git",
+  "meson",
+  "hyprland",
+  "hyprland-protocols",
+  "hyprwayland-scanner",
+  "xorgproto",
+  "gtest",
+  "libglvnd",
+  "mesa",
+  "glslang",
+  "libei",
+  "hyprwire",
+  "python",
+  "dbus",
+  "seatd",
+  "quickshell",
+  "qt6-base",
+  "qt6-declarative",
+  "qt6-wayland",
+  "vulkan-swrast",
+  "pipewire",
+  "pipewire-audio",
+  "wireplumber",
+  "networkmanager",
+  "sqlite",
+  "ffmpeg",
+  "wf-recorder",
+  "wayland",
+  "wayland-protocols",
+  "polkit",
+  "at-spi2-core",
+  "libcap",
+  "libxkbcommon",
+  "libx11",
+  "systemd-libs",
+  "fontconfig",
+  "ttf-dejavu",
+]
+
+# Repository database hashes pin the full dependency/provider resolution, while
+# pacman continues to require native package signatures. Never disable SigLevel.
+[repository_sha256]
+core = "7e00dedcbdafa67db01ea65b5657855f81271da0ed496d21d752b8f9037e036f"
+extra = "7d10af6511ba617512213e64434b8f55290893b9b77c959f21a1fcb5ef3c78cd"
+
+[[package]]
+name = "systemd-libs"
+version = "261.3-1"
+sha256 = "e817f4be82f7b2dfe924426b3e70291ea34f8fdec27bf6641e863f45eb784c36"
+
+# Pinned Hyprland requires Glaze 7. Snapshot Glaze 8 is incompatible.
+[archived_package]
+name = "glaze"
+version = "7.2.0-1"
+url = "https://archive.archlinux.org/packages/g/glaze/glaze-7.2.0-1-any.pkg.tar.zst"
+sha256 = "55e29acd6490de8d4b365c120b42c16714facc6d8f8bca93d6936552c3967ba4"
+signature_required = true
+
+[cache_policy]
+base_image_bytes = true
+prepared_guest_bytes = true
+cargo_dependency_bytes = true
+qualification_evidence = false
+linura_build_outputs = false
+guest_runtime_state = false
+release_support_promotion = false
+
+# A complete installed inventory is additionally recorded in the image manifest.
+# These expected versions detect partial upgrades and incompatible SDK headers.
+
+[[package]]
+name = "aquamarine"
+version = "0.15.0-2"
+sha256 = "a9be728c06fd74554141e16bda9dbada4141948d0c95b9efb531aac5cc1912a4"
+
+[[package]]
+name = "at-spi2-core"
+version = "2.60.6-1"
+sha256 = "0c5b4631d1880f4a9eb10978471cdd0afa34d4a6686a87eca69db6dd3ace84fa"
+
+[[package]]
+name = "base-devel"
+version = "1-2"
+sha256 = "412a2effe23751e1c11b2fa68155f1a29ecea5d9dc8ea8cef4e87b7b429d3201"
+
+[[package]]
+name = "cairo"
+version = "1.18.4-1"
+sha256 = "280a524ba7dce88990aace1496abd742b000a7c98a5ec6abd054a4b19f2f4c96"
+
+[[package]]
+name = "cmake"
+version = "4.4.3-2"
+sha256 = "90352d3550b4b7276cdb741dc0ea51867795869f1b72ecfc4238c8e2aca71429"
+
+[[package]]
+name = "dbus"
+version = "1.16.2-1"
+sha256 = "740fb8d02f6a5798984f17bf09c4f9f62f42a8339499c283867d9c35cda0d8af"
+
+[[package]]
+name = "ffmpeg"
+version = "2:9.0.1-4"
+sha256 = "2d7d982b62db59d3ca86267183c94ef7d258dd199fd489306db50c9b79626f48"
+
+[[package]]
+name = "fontconfig"
+version = "2:2.18.3-2"
+sha256 = "c3d961568e10d0bc035b52554333535d31853310b9b7936eedf5d026425d3adf"
+
+[[package]]
+name = "gcc"
+version = "16.2.1+r23+gd564253eb6c8-1"
+sha256 = "1d79371ccf3138e3c172dd83b51560687b65ab824c1ad7e9cb41b7857ed9c55f"
+
+[[package]]
+name = "git"
+version = "2.55.0-1"
+sha256 = "fbb24f455cb1de1c004a76b5a4dab92e4a9137764fbc3bc46afe13b7a38814fe"
+
+[[package]]
+name = "glslang"
+version = "1:1.4.357.0-1"
+sha256 = "c8417ab41fcccb7ce1f6f9da447733ad612d918c0d530484227e7af95ed735d1"
+
+[[package]]
+name = "gtest"
+version = "1.18.0-1"
+sha256 = "a056289240aebf743810c69a9dc3a8503edf9ae98b5be167fddd66598236ebe5"
+
+[[package]]
+name = "hyprcursor"
+version = "0.1.13-7"
+sha256 = "1a145509039b1914c179364c4a61fad0dadceea9cc039296ac69ffb48e983fce"
+
+[[package]]
+name = "hyprgraphics"
+version = "0.5.1-4"
+sha256 = "c916b1fb9d7ad0e78fab2d94b0066dcdc8be0a2810be7e72df57ddf5b639fea3"
+
+[[package]]
+name = "hyprland"
+version = "0.56.2-3"
+sha256 = "29dffae75c6dce936c31871bb223e9f60fe80882722565b823e7e0213b5d6086"
+
+[[package]]
+name = "hyprland-protocols"
+version = "0.7.0-1"
+sha256 = "f5ee290b2f670107025816a64a2249f8e29f09e9df6334b5b9c871bd2630689c"
+
+[[package]]
+name = "hyprlang"
+version = "0.6.8-5"
+sha256 = "212eb288e5a695650cdc4b91b59039ad80423ae5fb938de997e915d979948553"
+
+[[package]]
+name = "hyprutils"
+version = "0.14.2-1"
+sha256 = "177dfe5d64dba65ef2f1274d84d647b12cc1bc0b808394fd556f135ac8d7e65e"
+
+[[package]]
+name = "hyprwayland-scanner"
+version = "0.4.6-1"
+sha256 = "3d9da39c19f9febb0a1b3af9d88dc9a1466568f595228ffc88ffc51907e73d3a"
+
+[[package]]
+name = "hyprwire"
+version = "0.3.1-3"
+sha256 = "21c889597fc33cf1c2a4c45d13c709f73606a48dfa63c676d4bd4db120de3914"
+
+[[package]]
+name = "lcms2"
+version = "2.19.1-1"
+sha256 = "8cdbd1ec200fcf41a583d0fd6fbc6f117f9642a3968c73263c5b0ca35a4c4663"
+
+[[package]]
+name = "libcap"
+version = "2.78-1"
+sha256 = "3e984fe1d323b1c5a5fc60fef005776a4882fbca913d6fe3c41ad11128929ed1"
+
+[[package]]
+name = "libdrm"
+version = "2.4.134-1"
+sha256 = "29d101f13d219d01ee4aae25e8f84026e0740d747d56c37ea5573c4618e7df04"
+
+[[package]]
+name = "libei"
+version = "1.6.0-1"
+sha256 = "b395ee31992a3de68217fec11be54be98182cb8f40f657247c16d335081db842"
+
+[[package]]
+name = "libglvnd"
+version = "1.7.0-3"
+sha256 = "633c2e95d7798d0ce7ee1b7fe970a22325f7f6d35b9f923bb61b223a80934437"
+
+[[package]]
+name = "libinput"
+version = "1.31.3-1"
+sha256 = "9720a30d93827ac2856ced3ba54d64558562efef75b1331397d5fcee7287b2be"
+
+[[package]]
+name = "libx11"
+version = "1.8.13-1"
+sha256 = "251f58e0a9bc2cd69b8e708f239914e48e3a91cd1822220806d273be873d026f"
+
+[[package]]
+name = "libxkbcommon"
+version = "1.13.2-1"
+sha256 = "18d8dc90958eda2edaab9b671ee96c2c1f2b1a322618eca97c7c04605d738581"
+
+[[package]]
+name = "lua"
+version = "5.5.1-1"
+sha256 = "2cd360ab4590950b40adae136dd45a22a50b0621c67db5691e066751f6f2416f"
+
+[[package]]
+name = "mesa"
+version = "1:26.2.2-1"
+sha256 = "1e5647af7458f07c0859f04ad33d8b2f57a6e95545d31f96ea9caedc73169bcb"
+
+[[package]]
+name = "meson"
+version = "1.12.0-1"
+sha256 = "eab28750cb6df8a020dd77c8d8e0b6209c006f0a90c6debdab2ef730250f1620"
+
+[[package]]
+name = "muparser"
+version = "2.3.5-2"
+sha256 = "0a7fba76ff0d5c2c1e4b509d0176dd862bf232670276f73bd204f8b398fcced6"
+
+[[package]]
+name = "networkmanager"
+version = "1.58.1-1"
+sha256 = "627adcc039736bc0a878c0b34d512ea4596430663c0b0e522912eeeb919c8b01"
+
+[[package]]
+name = "ninja"
+version = "1.13.2-3"
+sha256 = "19e12c1a169d27e427c3fa678ed3573825ac2a1043c6d47dd96e76ec3d34236c"
+
+[[package]]
+name = "pango"
+version = "1:1.58.2-1"
+sha256 = "9b74c73056ce6b2aca83bf1647f79f0a6bf53f204c5273b03530e034472db13c"
+
+[[package]]
+name = "pipewire"
+version = "1:1.6.8-1"
+sha256 = "7f2ae9234088ac4e405b2e713c83d81b56bc71cae268d6717bf35cc810a8a8c3"
+
+[[package]]
+name = "pipewire-audio"
+version = "1:1.6.8-1"
+sha256 = "7bf88efb37e4169e83aa29c74d2855b5361eb2013d0928c305ffa8d9dbad2a9e"
+
+[[package]]
+name = "pixman"
+version = "0.46.4-1"
+sha256 = "e87e665d25a2230a178d8490202e1d677fde5908f68ebedf7d987308fc26fcb6"
+
+[[package]]
+name = "pkgconf"
+version = "3.0.7-1"
+sha256 = "12035a6c30576a5ebdbb2fc24706f3643bbb82108223dff8700ab1a0042a7313"
+
+[[package]]
+name = "polkit"
+version = "127-3"
+sha256 = "96a5189e985738bdb895febd532db5cb3799b8fbb867b7ad8ec68c6e3b85c308"
+
+[[package]]
+name = "python"
+version = "3.14.7-1"
+sha256 = "8a350ce53aae01ae687f043b301931e411bf06333ba480b42b3b5432a0e6c79b"
+
+[[package]]
+name = "qt6-base"
+version = "6.11.2-3"
+sha256 = "257c5ef6180119d5b4365bdfe2a2ad051694b5dff390eac8e736dd78b8107b21"
+
+[[package]]
+name = "qt6-declarative"
+version = "6.11.2-2"
+sha256 = "230c1bec364d4af2c4c9d10f0df6dabd8361463e8559979f235f59f71e8c2f77"
+
+[[package]]
+name = "qt6-wayland"
+version = "6.11.2-1"
+sha256 = "0e4f84b21871bf4a2f65278a0a4e85d43aa2681e036eb143ce882817552c8f66"
+
+[[package]]
+name = "quickshell"
+version = "0.3.1-1"
+sha256 = "5988659fdc1b0addf138a3cd8e3540fc1078bfc60c995c6f4cd0fb9054484ec7"
+
+[[package]]
+name = "re2"
+version = "2:2025.11.05-6"
+sha256 = "f055975eadd1916f1952c5caefcaaf32ef60f1e4461b2f4ac079b0e3c42d61d4"
+
+[[package]]
+name = "seatd"
+version = "0.9.3-1"
+sha256 = "b4b52430149e66aaeb4cb474f4b756b5c862adecf6e8ecbf358d67470d2b35de"
+
+[[package]]
+name = "sqlite"
+version = "3.53.4-1"
+sha256 = "910e7e59acc3a51c7e3468bb45c7ca20d5e987eaf2c26e4e8ad9f0624bef76d2"
+
+[[package]]
+name = "tomlplusplus"
+version = "3.4.0-2"
+sha256 = "adcfd4ca14c0d0480f84bc686964b88f129381d5e7ed7bc670473a7ac547fb71"
+
+[[package]]
+name = "ttf-dejavu"
+version = "2.37+18+g9b5d1b2f-8"
+sha256 = "d46da489e776dd3d74def85d6d613509db408e9de7a7e3445c63832fd3798e65"
+
+[[package]]
+name = "vulkan-swrast"
+version = "1:26.2.2-1"
+sha256 = "3fec6b11af1d931add1b995200b71fc517d2385d17c2c643c26a7a672dba7251"
+
+[[package]]
+name = "wayland"
+version = "1.26.0-1"
+sha256 = "0bf83ec9dd5b9e4037e7fd7d5ded70838bb50f82aa43e8280c8c0025c92804a9"
+
+[[package]]
+name = "wayland-protocols"
+version = "1.49-1"
+sha256 = "79efa08167c423c6bdbba0efeb05ccc0ef9172c930be96a5b93f8208bdab04a4"
+
+[[package]]
+name = "wf-recorder"
+version = "0.6.0-2"
+sha256 = "b20d3f19f9f0fddbabceab0ccac747160d9ff1c28ae7adf6f8e00e16d300079e"
+
+[[package]]
+name = "wireplumber"
+version = "0.5.17-1"
+sha256 = "69ffc3e6a4b65a0e055917b4fbd18cd29273498d880aa60bb86147a2c129972c"
+
+[[package]]
+name = "xorgproto"
+version = "2025.1-1"
+sha256 = "f7bf3eed570618511fb53cc1bd32c2f1ee82e02662075436a59e6e50436f30de"

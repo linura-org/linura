@@ -8,6 +8,8 @@
 
 mod account;
 mod bus;
+mod display_kernel;
+mod display_observer;
 mod observer;
 mod owner;
 mod service;
@@ -16,9 +18,14 @@ mod sleep_helper;
 mod sleep_observer;
 
 pub use bus::{NativeSessionChannel, NativeSessionRole};
+pub use display_kernel::{NativeDisplayKernelSubscription, NativeDisplayKernelWitness};
+pub use display_observer::NativeDisplayObserver;
 pub use observer::{NativeLockObserver, NativePowerPermissionObserver};
 pub use owner::{
-    NativeApprovalPurpose, NativeApprovalRequest, NativeAuthenticationSubject, NativeOwnerIdentity,
+    NativeApprovalPurpose, NativeApprovalRequest, NativeAuthenticationSubject,
+    NativeDisplayApprovalPurpose, NativeDisplayApprovalRequest, NativeDisplayContinuation,
+    NativeDisplayDecisionRequest, NativeDisplayPowerFence, NativeDisplayRecoveryCheckpoint,
+    NativeDisplaySafetyRequest, NativeOwnerIdentity,
 };
 pub use service::protect_before_native_sleep;
 pub use sleep_gate::NativeSleepEntry;

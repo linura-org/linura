@@ -27,6 +27,13 @@ STAGES = "request-intent,observe,plan,validate,authorize,prepare,execute,verify,
 ENVIRONMENT = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
 FIXTURE_COMMAND = "sudo -n /usr/bin/python3 -I -S /opt/linura-source/qualification/v010/session-security/native-auth-fixture.py "
 ASSISTIVE_COMMAND = "sudo -n /usr/bin/python3 -I -S /opt/linura-source/qualification/v010/session-security/native-assistive-fixture.py "
+DISPLAY_ADMISSION_COMMAND = "sudo -n /usr/bin/python3 -I -S /opt/linura-source/qualification/v010/session-security/native-display-admission-fixture.py"
+DISPLAY_ADMISSION_CHECKS = {
+    "root-supervised-owner-admitted",
+    "same-uid-probe-denied",
+    "root-uid-denied",
+    "invalid-pid-denied",
+}
 # NativeApproval::FailureCooldownMs is five seconds. Respect that production
 # boundary between negative cases; never restart the owner or reset its state
 # to make the next authentication pass. This wait grants no authentication.
@@ -676,6 +683,51 @@ def validate_assistive_report(
     return value
 
 
+def validate_display_owner_admission(
+    wire: bytes, resource: str, owner_pid: object
+) -> dict[str, object]:
+    lock_resource(resource)
+    if len(wire) > MAXIMUM_OUTPUT:
+        raise RuntimeError("native display admission report exceeds its bound")
+    try:
+        value = json.loads(wire, object_pairs_hook=unique_object)
+    except (ValueError, RecursionError):
+        raise RuntimeError("native display admission report is malformed") from None
+    if (
+        type(owner_pid) is not int
+        or not 1 < owner_pid < 2**31
+        or not isinstance(value, dict)
+        or set(value)
+        != {
+            "schema_version",
+            "claim",
+            "native_owner_pid",
+            "native_owner_uid",
+            "native_owner_invocation",
+            "checks",
+            "s21_2_complete",
+            "release_support_promotion",
+        }
+        or type(value["schema_version"]) is not int
+        or value["schema_version"] != 1
+        or value["claim"] != "native-display-owner-admission-predicate-cases-only"
+        or type(value["native_owner_pid"]) is not int
+        or value["native_owner_pid"] != owner_pid
+        or type(value["native_owner_uid"]) is not int
+        or value["native_owner_uid"] != int(resource.split(":")[3])
+        or value["native_owner_invocation"] != resource.split(":")[6].replace("-", "")
+        or not isinstance(value["checks"], dict)
+        or set(value["checks"]) != DISPLAY_ADMISSION_CHECKS
+        or any(result is not True for result in value["checks"].values())
+        or value["s21_2_complete"] is not False
+        or value["release_support_promotion"] is not False
+    ):
+        raise RuntimeError(
+            "native display admission differs from the exact owner and case scope"
+        )
+    return value
+
+
 def bootstrap_lock(path: Path) -> str:
     metadata = path.lstat()
     if (
@@ -1034,7 +1086,11 @@ def corroborate_locked_output_inventory(guest: Guest, resource: str) -> dict[str
 
 
 def exercise_locked_headless_hotplug(
-    guest: Guest, resource: str, suffix: str, baseline: dict[str, int]
+    guest: Guest,
+    resource: str,
+    suffix: str,
+    baseline: dict[str, int],
+    after_hotplug: Callable[[], None] | None = None,
 ) -> dict[str, dict[str, int]]:
     """Native VM topology exercise; not independent lock-coverage proof."""
     lock_resource(resource)
@@ -1065,6 +1121,8 @@ def exercise_locked_headless_hotplug(
             time.sleep(0.1)
         if during is None:
             raise RuntimeError("native headless output did not become usable")
+        if after_hotplug is not None:
+            after_hotplug()
         # First-party metadata must still be present. It is not secure coverage.
         validate_assistive_report(
             guest.run(ASSISTIVE_COMMAND + "locked"), resource, "locked"
@@ -1252,6 +1310,12 @@ def qualify(
             guest.run(ASSISTIVE_COMMAND + "locked"), resource, "locked"
         )
         checks["native-registry-discovers-protected-locked-presentation"] = True
+        display_admission = validate_display_owner_admission(
+            guest.run(DISPLAY_ADMISSION_COMMAND),
+            resource,
+            assistive["locked"]["native_owner_pid"],
+        )
+        checks["native-display-owner-supervision-admitted-and-same-uid-denied"] = True
         guest.run("sudo -n /usr/bin/systemctl restart linura-authorityd.service")
         receipt = guest.run(
             prefix + "recover-session-lock request:v010:session-lock:" + locked
@@ -1295,6 +1359,45 @@ def qualify(
         guest.run(
             FIXTURE_COMMAND + "set-response", payload=(response + "\n").encode("ascii")
         )
+
+        def qualify_protected_input_hotplug() -> None:
+            def hotplug_during_unlock_prompt() -> None:
+                validate_assistive_report(
+                    guest.run(ASSISTIVE_COMMAND + "unlock-prompt"),
+                    resource,
+                    "unlock-prompt",
+                )
+                # No response is entered into a cancelled/reconfigured prompt. The
+                # same real PAM request must fail, and a later fresh request must
+                # independently authenticate against the same retained lock below.
+                output_context.update(
+                    {
+                        "authentication-" + key: value
+                        for key, value in exercise_locked_headless_hotplug(
+                            guest,
+                            resource,
+                            suffix,
+                            output_context["after-recovery"],
+                            lambda: time.sleep(NATIVE_DENIAL_SETTLE_SECONDS),
+                        ).items()
+                    }
+                )
+
+            guest.run(
+                prefix
+                + f"unlock-session s17-native-hotplug-{suffix} S21-native-input-hotplug",
+                hotplug_during_unlock_prompt,
+                expect_failure=True,
+            )
+            if fields(guest.run(prefix + "own-session-lock")) != {"resource": resource}:
+                raise RuntimeError(
+                    "native hotplug changed or released the original lock generation"
+                )
+            require_locked_presentation()
+            checks[
+                "output-hotplug-cancels-protected-authentication-without-release"
+            ] = True
+
         for operation, decision, consent in (
             (enabled, "enable", True),
             (revoked, "revoke", False),
@@ -1308,6 +1411,8 @@ def qualify(
             )
             require_locked_presentation()
             checks["native-owner-pam-" + decision + "-consent"] = True
+            if consent:
+                qualify_protected_input_hotplug()
         receipt = guest.run(
             prefix
             + "protective-lock-setting-status request:v010:protective-lock-setting:"
@@ -1339,6 +1444,7 @@ def qualify(
         checks["native-cancellation-does-not-complete-unlock"] = True
         time.sleep(NATIVE_DENIAL_SETTLE_SECONDS)
         require_locked_presentation()
+
         # One deliberately incorrect response, not repeated password guessing.
         # Even if PAM refuses it by timeout, it must never complete release.
         # The correct-response completion below must retain this same generation.
@@ -1407,6 +1513,7 @@ def qualify(
         "lock_resource": resource,
         "receipts": receipts,
         "assistive_probes": assistive,
+        "native_display_admission": display_admission,
         "compositor_output_context": output_context,
         "s17_complete": False,
         "release_support_promotion": False,

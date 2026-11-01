@@ -109,12 +109,15 @@ impl Observer for NativeLockObserver {
     }
 
     fn observation_capabilities(&self) -> Vec<Capability> {
-        vec![Capability { id: self.capability.clone(), provider: Some(self.provider.clone()),
-            support: SupportLevel::Supported, reason: Some("exact own-session native lock evidence; runtime attestation is required for every probe".into()) }]
+        vec![self.capability.clone(), CapabilityId::new(linura_observation::DISPLAY_COVERAGE_CAPABILITY)
+            .unwrap_or_else(|e| unreachable!("fixed capability: {e}"))].into_iter().map(|id|
+            Capability { id, provider: Some(self.provider.clone()), support: SupportLevel::Supported,
+                reason: Some("exact own-session native lock evidence; runtime attestation is required for every probe".into()) }).collect()
     }
 
     fn supports_observation(&self, capability: &CapabilityId) -> bool {
         capability == &self.capability
+            || capability.as_str() == linura_observation::DISPLAY_COVERAGE_CAPABILITY
     }
     fn requires_live_health_preflight(&self) -> bool {
         false
@@ -161,8 +164,14 @@ impl Observer for NativeLockObserver {
             .map_err(|_| {
                 ProviderError::Unavailable("native lock observation sequence exhausted".into())
             })?;
-        self.channel
-            .observe_lock(&lock, sequence + 1)
-            .map_err(ProviderError::Unavailable)
+        if capability.as_str() == linura_observation::DISPLAY_COVERAGE_CAPABILITY {
+            self.channel
+                .observe_display_coverage(&lock, sequence + 1)
+                .map_err(ProviderError::Unavailable)
+        } else {
+            self.channel
+                .observe_lock(&lock, sequence + 1)
+                .map_err(ProviderError::Unavailable)
+        }
     }
 }

@@ -36,6 +36,22 @@ enum class ApprovalPurpose {
     AuthenticatePowerOff = 5,
     EnableProtectiveLock = 6,
     RevokeProtectiveLock = 7,
+    ApplyDisplay = 8,
+    KeepDisplay = 9,
+    RevertDisplay = 10,
+};
+
+// Exact native presentation material in addition to the ORIGINAL canonical
+// plan/review binding below. A continuation digest is a separate purpose-bound
+// challenge; it must never replace the original policy review digest.
+struct NativeDisplayApprovalBinding final
+{
+    QString material;
+    QString decisionDigest;
+    quint64 deadlineUnixMs = 0;
+    QString reason = {};
+    quint64 deadlineBootMs = 0;
+    bool operator==(const NativeDisplayApprovalBinding &) const = default;
 };
 
 enum class NativeSessionTransition { Suspend, Logout, Reboot, PowerOff };
@@ -66,8 +82,13 @@ struct NativeApprovalScope final
     QString reviewDigest;
     ApprovalPurpose purpose = ApprovalPurpose::ConfirmLock;
     std::optional<NativeTransitionIdentity> transition = std::nullopt;
+    std::optional<NativeDisplayApprovalBinding> display = std::nullopt;
 
     [[nodiscard]] bool valid() const;
+    [[nodiscard]] bool isDisplay() const noexcept;
+    // Domain-separated comparison with the exact compositor interaction. This
+    // is not a credential or a substitute for canonical plan-bound approval.
+    [[nodiscard]] QString protectedDisplayDigest() const;
     [[nodiscard]] const char *authenticationAction() const noexcept;
     [[nodiscard]] bool requiresSessionOwnerAuthentication() const noexcept;
     bool operator==(const NativeApprovalScope &) const = default;

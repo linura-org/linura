@@ -34,6 +34,7 @@ class NamespaceContractTests(unittest.TestCase):
             "crates/linura-dbus/src/sleep_gate.rs",
             "crates/linura-linux-session/src/bus.rs",
             "crates/linura-linux-session/src/owner.rs",
+            "crates/linura-linux-session/src/owner/display/approval.rs",
             "executors/linura-executor-session/src/lib.rs",
             "executors/linura-executor-systemd/src/lib.rs",
             "apps/linura-shell/org.linura.ControlCenter.desktop",
@@ -139,6 +140,23 @@ class NamespaceContractTests(unittest.TestCase):
                         self.assertNotEqual(result.returncode, 0)
                         self.assertIn(f"unregistered-{action}", result.stderr)
                         self.assertIn("runtime binding", result.stderr)
+
+    def test_native_display_action_cannot_substitute_another_authority_purpose(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._copy_fixture(root)
+            source = root / "crates/linura-linux-session/src/owner/display/approval.rs"
+            original = source.read_text(encoding="utf-8")
+            changed = original.replace(
+                'NativeDisplayApprovalPurpose::Apply => "org.linura.authority.apply-display-layout"',
+                'NativeDisplayApprovalPurpose::Apply => "org.linura.authority.reboot-session"',
+            )
+            self.assertNotEqual(original, changed)
+            source.write_text(changed, encoding="utf-8")
+            result = self._run_checker(root)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("org.linura.authority.apply-display-layout", result.stderr)
+            self.assertIn("runtime binding", result.stderr)
 
     def test_undeclared_dbus_interface_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

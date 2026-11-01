@@ -461,3 +461,14 @@ release_artifact = false
 authority_role = "client"
 scope = "trusted first-party Quickshell host with shared QML UI component foundation plus narrow Qt/D-Bus client bridge over Control1/Session1; no provider/executor, policy, risk-classification or privileged authority ownership"
 
+[[component]]
+id = "linura-hyprland-display"
+path = "apps/linura-hyprland-display"
+kind = "native-adapter"
+workspace_member = false
+maturity = "foundation"
+activation_milestone = "v0.10.0"
+release_artifact = false
+authority_role = "native-compositor-mechanism"
+scope = "pinned native display field overlay, one-use attempts and compositor-owned restoration timer; no planning, policy, approval or durable authority; production admission and native qualification remain required"
+

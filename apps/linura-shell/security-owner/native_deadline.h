@@ -19,6 +19,7 @@ class NativeDeadline final
         BusAuthentication,
         RuntimeInitialization,
         ApprovalArm,
+        DisplayDispatch,
         SleepEntry,
         SleepRecovery,
         PowerPermission,

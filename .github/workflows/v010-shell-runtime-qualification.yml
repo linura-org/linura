@@ -189,9 +189,89 @@ jobs:
           key: ${{ steps.prepared-substrate.outputs.cache-primary-key }}
 
 
+
+  display-build:
+    name: exact-source pinned Hyprland display build
+    runs-on: ubuntu-26.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.source_sha || github.sha }}
+
+      - name: Load repository toolchain contract
+        id: toolchain_data
+        run: |
+          set -euo pipefail
+          toolchain_values="$(python3 -I -S tools/check_toolchain_env.py --values tools/codex/versions.env)"
+          read -r ACTIONLINT_SHA256 ACTIONLINT_VERSION CARGO_AUDIT_VERSION HOST_ARCH HOST_OS PYTHON_MAJOR_MINOR PYTHON_PIP_VERSION PYTHON_RELEASE RUFF_VERSION RUSTUP_INIT_SHA256 RUSTUP_VERSION RUST_VERSION <<<"$toolchain_values"
+          : "${ACTIONLINT_SHA256:?}" "${ACTIONLINT_VERSION:?}" "${CARGO_AUDIT_VERSION:?}" "${HOST_ARCH:?}" "${HOST_OS:?}" "${PYTHON_MAJOR_MINOR:?}" "${PYTHON_PIP_VERSION:?}" "${PYTHON_RELEASE:?}" "${RUFF_VERSION:?}" "${RUSTUP_INIT_SHA256:?}" "${RUSTUP_VERSION:?}" "${RUST_VERSION:?}"
+
+      - name: Prepare guarded qualification storage
+        env:
+          LINURA_STORAGE_ROOT: ${{ vars.LINURA_STORAGE_ROOT }}
+          LINURA_STORAGE_ID: ${{ vars.LINURA_STORAGE_ID }}
+        run: bash scripts/prepare_qualification_storage.sh arch-hyprland-runtime
+
+      - name: Assert exact source and display build contract
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          python3 tools/check_v010_shell_runtime_qualification.py
+
+      - name: Install disposable display builder dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cloud-image-utils openssh-client qemu-system-x86 qemu-utils
+
+      - name: Verify display build KVM access
+        run: |
+          set -euo pipefail
+          [[ -c /dev/kvm ]]
+          sudo chown "$(id -u):$(id -g)" /dev/kvm
+          sudo chmod 0600 /dev/kvm
+          test "$(stat -c '%u:%g:%a:%F' /dev/kvm)" = "$(id -u):$(id -g):600:character special file"
+          [[ -r /dev/kvm && -w /dev/kvm ]]
+
+      - name: Build exact-source display integration with pinned Arch SDK
+        run: |
+          set -euo pipefail
+          python3 tools/hyprland_display_build.py ci-build \
+            --run "${LINURA_RUN_ID}-display" \
+            --diagnostics "$LINURA_WORK_DIR" \
+            --acceleration kvm --memory-mib 4096 --jobs 1
+
+      - name: Upload S21 compositor build diagnostics
+        if: ${{ always() && steps.toolchain_data.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linura-s21-display-build-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}-unqualified-diagnostics
+          path: |
+            ${{ env.LINURA_WORK_DIR }}/s21-prepare.log
+            ${{ env.LINURA_WORK_DIR }}/s21-build.log
+            ${{ env.LINURA_WORK_DIR }}/s21-qemu.log
+            ${{ env.LINURA_WORK_DIR }}/s21-build-result.json
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 6
+
+      - name: Retain exact-source compositor candidate for this runtime
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linura-s21-compositor-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}-unqualified-candidate
+          path: ${{ env.LINURA_WORK_DIR }}/s21-candidate/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 1
+
   runtime:
     name: exact-source Arch/Hyprland/Quickshell runtime
-    needs: substrate
+    needs: [substrate, display-build]
     runs-on: ubuntu-26.04
     timeout-minutes: 90
     steps:
@@ -222,6 +302,18 @@ jobs:
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           python3 tools/check_v010_shell_runtime_qualification.py
+
+      - name: Download this workflow attempt's compositor candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linura-s21-compositor-${{ inputs.source_sha || github.sha }}-attempt-${{ github.run_attempt }}-unqualified-candidate
+          path: ${{ env.LINURA_WORK_DIR }}/s21-candidate/
+
+      - name: Verify exact-source compositor candidate before runtime
+        run: |
+          set -euo pipefail
+          python3 tools/hyprland_display_candidate.py \
+            --candidate "$LINURA_WORK_DIR/s21-candidate" --source-sha "$SOURCE_SHA"
 
       - name: Install pinned Rust toolchain
         run: |
@@ -735,6 +827,23 @@ jobs:
             -o UserKnownHostsFile=/dev/null
             -o ConnectTimeout=3
           )
+          # The preceding shell cases retain their packaged reference runtime.
+          # Their cleanup stops that compositor before this native-only install.
+          ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+            "sudo -n /usr/bin/env 'EXPECTED_SOURCE_SHA=$SOURCE_SHA' /usr/bin/bash -s" <<'CANDIDATE'
+          set -euo pipefail
+          [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ ! -e /opt/linura-s21-candidate && ! -L /opt/linura-s21-candidate ]]
+          install -d -o root -g root -m 0700 /opt/linura-s21-candidate
+          install -d -o root -g root -m 0755 /etc/linura-qualification
+          printf '%s\n' "$EXPECTED_SOURCE_SHA" > /etc/linura-qualification/s21-source-sha
+          chmod 0600 /etc/linura-qualification/s21-source-sha
+          CANDIDATE
+          for name in Hyprland integration-build.h prepared-substrate.json staged-source.json candidate.json; do
+            ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
+              "sudo -n install -o root -g root -m 0600 /dev/null '/opt/linura-s21-candidate/$name' && sudo -n tee '/opt/linura-s21-candidate/$name' >/dev/null" \
+              < "$LINURA_WORK_DIR/s21-candidate/$name"
+          done
           # Use the same exact-source release outputs and asset installer as
           # the image. The substrate contains no Linura binaries/native evidence.
           ssh "${ssh_common[@]}" -p 2223 linura@127.0.0.1 \
@@ -804,11 +913,26 @@ jobs:
             -o ConnectTimeout=3 linura@127.0.0.1 \
             'sha256sum /usr/lib/linura/qualification/linura-s17-assistive-probe' \
             > "$ARTIFACT_DIR/s17-native-assistive-binary.sha256"
+          ssh -F /dev/null -i "$SSH_KEY" -p 2223 \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
+            -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=3 linura@127.0.0.1 \
+            'sha256sum /usr/lib/linura/qualification/linura-s21-owner-admission-probe' \
+            > "$ARTIFACT_DIR/s21-native-owner-admission-binary.sha256"
           sha256sum \
             "$ARTIFACT_DIR/s17-native-authentication.json" \
             "$ARTIFACT_DIR/s17-native-bootstrap.json" \
             "$ARTIFACT_DIR/s17-source-binaries.sha256" \
             "$ARTIFACT_DIR/s17-native-assistive-binary.sha256" \
+            "$ARTIFACT_DIR/s21-native-owner-admission-binary.sha256" \
+            qualification/v010/session-security/native-display-admission-fixture.py \
+            qualification/v010/session-security/native-display-admission-probe.cpp \
+            apps/linura-hyprland-display/native_owner_admission.cpp \
+            apps/linura-hyprland-display/native_owner_admission.h \
+            apps/linura-hyprland-display/owner_identity.cpp \
+            apps/linura-hyprland-display/wire_endpoint.h \
+            apps/linura-hyprland-display/compositor_display_service.h \
+            apps/linura-hyprland-display/display_transaction.h \
             qualification/v010/session-security/qualify-native-auth.py \
             qualification/v010/session-security/native-auth-fixture.py \
             qualification/v010/session-security/native-assistive-fixture.py \

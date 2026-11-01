@@ -66,6 +66,28 @@ class ApplicableQualificationTests(unittest.TestCase):
         )
         self.assertIn("v010-workstation", mixed)
 
+    def test_pinned_native_display_integration_requires_workstation_qualification(self):
+        contract = aq.load_contract(ROOT)
+        for path in (
+            "apps/linura-hyprland-display/pinned_backend.cpp",
+            "contracts/hyprland-display-integration.toml",
+            "tools/hyprland_display_source.py",
+            "contracts/s21-hyprland-build-environment.toml",
+            "tools/hyprland_display_environment.py",
+            "tools/hyprland_display_build.py",
+            "tools/codex/native-profiles.toml",
+            "tools/codex/native.py",
+            "tests/tooling/test_codex_readiness.py",
+            "tests/tooling/test_codex_native.py",
+            "tests/tooling/test_hyprland_display_environment.py",
+            "tests/tooling/test_hyprland_display_build.py",
+            "tests/tooling/test_hyprland_display_source.py",
+        ):
+            with self.subTest(path=path):
+                gates = aq.required_gate_ids(contract, [path])
+                self.assertIn("v010-workstation", gates)
+                self.assertTrue(set(contract["mandatory_gate_ids"]).issubset(gates))
+
     def test_update_recovery_and_migration_paths_require_full_v09(self):
         contract = aq.load_contract(ROOT)
         for path in (

@@ -63,6 +63,18 @@ while full S17 and physical Q11 acceptance remain pending under
 [ADR 0042](adr/0042-s17-session-security-and-power-authority.md). Secure-lock
 registration alone neither qualifies other transition classes nor S21.
 
+S21-2 registers `operation:display.layout.apply` as `ManagedExternalEffect`, with
+the `SecuritySensitive` floor and
+`operation-registry.managed-display-layout.risk-floor` provenance. Its exact
+route is `hyprland/display.outputs.observe`, a canonical `DisplayTopologyId`,
+and the sole `layout` material key. The complete `LNDI:1` intent binds the exact
+lock generation, original baseline and desired layout; a compact effect digest
+does not replace that material or mint an executor permit. The trusted display
+risk rule is versioned independently and unknown keys/capabilities/identities
+remain unclassified. Registration is not native execution or recovery
+qualification; public mutation activation remains blocked until the integrated
+watchdog, S17 fences and exact-source native cases pass.
+
 S17 also registers four distinct managed transition candidates:
 `operation:session.suspend`, `operation:session.logout`, `operation:session.reboot`
 and `operation:session.power-off`. Their observation route is

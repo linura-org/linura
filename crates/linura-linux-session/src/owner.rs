@@ -1,5 +1,11 @@
 //! Root-supervised native owner discovery and bounded private transport only.
 //! Neither these identities nor successful calls mint policy/dispatch authority.
+mod display;
+pub use display::{
+    NativeDisplayApprovalPurpose, NativeDisplayApprovalRequest, NativeDisplayContinuation,
+    NativeDisplayDecisionRequest, NativeDisplayPowerFence, NativeDisplayRecoveryCheckpoint,
+    NativeDisplaySafetyRequest,
+};
 mod polkit;
 mod sleep_fence;
 
@@ -133,6 +139,17 @@ type Properties = HashMap<String, OwnedValue>;
 type ExecStart = (String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32);
 type ApprovalWire = (String, String, String, String, String, String, String, u32);
 
+fn approval_operation_slug(slug: &str) -> bool {
+    !slug.is_empty()
+        && slug.len() <= 64
+        && !slug.starts_with('-')
+        && !slug.ends_with('-')
+        && !slug.contains("--")
+        && slug
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeOwnerIdentity {
     unique_name: String,
@@ -221,14 +238,7 @@ impl NativeApprovalRequest {
             .as_str()
             .strip_prefix(prefix)
             .ok_or("native approval requires a registered S17 request")?;
-        if slug.is_empty()
-            || slug.len() > 64
-            || slug.starts_with('-')
-            || slug.ends_with('-')
-            || slug.contains("--")
-            || !slug
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        if !approval_operation_slug(slug)
             || self.plan.as_str() != self.request.as_str()
             || self.principal.as_str() != format!("unix:uid:{}", self.lock.epoch().uid())
             || self.lock.epoch().uid() == 0
@@ -644,13 +654,33 @@ impl NativeSessionChannel {
         self.require_role(NativeSessionRole::Control)?;
         request.wire()?;
         let action = authentication_action(request.purpose)?;
+        self.authenticate_native_scope(
+            &request.lock,
+            &request.request,
+            action,
+            "linura-s17",
+            budget,
+        )
+    }
+
+    // Only the closed purpose adapters in this module may select an action.
+    // Public callers cannot use this helper to authenticate arbitrary work.
+    fn authenticate_native_scope(
+        &self,
+        lock: &SessionLockId,
+        request: &RequestId,
+        action: &'static str,
+        domain: &'static str,
+        budget: Duration,
+    ) -> Result<(), String> {
+        self.require_role(NativeSessionRole::Control)?;
         if budget.is_zero() || budget > crate::bus::INTERACTION_BUDGET {
             return Err("owner authentication purpose or budget is unsupported".into());
         }
         let started = Instant::now();
-        let subject = self.authentication_subject(&request.lock)?;
+        let subject = self.authentication_subject(lock)?;
         let daemon = self.authentication_daemon()?;
-        let cancellation = format!("linura-s17:{}", request.request.as_str());
+        let cancellation = format!("{domain}:{}", request.as_str());
         let details = HashMap::<String, String>::new();
         let facts = HashMap::from([
             ("pid", zbus::zvariant::Value::U32(subject.pid)),
@@ -692,6 +722,14 @@ impl NativeSessionChannel {
             );
         }
         let reply = reply?;
+        if reply
+            .header()
+            .sender()
+            .is_none_or(|sender| sender.as_str() != daemon.unique_name)
+            || reply.body().signature().to_string() != "(bba{ss})"
+        {
+            return Err("native authentication reply identity/shape mismatch".into());
+        }
         let ((authorized, challenge, _details),): ((bool, bool, HashMap<String, String>),) = reply
             .body()
             .deserialize()
@@ -705,8 +743,11 @@ impl NativeSessionChannel {
         if self.authentication_daemon()? != daemon {
             return Err("native authentication daemon changed after owner authentication".into());
         }
-        if self.authentication_subject(&request.lock)? != subject {
+        if self.authentication_subject(lock)? != subject {
             return Err("native authentication subject changed after owner authentication".into());
+        }
+        if started.elapsed() >= budget {
+            return Err("native owner authentication deadline expired".into());
         }
         Ok(())
     }

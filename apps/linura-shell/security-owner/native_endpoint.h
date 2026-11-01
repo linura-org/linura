@@ -14,6 +14,10 @@ struct NativeApprovalWire final
     QString resource, principal, request, plan, requestDigest, observationDigest, reviewDigest;
     quint32 purpose = 0;
     [[nodiscard]] std::optional<NativeApprovalScope> scope() const;
+    [[nodiscard]] std::optional<NativeApprovalScope> displayScope(const QString &material,
+                                                                  const QString &reason,
+                                                                  quint64 deadlineUnixMs,
+                                                                  quint64 deadlineBootMs) const;
 };
 QDBusArgument &operator<<(QDBusArgument &wire, const NativeApprovalWire &scope);
 const QDBusArgument &operator>>(const QDBusArgument &wire, NativeApprovalWire &scope);
@@ -39,6 +43,45 @@ struct NativePowerPermissionWire final
 QDBusArgument &operator<<(QDBusArgument &wire, const NativePowerPermissionWire &observation);
 const QDBusArgument &operator>>(const QDBusArgument &wire, NativePowerPermissionWire &observation);
 
+struct NativeDisplayObservationWire final
+{
+    QString resource, compositor, seat;
+    quint64 sampledBootMs = 0;
+    QString topology, monitors;
+    bool secure = false;
+};
+QDBusArgument &operator<<(QDBusArgument &wire, const NativeDisplayObservationWire &observation);
+const QDBusArgument &operator>>(const QDBusArgument &wire,
+                                NativeDisplayObservationWire &observation);
+
+struct NativePreparedDisplayObservationWire final
+{
+    NativeDisplayObservationWire sample;
+    QString sampleDigest;
+    QString recoveryPreimage;
+};
+QDBusArgument &operator<<(QDBusArgument &wire,
+                          const NativePreparedDisplayObservationWire &observation);
+const QDBusArgument &operator>>(const QDBusArgument &wire,
+                                NativePreparedDisplayObservationWire &observation);
+
+struct NativeDisplayAttemptQueryWire final
+{
+    QString intent, transaction, effectDigest, dispatchDigest;
+    quint64 deadlineUnixMs = 0;
+};
+QDBusArgument &operator<<(QDBusArgument &, const NativeDisplayAttemptQueryWire &);
+const QDBusArgument &operator>>(const QDBusArgument &, NativeDisplayAttemptQueryWire &);
+struct NativeDisplayAttemptObservationWire final
+{
+    QString lock, topology, transaction;
+    quint64 deadlineUnixMs = 0, sampledBootMs = 0;
+    quint32 phase = 7;
+    bool secure = false;
+};
+QDBusArgument &operator<<(QDBusArgument &, const NativeDisplayAttemptObservationWire &);
+const QDBusArgument &operator>>(const QDBusArgument &, NativeDisplayAttemptObservationWire &);
+
 // Adapter only, on the owner's authenticated canonical system-bus connection.
 // It owns no planner/policy/prepare logic. The runtime checks the actual message
 // sender against the independently supervised Control or session executor.
@@ -59,8 +102,74 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "direction=\"in\"/>"
         "<arg name=\"consumed\" type=\"b\" direction=\"out\"/></method>"
         "<method name=\"CancelApproval\"/>"
+        "<method name=\"RetireDisplayForSecurity\"><arg name=\"resource\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"ready\" type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"ArmDisplayApproval\"><arg name=\"scope\" type=\"(sssssssu)\" "
+        "direction=\"in\"/>"
+        "<arg name=\"material\" type=\"s\" direction=\"in\"/><arg name=\"reason\" type=\"s\" "
+        "direction=\"in\"/>"
+        "<arg name=\"deadline_unix_ms\" type=\"t\" direction=\"in\"/><arg "
+        "name=\"deadline_boot_ms\" type=\"t\" direction=\"in\"/><arg name=\"armed\" "
+        "type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"DisplayApprovalReady\"><arg name=\"scope\" type=\"(sssssssu)\" "
+        "direction=\"in\"/>"
+        "<arg name=\"material\" type=\"s\" direction=\"in\"/><arg name=\"reason\" type=\"s\" "
+        "direction=\"in\"/>"
+        "<arg name=\"deadline_unix_ms\" type=\"t\" direction=\"in\"/><arg "
+        "name=\"deadline_boot_ms\" type=\"t\" direction=\"in\"/><arg name=\"ready\" "
+        "type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"ConsumeDisplayApproval\"><arg name=\"scope\" type=\"(sssssssu)\" "
+        "direction=\"in\"/>"
+        "<arg name=\"material\" type=\"s\" direction=\"in\"/><arg name=\"reason\" type=\"s\" "
+        "direction=\"in\"/>"
+        "<arg name=\"deadline_unix_ms\" type=\"t\" direction=\"in\"/><arg "
+        "name=\"deadline_boot_ms\" type=\"t\" direction=\"in\"/><arg name=\"consumed\" "
+        "type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"CancelDisplayApproval\"><arg name=\"scope\" type=\"(sssssssu)\" "
+        "direction=\"in\"/><arg name=\"material\" type=\"s\" direction=\"in\"/>"
+        "<arg name=\"reason\" type=\"s\" direction=\"in\"/>"
+        "<arg name=\"deadline_unix_ms\" type=\"t\" direction=\"in\"/><arg "
+        "name=\"deadline_boot_ms\" type=\"t\" direction=\"in\"/>"
+        "<arg name=\"cancelled\" type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"ArmDisplayDecision\"><arg name=\"principal\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"request\" type=\"s\" direction=\"in\"/><arg name=\"query\" "
+        "type=\"(sssst)\" direction=\"in\"/><arg name=\"decision_digest\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"confirm\" type=\"b\" direction=\"in\"/><arg "
+        "name=\"accepted\" type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"DisplayDecisionReady\"><arg name=\"principal\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"request\" type=\"s\" direction=\"in\"/><arg name=\"query\" "
+        "type=\"(sssst)\" direction=\"in\"/><arg name=\"decision_digest\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"confirm\" type=\"b\" direction=\"in\"/><arg "
+        "name=\"accepted\" type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"ConsumeDisplayDecision\"><arg name=\"principal\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"request\" type=\"s\" direction=\"in\"/><arg name=\"query\" "
+        "type=\"(sssst)\" direction=\"in\"/><arg name=\"decision_digest\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"confirm\" type=\"b\" direction=\"in\"/><arg "
+        "name=\"accepted\" type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"CancelDisplayDecision\"><arg name=\"principal\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"request\" type=\"s\" direction=\"in\"/><arg name=\"query\" "
+        "type=\"(sssst)\" direction=\"in\"/><arg name=\"decision_digest\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"confirm\" type=\"b\" direction=\"in\"/><arg "
+        "name=\"accepted\" type=\"b\" direction=\"out\"/></method>"
         "<method name=\"ObserveLock\"><arg name=\"observation\" type=\"(sbt)\" "
         "direction=\"out\"/></method>"
+        "<method name=\"ObserveDisplay\"><arg name=\"observation\" type=\"(ssstssb)\" "
+        "direction=\"out\"/></method>"
+        "<method name=\"ObservePreparedDisplay\"><arg name=\"observation\" type=\"((ssstssb)ss)\" "
+        "direction=\"out\"/></method>"
+        "<method name=\"ObserveDisplayAttempt\"><arg name=\"query\" type=\"(sssst)\" "
+        "direction=\"in\"/><arg name=\"observation\" type=\"(sssttub)\" "
+        "direction=\"out\"/></method>"
+        "<method name=\"DispatchPreparedDisplay\"><arg name=\"query\" type=\"(sssst)\" "
+        "direction=\"in\"/><arg name=\"sample_digest\" type=\"s\" direction=\"in\"/>"
+        "<arg name=\"sampled_boot_ms\" type=\"t\" direction=\"in\"/>"
+        "<arg name=\"native_baseline_guard\" type=\"s\" direction=\"in\"/>"
+        "<arg name=\"phase\" type=\"u\" direction=\"out\"/></method>"
+        "<method name=\"ContinuePreparedDisplay\"><arg name=\"query\" type=\"(sssst)\" "
+        "direction=\"in\"/><arg name=\"decision_digest\" type=\"s\" direction=\"in\"/>"
+        "<arg name=\"protected_decision_digest\" type=\"s\" direction=\"in\"/>"
+        "<arg name=\"confirm\" type=\"b\" direction=\"in\"/>"
+        "<arg name=\"phase\" type=\"u\" direction=\"out\"/></method>"
         "<method name=\"ObservePowerPermission\"><arg name=\"resource\" type=\"s\" "
         "direction=\"in\"/>"
         "<arg name=\"observation\" type=\"(sst)\" direction=\"out\"/></method>"
@@ -98,7 +207,42 @@ class NativeEndpoint final : public QObject, protected QDBusContext
     bool ArmApproval(const NativeApprovalWire &scope);
     bool ConsumeApproval(const NativeApprovalWire &scope);
     void CancelApproval();
+    bool RetireDisplayForSecurity(const QString &resource);
+    bool ArmDisplayApproval(const NativeApprovalWire &, const QString &material,
+                            const QString &reason, quint64 deadline_unix_ms,
+                            quint64 deadline_boot_ms);
+    bool DisplayApprovalReady(const NativeApprovalWire &, const QString &material,
+                              const QString &reason, quint64 deadline_unix_ms,
+                              quint64 deadline_boot_ms);
+    bool ConsumeDisplayApproval(const NativeApprovalWire &, const QString &material,
+                                const QString &reason, quint64 deadline_unix_ms,
+                                quint64 deadline_boot_ms);
+    bool CancelDisplayApproval(const NativeApprovalWire &, const QString &material,
+                               const QString &reason, quint64 deadline_unix_ms,
+                               quint64 deadline_boot_ms);
     NativeLockObservationWire ObserveLock();
+    bool ArmDisplayDecision(const QString &principal, const QString &request,
+                            const NativeDisplayAttemptQueryWire &, const QString &decisionDigest,
+                            bool confirm);
+    bool DisplayDecisionReady(const QString &principal, const QString &request,
+                              const NativeDisplayAttemptQueryWire &, const QString &decisionDigest,
+                              bool confirm);
+    bool ConsumeDisplayDecision(const QString &principal, const QString &request,
+                                const NativeDisplayAttemptQueryWire &,
+                                const QString &decisionDigest, bool confirm);
+    bool CancelDisplayDecision(const QString &principal, const QString &request,
+                               const NativeDisplayAttemptQueryWire &, const QString &decisionDigest,
+                               bool confirm);
+    NativeDisplayObservationWire ObserveDisplay();
+    NativePreparedDisplayObservationWire ObservePreparedDisplay();
+    NativeDisplayAttemptObservationWire
+    ObserveDisplayAttempt(const NativeDisplayAttemptQueryWire &);
+    quint32 DispatchPreparedDisplay(const NativeDisplayAttemptQueryWire &,
+                                    const QString &sample_digest, quint64 sampled_boot_ms,
+                                    const QString &native_baseline_guard);
+    quint32 ContinuePreparedDisplay(const NativeDisplayAttemptQueryWire &,
+                                    const QString &decision_digest,
+                                    const QString &protected_decision_digest, bool confirm);
     NativePowerPermissionWire ObservePowerPermission(const QString &resource);
     bool FencePreparedTransition(const QString &resource);
     bool CancelUndispatchedTransition(const QString &resource);
@@ -121,3 +265,7 @@ class NativeEndpoint final : public QObject, protected QDBusContext
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeApprovalWire)
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeLockObservationWire)
 Q_DECLARE_METATYPE(Linura::SecurityOwner::NativePowerPermissionWire)
+Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeDisplayObservationWire)
+Q_DECLARE_METATYPE(Linura::SecurityOwner::NativePreparedDisplayObservationWire)
+Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeDisplayAttemptQueryWire)
+Q_DECLARE_METATYPE(Linura::SecurityOwner::NativeDisplayAttemptObservationWire)

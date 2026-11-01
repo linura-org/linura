@@ -67,6 +67,11 @@ kind = "polkit-action"
 status = "active"
 
 [[identifier]]
+id = "org.linura.executor.session.apply-display-layout"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
 id = "linura-executor-session.service"
 kind = "systemd-unit"
 status = "active"
@@ -145,6 +150,11 @@ status = "active"
 
 [[identifier]]
 id = "org.linura.authority.unlock-session"
+kind = "polkit-action"
+status = "active"
+
+[[identifier]]
+id = "org.linura.authority.apply-display-layout"
 kind = "polkit-action"
 status = "active"
 
@@ -260,6 +270,13 @@ token = "TRANSITION_ACTION"
 action = "org.linura.executor.session.execute-transition"
 policy = "packaging/polkit-1/actions/org.linura.executor.session.policy"
 
+[[polkit_binding]]
+source = "executors/linura-executor-session/src/lib.rs"
+usage = "action-arg"
+token = "DISPLAY_ACTION"
+action = "org.linura.executor.session.apply-display-layout"
+policy = "packaging/polkit-1/actions/org.linura.executor.session.policy"
+
 [[dbus_name_binding]]
 source = "executors/linura-executor-systemd/src/lib.rs"
 token = "SERVICE_NAME"
@@ -324,6 +341,13 @@ source = "crates/linura-linux-session/src/owner.rs"
 usage = "native-approval-action"
 token = '"org.linura.authority.unlock-session"'
 action = "org.linura.authority.unlock-session"
+policy = "packaging/polkit-1/actions/org.linura.authority.policy"
+
+[[polkit_binding]]
+source = "crates/linura-linux-session/src/owner/display/approval.rs"
+usage = "native-approval-action"
+token = '"org.linura.authority.apply-display-layout"'
+action = "org.linura.authority.apply-display-layout"
 policy = "packaging/polkit-1/actions/org.linura.authority.policy"
 
 [[polkit_binding]]

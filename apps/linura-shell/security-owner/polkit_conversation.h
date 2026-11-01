@@ -22,6 +22,11 @@ class PolkitConversation final : public QObject
     Q_OBJECT
 
   public:
+    // Native compositor/frame adapter only. The callback carries fixed prompt
+    // metadata's token, never a response, PAM cookie, input or effect handle.
+    // Completion may only admit input; NativeApproval still requires real PAM.
+    using PromptPresentation =
+        std::function<void(const NativeApprovalScope &, quint64, std::function<void(bool)>)>;
     explicit PolkitConversation(NativeApproval &approval, QObject *parent = nullptr);
     ~PolkitConversation() override;
 
@@ -32,6 +37,7 @@ class PolkitConversation final : public QObject
     void cancel();
     void ownerLost();
     [[nodiscard]] bool active() const noexcept;
+    [[nodiscard]] bool bindDisplayPromptPresentation(PromptPresentation);
 
   Q_SIGNALS:
     // No secret/prompt/cookie payload. Success records native conversation proof
@@ -45,6 +51,7 @@ class PolkitConversation final : public QObject
     void completed(bool success);
     void requested(NativePromptKind kind);
     void releaseNative();
+    void presented(const NativeApprovalScope &, quint64 token, quint64 generation, bool ready);
 
     NativeApproval &approval_;
     std::unique_ptr<Native> native_;
@@ -60,6 +67,9 @@ class PolkitConversation final : public QObject
     NativePromptKind deferredPromptKind_ = NativePromptKind::Response;
     quint32 promptStep_ = 0;
     quint32 authenticatedUid_ = 0;
+    PromptPresentation displayPresentation_;
+    std::optional<quint64> preparedToken_;
+    quint64 presentationGeneration_ = 0;
     std::optional<bool> deferredCompletion_;
 };
 

@@ -40,6 +40,7 @@ impl NativeSleepGate {
             sessions: LogindSessionObserver::connect().map_err(|e| e.to_string())?,
             executor: SessionExecutorClient {
                 channel: channel.clone(),
+                display_sequence: 0,
             },
             verifier: FreshSessionVerifier {
                 channel,
@@ -145,6 +146,13 @@ impl NativeSleepCoveragePort for ScopedCoverage<'_> {
             .map_err(|e| e.to_string())
     }
     fn observe_lock(&mut self, epoch: &SessionEpoch) -> Result<ObservationEnvelope, String> {
+        let sample = self.gate.channel.observe_current_lock(epoch.uid(), 1)?;
+        let lock = SessionLockId::from_resource(&sample.resource).map_err(|e| e.to_string())?;
+        // Preempt original display continuation before protective acquisition
+        // or already-secure sleep fencing. The received helper's outer scope
+        // and deadline are revalidated by the canonical coordinator; this
+        // narrow readiness never becomes protective consent or execution.
+        crate::display_safety::prepare(&self.gate.channel, &lock)?;
         self.gate.channel.observe_current_lock(epoch.uid(), 1)
     }
     fn converge_protective_lock(

@@ -2,6 +2,8 @@
 
 #include "native_managed_lock_backend.h"
 #include "native_keyboard.h"
+#include "native_display_topology.h"
+#include "native_display_prompt.h"
 #include <QImage>
 #include <QSize>
 #include <cstddef>
@@ -12,6 +14,9 @@ struct wl_display;
 namespace Linura::SecurityOwner {
 
 class SecretEntry;
+struct NativeDisplayCorrelation;
+struct NativeDisplayDecision;
+struct NativeDisplayIntent;
 
 // Owns its exclusive actual Wayland connection. The private runtime factory must
 // attest this SAME connection/session and secure-exec protection before binding
@@ -40,15 +45,52 @@ class NativeWaylandLock final : public NativeManagedLockBackend
                                           PointerHitTest hitTest = {});
     [[nodiscard]] bool protectedInputAvailable() const noexcept;
     [[nodiscard]] bool protectedInputFocused() const;
+    // Local native lifetime, never approval. Every output add/remove/configure
+    // invalidates proofs captured against an earlier generation.
+    [[nodiscard]] quint64 protectedInputGeneration() const noexcept;
+    [[nodiscard]] quint64 protectedInteractionGeneration() const noexcept;
     // Bounded observation of already available native events; no effect dispatch.
     void refreshNativeState();
     // Progress already queued native replies between bounded metadata reads.
     // Skip nested native callbacks/rendering; never process Qt/D-Bus/timer events.
     void progressNativeState();
+    // Read-only sync-fenced native inventory and per-output lock-surface facts.
+    // Absence means unsupported/incomplete; it never weakens S17 lock coverage.
+    [[nodiscard]] std::optional<NativeDisplaySnapshot> observeDisplayTopology();
+    [[nodiscard]] bool displayAllowsSecurityTransition();
+    // Original owned/attested connection; this sends get_status only. It never
+    // configures, confirms, restores or acquires continuation rights.
+    [[nodiscard]] std::optional<quint32> observeDisplayAttempt(const NativeDisplayCorrelation &);
+    // Private prepared runtime only. One fresh snapshot and one apply on the
+    // original owned connection; no reconnection, retry or continuation.
+    [[nodiscard]] std::optional<quint32>
+    dispatchPreparedDisplay(const NativeDisplayIntent &, const NativeDisplayCorrelation &,
+                            quint64 validatedSampledBootMs, const QString &nativeBaselineGuard);
+    [[nodiscard]] std::optional<quint32> continuePreparedDisplay(const NativeDisplayIntent &,
+                                                                 const NativeDisplayDecision &,
+                                                                 quint64 originalSampledBootMs);
+    [[nodiscard]] const QString &displayInvocation() const noexcept;
+    // Separate native display conversation. The caller must arm the exact
+    // canonical/purpose-bound authentication first. S17 state is independent.
+    [[nodiscard]] bool showProtectedDisplay(const NativeDisplayPromptScope &,
+                                            const NativeDisplayIntent &);
+    [[nodiscard]] std::optional<NativeDisplayPromptStatus> protectedDisplayStatus();
+    [[nodiscard]] std::optional<quint64>
+    displayDecisionBootDeadline(const NativeDisplayCorrelation &);
+    [[nodiscard]] bool beginProtectedDisplayDecision(const NativeDisplayPromptScope &,
+                                                     const NativeDisplayIntent &,
+                                                     const NativeDisplayCorrelation &);
+    [[nodiscard]] bool refreshProtectedDisplay(const NativeDisplayPromptScope &,
+                                               quint64 originalEpoch);
+    [[nodiscard]] bool consumeProtectedDisplay(const NativeDisplayPromptScope &,
+                                               quint64 originalEpoch);
+    void cancelProtectedDisplay();
     // Private native interaction, not an effect/approval credential. The runtime
     // arms the exact reviewed NativeApprovalScope first and consumes its fresh
     // confirmation through Control separately. Closing/expiry means denial.
     using LockConfirmation = std::function<void(bool)>;
+    [[nodiscard]] bool armProtectedDisplayReview(const NativeDisplayPromptScope &,
+                                                 quint64 originalEpoch, LockConfirmation);
     [[nodiscard]] bool showLockConfirmation(LockConfirmation completion);
     void cancelLockConfirmation();
     [[nodiscard]] bool lockConfirmationVisible() const noexcept;
