@@ -120,3 +120,38 @@ XDG edits change *external* per-user configuration, not Linura-local favorites. 
 ## 7. Validation and nonclaims
 
 In a prepared repo checkout run `python3 -m unittest discover -s tests/tooling -p test_v010_s23_design.py`, `python3 scripts/check_repository.py`, `python3 tools/check_adrs.py`, `python3 tools/check_roadmap.py`, `cargo xtask check` and exact-head security/qualification. Real pacman tests belong only in isolated disposable Arch environments with retained true source/OS/signature and interruption evidence. This Phase 1 is source inspection and design only; those native/CI/physical tests are **not** claimed executed.
+
+
+## 8. Implementation PR decomposition (proposed, not implementation evidence)
+
+The explicit, **adaptive** six-PR implementation graph is recorded in
+`contracts/v010-s23-design.toml` (`[pr_decomposition]` and
+`[[implementation_pr]]`). Each boundary names its owned source areas,
+prerequisites, traced requirements, positive/native acceptance, and
+adversarial coverage. These identifiers are **not** GitHub PR numbers.
+
+- **S23-1 — Application discovery and identity** (parallel with S23-2):
+  bounded, read-only XDG inventory; preserve S12/S14 exact launch behavior.
+- **S23-2 — ALPM package observation**: installed and frozen signed repository
+  facts with explicit freshness and source/keyring identity.
+- **S23-3 — Dependency and impact planning** (after S23-2):
+  non-executable closure, protected resources and S24 upgrade handoff.
+- **S23-4 — Managed package operations** (after S23-3): authenticated,
+  durable prepared native ALPM effects and independent postconditions;
+  effects remain disabled until genuinely qualified.
+- **S23-5 — XDG handlers and favorites** (after S23-1): exact user-level
+  revisioned MIME/scheme association and separate local preferences.
+- **S23-6 — Integrated experience and qualification** (after S23-1..5):
+  shared Control-backed UI/CLI/SDK, no-model/a11y, exact-head Arch A,
+  interactive B, separate physical C/Q11 evidence and inherited regressions.
+
+A first implementation PR starts on a clean, current `main` base and
+imports **only its owned** contracts, tests and code from this WIP reference.
+No placeholder PR, no unrelated ChatGPT/task metadata commits, no direct
+merge of this WIP branch, and no premature roadmap status/evidence change.
+Individually review, qualify, and merge each PR in dependency order;
+unqualified effects and physical proof remain explicit blockers.
+
+The six boundaries are an engineering starting point, not an artificial
+quota: a real architecture finding may require a documented rebaseline
+and tests, never a silent count change or a weaker safety gate.
