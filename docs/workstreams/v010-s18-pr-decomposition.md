@@ -1,156 +1,213 @@
-# S18 v0.10 implementation extraction — five reviewable PRs
+# S18 v0.10 — ten independent implementation boundaries
 
-> **WIP decomposition only.** Do not merge this branch directly, create a PR from this planning step, activate NetworkManager mutations or promote S18/Q11 evidence. The Phase-1 source is [S18 Phase 1](v010-s18-network-phase1.md), [proposed ADR 0048](../adr/0048-s18-networkmanager-authority.md) and [inactive S18 design](../../contracts/v010-s18-design.toml).
+> **Design-only extraction contract.** Historical reserved PR numbers are not authorizations, proof of implementation, review readiness or accepted qualification. Preserve the existing `wip/v010-s18-network` implementation; never merge WIP directly. The new ten-part decomposition follows the S17 identity → Control → native authority → protected security → client → qualification split and the S21 per-feature + convergence + qualification pattern.
 
-The machine-checkable decomposition is [`contracts/v010-s18-pr-decomposition.toml`](../../contracts/v010-s18-pr-decomposition.toml). **S18-1–S18-5 are slice-local identifiers, not assigned GitHub PR numbers.** Each eventual PR is extracted onto independently checked accepted `main`, including its entire source-owned functionality, negative/adversarial tests, canonical security/regression checks, native source-bound acceptance and review. No placeholder test or documentation can satisfy implementation evidence.
+Source of truth: [Phase-1 inventory](v010-s18-network-phase1.md), [ADR 0048](../adr/0048-s18-networkmanager-authority.md), [inactive effect design](../../contracts/v010-s18-design.toml), [machine-checked decomposition](../../contracts/v010-s18-pr-decomposition.toml).
 
-| Order | Boundary | Main dependency | Activation |
-|---|---|---|---|
-| S18-1 | native-network-observation | S16 | No external effect |
-| S18-2 | wifi-discovery-radio | S18-1 | Only after independently qualified managed authorization, native verification and offline recovery |
-| S18-3 | connection-lifecycle | S18-1, S18-2 | Only after independently qualified managed authorization, native verification and offline recovery |
-| S18-4 | connection-profile-management | S18-1, S18-3 | Only after independently qualified managed authorization, native verification and offline recovery |
-| S18-5 | experience-qualification | S18-1, S18-2, S18-3, S18-4 | No external effect |
+Existing code changes in the WIP observer now belong **conceptually to S18-2**, not S18-1. Move them into a future review branch only after source/compilation/native qualification checks. No runtime registration, permission downgrade or unsupported feature is introduced by this plan.
 
-## Engineering requirements
+| ID | Boundary | Required predecessors | Candidate native effects |
+| --- | --- | --- | --- |
+| S18-1 | feat(core): model exact native network identities | S16 | none |
+| S18-2 | feat(network): establish native NetworkManager observation | S18-1 | none |
+| S18-3 | feat(control): add managed network authority semantics | S18-1, S18-2 | none |
+| S18-4 | feat(security): add protected network credentials and native authorization | S18-1, S18-3 | none |
+| S18-5 | feat(network): add bounded Wi-Fi discovery and scan authority | S18-2, S18-3, S18-4 | `operation:network.wifi.scan` |
+| S18-6 | feat(network): add managed networking and radio controls | S18-2, S18-3, S18-4 | `operation:network.networking.set-enabled`, `operation:network.wifi.set-enabled` |
+| S18-7 | feat(network): add managed connection lifecycle | S18-2, S18-3, S18-4 | `operation:network.connection.activate`, `operation:network.connection.deactivate`, `operation:network.wifi.join` |
+| S18-8 | feat(network): add revisioned connection profile management | S18-2, S18-3, S18-4 | `operation:network.profile.create`, `operation:network.profile.update`, `operation:network.profile.delete` |
+| S18-9 | feat(shell): add unified network controls | S18-2, S18-3, S18-4, S18-5, S18-6, S18-7, S18-8 | none |
+| S18-10 | test(qualification): qualify native network integration | S18-1, S18-2, S18-3, S18-4, S18-5, S18-6, S18-7, S18-8, S18-9 | none |
 
-### S18-1 — feat(network): establish bounded native NetworkManager observation
+## Reviewable scopes and acceptance
 
-**Capabilities:** `networkmanager.manager.observe`, `networkmanager.device.observe`, `networkmanager.wifi.observe`, `networkmanager.connections.observe`, `networkmanager.ipconfig.observe`.
+### S18-1 — feat(core): model exact native network identities
 
-**Owned source (proposed boundary):** `crates/linura-linux-observation/src/`, `crates/linura-observation-control/`, `apps/linurad/src/`, `apps/linura-firstboot/src/`.
+**Source ownership:** `crates/linura-core/src/`, `crates/linura-linux-observation/src/`, `contracts/stability.toml`.
 
-**Must deliver:**
-- Extend the canonical NetworkManagerObserver and ObservationEnvelope; preserve tested manager/device query aliases, daemon/CLI/First Boot integration, and existing PlatformProfile provider-discovery behavior without creating a second authority.
-- Pin actual NetworkManager system-bus unique owner and boot epoch across bounded manager, device, saved-profile, active-connection, AP and IP reads; detect daemon replacement, alias/path reuse and inconsistent multi-object snapshots rather than claiming an atomic GetAll.
-- Provide typed observed wired/Wi-Fi inventory, passive AP results, saved/active connection identities and revisions, IPv4/IPv6 assignment, gateways, DNS, default routes and radio/rfkill with explicit stale/unknown/unsupported states; distinguish NM connectivity category from independent Internet reachability.
-- Enforce native transport byte/variant/depth, list count, string and time ceilings before unsafe allocation/retention; reject duplicates and oversized/malformed data, not truncation or first-match identity selection.
-- Keep all observations read-only; reading scan results is permitted, but RequestScan, secret retrieval, profile mutation and connection activation cannot be reached from the observer; add source-pinned negative/real-native tests.
+**Dependencies:** S16. **Requirements:** R18-OBS-02, R18-AUTH-01. **Adversarial cases:** T01, T03, T04, T05, T08, T11, T15, T24, T28.
 
-**Negative cases:** T01, T02, T03, T04, T05, T06, T07, T08, T09, T10, T22, T27, T28.
+- Introduce exact typed boot, NM unique owner, interface/device, access point, active connection, saved profile revision and non-authorizing observed generation identities.
+- Reject interface-name, ifindex, SSID/BSSID, UUID and path aliases as standalone authority across replacement, restart, or namespace changes.
+- Define canonical bounded encodings, comparison and anti-replay equality, including ambiguous/unknown identities that cannot be used for effects.
+- Preserve existing read-only query names and avoid granting any runtime operation, Polkit approval or native D-Bus mutation.
+- Unit-test malformed, mixed-epoch, conflicting path, reused device and profile revision identities.
 
-**Evidence:** unit-malformed-and-duplicate-device-fixtures; level-a-real-networkmanager-system-bus; existing-control1-cli-firstboot-regressions; observation-control-regression.
+**Required evidence:** typed-identity-adversarial-tests; existing-core-compatibility.
 
-**Release-blocking until:**
-- Exact-source Rust unit/adversarial and inherited regression checks pass
-- Real NM owner-replacement, hotplug, service-absent, malformed-object and budget/deadline tests pass
-- Complete AP/profile/active/IP/DNS/route observations are verified without claiming physical Wi-Fi support
+**Blockers:** No merge until exact-generation invariants and backward-compatible identity tests pass.
 
-**No native external effects are authorized by this boundary.
+**No operation activated or granted here.**
 
-### S18-2 — feat(network): qualify Wi-Fi scan and radio management authority
+### S18-2 — feat(network): establish native NetworkManager observation
 
-**Capabilities:** `networkmanager.manager.observe`, `networkmanager.wifi.observe`, `networkmanager.device.observe`.
+**Source ownership:** `crates/linura-linux-observation/src/`, `crates/linura-observation-control/`, `apps/linurad/src/`, `apps/linura-firstboot/src/`.
 
-**Owned source (proposed boundary):** `crates/linura-linux-observation/src/`, `crates/linura-control/`, `crates/linura-policy/`, `contracts/operation-semantics.toml`.
+**Dependencies:** S18-1. **Requirements:** R18-OBS-01, R18-OBS-02, R18-OBS-03. **Adversarial cases:** T01, T02, T03, T04, T05, T06, T07, T08, T09, T10, T22, T27, T28.
 
-**Must deliver:**
-- Keep passive AP reads separate from active RequestScan, which is an external effect; define exact adapter- and epoch-scoped scan limits, permissions and privacy, never a read-only shortcut.
-- Qualify independently typed networking-enabled and Wi-Fi-radio operations against observed NM, rfkill, hardware block and managed/unmanaged state; never conflate adapter and global toggles.
-- Route each proposed effect through trusted Control registration, canonical ReconciliationPlan, authenticated principal, policy, prepare, bounded native execution and independent postcondition verification; no shell/nmcli or generic D-Bus forwarding.
-- Bind unique NM owner, boot, device and relevant route generations before dispatch; reject changed epochs, changed risk class, reused approval, ambiguous replies and foreign session/Polkit subjects.
-- Protect the last working link and system/remote administration; deny when a proven local recovery path is required but unavailable, with durable indeterminate state and no blind replay.
+- Extend the existing canonical observer and coordinator, preserving manager/device resource aliases, daemon/CLI and First Boot behavior.
+- Implement bounded typed manager, device, passive AP, saved/active profile, radio/rfkill, IPv4/IPv6, DNS and default-route observations with distinct unknown/stale states.
+- Bind actual unique NetworkManager D-Bus owner, boot and stable device/profile epochs before accepting related snapshots; detect churn and duplicate identity.
+- Enforce transport receive/decode byte and nesting budgets, list bounds and real query deadlines, not only post-decoding elapsed time.
+- Keep all reads passive: no RequestScan, secret read, profile mutation, connection activation or new effect authority.
 
-**Negative cases:** T02, T03, T05, T06, T11, T12, T13, T14, T15, T18, T19, T20, T22, T23, T26, T29.
+**Required evidence:** unit-fuzz-device-ap-profile-ip; level-a-real-networkmanager-system-bus; existing-observation-control-and-firstboot.
 
-**Evidence:** unit-scan-authorization-and-rfkill; level-a-real-nm-scan-radio; managed-effect-denial-and-no-replay; local-recovery-and-security-review.
+**Blockers:** Complete native boundedness, owner swap, dual-stack and malformed-provider evidence before calling S18-2 complete.
 
-**Release-blocking until:**
-- Separately reviewed operation classes, risk floors and authenticated NM/Polkit subject are accepted
-- Native scan permissions/emission/privacy and bounded request/verification are independently proven
-- Networking/radio toggles have viable offline local recovery and full durable ambiguity qualification
+**No operation activated or granted here.**
 
-**Inactive candidate operations:** `operation:network.wifi.scan`, `operation:network.networking.set-enabled`, `operation:network.wifi.set-enabled`. None can be registered or enabled simply by extracting this plan.
+### S18-3 — feat(control): add managed network authority semantics
 
-### S18-3 — feat(network): implement protected connection activation and recovery
+**Source ownership:** `crates/linura-control/`, `crates/linura-policy/`, `crates/linura-transaction/`, `crates/linura-persistence-sqlite/`, `contracts/operation-semantics.toml`.
 
-**Capabilities:** `networkmanager.connections.observe`, `networkmanager.wifi.observe`, `networkmanager.ipconfig.observe`.
+**Dependencies:** S18-1, S18-2. **Requirements:** R18-AUTH-01, R18-AUTH-02, R18-REC-01. **Adversarial cases:** T03, T05, T08, T09, T10, T12, T13, T14, T15, T18, T19, T20, T21, T24, T25, T26, T29.
 
-**Owned source (proposed boundary):** `crates/linura-control/`, `crates/linura-policy/`, `crates/linura-linux-observation/src/`, `apps/linura-shell/plugins/network/`.
+- Define trusted typed operation classification and risk floors for all nine candidate effects; keep them inactive until feature-specific native qualification.
+- Extend canonical reconciliation plans, exact principal/resource/epoch preconditions and bounded protected review of default-route/DNS impact.
+- Persist prepare/attempt and indeterminate recovery through existing Control authority and SQLite; never mint grants from receipts or UI selections.
+- Specify independently corroborated postconditions, no-change semantics and loss-of-control-path refusal with offline fallback.
+- Test denial, replay, changed risk, ambiguous reply, crash recovery and route-impact conflicts without enabling unqualified effects.
 
-**Must deliver:**
-- Prepare exact profile revision, device/adapter, active-connection instance, owner/boot/session generation and impact on current IPv4/IPv6 default routes before activation or deactivation.
-- Keep authenticated Wi-Fi credentials in purpose-bound protected native handling; prohibit plaintext PSK, 802.1X, SSID/BSSID-sensitive diagnostics and secret-agent payloads in model, intent, plan, logs or retained evidence.
-- Distinguish one-time join from saving credentials/profiles; durable creation or editing must use S18-4 approved allowlisted profile authority, not hidden auto-save or arbitrary NM settings passthrough.
-- Verify independent association, active profile, IP, DNS, routes and requested postcondition; NM Connected/Connectivity category or D-Bus method receipt alone cannot prove Internet reachability or completion.
-- Retain uncertain-effect intent and native attempt; after crash, restart, lost reply, lock transition or route loss re-observe before compensation/retry and never replay blindly, with offline local recovery for consequential changes.
+**Required evidence:** canonical-policy-negative-tests; durable-attempt-recovery-and-enospc; v06-managed-lifecycle-regressions.
 
-**Negative cases:** T03, T05, T08, T09, T10, T11, T13, T14, T15, T16, T18, T19, T20, T21, T23, T24, T26, T29.
+**Blockers:** All durable authorizations and recovery paths independently reviewed before native registration.
 
-**Evidence:** unit-identity-route-secret-and-ambiguity; level-a-native-ethernet-and-wifi-lifecycle; level-b-protected-credentials; level-c-maintained-wifi-recovery; security-and-managed-lifecycle-regressions.
+**No operation activated or granted here.**
 
-**Release-blocking until:**
-- S17 protected credential/session handling, true native principal and exact NM subject are qualified
-- Native connect/disconnect/join proof includes default route and DNS postconditions, partial activation and no-blind-replay recovery
-- Physical Wi-Fi connection and offline local recovery evidence exist before claiming physical support
+### S18-4 — feat(security): add protected network credentials and native authorization
 
-**Inactive candidate operations:** `operation:network.connection.activate`, `operation:network.connection.deactivate`, `operation:network.wifi.join`. None can be registered or enabled simply by extracting this plan.
+**Source ownership:** `crates/linura-linux-session/`, `apps/linura-shell/security-owner/`, `crates/linura-control/`, `packaging/dbus-1/`.
 
-### S18-4 — feat(network): add revisioned NetworkManager profile management
+**Dependencies:** S18-1, S18-3. **Requirements:** R18-AUTH-02, R18-SEC-01. **Adversarial cases:** T03, T05, T11, T13, T14, T15, T16, T17, T19, T23, T24, T26, T28.
 
-**Capabilities:** `networkmanager.connections.observe`, `networkmanager.ipconfig.observe`.
+- Bind actual authenticated transport sender, logind session and Polkit subject to the exact operation, device/profile epoch and owner generation.
+- Establish purpose-bound native Wi-Fi secret-agent and protected credential input without exposing passwords, EAP material or BSSID-sensitive data to model, QML, audit or logs.
+- Separate one-time connection credentials from durable profile secret persistence and require explicit authenticated user consent.
+- Cancel and zeroize on lock/session/seat/owner changes, timeout, focus loss and connection cancellation; no reusable proof or arbitrary GetSecrets/Update2 relay.
+- Adversarially test confused deputy, root versus real user, foreign sessions, locked input, replay and redaction across native IPC.
 
-**Owned source (proposed boundary):** `crates/linura-control/`, `crates/linura-policy/`, `crates/linura-linux-observation/src/`, `apps/linura-shell/plugins/network/`.
+**Required evidence:** real-polkit-subject-adversarial; native-protected-input-credential-tests; secret-redaction-and-ownership-audit.
 
-**Must deliver:**
-- Provide typed, allowlisted saved-profile create/update/delete with exact setting revision, UUID and original owner scope; reject arbitrary settings maps, unreviewed VPN plugins and unsupported IP/DNS/hotspot extensions.
-- Present complete material diff, credential-save choice, owners/dependents and activation/default-route impact before any persisted change, with explicit conflict refusal and rereview.
-- Bind authentic Polkit subject, native settings owner epoch, exact previous profile version and durable Control-prepared transaction before mutation; never treat a user-supplied UUID as authority.
-- Make profile deletion destructive-risk with shared-owner/dependent and safe-restoration checks; never remove an active/last viable profile without qualified recovery.
-- Verify persisted native revision and intended effective state separately; detect edits by foreign applications, NM restart and ambiguous/lost replies without blindly re-executing.
+**Blockers:** No native credential use until genuine protected-input and secret-agent subject are qualified.
 
-**Negative cases:** T03, T05, T08, T09, T13, T14, T15, T16, T17, T18, T19, T20, T21, T24, T25, T28, T29.
+**No operation activated or granted here.**
 
-**Evidence:** unit-allowlist-revision-ownership; level-a-native-nm-profile-edits; shared-owner-and-secret-redaction; indeterminate-rollback-security-review.
+### S18-5 — feat(network): add bounded Wi-Fi discovery and scan authority
 
-**Release-blocking until:**
-- Allowlisted typed profile schema and exact current NM settings revision are accepted
-- Real NM profile mutation, concurrent-edit detection, shared-ownership safety and independent recovery are proven
-- Destructive deletion risk remains non-downgradable and protected secrets are never leaked
+**Source ownership:** `crates/linura-linux-observation/src/`, `crates/linura-control/`, `crates/linura-policy/`.
 
-**Inactive candidate operations:** `operation:network.profile.create`, `operation:network.profile.update`, `operation:network.profile.delete`. None can be registered or enabled simply by extracting this plan.
+**Dependencies:** S18-2, S18-3, S18-4. **Requirements:** R18-OBS-03, R18-AUTH-01, R18-AUTH-02, R18-SEC-01. **Adversarial cases:** T02, T03, T05, T06, T07, T11, T12, T13, T14, T15, T16, T19, T20, T22, T23, T28, T29.
 
-### S18-5 — feat(network): deliver unified network experience and qualification
+- Keep passive AP result observation separate from active RequestScan radio emission and permission-sensitive action.
+- Bind scan authorization to exact adapter/owner/session and a reviewed non-downgradable operation floor.
+- Limit native scan attempts, frequency, payloads, power/airplane mode interaction and privacy leakage.
+- Verify fresh scoped scan completion without treating cached AP list, methods or signals as proof.
+- Deny when rfkill, stale owner, missing authorization, foreign caller, timeout or uncertain effect makes scan unverifiable.
 
-**Capabilities:** `networkmanager.manager.observe`, `networkmanager.device.observe`, `networkmanager.wifi.observe`, `networkmanager.connections.observe`, `networkmanager.ipconfig.observe`.
+**Required evidence:** real-nm-wifi-scan-negative-tests; rate-and-payload-budget; rfkill-owner-swap-no-replay.
 
-**Owned source (proposed boundary):** `apps/linura-shell/plugins/network/`, `apps/linura-shell/bridge/`, `apps/linuractl/src/`, `crates/linura-sdk/`, `qualification/v010/interactive-workstation/`.
+**Blockers:** Native authenticated RequestScan and exact-freshness oracle still unqualified.
 
-**Must deliver:**
-- Use one typed Control state across network Control Center, Quick Settings, CLI/SDK and no-model flows; preserve existing manager/device query aliases, provider health and separate readiness/effect status.
-- Show fresh link, association, profile, IPv4/IPv6, DNS, route, portal/limited/unknown observations; never promote cached, inferred or NM-reported connectivity into independently verified Internet access.
-- Render purpose-bound protected credentials, exact review/approval, denial, stale data, progress, indeterminate/compensating state and verified outcome with correct S17 lock/session ownership.
-- Prove keyboard, focus, pointer, screen-reader, high-DPI/reduced-motion, screenshot/privacy and native offline fallback in actual ShellBridge/Qt/QML without direct QML NetworkManager mutation.
-- Retain exact-head A/B/Q9/Q10 and separate real physical C/Q11 hardware evidence; missing physical NIC/roaming/rfkill/recovery proof cannot be replaced by VM, mock or video.
+**Proposed inactive operations:** `operation:network.wifi.scan`.
 
-**Negative cases:** T01, T02, T09, T10, T16, T18, T20, T21, T22, T23, T24, T26, T27, T28, T30.
+### S18-6 — feat(network): add managed networking and radio controls
 
-**Evidence:** level-a-source-pinned-arch-nm-native; level-b-interactive-control-center-quick-settings; level-c-maintained-physical-nic-wifi-q11; q10-accessibility-and-visual; full-inherited-regressions.
+**Source ownership:** `crates/linura-control/`, `crates/linura-linux-observation/src/`, `crates/linura-policy/`, `executors/`.
 
-**Release-blocking until:**
-- All predecessor S18 implementation PRs independently merge with exact-head canonical/security gates
-- GUI/CLI/SDK and offline no-model parity prove fresh observed outcomes without optimistic success
-- Maintained physical Wi-Fi/Q11 plus exact-source Q9/Q10 and inherited Q12-Q14 evidence are accepted before slice-wide support
+**Dependencies:** S18-2, S18-3, S18-4. **Requirements:** R18-AUTH-01, R18-AUTH-02, R18-REC-01. **Adversarial cases:** T03, T05, T09, T10, T13, T14, T15, T18, T19, T20, T21, T22, T23, T24, T26, T29.
 
-**No native external effects are authorized by this boundary.
+- Type machine-wide networking and Wi-Fi radio toggles independently from rfkill, hardware state and managed/unmanaged adapter state.
+- Review and independently corroborate each impacted link, IPv4/IPv6 default routes, DNS and local/remote administration viability.
+- Use only exact prepared managed Control effect, authenticated Polkit subject and narrowly enumerated native methods.
+- Deny last viable link disruption unless independently proven accessible offline local recovery exists.
+- Verify observed effective state after the toggle; retain indeterminate attempt and no blind replay on crash, lost reply or NM restart.
 
-## Extraction and integration rules
+**Required evidence:** real-nm-radio-rfkill-test; last-link-and-remote-lockout-proofs; durable-recovery-disruption.
 
-1. Re-audit the true accepted `main` source, ADR ledger, `contracts/stability.toml` and all daemon/CLI/First Boot/Control consumers before extracting any work from this WIP branch.
-2. The current WIP branch already has **partial read-only observer edits** in `crates/linura-linux-observation/src/lib.rs`; do not mistake these for the complete S18-1 implementation. Re-review the owner/path `E0505` correction, boundedness, zbus cached property behavior, coherent D-Bus generations and native source qualification before porting it.
-3. Split by reviewed feature/trust boundaries, not by commit quotas. Each PR must carry its actual implementation, adverse-case tests, separate qualified evidence and a cohesive commit history; re-evaluate the five boundaries if real code findings require a different number of PRs.
-4. `S18-2` owns active RequestScan and both network/radio toggles; these are distinct from passive scan observations. All nine candidate effects remain inert until each trusted class and risk floor, transport-authenticated principal/Polkit subject, canonical plan, durable prepare, narrowly typed native effect, independent verify, durable reconcile and offline recovery are accepted.
-5. `S18-3` may use one-time credentials only through purpose-bound protected handling; durable profile/secret saving belongs to `S18-4`. Never implement an implicit profile-save side effect, secret in logs/audit/model, generic privileged D-Bus relay, direct `nmcli` or arbitrary NM settings map.
-6. Enforce S17 protected lock/session, S21 power/display/storage, S23/S24 package/update boundaries, Control-owned observation coordination and shared-route safety. Cross-slice shell/QML files require coordinated integration ownership.
-7. Supported observations must distinguish NM-reported connectivity, local routing/DNS, real Internet reachability and unknown/portal; never claim a postcondition from an NM method receipt or an optimistic cached UI state.
-8. Keep release ledger S18 `planned` until merged implementation PRs with exact-head CI and applicable Q9/Q10/Q11/Q12/Q13/Q14 evidence. An Arch VM or simulated Wi-Fi does not prove physical C/Q11. Do not merge WIP directly or create a PR until extraction is explicitly authorized.
+**Blockers:** No effect enabled until protected local recovery and independent verification demonstrated.
 
-**Validation before any later extraction:** `python3 -m unittest tests.tooling.test_v010_s18_decomposition tests.tooling.test_v010_s18_design`, `python3 scripts/check_repository.py`, `python3 tools/check_adrs.py`, `python3 tools/check_roadmap.py` and the canonical `cargo xtask check`, followed by applicable source-pinned CI/native qualification on each actual implementation PR.
+**Proposed inactive operations:** `operation:network.networking.set-enabled`, `operation:network.wifi.set-enabled`.
 
-## Decisions requiring explicit review
+### S18-7 — feat(network): add managed connection lifecycle
 
-- A D-Bus unique NM owner identifies a service generation, but does not make multi-object reads atomic or provide authenticated device/profile mutation identity. Enforce owner/boot/device/active/profile revision coherence and bounded transport data.
-- `GetAccessPoints` and `RequestScan` have different semantics. NetworkManager may restrict scanning by permissions; no hidden radio emissions or automatic scans on read-only queries.
-- Wi-Fi join, activation, profile changes and network disablement may remove the control plane's only route. Safety depends on actual independent offline local recovery, not a GUI timer or NM connectivity category.
-- Native network secrets require protected session/Polkit handling and data minimization. An SSID, BSSID or profile UUID is not a credential or safe stable effect authority.
-- Profile deletion has a destructive trusted floor and requires owner/dependency review, exact current revision and a recovery policy before authorization. Arbitrary VPN/hotspot/multimode administration remains explicitly unsupported.
+**Source ownership:** `crates/linura-control/`, `crates/linura-linux-observation/src/`, `crates/linura-policy/`, `executors/`.
+
+**Dependencies:** S18-2, S18-3, S18-4. **Requirements:** R18-AUTH-01, R18-AUTH-02, R18-SEC-01, R18-REC-01. **Adversarial cases:** T03, T05, T08, T09, T10, T11, T13, T14, T15, T16, T18, T19, T20, T21, T23, T24, T26, T29.
+
+- Implement exact saved-profile revision, device and active-connection binding for activation/deactivation, without requiring an unrelated Wi-Fi scan.
+- Use S18-4 protected one-time credentials and prohibit hidden durable profile saves; join and persistent configuration are different effects.
+- Review route/DNS/dual-stack impact and protect last viable control path before dispatch.
+- Use typed, narrowly constrained NM effect and independent IP/DNS/routes/association postcondition verification, not method-return optimism.
+- Preserve durable indeterminate attempt and re-observation after daemon restart, changed profile, partial DHCP or lost reply; never auto-retry.
+
+**Required evidence:** real-nm-ethernet-and-wifi-lifecycle; protected-credential-native-qualification; partial-ip-dns-route-and-no-replay.
+
+**Blockers:** Real native and protected Wi-Fi qualification pending; unsupported physical hardware remains explicitly unqualified.
+
+**Proposed inactive operations:** `operation:network.connection.activate`, `operation:network.connection.deactivate`, `operation:network.wifi.join`.
+
+### S18-8 — feat(network): add revisioned connection profile management
+
+**Source ownership:** `crates/linura-control/`, `crates/linura-linux-observation/src/`, `crates/linura-policy/`, `executors/`.
+
+**Dependencies:** S18-2, S18-3, S18-4. **Requirements:** R18-OBS-03, R18-AUTH-01, R18-AUTH-02, R18-SEC-01, R18-REC-01. **Adversarial cases:** T03, T05, T08, T09, T13, T14, T15, T16, T17, T18, T19, T20, T21, T24, T25, T28, T29.
+
+- Define typed allowlisted NM profile fields and revision-aware create/update/delete; no arbitrary settings maps, VPN or hotspot passthrough.
+- Bind actual owner/UUID/native settings path and content fingerprint with native Polkit subject and durable Control prepare.
+- Separate protected secret saving from one-time credential use and redact all sensitive material in evidence.
+- Treat delete as destructive; review active/default route, dependent profiles and shared owner before any physical change.
+- Reject concurrent updates, restarted owners, lost replies, uncertain deletion or unavailable independent restoration; no blind re-dispatch.
+
+**Required evidence:** native-saved-profile-revision-tests; destructive-shared-ownership-denials; protected-secret-redaction; recovery-after-profile-replacement.
+
+**Blockers:** Exact revision CAS, destructive policy and real native settings proof still pending.
+
+**Proposed inactive operations:** `operation:network.profile.create`, `operation:network.profile.update`, `operation:network.profile.delete`.
+
+### S18-9 — feat(shell): add unified network controls
+
+**Source ownership:** `apps/linura-shell/`, `apps/linuractl/src/`, `crates/linura-sdk/`.
+
+**Dependencies:** S18-2, S18-3, S18-4, S18-5, S18-6, S18-7, S18-8. **Requirements:** R18-UX-01, R18-UX-02, R18-REC-01. **Adversarial cases:** T09, T10, T13, T14, T16, T18, T20, T21, T22, T23, T24, T26, T28, T30.
+
+- Expose the same Control-owned typed capabilities in Control Center, Quick Settings, SDK, CLI and deterministic offline/no-model paths.
+- Show provider/link/AP/profile/IP/DNS/routes and unknown/stale/portal states distinctly from independently proven reachability.
+- Render exact risk/material impact, authenticated protected credential handoff and explicit denied/preparing/indeterminate/recovery states.
+- No direct QML/networkmanager/nmcli/agent mutation; client never selects risk, native identity or authority.
+- Qualify keyboard, pointer, screen-reader, scaled/multi-output, locked-session and screenshot/privacy behavior with negative regression tests.
+
+**Required evidence:** shellbridge-and-qt-integration; a11y-keyboard-pointer-high-dpi; offline-cli-sdk-parity.
+
+**Blockers:** All required backends accepted and integrated before presenting effects as available.
+
+**No operation activated or granted here.**
+
+### S18-10 — test(qualification): qualify native network integration
+
+**Source ownership:** `qualification/v010/`, `docs/qualification/`, `tests/acceptance/`, `tools/`.
+
+**Dependencies:** S18-1, S18-2, S18-3, S18-4, S18-5, S18-6, S18-7, S18-8, S18-9. **Requirements:** R18-QUAL-01, R18-REL-01, R18-UX-02. **Adversarial cases:** T01, T02, T03, T04, T05, T06, T07, T08, T09, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29, T30.
+
+- Establish source/guest/provider/boot/owner/subject and observed pre/postcondition binding for each accepted native network operation.
+- Exercise real NM native A, interactive B and maintained physical NIC/Wi-Fi Level C/Q11 separately; VM and mock are not physical support.
+- Adversarially prove hotplug, rfkill, owner restart, Polkit denial, credential cancellation, lost reply, route loss, partial dual stack and no blind replay.
+- Verify GUI/CLI/SDK, no-model and offline recovery parity and S17 secure lock/S21 power/display/storage integration.
+- Run exact-head canonical CI, security, CodeQL, native qualification, inherited v0.9 tests and evidence admission; release support remains planned otherwise.
+
+**Required evidence:** level-a-source-pinned-real-networkmanager; level-b-real-quickshell-accessibility; level-c-maintained-physical-wifi-q11; q12-q14-inherited-security-and-recovery.
+
+**Blockers:** Entire nine-PR dependency closure and real source-pinned A/B/C evidence required; no synthetic Q11 promotion.
+
+**No operation activated or granted here.**
+## Extraction rules
+
+1. A PR reservation is not source qualification. For each boundary, rebuild the existing assigned GitHub PR head from a current accepted `main` and retain its historical head-branch name unless GitHub separately renames it. Avoid stacking incomplete WIP history into any PR.
+2. Original reserved PR heads may belong to other slices; archive their old refs before any destructive rebuild and do not lose S19, S20, S22, S23, S25 or S26 WIP code. A historic branch name is not an authority or scope declaration.
+3. The nine existing `contracts/v010-s18-design.toml` operations stay unregistered and off. S18-1/2/3/4/9/10 cannot enable effects. S18-5/6/7/8 must prove each separately reviewed native effect, exact authenticated subject and independent verification before registration.
+4. Allow S18-5, S18-6, S18-7 and S18-8 to develop independently after shared identity, observation, Control and protected security. Do not make Ethernet activation depend on Wi-Fi scanning or radio toggles; do not implement hidden profile persistence in Wi-Fi join.
+5. S18-9 is UI/CLI/SDK/no-model integration with no second authority. S18-10 is integrated exact-source qualification and never a substitute for per-feature adverse-case testing.
+6. Every extracted PR must pass all required exact-head canonical CI, Security, CodeQL and applicable native qualification; accepted S17 protected session and S21 display/power/storage authority remain unchanged. Q11 physical NIC/Wi-Fi remains unqualified absent actual hardware evidence; never lower/skip a red gate.
+7. Never create a new PR merely to fill a numbering gap. A future PR number, if required, is assigned when an actual PR is opened and authorized, not predicted by the decomposition.
+
+**Known incompleteness:** Current read-only WIP provider tests and source-level Rust checks do not establish bounded D-Bus wire/decode budgets, coherent AP/profile/IP/DNS/routes data, real native A/B, physical C/Q11 or complete managed effects.

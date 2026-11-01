@@ -11,7 +11,7 @@ PLAN = ROOT / "contracts/v010-s18-pr-decomposition.toml"
 DESIGN = ROOT / "contracts/v010-s18-design.toml"
 DOC = ROOT / "docs/workstreams/v010-s18-pr-decomposition.md"
 
-EXPECTED_PRS = [f"S18-{number}" for number in range(1, 6)]
+EXPECTED_PRS = [f"S18-{number}" for number in range(1, 11)]
 EXPECTED_OPERATIONS = {
     "operation:network.wifi.scan",
     "operation:network.networking.set-enabled",
@@ -24,23 +24,16 @@ EXPECTED_OPERATIONS = {
     "operation:network.profile.delete",
 }
 EXPECTED_ASSIGNMENTS = {
-    "S18-1": set(),
-    "S18-2": {
-        "operation:network.wifi.scan",
-        "operation:network.networking.set-enabled",
-        "operation:network.wifi.set-enabled",
-    },
-    "S18-3": {
-        "operation:network.connection.activate",
-        "operation:network.connection.deactivate",
-        "operation:network.wifi.join",
-    },
-    "S18-4": {
-        "operation:network.profile.create",
-        "operation:network.profile.update",
-        "operation:network.profile.delete",
-    },
-    "S18-5": set(),
+    "S18-1": {},
+    "S18-2": {},
+    "S18-3": {},
+    "S18-4": {},
+    "S18-5": {"operation:network.wifi.scan"},
+    "S18-6": {"operation:network.networking.set-enabled", "operation:network.wifi.set-enabled"},
+    "S18-7": {"operation:network.connection.activate", "operation:network.connection.deactivate", "operation:network.wifi.join"},
+    "S18-8": {"operation:network.profile.create", "operation:network.profile.update", "operation:network.profile.delete"},
+    "S18-9": {},
+    "S18-10": {},
 }
 REQUIRED_FIELDS = (
     "slug", "title", "depends_on", "external_effects", "candidate_operations",
@@ -98,7 +91,7 @@ def validate(plan: dict, design: dict, document: str) -> None:
     referenced_threats: set[str] = set()
     for index, pr in enumerate(prs):
         assert all(field in pr for field in REQUIRED_FIELDS), pr["id"]
-        assert pr["slug"] and pr["title"].startswith("feat(network): ")
+        assert pr["slug"] and pr["title"].startswith(("feat(", "test("))
         assert pr["owned_paths"] and len(set(pr["owned_paths"])) == len(pr["owned_paths"])
         for field in ("capabilities", "requirements", "negative_cases",
                       "acceptance", "qualification", "blocked_until"):
@@ -114,7 +107,7 @@ def validate(plan: dict, design: dict, document: str) -> None:
         assert len(set(pr["candidate_operations"])) == len(pr["candidate_operations"])
         actual_operations = set(pr["candidate_operations"])
         assert actual_operations == EXPECTED_ASSIGNMENTS[pr["id"]], pr["id"]
-        assert pr["external_effects"] is (index in (1, 2, 3)), pr["id"]
+        assert pr["external_effects"] is (index in (4, 5, 6, 7)), pr["id"]
         assert not any(path.startswith("executors/") for path in pr["owned_paths"])
         assigned.extend(pr["candidate_operations"])
         referenced_requirements.update(pr["requirements"])
@@ -125,11 +118,17 @@ def validate(plan: dict, design: dict, document: str) -> None:
     assert referenced_requirements == REQUIREMENTS
     assert referenced_threats == THREATS
     assert prs[0]["depends_on"] == []
+    assert "S18-1" in prs[1]["depends_on"]
     assert "S18-2" in prs[2]["depends_on"]
     assert "S18-3" in prs[3]["depends_on"]
-    assert set(prs[4]["depends_on"]) == set(EXPECTED_PRS[:4])
+    assert all(set(prs[index]["depends_on"]) == {"S18-2", "S18-3", "S18-4"}
+               for index in (4, 5, 6, 7))
+    assert set(prs[8]["depends_on"]) == set(EXPECTED_PRS[1:8])
+    assert set(prs[9]["depends_on"]) == set(EXPECTED_PRS[:9])
+    assert not any("S18-5" in prs[index]["depends_on"]
+                   for index in (5, 6, 7))
     assert any("physical" in evidence.lower() or "hardware" in evidence.lower()
-               for evidence in prs[4]["qualification"])
+               for evidence in prs[9]["qualification"])
 
     assert design["slice"] == "S18" and design["status"] == "proposed"
     assert design["activation"] == "none"
@@ -168,7 +167,8 @@ def validate(plan: dict, design: dict, document: str) -> None:
         assert operation["provider"] == "networkmanager"
         assert operation["class"] == "managed-external-effect"
         assert operation["risk_floor"] == RISK_FLOORS[operation["id"]]
-    assert "not assigned GitHub PR numbers" in document
+    assert "ten independent implementation boundaries" in document
+    assert "Current read-only WIP provider tests" in document
     assert "Do not merge this branch directly" in document
 
 
@@ -209,14 +209,14 @@ class S18DecompositionTests(unittest.TestCase):
         for changed in ("duplicate", "missing", "reassigned"):
             mutated = copy.deepcopy(self.plan)
             if changed == "duplicate":
-                mutated["pull_request"][3]["candidate_operations"][0] = (
+                mutated["pull_request"][7]["candidate_operations"][0] = (
                     "operation:network.wifi.scan"
                 )
             elif changed == "missing":
-                mutated["pull_request"][2]["candidate_operations"].pop()
+                mutated["pull_request"][6]["candidate_operations"].pop()
             else:
-                moved = mutated["pull_request"][1]["candidate_operations"].pop()
-                mutated["pull_request"][2]["candidate_operations"].append(moved)
+                moved = mutated["pull_request"][4]["candidate_operations"].pop()
+                mutated["pull_request"][6]["candidate_operations"].append(moved)
             with self.subTest(change=changed), self.assertRaises(AssertionError):
                 validate(mutated, self.design, self.document)
 
@@ -226,7 +226,7 @@ class S18DecompositionTests(unittest.TestCase):
             if change == "forward":
                 mutated["pull_request"][0]["depends_on"] = ["S18-4"]
             else:
-                mutated["pull_request"][4]["depends_on"].remove("S18-3")
+                mutated["pull_request"][9]["depends_on"].remove("S18-3")
             with self.subTest(change=change), self.assertRaises(AssertionError):
                 validate(mutated, self.design, self.document)
 
@@ -236,7 +236,7 @@ class S18DecompositionTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             validate(mutated, self.design, self.document)
         mutated = copy.deepcopy(self.plan)
-        mutated["pull_request"][4]["qualification"] = []
+        mutated["pull_request"][9]["qualification"] = []
         with self.assertRaises(AssertionError):
             validate(mutated, self.design, self.document)
 
