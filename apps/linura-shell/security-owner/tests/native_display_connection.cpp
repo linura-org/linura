@@ -31,6 +31,7 @@ using namespace std::chrono_literals;
 
 namespace {
 constexpr char Instance[] = "74e3ca24-b38b-4b62-9671-ae32dc38fd57";
+constexpr char ReplacementInstance[] = "a12ae886-0dd7-48de-ab8c-d42dc17e2389";
 class Fixture final : public Backend
 {
   public:
@@ -101,7 +102,8 @@ class Harness final
     std::atomic<bool> stopped{false};
     std::thread worker;
     enum class BuildMismatch { None, Upstream, SourceRecipe };
-    explicit Harness(BuildMismatch mismatch = BuildMismatch::None, bool publishIntegration = true)
+    explicit Harness(BuildMismatch mismatch = BuildMismatch::None, bool publishIntegration = true,
+                     const char *instance = Instance)
     {
         assert(display);
         auto *loop = wl_display_get_event_loop(display);
@@ -109,7 +111,7 @@ class Harness final
         if (publishIntegration)
             endpoint = std::make_unique<WireEndpoint>(
                 *display, backend, *service,
-                NativeBuildIdentity{Instance,
+                NativeBuildIdentity{instance,
                                     mismatch == BuildMismatch::Upstream
                                         ? std::string(40, 'a')
                                         : "efb50993780079460b0cbed1363e2166a2de1d9f",
@@ -532,6 +534,45 @@ void recoveryMetadataIsBoundedAndNeverPublishesNativeIdentityPreimages()
     assert(harness.backend.writes == 0);
 }
 
+void replacementCompositorCannotAdoptOldTopologyOrContinuation()
+{
+    // Two independent real Wayland fixture servers model distinct compositor
+    // invocations. This tests identity-bound refusal, NOT compositor SIGKILL,
+    // persistent native rules, kernel continuity or durable restoration.
+    Harness original;
+    Client owner(original.descriptors[0]);
+    const auto first = owner.connection->sample();
+    assert(first);
+    const auto prior = baseline(*first);
+    auto desired = prior;
+    desired.outputs[0].x = 100;
+    const auto correlation = bound(QStringLiteral("transaction:prior-compositor"));
+    assert(owner.connection->apply(correlation, prior, desired, owner.protection()) == 2);
+    assert(original.backend.writes == 1);
+
+    Harness replacement(Harness::BuildMismatch::None, true, ReplacementInstance);
+    Client newOwner(replacement.descriptors[0]);
+    const auto current = newOwner.connection->sample();
+    assert(current && current->compositor != first->compositor);
+    const auto replacementLayout = baseline(*current);
+    assert(replacementLayout.topology != prior.topology);
+    assert(replacementLayout.outputs.size() == prior.outputs.size());
+    for (std::size_t i = 0; i < prior.outputs.size(); ++i)
+        assert(replacementLayout.outputs[i].encode() == prior.outputs[i].encode());
+    // Verify topology refusal BEFORE querying status: the client must not
+    // reject this stale apply merely because an earlier status probe already
+    // reserved a local transaction tombstone.
+    assert(!newOwner.connection->apply(correlation, prior, desired, newOwner.protection()));
+    assert(replacement.backend.writes == 0);
+    // A fresh compositor contains no old transaction or decision right.
+    // BUILDING is a newly queried wire object, never the prior dispatch.
+    assert(newOwner.connection->status(correlation) == 1);
+    assert(!newOwner.connection->decide(correlation, true));
+    assert(!newOwner.connection->decide(correlation, false));
+    assert(!newOwner.connection->decisionBootDeadline(correlation));
+    assert(newOwner.connection->securityTransitionAllowed(false));
+}
+
 void securityAdmissionRejectsUnknownStateAndRetainsFailedRecoveryFence()
 {
     NativeDisplayConnection unavailable(nullptr);
@@ -619,4 +660,5 @@ int main()
     compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage();
     recoveryMetadataIsBoundedAndNeverPublishesNativeIdentityPreimages();
     securityAdmissionRejectsUnknownStateAndRetainsFailedRecoveryFence();
+    replacementCompositorCannotAdoptOldTopologyOrContinuation();
 }
