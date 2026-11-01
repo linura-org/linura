@@ -1,0 +1,137 @@
+# S26 Phase-2 decomposition: proposal only; IDs are not GitHub PR numbers.
+schema_version = 1
+slice = "S26"
+milestone = "v0.10.0"
+status = "proposed"
+reference_branch = "wip/v010-s26-library"
+extraction_base = "main"
+depends_on_slice = "S16"
+unblocks_slice = "S27"
+platform_profile = "arch-hyprland-v1"
+proposed_pr_count = 6
+implementation_extracted = false
+runtime_operations_registered = false
+generic_setup_executor_permitted = false
+machine_effects_enabled = false
+release_or_qualification_promotion = false
+vm_proves_physical_q11 = false
+library_schema_version = 1
+portable_format_version = 1
+
+[authority]
+library = "crates/linura-library"
+local_preflight_is_machine_plan = false
+imported_actor_is_principal = false
+imported_approval_is_valid = false
+portable_digest_grants_authority = false
+shared_resource_is_auto_removable = false
+restore_is_implicit_machine_rollback = false
+query_and_ui_have_effect_authority = false
+native_effect_rule = "fresh-canonical-control-plan-and-qualified-domain-operations-only"
+machine_states = ["selected", "persisted-local", "reviewed-plan", "authorized", "attempted", "verified", "indeterminate"]
+shared_owner_rule = "incomplete-or-shared-fail-closed"
+
+[baseline]
+source_audit = "docs/workstreams/v010-s26-library-phase1.md"
+design = "contracts/v010-s26-design.toml"
+adr = "docs/adr/0054-s26-local-library-workstation-authority.md"
+native_qualification = "docs/qualification/v0.10.0-s26.md"
+security_qualification = "docs/qualification/v0.10.0-s26-security.md"
+roadmap = "contracts/v010-workstation-slices.toml"
+library = "crates/linura-library/src/lib.rs"
+store = "crates/linura-library/src/store.rs"
+adoption = "crates/linura-library/src/adoption.rs"
+portable = "crates/linura-library/src/portable.rs"
+released_tests = "crates/linura-library/tests/v07_qualification.rs"
+
+[global_gates]
+pr_required = ["accepted-main-base", "scoped-AGENTS-and-stability-audit", "affected-consumer-and-security-review", "exact-source-unit-and-negative-tests", "native-failure-denial-restart-recovery", "applicable-qualification", "canonical-check", "dependency-audit", "codeql", "no-weakened-existing-gates"]
+inherited_regression = ["v07-library", "v08-acceptance", "v09-first-boot-recovery", "S17-security", "S21-display-and-power"]
+slice_completion = ["merged-reviewed-PR-evidence", "Q10-visual-and-accessibility", "Q11-maintained-physical-for-native-effects", "Q12-Q14-inherited-security-recovery"]
+decomposition_is_implementation_evidence = false
+decomposition_advances_ledger = false
+
+[[pr]]
+id = "S26-1"
+title = "Local Library Experience Foundation"
+branch_hint = "feat/v010-s26-1-library-queries"
+depends_on = []
+semantics = ["authoritative-query", "experience-ephemeral"]
+owned_areas = ["crates/linura-library/", "crates/linura-sdk/", "apps/linura-shell/bridge/"]
+requirements = ["R26-BASE-01", "R26-OBS-01", "R26-OWN-01"]
+deliverables = ["same-SQLite-owner-bounded-catalog-query", "exact-current-history-digest-closure", "database-epoch-and-fresh-readback", "causal-owner-and-shared-removal-impact", "typed-read-only-SDK-and-ShellBridge"]
+negative_tests = ["same-name-different-ID", "missing-or-contradictory-revision", "cycle-or-incomplete-closure", "restored-database-stale-epoch", "corrupt-store-and-unknown-schema", "shared-resource-retained", "untrusted-card-markup"]
+proof = ["real-SQLite-open-reopen", "v07-regression", "read-only-no-side-effect", "bounded-query-limit-and-timeout", "SDK-consumer-compatibility"]
+activation = "read-only; no new writes or OS effects"
+merge_gate = "exact-head independently reviewed, negatively tested, and applicable-qualified"
+
+[[pr]]
+id = "S26-2"
+title = "Setup and MachineProfile Editors"
+branch_hint = "feat/v010-s26-2-versioned-editors"
+depends_on = ["S26-1"]
+semantics = ["linura-owned-state", "authoritative-query"]
+owned_areas = ["crates/linura-library/", "crates/linura-intent/", "crates/linura-sdk/", "apps/linura-shell/plugins/setups/", "apps/linura-shell/plugins/machine-profiles/"]
+requirements = ["R26-STATE-01", "R26-OBS-01", "R26-SEC-01"]
+deliverables = ["authenticated-draft-save-cancel", "append-only-setup-and-profile-CAS", "complete-nested-graph-validation", "deterministic-immutable-revision-compare", "idempotent-operation-ID-independent-readback"]
+negative_tests = ["stale-GUI-vs-CLI-CAS", "cycle-and-recursion-limit", "contradictory-intent-versions", "conflicting-request-idempotency", "crash-during-local-transaction", "imported-actor-not-principal", "prior-version-immutable"]
+proof = ["real-SQLite-CAS-and-restart", "graph-and-version-diff", "CLI-SDK-concurrency", "no-system-effects", "v07-v09-regression"]
+activation = "existing local API only; no unqualified Control candidate registration"
+merge_gate = "exact-head independently reviewed, negatively tested, and applicable-qualified"
+
+[[pr]]
+id = "S26-3"
+title = "Portable Import and Export"
+branch_hint = "feat/v010-s26-3-portability"
+depends_on = ["S26-1", "S26-2"]
+semantics = ["authoritative-query", "linura-owned-state", "managed-external-effect"]
+owned_areas = ["crates/linura-library/", "crates/linura-sdk/", "apps/linura-shell/plugins/library/"]
+requirements = ["R26-PORT-01", "R26-ADOPT-01", "R26-STATE-01", "R26-SEC-01"]
+deliverables = ["existing-version-one-deterministic-bundle", "bounded-staging-and-integrity-verification", "collision-secret-reference-machine-class-review", "atomic-local-only-idempotent-import", "safe-user-destination-atomic-artifact-export"]
+negative_tests = ["oversize-or-newer-portable-version", "digest-tamper-and-ID-collision", "secret-value-or-credential-in-bundle", "dry-run-mutates-local-store", "import-replays-approval-or-native-effect", "symlink-hardlink-path-race", "full-disk-and-partial-export"]
+proof = ["portable-v1-roundtrip", "adversarial-secret-redaction", "real-filesystem-destination-atomicity", "negative-native-no-mutation", "transaction-crash-reopen"]
+activation = "local import retained; new external export candidate inactive until independently qualified"
+merge_gate = "exact-head independently reviewed, negatively tested, and applicable-qualified"
+
+[[pr]]
+id = "S26-4"
+title = "Library Backup and Restore"
+branch_hint = "feat/v010-s26-4-backup-restore"
+depends_on = ["S26-1"]
+semantics = ["authoritative-query", "managed-external-effect"]
+owned_areas = ["crates/linura-library/", "crates/linura-sdk/", "apps/linura-shell/plugins/library/"]
+requirements = ["R26-BASE-01", "R26-REC-01", "R26-SEC-01"]
+deliverables = ["validated-consistent-DB-backup", "safe-user-selected-destination", "destructive-restore-explicit-review", "all-writers-and-readers-quiescent", "prior-DB-safeguard-epoch-invalidation-reopen"]
+negative_tests = ["restore-during-active-writer", "corrupt-or-newer-schema", "source-swapped-after-review", "WAL-interruption-ENOSPC", "symlink-or-wrong-owner", "partial-replacement-failure", "restored-old-approval-replay"]
+proof = ["real-SQLite-WAL-recovery", "independent-snapshot-integrity", "live-quiescence-and-resume", "safe-filesystem-races", "original-state-recovery"]
+activation = "released offline methods preserved; interactive destructive restore inactive pending separate managed qualification"
+merge_gate = "exact-head independently reviewed, negatively tested, and applicable-qualified"
+
+[[pr]]
+id = "S26-5"
+title = "Machine Adoption Planning"
+branch_hint = "feat/v010-s26-5-machine-planning"
+depends_on = ["S26-1", "S26-2", "S26-3"]
+semantics = ["authoritative-query", "qualified-domain-managed-effects-only"]
+owned_areas = ["crates/linura-control/", "crates/linura-planner/", "crates/linura-sdk/", "apps/linura-shell/bridge/"]
+requirements = ["R26-ADOPT-01", "R26-OWN-01", "R26-SEC-01", "R26-REC-01"]
+deliverables = ["current-target-boot-platform-and-capability", "exact-desired-profile-and-setup-closure", "canonical-Control-non-executable-reconciliation-plan", "current-policy-and-provider-owner-impact", "per-domain-authorization-verification-indeterminate-states"]
+negative_tests = ["stale-target-observation", "unsupported-provider-or-missing-secret-ref", "foreign-machine-class", "risk-class-downgrade", "imported-policy-or-approval-replay", "indeterminate-effect-no-blind-retry", "shared-owner-cleanup-denied"]
+proof = ["real-canonical-plan-registry-policy", "native-provider-effect-evidence-separate", "ambiguity-and-crash-reconciliation", "unsupported-blocked-state", "no-generic-executor"]
+activation = "planning preview only; native effects gated by existing per-domain accepted authority"
+merge_gate = "exact-head independently reviewed, negatively tested, and applicable-qualified"
+
+[[pr]]
+id = "S26-6"
+title = "Library Experience and Qualification"
+branch_hint = "feat/v010-s26-6-experience-qualification"
+depends_on = ["S26-1", "S26-2", "S26-3", "S26-4", "S26-5"]
+semantics = ["experience-ephemeral", "authoritative-query", "qualified-delegation-only"]
+owned_areas = ["apps/linura-shell/plugins/library/", "apps/linura-shell/plugins/setups/", "apps/linura-shell/plugins/machine-profiles/", "crates/linura-sdk/", "docs/qualification/"]
+requirements = ["R26-UX-01", "R26-QUAL-01", "R26-SEC-01", "R26-BASE-01"]
+deliverables = ["first-party-Library-Setup-Profile-shell-workflows", "Control-Center-CLI-SDK-no-model-parity", "keyboard-screen-reader-reduced-motion-HiDPI", "distinct-local-planned-attempted-verified-indeterminate", "exact-source-A-B-VM-and-separate-Q11-physical-proof"]
+negative_tests = ["injected-UI-label", "offline-cloud-disconnect", "stale-session-seat", "optimistic-applied-badge", "provider-unavailable", "mock-video-as-physical-evidence", "lock-power-display-interruption"]
+proof = ["Q10-real-UI-accessibility", "Q11-maintained-hardware-where-applicable", "Q12-Q14-recovery-security", "v07-v08-v09-regression", "S17-S21-regression", "merged-PR-and-CI-evidence"]
+activation = "honest unsupported status allowed; no release claims before all source-bound acceptance"
+merge_gate = "exact-head independently reviewed, negatively tested, and applicable-qualified"
+
