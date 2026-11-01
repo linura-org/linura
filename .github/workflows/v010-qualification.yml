@@ -319,6 +319,8 @@ jobs:
           python3 -m unittest \
             tests.tooling.test_roadmap \
             tests.tooling.test_operation_semantics \
+            tests.tooling.test_v010_s18_design \
+            tests.tooling.test_v010_s18_decomposition \
             tests.tooling.test_v010_workstation_qualification \
             tests.tooling.test_native_keyboard \
             tests.tooling.test_v010_shell_runtime_qualification \
