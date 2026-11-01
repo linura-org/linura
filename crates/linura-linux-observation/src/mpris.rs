@@ -488,14 +488,16 @@ mod tests {
 
     #[test]
     fn player_resources_pin_unique_owner_and_reject_retargeting() {
-        let id = resource_id("org.mpris.MediaPlayer2.Example", ":1.42").unwrap_or_else(|error| unreachable!("{error}"));
+        let id = resource_id("org.mpris.MediaPlayer2.Example", ":1.42")
+            .unwrap_or_else(|error| unreachable!("{error}"));
         assert_eq!(
             parse_resource(&id).unwrap_or_else(|error| unreachable!("{error}")),
             ("org.mpris.MediaPlayer2.Example", ":1.42")
         );
         assert_ne!(
             id,
-            resource_id("org.mpris.MediaPlayer2.Example", ":1.43").unwrap_or_else(|error| unreachable!("{error}"))
+            resource_id("org.mpris.MediaPlayer2.Example", ":1.43")
+                .unwrap_or_else(|error| unreachable!("{error}"))
         );
         for candidate in [
             "mpris:player:org.mpris.MediaPlayer2.Example",

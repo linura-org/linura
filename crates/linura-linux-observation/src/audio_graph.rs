@@ -84,11 +84,23 @@ impl AudioObject {
     fn attributes(&self) -> BTreeMap<String, ObservedValue> {
         let mut values = BTreeMap::from([
             ("id".into(), ObservedValue::U64(u64::from(self.id))),
-            ("observer_uid".into(), ObservedValue::U64(u64::from(geteuid().as_raw()))),
+            (
+                "observer_uid".into(),
+                ObservedValue::U64(u64::from(geteuid().as_raw())),
+            ),
             ("object_serial".into(), ObservedValue::U64(self.serial)),
-            ("kind".into(), ObservedValue::Text(self.kind.as_str().into())),
-            ("name_escaped".into(), ObservedValue::Text(escape(&self.name))),
-            ("capture_privacy_verified".into(), ObservedValue::Bool(false)),
+            (
+                "kind".into(),
+                ObservedValue::Text(self.kind.as_str().into()),
+            ),
+            (
+                "name_escaped".into(),
+                ObservedValue::Text(escape(&self.name)),
+            ),
+            (
+                "capture_privacy_verified".into(),
+                ObservedValue::Bool(false),
+            ),
             ("snapshot_atomic".into(), ObservedValue::Bool(false)),
         ]);
         if let Some(class) = self.media_class {
@@ -194,9 +206,9 @@ impl Observer for PipeWireGraphObserver {
             .snapshot()?
             .into_iter()
             .find(|object| object.resource().as_ref() == Ok(resource))
-            .ok_or_else(|| ProviderError::Unavailable(
-                "PipeWire graph object changed or disappeared".into(),
-            ))?;
+            .ok_or_else(|| {
+                ProviderError::Unavailable("PipeWire graph object changed or disappeared".into())
+            })?;
         Ok(ObservationEnvelope {
             provider: provider_id(AUDIO_GRAPH_PROVIDER),
             resource: resource.clone(),
@@ -228,7 +240,8 @@ fn parse_resource(resource: &ResourceId) -> Result<(), ProviderError> {
 }
 
 fn canonical_u64(text: &str) -> Result<u64, ProviderError> {
-    if text.is_empty() || (text.len() > 1 && text.starts_with('0'))
+    if text.is_empty()
+        || (text.len() > 1 && text.starts_with('0'))
         || !text.bytes().all(|c| c.is_ascii_digit())
     {
         return Err(invalid("noncanonical audio graph integer"));
@@ -247,28 +260,34 @@ fn canonical_u32(text: &str) -> Result<u32, ProviderError> {
 }
 
 fn property_u32(value: &Value, key: &str) -> Result<u32, ProviderError> {
-    let raw = value.get(key).ok_or_else(|| invalid("missing audio graph identity reference"))?;
+    let raw = value
+        .get(key)
+        .ok_or_else(|| invalid("missing audio graph identity reference"))?;
     if let Some(text) = raw.as_str() {
         return canonical_u32(text);
     }
-    let n = raw.as_u64().ok_or_else(|| invalid("invalid audio graph identity reference"))?;
-    u32::try_from(n).ok().filter(|v| *v != u32::MAX)
+    let n = raw
+        .as_u64()
+        .ok_or_else(|| invalid("invalid audio graph identity reference"))?;
+    u32::try_from(n)
+        .ok()
+        .filter(|v| *v != u32::MAX)
         .ok_or_else(|| invalid("audio graph identity reference out of range"))
 }
 
 fn serial(props: &Value) -> Result<u64, ProviderError> {
-    let raw = props.get("object.serial")
+    let raw = props
+        .get("object.serial")
         .ok_or_else(|| invalid("missing PipeWire object serial"))?;
     if let Some(s) = raw.as_str() {
         return canonical_u64(s);
     }
-    raw.as_u64().ok_or_else(|| invalid("invalid PipeWire object serial"))
+    raw.as_u64()
+        .ok_or_else(|| invalid("invalid PipeWire object serial"))
 }
 
 fn label(raw: &str) -> Result<String, ProviderError> {
-    if raw.is_empty() || raw.len() > MAX_LABEL
-        || raw.chars().any(char::is_control)
-    {
+    if raw.is_empty() || raw.len() > MAX_LABEL || raw.chars().any(char::is_control) {
         return Err(invalid("invalid or excessive PipeWire label"));
     }
     Ok(raw.into())
@@ -290,7 +309,9 @@ fn escape(raw: &str) -> String {
 }
 
 fn props(row: &Value) -> Result<&Value, ProviderError> {
-    let props = row.get("info").and_then(|v| v.get("props"))
+    let props = row
+        .get("info")
+        .and_then(|v| v.get("props"))
         .ok_or_else(|| invalid("missing PipeWire object properties"))?;
     if !props.is_object() {
         return Err(invalid("invalid PipeWire properties type"));
@@ -299,9 +320,13 @@ fn props(row: &Value) -> Result<&Value, ProviderError> {
 }
 
 fn item_id(row: &Value) -> Result<u32, ProviderError> {
-    let raw = row.get("id").and_then(Value::as_u64)
+    let raw = row
+        .get("id")
+        .and_then(Value::as_u64)
         .ok_or_else(|| invalid("PipeWire object missing id"))?;
-    u32::try_from(raw).ok().filter(|v| *v != u32::MAX)
+    u32::try_from(raw)
+        .ok()
+        .filter(|v| *v != u32::MAX)
         .ok_or_else(|| invalid("PipeWire id out of range"))
 }
 
@@ -309,9 +334,11 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
     if raw.len() > MAX_JSON as usize {
         return Err(invalid("PipeWire snapshot exceeds byte budget"));
     }
-    let value: Value = serde_json::from_str(raw)
-        .map_err(|_| invalid("PipeWire snapshot is not valid JSON"))?;
-    let rows = value.as_array().ok_or_else(|| invalid("PipeWire snapshot must be an array"))?;
+    let value: Value =
+        serde_json::from_str(raw).map_err(|_| invalid("PipeWire snapshot is not valid JSON"))?;
+    let rows = value
+        .as_array()
+        .ok_or_else(|| invalid("PipeWire snapshot must be an array"))?;
     if rows.len() > MAX_ITEMS {
         return Err(invalid("PipeWire snapshot exceeds object budget"));
     }
@@ -319,15 +346,24 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
     let mut global_ids = BTreeSet::new();
     let mut global_serials = BTreeSet::new();
     // Select audio node IDs regardless of native JSON record order.
-    let audio_node_ids: BTreeSet<u32> = rows.iter()
-        .filter(|row| row.get("type").and_then(Value::as_str)
-            == Some("PipeWire:Interface:Node"))
-        .filter(|row| row.get("info").and_then(|info| info.get("props"))
-            .and_then(|props| props.get("media.class"))
-            .and_then(Value::as_str)
-            .is_some_and(|class| matches!(class,
-                "Audio/Sink" | "Audio/Source"
-                | "Stream/Output/Audio" | "Stream/Input/Audio")))
+    let audio_node_ids: BTreeSet<u32> = rows
+        .iter()
+        .filter(|row| row.get("type").and_then(Value::as_str) == Some("PipeWire:Interface:Node"))
+        .filter(|row| {
+            row.get("info")
+                .and_then(|info| info.get("props"))
+                .and_then(|props| props.get("media.class"))
+                .and_then(Value::as_str)
+                .is_some_and(|class| {
+                    matches!(
+                        class,
+                        "Audio/Sink"
+                            | "Audio/Source"
+                            | "Stream/Output/Audio"
+                            | "Stream/Input/Audio"
+                    )
+                })
+        })
         .filter_map(|row| item_id(row).ok())
         .collect();
     let mut nodes = BTreeMap::new();
@@ -341,12 +377,16 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
         if !global_ids.insert(id) {
             return Err(invalid("duplicate PipeWire object id"));
         }
-        let object_type = row.get("type").and_then(Value::as_str)
+        let object_type = row
+            .get("type")
+            .and_then(Value::as_str)
             .ok_or_else(|| invalid("missing PipeWire interface type"))?;
         if !matches!(
             object_type,
-            "PipeWire:Interface:Node" | "PipeWire:Interface:Device"
-                | "PipeWire:Interface:Port" | "PipeWire:Interface:Link"
+            "PipeWire:Interface:Node"
+                | "PipeWire:Interface:Device"
+                | "PipeWire:Interface:Port"
+                | "PipeWire:Interface:Link"
         ) {
             continue;
         }
@@ -370,7 +410,9 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
                 if nodes.len() >= MAX_AUDIO_NODES {
                     return Err(invalid("PipeWire audio node budget exceeded"));
                 }
-                let node_name = p.get("node.name").and_then(Value::as_str)
+                let node_name = p
+                    .get("node.name")
+                    .and_then(Value::as_str)
                     .ok_or_else(|| invalid("audio node missing name"))?;
                 if p.get("device.id").is_some() {
                     attached_devices.insert(property_u32(p, "device.id")?);
@@ -393,10 +435,17 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
             "PipeWire:Interface:Device" => {
                 if let Some(name) = p.get("device.name").and_then(Value::as_str) {
                     devices.push(AudioObject {
-                        kind: Kind::Device, id, serial, name: label(name)?,
-                        media_class: None, parent_node: None, direction: None,
-                        output_node: None, input_node: None,
-                        output_port: None, input_port: None,
+                        kind: Kind::Device,
+                        id,
+                        serial,
+                        name: label(name)?,
+                        media_class: None,
+                        parent_node: None,
+                        direction: None,
+                        output_node: None,
+                        input_node: None,
+                        output_port: None,
+                        input_port: None,
                     });
                 }
             }
@@ -405,7 +454,9 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
                 if !audio_node_ids.contains(&parent_node) {
                     continue;
                 }
-                let name = p.get("port.name").and_then(Value::as_str)
+                let name = p
+                    .get("port.name")
+                    .and_then(Value::as_str)
                     .ok_or_else(|| invalid("audio port missing name"))?;
                 let direction = match p.get("port.direction").and_then(Value::as_str) {
                     Some("in") => "in",
@@ -413,10 +464,17 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
                     _ => return Err(invalid("invalid PipeWire port direction")),
                 };
                 ports.push(AudioObject {
-                    kind: Kind::Port, id, serial, name: label(name)?,
-                    media_class: None, parent_node: Some(parent_node),
-                    direction: Some(direction), output_node: None, input_node: None,
-                    output_port: None, input_port: None,
+                    kind: Kind::Port,
+                    id,
+                    serial,
+                    name: label(name)?,
+                    media_class: None,
+                    parent_node: Some(parent_node),
+                    direction: Some(direction),
+                    output_node: None,
+                    input_node: None,
+                    output_port: None,
+                    input_port: None,
                 });
             }
             "PipeWire:Interface:Link" => {
@@ -426,8 +484,13 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
                     continue;
                 }
                 links.push(AudioObject {
-                    kind: Kind::Link, id, serial, name: "PipeWire audio link".into(),
-                    media_class: None, parent_node: None, direction: None,
+                    kind: Kind::Link,
+                    id,
+                    serial,
+                    name: "PipeWire audio link".into(),
+                    media_class: None,
+                    parent_node: None,
+                    direction: None,
                     output_node: Some(output_node),
                     input_node: Some(input_node),
                     output_port: Some(property_u32(p, "link.output.port")?),
@@ -441,35 +504,48 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
     let mut objects: Vec<AudioObject> = nodes.values().cloned().collect();
     // Only audio-related ports and links are projected. Never imply an
     // incomplete link set represents a privacy or access-control guarantee.
-    let live_ports: BTreeMap<u32, AudioObject> = ports.iter()
+    let live_ports: BTreeMap<u32, AudioObject> = ports
+        .iter()
         .filter(|port| port.parent_node.is_some_and(|id| nodes.contains_key(&id)))
         .map(|port| (port.id, port.clone()))
         .collect();
     objects.extend(
-        ports.into_iter()
+        ports
+            .into_iter()
             .filter(|port| live_ports.contains_key(&port.id)),
     );
     for link in links {
-        let (Some(output), Some(input), Some(output_port), Some(input_port)) =
-            (link.output_node, link.input_node, link.output_port, link.input_port)
-        else {
+        let (Some(output), Some(input), Some(output_port), Some(input_port)) = (
+            link.output_node,
+            link.input_node,
+            link.output_port,
+            link.input_port,
+        ) else {
             return Err(invalid("incomplete PipeWire link identity"));
         };
         if !nodes.contains_key(&output) || !nodes.contains_key(&input) {
             continue;
         }
-        let out_port = live_ports.get(&output_port)
+        let out_port = live_ports
+            .get(&output_port)
             .ok_or_else(|| invalid("PipeWire audio link missing output port"))?;
-        let in_port = live_ports.get(&input_port)
+        let in_port = live_ports
+            .get(&input_port)
             .ok_or_else(|| invalid("PipeWire audio link missing input port"))?;
-        if out_port.parent_node != Some(output) || out_port.direction != Some("out")
-            || in_port.parent_node != Some(input) || in_port.direction != Some("in")
+        if out_port.parent_node != Some(output)
+            || out_port.direction != Some("out")
+            || in_port.parent_node != Some(input)
+            || in_port.direction != Some("in")
         {
             return Err(invalid("PipeWire audio link endpoint identity mismatch"));
         }
         objects.push(link);
     }
-    objects.extend(devices.into_iter().filter(|device| attached_devices.contains(&device.id)));
+    objects.extend(
+        devices
+            .into_iter()
+            .filter(|device| attached_devices.contains(&device.id)),
+    );
     if objects.len() > MAX_GRAPH_OBJECTS {
         return Err(invalid("PipeWire graph projection exceeds resource budget"));
     }
@@ -479,7 +555,9 @@ fn parse_snapshot(raw: &str) -> Result<Vec<AudioObject>, ProviderError> {
 
 fn pipe_limit(reader: impl Read, bound: u64) -> Result<Vec<u8>, ProviderError> {
     let mut data = Vec::new();
-    reader.take(bound + 1).read_to_end(&mut data)
+    reader
+        .take(bound + 1)
+        .read_to_end(&mut data)
         .map_err(|_| ProviderError::Unavailable("PipeWire snapshot read failed".into()))?;
     if data.len() as u64 > bound {
         return Err(invalid("PipeWire native snapshot exceeded byte budget"));
@@ -506,9 +584,13 @@ fn dump_current_session() -> Result<String, ProviderError> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|_| ProviderError::Unavailable("cannot start native PipeWire dumper".into()))?;
-    let stdout = child.stdout.take()
+    let stdout = child
+        .stdout
+        .take()
         .ok_or_else(|| ProviderError::Internal("PipeWire stdout unavailable".into()))?;
-    let stderr = child.stderr.take()
+    let stderr = child
+        .stderr
+        .take()
         .ok_or_else(|| ProviderError::Internal("PipeWire stderr unavailable".into()))?;
     let output_reader = thread::spawn(move || pipe_limit(stdout, MAX_JSON));
     let error_reader = thread::spawn(move || pipe_limit(stderr, 16 * 1024));
@@ -522,7 +604,9 @@ fn dump_current_session() -> Result<String, ProviderError> {
                     let _ = child.wait();
                     let _ = output_reader.join();
                     let _ = error_reader.join();
-                    return Err(ProviderError::Unavailable("PipeWire snapshot timed out".into()));
+                    return Err(ProviderError::Unavailable(
+                        "PipeWire snapshot timed out".into(),
+                    ));
                 }
                 thread::sleep(POLL);
             }
@@ -531,16 +615,22 @@ fn dump_current_session() -> Result<String, ProviderError> {
                 let _ = child.wait();
                 let _ = output_reader.join();
                 let _ = error_reader.join();
-                return Err(ProviderError::Unavailable("PipeWire snapshot wait failed".into()));
+                return Err(ProviderError::Unavailable(
+                    "PipeWire snapshot wait failed".into(),
+                ));
             }
         }
     };
-    let output = output_reader.join()
+    let output = output_reader
+        .join()
         .map_err(|_| ProviderError::Internal("PipeWire output reader panicked".into()))??;
-    error_reader.join()
+    error_reader
+        .join()
         .map_err(|_| ProviderError::Internal("PipeWire error reader panicked".into()))??;
     if !status.success() {
-        return Err(ProviderError::Unavailable("PipeWire native snapshot failed".into()));
+        return Err(ProviderError::Unavailable(
+            "PipeWire native snapshot failed".into(),
+        ));
     }
     String::from_utf8(output).map_err(|_| invalid("PipeWire JSON is not UTF-8"))
 }
@@ -569,15 +659,18 @@ mod tests {
 
     #[test]
     fn audio_graph_projects_typed_nodes_ports_and_real_links() {
-        let graph = parse_snapshot(FIXTURE)
-            .unwrap_or_else(|e| unreachable!("{e}"));
+        let graph = parse_snapshot(FIXTURE).unwrap_or_else(|e| unreachable!("{e}"));
         assert_eq!(graph.len(), 6);
         assert_eq!(graph.iter().filter(|o| o.kind == Kind::Node).count(), 2);
-        let link = graph.iter().find(|o| o.kind == Kind::Link)
+        let link = graph
+            .iter()
+            .find(|o| o.kind == Kind::Link)
             .unwrap_or_else(|| unreachable!("expected audio link"));
         assert_eq!(link.output_node, Some(11));
         assert_eq!(link.input_node, Some(10));
-        let sink = graph.iter().find(|o| o.id == 10)
+        let sink = graph
+            .iter()
+            .find(|o| o.id == 10)
             .unwrap_or_else(|| unreachable!("expected sink"));
         assert_eq!(
             sink.attributes().get("name_escaped"),
@@ -593,9 +686,24 @@ mod tests {
     fn audio_graph_rejects_reused_ids_serials_and_broken_links() {
         assert!(parse_snapshot(&FIXTURE.replace("\"id\":15", "\"id\":10")).is_err());
         assert!(parse_snapshot(&FIXTURE.replace("\"105\"", "\"100\"")).is_err());
-        assert!(parse_snapshot(&FIXTURE.replace("\"link.input.port\":\"13\"", "\"link.input.port\":\"12\"")).is_err());
-        assert!(parse_snapshot(&FIXTURE.replace("\"node.name\":\"sink<&\"", "\"node.name\":\"bad\\nname\"")).is_err());
-        assert!(parse_snapshot(&FIXTURE.replace("\"object.serial\":\"100\"", "\"object.serial\":\"0100\"")).is_err());
+        assert!(
+            parse_snapshot(
+                &FIXTURE.replace("\"link.input.port\":\"13\"", "\"link.input.port\":\"12\"")
+            )
+            .is_err()
+        );
+        assert!(
+            parse_snapshot(
+                &FIXTURE.replace("\"node.name\":\"sink<&\"", "\"node.name\":\"bad\\nname\"")
+            )
+            .is_err()
+        );
+        assert!(
+            parse_snapshot(
+                &FIXTURE.replace("\"object.serial\":\"100\"", "\"object.serial\":\"0100\"")
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -630,9 +738,10 @@ mod tests {
 
     #[test]
     fn audio_graph_resources_pin_exact_serial_and_reject_aliases() {
-        let graph = parse_snapshot(FIXTURE)
-            .unwrap_or_else(|e| unreachable!("{e}"));
-        let sink = graph.iter().find(|o| o.id == 10)
+        let graph = parse_snapshot(FIXTURE).unwrap_or_else(|e| unreachable!("{e}"));
+        let sink = graph
+            .iter()
+            .find(|o| o.id == 10)
             .unwrap_or_else(|| unreachable!("expected sink"));
         assert_eq!(
             sink.resource().map(|v| v.as_str().to_owned()),
@@ -645,8 +754,8 @@ mod tests {
             "audio:graph:node:10:100:extra",
             "audio:session:output:10",
         ] {
-            let id = ResourceId::new(invalid_resource)
-                .unwrap_or_else(|error| unreachable!("{error}"));
+            let id =
+                ResourceId::new(invalid_resource).unwrap_or_else(|error| unreachable!("{error}"));
             assert!(parse_resource(&id).is_err());
         }
     }
