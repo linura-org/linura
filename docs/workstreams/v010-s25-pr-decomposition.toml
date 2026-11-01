@@ -1,0 +1,122 @@
+schema_version = 1
+milestone = "v0.10.0"
+slice = "S25"
+profile = "arch-hyprland-v1"
+status = "proposed-implementation-decomposition"
+planning_identifiers_only = true
+implementation_prs_created = false
+source_branch_is_merge_target = false
+implementation_base = "accepted-main-exact-sha"
+canonical_slice_ledger_unchanged = true
+runtime_activation = false
+release_qualification = false
+hardware_q11_evidence = false
+pr_count_is_adaptive = true
+phase1 = "docs/workstreams/v010-s25-personalization-phase1.md"
+architecture = "docs/adr/0053-s25-personalization-authority-and-safe-rendering.md"
+inactive_design = "contracts/v010-s25-design.toml"
+qualification = "docs/qualification/v0.10.0-s25.md"
+security_qualification = "docs/qualification/v0.10.0-s25-security.md"
+implementation_contract = "docs/workstreams/v010-s25-pr-decomposition.md"
+
+[global_gates]
+require_complete_in_pr_tests = true
+require_no_weakened_existing_gates = true
+require_exact_head_security_and_canonical_checks = true
+require_executed_applicable_native_qualification = true
+require_source_bound_evidence = true
+require_reviewed_adversarial_tests = true
+require_distinct_saved_and_effective_state = true
+require_independent_native_verification = true
+require_no_unqualified_effect_activation = true
+require_s10_s16_regression_protection = true
+require_s17_secure_owner_isolation = true
+require_s21_topology_preconditions = true
+require_maintained_physical_q11_for_release = true
+forbid_document_only_runtime_acceptance = true
+forbid_fake_physical_evidence = true
+forbid_wip_branch_direct_merge = true
+forbid_generic_shell_or_model_executor = true
+forbid_raw_qml_js_css_shader_theme = true
+forbid_preview_as_authorization = true
+forbid_saved_as_renderer_proof = true
+forbid_policy_bypass_on_no_change = true
+
+[[work_item]]
+id = "S25-1"
+title = "Versioned Preference Authority"
+depends_on = []
+capability = "authenticated-owner-strict-v1-schema-atomic-revision-cas"
+owned_areas = ["typed-personalization-schema", "owner-authenticated-local-state", "read-observe", "atomic-durable-cas", "migration-and-corruption-recovery"]
+operation_ids = [
+  "operation:personalization.appearance.configure",
+  "operation:personalization.typography.configure",
+  "operation:personalization.density.configure",
+  "operation:personalization.motion.configure",
+  "operation:personalization.icons.configure",
+  "operation:personalization.wallpaper.configure",
+  "operation:personalization.profile.reset",
+]
+requirements = ["R25-STATE-01", "R25-SEC-01"]
+adversarial_cases = ["T25-01", "T25-02", "T25-03", "T25-04", "T25-05", "T25-21"]
+required_proof = ["authenticated-principal-uid-isolation", "strict-schema-and-canonical-digest", "atomic-cas-and-crash-recovery", "disk-full-and-migration-rejection", "no-external-dispatch-or-optimistic-renderer-receipt"]
+external_effects_enabled = false
+implementation_complete = false
+
+[[work_item]]
+id = "S25-2"
+title = "Appearance Transactions and Preview"
+depends_on = ["S25-1"]
+capability = "bounded-session-window-preview-apply-cancel-explicit-restore"
+owned_areas = ["preview-session-epochs", "window-seat-generation", "apply-cancel-lifecycle", "explicit-prior-revision-restore", "conflict-and-crash-recovery"]
+operation_ids = []
+requirements = ["R25-PREVIEW-01", "R25-STATE-01"]
+adversarial_cases = ["T25-03", "T25-04", "T25-06", "T25-18", "T25-26"]
+required_proof = ["no-durable-preview-write", "ttl-and-seat-lock-logout-invalidation", "stale-apply-denial", "restart-previous-valid-revision", "saved-does-not-prove-applied"]
+external_effects_enabled = false
+implementation_complete = false
+
+[[work_item]]
+id = "S25-3"
+title = "Typed Theme and Safe Font/Icon Assets"
+depends_on = ["S25-1", "S25-2"]
+capability = "safe-semantic-token-projection-fonts-icons-accessibility"
+owned_areas = ["s10-tokens-and-ui-sdk", "typed-color-roles", "installed-font-fallback", "icon-allowlist-and-safe-decoder", "density-motion-contrast-focus"]
+operation_ids = []
+requirements = ["R25-BASE-01", "R25-THEME-01", "R25-ASSET-01", "R25-SEC-01"]
+adversarial_cases = ["T25-01", "T25-07", "T25-08", "T25-09", "T25-10", "T25-17", "T25-19", "T25-20", "T25-21"]
+required_proof = ["compiled-org-linura-ui-1-0-regression", "role-contrast-focus-accessibility", "installed-font-rtl-glyph-fallback", "scriptless-bounded-icon-asset-decoder", "security-owner-fontconfig-unchanged"]
+external_effects_enabled = false
+implementation_complete = false
+
+[[work_item]]
+id = "S25-4"
+title = "Per-Output Wallpaper and Native Provider Authority"
+depends_on = ["S25-1", "S25-2"]
+cross_slice_dependencies = ["S17-security-owner-constraints", "S21-output-topology-authority"]
+capability = "safe-wallpaper-intake-exact-native-per-output-authorization"
+owned_areas = ["safe-image-descriptor-and-content-digest", "s21-output-generation-binding", "narrow-user-session-wallpaper-adapter", "authoritative-renderer-observation", "failure-and-indeterminate-recovery"]
+operation_ids = [
+  "operation:personalization.wallpaper.apply",
+  "operation:personalization.wallpaper.clear",
+  "operation:personalization.desktop.color-scheme.set",
+]
+requirements = ["R25-ASSET-01", "R25-NATIVE-01", "R25-SEC-01"]
+adversarial_cases = ["T25-11", "T25-12", "T25-13", "T25-14", "T25-15", "T25-16", "T25-17", "T25-21", "T25-25", "T25-26"]
+required_proof = ["owner-scoped-safe-fd-hash-and-decoder-budgets", "native-provider-identity-and-session-owner", "trusted-plan-policy-prepare-execute-verify-audit", "fresh-s21-topology-and-no-retarget", "actual-renderer-postcondition", "crash-lost-receipt-no-replay", "partial-multioutput-degraded-receipt"]
+activation_requires = ["accepted-security-review", "accepted-native-authority-gates", "S25-5-integrated-effective-state-qualification"]
+external_effects_enabled = false
+implementation_complete = false
+
+[[work_item]]
+id = "S25-5"
+title = "Cross-Surface Experience and Qualification"
+depends_on = ["S25-1", "S25-2", "S25-3", "S25-4"]
+capability = "unified-control-center-shell-cli-sdk-accessible-qualification"
+owned_areas = ["control-center-and-shell-bridge", "quick-settings-and-osd", "manual-cli-sdk-no-model", "per-surface-effective-revision", "q10-q11-adversarial-visual-accessibility"]
+operation_ids = []
+requirements = ["R25-BASE-01", "R25-UX-01", "R25-QUAL-01", "R25-SEC-01"]
+adversarial_cases = ["T25-07", "T25-08", "T25-09", "T25-17", "T25-18", "T25-19", "T25-20", "T25-21", "T25-22", "T25-23", "T25-24", "T25-26"]
+required_proof = ["source-pinned-q10-real-rendered-pixels", "reviewed-visual-baseline-diff-and-interaction", "a11y-keyboard-pointer-rtl-hidpi-reduced-motion", "offline-no-model-error-and-restart", "native-saved-vs-applied-discrepancy", "physical-maintained-q11-with-actual-hardware", "inherited-security-and-qualification-gates"]
+external_effects_enabled = false
+implementation_complete = false

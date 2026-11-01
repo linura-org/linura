@@ -273,5 +273,66 @@ class S25ProposedArchitectureTests(unittest.TestCase):
         self.assertTrue(doc["qualification"]["require_s17_lock_chrome_and_font_isolation"])
 
 
+
+class S25ProposedImplementationPlanTests(unittest.TestCase):
+    PLAN = ROOT / "docs/workstreams/v010-s25-pr-decomposition.toml"
+
+    def test_plan_is_provisional_and_not_authority(self):
+        plan = read(self.PLAN)
+        self.assertEqual((plan["slice"], plan["milestone"]), ("S25", "v0.10.0"))
+        self.assertEqual(plan["status"], "proposed-implementation-decomposition")
+        self.assertEqual(plan["implementation_base"], "accepted-main-exact-sha")
+        self.assertTrue(plan["planning_identifiers_only"])
+        self.assertTrue(plan["pr_count_is_adaptive"])
+        for name in ("implementation_prs_created", "source_branch_is_merge_target",
+                     "runtime_activation", "release_qualification",
+                     "hardware_q11_evidence"):
+            self.assertIs(plan[name], False)
+        for path in ("phase1", "architecture", "inactive_design", "qualification",
+                     "security_qualification", "implementation_contract"):
+            self.assertTrue((ROOT / plan[path]).is_file(), path)
+        self.assertTrue(all(plan["global_gates"].values()))
+
+    def test_five_prs_are_independent_acyclic_and_coverage_complete(self):
+        plan = read(self.PLAN)
+        items = plan["work_item"]
+        ids = [item["id"] for item in items]
+        self.assertEqual(ids, [f"S25-{n}" for n in range(1, 6)])
+        seen = set()
+        assigned_operations = []
+        covered_requirements = set()
+        covered_threats = set()
+        for item in items:
+            self.assertTrue(set(item["depends_on"]) <= seen)
+            self.assertTrue(item["title"] and item["capability"])
+            self.assertTrue(item["owned_areas"] and item["required_proof"])
+            self.assertTrue(item["requirements"] and item["adversarial_cases"])
+            self.assertFalse(item["external_effects_enabled"])
+            self.assertFalse(item["implementation_complete"])
+            assigned_operations.extend(item["operation_ids"])
+            covered_requirements.update(item["requirements"])
+            covered_threats.update(item["adversarial_cases"])
+            seen.add(item["id"])
+        self.assertEqual(
+            set(assigned_operations),
+            {op["id"] for op in read(DESIGN)["candidate_operation"]},
+        )
+        self.assertEqual(len(assigned_operations), len(set(assigned_operations)))
+        self.assertEqual(
+            covered_threats, {f"T25-{n:02d}" for n in range(1, 27)}
+        )
+        self.assertEqual(covered_requirements, {
+            "R25-BASE-01", "R25-STATE-01", "R25-PREVIEW-01",
+            "R25-THEME-01", "R25-ASSET-01", "R25-NATIVE-01",
+            "R25-SEC-01", "R25-UX-01", "R25-QUAL-01",
+        })
+        self.assertEqual(
+            set(items[3]["operation_ids"]),
+            {op["id"] for op in read(DESIGN)["candidate_operation"]
+             if op["class"] == "managed-external-effect"},
+        )
+        self.assertIn("S25-5-integrated-effective-state-qualification",
+                      items[3]["activation_requires"])
+
 if __name__ == "__main__":
     unittest.main()
