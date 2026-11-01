@@ -160,6 +160,7 @@ SLICE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
         "apps/linura-shell/plugins/screenshot/",
         "apps/linura-shell/plugins/recording/",
         "apps/linura-shell/plugins/clipboard/",
+        "crates/linura-linux-observation/src/desktop_capture/",
     ),
     "S23": (
         "apps/linura-shell/plugins/applications/",
