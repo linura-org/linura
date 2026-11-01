@@ -290,8 +290,11 @@ mod tests {
         let retry = control.configure_with_clock(&principal(1000), &request("first"), || Ok(2000))
             .unwrap_or_else(|error| unreachable!("{error}"));
         assert!(!retry.current_saved_revision);
-        assert_eq!(control.current(&principal(1000))
-            .unwrap_or_else(|error| unreachable!("{error}"), Some(second_receipt.record));
+        assert_eq!(
+            control.current(&principal(1000))
+                .unwrap_or_else(|error| unreachable!("{error}")),
+            Some(second_receipt.record)
+        );
         let mut conflicting = request("first");
         conflicting.choices.reduced_motion = true;
         assert!(control.configure_with_clock(&principal(1000), &conflicting, || Ok(1000)).is_err());
