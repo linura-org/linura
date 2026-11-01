@@ -232,6 +232,10 @@ include(CTest)
 if(BUILD_TESTING)
     pkg_check_modules(WAYLAND_SERVER REQUIRED IMPORTED_TARGET wayland-server)
     find_package(Threads REQUIRED)
+    set(PROTECTED_COMPONENT_SERVER_HEADER "${CMAKE_CURRENT_BINARY_DIR}/linura-protected-display-v1-server-protocol.h")
+    add_custom_command(OUTPUT "${PROTECTED_COMPONENT_SERVER_HEADER}"
+        COMMAND "${WAYLAND_SCANNER}" server-header "${PROTECTED_DISPLAY_XML}" "${PROTECTED_COMPONENT_SERVER_HEADER}"
+        DEPENDS "${PROTECTED_DISPLAY_XML}" VERBATIM)
     set(PINNED_DISPLAY_SERVER_HEADER "${CMAKE_CURRENT_BINARY_DIR}/linura-display-management-v1-server-protocol.h")
     add_custom_command(OUTPUT "${PINNED_DISPLAY_SERVER_HEADER}"
         COMMAND "${WAYLAND_SCANNER}" server-header "${PINNED_DISPLAY_XML}" "${PINNED_DISPLAY_SERVER_HEADER}"
@@ -240,7 +244,8 @@ if(BUILD_TESTING)
         tests/native_display_connection.cpp "${PINNED_DISPLAY_SERVER_HEADER}"
         "${PINNED_DISPLAY_SOURCE}/display_transaction.cpp"
         "${PINNED_DISPLAY_SOURCE}/compositor_display_service.cpp"
-        "${PINNED_DISPLAY_SOURCE}/wire_endpoint.cpp")
+        "${PINNED_DISPLAY_SOURCE}/wire_endpoint.cpp"
+        "${PINNED_DISPLAY_SOURCE}/protected_wire.cpp" "${PROTECTED_COMPONENT_SERVER_HEADER}")
     target_include_directories(linura-security-owner-display-connection-tests PRIVATE
         "${PINNED_DISPLAY_SOURCE}" "${CMAKE_CURRENT_BINARY_DIR}")
     target_link_libraries(linura-security-owner-display-connection-tests PRIVATE

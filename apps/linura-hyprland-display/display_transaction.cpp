@@ -94,10 +94,12 @@ bool DisplayTransaction::validLayout(const Layout &layout, const Snapshot &snaps
 
 DisplayTransaction::DisplayTransaction(Backend &backend, Correlation correlation, Layout baseline,
                                        Layout desired, Snapshot inventory, ClockSample armed,
-                                       std::uint64_t deadlineBootMs)
-    : backend_(backend), correlation_(std::move(correlation)), baseline_(std::move(baseline)),
-      desired_(std::move(desired)), inventory_(std::move(inventory)), armed_(armed),
-      deadlineBootMs_(deadlineBootMs), secureSeen_(inventory_.coverage == Coverage::Secure)
+                                       std::uint64_t deadlineBootMs,
+                                       std::shared_ptr<MutationProtection> protection)
+    : backend_(backend), protection_(std::move(protection)), correlation_(std::move(correlation)),
+      baseline_(std::move(baseline)), desired_(std::move(desired)),
+      inventory_(std::move(inventory)), armed_(armed), deadlineBootMs_(deadlineBootMs),
+      secureSeen_(inventory_.coverage == Coverage::Secure)
 {}
 DisplayTransaction::~DisplayTransaction()
 {
@@ -107,9 +109,10 @@ DisplayTransaction::~DisplayTransaction()
 }
 std::unique_ptr<DisplayTransaction>
 DisplayTransaction::start(Backend &backend, const Correlation &correlation, const Layout &baseline,
-                          const Layout &desired, const Snapshot &captured, ClockSample now)
+                          const Layout &desired, const Snapshot &captured, ClockSample now,
+                          std::shared_ptr<MutationProtection> protection)
 {
-    if (!validCorrelation(correlation) || now.unixMs == 0 || now.bootMs == 0 ||
+    if (!protection || !validCorrelation(correlation) || now.unixMs == 0 || now.bootMs == 0 ||
         now.unixMs >= correlation.deadlineUnixMs ||
         correlation.deadlineUnixMs - now.unixMs > WindowMs || baseline == desired)
         return {};
@@ -125,11 +128,13 @@ DisplayTransaction::start(Backend &backend, const Correlation &correlation, cons
     if (!sample || *sample != captured || !validLayout(baseline, *sample) ||
         !validLayout(desired, *sample))
         return {};
-    auto attempt = std::unique_ptr<DisplayTransaction>(new DisplayTransaction(
-        backend, correlation, baseline, desired, *sample, now, now.bootMs + remaining));
+    auto attempt = std::unique_ptr<DisplayTransaction>(
+        new DisplayTransaction(backend, correlation, baseline, desired, *sample, now,
+                               now.bootMs + remaining, std::move(protection)));
     if (!attempt->scopeMatches(*sample) || !attempt->matches(baseline, *sample)) {
         // No write was constructed; destruction must not create compensation.
         attempt->phase_ = Phase::RecoveryFailed;
+        attempt->protection_->release();
         return {};
     }
     bool inhibited = false;
@@ -140,22 +145,61 @@ DisplayTransaction::start(Backend &backend, const Correlation &correlation, cons
         const auto fresh = inhibited ? backend.snapshot() : std::nullopt;
         const auto completed = backend.clock();
         if (!inhibited || !fresh || *fresh != captured || !completed ||
-            attempt->expired(*completed)) {
+            attempt->expired(*completed) || !attempt->protection_->healthy()) {
             if (inhibited)
                 backend.releasePowerInhibitor();
             attempt->phase_ = Phase::RecoveryFailed;
+            attempt->protection_->release();
             return {};
         }
     } catch (...) {
         if (inhibited)
             backend.releasePowerInhibitor();
         attempt->phase_ = Phase::RecoveryFailed;
+        attempt->protection_->release();
         return {};
     }
     // The owning endpoint must retain a dispatch tombstone before entering this
     // method. The attempt itself reserves the write before calling the backend.
+    bool protectedWrite = false;
     try {
-        if (!backend.applyOwnedLayout(desired, *sample))
+        protectedWrite =
+            attempt->protection_->beginWrite(MutationProtection::Write::Apply, *sample);
+    } catch (...) {
+        // A failed pre-write presentation check grants no backend call.
+    }
+    if (!protectedWrite) {
+        backend.releasePowerInhibitor();
+        attempt->phase_ = Phase::RecoveryFailed;
+        attempt->protection_->release();
+        return {};
+    }
+    bool freshProtection = false;
+    try {
+        const auto current = backend.snapshot();
+        const bool live = attempt->protection_->healthy();
+        const auto clock = backend.clock();
+        freshProtection =
+            current && *current == captured && live && clock && !attempt->expired(*clock);
+    } catch (...) {
+        // Native scene preparation consumes the original dispatch budget.
+    }
+    if (!freshProtection) {
+        attempt->protection_->endWrite(MutationProtection::Write::Apply);
+        attempt->phase_ = Phase::RecoveryFailed;
+        backend.releasePowerInhibitor();
+        attempt->protection_->release();
+        return {};
+    }
+    bool applied = false;
+    try {
+        applied = backend.applyOwnedLayout(desired, *sample);
+    } catch (...) {
+        // endWrite must also run after a partial write or a lost native reply.
+    }
+    attempt->protection_->endWrite(MutationProtection::Write::Apply);
+    try {
+        if (!applied || !attempt->protection_->healthy())
             attempt->restore();
         const auto completed = backend.clock();
         if (!completed || attempt->expired(*completed))
@@ -202,13 +246,18 @@ bool DisplayTransaction::confirm(const Correlation &correlation, ClockSample now
         return false;
     try {
         const auto sample = backend_.snapshot();
-        if (!sample || !scopeMatches(*sample) || !matches(desired_, *sample))
+        if (!sample || !scopeMatches(*sample) || !matches(desired_, *sample) ||
+            !protection_->healthy() || !protection_->presented(MutationProtection::Write::Apply))
             return false;
         const auto completed = backend_.clock();
-        if (!completed || expired(*completed))
+        if (!completed || expired(*completed) || !protection_->consumeKeepDecision())
+            return false;
+        const auto consumed = backend_.clock();
+        if (!consumed || expired(*consumed))
             return false;
         phase_ = Phase::Confirmed;
         backend_.releasePowerInhibitor();
+        protection_->release();
         return true;
     } catch (...) {
         return false;
@@ -223,17 +272,43 @@ void DisplayTransaction::restore()
     phase_ = Phase::Restoring;
     try {
         const auto sample = backend_.snapshot();
-        if (!sample || !scopeMatches(*sample) || !validLayout(baseline_, *sample)) {
+        if (!sample || !scopeMatches(*sample) || !validLayout(baseline_, *sample) ||
+            !protection_->beginWrite(MutationProtection::Write::Restore, *sample)) {
             phase_ = Phase::RecoveryFailed;
             return;
         }
-        if (!backend_.restoreOwnedLayout(baseline_, *sample))
+        bool restored = false;
+        try {
+            restored = backend_.restoreOwnedLayout(baseline_, *sample);
+        } catch (...) {
+            // The same native fence survives an ambiguous compensation reply.
+        }
+        protection_->endWrite(MutationProtection::Write::Restore);
+        if (!restored)
             phase_ = Phase::RecoveryFailed;
     } catch (...) {
         phase_ = Phase::RecoveryFailed;
     }
     // Even a successful acknowledgement remains Restoring. A later snapshot is
     // required; Rust independently verifies again before durable retirement.
+}
+bool DisplayTransaction::requestRestore(const Correlation &bound, ClockSample now)
+{
+    if (phase_ != Phase::Pending || bound != correlation_ || expired(now))
+        return false;
+    try {
+        const auto completed = backend_.clock();
+        if (!completed || expired(*completed) || !protection_->healthy() ||
+            !protection_->consumeRevertDecision())
+            return false;
+        const auto consumed = backend_.clock();
+        if (!consumed || expired(*consumed))
+            return false;
+        restore();
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 void DisplayTransaction::verifyRestoration()
 {
@@ -242,9 +317,11 @@ void DisplayTransaction::verifyRestoration()
     try {
         const auto sample = backend_.snapshot();
         if (sample && scopeMatches(*sample) && matches(baseline_, *sample) &&
-            backend_.restoredOwnedState()) {
+            backend_.restoredOwnedState() &&
+            protection_->presented(MutationProtection::Write::Restore)) {
             phase_ = Phase::Restored;
             backend_.releasePowerInhibitor();
+            protection_->release();
         }
     } catch (...) {
         // A failed observation cannot become restoration, nor grant a retry.
@@ -252,7 +329,13 @@ void DisplayTransaction::verifyRestoration()
 }
 void DisplayTransaction::tick(std::optional<ClockSample> now)
 {
-    if (phase_ == Phase::Pending && (!now || expired(*now)))
+    bool healthy = false;
+    try {
+        healthy = protection_->healthy();
+    } catch (...) {
+        // A failed scene query is cancellation, never native authority.
+    }
+    if (phase_ == Phase::Pending && (!now || expired(*now) || !healthy))
         restore();
     else
         verifyRestoration();

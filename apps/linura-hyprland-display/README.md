@@ -149,3 +149,21 @@ silently reacquire a fence or replay compensation. Normal rendering with no
 retained transaction or a healthy fence remains available. Kernel FIFO tests
 cover both peer-loss directions and reopen without lease revival; full native
 logind restart/race qualification and durable recovery remain required.
+
+The native display apply request now requires the actual consumed private
+interaction resource on its original, freshly attested connection. Its retained
+scene survives client/resource loss through a compositor-owned mutation fence.
+Owned writes invalidate old frame evidence before modesetting; fresh hardware
+completion on every enabled head and accepted disable submissions are required
+before native terminal retirement. Failed recovery keeps the opaque/input fence
+and power inhibitor. Rejection before effects releases only its reserved scene.
+
+Keep and explicit Revert require a separately consumed, purpose-bound native
+decision. The private decision request retains the original attempt's wall and
+BOOTTIME bounds, roles, physical input bindings and native commit high-water
+marks, and reconfigures all enabled heads at their new logical geometry. Dormant
+heads have private roles staged before Apply. A saved Apply epoch cannot confirm
+or revert; automatic compensation remains confined to the original baseline.
+These are native mechanism and lifetime contracts. The production Control-to-owner
+decision composition, compositor-replacement restoration and real multi-output /
+adversarial runtime acceptance remain required before public activation.

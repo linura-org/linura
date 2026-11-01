@@ -337,6 +337,44 @@ class ProtectedWireEndpoint::Impl final
             linura_protected_display_interaction_v1_send_denied(resource);
         }
     }
+    static std::shared_ptr<MutationProtection> reserve(wl_resource *resource, wl_client *client,
+                                                       const Correlation &bound,
+                                                       const Layout &baseline,
+                                                       const Layout &desired,
+                                                       const Snapshot &captured, ClockSample clock)
+    {
+        if (!resource || !client || wl_resource_get_client(resource) != client ||
+            !wl_resource_instance_of(resource, &linura_protected_display_interaction_v1_interface,
+                                     &interactionImpl))
+            return {};
+        auto &interaction = object<Interaction>(resource);
+        const auto &state = interaction.state;
+        if (!state || state->closed || !state->scene || !interaction.owner.current(interaction))
+            return {};
+        return state->scene->reserveMutation(bound, baseline, desired, captured, clock);
+    }
+    static void beginDecision(wl_client *, wl_resource *resource, const char *scope,
+                              std::uint32_t purpose, std::uint32_t high, std::uint32_t low,
+                              std::uint32_t bootHigh, std::uint32_t bootLow)
+    {
+        auto &interaction = object<Interaction>(resource);
+        try {
+            const auto &state = interaction.state;
+            if (!digest(scope) || purpose < 1 || purpose > 2 || !state || !state->scene ||
+                state->closed || !interaction.owner.current(interaction) ||
+                !state->scene->beginDecision({scope,
+                                              static_cast<ProtectedInteraction::Purpose>(purpose),
+                                              joined(high, low), joined(bootHigh, bootLow)})) {
+                if (state)
+                    state->close();
+                linura_protected_display_interaction_v1_send_denied(resource);
+            }
+        } catch (...) {
+            if (interaction.state)
+                interaction.state->close();
+            linura_protected_display_interaction_v1_send_denied(resource);
+        }
+    }
     static const struct linura_protected_display_manager_v1_interface managerImpl;
     static const struct linura_protected_display_interaction_v1_interface interactionImpl;
     static const struct linura_protected_display_surface_v1_interface surfaceImpl;
@@ -348,7 +386,7 @@ const struct linura_protected_display_manager_v1_interface ProtectedWireEndpoint
 const struct linura_protected_display_interaction_v1_interface
     ProtectedWireEndpoint::Impl::interactionImpl
 {
-    destroy, getSurface, status, refreshPresentation, consume
+    destroy, getSurface, status, refreshPresentation, consume, beginDecision
 };
 const struct linura_protected_display_surface_v1_interface ProtectedWireEndpoint::Impl::surfaceImpl
 {
@@ -362,5 +400,11 @@ ProtectedWireEndpoint::~ProtectedWireEndpoint() = default;
 bool ProtectedWireEndpoint::available() const noexcept
 {
     return impl_->global != nullptr;
+}
+std::shared_ptr<MutationProtection> ProtectedWireEndpoint::reserveMutation(
+    wl_resource *resource, wl_client *client, const Correlation &bound, const Layout &baseline,
+    const Layout &desired, const Snapshot &captured, ClockSample clock)
+{
+    return Impl::reserve(resource, client, bound, baseline, desired, captured, clock);
 }
 } // namespace Linura::HyprlandDisplay

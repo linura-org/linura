@@ -1101,3 +1101,16 @@ bounds. A shorter original BOOTTIME budget must expire even while wall time leav
 more budget; receiving a prompt later cannot remap or renew that bound. Zero,
 expired, overlong and substituted bounds fail closed. This closes a presentation
 lifetime gap and does not grant a native mutation or continuation permit.
+
+A native display apply now retains the actual consumed scene resource on its
+original re-attested connection. Client death, private surface loss or human
+proof expiry cannot discard its opaque/input fence during an owned mutation or
+compensation. Geometry changes are permitted only within the reserved native
+write stack; unrelated inventory/rule/session changes fence the attempt. All
+post-write frame evidence is invalidated, enabled outputs need fresh hardware
+completion, and disabled outputs need accepted native disable submissions.
+Restored numeric targets without original ownership or those native observations
+cannot retire recovery. Explicit Keep/Revert consume distinct fresh protected
+scopes at the original attempt deadlines, retaining roles and physical input
+bindings through the transition. This does not complete production decision
+composition, replacement restoration or native adversarial acceptance.

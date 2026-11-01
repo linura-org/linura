@@ -8,6 +8,7 @@
 
 struct wl_display;
 struct wl_resource;
+struct wl_client;
 
 namespace Linura::HyprlandDisplay {
 struct ProtectedSceneStatus final
@@ -29,6 +30,10 @@ class ProtectedScene
     [[nodiscard]] virtual std::optional<ProtectedSceneStatus> status() = 0;
     [[nodiscard]] virtual bool refreshPresentation() = 0;
     [[nodiscard]] virtual bool consume(const std::string &scopeDigest, std::uint64_t epoch) = 0;
+    [[nodiscard]] virtual bool beginDecision(const ProtectedInteraction::Scope &) = 0;
+    [[nodiscard]] virtual std::shared_ptr<MutationProtection>
+    reserveMutation(const Correlation &, const Layout &baseline, const Layout &desired,
+                    const Snapshot &, ClockSample captured) = 0;
     virtual void close() noexcept = 0;
 };
 
@@ -42,6 +47,12 @@ class ProtectedWireEndpoint final
     ProtectedWireEndpoint(const ProtectedWireEndpoint &) = delete;
     ProtectedWireEndpoint &operator=(const ProtectedWireEndpoint &) = delete;
     [[nodiscard]] bool available() const noexcept;
+    // Acquires only this implementation's live resource on the same attested
+    // Wayland connection. Digests, UID equality and lookalike objects cannot
+    // substitute for the actual consumed scene.
+    [[nodiscard]] static std::shared_ptr<MutationProtection>
+    reserveMutation(wl_resource *, wl_client *, const Correlation &, const Layout &baseline,
+                    const Layout &desired, const Snapshot &, ClockSample captured);
 
   private:
     class Impl;

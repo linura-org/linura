@@ -449,9 +449,9 @@ void initialize(wl_display &display, wl_event_loop &loop)
 }
 void shutdown()
 {
-    shutdownProtectedDisplay();
     endpoint.reset();
-    service.reset(); // Compensation while monitor/rule/lock managers still exist.
+    service.reset(); // Compensation while monitor/rule/lock/protection still exist.
+    shutdownProtectedDisplay();
     backend.reset();
 }
 bool lockReleased()

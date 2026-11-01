@@ -49,6 +49,9 @@ class PrivateRole final : public ISurfaceRole
 };
 struct NativeData;
 std::weak_ptr<NativeData> active;
+// A failed/abandoned transaction must not drop its fence when wire objects die.
+// Only verified terminal retirement releases this compositor-owned reference.
+std::shared_ptr<NativeData> mutationFence;
 NativeData *activeNative = nullptr;
 ProtectedInputRetirement inputRetirement;
 std::unique_ptr<ProtectedWireEndpoint> endpoint;
@@ -181,6 +184,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
         std::uint32_t serial = 0;
         bool acknowledged = false, contentCommitted = false, selectedFrame = false;
         ProtectedFrame frame;
+        std::uint64_t disableCommit = 0;
+        bool disableSubmitted = false;
         SP<Aquamarine::IBuffer> renderedBuffer;
         CHyprSignalListener commit, destroy, present, result;
     };
@@ -197,6 +202,14 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     ProtectedKeyDelivery keys;
     std::vector<WP<IPointer>> pointers;
     bool closed = false;
+    bool mutation = false, ownerLost = false, mutationFault = false, writing = false;
+    bool decisionActive = false, decisionStarted = false, decisionUsed = false;
+    MutationProtection::Write lastWrite = MutationProtection::Write::Apply;
+    Snapshot mutationInventory, stableInventory;
+    Layout baseline, desired;
+    Correlation bound;
+    std::uint64_t mutationEpoch = 0, mutationDeadlineBootMs = 0;
+    ClockSample mutationClock;
     bool escapeDown = false;
     std::uint64_t exitBootMs = 0, exitEpoch = 0;
     wl_event_source *timer = nullptr;
@@ -234,11 +247,74 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
                 devices = devices && pointers[i].lock() &&
                           pointers[i].lock() == g_pInputManager->m_pointers[i];
         }
+        if (mutation) {
+            if (!devices) {
+                mutationFault = true; // Retire authority, retain opaque rendering.
+                interaction.cancel();
+            }
+            if (!facts || !clock || !mutationScope(*facts)) {
+                mutationFault = true;
+                return false;
+            }
+            // Geometry may vary only inside this reserved compositor write.
+            // Outside that stack, even a compatible-looking external change
+            // fences the attempt instead of being adopted as desired state.
+            if (!(writing && ownedModesetInProgress()) && *facts != stableInventory) {
+                mutationFault = true;
+                return false;
+            }
+            if (clock->unixMs < mutationClock.unixMs || clock->bootMs < mutationClock.bootMs)
+                mutationFault = true;
+            else
+                mutationClock = *clock;
+            if (decisionActive && !interaction.refresh(*facts, *clock))
+                mutationFault = true;
+            return true;
+        }
         if (!devices || !facts || !clock || !interaction.refresh(*facts, *clock)) {
             interaction.cancel();
             return false;
         }
         return true;
+    }
+    void cancelInput() noexcept
+    {
+        interaction.cancel();
+        if (mutation)
+            mutationFault = true;
+    }
+    bool mutationScope(const Snapshot &facts) const
+    {
+        if (facts.generation != mutationInventory.generation ||
+            facts.securityEpoch != mutationInventory.securityEpoch ||
+            facts.heads.size() != mutationInventory.heads.size() ||
+            (facts.coverage != Coverage::Unlocked && facts.coverage != Coverage::Secure) ||
+            (mutationInventory.coverage == Coverage::Secure && facts.coverage != Coverage::Secure))
+            return false;
+        for (std::size_t i = 0; i < facts.heads.size(); ++i) {
+            const auto &head = facts.heads[i];
+            const auto &original = mutationInventory.heads[i];
+            if (head.key != original.key || head.modes != original.modes ||
+                head.baseRuleWitness != original.baseRuleWitness ||
+                head.outputIdentityWitness != original.outputIdentityWitness ||
+                (head.current.enabled && facts.coverage == Coverage::Secure && !head.covered))
+                return false;
+        }
+        return true;
+    }
+    void invalidateFrames()
+    {
+        for (auto &[key, surface] : surfaces) {
+            (void)key;
+            surface.acknowledged = surface.contentCommitted = surface.selectedFrame = false;
+            surface.frame.invalidate();
+            surface.renderedBuffer.reset();
+        }
+        if (g_pSeatManager) {
+            g_pSeatManager->setKeyboardFocus(nullptr);
+            g_pSeatManager->setPointerFocus(nullptr, {});
+        }
+        damage();
     }
     void damage()
     {
@@ -252,6 +328,15 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     {
         if (closed)
             return;
+        if (mutation) {
+            // Losing authentication/input resources cancels continuation, not
+            // the opaque native fence. The independent transaction timer sees
+            // ownerLost and reserves compensation after the current write.
+            ownerLost = true;
+            interaction.cancel();
+            invalidateFrames();
+            return;
+        }
         closed = true;
         if (timer) {
             wl_event_source_remove(timer);
@@ -328,6 +413,8 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
     }
     bool inputReady()
     {
+        if (mutation && !decisionActive)
+            return false;
         if (!refresh())
             return false;
         const auto resource = focused();
@@ -348,6 +435,106 @@ struct NativeData final : std::enable_shared_from_this<NativeData>
                });
     }
 };
+class PinnedMutation final : public MutationProtection
+{
+  public:
+    explicit PinnedMutation(std::shared_ptr<NativeData> data) : data_(std::move(data)) {}
+    ~PinnedMutation() override
+    {
+        if (!wrote_)
+            release(); // Rejection before the first possible native write.
+    }
+    bool healthy() override
+    {
+        return data_->mutation && data_->refresh() && !data_->ownerLost && !data_->mutationFault;
+    }
+    bool beginWrite(Write kind, const Snapshot &captured) override
+    {
+        auto *backend = nativeBackend();
+        const auto current = backend ? backend->snapshot() : std::nullopt;
+        if (!data_->mutation || data_->writing || !current || *current != captured ||
+            !data_->mutationScope(*current) || (kind == Write::Apply && (wrote_ || !healthy())))
+            return false;
+        // Compensation remains confined to this original baseline even if the
+        // owner or human proof has gone away. No new client gains an effect.
+        wrote_ = true;
+        data_->lastWrite = kind;
+        data_->writing = true;
+        data_->decisionActive = false;
+        const auto &targets = kind == Write::Apply ? data_->desired : data_->baseline;
+        for (std::size_t i = 0; i < targets.size(); ++i) {
+            auto &surface = data_->surfaces.at(targets[i].output);
+            surface.disableCommit = 0;
+            surface.disableSubmitted = !targets[i].enabled && !captured.heads[i].current.enabled;
+        }
+        data_->invalidateFrames();
+        return true;
+    }
+    void endWrite(Write kind) noexcept override
+    {
+        data_->writing = false;
+        try {
+            const auto sample = nativeBackend()->snapshot();
+            if (!sample || !data_->mutationScope(*sample) || data_->lastWrite != kind)
+                data_->mutationFault = true;
+            else
+                data_->stableInventory = *sample;
+            // A pre-modeset hardware event cannot qualify the restored mode.
+            data_->invalidateFrames();
+        } catch (...) {
+            data_->mutationFault = true;
+        }
+    }
+    bool presented(Write kind) override
+    {
+        if (!data_->mutation || data_->writing || data_->lastWrite != kind || !data_->refresh())
+            return false;
+        const auto &targets = kind == Write::Apply ? data_->desired : data_->baseline;
+        if (targets.size() != data_->stableInventory.heads.size())
+            return false;
+        for (std::size_t i = 0; i < targets.size(); ++i) {
+            const auto &target = targets[i];
+            const auto surface = data_->surfaces.find(target.output);
+            if (target != data_->stableInventory.heads[i].current ||
+                (target.enabled &&
+                 (surface == data_->surfaces.end() || !surface->second.frame.completed())) ||
+                (!target.enabled &&
+                 (surface == data_->surfaces.end() || !surface->second.disableSubmitted)))
+                return false;
+        }
+        return true;
+    }
+    bool consumeKeepDecision() override
+    {
+        return consumeDecision(ProtectedInteraction::Purpose::Keep);
+    }
+    bool consumeRevertDecision() override
+    {
+        return consumeDecision(ProtectedInteraction::Purpose::Revert);
+    }
+    void release() noexcept override
+    {
+        if (!data_->mutation)
+            return;
+        data_->mutation = false;
+        if (mutationFence == data_)
+            mutationFence.reset();
+        data_->close();
+    }
+
+  private:
+    bool consumeDecision(ProtectedInteraction::Purpose purpose)
+    {
+        if (!healthy() || !data_->decisionActive || data_->decisionUsed ||
+            data_->interaction.phase() != ProtectedInteraction::Phase::Consumed ||
+            data_->interaction.scope().purpose != purpose || !presented(Write::Apply))
+            return false;
+        data_->decisionUsed = true;
+        return true;
+    }
+    std::shared_ptr<NativeData> data_;
+    bool wrote_ = false;
+};
 class PinnedScene final : public ProtectedScene
 {
   public:
@@ -361,19 +548,109 @@ class PinnedScene final : public ProtectedScene
     {
         data->close();
     }
+    std::shared_ptr<MutationProtection>
+    reserveMutation(const Correlation &bound, const Layout &baseline, const Layout &desired,
+                    const Snapshot &captured, ClockSample capturedClock) override
+    {
+        if (data->mutation || mutationFence || !data->refresh() ||
+            data->interaction.phase() != ProtectedInteraction::Phase::Consumed ||
+            data->interaction.scope().purpose != ProtectedInteraction::Purpose::Apply ||
+            data->surfaces.size() != captured.heads.size() || baseline == desired ||
+            !DisplayTransaction::validLayout(baseline, captured) ||
+            !DisplayTransaction::validLayout(desired, captured) || capturedClock.unixMs == 0 ||
+            capturedClock.bootMs == 0 || bound.deadlineUnixMs <= capturedClock.unixMs ||
+            bound.deadlineUnixMs - capturedClock.unixMs > DisplayTransaction::WindowMs ||
+            capturedClock.bootMs > std::numeric_limits<std::uint64_t>::max() -
+                                       (bound.deadlineUnixMs - capturedClock.unixMs))
+            return {};
+        const auto now = nativeBackend()->snapshot();
+        if (!now || *now != captured)
+            return {};
+        for (std::size_t i = 0; i < captured.heads.size(); ++i)
+            if (!data->surfaces.contains(captured.heads[i].key) ||
+                baseline[i] != captured.heads[i].current)
+                return {};
+        auto lease = std::make_shared<PinnedMutation>(data);
+        data->mutationInventory = data->stableInventory = captured;
+        data->baseline = baseline;
+        data->desired = desired;
+        data->bound = bound;
+        data->mutationEpoch = data->interaction.epoch();
+        data->mutationDeadlineBootMs =
+            capturedClock.bootMs + bound.deadlineUnixMs - capturedClock.unixMs;
+        data->mutationClock = capturedClock;
+        data->mutation = true;
+        mutationFence = data;
+        return lease;
+    }
+    bool beginDecision(const ProtectedInteraction::Scope &scope) override
+    {
+        if (!data->mutation || !data->refresh() || data->ownerLost || data->mutationFault ||
+            data->writing || data->decisionStarted ||
+            data->lastWrite != MutationProtection::Write::Apply ||
+            (scope.purpose != ProtectedInteraction::Purpose::Keep &&
+             scope.purpose != ProtectedInteraction::Purpose::Revert) ||
+            scope.digest == data->interaction.scope().digest ||
+            scope.deadlineUnixMs != data->bound.deadlineUnixMs ||
+            scope.deadlineBootMs != data->mutationDeadlineBootMs || heldInput().any)
+            return false;
+        for (std::size_t i = 0; i < data->desired.size(); ++i)
+            if (data->stableInventory.heads[i].current != data->desired[i])
+                return false;
+        const auto clock = compositorClock();
+        const auto epoch = std::max(nextEpoch, data->interaction.epoch() + 1);
+        if (!clock || epoch >= std::numeric_limits<std::uint64_t>::max() - 1)
+            return false;
+        auto decision = ProtectedInteraction::start(scope, data->stableInventory, *clock, epoch);
+        if (!decision || !scopes.reserve(scope, *clock))
+            return false;
+        nextEpoch = epoch + 1;
+        data->decisionStarted = true;
+        data->interaction = std::move(*decision);
+        data->invalidateFrames();
+        data->decisionActive = true;
+        // Retain roles, physical input bindings and native commit high-water
+        // marks. Every enabled head receives a fresh logical-size configure.
+        for (auto &[key, surface] : data->surfaces) {
+            const auto monitor = surface.monitor.lock();
+            if (!monitor || !monitor->m_output || !surface.resource.lock())
+                return false;
+            if (!monitor->m_enabled)
+                continue;
+            if (monitor->m_size.x < 1 || monitor->m_size.x > 32768 || monitor->m_size.y < 1 ||
+                monitor->m_size.y > 32768 || monitor->m_size.x != std::floor(monitor->m_size.x) ||
+                monitor->m_size.y != std::floor(monitor->m_size.y))
+                return false;
+            surface.serial = wl_display_next_serial(g_pCompositor->m_wlDisplay);
+            if (!data->interaction.configure(key, surface.serial))
+                return false;
+        }
+        for (auto &[key, surface] : data->surfaces) {
+            (void)key;
+            const auto monitor = surface.monitor.lock();
+            if (!monitor->m_enabled)
+                continue;
+            surface.resource.lock()->enter(monitor->m_self.lock());
+            surface.configure(surface.serial, static_cast<std::uint32_t>(monitor->m_size.x),
+                              static_cast<std::uint32_t>(monitor->m_size.y));
+        }
+        data->damage();
+        return true;
+    }
     bool attach(OutputKey key, wl_resource *wire, Configure configure) override
     {
         if (!data->refresh() || !configure || data->surfaces.contains(key))
             return false;
         const auto resource = CWLSurfaceResource::fromResource(wire);
         const auto monitor = nativeOutputMonitor(key);
-        if (!resource || !monitor || !monitor->m_enabled || !monitor->m_output ||
+        if (!resource || !monitor || !monitor->m_output ||
             (resource->m_role && resource->m_role->role() != SURFACE_ROLE_UNASSIGNED) ||
             resource->m_current.buffer || resource->m_pending.buffer || resource->m_mapped ||
-            !resource->m_subsurfaces.empty() || monitor->m_size.x < 1 || monitor->m_size.y < 1 ||
-            monitor->m_size.x > 32768 || monitor->m_size.y > 32768 ||
-            monitor->m_size.x != std::floor(monitor->m_size.x) ||
-            monitor->m_size.y != std::floor(monitor->m_size.y) ||
+            !resource->m_subsurfaces.empty() ||
+            (monitor->m_enabled &&
+             (monitor->m_size.x < 1 || monitor->m_size.y < 1 || monitor->m_size.x > 32768 ||
+              monitor->m_size.y > 32768 || monitor->m_size.x != std::floor(monitor->m_size.x) ||
+              monitor->m_size.y != std::floor(monitor->m_size.y))) ||
             !(monitor->m_output->commitCapabilities() &
               Aquamarine::IOutput::AQ_OUTPUT_COMMIT_CAPABILITY_QUEUED))
             return false;
@@ -388,7 +665,7 @@ class PinnedScene final : public ProtectedScene
         resource->m_role = surface.role;
         surface.configure = std::move(configure);
         surface.serial = wl_display_next_serial(g_pCompositor->m_wlDisplay);
-        if (!data->interaction.configure(key, surface.serial))
+        if (monitor->m_enabled && !data->interaction.configure(key, surface.serial))
             return false;
         const auto weak = std::weak_ptr<NativeData>(data);
         surface.destroy = resource->m_events.destroy.listen([weak] {
@@ -405,7 +682,7 @@ class PinnedScene final : public ProtectedScene
             if (!resource || !monitor || !surface.acknowledged || !resource->m_current.buffer ||
                 !resource->m_current.texture || resource->m_current.size != monitor->m_size ||
                 !resource->m_subsurfaces.empty()) {
-                live->interaction.cancel();
+                live->cancelInput();
                 return;
             }
             if (!resource->m_mapped)
@@ -419,10 +696,18 @@ class PinnedScene final : public ProtectedScene
                 if (!live || live->closed)
                     return;
                 auto &surface = live->surfaces.at(key);
+                if (event.id != 0 && event.id == surface.disableCommit) {
+                    surface.disableSubmitted =
+                        event.status == Aquamarine::IOutput::AQ_OUTPUT_COMMIT_SUBMITTED &&
+                        event.error == 0;
+                    if (!surface.disableSubmitted)
+                        live->mutationFault = true;
+                    return;
+                }
                 if (!surface.frame.submitted(
                         event.id, event.status == Aquamarine::IOutput::AQ_OUTPUT_COMMIT_SUBMITTED &&
                                       event.error == 0)) {
-                    live->interaction.cancel();
+                    live->cancelInput();
                     live->damage();
                     return;
                 }
@@ -438,20 +723,24 @@ class PinnedScene final : public ProtectedScene
                     event.presented &&
                         (event.flags & Aquamarine::IOutput::AQ_OUTPUT_PRESENT_HW_COMPLETION));
                 if (presentation == ProtectedFrame::Presentation::Failed) {
-                    live->interaction.cancel();
+                    live->cancelInput();
                     live->damage();
                     return;
                 }
                 if (presentation != ProtectedFrame::Presentation::Content)
+                    return;
+                if (live->mutation && !live->decisionActive)
                     return;
                 live->interaction.presented(key, event.commitID, true);
                 const auto focus = live->focused();
                 if (focus && g_pSeatManager)
                     g_pSeatManager->setKeyboardFocus(focus);
             });
-        resource->enter(monitor->m_self.lock());
-        surface.configure(surface.serial, static_cast<std::uint32_t>(monitor->m_size.x),
-                          static_cast<std::uint32_t>(monitor->m_size.y));
+        if (monitor->m_enabled) {
+            resource->enter(monitor->m_self.lock());
+            surface.configure(surface.serial, static_cast<std::uint32_t>(monitor->m_size.x),
+                              static_cast<std::uint32_t>(monitor->m_size.y));
+        }
         return true;
     }
     bool acknowledge(OutputKey key, std::uint32_t serial) override
@@ -472,6 +761,11 @@ class PinnedScene final : public ProtectedScene
         // Change every configure/input epoch before any callback can publish a
         // revision. No original Ready frame can attest the replacement content.
         for (auto &[key, surface] : data->surfaces) {
+            const auto monitor = surface.monitor.lock();
+            if (!monitor)
+                return false;
+            if (!monitor->m_enabled)
+                continue;
             surface.serial = wl_display_next_serial(g_pCompositor->m_wlDisplay);
             surface.acknowledged = surface.contentCommitted = surface.selectedFrame = false;
             surface.frame.invalidate();
@@ -483,6 +777,8 @@ class PinnedScene final : public ProtectedScene
             const auto monitor = surface.monitor.lock();
             if (!monitor || !surface.configure)
                 return false;
+            if (!monitor->m_enabled)
+                continue;
             surface.configure(surface.serial, static_cast<std::uint32_t>(monitor->m_size.x),
                               static_cast<std::uint32_t>(monitor->m_size.y));
         }
@@ -494,10 +790,15 @@ class PinnedScene final : public ProtectedScene
         if (!data->refresh())
             return std::nullopt;
         const auto facts = nativeBackend()->snapshot();
-        return facts ? std::optional(ProtectedSceneStatus{compositorInstance(), facts->generation,
-                                                          data->interaction.epoch(),
-                                                          data->interaction.phase()})
-                     : std::nullopt;
+        return facts
+                   ? std::optional(ProtectedSceneStatus{compositorInstance(), facts->generation,
+                                                        data->mutation && !data->decisionActive
+                                                            ? data->mutationEpoch
+                                                            : data->interaction.epoch(),
+                                                        data->mutation && !data->decisionActive
+                                                            ? ProtectedInteraction::Phase::Consumed
+                                                            : data->interaction.phase()})
+                   : std::nullopt;
     }
     bool consume(const std::string &digest, std::uint64_t epoch) override
     {
@@ -569,7 +870,7 @@ void initializeProtectedDisplay(wl_display &display)
                 keyboard.changed = device->m_keyboardEvents.keymap.listen(
                     [weak = std::weak_ptr<NativeData>(data)](const IKeyboard::SKeymapEvent &) {
                         if (const auto live = weak.lock())
-                            live->interaction.inputReplaced();
+                            live->cancelInput();
                     });
             }
             auto scene = std::make_unique<PinnedScene>(data);
@@ -608,8 +909,11 @@ void initializeProtectedDisplay(wl_display &display)
 void shutdownProtectedDisplay()
 {
     endpoint.reset();
-    if (const auto data = active.lock())
+    if (const auto data = active.lock()) {
+        data->mutation = false; // Compositor teardown, after its compensation.
         data->close();
+    }
+    mutationFence.reset();
     active.reset();
     if (drainTimer) {
         wl_event_source_remove(drainTimer);
@@ -668,7 +972,7 @@ void protectedFrameRendered(Monitor::CMonitor *monitor, Aquamarine::IBuffer *buf
         return;
     if (!surface->frame.rendered(buffer, surface->selectedFrame ? ProtectedFrame::Kind::Content
                                                                 : ProtectedFrame::Kind::Safety)) {
-        data->interaction.cancel();
+        data->cancelInput();
         return;
     }
     surface->selectedFrame = false;
@@ -682,6 +986,18 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
     auto *surface = data->forMonitor(monitor);
     if (!data->refresh() || !surface || !monitor || !monitor->m_output)
         return false;
+    if (!monitor->m_output->state->state().enabled) {
+        if (!data->mutation || !data->writing || !ownedModesetInProgress() || !ownedCommitAllowed())
+            return false;
+        const auto submission = monitor->m_output->commitAsync({});
+        if (submission.id == 0 || submission.error != 0) {
+            data->mutationFault = true;
+            return false;
+        }
+        surface->disableCommit = submission.id;
+        surface->disableSubmitted = false;
+        return true;
+    }
     const auto buffer = monitor->m_output->state->state().buffer;
     if (!buffer)
         return false;
@@ -689,9 +1005,7 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
         // Native-owned opaque initialization replaces the former unrendered
         // placeholder refusal. Inventory/lease checks above stay mandatory;
         // this does not make an unbound layout mutation eligible.
-        if (!ownedModesetInProgress() ||
-            data->interaction.phase() != ProtectedInteraction::Phase::Consumed ||
-            data->interaction.scope().purpose != ProtectedInteraction::Purpose::Apply ||
+        if (!ownedModesetInProgress() || !data->mutation || !data->writing ||
             !renderOpaqueBuffer(monitor, buffer) ||
             !surface->frame.rendered(buffer.get(), ProtectedFrame::Kind::Safety))
             return false;
@@ -699,7 +1013,8 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
     }
     // Revoke old interaction evidence BEFORE a black frame can replace it.
     // The opaque frame's own hardware event will remain safety-only.
-    if (surface->frame.pendingKind() == ProtectedFrame::Kind::Safety &&
+    if ((!data->mutation || data->decisionActive) &&
+        surface->frame.pendingKind() == ProtectedFrame::Kind::Safety &&
         !data->interaction.safetyFrame(surface->output))
         return false;
     // Rendering/importing the buffer can take time. Neither the original
@@ -710,9 +1025,10 @@ std::optional<bool> commitProtectedDisplay(Monitor::CMonitor *monitor)
     surface->renderedBuffer.reset();
     if (submission.id == 0 || submission.error != 0 ||
         !surface->frame.queued(buffer.get(), submission.id) ||
-        (surface->frame.queuedKind() == ProtectedFrame::Kind::Content &&
+        ((!data->mutation || data->decisionActive) &&
+         surface->frame.queuedKind() == ProtectedFrame::Kind::Content &&
          !data->interaction.commit(surface->output, surface->serial, submission.id))) {
-        data->interaction.cancel();
+        data->cancelInput();
         return false;
     }
     return true;
@@ -770,7 +1086,7 @@ bool protectedKeyboardKey(const IKeyboard::SKeyEvent &event, const SP<IKeyboard>
         return true;
     }
     if (!nativeKeyboardDevice(keyboard) || !keyboard->m_enabled || !keyboard->m_allowed) {
-        data->interaction.cancel();
+        data->cancelInput();
         return true;
     }
     const bool ready = data->inputReady();
@@ -812,7 +1128,7 @@ bool protectedKeyboardModifiers(const SP<IKeyboard> &keyboard)
     if (!data)
         return draining();
     if (!nativeKeyboardDevice(keyboard) || !keyboard->m_enabled || !keyboard->m_allowed) {
-        data->interaction.cancel();
+        data->cancelInput();
         return true;
     }
     const bool bound = std::ranges::any_of(
@@ -865,7 +1181,7 @@ bool protectedPointerMove(const IPointer::SMotionEvent &event)
     if (!data)
         return draining();
     if (!nativePointerDevice(event.device) || !event.device->m_connected) {
-        data->interaction.cancel();
+        data->cancelInput();
         return true;
     }
     Pointer::mgr()->move(event.delta);
@@ -880,7 +1196,7 @@ bool protectedPointerWarp(const IPointer::SMotionAbsoluteEvent &event)
     // Absolute physical pointers/touch/tablets have distinct device semantics;
     // they cannot be relabelled as an authenticated physical relative pointer.
     (void)event;
-    data->interaction.cancel();
+    data->cancelInput();
     return true;
 }
 bool protectedPointerButton(const IPointer::SButtonEvent &event, const SP<IPointer> &pointer)
@@ -890,12 +1206,12 @@ bool protectedPointerButton(const IPointer::SButtonEvent &event, const SP<IPoint
         return false;
     if (event.button > KEY_MAX) {
         if (data)
-            data->interaction.cancel();
+            data->cancelInput();
         return true;
     }
     if (!nativePointerDevice(pointer)) {
         if (data)
-            data->interaction.cancel();
+            data->cancelInput();
         return true;
     }
     const auto key = std::pair{pointer.get(), event.button};
@@ -912,7 +1228,7 @@ bool protectedPointerButton(const IPointer::SButtonEvent &event, const SP<IPoint
         return true;
     }
     if (!pointer->m_connected) {
-        data->interaction.cancel();
+        data->cancelInput();
         return true;
     }
     (void)protectedPointerRefocus(event.timeMs);

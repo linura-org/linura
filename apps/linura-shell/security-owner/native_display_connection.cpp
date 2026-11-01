@@ -112,6 +112,7 @@ class NativeDisplayConnection::Impl final
         std::optional<quint32> phase;
         bool original = false, decisionUsed = false;
         quint64 startedUnixMs = 0, startedBootMs = 0;
+        quint64 deadlineBootMs = 0;
         ~Attempt()
         {
             if (native)
@@ -477,11 +478,11 @@ std::optional<NativePinnedDisplaySample> NativeDisplayConnection::sample()
         return std::nullopt;
     return capture.sample;
 }
-std::optional<quint32> NativeDisplayConnection::apply(const NativeDisplayCorrelation &bound,
-                                                      const NativeDisplayLayout &baseline,
-                                                      const NativeDisplayLayout &desired)
+std::optional<quint32> NativeDisplayConnection::apply(
+    const NativeDisplayCorrelation &bound, const NativeDisplayLayout &baseline,
+    const NativeDisplayLayout &desired, linura_protected_display_interaction_v1 *protection)
 {
-    if (!impl_->capture || impl_->capture->invalid || !impl_->capture->done ||
+    if (!protection || !impl_->capture || impl_->capture->invalid || !impl_->capture->done ||
         impl_->capture->sample.fenced || baseline.encode() == desired.encode() ||
         baseline.topology != desired.topology ||
         baseline.topology.section(QLatin1Char(':'), 7, 7) != impl_->capture->sample.compositor ||
@@ -518,6 +519,12 @@ std::optional<quint32> NativeDisplayConnection::apply(const NativeDisplayCorrela
     attempt->original = true;
     attempt->startedUnixMs = *wall;
     attempt->startedBootMs = *boot;
+    // The compositor uses this SAME original native snapshot clock pair.
+    // A later decision cannot remap from its arrival time or refresh the bound.
+    const auto remaining = bound.deadlineUnixMs - sample.sampledUnixMs;
+    if (sample.sampledBootMs > std::numeric_limits<quint64>::max() - remaining)
+        return std::nullopt;
+    attempt->deadlineBootMs = sample.sampledBootMs + remaining;
     linura_display_attempt_v1_configure(attempt->native, impl_->capture->native);
     for (const auto &target : desired.outputs) {
         const auto head = impl_->capture->heads.find(target.handle);
@@ -542,7 +549,7 @@ std::optional<quint32> NativeDisplayConnection::apply(const NativeDisplayCorrela
         }
     }
     attempt->phase.reset();
-    linura_display_attempt_v1_apply(attempt->native);
+    linura_display_attempt_v1_apply(attempt->native, protection);
     return impl_->completed(*attempt);
 }
 std::optional<quint32> NativeDisplayConnection::status(const NativeDisplayCorrelation &bound)
@@ -553,6 +560,21 @@ std::optional<quint32> NativeDisplayConnection::status(const NativeDisplayCorrel
     attempt->phase.reset();
     linura_display_attempt_v1_get_status(attempt->native);
     return impl_->completed(*attempt);
+}
+std::optional<quint64>
+NativeDisplayConnection::decisionBootDeadline(const NativeDisplayCorrelation &bound) const
+{
+    const auto found = impl_->attempts.find(bound.transaction);
+    const auto wall = milliseconds(CLOCK_REALTIME), boot = milliseconds(CLOCK_BOOTTIME);
+    if (!impl_->healthy || found == impl_->attempts.end() || !wall || !boot)
+        return std::nullopt;
+    const auto &attempt = *found->second;
+    if (!attempt.original || attempt.bound != bound || !attempt.phase || *attempt.phase != 2 ||
+        attempt.decisionUsed ||
+        !bound.decisionWindow(attempt.startedUnixMs, attempt.startedBootMs, *wall, *boot) ||
+        attempt.deadlineBootMs == 0 || *boot >= attempt.deadlineBootMs)
+        return std::nullopt;
+    return attempt.deadlineBootMs;
 }
 bool NativeDisplayCorrelation::valid() const
 {

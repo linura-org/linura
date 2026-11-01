@@ -130,6 +130,7 @@ class NativeWaylandLock::Impl final
         ext_session_lock_surface_v1 *lockSurface = nullptr;
         linura_protected_display_surface_v1 *displayRole = nullptr;
         quint64 displayHandle = 0, displayGeneration = 0;
+        bool dormantDisplay = false;
         xdg_surface *confirmationRole = nullptr;
         xdg_toplevel *confirmationWindow = nullptr;
         quint32 width = 0;
@@ -232,8 +233,9 @@ class NativeWaylandLock::Impl final
                protectedLast.bootMs - protectedStatusBootMs <= 250 && !protectedOutputs.empty() &&
                std::all_of(protectedOutputs.begin(), protectedOutputs.end(), [](const auto &item) {
                    const auto &output = *item.second;
-                   return output.displayRole && output.configured && !output.needsAck &&
-                          !output.pending;
+                   return output.displayRole &&
+                          (output.dormantDisplay ||
+                           (output.configured && !output.needsAck && !output.pending));
                });
     }
     void cancelProtected()
@@ -327,6 +329,7 @@ class NativeWaylandLock::Impl final
             self.invalidateOutputConfiguration(self.protectedRevisionPending);
             self.protectedStatus.reset();
             output.serial = serial;
+            output.dormantDisplay = false;
             output.width = width;
             output.height = height;
             output.configured = output.needsAck = output.pending = true;
@@ -938,19 +941,20 @@ bool NativeWaylandLock::showProtectedDisplay(const NativeDisplayPromptScope &sco
     }
     std::map<quint64, std::unique_ptr<Impl::Output>> pendingOutputs;
     for (const auto &head : current->topology.heads) {
-        if (!head.enabled)
-            continue;
         const auto native =
             std::find_if(impl_->outputs.begin(), impl_->outputs.end(),
                          [&](const auto &item) { return item.second->nativeName == head.name; });
-        if (native == impl_->outputs.end())
+        if (head.enabled && native == impl_->outputs.end())
             return false;
         auto output = std::make_unique<Impl::Output>();
         output->owner = impl_.get();
-        output->id = native->first;
+        // The painter index is presentation-only; native handle/generation
+        // below remain the sole output identity, including dormant outputs.
+        output->id = native == impl_->outputs.end() ? 0 : native->first;
         output->nativeName = head.name;
         output->displayHandle = head.handle;
         output->displayGeneration = head.generation;
+        output->dormantDisplay = !head.enabled;
         pendingOutputs.emplace(head.handle, std::move(output));
     }
     if (pendingOutputs.empty())
@@ -1011,6 +1015,67 @@ std::optional<NativeDisplayPromptStatus> NativeWaylandLock::protectedDisplayStat
         impl_->keyboard->refreshProtectedFocus(impl_->protectedRevisionPending);
     return impl_->protectedStatus;
 }
+std::optional<quint64>
+NativeWaylandLock::displayDecisionBootDeadline(const NativeDisplayCorrelation &bound)
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping || impl_->displayConnection->status(bound) != 2)
+        return std::nullopt;
+    return impl_->displayConnection->decisionBootDeadline(bound);
+}
+bool NativeWaylandLock::beginProtectedDisplayDecision(const NativeDisplayPromptScope &scope,
+                                                      const NativeDisplayIntent &intent,
+                                                      const NativeDisplayCorrelation &bound)
+{
+    if (thread() != QThread::currentThread() || !impl_->initialized || impl_->painting ||
+        impl_->pumping || !impl_->protectedInteraction || !impl_->protectedScope ||
+        !impl_->protectedConsumed ||
+        impl_->protectedScope->purpose != NativeDisplayPromptScope::Purpose::Apply ||
+        !scope.valid() || scope.purpose == NativeDisplayPromptScope::Purpose::Apply ||
+        scope.digest == impl_->protectedScope->digest ||
+        scope.deadlineUnixMs != bound.deadlineUnixMs || requestedSecure() != secureCoverage())
+        return false;
+    const auto deadline = displayDecisionBootDeadline(bound);
+    const auto sample = impl_->displayConnection->sample();
+    if (!deadline || scope.deadlineBootMs != *deadline || !sample || !sample->fenced ||
+        sample->compositor != impl_->displayInvocation ||
+        sample->topology.generation != impl_->protectedTopology ||
+        sample->coverage != (secureCoverage() ? 1U : 0U) ||
+        (secureCoverage() && !impl_->inputCovered()) ||
+        intent.desired.outputs.size() != sample->current.outputs.size())
+        return false;
+    for (std::size_t i = 0; i < intent.desired.outputs.size(); ++i)
+        if (intent.desired.outputs[i].encode() != sample->current.outputs[i].encode())
+            return false;
+    // Drain old status replies before changing purpose. No old Consumed Apply
+    // reply can qualify the new conversation or cancel a correctly queued one.
+    if (!waitForNativeWaylandReady(impl_->display, std::chrono::milliseconds(250)) ||
+        !impl_->protectedInteraction)
+        return false;
+    for (const auto &head : sample->topology.heads) {
+        const auto at = impl_->protectedOutputs.find(head.handle);
+        if (at == impl_->protectedOutputs.end() || at->second->displayGeneration != head.generation)
+            return false;
+        at->second->dormantDisplay = !head.enabled;
+    }
+    impl_->protectedScope = scope;
+    impl_->protectedBootDeadline = scope.deadlineBootMs;
+    impl_->protectedStatus.reset();
+    impl_->protectedConsumed = impl_->protectedPollPending = false;
+    impl_->protectedRevisionEpoch = impl_->protectedReviewEpochUsed = 0;
+    impl_->protectedRevisionPending = true;
+    impl_->invalidateOutputConfiguration();
+    const auto digest = scope.digest.toLatin1();
+    linura_protected_display_interaction_v1_begin_decision(
+        impl_->protectedInteraction, digest.constData(), static_cast<quint32>(scope.purpose),
+        static_cast<quint32>(scope.deadlineUnixMs >> 32U),
+        static_cast<quint32>(scope.deadlineUnixMs),
+        static_cast<quint32>(scope.deadlineBootMs >> 32U),
+        static_cast<quint32>(scope.deadlineBootMs));
+    impl_->flush();
+    return waitForNativeWaylandReady(impl_->display, std::chrono::milliseconds(250)) &&
+           impl_->protectedInteraction && impl_->protectedWindow();
+}
 bool NativeWaylandLock::refreshProtectedDisplay(const NativeDisplayPromptScope &scope,
                                                 quint64 originalEpoch)
 {
@@ -1022,7 +1087,9 @@ bool NativeWaylandLock::refreshProtectedDisplay(const NativeDisplayPromptScope &
     if (!fresh || fresh->phase != NativeDisplayPromptStatus::Phase::Ready ||
         fresh->epoch != originalEpoch || !impl_->protectedInteraction)
         return false;
-    const auto outputs = static_cast<quint64>(impl_->protectedOutputs.size());
+    const auto outputs = static_cast<quint64>(
+        std::count_if(impl_->protectedOutputs.begin(), impl_->protectedOutputs.end(),
+                      [](const auto &item) { return !item.second->dormantDisplay; }));
     if (outputs == 0 || originalEpoch >= std::numeric_limits<quint64>::max() - outputs - 1)
         return false;
     impl_->protectedRevisionEpoch = originalEpoch + outputs;
@@ -1199,7 +1266,8 @@ std::optional<quint32> NativeWaylandLock::dispatchPreparedDisplay(
     // apply revalidates the complete exact baseline (including mirrors) and
     // native inventory against this same retained immutable snapshot. It
     // reserves the one-use wire attempt before any potentially effectful call.
-    return impl_->displayConnection->apply(correlation, intent.baseline, intent.desired);
+    return impl_->displayConnection->apply(correlation, intent.baseline, intent.desired,
+                                           impl_->protectedInteraction);
 }
 std::optional<quint32>
 NativeWaylandLock::continuePreparedDisplay(const NativeDisplayIntent &intent,

@@ -1,4 +1,5 @@
 #include "compositor_display_service.h"
+#include "mutation_fixture.h"
 
 #include <cassert>
 #include <csignal>
@@ -69,7 +70,8 @@ CompositorDisplayService::Begin begin(CompositorDisplayService &service, NativeF
 {
     const auto captured = compositorClock();
     assert(captured);
-    return service.begin(correlation, baseline, desired, *native.snapshot(), *captured);
+    return service.begin(correlation, baseline, desired, *native.snapshot(), *captured,
+                         std::make_shared<Test::MutationFixture>());
 }
 void independentTimerAfterClientDeath()
 {

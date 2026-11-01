@@ -64,6 +64,21 @@
       <arg name="epoch_hi" type="uint"/>
       <arg name="epoch_lo" type="uint"/>
     </request>
+    <request name="begin_decision">
+      <description summary="fresh decision within the original protected attempt">
+        Only the retained consumed Apply scene can transition to a fresh Keep or
+        Revert scope. Both absolute bounds must equal the original attempt's
+        bounds. All required outputs receive new configure and presentation
+        evidence; Apply input and frames cannot attest this decision. A second
+        decision or any expired, replaced or abandoned context is denied.
+      </description>
+      <arg name="scope_digest" type="string"/>
+      <arg name="purpose" type="uint" enum="linura_protected_display_manager_v1.purpose"/>
+      <arg name="deadline_unix_hi" type="uint"/>
+      <arg name="deadline_unix_lo" type="uint"/>
+      <arg name="deadline_boot_hi" type="uint"/>
+      <arg name="deadline_boot_lo" type="uint"/>
+    </request>
     <event name="status">
       <arg name="compositor_instance" type="string"/>
       <arg name="topology_hi" type="uint"/>

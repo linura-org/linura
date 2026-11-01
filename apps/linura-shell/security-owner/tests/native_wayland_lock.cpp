@@ -989,6 +989,16 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
             // which remaps from wall time would erase this original 2s gap.
             assert(wallRemaining > bootRemaining + 1500 && wallRemaining < bootRemaining + 2500);
         }
+        std::shared_ptr<MutationProtection> reserveMutation(const Correlation &, const Layout &,
+                                                            const Layout &, const Snapshot &,
+                                                            ClockSample) override
+        {
+            return {};
+        }
+        bool beginDecision(const ProtectedInteraction::Scope &) override
+        {
+            return false;
+        }
         bool attach(OutputKey key, wl_resource *resource, Configure configure) override
         {
             if (key != OutputKey{1, 1} || role)

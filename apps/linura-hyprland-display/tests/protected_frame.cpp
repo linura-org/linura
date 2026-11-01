@@ -12,18 +12,25 @@ int main()
     int first = 0, replacement = 0;
     // Safety is a real hardware-presented opaque frame, never review evidence.
     ProtectedFrame frame;
+    assert(!frame.completed());
     assert(frame.rendered(&first, Kind::Safety));
     assert(frame.queued(&first, 1));
     assert(frame.submitted(1, true));
+    assert(!frame.completed());
     assert(frame.presented(1, true) == Presentation::Safety);
+    assert(frame.completed());
     assert(frame.presented(1, true) == Presentation::Ignored);
     assert(frame.rendered(&replacement, Kind::Content));
     assert(!frame.prepared(&first) && frame.prepared(&replacement));
     assert(frame.queued(&replacement, 2));
+    assert(!frame.completed());
     assert(frame.submitted(1, false)); // Late failure of the old frame is irrelevant.
     assert(frame.presented(1, true) == Presentation::Ignored);
     assert(frame.submitted(2, true));
     assert(frame.presented(2, true) == Presentation::Content);
+    assert(frame.completed());
+    frame.invalidate();
+    assert(!frame.completed());
 
     for (unsigned fault = 0; fault != 7; ++fault) {
         ProtectedFrame candidate;

@@ -155,6 +155,20 @@ composition is not production display support: continuous protected modeset,
 Keep/Revert, replacement restoration and native adversarial acceptance remain
 required before the public display effect can be enabled.
 
+The private native apply request additionally binds the actual consumed protected
+interaction resource on the same re-attested connection. The compositor retains
+its opaque/input fence independently of protocol resources, separating the
+expired human proof from the safety lifetime of an already started effect.
+Only its reserved apply/restore stack permits expected geometry changes; static
+output/rule/session/input drift cannot become new authority. Failure or owner
+loss cancels continuation and reserves original compensation. Native restoration
+requires original ownership, fresh baseline geometry, fresh per-enabled-output
+hardware frames and accepted disable submissions before releasing protection.
+Keep and explicit Revert consume a fresh purpose-bound scope within both original
+attempt deadlines; the old Apply epoch cannot serve as that decision. The
+Control-to-owner decision composition and replacement/native acceptance gates
+remain incomplete, and public display mutation stays disabled.
+
 The owner's native peer/session/unit inspectors queue at most 32 fixed
 `Properties.Get` reads per interface before waiting. Each pending call retains
 the existing 500 ms cap from admission, and all batches share their caller's

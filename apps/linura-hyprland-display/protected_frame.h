@@ -68,6 +68,10 @@ class ProtectedFrame final
     {
         return kind_;
     }
+    [[nodiscard]] bool completed() const noexcept
+    {
+        return !failed_ && id_ != 0 && submitted_ && presented_;
+    }
     [[nodiscard]] Kind pendingKind() const noexcept
     {
         return pendingKind_;

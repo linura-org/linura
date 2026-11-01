@@ -1,4 +1,5 @@
 #include "wire_endpoint.h"
+#include "protected_wire.h"
 #include "native_scale.h"
 #include "linura-display-management-v1-server-protocol.h"
 
@@ -451,7 +452,7 @@ class WireEndpoint::Impl final
             wl_client_post_no_memory(client);
         }
     }
-    static void apply(wl_client *client, wl_resource *resource)
+    static void apply(wl_client *client, wl_resource *resource, wl_resource *protection)
     {
         auto &attempt = object<Attempt>(resource);
         if (attempt.used || attempt.invalid || !attempt.captured ||
@@ -482,10 +483,18 @@ class WireEndpoint::Impl final
                 attempt.deny();
                 return;
             }
+            auto fence = ProtectedWireEndpoint::reserveMutation(
+                protection, client, attempt.bound, baseline, desired, attempt.captured->sample,
+                attempt.captured->at);
+            if (!fence) {
+                attempt.deny();
+                return;
+            }
             attempt.owner.origins.emplace(attempt.bound.transaction,
                                           Origin{attempt.client, *invocation});
             (void)attempt.owner.service.begin(attempt.bound, baseline, desired,
-                                              attempt.captured->sample, attempt.captured->at);
+                                              attempt.captured->sample, attempt.captured->at,
+                                              std::move(fence));
             if (!attempt.owner.service.status(attempt.bound))
                 attempt.owner.origins.erase(attempt.bound.transaction);
             attempt.status();

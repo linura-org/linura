@@ -36,7 +36,8 @@ class CompositorDisplayService final
     CompositorDisplayService &operator=(const CompositorDisplayService &) = delete;
 
     [[nodiscard]] Begin begin(const Correlation &, const Layout &baseline, const Layout &desired,
-                              const Snapshot &capturedSnapshot, ClockSample captured);
+                              const Snapshot &capturedSnapshot, ClockSample captured,
+                              std::shared_ptr<MutationProtection>);
     [[nodiscard]] std::optional<Phase> status(const Correlation &) const;
     [[nodiscard]] bool confirm(const Correlation &);
     [[nodiscard]] bool restore(const Correlation &);

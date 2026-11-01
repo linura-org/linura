@@ -1,4 +1,5 @@
 #include "display_transaction.h"
+#include "mutation_fixture.h"
 #include "rule_overlay.h"
 #include "native_scale.h"
 
@@ -101,8 +102,9 @@ class Fixture final : public Backend
 void desiredVerificationAndCorrelation()
 {
     Fixture native;
-    auto attempt = DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
-                                             native.facts, Start);
+    auto attempt =
+        DisplayTransaction::start(native, Bound, native.baseline(), native.desired(), native.facts,
+                                  Start, std::make_shared<Test::MutationFixture>());
     assert(attempt && native.writes == 1 && attempt->fenced());
     for (int field = 0; field != 4; ++field) {
         auto substitute = Bound;
@@ -139,8 +141,9 @@ void deadlinesAndOneCompensation()
           std::optional<ClockSample>({100'100, 49'999}), std::optional<ClockSample>{}}) {
         Fixture native;
         const auto baseline = native.baseline();
-        auto attempt = DisplayTransaction::start(native, Bound, baseline, native.desired(),
-                                                 native.facts, Start);
+        auto attempt =
+            DisplayTransaction::start(native, Bound, baseline, native.desired(), native.facts,
+                                      Start, std::make_shared<Test::MutationFixture>());
         assert(attempt && native.writes == 1);
         attempt->tick(clock);
         assert(native.writes == 2 && attempt->fenced());
@@ -162,8 +165,9 @@ void replyLossAndIndependentRestoration()
         const auto baseline = native.baseline();
         native.acknowledge = false;
         native.throwWrite = exception;
-        auto attempt = DisplayTransaction::start(native, Bound, baseline, native.desired(),
-                                                 native.facts, Start);
+        auto attempt =
+            DisplayTransaction::start(native, Bound, baseline, native.desired(), native.facts,
+                                      Start, std::make_shared<Test::MutationFixture>());
         assert(attempt && native.writes == 2 && attempt->fenced());
         assert(attempt->phase() == DisplayTransaction::Phase::RecoveryFailed);
         native.available = false;
@@ -179,8 +183,9 @@ void replyLossAndIndependentRestoration()
     }
     Fixture native;
     native.performWrite = false;
-    auto attempt = DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
-                                             native.facts, Start);
+    auto attempt =
+        DisplayTransaction::start(native, Bound, native.baseline(), native.desired(), native.facts,
+                                  Start, std::make_shared<Test::MutationFixture>());
     assert(attempt && !attempt->confirm(Bound, {100'100, 50'100}));
     attempt->restore();
     assert(attempt->fenced()); // ACK, including a no-op ACK, is never verification.
@@ -188,8 +193,9 @@ void replyLossAndIndependentRestoration()
     assert(!attempt->fenced());
     Fixture delayed;
     delayed.expireAfterWrite = true;
-    auto expired = DisplayTransaction::start(delayed, Bound, delayed.baseline(), delayed.desired(),
-                                             delayed.facts, Start);
+    auto expired =
+        DisplayTransaction::start(delayed, Bound, delayed.baseline(), delayed.desired(),
+                                  delayed.facts, Start, std::make_shared<Test::MutationFixture>());
     assert(expired && delayed.writes == 2 &&
            expired->phase() == DisplayTransaction::Phase::Restoring);
 }
@@ -202,7 +208,8 @@ void identityAndCoverageFences()
         for (auto &head : native.facts.heads)
             head.covered = true;
         auto attempt = DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
-                                                 native.facts, Start);
+                                                 native.facts, Start,
+                                                 std::make_shared<Test::MutationFixture>());
         assert(attempt && native.writes == 1);
         if (fault == 0)
             ++native.facts.generation;
@@ -231,8 +238,9 @@ void identityAndCoverageFences()
         assert(attempt->fenced() && native.writes == 1);
     }
     Fixture native;
-    auto attempt = DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
-                                             native.facts, Start);
+    auto attempt =
+        DisplayTransaction::start(native, Bound, native.baseline(), native.desired(), native.facts,
+                                  Start, std::make_shared<Test::MutationFixture>());
     native.facts.coverage = Coverage::Secure;
     for (auto &head : native.facts.heads)
         head.covered = true;
@@ -290,13 +298,14 @@ void rejectBeforeWrite()
         if (fault == 15)
             native.facts.securityEpoch = 0;
         assert(!DisplayTransaction::start(native, correlation, baseline, desired, native.facts,
-                                          clock));
+                                          clock, std::make_shared<Test::MutationFixture>()));
         assert(native.writes == 0);
     }
     Fixture native;
     {
         auto attempt = DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
-                                                 native.facts, Start);
+                                                 native.facts, Start,
+                                                 std::make_shared<Test::MutationFixture>());
         assert(attempt && native.writes == 1);
     }
     assert(native.writes == 2); // Ordinary destruction cannot silently disarm.
@@ -341,7 +350,8 @@ void staleCapturedInventoryNeverDispatches()
             native.facts.heads[0].baseRuleWitness = "LNDR:1;1;";
         if (changed == 6)
             native.facts.heads[0].outputIdentityWitness = "LNDF:1;1;";
-        assert(!DisplayTransaction::start(native, Bound, baseline, desired, captured, Start));
+        assert(!DisplayTransaction::start(native, Bound, baseline, desired, captured, Start,
+                                          std::make_shared<Test::MutationFixture>()));
         assert(native.writes == 0);
     }
 }
@@ -389,7 +399,8 @@ void powerCoordinationBeforeWriteAndThroughRecovery()
         Fixture native;
         native.permitInhibitor = false;
         assert(!DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
-                                          native.facts, Start));
+                                          native.facts, Start,
+                                          std::make_shared<Test::MutationFixture>()));
         assert(native.writes == 0 && !native.inhibited && native.inhibitorReleases == 0);
     }
     {
@@ -397,14 +408,15 @@ void powerCoordinationBeforeWriteAndThroughRecovery()
         native.changeDuringInhibition = true;
         const auto captured = native.facts;
         assert(!DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
-                                          captured, Start));
+                                          captured, Start,
+                                          std::make_shared<Test::MutationFixture>()));
         assert(native.writes == 0 && !native.inhibited && native.inhibitorReleases == 1);
     }
     {
         Fixture native;
         const auto baseline = native.baseline(), desired = native.desired();
-        auto attempt =
-            DisplayTransaction::start(native, Bound, baseline, desired, native.facts, Start);
+        auto attempt = DisplayTransaction::start(native, Bound, baseline, desired, native.facts,
+                                                 Start, std::make_shared<Test::MutationFixture>());
         assert(attempt && native.inhibited && native.inhibitorReleases == 0);
         attempt->restore();
         assert(native.writes == 2 && native.inhibited && attempt->fenced());
@@ -421,7 +433,8 @@ void powerCoordinationBeforeWriteAndThroughRecovery()
     {
         Fixture native;
         auto attempt = DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
-                                                 native.facts, Start);
+                                                 native.facts, Start,
+                                                 std::make_shared<Test::MutationFixture>());
         assert(attempt && native.inhibited);
         native.available = false;
         attempt->restore();
@@ -435,7 +448,8 @@ void numericBaselineCannotSubstituteForRestoredOwnership()
     Fixture native;
     const auto baseline = native.baseline();
     auto attempt =
-        DisplayTransaction::start(native, Bound, baseline, native.desired(), native.facts, Start);
+        DisplayTransaction::start(native, Bound, baseline, native.desired(), native.facts, Start,
+                                  std::make_shared<Test::MutationFixture>());
     assert(attempt);
     native.ownedStateRestored = false;
     attempt->restore();
@@ -478,6 +492,64 @@ void overlayCheckpointCannotBeReplacedOrRetargeted()
     checkpoint.retire();
     assert(!checkpoint.retained() && !checkpoint.restoration(native.baseline(), rules, same));
 }
+void nativeProtectionIsRequiredAndRetainedThroughRecovery()
+{
+    Fixture native;
+    assert(!DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
+                                      native.facts, Start, {}));
+    assert(native.writes == 0 && !native.inhibited);
+    auto protection = std::make_shared<Test::MutationFixture>();
+    protection->allowApply = false;
+    assert(!DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
+                                      native.facts, Start, protection));
+    assert(native.writes == 0 && !native.inhibited && protection->releases == 1);
+
+    protection = std::make_shared<Test::MutationFixture>();
+    protection->applyPresented = protection->restorePresented = false;
+    protection->keepDecision = false;
+    auto attempt = DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
+                                             native.facts, Start, protection);
+    assert(attempt && native.writes == 1 && protection->ends == 1);
+    assert(!attempt->confirm(Bound, Start)); // Backend ACK is not presentation.
+    protection->applyPresented = true;
+    assert(!attempt->confirm(Bound, Start)); // Apply proof is not a Keep choice.
+    protection->live = false;                // Owner/resources disappear before the deadline.
+    attempt->tick(Start);
+    assert(native.restores == 1 && protection->restores == 1 && protection->ends == 2);
+    attempt->tick(Start);
+    assert(attempt->phase() == DisplayTransaction::Phase::Restoring && native.inhibited);
+    assert(protection->releases == 0); // Numeric baseline is insufficient.
+    protection->restorePresented = true;
+    attempt->tick(Start);
+    assert(attempt->phase() == DisplayTransaction::Phase::Restored && !native.inhibited);
+    assert(protection->releases == 1 && native.restores == 1);
+}
+void ambiguousWriteAlwaysCompletesItsProtectionStack()
+{
+    Fixture native;
+    native.throwWrite = true;
+    auto protection = std::make_shared<Test::MutationFixture>();
+    auto attempt = DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
+                                             native.facts, Start, protection);
+    assert(attempt && native.writes == 2 && protection->applies == 1 && protection->restores == 1);
+    assert(protection->ends == 2 && protection->releases == 0 && native.inhibited);
+    protection->restorePresented = false;
+    attempt->tick(Start);
+    assert(attempt->fenced() && protection->releases == 0);
+    protection->restorePresented = true;
+    attempt->tick(Start);
+    assert(!attempt->fenced() && protection->releases == 1 && !native.inhibited);
+}
+void scenePreparationCannotRenewTheDispatchBudget()
+{
+    Fixture native;
+    auto protection = std::make_shared<Test::MutationFixture>();
+    protection->onApply = [&] { native.now.bootMs = 65'000; };
+    assert(!DisplayTransaction::start(native, Bound, native.baseline(), native.desired(),
+                                      native.facts, Start, protection));
+    assert(native.writes == 0 && !native.inhibited && protection->ends == 1 &&
+           protection->releases == 1);
+}
 } // namespace
 
 int main()
@@ -493,4 +565,7 @@ int main()
     powerCoordinationBeforeWriteAndThroughRecovery();
     numericBaselineCannotSubstituteForRestoredOwnership();
     overlayCheckpointCannotBeReplacedOrRetargeted();
+    nativeProtectionIsRequiredAndRetainedThroughRecovery();
+    ambiguousWriteAlwaysCompletesItsProtectionStack();
+    scenePreparationCannotRenewTheDispatchBudget();
 }

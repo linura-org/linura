@@ -1,3 +1,6 @@
+#include "protected_wire.h"
+#include "linura-protected-display-v1-client-protocol.h"
+#include "wire_scene_fixture.h"
 #include "wire_endpoint.h"
 #include "linura-display-management-v1-client-protocol.h"
 
@@ -74,6 +77,7 @@ class Harness final
     wl_display *display = wl_display_create();
     std::unique_ptr<CompositorDisplayService> service;
     std::unique_ptr<WireEndpoint> endpoint;
+    std::unique_ptr<ProtectedWireEndpoint> protectedEndpoint;
     std::vector<int> connections;
     std::atomic<bool> stop{false};
     std::atomic<unsigned char> admittedInvocation{1};
@@ -101,6 +105,20 @@ class Harness final
                 return invocation;
             });
         assert(endpoint->available());
+        protectedEndpoint = std::make_unique<ProtectedWireEndpoint>(
+            *display,
+            [this](pid_t pid, uid_t uid) -> std::optional<WireEndpoint::OwnerInvocation> {
+                assert(pid == getpid() && uid == getuid());
+                WireEndpoint::OwnerInvocation invocation{};
+                invocation[0] = admittedInvocation.load();
+                if (invocation[0] == 0)
+                    return std::nullopt;
+                return invocation;
+            },
+            [](const ProtectedInteraction::Scope &) {
+                return std::make_unique<Test::WireSceneFixture>();
+            });
+        assert(protectedEndpoint->available());
         // Create server resources before starting its event thread. Two native
         // connections have identical kernel UID/PID but different ownership.
         for (int i = 0; i != connectionCount; ++i) {
@@ -122,6 +140,7 @@ class Harness final
         server.join();
         wl_display_destroy_clients(display);
         endpoint.reset();
+        protectedEndpoint.reset();
         service.reset();
         wl_display_destroy(display);
     }
@@ -147,6 +166,8 @@ class Client final
   public:
     wl_display *display;
     wl_registry *registry;
+    linura_protected_display_manager_v1 *protectedManager = nullptr;
+    std::vector<linura_protected_display_interaction_v1 *> protections;
     linura_display_manager_v1 *manager = nullptr;
     std::vector<std::unique_ptr<SnapshotData>> snapshots;
     std::vector<std::unique_ptr<Attempt>> attempts;
@@ -159,6 +180,12 @@ class Client final
             [](void *data, wl_registry *registry, std::uint32_t name, const char *interface,
                std::uint32_t) {
                 auto &self = *static_cast<Client *>(data);
+                if (std::strcmp(interface, "linura_protected_display_manager_v1") == 0) {
+                    auto &owner = *static_cast<Client *>(data);
+                    owner.protectedManager =
+                        static_cast<linura_protected_display_manager_v1 *>(wl_registry_bind(
+                            registry, name, &linura_protected_display_manager_v1_interface, 1));
+                }
                 if (std::strcmp(interface, "linura_display_manager_v1") == 0)
                     self.manager = static_cast<linura_display_manager_v1 *>(
                         wl_registry_bind(registry, name, &linura_display_manager_v1_interface, 1));
@@ -179,6 +206,27 @@ class Client final
         }
         assert(manager);
     }
+    linura_protected_display_interaction_v1 *protection(bool consume = true)
+    {
+        const auto now = compositorClock();
+        assert(now && protectedManager);
+        const std::string scope(64, 'e');
+        const auto wall = now->unixMs + 10'000, boot = now->bootMs + 10'000;
+        auto *scene = linura_protected_display_manager_v1_begin(
+            protectedManager, scope.c_str(), 0, static_cast<std::uint32_t>(wall >> 32U),
+            static_cast<std::uint32_t>(wall), static_cast<std::uint32_t>(boot >> 32U),
+            static_cast<std::uint32_t>(boot));
+        assert(scene);
+        static const linura_protected_display_interaction_v1_listener listener{
+            [](void *, linura_protected_display_interaction_v1 *, const char *, std::uint32_t,
+               std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) {},
+            [](void *, linura_protected_display_interaction_v1 *) {}};
+        linura_protected_display_interaction_v1_add_listener(scene, &listener, nullptr);
+        if (consume)
+            linura_protected_display_interaction_v1_consume(scene, scope.c_str(), 0, 1);
+        protections.push_back(scene);
+        return scene;
+    }
     ~Client()
     {
         close();
@@ -194,6 +242,11 @@ class Client final
                 linura_display_head_v1_destroy(head->wire);
             linura_display_snapshot_v1_destroy(snapshot->wire);
         }
+        for (auto *scene : protections)
+            linura_protected_display_interaction_v1_destroy(scene);
+        protections.clear();
+        if (protectedManager)
+            linura_protected_display_manager_v1_destroy(protectedManager);
         linura_display_manager_v1_destroy(manager);
         wl_registry_destroy(registry);
         (void)wl_display_flush(display);
@@ -284,7 +337,7 @@ void ownershipAndOneUse()
     auto &attempt = owner.attempt(bound);
     owner.configure(attempt, sample);
     assert(server.native.writes.load() == 0); // Staging never dispatches.
-    linura_display_attempt_v1_apply(attempt.wire);
+    linura_display_attempt_v1_apply(attempt.wire, owner.protection());
     owner.sync();
     assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_PENDING &&
            server.native.writes.load() == 1);
@@ -298,7 +351,7 @@ void ownershipAndOneUse()
     linura_display_attempt_v1_confirm(continued.wire);
     owner.sync();
     assert(continued.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_CONFIRMED);
-    linura_display_attempt_v1_apply(attempt.wire);
+    linura_display_attempt_v1_apply(attempt.wire, owner.protection());
     owner.sync();
     assert(server.native.writes.load() == 1);
     auto substituted = bound;
@@ -318,7 +371,7 @@ void staleAndCrossSnapshotAreRejected()
     auto &two = client.snapshot();
     auto &wrong = client.attempt(correlation("transaction:wire-cross-snapshot"));
     client.configure(wrong, one, two.heads[0]->wire);
-    linura_display_attempt_v1_apply(wrong.wire);
+    linura_display_attempt_v1_apply(wrong.wire, client.protection());
     client.sync();
     assert(wrong.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED &&
            server.native.writes.load() == 0);
@@ -329,7 +382,7 @@ void staleAndCrossSnapshotAreRejected()
         const std::lock_guard guard(server.native.mutex);
         ++server.native.facts.generation;
     }
-    linura_display_attempt_v1_apply(attempt.wire);
+    linura_display_attempt_v1_apply(attempt.wire, other.protection());
     other.sync();
     assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_REJECTED_BEFORE_DISPATCH &&
            server.native.writes.load() == 0);
@@ -343,7 +396,7 @@ void disconnectRetainsIndependentRestoration()
     const auto bound = correlation("transaction:wire-disconnect", 750);
     auto &attempt = owner.attempt(bound);
     owner.configure(attempt, sample);
-    linura_display_attempt_v1_apply(attempt.wire);
+    linura_display_attempt_v1_apply(attempt.wire, owner.protection());
     owner.sync();
     assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_PENDING &&
            server.native.writes.load() == 1);
@@ -360,7 +413,7 @@ void disconnectRetainsIndependentRestoration()
            server.native.writes.load() == 2);
     const auto facts = server.native.snapshot();
     assert(facts && facts->heads[0].current.mode == server.native.full);
-    linura_display_attempt_v1_apply(status.wire);
+    linura_display_attempt_v1_apply(status.wire, observer.protection());
     observer.sync();
     assert(server.native.writes.load() == 2);
 }
@@ -372,12 +425,12 @@ void admissionDenialCannotWriteOrRetry()
     auto &attempt = client.attempt(correlation("transaction:wire-unattested"));
     client.configure(attempt, sample);
     server.admittedInvocation.store(0);
-    linura_display_attempt_v1_apply(attempt.wire);
+    linura_display_attempt_v1_apply(attempt.wire, client.protection());
     client.sync();
     assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED);
     assert(server.native.writes.load() == 0);
     server.admittedInvocation.store(1);
-    linura_display_attempt_v1_apply(attempt.wire);
+    linura_display_attempt_v1_apply(attempt.wire, client.protection());
     client.sync();
     assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED);
     assert(server.native.writes.load() == 0);
@@ -398,7 +451,7 @@ void rejectedBindingsCannotExhaustProtectedOwnerSlots()
     auto &sample = admitted.snapshot();
     auto &attempt = admitted.attempt(correlation("transaction:wire-admitted-after-denials"));
     admitted.configure(attempt, sample);
-    linura_display_attempt_v1_apply(attempt.wire);
+    linura_display_attempt_v1_apply(attempt.wire, admitted.protection());
     admitted.sync();
     assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_PENDING &&
            server.native.writes.load() == 1);
@@ -414,7 +467,7 @@ void changedInvocationCannotInheritAnAdmittedConnection()
     auto &attempt = client.attempt(correlation("transaction:wire-replaced-before-apply"));
     client.configure(attempt, sample);
     server.admittedInvocation.store(2);
-    linura_display_attempt_v1_apply(attempt.wire);
+    linura_display_attempt_v1_apply(attempt.wire, client.protection());
     client.sync();
     assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED &&
            server.native.writes.load() == 0);
@@ -429,7 +482,7 @@ void changedOrUnavailableOwnerCannotDecideButTimerRecovers()
         const auto bound = correlation("transaction:wire-owner-replaced", 750);
         auto &attempt = owner.attempt(bound);
         owner.configure(attempt, sample);
-        linura_display_attempt_v1_apply(attempt.wire);
+        linura_display_attempt_v1_apply(attempt.wire, owner.protection());
         owner.sync();
         assert(attempt.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_PENDING &&
                server.native.writes.load() == 1);
@@ -456,6 +509,38 @@ void changedOrUnavailableOwnerCannotDecideButTimerRecovers()
                server.native.writes.load() == 2);
     }
 }
+void unconsumedOrReusedSceneCannotDispatch()
+{
+    Harness server;
+    Client owner(server.connections[0]);
+    auto &sample = owner.snapshot();
+    auto &denied = owner.attempt(correlation("transaction:unconsumed-scene"));
+    owner.configure(denied, sample);
+    auto *unconsumed = owner.protection(false);
+    linura_display_attempt_v1_apply(denied.wire, unconsumed);
+    owner.sync();
+    assert(denied.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED && server.native.writes == 0);
+    const std::string digest(64, 'e');
+    linura_protected_display_interaction_v1_consume(unconsumed, digest.c_str(), 0, 1);
+    linura_display_attempt_v1_apply(denied.wire, unconsumed);
+    owner.sync();
+    assert(denied.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED && server.native.writes == 0);
+
+    auto &accepted = owner.attempt(correlation("transaction:consumed-scene"));
+    owner.configure(accepted, sample);
+    linura_display_attempt_v1_apply(accepted.wire, unconsumed);
+    owner.sync();
+    assert(accepted.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_PENDING && server.native.writes == 1);
+    linura_display_attempt_v1_confirm(accepted.wire);
+    owner.sync();
+    assert(accepted.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_CONFIRMED);
+    auto &fresh = owner.snapshot();
+    auto &reused = owner.attempt(correlation("transaction:reused-scene"));
+    owner.configure(reused, fresh);
+    linura_display_attempt_v1_apply(reused.wire, unconsumed);
+    owner.sync();
+    assert(reused.phase == LINURA_DISPLAY_ATTEMPT_V1_PHASE_DENIED && server.native.writes == 1);
+}
 } // namespace
 int main()
 {
@@ -466,4 +551,5 @@ int main()
     rejectedBindingsCannotExhaustProtectedOwnerSlots();
     changedInvocationCannotInheritAnAdmittedConnection();
     changedOrUnavailableOwnerCannotDecideButTimerRecovers();
+    unconsumedOrReusedSceneCannotDispatch();
 }

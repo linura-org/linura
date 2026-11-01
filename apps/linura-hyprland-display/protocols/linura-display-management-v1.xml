@@ -146,7 +146,14 @@
     <request name="disable_head">
       <arg name="head" type="object" interface="linura_display_head_v1"/>
     </request>
-    <request name="apply"/>
+    <request name="apply">
+      <description summary="retain the consumed native protection resource">
+        The interaction must be the original live consumed Apply scene on this
+        same attested connection. It is retained independently through modeset
+        and restoration. Strings or a newly created scene cannot replace it.
+      </description>
+      <arg name="protection" type="object" interface="linura_protected_display_interaction_v1"/>
+    </request>
     <request name="confirm"/>
     <request name="restore"/>
     <request name="get_status"/>

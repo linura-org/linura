@@ -5,6 +5,7 @@
 
 struct wl_display;
 struct wl_registry;
+struct linura_protected_display_interaction_v1;
 
 namespace Linura::SecurityOwner {
 
@@ -62,9 +63,12 @@ class NativeDisplayConnection final
     // native snapshot and all heads stay alive through the one-use wire apply.
     [[nodiscard]] std::optional<quint32> apply(const NativeDisplayCorrelation &,
                                                const NativeDisplayLayout &baseline,
-                                               const NativeDisplayLayout &desired);
+                                               const NativeDisplayLayout &desired,
+                                               linura_protected_display_interaction_v1 *protection);
     // Reconnection can observe a reservation, never acquire its continuation.
     [[nodiscard]] std::optional<quint32> status(const NativeDisplayCorrelation &);
+    [[nodiscard]] std::optional<quint64>
+    decisionBootDeadline(const NativeDisplayCorrelation &) const;
     [[nodiscard]] std::optional<quint32> decide(const NativeDisplayCorrelation &, bool confirm);
 
   private:

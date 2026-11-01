@@ -72,6 +72,7 @@ target_include_directories(linura-hyprland-protected-wire PUBLIC "${CMAKE_CURREN
 target_link_libraries(linura-hyprland-protected-wire PUBLIC linura-hyprland-display-supervisor)
 target_compile_options(linura-hyprland-protected-wire PRIVATE
     -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+target_link_libraries(linura-hyprland-display-wire PUBLIC linura-hyprland-protected-wire)
 
 add_library(linura-hyprland-display-owner STATIC owner_identity.cpp)
 target_link_libraries(linura-hyprland-display-owner PUBLIC linura-hyprland-display-wire)

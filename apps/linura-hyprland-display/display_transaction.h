@@ -94,6 +94,25 @@ class Backend
     virtual void releasePowerInhibitor() noexcept = 0;
 };
 
+// Native scene lifetime acquired from the actual consumed private interaction.
+// This is not authorization: the prepared Rust path still admits the effect.
+// The compositor retains this fence independently of every client resource.
+class MutationProtection
+{
+  public:
+    enum class Write { Apply, Restore };
+    virtual ~MutationProtection() = default;
+    [[nodiscard]] virtual bool healthy() = 0;
+    [[nodiscard]] virtual bool beginWrite(Write, const Snapshot &) = 0;
+    virtual void endWrite(Write) noexcept = 0;
+    // Geometry/acknowledgement alone cannot retire a per-output visual fence.
+    [[nodiscard]] virtual bool presented(Write) = 0;
+    [[nodiscard]] virtual bool consumeKeepDecision() = 0;
+    [[nodiscard]] virtual bool consumeRevertDecision() = 0;
+    // Only a verified terminal state (or a rejection before effects) releases.
+    virtual void release() noexcept = 0;
+};
+
 // A single bounded native mechanism attempt. Rust owns admission, authorization,
 // durable prepare, independent verification and final transaction retirement.
 // The compositor owns this object and its timer independently of every client.
@@ -112,8 +131,9 @@ class DisplayTransaction final
     // again for that durable dispatch, even if its reply was lost.
     [[nodiscard]] static std::unique_ptr<DisplayTransaction>
     start(Backend &, const Correlation &, const Layout &baseline, const Layout &desired,
-          const Snapshot &captured, ClockSample now);
+          const Snapshot &captured, ClockSample now, std::shared_ptr<MutationProtection>);
     [[nodiscard]] bool confirm(const Correlation &, ClockSample now);
+    [[nodiscard]] bool requestRestore(const Correlation &, ClockSample now);
     void restore();
     void tick(std::optional<ClockSample> now);
     [[nodiscard]] Phase phase() const noexcept;
@@ -123,12 +143,14 @@ class DisplayTransaction final
 
   private:
     DisplayTransaction(Backend &, Correlation, Layout baseline, Layout desired, Snapshot,
-                       ClockSample armed, std::uint64_t deadlineBootMs);
+                       ClockSample armed, std::uint64_t deadlineBootMs,
+                       std::shared_ptr<MutationProtection>);
     [[nodiscard]] bool scopeMatches(const Snapshot &);
     [[nodiscard]] bool expired(ClockSample now) const;
     [[nodiscard]] bool matches(const Layout &, const Snapshot &) const;
     void verifyRestoration();
     Backend &backend_;
+    std::shared_ptr<MutationProtection> protection_;
     Correlation correlation_;
     Layout baseline_, desired_;
     Snapshot inventory_;

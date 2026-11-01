@@ -1,3 +1,6 @@
+#include "protected_wire.h"
+#include "linura-protected-display-v1-client-protocol.h"
+#include "tests/wire_scene_fixture.h"
 // Real private protocol client/server component fixture. No native session,
 // root peer, prepared authority, actual compositor or qualification is simulated
 // into a support claim by this test.
@@ -93,6 +96,7 @@ class Harness final
     wl_display *display = wl_display_create();
     std::unique_ptr<CompositorDisplayService> service;
     std::unique_ptr<WireEndpoint> endpoint;
+    std::unique_ptr<ProtectedWireEndpoint> protectedEndpoint;
     std::vector<int> descriptors;
     std::atomic<bool> stopped{false};
     std::thread worker;
@@ -126,6 +130,20 @@ class Harness final
                     return invocation;
                 });
         assert(!publishIntegration || (endpoint && endpoint->available()));
+        protectedEndpoint = std::make_unique<ProtectedWireEndpoint>(
+            *display,
+            [](pid_t pid, uid_t uid) -> std::optional<WireEndpoint::OwnerInvocation> {
+                assert(pid == getpid() && uid == getuid());
+                WireEndpoint::OwnerInvocation invocation{};
+                invocation[0] = 1;
+                if (invocation[0] == 0)
+                    return std::nullopt;
+                return invocation;
+            },
+            [](const ProtectedInteraction::Scope &) {
+                return std::make_unique<Test::WireSceneFixture>();
+            });
+        assert(protectedEndpoint->available());
         for (int i = 0; i < 3; ++i) {
             int pair[2];
             assert(socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair) == 0);
@@ -145,6 +163,7 @@ class Harness final
         worker.join();
         wl_display_destroy_clients(display);
         endpoint.reset();
+        protectedEndpoint.reset();
         service.reset();
         wl_display_destroy(display);
     }
@@ -154,6 +173,8 @@ class Client final
   public:
     wl_display *display;
     wl_registry *registry;
+    linura_protected_display_manager_v1 *protectedManager = nullptr;
+    std::vector<linura_protected_display_interaction_v1 *> protections;
     std::unique_ptr<NativeDisplayConnection> connection;
     explicit Client(int descriptor, bool expectedIntegration = true)
     {
@@ -164,6 +185,12 @@ class Client final
         static const wl_registry_listener listener{
             [](void *data, wl_registry *registry, uint32_t name, const char *interface,
                uint32_t version) {
+                if (std::strcmp(interface, "linura_protected_display_manager_v1") == 0) {
+                    auto &owner = *static_cast<Client *>(data);
+                    owner.protectedManager =
+                        static_cast<linura_protected_display_manager_v1 *>(wl_registry_bind(
+                            registry, name, &linura_protected_display_manager_v1_interface, 1));
+                }
                 if (std::strcmp(interface, "linura_display_manager_v1") == 0)
                     static_cast<Client *>(data)->connection->announce(registry, name, version);
             },
@@ -174,8 +201,34 @@ class Client final
         assert(waitForNativeWaylandReady(display, 250ms));
         assert(connection->advertised() == expectedIntegration);
     }
+    linura_protected_display_interaction_v1 *protection(bool consume = true)
+    {
+        const auto now = compositorClock();
+        assert(now && protectedManager);
+        const std::string scope(64, 'e');
+        const auto wall = now->unixMs + 10'000, boot = now->bootMs + 10'000;
+        auto *scene = linura_protected_display_manager_v1_begin(
+            protectedManager, scope.c_str(), 0, static_cast<std::uint32_t>(wall >> 32U),
+            static_cast<std::uint32_t>(wall), static_cast<std::uint32_t>(boot >> 32U),
+            static_cast<std::uint32_t>(boot));
+        assert(scene);
+        static const linura_protected_display_interaction_v1_listener listener{
+            [](void *, linura_protected_display_interaction_v1 *, const char *, std::uint32_t,
+               std::uint32_t, std::uint32_t, std::uint32_t, std::uint32_t) {},
+            [](void *, linura_protected_display_interaction_v1 *) {}};
+        linura_protected_display_interaction_v1_add_listener(scene, &listener, nullptr);
+        if (consume)
+            linura_protected_display_interaction_v1_consume(scene, scope.c_str(), 0, 1);
+        protections.push_back(scene);
+        return scene;
+    }
     ~Client()
     {
+        for (auto *scene : protections)
+            linura_protected_display_interaction_v1_destroy(scene);
+        protections.clear();
+        if (protectedManager)
+            linura_protected_display_manager_v1_destroy(protectedManager);
         connection.reset();
         wl_registry_destroy(registry);
         wl_display_flush(display);
@@ -209,18 +262,25 @@ void identityAndContinuationOwnership()
     auto prior = baseline(*captured), desired = prior;
     desired.outputs[0].scaleMilli = 1126; // Requires exact native float plus wlr projection.
     desired.outputs[0].x = 100;
-    assert(owner.connection->apply(correlation, prior, desired) == 2);
+    assert(!owner.connection->apply(correlation, prior, desired, nullptr));
+    assert(harness.backend.writes == 0);
+    assert(owner.connection->apply(correlation, prior, desired, owner.protection()) == 2);
+    assert(owner.connection->decisionBootDeadline(correlation) ==
+           captured->sampledBootMs + correlation.deadlineUnixMs - captured->sampledUnixMs);
+    assert(!observer.connection->decisionBootDeadline(correlation));
     assert(harness.backend.writes == 1);
     assert(!owner.connection->securityTransitionAllowed(false));
     assert(!observer.connection->securityTransitionAllowed(false));
     assert(observer.connection->status(correlation) == 2);
     assert(!observer.connection->decide(correlation, true));
-    assert(!observer.connection->apply(correlation, prior, desired));
-    assert(!owner.connection->apply(correlation, prior, desired));
+    assert(!observer.connection->apply(correlation, prior, desired, observer.protection()));
+    assert(!owner.connection->apply(correlation, prior, desired, owner.protection()));
     auto substituted = correlation;
     substituted.dispatchDigest[0] = QLatin1Char('c');
     assert(!owner.connection->status(substituted));
+    assert(!owner.connection->decisionBootDeadline(substituted));
     assert(owner.connection->decide(correlation, true) == 4);
+    assert(!owner.connection->decisionBootDeadline(correlation));
     assert(owner.connection->securityTransitionAllowed(false));
     assert(observer.connection->securityTransitionAllowed(false));
     assert(!owner.connection->decide(correlation, false));
@@ -239,7 +299,7 @@ void clientLossDoesNotDisarmNativeRecovery()
         assert(captured);
         auto prior = baseline(*captured), desired = prior;
         desired.outputs[0].x = 100;
-        assert(owner.connection->apply(correlation, prior, desired) == 2);
+        assert(owner.connection->apply(correlation, prior, desired, owner.protection()) == 2);
     }
     Client replacement(harness.descriptors[1]);
     assert(!replacement.connection->securityTransitionAllowed(false));
@@ -263,11 +323,11 @@ void explicitRevertCannotBecomeAnotherApplyOrDecision()
     assert(captured);
     auto prior = baseline(*captured), desired = prior;
     desired.outputs[0].x = 100;
-    assert(owner.connection->apply(correlation, prior, desired) == 2);
+    assert(owner.connection->apply(correlation, prior, desired, owner.protection()) == 2);
     assert(owner.connection->decide(correlation, false) == 3); // Acknowledged, not verified.
     assert(!owner.connection->decide(correlation, false));
     assert(!owner.connection->decide(correlation, true));
-    assert(!owner.connection->apply(correlation, prior, desired));
+    assert(!owner.connection->apply(correlation, prior, desired, owner.protection()));
     const auto deadline = std::chrono::steady_clock::now() + 2s;
     while (owner.connection->status(correlation) != 5) {
         assert(std::chrono::steady_clock::now() < deadline);
@@ -286,7 +346,7 @@ void expiredDecisionLeavesTheIndependentNativeTimerResponsible()
     assert(captured);
     auto prior = baseline(*captured), desired = prior;
     desired.outputs[0].x = 100;
-    assert(owner.connection->apply(correlation, prior, desired) == 2);
+    assert(owner.connection->apply(correlation, prior, desired, owner.protection()) == 2);
     // Expiry cannot disarm or extend the timer. Both actions remain refused
     // locally even if the client has not observed the restoration reply.
     const auto expiryBudget = std::chrono::steady_clock::now() + 2s;
@@ -322,9 +382,9 @@ void unsupportedBuildAndSubstitutedSnapshotCannotWrite()
     desired.outputs[0].x = 100;
     auto wrongBaseline = prior;
     wrongBaseline.outputs[0].x = -100;
-    assert(!owner.connection->apply(correlation, wrongBaseline, desired));
+    assert(!owner.connection->apply(correlation, wrongBaseline, desired, owner.protection()));
     desired.outputs[0].generation++;
-    assert(!owner.connection->apply(correlation, prior, desired));
+    assert(!owner.connection->apply(correlation, prior, desired, owner.protection()));
     assert(harness.backend.writes == 0);
 }
 void terminalWireObjectsRetireWithoutEvictingOneUseReservations()
@@ -340,10 +400,15 @@ void terminalWireObjectsRetireWithoutEvictingOneUseReservations()
         assert(captured);
         auto prior = baseline(*captured), desired = prior;
         desired.outputs[0].x = (i % 2) ? 100 : 0;
-        assert(owner.connection->apply(correlation, prior, desired) == 2);
+        assert(owner.connection->apply(correlation, prior, desired, owner.protection()) == 2);
         assert(owner.connection->decide(correlation, true) == 4);
         assert(owner.connection->status(correlation) == 4);
-        assert(!owner.connection->apply(correlation, prior, desired));
+        assert(!owner.connection->apply(correlation, prior, desired, owner.protection()));
+        // The reservation is retained by the compositor. Terminal private
+        // conversation resources have their own, smaller bounded lifetime.
+        for (auto *scene : owner.protections)
+            linura_protected_display_interaction_v1_destroy(scene);
+        owner.protections.clear();
     }
     assert(harness.backend.writes == 70);
 }
@@ -363,7 +428,7 @@ void finalNativePowerStateCannotReuseAnEarlierVisibilityReview()
     const auto fresh = owner.connection->sample();
     assert(fresh && fresh->topology == earlier->topology &&
            fresh->current.outputs[0].encode() == earlier->current.outputs[0].encode());
-    assert(!owner.connection->apply(drift, prior, desired));
+    assert(!owner.connection->apply(drift, prior, desired, owner.protection()));
     assert(harness.backend.writes == 0 && !fresh->fenced);
     {
         const std::lock_guard lock(harness.backend.mutex);
@@ -372,7 +437,7 @@ void finalNativePowerStateCannotReuseAnEarlierVisibilityReview()
     // A separate deliberate fixture attempt, never an automatic effect retry.
     const auto next = bound(QStringLiteral("transaction:powered-root"));
     assert(owner.connection->sample());
-    assert(owner.connection->apply(next, prior, desired) == 2);
+    assert(owner.connection->apply(next, prior, desired, owner.protection()) == 2);
     assert(owner.connection->decide(next, false) == 3); // Restoration is not yet verification.
     const auto deadline = std::chrono::steady_clock::now() + 3s;
     while (owner.connection->status(next) != 5) {
@@ -495,7 +560,7 @@ void securityAdmissionRejectsUnknownStateAndRetainsFailedRecoveryFence()
     assert(captured);
     auto prior = baseline(*captured), desired = prior;
     desired.outputs[0].x = 100;
-    assert(owner.connection->apply(correlation, prior, desired) == 2);
+    assert(owner.connection->apply(correlation, prior, desired, owner.protection()) == 2);
     harness.backend.failRestore = true;
     assert(owner.connection->decide(correlation, false) == 6);
     assert(!owner.connection->securityTransitionAllowed(false));

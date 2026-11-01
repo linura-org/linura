@@ -74,11 +74,11 @@ bool CompositorDisplayService::armTimer()
     // cannot reset, cancel or extend this compositor-owned periodic timer.
     return timerfd_settime(timer_, 0, &interval, nullptr) == 0;
 }
-CompositorDisplayService::Begin CompositorDisplayService::begin(const Correlation &correlation,
-                                                                const Layout &baseline,
-                                                                const Layout &desired,
-                                                                const Snapshot &capturedSnapshot,
-                                                                ClockSample captured)
+CompositorDisplayService::Begin
+CompositorDisplayService::begin(const Correlation &correlation, const Layout &baseline,
+                                const Layout &desired, const Snapshot &capturedSnapshot,
+                                ClockSample captured,
+                                std::shared_ptr<MutationProtection> protection)
 {
     const auto retained = reservations_.find(correlation.transaction);
     if (retained != reservations_.end()) {
@@ -87,7 +87,7 @@ CompositorDisplayService::Begin CompositorDisplayService::begin(const Correlatio
                    ? Begin::Existing
                    : Begin::Rejected;
     }
-    if (fenced() || dispatches_.contains(correlation.dispatchDigest) ||
+    if (!protection || fenced() || dispatches_.contains(correlation.dispatchDigest) ||
         reservations_.size() >= MaxReservations || correlation.transaction.size() > 256 ||
         correlation.effectDigest.size() > 64 || correlation.dispatchDigest.size() > 64 ||
         baseline.size() > DisplayTransaction::MaxHeads ||
@@ -117,7 +117,7 @@ CompositorDisplayService::Begin CompositorDisplayService::begin(const Correlatio
         }
     } startingFence{starting_};
     active_ = DisplayTransaction::start(backend_, correlation, baseline, desired, capturedSnapshot,
-                                        captured);
+                                        captured, std::move(protection));
     if (!active_) {
         entry.first->second.phase = Phase::RejectedBeforeDispatch;
         return Begin::Rejected;
@@ -143,9 +143,9 @@ bool CompositorDisplayService::confirm(const Correlation &correlation)
 }
 bool CompositorDisplayService::restore(const Correlation &correlation)
 {
-    if (!active_ || active_->correlation() != correlation || !active_->fenced())
+    const auto now = compositorClock();
+    if (!active_ || !now || !active_->requestRestore(correlation, *now))
         return false;
-    active_->restore();
     recordPhase();
     return true;
 }

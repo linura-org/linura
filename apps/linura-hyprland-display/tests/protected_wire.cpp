@@ -73,6 +73,16 @@ class Scene final : public ProtectedScene
         configured(++serial, 1920, 1080);
         return true;
     }
+    std::shared_ptr<MutationProtection> reserveMutation(const Correlation &, const Layout &,
+                                                        const Layout &, const Snapshot &,
+                                                        ClockSample) override
+    {
+        return {};
+    }
+    bool beginDecision(const ProtectedInteraction::Scope &) override
+    {
+        return false;
+    }
     void close() noexcept override
     {
         // Endpoint ownership must close exactly once even if parent and child
