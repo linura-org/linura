@@ -489,7 +489,7 @@ fn pipe_limit(reader: impl Read, bound: u64) -> Result<Vec<u8>, ProviderError> {
 
 fn dump_current_session() -> Result<String, ProviderError> {
     let runtime = wireplumber_runtime_dir()?;
-    let metadata = fs::metadata(&runtime)
+    let metadata = fs::metadata(std::path::PathBuf::from(&runtime))
         .map_err(|_| ProviderError::Unavailable("PipeWire runtime is inaccessible".into()))?;
     if metadata.uid() != geteuid().as_raw() || metadata.mode() & 0o077 != 0 {
         return Err(ProviderError::Unavailable(
