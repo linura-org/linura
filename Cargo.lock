@@ -611,6 +611,8 @@ dependencies = [
  "linura-core",
  "linura-linux-session",
  "linura-provider-sdk",
+ "rustix",
+ "sha2",
  "zbus",
 ]
 

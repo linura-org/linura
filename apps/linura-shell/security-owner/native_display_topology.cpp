@@ -1,5 +1,7 @@
 #include "native_display_topology.h"
 #include "wlr-output-management-unstable-v1-client-protocol.h"
+#include "recovery_rule.h"
+#include "linura-display-integration-build.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -35,6 +37,14 @@ bool validMode(const NativeDisplayMode &mode)
 QJsonArray modeWire(const NativeDisplayMode &mode)
 {
     return {mode.width, mode.height, mode.refresh};
+}
+bool validDigest(const QString &value)
+{
+    return value.size() == 64 && value != QString(64, QLatin1Char('0')) &&
+           std::all_of(value.cbegin(), value.cend(), [](QChar c) {
+               const auto n = c.unicode();
+               return (n >= '0' && n <= '9') || (n >= 'a' && n <= 'f');
+           });
 }
 } // namespace
 
@@ -78,6 +88,50 @@ QString NativeDisplaySnapshot::encode() const
     return bytes.size() <= 64 * 1024 ? QString::fromUtf8(bytes) : QString{};
 }
 
+QString NativeDisplaySnapshot::recoveryPreimage() const
+{
+    if (heads.empty() || heads.size() > MaximumHeads || generation == 0 ||
+        generation == std::numeric_limits<quint64>::max())
+        return {};
+    QJsonArray rows;
+    std::set<quint64> handles;
+    std::set<std::array<quint32, 3>> devices;
+    for (const auto &head : heads) {
+        const auto bytes = head.baseRulePreimage.toLatin1();
+        const auto &key = head.kernelDrm;
+        if (!handles.insert(head.handle).second || head.handle == 0 || head.generation == 0 ||
+            head.handle == std::numeric_limits<quint64>::max() ||
+            head.generation == std::numeric_limits<quint64>::max() || key[0] != 226 ||
+            key[1] > 63 || key[2] == 0 || !devices.insert(key).second ||
+            !HyprlandDisplay::RecoveryRule::decode(
+                std::string_view(bytes.constData(), static_cast<std::size_t>(bytes.size()))) ||
+            QString::fromLatin1(
+                QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) !=
+                head.baseRuleDigest ||
+            !validDigest(head.outputIdentityDigest) || head.ownedTarget.size() > 512 ||
+            (head.linuraOwned ? !head.ownedTarget.startsWith(QLatin1String("LNOT:1;"))
+                              : !head.ownedTarget.isEmpty()))
+            return {};
+        rows.append(QJsonObject{
+            {"handle", QString::number(head.handle)},
+            {"generation", QString::number(head.generation)},
+            {"kernel_drm", QJsonArray{static_cast<qint64>(key[0]), static_cast<qint64>(key[1]),
+                                      static_cast<qint64>(key[2])}},
+            {"base_rule", head.baseRulePreimage},
+            {"linura_owned", head.linuraOwned},
+            {"owned_target", head.ownedTarget},
+            {"output_identity_digest", head.outputIdentityDigest}});
+    }
+    const auto bytes =
+        QJsonDocument(QJsonObject{{"schema", 1},
+                                  {"upstream", "efb50993780079460b0cbed1363e2166a2de1d9f"},
+                                  {"integration", HyprlandDisplay::IntegrationSourceDigest},
+                                  {"generation", QString::number(generation)},
+                                  {"heads", rows}})
+            .toJson(QJsonDocument::Compact);
+    return bytes.size() <= 256 * 1024 ? QString::fromUtf8(bytes) : QString{};
+}
+
 std::optional<QString> NativeDisplaySnapshot::baselineGuard(const QString &baseline) const
 {
     if (heads.empty() || heads.size() > MaximumHeads || baseline.isEmpty() ||
@@ -89,13 +143,6 @@ std::optional<QString> NativeDisplaySnapshot::baselineGuard(const QString &basel
     std::sort(ordered.begin(), ordered.end(), [](const auto *a, const auto *b) {
         return std::pair{a->handle, a->generation} < std::pair{b->handle, b->generation};
     });
-    auto digest = [](const QString &value) {
-        return value.size() == 64 && value != QString(64, QLatin1Char('0')) &&
-               std::all_of(value.cbegin(), value.cend(), [](QChar c) {
-                   const auto n = c.unicode();
-                   return (n >= '0' && n <= '9') || (n >= 'a' && n <= 'f');
-               });
-    };
     auto append = [](QByteArray &out, const QByteArray &value) {
         const auto size = qToBigEndian(static_cast<quint64>(value.size()));
         out.append(reinterpret_cast<const char *>(&size), sizeof(size));
@@ -106,7 +153,7 @@ std::optional<QString> NativeDisplaySnapshot::baselineGuard(const QString &basel
     for (const auto *head : ordered) {
         if ((last && *last == head->handle) || head->generation == 0 ||
             head->generation == std::numeric_limits<quint64>::max() ||
-            !digest(head->baseRuleDigest) || !digest(head->outputIdentityDigest) ||
+            !validDigest(head->baseRuleDigest) || !validDigest(head->outputIdentityDigest) ||
             head->ownedTarget.size() > 512 ||
             (head->linuraOwned ? !head->ownedTarget.startsWith(QLatin1String("LNOT:1;"))
                                : !head->ownedTarget.isEmpty()))

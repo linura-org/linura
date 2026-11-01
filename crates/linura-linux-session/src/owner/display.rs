@@ -28,8 +28,10 @@ mod decision;
 mod safety;
 pub use decision::NativeDisplayDecisionRequest;
 pub use safety::NativeDisplaySafetyRequest;
+mod preimage;
 mod prepared;
 pub use continuation::NativeDisplayContinuation;
+pub use preimage::NativeDisplayRecoveryCheckpoint;
 
 type Wire = (String, String, String, u64, String, String, bool);
 
@@ -42,6 +44,7 @@ struct PreparedSample {
     digest: linura_provider_sdk::ComponentDigest,
     sampled_boot_ms: u64,
     native_baseline_guard: Option<linura_provider_sdk::ComponentDigest>,
+    recovery_preimage: String,
 }
 
 fn sample_digest(sample: &Wire) -> linura_provider_sdk::ComponentDigest {
@@ -493,10 +496,10 @@ impl NativeSessionChannel {
                 "prepared native display sample has a different authenticated sender".into(),
             );
         }
-        if reply.body().signature().to_string() != "((ssstssb)s)" {
+        if reply.body().signature().to_string() != "((ssstssb)ss)" {
             return Err("prepared native display observation signature mismatch".into());
         }
-        let ((sample, digest),): ((Wire, String),) = reply
+        let ((sample, digest, recovery_preimage),): ((Wire, String, String),) = reply
             .body()
             .deserialize()
             .map_err(|_| "prepared native display observation codec mismatch")?;
@@ -513,6 +516,7 @@ impl NativeSessionChannel {
         if sample_digest(&sample) != digest {
             return Err("prepared native display sample correlation mismatch".into());
         }
+        let recovery_preimage = preimage::checked(recovery_preimage, &sample.4)?;
         self.revalidate_observation(&identity, &boot, started)?;
         let now = unix_ms()?;
         let coverage = observation(
@@ -571,6 +575,7 @@ impl NativeSessionChannel {
                 .recovery_metadata()
                 .map(|_| linura_provider_sdk::display_baseline_guard(&facts))
                 .transpose()?,
+            recovery_preimage,
         })
     }
 

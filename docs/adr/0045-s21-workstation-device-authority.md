@@ -324,6 +324,26 @@ precedence, ICC, VRR, reservations or other unrelated fields. Existing canonical
 witness bytes remain unchanged. This establishes reconstructable comparison
 data, not durable retention, a restoration permit or cross-compositor proof.
 
+The separately admitted root prepared observation also carries the exact
+original-rule preimages and prior overlays, privately schema-bound to the
+sampled output generations, kernel bindings and native identity digests. Rust
+independently decodes the rule representation and matches it against the strict
+sample before constructing an opaque historical checkpoint. Ordinary queries
+still receive comparison hashes only. The root session executor reserves that
+checkpoint before any native apply in `StateDirectory=linura/display-recovery`.
+Every ancestor is root-owned and unwritable by other principals; the final directory is
+0700. Exclusive 0600 single-link files, serialized directory locking, bounded
+history, content checksums, file sync and directory sync protect publication.
+Existing, corrupt, partial, substituted or over-capacity history refuses effects
+without repair or deletion. Root records include the original durable binding,
+intent, sampled owner/boot, source, baseline and deadlines, not credentials.
+Publication consumes the original probe clock and is followed by fresh owner,
+wall/BOOTTIME and native precondition revalidation. These immutable mechanism
+preimages are not a second authority journal. They cannot adopt outputs, replay
+an effect, retire Control ambiguity or authorize restoration. Independently
+retained kernel continuity, supervised replacement recovery and independently
+verified terminal/retention cleanup remain required before public activation.
+
 The exact upstream hook transformations live in the native integration source
 tree as `source_integration.py`. The shared owner/compositor CMake identity hashes
 that recipe alongside the native implementation and protocol. Changing only a

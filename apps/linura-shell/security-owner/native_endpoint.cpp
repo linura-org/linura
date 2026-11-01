@@ -146,7 +146,7 @@ QDBusArgument &operator<<(QDBusArgument &wire,
                           const NativePreparedDisplayObservationWire &observation)
 {
     wire.beginStructure();
-    wire << observation.sample << observation.sampleDigest;
+    wire << observation.sample << observation.sampleDigest << observation.recoveryPreimage;
     wire.endStructure();
     return wire;
 }
@@ -154,7 +154,7 @@ const QDBusArgument &operator>>(const QDBusArgument &wire,
                                 NativePreparedDisplayObservationWire &observation)
 {
     wire.beginStructure();
-    wire >> observation.sample >> observation.sampleDigest;
+    wire >> observation.sample >> observation.sampleDigest >> observation.recoveryPreimage;
     wire.endStructure();
     return wire;
 }
@@ -316,12 +316,16 @@ NativePreparedDisplayObservationWire NativeEndpoint::ObservePreparedDisplay()
         const auto sampled = bootMilliseconds();
         const auto state = runtime_.observePreparedDisplay(message());
         const auto completed = bootMilliseconds();
-        if (sampled && completed && state &&
+        if (sampled && completed && state && !state->recoveryPreimage.isEmpty() &&
+            state->topology.toUtf8().size() + state->monitors.toUtf8().size() +
+                    state->recoveryPreimage.toUtf8().size() <=
+                383 * 1024 &&
             NativeLockObservationWire{state->resource, state->secure, *sampled}.freshAtBootMs(
                 *completed))
             return {{state->resource, state->compositor, state->seat, *sampled, state->topology,
                      state->monitors, state->secure},
-                    state->correlationDigest()};
+                    state->correlationDigest(),
+                    state->recoveryPreimage};
         sendErrorReply(QStringLiteral("org.linura.Private.NativeUnavailable"),
                        QStringLiteral("Native prepared display evidence unavailable"));
     }

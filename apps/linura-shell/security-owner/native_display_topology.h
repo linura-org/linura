@@ -37,6 +37,9 @@ struct NativeDisplayHead final
     bool linuraOwned = false;
     QString baseRuleDigest{}, outputIdentityDigest{}, ownedTarget{};
     std::array<quint32, 3> kernelDrm{};
+    // Root-only prepared observation data. Ordinary encode() never publishes
+    // this preimage. It is not a selector, current proof or restoration permit.
+    QString baseRulePreimage{};
     bool operator==(const NativeDisplayHead &) const = default;
 };
 
@@ -45,6 +48,7 @@ struct NativeDisplaySnapshot final
     quint64 generation = 0;
     std::vector<NativeDisplayHead> heads;
     [[nodiscard]] QString encode() const;
+    [[nodiscard]] QString recoveryPreimage() const;
     // Original canonical baseline comparison; never an execution credential.
     [[nodiscard]] std::optional<QString> baselineGuard(const QString &baseline) const;
     bool operator==(const NativeDisplaySnapshot &) const = default;

@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! Narrow prepared session effector. No planner, policy, durable store,
+//! Narrow prepared session effector. No planner, policy, authority journal,
 //! generic command, authentication response or caller-selected principal.
 
 use std::process::{Command, Stdio};
@@ -13,6 +13,7 @@ use linura_provider_sdk::{
 };
 use zbus::message::Header;
 
+mod display_checkpoint;
 mod introspection;
 
 const ACTION: &str = "org.linura.executor.session.set-secure";
@@ -82,7 +83,13 @@ impl SessionDispatch for NativeSessionChannel {
         deadline_unix_ms: u64,
         native_baseline_guard: &ComponentDigest,
     ) -> Result<u32, String> {
-        self.dispatch_prepared_display(material, binding, deadline_unix_ms, native_baseline_guard)
+        self.dispatch_prepared_display(
+            material,
+            binding,
+            deadline_unix_ms,
+            native_baseline_guard,
+            display_checkpoint::reserve,
+        )
     }
 }
 

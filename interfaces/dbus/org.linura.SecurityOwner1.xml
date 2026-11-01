@@ -108,9 +108,11 @@
       <arg name="observation" type="(ssstssb)" direction="out"/>
     </method>
     <!-- Read-only, admitted only for the independently supervised session executor.
-         sampleDigest correlates strictly parsed raw facts; it is not authority. -->
+         sampleDigest correlates strictly parsed raw facts; it is not authority.
+         The last field retains bounded original rule/overlay preimages for the
+         private root checkpoint. These never enter ordinary observations. -->
     <method name="ObservePreparedDisplay">
-      <arg name="observation" type="((ssstssb)s)" direction="out"/>
+      <arg name="observation" type="((ssstssb)ss)" direction="out"/>
     </method>
     <!-- Read-only; supervised Control only. Complete canonical intent and
          immutable native correlation scope this get_status probe. Phases are

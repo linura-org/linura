@@ -1145,6 +1145,20 @@ rule; it cannot restore an old selector, color/ICC/VRR setting or unrelated rule
 Successful parsing is not current evidence, durable retention, kernel continuity
 or permission to restore, and cannot enable the public mutation path.
 
+The private prepared observation now delivers original rule/overlay preimages
+only to the independently supervised session executor. Rust matches them to
+every exact sampled native identity, kernel binding and ownership digest before
+the root mechanism can reserve a checkpoint. The store has fixed root-owned
+0700 scope, descriptor-relative no-follow access and exclusive 0600 single-link
+records. Directory locking serializes integrity/quota checks and publication;
+both the record and directory must sync before native apply. Partial, altered,
+unexpected, duplicate or full history is retained and fences further writes;
+there is no automatic repair, deletion or replay. Record contents never enter
+public observations or diagnostics. A storage operation cannot freshen either
+original clock, and final native scope/sample checks remain mandatory. This
+adds immutable preimages, not a recovery supervisor, kernel continuity, terminal
+retirement authority or a supported public effect.
+
 Control's separate display safety preparation cancels only human continuation
 in the current owner/lock generation and lets the compositor perform the
 original baseline compensation. It cannot accept a new target, acquire/release

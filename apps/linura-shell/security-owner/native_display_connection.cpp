@@ -311,6 +311,7 @@ class NativeDisplayConnection::Impl final
             // source-versioned digest; never publish raw identity/config bytes.
             head.facts.baseRuleDigest = QString::fromLatin1(
                 QCryptographicHash::hash(*base, QCryptographicHash::Sha256).toHex());
+            head.facts.baseRulePreimage = QString::fromLatin1(*base);
             head.facts.outputIdentityDigest = QString::fromLatin1(
                 QCryptographicHash::hash(*native, QCryptographicHash::Sha256).toHex());
         });

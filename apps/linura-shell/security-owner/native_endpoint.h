@@ -58,6 +58,7 @@ struct NativePreparedDisplayObservationWire final
 {
     NativeDisplayObservationWire sample;
     QString sampleDigest;
+    QString recoveryPreimage;
 };
 QDBusArgument &operator<<(QDBusArgument &wire,
                           const NativePreparedDisplayObservationWire &observation);
@@ -154,7 +155,7 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "direction=\"out\"/></method>"
         "<method name=\"ObserveDisplay\"><arg name=\"observation\" type=\"(ssstssb)\" "
         "direction=\"out\"/></method>"
-        "<method name=\"ObservePreparedDisplay\"><arg name=\"observation\" type=\"((ssstssb)s)\" "
+        "<method name=\"ObservePreparedDisplay\"><arg name=\"observation\" type=\"((ssstssb)ss)\" "
         "direction=\"out\"/></method>"
         "<method name=\"ObserveDisplayAttempt\"><arg name=\"query\" type=\"(sssst)\" "
         "direction=\"in\"/><arg name=\"observation\" type=\"(sssttub)\" "

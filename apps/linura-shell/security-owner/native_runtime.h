@@ -22,6 +22,7 @@ struct NativeDisplaySample final
 {
     QString resource, compositor, seat, topology, monitors;
     bool secure = false;
+    QString recoveryPreimage{};
     [[nodiscard]] QString correlationDigest() const;
 };
 struct NativeDisplayAttemptSample final

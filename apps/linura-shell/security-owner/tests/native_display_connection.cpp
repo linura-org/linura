@@ -518,6 +518,7 @@ void recoveryMetadataIsBoundedAndNeverPublishesNativeIdentityPreimages()
     Client observer(harness.descriptors[0]);
     const auto initial = observer.connection->sample();
     assert(initial);
+    assert(initial->topology.recoveryPreimage().isEmpty()); // Non-DRM stays read-only.
     const auto base = QString::fromLatin1(
         QCryptographicHash::hash(Test::RulePreimage, QCryptographicHash::Sha256).toHex());
     assert(initial->topology.heads[0].baseRuleDigest == base);
@@ -536,6 +537,25 @@ void recoveryMetadataIsBoundedAndNeverPublishesNativeIdentityPreimages()
     assert((owned->topology.heads[0].kernelDrm == std::array<quint32, 3>{226, 0, 1}));
     const auto serialized = owned->topology.encode();
     assert(!serialized.contains("LNDF:") && !serialized.contains("LNDR:"));
+    const auto preimage = owned->topology.recoveryPreimage();
+    const auto recovery = QJsonDocument::fromJson(preimage.toUtf8()).object();
+    assert(!preimage.isEmpty() && recovery.value("schema").toInt() == 1 &&
+           recovery.value("upstream").toString() ==
+               QStringLiteral("efb50993780079460b0cbed1363e2166a2de1d9f") &&
+           recovery.value("integration").toString() ==
+               QString::fromLatin1(IntegrationSourceDigest));
+    const auto saved = recovery.value("heads").toArray().at(0).toObject();
+    assert(saved.value("base_rule").toString() == QString::fromLatin1(Test::RulePreimage) &&
+           saved.value("owned_target").toString() == owned->topology.heads[0].ownedTarget);
+    auto corrupted = owned->topology;
+    corrupted.heads[0].baseRulePreimage += QStringLiteral("0;");
+    assert(corrupted.recoveryPreimage().isEmpty());
+    corrupted = owned->topology;
+    corrupted.heads[0].baseRuleDigest = QString(64, QLatin1Char('a'));
+    assert(corrupted.recoveryPreimage().isEmpty());
+    corrupted = owned->topology;
+    corrupted.heads.push_back(corrupted.heads[0]);
+    assert(corrupted.recoveryPreimage().isEmpty());
     for (const std::string &bad :
          {std::string{}, std::string("LNDF:1;0;"), std::string("LNDF:2;0;"),
           std::string("LNDF:2;226;0;1;\n;"), std::string("LNDF:2;0226;0;1;0;"),

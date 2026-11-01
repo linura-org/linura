@@ -192,6 +192,20 @@ and unrelated settings. This codec is not a store or an execution boundary:
 durable preimage retention, authenticated continuity and independently verified
 restoration are still required before any replacement compositor may use it.
 
+Only the supervised root executor receives original native rule preimages in
+its prepared observation. Rust matches their complete output/ownership/kernel
+scope and checks their canonical representation independently. The executor
+publishes an exclusive immutable private checkpoint and requires both file and
+directory sync before it can call native apply. Root-owned safe ancestors,
+0700/0600 scope, no-follow descriptor-relative access, serialized admission,
+single-link regular files, bounded history and content digests prevent ordinary
+callers from substituting records. Torn, corrupt, duplicate, unavailable or full
+storage refuses dispatch without automatic cleanup. Persistence never renews
+the original probe or confirmation clocks; both are revalidated before native
+handoff. These are historical preimages, not policy, approval or executable
+recovery authority. Replacement continuity, restoration and independent terminal
+verification remain incomplete; public display mutations remain unavailable.
+
 Before lock/power review or native-sleep coverage coordination, Control's private
 safety preparation cancels display continuation in the exact current owner/lock
 generation. It polls restoration readiness within one two-second BOOTTIME budget,

@@ -28,7 +28,7 @@ pub(super) fn coverage(secure: bool) -> ObservationEnvelope {
         1,
     ))
 }
-fn inputs() -> (Value, Value) {
+pub(super) fn inputs() -> (Value, Value) {
     let head = json!({"handle":"1", "generation":"2", "name":"DP-1", "enabled":true,
         "covered":true, "modes":[[1920,1080,59940],[1280,720,60000]], "current_mode":[1920,1080,59940],
         "x":0, "y":0, "transform":0, "scale_fixed":320,

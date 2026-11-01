@@ -1016,12 +1016,18 @@ std::optional<NativeDisplaySample> NativeRuntime::displaySample(const QDBusMessa
     const QString metadata = QString::fromUtf8(*monitors);
     if (topology.isEmpty() || metadata.toUtf8() != *monitors)
         return std::nullopt;
+    const QString recovery = purpose == NativePeerPurpose::PreparedSessionDispatch
+                                 ? after->recoveryPreimage()
+                                 : QString{};
+    if (purpose == NativePeerPurpose::PreparedSessionDispatch && recovery.isEmpty())
+        return std::nullopt;
     return NativeDisplaySample{identity().resource,
                                impl_->backend->displayInvocation(),
                                impl_->binding->seat,
                                topology,
                                metadata,
-                               *settled == NativeObservedLockState::Secure};
+                               *settled == NativeObservedLockState::Secure,
+                               recovery};
 }
 
 std::optional<quint32> NativeRuntime::dispatchPreparedDisplay(

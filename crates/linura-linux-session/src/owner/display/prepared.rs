@@ -38,6 +38,7 @@ impl NativeSessionChannel {
         binding: &ExecutionBinding,
         deadline_unix_ms: u64,
         native_baseline_guard: &linura_provider_sdk::ComponentDigest,
+        checkpoint: impl FnOnce(&NativeDisplayRecoveryCheckpoint) -> Result<(), String>,
     ) -> Result<u32, String> {
         self.require_role(NativeSessionRole::Executor)?;
         validate_handoff(material, binding, deadline_unix_ms, unix_ms()?)?;
@@ -52,6 +53,20 @@ impl NativeSessionChannel {
         let now_boot_ms = boot_ms()?;
         if now_boot_ms < sample.sampled_boot_ms || now_boot_ms - sample.sampled_boot_ms >= 2000 {
             return Err("prepared display sample expired before dispatch".into());
+        }
+        // Native preimages must survive independently BEFORE the first write.
+        // This callback can persist only the already validated opaque record;
+        // it is not a policy or effect callback. Storage failure never dispatches.
+        let record =
+            NativeDisplayRecoveryCheckpoint::capture(material, binding, deadline_unix_ms, &sample)?;
+        checkpoint(&record)?;
+        self.revalidate_observation(&sample.owner, &sample.boot, sample.started)?;
+        validate_handoff(material, binding, deadline_unix_ms, unix_ms()?)?;
+        let after_checkpoint_boot_ms = boot_ms()?;
+        if after_checkpoint_boot_ms < sample.sampled_boot_ms
+            || after_checkpoint_boot_ms - sample.sampled_boot_ms >= 2000
+        {
+            return Err("prepared display sample expired during durable checkpoint".into());
         }
         let query = (
             material,

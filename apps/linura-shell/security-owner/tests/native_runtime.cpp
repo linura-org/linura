@@ -616,7 +616,7 @@ int main(int argc, char **argv)
     assert(QByteArray(QDBusMetaType::typeToSignature(
                QMetaType::fromType<NativeDisplayObservationWire>())) == "(ssstssb)");
     assert(QByteArray(QDBusMetaType::typeToSignature(
-               QMetaType::fromType<NativePreparedDisplayObservationWire>())) == "((ssstssb)s)");
+               QMetaType::fromType<NativePreparedDisplayObservationWire>())) == "((ssstssb)ss)");
     assert(QByteArray(QDBusMetaType::typeToSignature(
                QMetaType::fromType<NativeDisplayAttemptQueryWire>())) == "(sssst)");
     assert(QByteArray(QDBusMetaType::typeToSignature(

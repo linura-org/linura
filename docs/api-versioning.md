@@ -257,15 +257,19 @@ shape, complete inventory and original expiry. Only this method has a 64 KiB
 client reply budget; existing replies retain their 16 KiB limit. Discovery may
 report no powered outputs and grants no mutation, coverage or approval authority.
 
-The owner display projection uses private schema 2, binding the exact native
-thousandth scale and its IEEE float bits to the independent wlr 24.8 projection.
+The owner display projection uses private schema 4, binding the exact native
+thousandth scale and its IEEE float bits to the independent wlr 24.8 projection,
+with generation-bound ownership/identity digests and actual DRM device/connector
+comparison data. Non-DRM outputs remain read-only for mutation qualification.
 The pinned compositor's UUID/output lifetimes replace owner-generated display
 identities. A missing/mismatched live source integration or inconsistent complete
 inventory is unsupported. No schema-1 compatibility path supplies authority.
 
 The separate private `ObservePreparedDisplay` method admits only the supervised
-session executor and returns `((ssstssb)s)`: the same bounded sample plus a
-length-framed SHA-256 content correlation. Rust checks the digest, typed complete
+session executor and returns `((ssstssb)ss)`: the same bounded sample, a
+length-framed SHA-256 content correlation and a separate private original-rule
+preimage. This replaces the Experimental shape coherently; no old-shape shim
+grants preparation. Rust checks the digest, typed complete
 native inventory, original baseline, available desired options, visible recovery
 output and independent per-output coverage before retaining this precondition.
 The digest excludes probe time because it correlates two distinct native probes;
@@ -273,6 +277,17 @@ each conservative boot-clock deadline is checked independently. Neither a sample
 nor its digest is approval or prepared dispatch authority. Only this exact
 method/role pair receives the larger reply cap; errors and other endpoints retain
 their existing limits. This read-only addition does not activate a display write.
+
+The preimage has its own schema, exact upstream/integration identity, complete
+native output/kernel bindings, original owned-rule bytes and prior overlays.
+Rust independently validates its canonical rule encoding and matches every row
+against the sampled topology's hashes/ownership before retention. It stays out
+of ordinary observations. The root executor reserves an immutable private
+`LNRJ:1` checkpoint before native apply; file and directory durability must both
+succeed. Storage work consumes the original probe/confirmation clocks, followed
+by fresh revalidation. No stored bytes, digest or successful sync grants
+restoration authority. Independent continuity, replacement recovery, terminal
+verification and production activation remain incomplete.
 
 `SecurityOwner1.ObserveDisplayAttempt` is a separate read-only Control probe.
 Its `(sssst)` query carries the retained canonical intent and exact native
