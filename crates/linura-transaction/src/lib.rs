@@ -1,9 +1,15 @@
 #![forbid(unsafe_code)]
 
 mod approved_request;
+mod personalization_preference;
 mod protective_lock_setting;
 pub use approved_request::{
     ApprovedRequestJournal, MAX_RETAINED_REQUEST_BYTES, RETAINED_REQUEST_FORMAT, RetainedRequest,
+};
+pub use personalization_preference::{
+    AccentPreset, Density, FontPreset, IconPreset, MAX_PERSONALIZATION_PREFERENCE_BYTES,
+    PERSONALIZATION_REQUEST_PREFIX, PersonalizationChoices, PersonalizationPreferenceRecord,
+    PersonalizationPreferenceUpdate, ThemeMode,
 };
 pub use protective_lock_setting::{
     MAX_PROTECTIVE_LOCK_SETTING_BYTES, ProtectiveLockSettingRecord, ProtectiveLockSettingStore,
