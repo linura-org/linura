@@ -10,6 +10,18 @@ The repository already ships a bounded `NetworkManagerObserver` in `crates/linur
 
 This workstream is defined by `contracts/v010-workstation-slices.toml`, `docs/milestones/v0.10.0.md`, ADR 0031/0032/0033 and `docs/qualification/v0.10.0.md`. S16 is the declared predecessor; completed code/merge evidence and separate physical Q11 release qualification are not interchangeable. A WIP branch is never merged into `main` directly.
 
+## Current WIP implementation checkpoint — observation safety baseline
+
+- **Code state:** Incremental read-only implementation under this WIP branch; **not** a complete S18-1 capability, native acceptance result, or merge proposal.
+- **Native owner:** Resolve the actual NetworkManager system-bus unique owner before manager/device reads, address object reads to that owner, then reject an observed owner replacement. This is one owner-epoch guard, not an atomic cross-object snapshot.
+- **Devices:** Enforce a 128-row post-decoding enumeration limit, bounded interface identifiers, duplicate-interface and duplicate-object-path denial, and a second identity mapping check before publishing a device envelope. The list bound alone does **not** impose a D-Bus wire-byte limit or transport deadline.
+- **Existing contract:** Retain manager and `networkmanager:device:<interface>` query aliases and canonical Control observation. Report owner and selected native radio/config references as correlation attributes, **not** permissions or effect identities. No new mutation or active scan is registered.
+- **Initial regression cases:** Pure tests cover duplicate aliases/paths, oversized enumeration, invalid interface names, owner-epoch mismatch, and property text bounds; they do not replace real NM restart/rename/hotplug/timeout fixtures.
+- **Observed predecessor validation:** A discarded standalone PR candidate failed multiple exact-head workflows because a zbus proxy borrowed a D-Bus object path while its value was moved (`E0505`). The branch integration explicitly drops that proxy before moving the path. All checks must be rerun on **this WIP head** before asserting the fix or any test success.
+- **Outstanding:** Complete typed AP/SSID scan results, saved/active profiles, IPv4/IPv6, DNS, routes, radio/device state, provider generation coherence, bounded native transport/deadlines, repeatable negative fixtures and qualification. Preserve the Phase-1 specifications as the architecture record; this checkpoint does not promote support.
+
+This branch is the **single ongoing S18 WIP workspace**. A previously opened PR (#267) was closed unmerged because implementation PR extraction was premature. Do not infer a PR plan, reviewed status, or permission to merge from this checkpoint.
+
 ## Exact resource, identity and observation requirements
 
 Bind the live `org.freedesktop.NetworkManager` unique D-Bus owner, manager/device/active-connection/settings object generation, native interface identity, boot/session/seat as needed and fresh connectivity, IP/DNS/route observations. Interface names, SSIDs, BSSIDs, UUID strings and object paths on their own are not authorization identities; scan results and cached connection profiles cannot establish current link state. Explicitly distinguish unowned/unmanaged interfaces, absent radios, airplane mode, portal connectivity and daemon restarts.
@@ -18,7 +30,7 @@ Provider and transport objects are adapter mechanisms, not domain authority. Can
 
 ## Operation semantics and authority boundary
 
-Queries (adapter/device/link/connection state, Wi-Fi scan) are `AuthoritativeQuery`; purely local panel selection is `ExperienceEphemeral`. Candidate toggles, connect/disconnect and profile edits require separate trusted descriptors and risk classification. Any privileged connection/profile mutation, durable desired state or uncertain activation is `ManagedExternalEffect`, with one Control-owned authorization/preparation path; never turn a client D-Bus call into an implicit transient shortcut. Do not implement raw NM method forwarding or unrestricted secrets.
+Queries (adapter/device/link/connection state and passive Wi-Fi scan results) are `AuthoritativeQuery`; requesting a fresh active Wi-Fi scan is an external effect requiring separate classification and qualification; purely local panel selection is `ExperienceEphemeral`. Candidate toggles, connect/disconnect and profile edits require separate trusted descriptors and risk classification. Any privileged connection/profile mutation, durable desired state or uncertain activation is `ManagedExternalEffect`, with one Control-owned authorization/preparation path; never turn a client D-Bus call into an implicit transient shortcut. Do not implement raw NM method forwarding or unrestricted secrets.
 
 A mutable effect must follow the exact Control-owned trusted descriptor, authenticated principal, canonical plan, policy and trusted risk floor. `policy allow != executor grant`; `reviewed plan != prepared mutation`; `executor != verification`. No raw commands, ambient credentials, arbitrarily forwarded D-Bus methods or model-selected permits. Qualified transient paths, if any, still require fresh preconditions, narrow unprivileged execution, independent verification and audit.
 
