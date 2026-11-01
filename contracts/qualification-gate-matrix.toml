@@ -1263,6 +1263,10 @@ path = "contracts/v010-s18-design.toml"
 gates = ["v010-workstation"]
 
 [[contract]]
+path = "contracts/v010-s18-pr-decomposition.toml"
+gates = ["v010-workstation"]
+
+[[contract]]
 path = "contracts/v010-s21-design.toml"
 gates = ["v010-workstation"]
 
