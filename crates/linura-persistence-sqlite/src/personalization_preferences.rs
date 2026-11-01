@@ -397,34 +397,66 @@ fn write_identity(
     Ok(())
 }
 
+type SchemaObject = (String, String, String, String);
+
+fn schema_objects(connection: &Connection) -> Result<Vec<SchemaObject>, TransactionStoreError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT type,name,tbl_name,coalesce(sql,'') FROM sqlite_schema ORDER BY name LIMIT 5",
+        )
+        .map_err(sqlite)?;
+    let rows = statement
+        .query_map([], |row| {
+            for field in 0..4 {
+                if row.get_ref(field)?.as_bytes()?.len() > 16384 {
+                    return Err(rusqlite::Error::InvalidQuery);
+                }
+            }
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .map_err(sqlite)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(sqlite)
+}
+
 fn validate(
     connection: &Connection,
     key: &SqliteIntegrityKey,
     authority: &TransactionAuthorityVerifier,
 ) -> Result<Snapshot, TransactionStoreError> {
-    let application: i64 = connection
-        .pragma_query_value(None, "application_id", |row| row.get(0))
-        .map_err(sqlite)?;
-    let version: i64 = connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .map_err(sqlite)?;
-    if application != APPLICATION_ID || version != 1 {
+    // Refuse schema widening, dropped constraints, rogue triggers, injected
+    // tables and changed pragma modes, not just unknown schema version.
+    let reference = Connection::open_in_memory().map_err(sqlite)?;
+    reference.execute_batch(SCHEMA).map_err(sqlite)?;
+    if schema_objects(connection)? != schema_objects(&reference)? {
         return Err(corrupt());
     }
-    let mut schema = connection
-        .prepare(
-            "SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 3",
-        )
+    for (pragma, expected) in [
+        ("application_id", APPLICATION_ID),
+        ("user_version", 1),
+        ("synchronous", 2),
+        ("trusted_schema", 0),
+        ("max_page_count", MAX_PAGES),
+    ] {
+        let actual: i64 = connection
+            .pragma_query_value(None, pragma, |row| row.get(0))
+            .map_err(sqlite)?;
+        if actual != expected {
+            return Err(corrupt());
+        }
+    }
+    let mode: String = connection
+        .pragma_query_value(None, "journal_mode", |row| row.get(0))
         .map_err(sqlite)?;
-    let names = schema
-        .query_map([], |row| row.get::<_, String>(0))
-        .map_err(sqlite)?
-        .collect::<Result<Vec<_>, _>>()
+    let page_count: i64 = connection
+        .pragma_query_value(None, "page_count", |row| row.get(0))
         .map_err(sqlite)?;
-    if names.len() != 2
-        || names[0] != "personalization_identity"
-        || names[1] != "personalization_records"
-    {
+    let page_size: i64 = connection
+        .pragma_query_value(None, "page_size", |row| row.get(0))
+        .map_err(sqlite)?;
+    let identities: i64 = connection
+        .query_row("SELECT count(*) FROM personalization_identity", [], |row| row.get(0))
+        .map_err(sqlite)?;
+    if mode != "wal" || page_count > MAX_PAGES || page_size > 4096 || identities != 1 {
         return Err(corrupt());
     }
 
@@ -704,4 +736,22 @@ mod tests {
         );
         assert!(result.is_err());
     }
+    #[test]
+    fn foreign_schema_object_and_deleted_identity_are_rejected() {
+        let fixture = Fixture::new();
+        let (store, _) = fixture.open();
+        store.connection.execute_batch(
+            "CREATE TABLE unexpected_mutation_surface (value TEXT NOT NULL);",
+        ).unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(store.integrity_check().is_err());
+        drop(store);
+
+        let other = Fixture::new();
+        let (store, _) = other.open();
+        store.connection.execute("DELETE FROM personalization_identity", [])
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(store.integrity_check().is_err());
+    }
+
+
 }
