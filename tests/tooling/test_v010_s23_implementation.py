@@ -41,7 +41,8 @@ class S23WipImplementationGuards(unittest.TestCase):
                 self.assertIn(f"Box::new({class_name}::", daemon)
                 self.assertIn("ObservationAuthority::Filesystem", source)
                 self.assertIn("next_sequence(&self.sequence)", source)
-                self.assertIn("effect_authorized", source)
+                denied_flag = "launch_authorized" if class_name == "XdgApplicationObserver" else "effect_authorized"
+                self.assertIn(denied_flag, source)
                 # Both ownership and execution authority remain outside providers.
                 actual = source.split("\n#[cfg(test)]\nmod tests", maxsplit=1)[0]
                 self.assertNotRegex(actual, r"Command::new|std::process::Command|systemd_run|pacman\s+-")
