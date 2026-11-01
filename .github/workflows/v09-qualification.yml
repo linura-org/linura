@@ -53,6 +53,7 @@ on:
       - "crates/linura-core/**"
       - "crates/linura-hardware/**"
       - "crates/linura-linux-observation/**"
+      - "crates/linura-provider-bluez/**"
       - "crates/linura-linux-session/**"
       - "crates/linura-migrations/**"
       - "crates/linura-observation/**"

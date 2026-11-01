@@ -52,6 +52,7 @@ on:
       - "crates/linura-hardware/**"
       - "crates/linura-dbus/**"
       - "crates/linura-linux-observation/**"
+      - "crates/linura-provider-bluez/**"
       - "crates/linura-linux-session/**"
       - "crates/linura-observation/**"
       - "crates/linura-observation-control/**"

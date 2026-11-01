@@ -129,6 +129,12 @@ forbid_local_prefixes = ["linura-executor-"]
 forbid_external = []
 
 [[rules]]
+package = "linura-provider-bluez"
+forbid_local = ["linura-dbus", "linura-hardware", "linura-planner", "linura-policy", "linura-control", "linura-observation-control", "linura-linux-session", "linura-agent-runtime", "linura-sdk", "linura-transaction", "linura-persistence-sqlite"]
+forbid_local_prefixes = ["linura-executor-", "linura-verifier-"]
+forbid_external = []
+
+[[rules]]
 package = "linura-linux-session"
 forbid_local = ["linura-dbus", "linura-linux-observation", "linura-hardware", "linura-planner", "linura-policy", "linura-control", "linura-observation-control", "linura-agent-runtime", "linura-sdk", "linura-transaction", "linura-persistence-sqlite", "linura-protocol"]
 forbid_local_prefixes = ["linura-executor-", "linura-verifier-"]

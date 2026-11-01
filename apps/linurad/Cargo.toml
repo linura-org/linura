@@ -15,6 +15,7 @@ linura-observation = { path = "../../crates/linura-observation" }
 linura-observation-control = { path = "../../crates/linura-observation-control" }
 linura-protocol = { path = "../../crates/linura-protocol" }
 linura-provider-sdk = { path = "../../crates/linura-provider-sdk" }
+linura-provider-bluez = { path = "../../crates/linura-provider-bluez" }
 rustix = { version = "1.1", features = ["fs"] }
 rusqlite = { version = "0.41", features = ["bundled"] }
 

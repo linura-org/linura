@@ -20,6 +20,7 @@ on:
       - "tests/tooling/test_qualification_evidence.py"
       - ".github/workflows/trusted-release-proof.yml"
       - "crates/linura-linux-observation/**"
+      - "crates/linura-provider-bluez/**"
       - "crates/linura-linux-session/**"
       - "crates/linura-observation/**"
       - "crates/linura-provider-sdk/**"

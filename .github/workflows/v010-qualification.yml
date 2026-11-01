@@ -83,6 +83,7 @@ on:
       - "crates/linura-library/**"
       - "crates/linura-lifecycle/**"
       - "crates/linura-linux-observation/**"
+      - "crates/linura-provider-bluez/**"
       - "crates/linura-linux-session/**"
       - "executors/linura-executor-session/**"
       - "crates/linura-observation/**"
