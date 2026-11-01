@@ -30,6 +30,7 @@ const DEVICE_INTERFACE: &str = "org.bluez.Device1";
 const PROVIDER: &str = "bluez";
 const ADAPTER_CAPABILITY: &str = "bluez.adapter.observe";
 const DEVICE_CAPABILITY: &str = "bluez.device.observe";
+const DISCOVERY_CAPABILITY: &str = "bluez.discovery.observe";
 const BOND_CAPABILITY: &str = "bluez.bond.observe";
 const ADAPTER_RESOURCE: &str = "bluez:adapter:";
 const DEVICE_RESOURCE: &str = "bluez:device:";
@@ -83,7 +84,7 @@ impl Inventory {
                 ProviderError::Unavailable("stale Bluetooth resource owner/boot epoch".into())
             })?;
         let (path, attributes) = match capability.as_str() {
-            ADAPTER_CAPABILITY => {
+            ADAPTER_CAPABILITY | DISCOVERY_CAPABILITY => {
                 let path = key.strip_prefix(ADAPTER_RESOURCE).ok_or_else(|| {
                     ProviderError::Unsupported("adapter capability/resource mismatch".into())
                 })?;
@@ -108,6 +109,19 @@ impl Inventory {
             )
         })?;
         let mut result = attributes.clone();
+        if capability.as_str() == DISCOVERY_CAPABILITY {
+            // Adapter1.Discovering is aggregated state across BlueZ clients.
+            // No owned scan lease, filter, authorization or ability to stop another
+            // client's discovery is established by this passive observation.
+            result.insert(
+                "own_discovery_lease_verified".into(),
+                ObservedValue::Bool(false),
+            );
+            result.insert(
+                "discovery_visibility".into(),
+                ObservedValue::Text("adapter-global-aggregate".into()),
+            );
+        }
         result.insert("object_path".into(), ObservedValue::Text(path.into()));
         result.insert("boot_id".into(), ObservedValue::Text(self.boot_id.clone()));
         result.insert(
@@ -219,7 +233,12 @@ impl Observer for BlueZObserver {
 
     fn observation_capabilities(&self) -> Vec<Capability> {
         let health = self.health();
-        [ADAPTER_CAPABILITY, DEVICE_CAPABILITY, BOND_CAPABILITY]
+        [
+            ADAPTER_CAPABILITY,
+            DEVICE_CAPABILITY,
+            BOND_CAPABILITY,
+            DISCOVERY_CAPABILITY,
+        ]
             .into_iter()
             .map(|id| Capability {
                 id: static_capability(id),
@@ -783,6 +802,39 @@ mod tests {
         source.insert("Alias".into(), str_value(&"X".repeat(MAX_LABEL_BYTES + 1)));
         assert!(parse_device(&source).is_err());
     }
+    #[test]
+    fn passive_discovery_state_never_implies_owned_scan_or_stop_authority() {
+        let inventory = parse(snapshot()).unwrap_or_else(|error| unreachable!("{error}"));
+        let adapter = bound_resource(
+            ADAPTER_RESOURCE,
+            "/org/bluez/hci0",
+            &inventory.boot_id,
+            &inventory.owner,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        let facts = inventory
+            .observe(&adapter, &static_capability(DISCOVERY_CAPABILITY))
+            .unwrap_or_else(|error| unreachable!("{error}"));
+        assert_eq!(facts.get("discovering"), Some(&ObservedValue::Bool(false)));
+        assert_eq!(
+            facts.get("own_discovery_lease_verified"),
+            Some(&ObservedValue::Bool(false))
+        );
+        assert!(facts.get("lease_id").is_none());
+        let device = bound_resource(
+            DEVICE_RESOURCE,
+            "/org/bluez/hci0/dev_11_22_33_44_55_66",
+            &inventory.boot_id,
+            &inventory.owner,
+        )
+        .unwrap_or_else(|error| unreachable!("{error}"));
+        assert!(
+            inventory
+                .observe(&device, &static_capability(DISCOVERY_CAPABILITY))
+                .is_err()
+        );
+    }
+
     #[test]
     fn resource_enumeration_cannot_cross_replaced_owner_or_boot_epoch() {
         let initial = parse(snapshot()).unwrap_or_else(|error| unreachable!("{error}"));
