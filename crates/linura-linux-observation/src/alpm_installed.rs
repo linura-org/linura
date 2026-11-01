@@ -82,7 +82,7 @@ impl AlpmInstalledObserver {
         // Arch local DB schema v9 has one non-package sentinel. Reject any
         // unknown future version rather than parsing incompatible metadata.
         let version = self.read_desc(&self.local_db.join("ALPM_DB_VERSION"))?;
-        if version != b"9\n" && version != b"9" {
+        if version.as_slice() != b"9\n" && version.as_slice() != b"9" {
             return Err(invalid("Unsupported ALPM local database schema version"));
         }
         let mut entries = fs::read_dir(&self.local_db)
@@ -376,8 +376,8 @@ fn parse_files_manifest(content: &[u8]) -> Result<u64, ProviderError> {
         if section=="FILES" {
             if line.len()>4096 || line.chars().any(char::is_control) || line.starts_with('/')
                 || line.split('/').filter(|p| !p.is_empty()).any(|p| p=="." || p=="..")
-                || line.contains("//") || line.trim_end_matches('/').ends_with('/')
-                || !paths.insert(line)
+                || line.contains("//") || line.trim_end_matches('/').is_empty()
+                || !paths.insert(line.trim_end_matches('/'))
             {
                 return Err(invalid("Invalid or duplicate ALPM owned manifest path"));
             }
