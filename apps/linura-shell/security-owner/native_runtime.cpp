@@ -425,8 +425,13 @@ void NativeRuntime::requestNativeUnlock()
         return;
     }
     if (impl_->displayRecoveryNotice) {
+        // "Check display recovery" is an observation-only action. Even when
+        // the compositor has cleared its fence, the same physical input may
+        // not be promoted into a new unlock request or PAM interaction.
+        // Render the ordinary unlock prompt and require a separate gesture.
         impl_->displayRecoveryNotice = false;
         impl_->refreshPresentation();
+        return;
     }
     const auto control = impl_->peers->namedPeer(NativePeerPurpose::ControlApproval);
     if (!control) {
