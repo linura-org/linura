@@ -87,7 +87,7 @@ def validate(plan: dict, design: dict, document: str) -> None:
 
     prs = plan["pull_request"]
     assert [pr["id"] for pr in prs] == EXPECTED_PRS
-    assert [pr.get("reservation_pr") for pr in prs] == [267, 268, 269, 270, 271, 272, 273, None, None, None]
+    assert [pr.get("reservation_pr") for pr in prs] == list(range(267, 277))
     assigned: list[str] = []
     referenced_requirements: set[str] = set()
     referenced_threats: set[str] = set()
@@ -229,10 +229,12 @@ class S18DecompositionTests(unittest.TestCase):
                 validate(mutated, self.design, self.document)
 
     def test_pr_assignment_and_review_base_cannot_drift(self) -> None:
-        for changed in ("pr", "base", "final"):
+        for changed in ("pr", "new_pr", "base", "final"):
             mutated = copy.deepcopy(self.plan)
             if changed == "pr":
                 mutated["pull_request"][2]["reservation_pr"] = 270
+            elif changed == "new_pr":
+                mutated["pull_request"][9]["reservation_pr"] = 275
             elif changed == "base":
                 mutated["base_branch"] = "main"
             else:

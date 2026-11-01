@@ -147,6 +147,7 @@ blocked_until = ["Real native and protected Wi-Fi qualification pending; unsuppo
 
 [[pull_request]]
 id = "S18-8"
+reservation_pr = 274
 slug = "saved-profile-management"
 title = "feat(network): add revisioned connection profile management"
 depends_on = ["S18-2", "S18-3", "S18-4"]
@@ -162,6 +163,7 @@ blocked_until = ["Exact revision CAS, destructive policy and real native setting
 
 [[pull_request]]
 id = "S18-9"
+reservation_pr = 275
 slug = "unified-network-controls"
 title = "feat(shell): add unified network controls"
 depends_on = ["S18-2", "S18-3", "S18-4", "S18-5", "S18-6", "S18-7", "S18-8"]
@@ -177,6 +179,7 @@ blocked_until = ["All required backends accepted and integrated before presentin
 
 [[pull_request]]
 id = "S18-10"
+reservation_pr = 276
 slug = "network-integration-qualification"
 title = "test(qualification): qualify native network integration"
 depends_on = ["S18-1", "S18-2", "S18-3", "S18-4", "S18-5", "S18-6", "S18-7", "S18-8", "S18-9"]

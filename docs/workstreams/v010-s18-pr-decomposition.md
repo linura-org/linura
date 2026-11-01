@@ -2,7 +2,7 @@
 
 > **Design-only extraction contract.** Historical reserved PR numbers are not authorizations, proof of implementation, review readiness or accepted qualification. Preserve the existing `wip/v010-s18-network` implementation; never merge WIP directly. **Do not merge this branch directly.** The new ten-part decomposition follows the S17 identity → Control → native authority → protected security → client → qualification split and the S21 per-feature + convergence + qualification pattern.
 
-**Draft PR base/reference:** `wip/v010-s18-network`. This WIP branch is the authoritative live integration/development source. Each existing reserved PR (#267–#273) targets WIP with a standalone non-executable scope document; it must not be merged into WIP as an implementation claim. After the reviewed implementation is extracted and qualified, rebase/retarget for final integration into accepted `main` without merging the WIP branch wholesale. PRs S18-8–S18-10 are unassigned; no new PRs are opened by this plan.
+**Draft PR base/reference:** `wip/v010-s18-network`. This WIP branch is the authoritative live integration/development source. All ten draft PRs (#267–#276) target WIP with standalone non-executable scope documents; none may be merged into WIP as an implementation claim. After the reviewed implementation is extracted and qualified, rebase/retarget for final integration into accepted `main` without merging the WIP branch wholesale. S18-8, S18-9 and S18-10 are now reserved as draft PRs #274, #275 and #276, respectively.
 
 Source of truth: [Phase-1 inventory](v010-s18-network-phase1.md), [ADR 0048](../adr/0048-s18-networkmanager-authority.md), [inactive effect design](../../contracts/v010-s18-design.toml), [machine-checked decomposition](../../contracts/v010-s18-pr-decomposition.toml).
 
@@ -17,9 +17,9 @@ Existing code changes in the WIP observer now belong **conceptually to S18-2**, 
 | S18-5 | feat(network): add bounded Wi-Fi discovery and scan authority | [#271](https://github.com/linura-org/linura/pull/271) | S18-2, S18-3, S18-4 | `operation:network.wifi.scan` |
 | S18-6 | feat(network): add managed networking and radio controls | [#272](https://github.com/linura-org/linura/pull/272) | S18-2, S18-3, S18-4 | `operation:network.networking.set-enabled`, `operation:network.wifi.set-enabled` |
 | S18-7 | feat(network): add managed connection lifecycle | [#273](https://github.com/linura-org/linura/pull/273) | S18-2, S18-3, S18-4 | `operation:network.connection.activate`, `operation:network.connection.deactivate`, `operation:network.wifi.join` |
-| S18-8 | feat(network): add revisioned connection profile management | Unassigned | S18-2, S18-3, S18-4 | `operation:network.profile.create`, `operation:network.profile.update`, `operation:network.profile.delete` |
-| S18-9 | feat(shell): add unified network controls | Unassigned | S18-2, S18-3, S18-4, S18-5, S18-6, S18-7, S18-8 | none |
-| S18-10 | test(qualification): qualify native network integration | Unassigned | S18-1, S18-2, S18-3, S18-4, S18-5, S18-6, S18-7, S18-8, S18-9 | none |
+| S18-8 | feat(network): add revisioned connection profile management | [#274](https://github.com/linura-org/linura/pull/274) | S18-2, S18-3, S18-4 | `operation:network.profile.create`, `operation:network.profile.update`, `operation:network.profile.delete` |
+| S18-9 | feat(shell): add unified network controls | [#275](https://github.com/linura-org/linura/pull/275) | S18-2, S18-3, S18-4, S18-5, S18-6, S18-7, S18-8 | none |
+| S18-10 | test(qualification): qualify native network integration | [#276](https://github.com/linura-org/linura/pull/276) | S18-1, S18-2, S18-3, S18-4, S18-5, S18-6, S18-7, S18-8, S18-9 | none |
 
 ## Reviewable scopes and acceptance
 
