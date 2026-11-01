@@ -23,7 +23,8 @@ const CAPABILITY: &str = "alpm.package.installed.observe";
 const PREFIX: &str = "alpm:installed:";
 const MAX_PACKAGES: usize = 8192;
 const MAX_DESC: usize = 128 * 1024;
-const MAX_TOTAL: usize = 48 * 1024 * 1024;
+const MAX_FILES_METADATA: usize = 8 * 1024 * 1024;
+const MAX_TOTAL: usize = 128 * 1024 * 1024;
 const MAX_DIR_ENTRIES: usize = MAX_PACKAGES + 2; // Package directories plus ALPM_DB_VERSION.
 const FRESH_MS: u64 = 1000;
 
@@ -35,6 +36,8 @@ struct InstalledPackage {
     reason: u64,
     installed_size: u64,
     installed_size_known: bool,
+    owned_manifest_count: u64,
+    files_sha256: String,
     depends_count: u64,
     provides_count: u64,
     conflicts_count: u64,
@@ -116,11 +119,15 @@ impl AlpmInstalledObserver {
             self.check_dir(&dir_before)?;
             let desc = dir.join("desc");
             let bytes = self.read_desc(&desc)?;
-            total = total.checked_add(bytes.len()).ok_or_else(|| invalid("ALPM byte-budget overflow"))?;
+            let file_bytes = self.read_checked(&dir.join("files"), MAX_FILES_METADATA)?;
+            total = total.checked_add(bytes.len()).and_then(|sum| sum.checked_add(file_bytes.len()))
+                .ok_or_else(|| invalid("ALPM byte-budget overflow"))?;
             if total > MAX_TOTAL {
                 return Err(invalid("ALPM local database exceeds byte budget"));
             }
-            let parsed = parse_desc(&bytes, name)?;
+            let mut parsed = parse_desc(&bytes, name)?;
+            parsed.owned_manifest_count = parse_files_manifest(&file_bytes)?;
+            parsed.files_sha256 = format!("{:x}", Sha256::digest(&file_bytes));
             if packages.insert(parsed.name.clone(), parsed).is_some() {
                 return Err(invalid("Duplicate installed package name"));
             }
@@ -157,22 +164,26 @@ impl AlpmInstalledObserver {
     }
 
     fn read_desc(&self, path: &Path) -> Result<Vec<u8>, ProviderError> {
+        self.read_checked(path, MAX_DESC)
+    }
+
+    fn read_checked(&self, path: &Path, limit: usize) -> Result<Vec<u8>, ProviderError> {
         let fd = open(path, OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK, Mode::empty())
             .map_err(|_| invalid("Unsafe ALPM descriptor open"))?;
         let mut file = File::from(fd);
         let before = file.metadata().map_err(source_error)?;
-        if !before.is_file() || before.len() > MAX_DESC as u64
+        if !before.is_file() || before.len() > limit as u64
             || (self.require_root_owner && before.uid() != 0)
             || before.nlink() != 1
         {
             return Err(invalid("Unsafe ALPM descriptor ownership, links or size"));
         }
         let mut bytes = Vec::new();
-        file.by_ref().take((MAX_DESC + 1) as u64).read_to_end(&mut bytes)
+        file.by_ref().take((limit + 1) as u64).read_to_end(&mut bytes)
             .map_err(source_error)?;
         let after = file.metadata().map_err(source_error)?;
         let path_now = fs::symlink_metadata(path).map_err(source_error)?;
-        if bytes.len() > MAX_DESC || bytes.len() as u64 != before.len()
+        if bytes.len() > limit || bytes.len() as u64 != before.len()
             || !same_revision(&before, &after) || !same_revision(&after, &path_now)
             || !path_now.is_file() || path_now.file_type().is_symlink()
         {
@@ -244,6 +255,9 @@ impl Observer for AlpmInstalledObserver {
                 ("reason".into(), ObservedValue::U64(observed.reason)),
                 ("installed_size".into(), ObservedValue::U64(observed.installed_size)),
                 ("installed_size_known".into(), ObservedValue::Bool(observed.installed_size_known)),
+                ("owned_manifest_count".into(), ObservedValue::U64(observed.owned_manifest_count)),
+                ("files_sha256".into(), ObservedValue::Text(observed.files_sha256)),
+                ("actual_files_verified".into(), ObservedValue::Bool(false)),
                 ("depends_count".into(), ObservedValue::U64(observed.depends_count)),
                 ("provides_count".into(), ObservedValue::U64(observed.provides_count)),
                 ("conflicts_count".into(), ObservedValue::U64(observed.conflicts_count)),
@@ -332,10 +346,48 @@ fn parse_desc(content: &[u8], directory: &str) -> Result<InstalledPackage, Provi
     let hash=Sha256::digest(content);
     Ok(InstalledPackage {
         name, version, architecture, reason, installed_size, installed_size_known,
+        owned_manifest_count: 0, files_sha256: String::new(),
         depends_count: count("DEPENDS")?, provides_count: count("PROVIDES")?,
         conflicts_count: count("CONFLICTS")?, replaces_count: count("REPLACES")?,
         directory: directory.into(), desc_sha256: format!("{hash:x}"),
     })
+}
+
+/// Counts exact declared ownership paths in the ALPM local "files" record.
+/// These are database claims, not proof that on-disk files currently match.
+fn parse_files_manifest(content: &[u8]) -> Result<u64, ProviderError> {
+    let text=std::str::from_utf8(content).map_err(|_| invalid("ALPM file manifest is not UTF-8"))?;
+    let mut section="";
+    let mut fields=BTreeSet::new();
+    let mut paths=BTreeSet::new();
+    for line in text.lines() {
+        let line=line.trim_end_matches('\r');
+        if line.starts_with('%') && line.ends_with('%') && line.len()>2 {
+            let field=&line[1..line.len()-1];
+            if field!="FILES" && field!="BACKUP" {
+                return Err(invalid("Unknown ALPM file-manifest section"));
+            }
+            if !fields.insert(field) { return Err(invalid("Duplicate ALPM manifest field")); }
+            section=field;
+            continue;
+        }
+        if line.is_empty(){continue;}
+        if section.is_empty() { return Err(invalid("Unscoped ALPM file manifest path")); }
+        if section=="FILES" {
+            if line.len()>4096 || line.chars().any(char::is_control) || line.starts_with('/')
+                || line.split('/').filter(|p| !p.is_empty()).any(|p| p=="." || p=="..")
+                || line.contains("//") || line.trim_end_matches('/').ends_with('/')
+                || !paths.insert(line)
+            {
+                return Err(invalid("Invalid or duplicate ALPM owned manifest path"));
+            }
+            if paths.len()>131072 { return Err(invalid("ALPM file manifest path count exceeded")); }
+        } else if line.len()>8192 || line.chars().any(char::is_control) {
+            return Err(invalid("Unsafe ALPM backup record"));
+        }
+    }
+    if !fields.contains("FILES") { return Err(invalid("ALPM files manifest has no FILES section")); }
+    u64::try_from(paths.len()).map_err(|_| invalid("ALPM file-count overflow"))
 }
 
 #[cfg(test)]
@@ -357,6 +409,7 @@ mod tests {
         let dir=local.join(format!("{name}-{version}"));
         assert!(fs::create_dir_all(&dir).is_ok());
         assert!(fs::write(dir.join("desc"),data).is_ok());
+        assert!(fs::write(dir.join("files"),b"%FILES%\nusr/bin/example\nusr/share/example/\n\n%BACKUP%\netc/example.conf d41d8cd98f00b204e9800998ecf8427e\n").is_ok());
     }
     const VALID: &[u8] = b"%NAME%\nexample\n\n%VERSION%\n1.2-1\n\n%ARCH%\nx86_64\n\n%REASON%\n0\n\n%SIZE%\n42\n\n%DEPENDS%\nglibc\n\n";
     #[test]
@@ -371,6 +424,8 @@ mod tests {
         assert_eq!(row.attributes["depends_count"],ObservedValue::U64(1));
         assert_eq!(row.attributes["installed_size"],ObservedValue::U64(42));
         assert_eq!(row.attributes["installed_size_known"],ObservedValue::Bool(true));
+        assert_eq!(row.attributes["owned_manifest_count"],ObservedValue::U64(2));
+        assert_eq!(row.attributes["actual_files_verified"],ObservedValue::Bool(false));
         assert_eq!(row.attributes["signed_repository_verified"],ObservedValue::Bool(false));
         assert_eq!(row.attributes["effect_authorized"],ObservedValue::Bool(false));
         assert_eq!(observer.resources().unwrap_or_else(|e| unreachable!("{e}")).len(),1);
@@ -396,6 +451,13 @@ mod tests {
         let observer=AlpmInstalledObserver::fixture(local,lock);
         assert!(matches!(observer.resources(),Err(ProviderError::InvalidState(_))));
         let _=fs::remove_dir_all(root);
+    }
+    #[test]
+    fn ownership_manifest_rejects_path_traversal_and_duplicates() {
+        assert!(parse_files_manifest(b"%FILES%\nusr/bin/tool\nusr/bin/tool\n").is_err());
+        assert!(parse_files_manifest(b"%FILES%\n../private\n").is_err());
+        assert!(parse_files_manifest(b"%FILES%\n/etc/shadow\n").is_err());
+        assert!(parse_files_manifest(b"%BACKUP%\netc/file abc\n").is_err());
     }
     #[test]
     fn malformed_duplicate_sections_are_not_accepted() {
