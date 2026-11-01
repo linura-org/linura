@@ -226,3 +226,110 @@ require_xdg_mime_precedence_and_safe_write = true
 require_adversarial = true
 require_interruption_no_replay = true
 require_accessibility_and_no_model = true
+
+# Candidate implementation PR boundaries. Design planning ONLY; no registered effects.
+[pr_decomposition]
+status = "proposed"
+adaptive = true
+planned_pr_count = 6
+branch = "wip/v010-s23-applications"
+implementation_base = "main"
+merge_wip_directly = false
+register_effects_from_design = false
+allow_document_only_slice_completion = false
+require_independent_pr_verification = true
+require_exact_head_applicable_gates = true
+require_physical_q11_for_release = true
+s24_keeps_coordinated_upgrade_ownership = true
+unqualified_package_operations_remain_disabled = true
+
+[[implementation_pr]]
+id = "S23-1"
+title = "Application discovery and identity"
+depends_on = []
+phase = "read-only-observation"
+owner = "xdg-application-catalog"
+source_areas = ["apps/linura-shell/integrations/xdg/","crates/linura-linux-observation/","crates/linura-observation/"]
+requirements = ["R23-APP-01","R23-OBS-01"]
+capabilities = ["typed visible XDG application inventory","desktop entry identity and ordered source precedence","current UID/session and file revision binding","re-resolution at use; preserve fixed user-systemd app.slice broker"]
+acceptance = ["catalog matches currently eligible XDG entries without exposing Exec argv","shadowed/changed desktop entries cannot retarget launch","S12/S14 launcher and command palette regressions unchanged"]
+adversarial_cases = ["P23-01","P23-02","P23-03","P23-18","P23-28"]
+native_levels = ["A","B"]
+activation = "observation-only"
+candidate_effect_enabled = false
+
+[[implementation_pr]]
+id = "S23-2"
+title = "Native ALPM installed and repository observation"
+depends_on = []
+phase = "read-only-observation"
+owner = "arch-package-observation"
+source_areas = ["crates/linura-linux-observation/","crates/linura-observation/","crates/linura-observation-control/"]
+requirements = ["R23-OBS-01","R23-PKG-01"]
+capabilities = ["read-only local ALPM installed name epoch version release arch reason ownership","signed and frozen repository catalog provenance with keyring/sync database digest","bounded freshness, local DB lock and coherent PackageUniverseEpoch","unknown/offline/incomplete data is explicitly unavailable"]
+acceptance = ["real Arch local package observations preserve exact installed and available distinctions","source/keyring/database drift invalidates frozen catalog","no pacman package effects or update coordinator bypass"]
+adversarial_cases = ["P23-05","P23-06","P23-16","P23-29"]
+native_levels = ["A"]
+activation = "observation-only"
+candidate_effect_enabled = false
+
+[[implementation_pr]]
+id = "S23-3"
+title = "Dependency closure and protected transaction preflight"
+depends_on = ["S23-2"]
+phase = "planning-only"
+owner = "package-plan-and-impact"
+source_areas = ["crates/linura-planner/","crates/linura-control/","crates/linura-provider-sdk/"]
+requirements = ["R23-PKG-01","R23-PKG-02","R23-AUTH-01"]
+capabilities = ["deterministic complete install/remove/reinstall dependency and reverse dependency closure","immutable exact source/database/lock and reviewed desired state","protected Linura/PAM/Polkit/kernel/seat/session/shared ownership impact","scriptlet/hooks/unknown disk and recovery consequences surfaced, not asserted harmless","no-partial-upgrade and S24 update handoff guard"]
+acceptance = ["preflight is reproducible against unchanged frozen repository and installed graph","mismatch, stale lock, untrusted flags and unqualified recovery deny","planner emits canonical non-executable plan, never pacman command authority"]
+adversarial_cases = ["P23-04","P23-07","P23-08","P23-10","P23-11","P23-12","P23-16","P23-24"]
+native_levels = ["A"]
+activation = "disabled-effect"
+candidate_effect_enabled = false
+
+[[implementation_pr]]
+id = "S23-4"
+title = "Authenticated managed ALPM operations and recovery"
+depends_on = ["S23-3"]
+phase = "managed-effect"
+owner = "package-effect-and-verification"
+source_areas = ["crates/linura-control/","crates/linura-lifecycle/","executors/","crates/linura-linux-observation/"]
+requirements = ["R23-PKG-01","R23-PKG-02","R23-PKG-03","R23-AUTH-01"]
+capabilities = ["trusted registered managed operation and unforgeable current Polkit principal","durable authorized prepare with exact package universe and S24 lock interlock","narrow native ALPM dispatch without raw flags, shell or direct-update bypass","independent installed package/file/owner postcondition verification","indeterminate interruption yields observe-only reconcile without blind replay"]
+acceptance = ["real pinned signed Arch package install/remove/reinstall/selected orphan transactions in disposable VM","lost reply, crash and scriptlet faults cannot report verified success","exact-head security review and safe recovery requirement satisfied before operation activation"]
+adversarial_cases = ["P23-03","P23-04","P23-05","P23-06","P23-07","P23-08","P23-09","P23-10","P23-11","P23-12","P23-13","P23-14","P23-15","P23-24","P23-25","P23-26","P23-30"]
+native_levels = ["A","B"]
+activation = "disabled-until-qualified"
+candidate_effect_enabled = false
+
+[[implementation_pr]]
+id = "S23-5"
+title = "User-level MIME defaults, associations and favorites"
+depends_on = ["S23-1"]
+phase = "managed-user-effect"
+owner = "xdg-handler-and-local-preferences"
+source_areas = ["crates/linura-linux-observation/","crates/linura-control/","apps/linura-shell/plugins/default-apps/","apps/linura-shell/plugins/applications/"]
+requirements = ["R23-XDG-01","R23-XDG-02","R23-AUTH-01"]
+capabilities = ["effective XDG MIME and scheme precedence with eligible desktop source","revision-bound set/reset default and add/remove association typed separately","safe user-owned descriptor and atomic replacement; preserve unrelated groups","fresh independently effective handler verification and fallback after reset","optional revisioned Linura-owned favorites with no launch or installation grant"]
+acceptance = ["native XDG precedence including higher-priority shadow configuration proven","symlink, hardlink, race and foreign UID fail closed","fallback after reset and added/removed associations are accurate"]
+adversarial_cases = ["P23-17","P23-18","P23-19","P23-20","P23-21","P23-22","P23-23","P23-25","P23-26","P23-30"]
+native_levels = ["A","B"]
+activation = "disabled-until-qualified"
+candidate_effect_enabled = false
+
+[[implementation_pr]]
+id = "S23-6"
+title = "Application and package experience plus qualification"
+depends_on = ["S23-1","S23-2","S23-3","S23-4","S23-5"]
+phase = "experience-and-qualification"
+owner = "first-party-ui-and-native-acceptance"
+source_areas = ["apps/linura-shell/plugins/applications/","apps/linura-shell/plugins/packages/","apps/linura-shell/plugins/default-apps/","apps/linuractl/","crates/linura-sdk/","qualification/v010/"]
+requirements = ["R23-UX-01","R23-QUAL-01","R23-APP-01"]
+capabilities = ["one Control-backed typed state and operation surface shared across UI CLI SDK","accessibility, focus/keyboard, HiDPI, progress, no-model and offline truthfulness","package provenance and full impact review before any managed effect","actual disposable Arch A, interactive Hyprland B, separate physical Q11 C evidence","regression inheritance for S12/S14, update guard, S17/S21, S24 handoff"]
+acceptance = ["all 30 S23 adversarial cases traced with exact-head unit/native/security evidence","no UI-approved optimistic outcome without independently verified state","missing physical Q11 and unsupported recovery remain explicit blockers"]
+adversarial_cases = ["P23-01","P23-02","P23-13","P23-14","P23-15","P23-24","P23-27","P23-28","P23-29","P23-30"]
+native_levels = ["A","B","C"]
+activation = "no-release-promotion-without-evidence"
+candidate_effect_enabled = false
+
