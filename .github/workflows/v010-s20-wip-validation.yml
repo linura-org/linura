@@ -43,6 +43,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo +1.98.0 clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Inert S20 authority and extraction contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I -S tests/tooling/test_v010_s20_design.py
+          python3 -I -S tests/tooling/test_v010_s20_pr_extraction.py
       - name: Audio graph and MPRIS unit tests
         shell: bash
         run: |
