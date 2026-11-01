@@ -6,7 +6,6 @@ independently required.
 """
 from __future__ import annotations
 
-import re
 import tomllib
 import unittest
 from pathlib import Path
@@ -44,7 +43,7 @@ class S23WipImplementationGuards(unittest.TestCase):
                 self.assertIn("next_sequence(&self.sequence)", source)
                 self.assertIn("effect_authorized", source)
                 # Both ownership and execution authority remain outside providers.
-                actual = source.split("#[cfg(test)]", maxsplit=1)[0]
+                actual = source.split("\n#[cfg(test)]\nmod tests", maxsplit=1)[0]
                 self.assertNotRegex(actual, r"Command::new|std::process::Command|systemd_run|pacman\s+-")
                 self.assertNotRegex(actual, r"(?<![A-Za-z])write_all\s*\(|\bremove_file\s*\(|\bset_permissions\s*\(")
 
