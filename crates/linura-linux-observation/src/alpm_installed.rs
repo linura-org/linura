@@ -24,7 +24,7 @@ const PREFIX: &str = "alpm:installed:";
 const MAX_PACKAGES: usize = 8192;
 const MAX_DESC: usize = 128 * 1024;
 const MAX_TOTAL: usize = 48 * 1024 * 1024;
-const MAX_DIR_ENTRIES: usize = MAX_PACKAGES + 1;
+const MAX_DIR_ENTRIES: usize = MAX_PACKAGES + 2; // Package directories plus ALPM_DB_VERSION.
 const FRESH_MS: u64 = 1000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -76,6 +76,12 @@ impl AlpmInstalledObserver {
         self.ensure_unlocked()?;
         let before = fs::symlink_metadata(&self.local_db).map_err(source_error)?;
         self.check_dir(&before)?;
+        // Arch local DB schema v9 has one non-package sentinel. Reject any
+        // unknown future version rather than parsing incompatible metadata.
+        let version = self.read_desc(&self.local_db.join("ALPM_DB_VERSION"))?;
+        if version != b"9\n" && version != b"9" {
+            return Err(invalid("Unsupported ALPM local database schema version"));
+        }
         let mut entries = fs::read_dir(&self.local_db)
             .map_err(source_error)?
             .take(MAX_DIR_ENTRIES)
@@ -96,6 +102,12 @@ impl AlpmInstalledObserver {
                 return Err(invalid("Invalid installed package directory"));
             }
             let kind = entry.file_type().map_err(source_error)?;
+            if name == "ALPM_DB_VERSION" {
+                if kind.is_symlink() || !kind.is_file() {
+                    return Err(invalid("Unsafe ALPM database version sentinel"));
+                }
+                continue;
+            }
             if kind.is_symlink() || !kind.is_dir() {
                 return Err(invalid("Unsafe local ALPM package directory"));
             }
@@ -338,6 +350,7 @@ mod tests {
         let local=root.join("local");
         let lock=root.join("db.lck");
         assert!(fs::create_dir_all(&local).is_ok());
+        assert!(fs::write(local.join("ALPM_DB_VERSION"), b"9\n").is_ok());
         (root,local,lock)
     }
     fn package(local:&Path, name:&str,version:&str, data:&[u8]) {
@@ -372,6 +385,15 @@ mod tests {
         assert!(matches!(observer.resources(),Err(ProviderError::Unavailable(_))));
         assert!(fs::remove_file(&lock).is_ok());
         package(&local,"evil","1.2-1",VALID); // directory name disagrees with descriptor
+        assert!(matches!(observer.resources(),Err(ProviderError::InvalidState(_))));
+        let _=fs::remove_dir_all(root);
+    }
+    #[test]
+    fn unknown_schema_version_is_rejected() {
+        let (root,local,lock)=fixture();
+        package(&local,"example","1.2-1",VALID);
+        assert!(fs::write(local.join("ALPM_DB_VERSION"),b"10\n").is_ok());
+        let observer=AlpmInstalledObserver::fixture(local,lock);
         assert!(matches!(observer.resources(),Err(ProviderError::InvalidState(_))));
         let _=fs::remove_dir_all(root);
     }
