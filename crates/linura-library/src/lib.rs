@@ -7,6 +7,7 @@
 //! reconstructs executor authority, approval authority, or privileged tokens.
 
 mod adoption;
+mod catalog;
 mod portable;
 #[path = "proposal_acceptance_secure.rs"]
 mod proposal_acceptance;
@@ -24,6 +25,7 @@ use linura_core::{CapabilityId, IntentId, ProfileId, ProviderId, RequestId, Reso
 use linura_intent::{Intent, MachineProfile, Setup};
 
 pub use adoption::AdoptionContext;
+pub use catalog::{CatalogPage, MAX_CATALOG_PAGE_SIZE};
 pub use portable::{
     PORTABLE_FORMAT_VERSION, PortableProfileBundle, PortableSetupBundle, decode_profile_bundle,
     decode_setup_bundle, encode_profile_bundle, encode_setup_bundle,
