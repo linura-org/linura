@@ -3,6 +3,7 @@
 mod display;
 pub use display::{
     NativeDisplayApprovalPurpose, NativeDisplayApprovalRequest, NativeDisplayContinuation,
+    NativeDisplayDecisionRequest,
 };
 mod polkit;
 mod sleep_fence;

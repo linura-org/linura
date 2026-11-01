@@ -1112,5 +1112,16 @@ completion, and disabled outputs need accepted native disable submissions.
 Restored numeric targets without original ownership or those native observations
 cannot retire recovery. Explicit Keep/Revert consume distinct fresh protected
 scopes at the original attempt deadlines, retaining roles and physical input
-bindings through the transition. This does not complete production decision
-composition, replacement restoration or native adversarial acceptance.
+bindings through the transition. Replacement restoration and native adversarial
+acceptance remain incomplete.
+
+The private Control-to-owner decision adapter now binds a sealed challenge to the
+original durable dispatch, principal, request, material and attempt deadline. A
+fresh first-party Keep/Revert page must receive physical input after new native
+presentation. Apply authentication cannot satisfy this choice; the owner consumes
+its new scope once and the root continuation separately redeems that exact
+receipt. Control polls within a nonrenewable budget and cancels its exact scope
+on refusal, uncertainty or expiry, including replies arriving after expiry.
+Neither the decision digest nor the transport request is a credential. The
+public Authority1 mutation composition remains disabled pending replacement
+restoration, S17/power preemption and real native acceptance.

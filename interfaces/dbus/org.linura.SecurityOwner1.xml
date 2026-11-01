@@ -57,6 +57,38 @@
       <arg name="deadline_boot_ms" type="t" direction="in"/>
       <arg name="cancelled" type="b" direction="out"/>
     </method>
+    <method name="ArmDisplayDecision">
+      <arg name="principal" type="s" direction="in"/>
+      <arg name="request" type="s" direction="in"/>
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="decision_digest" type="s" direction="in"/>
+      <arg name="confirm" type="b" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="DisplayDecisionReady">
+      <arg name="principal" type="s" direction="in"/>
+      <arg name="request" type="s" direction="in"/>
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="decision_digest" type="s" direction="in"/>
+      <arg name="confirm" type="b" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="ConsumeDisplayDecision">
+      <arg name="principal" type="s" direction="in"/>
+      <arg name="request" type="s" direction="in"/>
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="decision_digest" type="s" direction="in"/>
+      <arg name="confirm" type="b" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="CancelDisplayDecision">
+      <arg name="principal" type="s" direction="in"/>
+      <arg name="request" type="s" direction="in"/>
+      <arg name="query" type="(sssst)" direction="in"/>
+      <arg name="decision_digest" type="s" direction="in"/>
+      <arg name="confirm" type="b" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
     <method name="ObserveLock">
       <!-- Consistent in-flight acquisition/release returns the fixed private
            NativeTransitionPending error, never secure=false. Other unknown or

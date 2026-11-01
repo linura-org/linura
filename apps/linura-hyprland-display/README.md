@@ -164,6 +164,11 @@ BOOTTIME bounds, roles, physical input bindings and native commit high-water
 marks, and reconfigures all enabled heads at their new logical geometry. Dormant
 heads have private roles staged before Apply. A saved Apply epoch cannot confirm
 or revert; automatic compensation remains confined to the original baseline.
-These are native mechanism and lifetime contracts. The production Control-to-owner
-decision composition, compositor-replacement restoration and real multi-output /
-adversarial runtime acceptance remain required before public activation.
+Control's sealed decision challenge now reaches this retained scene through the
+private owner adapter. The owner preserves the original reviewed material and
+requires a fresh physical Keep/Revert choice, input/frame generations and a
+one-use receipt before the separately prepared root continuation can proceed.
+Expired, denied, replaced-owner and uncertain calls cancel only that exact scope.
+This composition does not enable the public Authority1 methods: compositor-
+replacement restoration, S17/power preemption and real multi-output/adversarial
+runtime acceptance remain required before public activation.

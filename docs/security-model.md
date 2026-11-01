@@ -166,8 +166,14 @@ requires original ownership, fresh baseline geometry, fresh per-enabled-output
 hardware frames and accepted disable submissions before releasing protection.
 Keep and explicit Revert consume a fresh purpose-bound scope within both original
 attempt deadlines; the old Apply epoch cannot serve as that decision. The
-Control-to-owner decision composition and replacement/native acceptance gates
-remain incomplete, and public display mutation stays disabled.
+Control-to-owner decision adapter preserves the sealed original dispatch,
+principal, request, complete material and absolute deadline. A new native
+Keep/Revert review consumes fresh physical input and per-output presentation;
+the retained Apply receipt or positive Polkit result cannot substitute for it.
+The root continuation must redeem this exact one-use owner receipt in addition
+to its durable Control authorization. Scoped cancellation cannot retire an
+unrelated conversation. Replacement restoration, S17/power preemption and native
+acceptance remain incomplete, and public display mutation stays disabled.
 
 The owner's native peer/session/unit inspectors queue at most 32 fixed
 `Properties.Get` reads per interface before waiting. Each pending call retains

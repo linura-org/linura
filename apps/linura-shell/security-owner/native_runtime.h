@@ -15,6 +15,7 @@
 namespace Linura::SecurityOwner {
 
 enum class NativePeerPurpose;
+struct NativeDisplayChoiceChallenge;
 
 enum class NativeObservedLockState { Unlocked, Secure, Acquiring, Releasing };
 struct NativeDisplaySample final
@@ -53,6 +54,14 @@ class NativeRuntime final : public QObject
                                                            const NativeApprovalScope &);
     [[nodiscard]] bool consumeDisplayApproval(const QDBusMessage &, const NativeApprovalScope &);
     [[nodiscard]] bool cancelDisplayApproval(const QDBusMessage &, const NativeApprovalScope &);
+    [[nodiscard]] bool armDisplayDecision(const QDBusMessage &,
+                                          const NativeDisplayChoiceChallenge &);
+    [[nodiscard]] std::optional<bool> displayDecisionReady(const QDBusMessage &,
+                                                           const NativeDisplayChoiceChallenge &);
+    [[nodiscard]] bool consumeDisplayDecision(const QDBusMessage &,
+                                              const NativeDisplayChoiceChallenge &);
+    [[nodiscard]] bool cancelDisplayDecision(const QDBusMessage &,
+                                             const NativeDisplayChoiceChallenge &);
     [[nodiscard]] bool dispatchPrepared(const QDBusMessage &received,
                                         const NativeLockIdentity &identity, bool secure);
     [[nodiscard]] std::optional<NativeObservedLockState> observe(const QDBusMessage &received);

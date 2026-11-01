@@ -24,6 +24,8 @@ mod approval;
 mod attempt;
 pub use approval::{NativeDisplayApprovalPurpose, NativeDisplayApprovalRequest};
 mod continuation;
+mod decision;
+pub use decision::NativeDisplayDecisionRequest;
 mod prepared;
 pub use continuation::NativeDisplayContinuation;
 

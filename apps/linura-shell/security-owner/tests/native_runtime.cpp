@@ -556,8 +556,10 @@ int main(int argc, char **argv)
     assert(NativeRuntime::staticMetaObject.indexOfMethod("observeDisplayAttempt()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("dispatchPreparedDisplay()") == -1);
     assert(NativeRuntime::staticMetaObject.indexOfMethod("continuePreparedDisplay()") == -1);
-    for (const char *method : {"armDisplayApproval()", "displayApprovalReady()",
-                               "consumeDisplayApproval()", "cancelDisplayApproval()"})
+    for (const char *method :
+         {"armDisplayApproval()", "displayApprovalReady()", "consumeDisplayApproval()",
+          "cancelDisplayApproval()", "armDisplayDecision()", "displayDecisionReady()",
+          "consumeDisplayDecision()", "cancelDisplayDecision()"})
         assert(NativeRuntime::staticMetaObject.indexOfMethod(method) == -1);
 
     const int index = NativeEndpoint::staticMetaObject.indexOfClassInfo("D-Bus Introspection");
@@ -581,9 +583,11 @@ int main(int argc, char **argv)
         if (xml.name() == QLatin1String("annotation"))
             annotations++;
     }
-    assert(!xml.hasError() && methods == 22 && signals == 1 && annotations == 3);
-    for (const char *method : {"ArmDisplayApproval", "DisplayApprovalReady",
-                               "ConsumeDisplayApproval", "CancelDisplayApproval"})
+    assert(!xml.hasError() && methods == 26 && signals == 1 && annotations == 3);
+    for (const char *method :
+         {"ArmDisplayApproval", "DisplayApprovalReady", "ConsumeDisplayApproval",
+          "CancelDisplayApproval", "ArmDisplayDecision", "DisplayDecisionReady",
+          "ConsumeDisplayDecision", "CancelDisplayDecision"})
         assert(introspection.contains(QString::fromLatin1(method)));
     assert(introspection.contains(QStringLiteral("ContinuePreparedDisplay")));
     assert(introspection.contains(QStringLiteral("RetainedVerifiedRelease")));

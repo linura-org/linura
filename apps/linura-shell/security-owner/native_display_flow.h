@@ -12,6 +12,13 @@ namespace Linura::SecurityOwner {
 class NativeWaylandLock;
 class NativePresentation;
 class AuthenticationAgent;
+struct NativeDisplayChoiceChallenge final
+{
+    NativeDisplayCorrelation correlation;
+    QString principal, request, material, digest;
+    bool confirm = false;
+    bool operator==(const NativeDisplayChoiceChallenge &) const = default;
+};
 
 // Trusted native presentation/PAM composition only. It owns no planner, policy,
 // durable signer, executor or public client API. Runtime supplies fresh transport
@@ -33,6 +40,11 @@ class NativeDisplayFlow final : public QObject
     // The trusted runtime calls only after independently admitting the prepared
     // root executor. This reserves the exact live human receipt before effect.
     [[nodiscard]] bool redeem(const NativeDisplayIntent &, const NativeDisplayCorrelation &);
+    [[nodiscard]] bool beginDecision(const NativeDisplayChoiceChallenge &);
+    [[nodiscard]] bool matchesDecision(const NativeDisplayChoiceChallenge &) const;
+    [[nodiscard]] bool decisionReady(const NativeDisplayChoiceChallenge &);
+    [[nodiscard]] bool consumeDecision(const NativeDisplayChoiceChallenge &);
+    [[nodiscard]] bool redeemDecision(const NativeDisplayIntent &, const NativeDisplayDecision &);
     void presentPrompt(const NativeApprovalScope &, quint64 token, Presented);
     void cancel();
     void revalidateOrigin();
@@ -65,6 +77,9 @@ class NativeDisplayFlow final : public QObject
     bool authenticationArmed_ = false, consumed_ = false, spent_ = false;
     bool ownsPresentation_ = false;
     bool awaitingRevision_ = true;
+    bool decisionMode_ = false, decisionReviewed_ = false;
+    std::optional<NativeDisplayCorrelation> dispatched_;
+    std::optional<NativeDisplayChoiceChallenge> choice_;
     struct Pending final
     {
         quint64 token;

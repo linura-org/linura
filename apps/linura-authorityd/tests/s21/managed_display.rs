@@ -506,6 +506,14 @@ impl DisplayDecisionAuthorizer for Decision {
                 .unwrap_or_else(|| unreachable!("no dispatch"))
                 .transaction_id
         );
+        assert_eq!(
+            challenge.dispatch_digest(),
+            m.binding
+                .as_ref()
+                .unwrap_or_else(|| unreachable!("no dispatch"))
+                .dispatch_digest
+                .to_hex()
+        );
         let principal = match self.behavior {
             DecisionBehavior::Deny => return Err("simulated protected cancellation".into()),
             DecisionBehavior::ForeignPrincipal => value(PrincipalId::new("unix:uid:1001")),

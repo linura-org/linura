@@ -128,6 +128,26 @@ class NativeEndpoint final : public QObject, protected QDBusContext
         "<arg name=\"deadline_unix_ms\" type=\"t\" direction=\"in\"/><arg "
         "name=\"deadline_boot_ms\" type=\"t\" direction=\"in\"/>"
         "<arg name=\"cancelled\" type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"ArmDisplayDecision\"><arg name=\"principal\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"request\" type=\"s\" direction=\"in\"/><arg name=\"query\" "
+        "type=\"(sssst)\" direction=\"in\"/><arg name=\"decision_digest\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"confirm\" type=\"b\" direction=\"in\"/><arg "
+        "name=\"accepted\" type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"DisplayDecisionReady\"><arg name=\"principal\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"request\" type=\"s\" direction=\"in\"/><arg name=\"query\" "
+        "type=\"(sssst)\" direction=\"in\"/><arg name=\"decision_digest\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"confirm\" type=\"b\" direction=\"in\"/><arg "
+        "name=\"accepted\" type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"ConsumeDisplayDecision\"><arg name=\"principal\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"request\" type=\"s\" direction=\"in\"/><arg name=\"query\" "
+        "type=\"(sssst)\" direction=\"in\"/><arg name=\"decision_digest\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"confirm\" type=\"b\" direction=\"in\"/><arg "
+        "name=\"accepted\" type=\"b\" direction=\"out\"/></method>"
+        "<method name=\"CancelDisplayDecision\"><arg name=\"principal\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"request\" type=\"s\" direction=\"in\"/><arg name=\"query\" "
+        "type=\"(sssst)\" direction=\"in\"/><arg name=\"decision_digest\" type=\"s\" "
+        "direction=\"in\"/><arg name=\"confirm\" type=\"b\" direction=\"in\"/><arg "
+        "name=\"accepted\" type=\"b\" direction=\"out\"/></method>"
         "<method name=\"ObserveLock\"><arg name=\"observation\" type=\"(sbt)\" "
         "direction=\"out\"/></method>"
         "<method name=\"ObserveDisplay\"><arg name=\"observation\" type=\"(ssstssb)\" "
@@ -197,6 +217,18 @@ class NativeEndpoint final : public QObject, protected QDBusContext
                                const QString &reason, quint64 deadline_unix_ms,
                                quint64 deadline_boot_ms);
     NativeLockObservationWire ObserveLock();
+    bool ArmDisplayDecision(const QString &principal, const QString &request,
+                            const NativeDisplayAttemptQueryWire &, const QString &decisionDigest,
+                            bool confirm);
+    bool DisplayDecisionReady(const QString &principal, const QString &request,
+                              const NativeDisplayAttemptQueryWire &, const QString &decisionDigest,
+                              bool confirm);
+    bool ConsumeDisplayDecision(const QString &principal, const QString &request,
+                                const NativeDisplayAttemptQueryWire &,
+                                const QString &decisionDigest, bool confirm);
+    bool CancelDisplayDecision(const QString &principal, const QString &request,
+                               const NativeDisplayAttemptQueryWire &, const QString &decisionDigest,
+                               bool confirm);
     NativeDisplayObservationWire ObserveDisplay();
     NativePreparedDisplayObservationWire ObservePreparedDisplay();
     NativeDisplayAttemptObservationWire

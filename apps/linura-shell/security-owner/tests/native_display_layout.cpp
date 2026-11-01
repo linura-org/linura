@@ -178,7 +178,11 @@ int main()
         changedReview.display->decisionDigest =
             QStringLiteral("sha256:") + QString(64, QLatin1Char('4'));
         const auto decisionPages = nativeDisplayReviewPages(changedReview, observed);
-        assert(decisionPages && decisionPages->size() == pages->size());
+        // The original 15s window admits one fresh choice over the exact
+        // previously reviewed layout; it must not restart the Apply/PAM pages.
+        assert(decisionPages && decisionPages->size() == 1);
+        assert(decisionPages->front().explanation.contains(QStringLiteral("original timer")));
+        assert(!decisionPages->front().explanation.contains(QStringLiteral("Administrator")));
         assert(decisionPages->at(0).heading.startsWith(purpose == ApprovalPurpose::KeepDisplay
                                                            ? QStringLiteral("Keep")
                                                            : QStringLiteral("Revert")));

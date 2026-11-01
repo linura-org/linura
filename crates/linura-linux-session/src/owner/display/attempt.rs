@@ -14,6 +14,12 @@ pub(super) struct Query<'a> {
     deadline: u64,
 }
 impl<'a> Query<'a> {
+    pub(super) const fn material(&self) -> &DisplayLayoutMaterial<'a> {
+        &self.intent
+    }
+    pub(super) const fn effect_digest(&self) -> ComponentDigest {
+        self.effect
+    }
     pub(super) fn new(
         material: &'a str,
         transaction: &'a str,

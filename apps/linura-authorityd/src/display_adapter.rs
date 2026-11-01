@@ -81,7 +81,7 @@ impl DisplayTransactionPort for SessionExecutorClient {
     }
 }
 
-fn display_material(request: &PlanDesiredStateRequest) -> Result<&str, String> {
+pub(crate) fn display_material(request: &PlanDesiredStateRequest) -> Result<&str, String> {
     if request.provider.as_str() != linura_observation::DISPLAY_PROVIDER
         || request.observation_capability.as_str() != linura_observation::DISPLAY_OUTPUTS_CAPABILITY
         || request.desired_state.len() != 1

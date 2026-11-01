@@ -367,8 +367,11 @@ bool NativePresentation::presentDisplayReview(const NativeApprovalScope &scope,
         return false;
     impl_->displayPage = pages->at(page);
     impl_->displayPage->heading += QStringLiteral(" (%1/%2)").arg(page + 1).arg(pages->size());
-    impl_->displayPrimary =
-        page + 1 == pages->size() ? QStringLiteral("Authenticate") : QStringLiteral("Next");
+    impl_->displayPrimary = scope.purpose == ApprovalPurpose::KeepDisplay ? QStringLiteral("Keep")
+                            : scope.purpose == ApprovalPurpose::RevertDisplay
+                                ? QStringLiteral("Revert")
+                            : page + 1 == pages->size() ? QStringLiteral("Authenticate")
+                                                        : QStringLiteral("Next");
     impl_->authenticationPurpose = scope.purpose;
     impl_->state = authenticating ? State::Authenticating : State::ReviewingDisplay;
     impl_->advanceInteraction();

@@ -1,5 +1,6 @@
 #include "native_endpoint.h"
 #include "native_runtime.h"
+#include "native_display_flow.h"
 
 #include <QDBusMetaType>
 #include <limits>
@@ -396,6 +397,79 @@ quint32 NativeEndpoint::ContinuePreparedDisplay(const NativeDisplayAttemptQueryW
     return 7; // No success, independent verification or retry authority.
 }
 
+bool NativeEndpoint::ArmDisplayDecision(const QString &principal, const QString &request,
+                                        const NativeDisplayAttemptQueryWire &query,
+                                        const QString &decisionDigest, bool confirm)
+{
+    if (!calledFromDBus() || principal.size() > 256 || request.size() > 256 ||
+        query.intent.size() > 4096 || query.transaction.size() > 256 ||
+        query.effectDigest.size() != 64 || query.dispatchDigest.size() != 64 ||
+        decisionDigest.size() != 64)
+        return false;
+    const NativeDisplayChoiceChallenge challenge{
+        {query.transaction, query.effectDigest, query.dispatchDigest, query.deadlineUnixMs},
+        principal,
+        request,
+        query.intent,
+        decisionDigest,
+        confirm};
+    return challenge.correlation.valid() && runtime_.armDisplayDecision(message(), challenge);
+}
+bool NativeEndpoint::DisplayDecisionReady(const QString &principal, const QString &request,
+                                          const NativeDisplayAttemptQueryWire &query,
+                                          const QString &decisionDigest, bool confirm)
+{
+    if (!calledFromDBus() || principal.size() > 256 || request.size() > 256 ||
+        query.intent.size() > 4096 || query.transaction.size() > 256 ||
+        query.effectDigest.size() != 64 || query.dispatchDigest.size() != 64 ||
+        decisionDigest.size() != 64)
+        return false;
+    const NativeDisplayChoiceChallenge challenge{
+        {query.transaction, query.effectDigest, query.dispatchDigest, query.deadlineUnixMs},
+        principal,
+        request,
+        query.intent,
+        decisionDigest,
+        confirm};
+    return challenge.correlation.valid() &&
+           runtime_.displayDecisionReady(message(), challenge).value_or(false);
+}
+bool NativeEndpoint::ConsumeDisplayDecision(const QString &principal, const QString &request,
+                                            const NativeDisplayAttemptQueryWire &query,
+                                            const QString &decisionDigest, bool confirm)
+{
+    if (!calledFromDBus() || principal.size() > 256 || request.size() > 256 ||
+        query.intent.size() > 4096 || query.transaction.size() > 256 ||
+        query.effectDigest.size() != 64 || query.dispatchDigest.size() != 64 ||
+        decisionDigest.size() != 64)
+        return false;
+    const NativeDisplayChoiceChallenge challenge{
+        {query.transaction, query.effectDigest, query.dispatchDigest, query.deadlineUnixMs},
+        principal,
+        request,
+        query.intent,
+        decisionDigest,
+        confirm};
+    return challenge.correlation.valid() && runtime_.consumeDisplayDecision(message(), challenge);
+}
+bool NativeEndpoint::CancelDisplayDecision(const QString &principal, const QString &request,
+                                           const NativeDisplayAttemptQueryWire &query,
+                                           const QString &decisionDigest, bool confirm)
+{
+    if (!calledFromDBus() || principal.size() > 256 || request.size() > 256 ||
+        query.intent.size() > 4096 || query.transaction.size() > 256 ||
+        query.effectDigest.size() != 64 || query.dispatchDigest.size() != 64 ||
+        decisionDigest.size() != 64)
+        return false;
+    const NativeDisplayChoiceChallenge challenge{
+        {query.transaction, query.effectDigest, query.dispatchDigest, query.deadlineUnixMs},
+        principal,
+        request,
+        query.intent,
+        decisionDigest,
+        confirm};
+    return challenge.correlation.valid() && runtime_.cancelDisplayDecision(message(), challenge);
+}
 bool NativeEndpoint::DispatchPreparedLock(const QString &resource, bool secure)
 {
     const auto lock = NativeLockIdentity::parse(resource);

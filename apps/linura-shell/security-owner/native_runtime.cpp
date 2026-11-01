@@ -706,6 +706,42 @@ bool NativeRuntime::cancelDisplayApproval(const QDBusMessage &received,
     return true;
 }
 
+bool NativeRuntime::armDisplayDecision(const QDBusMessage &received,
+                                       const NativeDisplayChoiceChallenge &challenge)
+{
+    if (!impl_->caller(received, NativePeerPurpose::ControlApproval) || !impl_->display ||
+        !impl_->display->fenced() || impl_->approvalScope || impl_->transitionFence.active() ||
+        impl_->sleepFence.active() || impl_->unlockRequestLock || impl_->transitionRequest)
+        return false;
+    const auto intent = NativeDisplayIntent::parse(challenge.material);
+    return intent && intent->lock == identity() && impl_->display->beginDecision(challenge);
+}
+std::optional<bool>
+NativeRuntime::displayDecisionReady(const QDBusMessage &received,
+                                    const NativeDisplayChoiceChallenge &challenge)
+{
+    if (!impl_->caller(received, NativePeerPurpose::ControlApproval) || !impl_->display ||
+        !impl_->display->fenced() || !impl_->display->matchesDecision(challenge))
+        return std::nullopt;
+    const bool ready = impl_->display->decisionReady(challenge);
+    return impl_->display->fenced() ? std::optional(ready) : std::nullopt;
+}
+bool NativeRuntime::consumeDisplayDecision(const QDBusMessage &received,
+                                           const NativeDisplayChoiceChallenge &challenge)
+{
+    return impl_->caller(received, NativePeerPurpose::ControlApproval) && impl_->display &&
+           impl_->display->fenced() && impl_->display->consumeDecision(challenge);
+}
+bool NativeRuntime::cancelDisplayDecision(const QDBusMessage &received,
+                                          const NativeDisplayChoiceChallenge &challenge)
+{
+    if (!impl_->caller(received, NativePeerPurpose::ControlApproval) || !impl_->display ||
+        !impl_->display->matchesDecision(challenge))
+        return false;
+    impl_->display->cancel();
+    return true;
+}
+
 bool NativeRuntime::armApproval(const QDBusMessage &received, const NativeApprovalScope &scope)
 {
     const auto peer = impl_->caller(received, NativePeerPurpose::ControlApproval);
@@ -991,6 +1027,10 @@ std::optional<quint32> NativeRuntime::continuePreparedDisplay(const QDBusMessage
                                               .arg(topology->generation)
                                         : QString{};
     if (!topology || !intent.nativeOptions(*topology, exactTopology, lock) ||
+        !impl_->currentSession() ||
+        !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
+        return std::nullopt;
+    if (!impl_->display || !impl_->display->redeemDecision(intent, decision) ||
         !impl_->currentSession() ||
         !impl_->peers->stillCurrent(NativePeerPurpose::PreparedSessionDispatch, *peer))
         return std::nullopt;

@@ -17,6 +17,14 @@ pub(crate) struct NativeSessionApprovalAuthorizer {
     pub(crate) channel: NativeSessionChannel,
     pub(crate) principal: PrincipalId,
 }
+impl linura_control::DisplayDecisionAuthorizer for NativeSessionApprovalAuthorizer {
+    fn authorize_decision(
+        &self,
+        challenge: &linura_control::DisplayDecisionChallenge,
+    ) -> Result<linura_control::TrustedDisplayDecision, String> {
+        crate::display_decision::authorize(&self.channel, &self.principal, challenge)
+    }
+}
 
 impl ManagedApprovalAuthorizer for NativeSessionApprovalAuthorizer {
     fn authorize(

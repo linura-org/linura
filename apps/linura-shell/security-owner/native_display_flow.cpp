@@ -106,6 +106,14 @@ void NativeDisplayFlow::revalidateOrigin()
 bool NativeDisplayFlow::window()
 {
     const auto now = NativeDisplayClock::sample();
+    if (!failed_ && spent_ && dispatched_ && !decisionMode_) {
+        const auto boot = backend_.displayDecisionBootDeadline(*dispatched_);
+        if (!now || !boot || now->unixMs < last_.unixMs || now->bootMs < last_.bootMs ||
+            now->unixMs >= dispatched_->deadlineUnixMs || now->bootMs >= *boot)
+            return false;
+        last_ = *now;
+        return true;
+    }
     if (failed_ || !now || now->unixMs < last_.unixMs || now->bootMs < last_.bootMs ||
         now->unixMs >= scope_.display->deadlineUnixMs || now->bootMs >= deadlineBoot_)
         return false;
@@ -160,7 +168,7 @@ void NativeDisplayFlow::pulse()
             cancel();
         return;
     }
-    if (!authenticateSelected_ && !reviewArmed_) {
+    if (!authenticateSelected_ && !reviewArmed_ && !decisionReviewed_) {
         reviewArmed_ = true;
         const auto page = page_;
         const auto epoch = epoch_;
@@ -197,6 +205,18 @@ void NativeDisplayFlow::reviewed(std::size_t page, quint64 epoch, bool accepted)
     reviewArmed_ = false;
     if (!accepted || !revalidate_() || !window()) {
         cancel();
+        return;
+    }
+    if (decisionMode_) {
+        const auto status = backend_.protectedDisplayStatus();
+        if (!status || status->phase != NativeDisplayPromptStatus::Phase::Ready ||
+            status->epoch != epoch || !backend_.protectedInputFocused()) {
+            cancel();
+            return;
+        }
+        decisionReviewed_ = true;
+        proofGeneration_ = backend_.protectedInteractionGeneration();
+        inputGeneration_ = backend_.protectedInputGeneration();
         return;
     }
     if (page_ + 1 == pageCount_)
@@ -271,7 +291,98 @@ bool NativeDisplayFlow::redeem(const NativeDisplayIntent &intent,
         proofGeneration_ != backend_.protectedInteractionGeneration())
         return false;
     spent_ = true;
+    dispatched_ = correlation;
     presentation_.present(NativePresentation::State::ApplyingDisplay);
+    return true;
+}
+bool NativeDisplayFlow::beginDecision(const NativeDisplayChoiceChallenge &challenge)
+{
+    if (failed_ || decisionMode_ || !consumed_ || !spent_ || !dispatched_ ||
+        challenge.correlation != *dispatched_ || challenge.principal != scope_.principal ||
+        challenge.request != scope_.request || challenge.material != intent_.encode() ||
+        challenge.digest.size() != 64 || !window() || !revalidate_())
+        return false;
+    const auto boot = backend_.displayDecisionBootDeadline(*dispatched_);
+    const auto snapshot = backend_.observeDisplayTopology();
+    if (!boot || !snapshot || snapshot->generation != snapshot_.generation)
+        return false;
+    auto scope = scope_;
+    scope.purpose =
+        challenge.confirm ? ApprovalPurpose::KeepDisplay : ApprovalPurpose::RevertDisplay;
+    scope.display->decisionDigest = QStringLiteral("sha256:") + challenge.digest;
+    scope.display->deadlineUnixMs = dispatched_->deadlineUnixMs;
+    scope.display->deadlineBootMs = *boot;
+    const auto pages = nativeDisplayReviewPages(scope, *snapshot);
+    if (!scope.valid() || !pages || pages->size() != 1)
+        return false;
+    const NativeDisplayPromptScope prompt{
+        scope.protectedDisplayDigest(),
+        challenge.confirm ? NativeDisplayPromptScope::Purpose::Keep
+                          : NativeDisplayPromptScope::Purpose::Revert,
+        scope.display->deadlineUnixMs, scope.display->deadlineBootMs};
+    // Retain the original canonical plan/review/material. Only this separate
+    // protected decision digest, purpose and original attempt deadlines change.
+    if (!presentation_.presentDisplayReview(scope, *snapshot, 0) ||
+        !backend_.beginProtectedDisplayDecision(prompt, intent_, *dispatched_)) {
+        cancel();
+        return false;
+    }
+    scope_ = std::move(scope);
+    snapshot_ = *snapshot;
+    prompt_ = prompt;
+    choice_ = challenge;
+    decisionMode_ = true;
+    consumed_ = spent_ = reviewArmed_ = authenticateSelected_ = authenticationArmed_ = false;
+    awaitingRevision_ = true;
+    epoch_ = proofGeneration_ = inputGeneration_ = 0;
+    deadlineBoot_ = *boot;
+    page_ = 0;
+    pageCount_ = 1;
+    return revalidate_() && window();
+}
+bool NativeDisplayFlow::matchesDecision(const NativeDisplayChoiceChallenge &challenge) const
+{
+    return choice_ && *choice_ == challenge;
+}
+bool NativeDisplayFlow::decisionReady(const NativeDisplayChoiceChallenge &challenge)
+{
+    if (!matchesDecision(challenge) || !decisionMode_ || consumed_ || !revalidate_() || !window())
+        return false;
+    pulse();
+    return !failed_ && decisionReviewed_ && proofGeneration_ != 0 &&
+           proofGeneration_ == backend_.protectedInteractionGeneration() &&
+           inputGeneration_ == backend_.protectedInputGeneration();
+}
+bool NativeDisplayFlow::consumeDecision(const NativeDisplayChoiceChallenge &challenge)
+{
+    if (!decisionReady(challenge))
+        return false;
+    const auto status = backend_.protectedDisplayStatus();
+    if (!status || status->phase != NativeDisplayPromptStatus::Phase::Ready ||
+        status->epoch != epoch_ || !backend_.protectedInputFocused() ||
+        proofGeneration_ != backend_.protectedInteractionGeneration() ||
+        !backend_.consumeProtectedDisplay(prompt_, epoch_) || !window() || !revalidate_()) {
+        cancel();
+        return false;
+    }
+    consumed_ = true;
+    inputGeneration_ = backend_.protectedInputGeneration();
+    return true;
+}
+bool NativeDisplayFlow::redeemDecision(const NativeDisplayIntent &intent,
+                                       const NativeDisplayDecision &decision)
+{
+    if (!decisionMode_ || !choice_ || !consumed_ || spent_ || !decision.valid() ||
+        decision.correlation != choice_->correlation || decision.confirm != choice_->confirm ||
+        decision.protectedDecisionDigest != choice_->digest ||
+        intent.encode() != choice_->material || !window() || !revalidate_())
+        return false;
+    const auto status = backend_.protectedDisplayStatus();
+    if (!status || status->phase != NativeDisplayPromptStatus::Phase::Consumed ||
+        status->epoch != epoch_ || inputGeneration_ != backend_.protectedInputGeneration() ||
+        proofGeneration_ != backend_.protectedInteractionGeneration() || !window())
+        return false;
+    spent_ = true;
     return true;
 }
 void NativeDisplayFlow::cancel()

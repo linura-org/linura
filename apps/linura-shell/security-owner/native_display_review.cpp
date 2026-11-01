@@ -59,6 +59,22 @@ nativeDisplayReviewPages(const NativeApprovalScope &scope, const NativeDisplaySn
     const auto purpose = scope.purpose == ApprovalPurpose::ApplyDisplay  ? QStringLiteral("Apply")
                          : scope.purpose == ApprovalPurpose::KeepDisplay ? QStringLiteral("Keep")
                                                                          : QStringLiteral("Revert");
+    if (scope.purpose != ApprovalPurpose::ApplyDisplay) {
+        // Apply already reviewed every setting and authenticated the canonical
+        // plan. The fixed confirmation window needs one fresh human decision,
+        // not another multi-page review or administrator conversation.
+        return std::vector<NativeDisplayReviewPage>{
+            {purpose + QStringLiteral(" the reviewed display layout?"),
+             QStringLiteral("Session owner UID %1. %2 outputs. %3\n"
+                            "Enter confirms this choice. Escape cancels. The original timer "
+                            "continues; without Keep, the previous layout is restored. "
+                            "Existing session-lock protection stays active.")
+                 .arg(scope.lock.uid)
+                 .arg(intent->desired.outputs.size())
+                 .arg(scope.purpose == ApprovalPurpose::KeepDisplay
+                          ? QStringLiteral("Keep the exact layout you reviewed.")
+                          : QStringLiteral("Restore the previous reviewed layout."))}};
+    }
     const auto introduction =
         QStringLiteral("%1 display layout for session owner UID %2. Security-sensitive system "
                        "change. Administrator authentication is required. Escape cancels.")

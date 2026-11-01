@@ -14,6 +14,7 @@ pub struct DisplayDecisionChallenge {
     action: DisplayContinuationAction,
     deadline_unix_ms: u64,
     digest: ContentDigest,
+    dispatch_digest: String,
 }
 
 impl DisplayDecisionChallenge {
@@ -71,6 +72,9 @@ impl DisplayDecisionChallenge {
             action,
             deadline_unix_ms: dispatched.deadline_unix_ms,
             digest,
+            dispatch_digest: DisplayAttemptQuery::new(request, dispatched)?
+                .dispatch_digest()
+                .into(),
         })
     }
 
@@ -97,6 +101,10 @@ impl DisplayDecisionChallenge {
     #[must_use]
     pub fn digest(&self) -> &str {
         self.digest.as_str()
+    }
+    #[must_use]
+    pub fn dispatch_digest(&self) -> &str {
+        &self.dispatch_digest
     }
 }
 

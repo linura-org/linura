@@ -22,7 +22,7 @@ pub use observer::{NativeLockObserver, NativePowerPermissionObserver};
 pub use owner::{
     NativeApprovalPurpose, NativeApprovalRequest, NativeAuthenticationSubject,
     NativeDisplayApprovalPurpose, NativeDisplayApprovalRequest, NativeDisplayContinuation,
-    NativeOwnerIdentity,
+    NativeDisplayDecisionRequest, NativeOwnerIdentity,
 };
 pub use service::protect_before_native_sleep;
 pub use sleep_gate::NativeSleepEntry;
