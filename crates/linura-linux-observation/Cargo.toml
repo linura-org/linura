@@ -12,6 +12,7 @@ futures-lite = "2.6"
 linura-core = { path = "../linura-core" }
 linura-observation = { path = "../linura-observation" }
 linura-provider-sdk = { path = "../linura-provider-sdk" }
+serde_json = "1.0"
 rustix = { version = "1.1", features = ["event", "fs", "net", "system", "process"] }
 zbus = { version = "=5.19.0", default-features = false, features = ["async-io", "blocking-api"] }
 

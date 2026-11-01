@@ -473,14 +473,14 @@ mod tests {
 
     #[test]
     fn player_resources_pin_unique_owner_and_reject_retargeting() {
-        let id = resource_id("org.mpris.MediaPlayer2.Example", ":1.42").unwrap();
+        let id = resource_id("org.mpris.MediaPlayer2.Example", ":1.42").unwrap_or_else(|error| unreachable!("{error}"));
         assert_eq!(
-            parse_resource(&id).unwrap(),
+            parse_resource(&id).unwrap_or_else(|error| unreachable!("{error}")),
             ("org.mpris.MediaPlayer2.Example", ":1.42")
         );
         assert_ne!(
             id,
-            resource_id("org.mpris.MediaPlayer2.Example", ":1.43").unwrap()
+            resource_id("org.mpris.MediaPlayer2.Example", ":1.43").unwrap_or_else(|error| unreachable!("{error}"))
         );
         for candidate in [
             "mpris:player:org.mpris.MediaPlayer2.Example",
@@ -492,7 +492,7 @@ mod tests {
             "mpris:player:org.mpris.MediaPlayer2..Bad@:1.2",
             "mpris:player:org.mpris.MediaPlayer2.Example@:1..2",
         ] {
-            let value = ResourceId::new(candidate).unwrap();
+            let value = ResourceId::new(candidate).unwrap_or_else(|error| unreachable!("{error}"));
             assert!(parse_resource(&value).is_err(), "{candidate}");
         }
     }
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn untrusted_labels_are_bounded_and_escaped() {
         assert_eq!(
-            safe_label("<bad & \"title\">").unwrap(),
+            safe_label("<bad & \"title\">").unwrap_or_else(|error| unreachable!("{error}")),
             "&lt;bad &amp; &quot;title&quot;&gt;"
         );
         for value in ["hello\nworld", "a\tb"] {

@@ -2,6 +2,8 @@
 
 mod logind;
 mod mpris;
+mod audio_graph;
+pub use audio_graph::{AUDIO_GRAPH_CAPABILITY, AUDIO_GRAPH_PROVIDER, PipeWireGraphObserver};
 pub use mpris::{MPRIS_PLAYER_CAPABILITY, MPRIS_PROVIDER, MprisObserver};
 pub mod platform_discovery;
 pub use logind::{
