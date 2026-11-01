@@ -70,7 +70,7 @@ NativeDisplayFlow::NativeDisplayFlow(NativeApprovalScope scope, NativeDisplayInt
                                      NativePeerIdentity control, Revalidate revalidate)
     : scope_(std::move(scope)), intent_(std::move(intent)), snapshot_(std::move(snapshot)),
       prompt_{scope_.protectedDisplayDigest(), NativeDisplayPromptScope::Purpose::Apply,
-              scope_.display->deadlineUnixMs},
+              scope_.display->deadlineUnixMs, scope_.display->deadlineBootMs},
       backend_(backend), presentation_(presentation), authentication_(authentication),
       revalidate_(std::move(revalidate)), control_(std::move(control))
 {

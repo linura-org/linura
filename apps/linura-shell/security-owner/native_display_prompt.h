@@ -11,7 +11,8 @@ struct NativeDisplayPromptScope final
     enum class Purpose : quint32 { Apply = 0, Keep = 1, Revert = 2 };
     QString digest;
     Purpose purpose = Purpose::Apply;
-    quint64 deadlineUnixMs = 0;
+    // Both original Control deadlines; never remapped at owner/native admission.
+    quint64 deadlineUnixMs = 0, deadlineBootMs = 0;
     [[nodiscard]] bool valid() const noexcept;
     bool operator==(const NativeDisplayPromptScope &) const = default;
 };

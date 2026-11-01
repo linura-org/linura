@@ -1032,11 +1032,12 @@ cannot supply a receipt. Password keystrokes bypass ordinary capture, IME and
 keybindings, and held physical input is drained before restoring ordinary focus.
 The native presentation receipt still authenticates no human and grants no effect.
 
-These are candidate mechanisms under PR #259. The production owner does not yet
-use the private scene for display authentication. Native modeset placeholder
-coverage, end-to-end purpose-bound authentication, final receipt redemption,
-compositor-death restoration and adversarial multi-output acceptance remain required
-before activation; compile/component/wire results cannot stand in for those tests.
+These are candidate mechanisms under PR #259. The native owner composes private
+Apply review, purpose-bound authentication and one-use prepared receipt redemption,
+while public production display mutations remain disabled. Transaction-bound
+modeset continuity, atomic Keep/Revert, compositor-death restoration and adversarial
+multi-output acceptance remain required before activation; compile/component/wire
+results cannot stand in for those tests.
 
 The candidate now retains compositor-owned input quarantine after unexpected
 private-scene loss. Releases alone do not route subsequent response characters to
@@ -1059,8 +1060,8 @@ per-output configures, post-ack content and independently correlated hardware
 presentation. Old buffers and unexplained focus/epoch changes cannot qualify a
 revision. Consumed presentation can remain covered while a prepared handoff is
 pending, without rearming one-use proof or extending clocks. This mechanism does
-not complete production PAM presentation, receipt redemption, cross-compositor
-restoration or adversarial native qualification, and does not activate mutations.
+not qualify end-to-end native mutations, cross-compositor restoration or adversarial
+native acceptance, and does not activate mutations.
 
 Prepared S21 authentication metadata accepts no response or primary-action input.
 Native-only activation compares the exact field token and original BOOTTIME
@@ -1092,3 +1093,11 @@ still ahead, and avoids permanent session exhaustion from expired reservations.
 Consumed Apply presentation reports preparation/dispatch progress without a
 password field, unlock action or success claim; this fixed feedback grants no
 Keep/Revert authority and does not complete recovery interaction.
+
+Control's original absolute wall and BOOTTIME deadlines now reach the protected
+compositor scope unchanged through the private Wayland protocol. Owner admission,
+native eligibility, consumption and scope-history retirement compare these same
+bounds. A shorter original BOOTTIME budget must expire even while wall time leaves
+more budget; receiving a prompt later cannot remap or renew that bound. Zero,
+expired, overlong and substituted bounds fail closed. This closes a presentation
+lifetime gap and does not grant a native mutation or continuation permit.

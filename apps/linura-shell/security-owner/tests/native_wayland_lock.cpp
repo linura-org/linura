@@ -980,7 +980,15 @@ WireServer::DisplaySupport::DisplaySupport(WireServer &server) : owner(server)
         unsigned revisionCommits = 0;
         Scene(WireServer &server, ProtectedInteraction::Scope value)
             : owner(server), scope(std::move(value))
-        {}
+        {
+            const auto now = compositorClock();
+            assert(now && scope.deadlineBootMs > now->bootMs && scope.deadlineUnixMs > now->unixMs);
+            const auto wallRemaining = scope.deadlineUnixMs - now->unixMs;
+            const auto bootRemaining = scope.deadlineBootMs - now->bootMs;
+            // Client supplied 8s BOOTTIME and 10s wall budgets. A recipient
+            // which remaps from wall time would erase this original 2s gap.
+            assert(wallRemaining > bootRemaining + 1500 && wallRemaining < bootRemaining + 2500);
+        }
         bool attach(OutputKey key, wl_resource *resource, Configure configure) override
         {
             if (key != OutputKey{1, 1} || role)
@@ -1192,7 +1200,7 @@ void client(Case scenario, int descriptor, int commands)
             // Legacy/unsupported peers cannot fall back to an ordinary xdg window,
             // acquire a lock for display approval, or manufacture a consumed epoch.
             const NativeDisplayPromptScope unsupportedPrompt{
-                QString(64, QLatin1Char('a')), NativeDisplayPromptScope::Purpose::Apply, 1000};
+                QString(64, QLatin1Char('a')), NativeDisplayPromptScope::Purpose::Apply, 1000, 500};
             assert(!backend.showProtectedDisplay(unsupportedPrompt, NativeDisplayIntent{}));
             assert(!backend.protectedDisplayStatus());
             assert(!backend.consumeProtectedDisplay(unsupportedPrompt, 1));
@@ -1231,7 +1239,12 @@ void client(Case scenario, int descriptor, int commands)
             assert(clock);
             const NativeDisplayPromptScope prompt{QString(64, QLatin1Char('a')),
                                                   NativeDisplayPromptScope::Purpose::Apply,
-                                                  clock->unixMs + 10000};
+                                                  clock->unixMs + 10000, clock->bootMs + 8000};
+            auto expired = prompt;
+            expired.deadlineBootMs = clock->bootMs;
+            assert(!backend.showProtectedDisplay(expired, *intent));
+            expired.deadlineBootMs = clock->bootMs + 120'000;
+            assert(!backend.showProtectedDisplay(expired, *intent));
             assert(backend.showProtectedDisplay(prompt, *intent));
             assert(!backend.showProtectedDisplay(prompt, *intent));
             assert(!backend.displayAllowsSecurityTransition());

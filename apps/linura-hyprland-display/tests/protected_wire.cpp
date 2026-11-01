@@ -32,7 +32,10 @@ class Scene final : public ProtectedScene
     Configure configured;
     std::uint32_t serial = 7;
     Scene(Counts &facts, ProtectedInteraction::Scope value) : counts(facts), scope(std::move(value))
-    {}
+    {
+        assert(scope.deadlineUnixMs == 10'000);
+        assert(scope.deadlineBootMs == 0x123456789abcdef0ULL);
+    }
     bool attach(OutputKey key, wl_resource *, Configure configure) override
     {
         ++counts.attach;
@@ -224,11 +227,14 @@ class Client final
     {
         assert(wl_display_roundtrip(display) >= 0);
     }
-    void begin(const char *digest = nullptr, unsigned purpose = 0)
+    void begin(const char *digest = nullptr, unsigned purpose = 0,
+               std::uint64_t deadlineBoot = 0x123456789abcdef0ULL)
     {
         const auto value = std::string(64, 'a');
         interaction = linura_protected_display_manager_v1_begin(
-            manager, digest ? digest : value.c_str(), purpose, 0, 10'000);
+            manager, digest ? digest : value.c_str(), purpose, 0, 10'000,
+            static_cast<std::uint32_t>(deadlineBoot >> 32U),
+            static_cast<std::uint32_t>(deadlineBoot));
         static const linura_protected_display_interaction_v1_listener listener{
             [](void *data, linura_protected_display_interaction_v1 *, const char *instance,
                std::uint32_t hi, std::uint32_t lo, std::uint32_t epochHi, std::uint32_t epochLo,
@@ -303,6 +309,12 @@ void ownerReplacement()
 int main()
 {
     assert(getuid() != 0); // Native graphical owner/compositor never runs as root.
+    {
+        Harness h;
+        Client c(h.descriptor);
+        c.begin(nullptr, 0, 0);
+        assert(c.denied == 1 && h.counts.begin == 0);
+    }
     {
         Harness h;
         h.invocation.store(0);
@@ -400,7 +412,7 @@ int main()
             c.interaction = nullptr;
         }
         c.interaction = linura_protected_display_manager_v1_begin(
-            c.manager, std::string(64, 'a').c_str(), 0, 0, 10'000);
+            c.manager, std::string(64, 'a').c_str(), 0, 0, 10'000, 0x12345678, 0x9abcdef0);
         assert(wl_display_roundtrip(c.display) < 0);
         h.finish(); // Protocol error delivery precedes server resource teardown.
         assert(h.counts.begin == 127 && h.counts.close == 127);

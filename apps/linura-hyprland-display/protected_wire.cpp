@@ -184,7 +184,7 @@ class ProtectedWireEndpoint::Impl final
     }
     static void beginInteraction(wl_client *client, wl_resource *resource, std::uint32_t id,
                                  const char *scope, std::uint32_t purpose, std::uint32_t high,
-                                 std::uint32_t low)
+                                 std::uint32_t low, std::uint32_t bootHigh, std::uint32_t bootLow)
     {
         auto &manager = object<Manager>(resource);
         try {
@@ -198,10 +198,11 @@ class ProtectedWireEndpoint::Impl final
                 return;
             }
             auto *created = wl_client_get_object(client, id);
-            if (digest(scope) && purpose <= 2 && manager.owner.current(manager))
+            if (digest(scope) && purpose <= 2 && joined(high, low) != 0 &&
+                joined(bootHigh, bootLow) != 0 && manager.owner.current(manager))
                 state->scene =
                     manager.owner.begin({scope, static_cast<ProtectedInteraction::Purpose>(purpose),
-                                         joined(high, low)});
+                                         joined(high, low), joined(bootHigh, bootLow)});
             if (!state->scene)
                 linura_protected_display_interaction_v1_send_denied(created);
         } catch (...) {

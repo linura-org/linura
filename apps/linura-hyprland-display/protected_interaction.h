@@ -23,7 +23,9 @@ class ProtectedInteraction final
     {
         std::string digest;
         Purpose purpose = Purpose::Apply;
-        std::uint64_t deadlineUnixMs = 0;
+        // Original absolute Control bounds on this same boot. Native recipients
+        // retain both; one clock's remaining budget cannot renew the other.
+        std::uint64_t deadlineUnixMs = 0, deadlineBootMs = 0;
         bool operator==(const Scope &) const = default;
     };
     ProtectedInteraction(const ProtectedInteraction &) = delete;

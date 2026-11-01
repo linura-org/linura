@@ -3,7 +3,6 @@
 #include "protected_interaction.h"
 
 #include <algorithm>
-#include <limits>
 #include <map>
 
 namespace Linura::HyprlandDisplay {
@@ -25,9 +24,8 @@ class ProtectedScopeHistory final
         }
         last_ = now;
         std::erase_if(entries_, [&](const auto &entry) {
-            // A BOOTTIME-expired scope whose wall deadline is still ahead
-            // must keep its tombstone: remapping that digest at a later begin
-            // would otherwise grant it a second boot-clock window.
+            // Retain each original absolute bound. Neither expiry nor a later
+            // begin may reconstruct a fresh window from the other clock.
             return now.unixMs >= entry.second.unixMs && now.bootMs >= entry.second.bootMs;
         });
         const auto maximum = scope.purpose == ProtectedInteraction::Purpose::Apply
@@ -40,13 +38,11 @@ class ProtectedScopeHistory final
             !std::all_of(scope.digest.begin(), scope.digest.end(),
                          [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }) ||
             scope.deadlineUnixMs <= now.unixMs || scope.deadlineUnixMs - now.unixMs > maximum ||
-            now.bootMs >
-                std::numeric_limits<std::uint64_t>::max() - (scope.deadlineUnixMs - now.unixMs) ||
+            scope.deadlineBootMs <= now.bootMs || scope.deadlineBootMs - now.bootMs > maximum ||
             entries_.size() >= Capacity)
             return false;
         return entries_
-            .emplace(scope.digest, ClockSample{scope.deadlineUnixMs,
-                                               now.bootMs + (scope.deadlineUnixMs - now.unixMs)})
+            .emplace(scope.digest, ClockSample{scope.deadlineUnixMs, scope.deadlineBootMs})
             .second;
     }
 

@@ -9,7 +9,7 @@ using namespace Linura::SecurityOwner;
 int main()
 {
     const NativeDisplayPromptScope validPrompt{QString(64, QLatin1Char('a')),
-                                               NativeDisplayPromptScope::Purpose::Apply, 1000};
+                                               NativeDisplayPromptScope::Purpose::Apply, 1000, 500};
     assert(validPrompt.valid());
     for (const auto purpose :
          {NativeDisplayPromptScope::Purpose::Apply, NativeDisplayPromptScope::Purpose::Keep,
@@ -18,7 +18,7 @@ int main()
         prompt.purpose = purpose;
         assert(prompt.valid());
     }
-    for (unsigned denial = 0; denial != 7; ++denial) {
+    for (unsigned denial = 0; denial != 8; ++denial) {
         auto prompt = validPrompt;
         switch (denial) {
         case 0:
@@ -38,6 +38,9 @@ int main()
             break;
         case 5:
             prompt.deadlineUnixMs = 0;
+            break;
+        case 6:
+            prompt.deadlineBootMs = 0;
             break;
         default:
             prompt.purpose = static_cast<NativeDisplayPromptScope::Purpose>(3);

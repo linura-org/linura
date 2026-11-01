@@ -26,8 +26,7 @@ std::optional<ProtectedInteraction> ProtectedInteraction::start(Scope scope, con
         !validDigest(scope.digest) || clock.unixMs == 0 || clock.bootMs == 0 || epoch == 0 ||
         epoch >= std::numeric_limits<std::uint64_t>::max() - 1 ||
         scope.deadlineUnixMs <= clock.unixMs || scope.deadlineUnixMs - clock.unixMs > maximum ||
-        clock.bootMs >
-            std::numeric_limits<std::uint64_t>::max() - (scope.deadlineUnixMs - clock.unixMs) ||
+        scope.deadlineBootMs <= clock.bootMs || scope.deadlineBootMs - clock.bootMs > maximum ||
         sample.generation == 0 || sample.generation == std::numeric_limits<std::uint64_t>::max() ||
         sample.securityEpoch == 0 ||
         sample.securityEpoch == std::numeric_limits<std::uint64_t>::max() || sample.heads.empty() ||
@@ -54,7 +53,7 @@ std::optional<ProtectedInteraction> ProtectedInteraction::start(Scope scope, con
 ProtectedInteraction::ProtectedInteraction(Scope scope, Snapshot sample, ClockSample clock,
                                            std::uint64_t epoch)
     : scope_(std::move(scope)), inventory_(std::move(sample)), armed_(clock),
-      deadlineBootMs_(clock.bootMs + (scope_.deadlineUnixMs - clock.unixMs)), epoch_(epoch)
+      deadlineBootMs_(scope_.deadlineBootMs), epoch_(epoch)
 {
     for (const auto &head : inventory_.heads)
         if (head.current.enabled)

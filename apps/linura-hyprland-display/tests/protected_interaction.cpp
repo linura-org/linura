@@ -25,7 +25,7 @@ Snapshot inventory()
 ProtectedInteraction::Scope
 scope(ProtectedInteraction::Purpose purpose = ProtectedInteraction::Purpose::Keep)
 {
-    return {std::string(64, 'a'), purpose, 25'000};
+    return {std::string(64, 'a'), purpose, 25'000, 16'000};
 }
 ProtectedInteraction conversation()
 {
@@ -103,6 +103,28 @@ void opaqueSafetyCannotPreserveOrRearmInteractionProof()
     assert(!value.eligible(value.epoch(), inventory(), {10'003, 1003}));
     assert(!value.safetyFrame({99, 99}));
     assert(value.phase() == ProtectedInteraction::Phase::Cancelled);
+}
+void originalBootBoundCannotBeRenewedFromWallTime()
+{
+    auto original = scope(ProtectedInteraction::Purpose::Apply);
+    original.deadlineBootMs = 1200; // Wall time has much more remaining budget.
+    auto value = ProtectedInteraction::start(original, inventory(), {10'000, 1000}, 6);
+    assert(value);
+    ready(*value);
+    assert(value->eligible(value->epoch(), inventory(), {10'001, 1199}));
+    assert(!value->eligible(value->epoch(), inventory(), {10'002, 1200}));
+    assert(value->phase() == ProtectedInteraction::Phase::Cancelled);
+    assert(!ProtectedInteraction::start(original, inventory(), {10'002, 1200}, 6));
+    auto extended = original;
+    extended.deadlineBootMs = 61'001;
+    assert(!ProtectedInteraction::start(extended, inventory(), {10'000, 1000}, 6));
+    original.deadlineBootMs = 0;
+    assert(!ProtectedInteraction::start(original, inventory(), {10'000, 1000}, 6));
+    auto consumed = conversation();
+    ready(consumed);
+    auto substituted = scope();
+    --substituted.deadlineBootMs;
+    assert(!consumed.consume(substituted, consumed.epoch(), inventory(), {10'001, 1001}));
 }
 void purposeAndProofCannotBeSubstitutedOrReused()
 {
@@ -287,6 +309,7 @@ int main()
     everyOutputNeedsCorrelatedPresentation();
     backendCommitIdsCannotBeReused();
     opaqueSafetyCannotPreserveOrRearmInteractionProof();
+    originalBootBoundCannotBeRenewedFromWallTime();
     purposeAndProofCannotBeSubstitutedOrReused();
     consumedPresentationCanRepaintWithoutRearmingProof();
     focusInputAndNativeLifetimeDriftInvalidateTheProof();

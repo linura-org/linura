@@ -12,7 +12,7 @@ bool NativeDisplayPromptScope::valid() const noexcept
                            return (c >= QLatin1Char('0') && c <= QLatin1Char('9')) ||
                                   (c >= QLatin1Char('a') && c <= QLatin1Char('f'));
                        }) &&
-           deadlineUnixMs != 0 &&
+           deadlineUnixMs != 0 && deadlineBootMs != 0 &&
            (purpose == Purpose::Apply || purpose == Purpose::Keep || purpose == Purpose::Revert);
 }
 } // namespace Linura::SecurityOwner

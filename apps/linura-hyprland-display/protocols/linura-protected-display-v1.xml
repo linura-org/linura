@@ -14,11 +14,19 @@
     </enum>
     <request name="destroy" type="destructor"/>
     <request name="begin">
+      <description summary="retain both original absolute deadlines">
+        BOOTTIME and wall-clock deadlines are supplied by the sealed Control
+        challenge. Neither endpoint may reconstruct one clock's deadline from
+        the remaining budget on the other clock, including after transport delay.
+        Zero, expired, substituted or overlong bounds fail closed.
+      </description>
       <arg name="interaction" type="new_id" interface="linura_protected_display_interaction_v1"/>
       <arg name="scope_digest" type="string"/>
       <arg name="purpose" type="uint" enum="purpose"/>
       <arg name="deadline_unix_hi" type="uint"/>
       <arg name="deadline_unix_lo" type="uint"/>
+      <arg name="deadline_boot_hi" type="uint"/>
+      <arg name="deadline_boot_lo" type="uint"/>
     </request>
   </interface>
   <interface name="linura_protected_display_interaction_v1" version="1">

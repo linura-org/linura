@@ -915,8 +915,8 @@ bool NativeWaylandLock::showProtectedDisplay(const NativeDisplayPromptScope &sco
             QString::number(current->topology.generation) ||
         !intent.baseline.nativeOptions(current->topology) ||
         !intent.desired.nativeOptions(current->topology) || scope.deadlineUnixMs <= now->unixMs ||
-        scope.deadlineUnixMs - now->unixMs > maximum ||
-        now->bootMs > std::numeric_limits<quint64>::max() - (scope.deadlineUnixMs - now->unixMs))
+        scope.deadlineUnixMs - now->unixMs > maximum || scope.deadlineBootMs <= now->bootMs ||
+        scope.deadlineBootMs - now->bootMs > maximum)
         return false;
     const NativeDisplayLayout *expected = nullptr;
     if (scope.purpose == NativeDisplayPromptScope::Purpose::Apply) {
@@ -958,14 +958,16 @@ bool NativeWaylandLock::showProtectedDisplay(const NativeDisplayPromptScope &sco
     impl_->protectedOutputs = std::move(pendingOutputs);
     impl_->protectedScope = scope;
     impl_->protectedLast = *now;
-    impl_->protectedBootDeadline = now->bootMs + (scope.deadlineUnixMs - now->unixMs);
+    impl_->protectedBootDeadline = scope.deadlineBootMs;
     impl_->protectedTopology = current->topology.generation;
     impl_->invalidateOutputConfiguration();
     const auto digest = scope.digest.toLatin1();
     impl_->protectedInteraction = linura_protected_display_manager_v1_begin(
         impl_->protectedManager, digest.constData(), static_cast<quint32>(scope.purpose),
         static_cast<quint32>(scope.deadlineUnixMs >> 32U),
-        static_cast<quint32>(scope.deadlineUnixMs));
+        static_cast<quint32>(scope.deadlineUnixMs),
+        static_cast<quint32>(scope.deadlineBootMs >> 32U),
+        static_cast<quint32>(scope.deadlineBootMs));
     static const linura_protected_display_interaction_v1_listener listener{Impl::protectedState,
                                                                            Impl::protectedDenied};
     if (!impl_->protectedInteraction ||

@@ -13,11 +13,22 @@ ProtectedInteraction::Scope scope(unsigned id, std::uint64_t deadline = 25'000)
         digest[i] = hex[id & 15U];
         id >>= 4U;
     }
-    return {digest, ProtectedInteraction::Purpose::Apply, deadline};
+    return {digest, ProtectedInteraction::Purpose::Apply, deadline, deadline - 9000};
 }
 } // namespace
 int main()
 {
+    ProtectedScopeHistory originalBound;
+    auto shortBoot = scope(0);
+    shortBoot.deadlineBootMs = 1200;
+    assert(originalBound.reserve(shortBoot, {10'000, 1000}));
+    assert(!originalBound.reserve(shortBoot, {10'001, 1200}));
+    auto missing = scope(1);
+    missing.deadlineBootMs = 0;
+    assert(!originalBound.reserve(missing, {10'002, 1201}));
+    auto tooLong = scope(2);
+    tooLong.deadlineBootMs = 61'202;
+    assert(!originalBound.reserve(tooLong, {10'003, 1201}));
     ProtectedScopeHistory history;
     for (unsigned i = 0; i != ProtectedScopeHistory::Capacity; ++i)
         assert(history.reserve(scope(i), {10'000, 1000}));
