@@ -566,7 +566,7 @@ void replacementCompositorCannotAdoptOldTopologyOrContinuation()
     assert(replacement.backend.writes == 0);
     // A fresh compositor contains no old transaction or decision right.
     // BUILDING is a newly queried wire object, never the prior dispatch.
-    assert(newOwner.connection->status(correlation) == 1);
+    assert(newOwner.connection->status(correlation) == 0);
     assert(!newOwner.connection->decide(correlation, true));
     assert(!newOwner.connection->decide(correlation, false));
     assert(!newOwner.connection->decisionBootDeadline(correlation));

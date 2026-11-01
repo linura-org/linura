@@ -470,27 +470,48 @@ void overlayCheckpointCannotBeReplacedOrRetargeted()
     Checkpoint checkpoint;
     Checkpoint::Overlay previous{{10, native.baseline()[0]}};
     const Checkpoint::Rules rules{{10, 100}, {20, 200}};
+    const Checkpoint::Identities identities{{10, native.baseline()[0].output},
+                                           {20, native.baseline()[1].output}};
     const auto same = [](int a, int b) { return a == b; };
-    assert(checkpoint.capture(previous, rules, native.baseline()));
-    assert(!checkpoint.capture({}, rules, native.desired()));
-    assert(!checkpoint.restoration(native.desired(), rules, same));
+    auto swapped = identities;
+    std::swap(swapped[10], swapped[20]);
+    assert(!checkpoint.capture(previous, rules, native.baseline(), swapped));
+    auto duplicate = identities;
+    duplicate[20] = duplicate[10];
+    assert(!checkpoint.capture(previous, rules, native.baseline(), duplicate));
+    auto missing = identities;
+    missing.erase(20);
+    assert(!checkpoint.capture(previous, rules, native.baseline(), missing));
+    auto foreign = identities;
+    foreign.erase(20);
+    foreign.emplace(30, native.baseline()[1].output);
+    assert(!checkpoint.capture(previous, rules, native.baseline(), foreign));
+    assert(checkpoint.capture(previous, rules, native.baseline(), identities));
+    assert(!checkpoint.capture({}, rules, native.desired(), identities));
+    assert(!checkpoint.owns(10, native.baseline()[1].output));
+    assert(!checkpoint.owns(20, native.baseline()[0].output));
+    assert(!checkpoint.restoration(native.desired(), rules, identities, same));
+    assert(!checkpoint.restoration(native.baseline(), rules, swapped, same));
+    assert(!checkpoint.restored(previous, rules, swapped, same));
     auto changed = rules;
     changed[10] = 101;
-    assert(!checkpoint.restoration(native.baseline(), changed, same));
+    assert(!checkpoint.restoration(native.baseline(), changed, identities, same));
     changed = rules;
     changed.erase(10);
     changed.emplace(30, 100);
-    assert(!checkpoint.restoration(native.baseline(), changed, same));
-    assert(!checkpoint.restored({}, rules, same));
-    const auto restored = checkpoint.restoration(native.baseline(), rules, same);
-    assert(restored && *restored == previous && checkpoint.restored(*restored, rules, same));
+    assert(!checkpoint.restoration(native.baseline(), changed, identities, same));
+    assert(!checkpoint.restored({}, rules, identities, same));
+    const auto restored = checkpoint.restoration(native.baseline(), rules, identities, same);
+    assert(restored && *restored == previous &&
+           checkpoint.restored(*restored, rules, identities, same));
     assert(checkpoint.retained() && checkpoint.owns(10, native.baseline()[0].output));
     assert(!checkpoint.owns(30, native.baseline()[0].output));
     auto replaced = native.baseline()[0].output;
     ++replaced.generation;
     assert(!checkpoint.owns(10, replaced));
     checkpoint.retire();
-    assert(!checkpoint.retained() && !checkpoint.restoration(native.baseline(), rules, same));
+    assert(!checkpoint.retained() &&
+           !checkpoint.restoration(native.baseline(), rules, identities, same));
 }
 void nativeProtectionIsRequiredAndRetainedThroughRecovery()
 {

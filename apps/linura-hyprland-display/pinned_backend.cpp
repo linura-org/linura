@@ -193,7 +193,8 @@ class PinnedBackend final : public Backend
         Layout baseline;
         for (const auto &head : fresh->heads)
             baseline.push_back(head.current);
-        if (!rules || !checkpoint.capture(overlay, *rules, baseline))
+        const auto identities = identitiesFor(*fresh);
+        if (!rules || !identities || !checkpoint.capture(overlay, *rules, baseline, *identities))
             return false;
         // Start with actual current owned fields, preserving every underlying
         // rule. Establish the desired independent roots before removing any old
@@ -247,9 +248,11 @@ class PinnedBackend final : public Backend
                 [](const Target &target, const Head &head) { return target == head.current; });
         }
         const auto rules = baseRules();
-        auto prior = rules ? checkpoint.restoration(targets, *rules,
-                                                    sameOwnedDisplayFields<Config::CMonitorRule>)
-                           : std::nullopt;
+        const auto identities = identitiesFor(*fresh);
+        auto prior = rules && identities
+                         ? checkpoint.restoration(targets, *rules, *identities,
+                                                  sameOwnedDisplayFields<Config::CMonitorRule>)
+                         : std::nullopt;
         if (!prior)
             return false; // Changed native layout rules cannot be silently overwritten.
         writing = true;
@@ -271,10 +274,11 @@ class PinnedBackend final : public Backend
         Config::monitorRuleMgr()->ensureMonitorStatus();
         const auto roots = snapshot();
         const auto currentRules = baseRules();
+        const auto currentIdentities = roots ? identitiesFor(*roots) : std::nullopt;
         if (commitFailed || !roots || roots->generation != expected.generation ||
             roots->securityEpoch != expected.securityEpoch ||
-            !hasDesiredPoweredRoot(targets, *roots) || !currentRules ||
-            !checkpoint.restoration(targets, *currentRules,
+            !hasDesiredPoweredRoot(targets, *roots) || !currentRules || !currentIdentities ||
+            !checkpoint.restoration(targets, *currentRules, *currentIdentities,
                                     sameOwnedDisplayFields<Config::CMonitorRule>))
             return false;
         overlay = std::move(*prior);
@@ -292,9 +296,12 @@ class PinnedBackend final : public Backend
             return false;
         if (!checkpoint.retained())
             return true; // No owned write passed initial admission.
+        const auto sample = snapshot();
+        const auto identities = sample ? identitiesFor(*sample) : std::nullopt;
         const auto rules = baseRules();
-        return rules &&
-               checkpoint.restored(overlay, *rules, sameOwnedDisplayFields<Config::CMonitorRule>);
+        return rules && identities &&
+               checkpoint.restored(overlay, *rules, *identities,
+                                   sameOwnedDisplayFields<Config::CMonitorRule>);
     }
     [[nodiscard]] PHLMONITOR monitorFor(OutputKey key) const
     {
@@ -312,6 +319,20 @@ class PinnedBackend final : public Backend
     }
 
   private:
+    [[nodiscard]] std::optional<RuleCheckpoint::Identities>
+    identitiesFor(const Snapshot &sample) const
+    {
+        if (sample.heads.size() != bindings.size())
+            return std::nullopt;
+        RuleCheckpoint::Identities identities;
+        for (const auto &head : sample.heads) {
+            const auto monitor = monitorFor(head.key);
+            if (!monitor || !identities.emplace(monitor.get(), head.key).second)
+                return std::nullopt;
+        }
+        return identities;
+    }
+
     [[nodiscard]] std::optional<RuleCheckpoint::Rules> baseRules()
     {
         if (readingBaseRules || !Config::monitorRuleMgr())

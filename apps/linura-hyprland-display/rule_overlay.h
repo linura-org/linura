@@ -20,11 +20,30 @@ template <typename Key, typename Rule> class RuleOverlayCheckpoint final
   public:
     using Overlay = std::map<Key, Target>;
     using Rules = std::map<Key, Rule>;
-    [[nodiscard]] bool capture(const Overlay &overlay, const Rules &rules, const Layout &baseline)
+    using Identities = std::map<Key, OutputKey>;
+    [[nodiscard]] bool capture(const Overlay &overlay, const Rules &rules, const Layout &baseline,
+                               const Identities &identities)
     {
-        if (saved_ || baseline.empty() || rules.size() != baseline.size())
+        if (saved_ || baseline.empty() || rules.size() != baseline.size() ||
+            identities.size() != rules.size() || overlay.size() > rules.size())
             return false;
-        saved_ = Saved{overlay, rules, baseline};
+        // Capture the native-object-to-output pairing, not merely independent
+        // membership of each key and output in a historical collection.
+        // Otherwise a recycled/swapped monitor binding could inherit an old
+        // rule-ownership privilege from a different head.
+        for (const auto &[key, output] : identities) {
+            if (!rules.contains(key) ||
+                std::count_if(baseline.begin(), baseline.end(), [&](const Target &target) {
+                    return target.output == output;
+                }) != 1)
+                return false;
+        }
+        for (const auto &[key, target] : overlay) {
+            const auto found = identities.find(key);
+            if (found == identities.end() || found->second != target.output)
+                return false;
+        }
+        saved_ = Saved{overlay, rules, baseline, identities};
         return true;
     }
     [[nodiscard]] bool retained() const noexcept
@@ -33,22 +52,26 @@ template <typename Key, typename Rule> class RuleOverlayCheckpoint final
     }
     [[nodiscard]] bool owns(const Key &key, OutputKey output) const
     {
-        return saved_ && saved_->rules.contains(key) &&
-               std::any_of(saved_->baseline.begin(), saved_->baseline.end(),
-                           [&](const Target &target) { return target.output == output; });
+        if (!saved_)
+            return false;
+        const auto found = saved_->identities.find(key);
+        return found != saved_->identities.end() && found->second == output;
     }
     template <typename Same>
     [[nodiscard]] std::optional<Overlay> restoration(const Layout &baseline, const Rules &rules,
-                                                     Same same) const
+                                                     const Identities &identities, Same same) const
     {
-        if (!saved_ || baseline != saved_->baseline || !rulesMatch(rules, same))
+        if (!saved_ || baseline != saved_->baseline || identities != saved_->identities ||
+            !rulesMatch(rules, same))
             return std::nullopt;
         return saved_->overlay;
     }
     template <typename Same>
-    [[nodiscard]] bool restored(const Overlay &overlay, const Rules &rules, Same same) const
+    [[nodiscard]] bool restored(const Overlay &overlay, const Rules &rules,
+                                const Identities &identities, Same same) const
     {
-        return saved_ && overlay == saved_->overlay && rulesMatch(rules, same);
+        return saved_ && overlay == saved_->overlay && identities == saved_->identities &&
+               rulesMatch(rules, same);
     }
     void retire() noexcept
     {
@@ -61,6 +84,7 @@ template <typename Key, typename Rule> class RuleOverlayCheckpoint final
         Overlay overlay;
         Rules rules;
         Layout baseline;
+        Identities identities;
     };
     std::optional<Saved> saved_;
     template <typename Same> bool rulesMatch(const Rules &rules, Same same) const
