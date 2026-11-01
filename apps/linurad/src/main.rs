@@ -5,7 +5,7 @@ mod session_audit;
 
 use std::error::Error;
 
-use linura_linux_observation::{NetworkManagerObserver, PipeWireSessionObserver, SystemdObserver};
+use linura_linux_observation::{NetworkManagerObserver, PipeWireSessionObserver, SystemdObserver, XdgApplicationObserver};
 use linura_observation_control::ObservationCoordinator;
 
 fn main() {
@@ -20,6 +20,8 @@ fn run() -> Result<(), Box<dyn Error>> {
     coordinator.register_observer(Box::new(SystemdObserver::connect()?))?;
     coordinator.register_observer(Box::new(NetworkManagerObserver::connect()?))?;
     coordinator.register_observer(Box::new(PipeWireSessionObserver::new()))?;
+    // User-session read-only application files; health fails closed without HOME.
+    coordinator.register_observer(Box::new(XdgApplicationObserver::from_environment()))?;
     let state_dir = session_audio::state_dir().map_err(std::io::Error::other)?;
     let session_runtime =
         session_audio::SessionAudioRuntime::open(&state_dir).map_err(std::io::Error::other)?;
