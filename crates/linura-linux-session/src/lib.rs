@@ -8,6 +8,7 @@
 
 mod account;
 mod bus;
+mod display_kernel;
 mod display_observer;
 mod observer;
 mod owner;
@@ -17,6 +18,7 @@ mod sleep_helper;
 mod sleep_observer;
 
 pub use bus::{NativeSessionChannel, NativeSessionRole};
+pub use display_kernel::{NativeDisplayKernelSubscription, NativeDisplayKernelWitness};
 pub use display_observer::NativeDisplayObserver;
 pub use observer::{NativeLockObserver, NativePowerPermissionObserver};
 pub use owner::{

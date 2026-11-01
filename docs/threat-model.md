@@ -1159,6 +1159,25 @@ original clock, and final native scope/sample checks remain mandatory. This
 adds immutable preimages, not a recovery supervisor, kernel continuity, terminal
 retirement authority or a supported public effect.
 
+Independent kernel evidence now retains the original kernfs connector/device
+attribute descriptors and a kernel multicast subscription outside compositor
+memory. Subscription precedes the sampled native baseline. Re-reading a name,
+opening a replacement descriptor or restoring a checkpoint cannot recreate this
+lifetime. Malformed/untrusted messages, truncation, overflow, global sequence
+gaps, DRM changes, events on the bound bus/driver ancestry and changed/removed
+attributes permanently fence the witness. Draining and enumeration are bounded;
+a busy stream or unavailable check refuses continuation instead of widening a
+budget. Protected Keep/Revert checks the retained witness before and after
+handoff. Executor restart deliberately loses this evidence and cannot revive it
+from files. AF_NETLINK reception adds no capabilities, device access, IP sockets,
+sysfs writes or DRM master operations. The adapter uses the kernel multicast
+address and counter; kernel forwarding of injected uevents itself requires
+CAP_SYS_ADMIN in the owning network namespace. No such event grants an effect
+or makes a poisoned witness valid. Actual kernel removal/reset and compositor
+death are not established by portable component fixtures; startup fencing,
+one-use recovery admission, terminal verification and native acceptance remain
+unfinished.
+
 Control's separate display safety preparation cancels only human continuation
 in the current owner/lock generation and lets the compositor perform the
 original baseline compensation. It cannot accept a new target, acquire/release

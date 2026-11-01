@@ -159,6 +159,7 @@ fn checkpoint_retains_original_binding_owner_and_clocks_without_logging_preimage
     let record = NativeDisplayRecoveryCheckpoint::capture(&material, &binding, 25_000, &sample)
         .unwrap_or_else(|e| unreachable!("{e}"));
     assert_eq!(record.dispatch_digest(), &binding.dispatch_digest);
+    assert_eq!(record.kernel_outputs(), &[[226, 0, 1]]);
     let mut cursor = record.canonical_bytes();
     let mut fields = Vec::new();
     while !cursor.is_empty() {

@@ -16,6 +16,9 @@ pub struct NativeDisplayContinuation {
     confirm: bool,
 }
 impl NativeDisplayContinuation {
+    pub fn dispatch_digest(&self) -> &ComponentDigest {
+        &self.dispatch
+    }
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         material: &str,

@@ -25,6 +25,20 @@ def unit(name: str) -> configparser.ConfigParser:
 
 
 class S17DeploymentTests(unittest.TestCase):
+    def test_display_kernel_witness_adds_only_local_read_only_observation(self):
+        service = unit("linura-executor-session.service")["Service"]
+        self.assertEqual(service["RestrictAddressFamilies"], "AF_UNIX AF_NETLINK")
+        self.assertEqual(service["PrivateDevices"], "yes")
+        self.assertEqual(service["ProtectKernelTunables"], "yes")
+        self.assertEqual(service["CapabilityBoundingSet"], "")
+        self.assertEqual(service["AmbientCapabilities"], "")
+        self.assertEqual(service["NoNewPrivileges"], "yes")
+        self.assertEqual(service["ProtectSystem"], "strict")
+        self.assertEqual(service["StateDirectory"], "linura/display-recovery")
+        self.assertEqual(service["StateDirectoryMode"], "0700")
+        for setting in ("DeviceAllow", "BindPaths", "ReadWritePaths", "PrivateNetwork"):
+            self.assertNotIn(setting, service)
+
     def test_native_sleep_gate_is_fixed_fail_closed_and_staged_with_runtime(self):
         relative = "systemd-suspend.service.d/50-linura-protective-lock.conf"
         drop_in = unit(relative)

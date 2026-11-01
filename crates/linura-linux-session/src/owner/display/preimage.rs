@@ -148,6 +148,7 @@ fn validate(raw: &str, topology: &str) -> Result<Preimage, String> {
 pub struct NativeDisplayRecoveryCheckpoint {
     canonical: Vec<u8>,
     dispatch: ComponentDigest,
+    kernel_outputs: Vec<[u32; 3]>,
 }
 impl std::fmt::Debug for NativeDisplayRecoveryCheckpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -162,6 +163,11 @@ impl NativeDisplayRecoveryCheckpoint {
     }
     pub fn dispatch_digest(&self) -> &ComponentDigest {
         &self.dispatch
+    }
+    /// Comparison-only kernel identities from the same validated original
+    /// sample. They cannot select a new output or authorize restoration.
+    pub fn kernel_outputs(&self) -> &[[u32; 3]] {
+        &self.kernel_outputs
     }
     pub(super) fn capture(
         material: &str,
@@ -204,6 +210,12 @@ impl NativeDisplayRecoveryCheckpoint {
         Ok(Self {
             canonical,
             dispatch: binding.dispatch_digest,
+            kernel_outputs: serde_json::from_str::<Preimage>(&sample.recovery_preimage)
+                .map_err(|_| invalid())?
+                .heads
+                .iter()
+                .map(|head| head.kernel_drm)
+                .collect(),
         })
     }
 }

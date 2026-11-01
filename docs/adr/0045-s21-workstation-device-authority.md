@@ -344,6 +344,20 @@ an effect, retire Control ambiguity or authorize restoration. Independently
 retained kernel continuity, supervised replacement recovery and independently
 verified terminal/retention cleanup remain required before public activation.
 
+A separate read-only Linux mechanism starts a kernel uevent subscription before
+native sampling, then binds actual DRM tuples to retained kernfs attributes and
+the exact kernel device ancestry. The supervised executor retains it through
+compositor loss. Bounded drains, the global sequence watermark, kernel multicast
+origin and current reads from the original descriptors reject gaps, overflow,
+hotplug, ancestor/driver changes and removed or changed attributes; invalidity
+is permanent. The kernel witness is neither cloneable nor serializable. No
+historical checkpoint or new subscription can replace a lost lifetime. Original
+display continuation checks it before and after dispatch. AF_NETLINK is added
+only for this observation; device isolation, empty capabilities and read-only
+kernel protections remain. No DRM master, output write or effect authority is
+introduced. Native modeset/hotplug/reset qualification, startup protection,
+single-use restoration and terminal/retention semantics remain required.
+
 The exact upstream hook transformations live in the native integration source
 tree as `source_integration.py`. The shared owner/compositor CMake identity hashes
 that recipe alongside the native implementation and protocol. Changing only a

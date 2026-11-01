@@ -14,6 +14,7 @@ use linura_provider_sdk::{
 use zbus::message::Header;
 
 mod display_checkpoint;
+mod display_kernel;
 mod introspection;
 
 const ACTION: &str = "org.linura.executor.session.set-secure";
@@ -63,18 +64,26 @@ trait SessionDispatch: Clone + Send + Sync + 'static {
     ) -> Result<u32, String>;
     fn continue_display(&self, continuation: &NativeDisplayContinuation) -> Result<u32, String>;
 }
-impl SessionDispatch for NativeSessionChannel {
+#[derive(Clone, Debug)]
+struct NativeSessionDispatch {
+    channel: NativeSessionChannel,
+    displays: std::sync::Arc<display_kernel::Witnesses>,
+}
+impl SessionDispatch for NativeSessionDispatch {
     fn continue_display(&self, continuation: &NativeDisplayContinuation) -> Result<u32, String> {
-        self.dispatch_display_continuation(continuation)
+        self.displays.verify(continuation.dispatch_digest())?;
+        let result = self.channel.dispatch_display_continuation(continuation);
+        self.displays.verify(continuation.dispatch_digest())?;
+        result
     }
     fn require_control(&self, sender: &str) -> Result<(), String> {
-        self.require_trusted_control_sender(sender)
+        self.channel.require_trusted_control_sender(sender)
     }
     fn dispatch(&self, lock: &SessionLockId, secure: bool) -> Result<bool, String> {
-        self.dispatch_prepared_lock(lock, secure)
+        self.channel.dispatch_prepared_lock(lock, secure)
     }
     fn transition(&self, target: &SessionTransitionId) -> Result<bool, String> {
-        self.dispatch_prepared_transition(target)
+        self.channel.dispatch_prepared_transition(target)
     }
     fn display(
         &self,
@@ -83,13 +92,18 @@ impl SessionDispatch for NativeSessionChannel {
         deadline_unix_ms: u64,
         native_baseline_guard: &ComponentDigest,
     ) -> Result<u32, String> {
-        self.dispatch_prepared_display(
+        // Subscription must precede native baseline sampling. Capturing a new
+        // subscription after compositor death cannot replace this lifetime.
+        let subscription = linura_linux_session::NativeDisplayKernelSubscription::begin()?;
+        let result = self.channel.dispatch_prepared_display(
             material,
             binding,
             deadline_unix_ms,
             native_baseline_guard,
-            display_checkpoint::reserve,
-        )
+            |record| self.displays.reserve(record, subscription),
+        );
+        self.displays.verify(&binding.dispatch_digest)?;
+        result
     }
 }
 
@@ -510,7 +524,12 @@ fn authorize_service(sender: &str, action: ServiceAction) -> Result<(), String> 
 pub fn serve() -> Result<(), String> {
     let channel = NativeSessionChannel::connect(NativeSessionRole::Executor)?;
     let connection = channel.service_connection();
-    let service = introspection::SessionContract(SessionExecutor { channel });
+    let service = introspection::SessionContract(SessionExecutor {
+        channel: NativeSessionDispatch {
+            channel,
+            displays: std::sync::Arc::new(display_kernel::Witnesses::default()),
+        },
+    });
     connection
         .object_server()
         .at(OBJECT_PATH, service)

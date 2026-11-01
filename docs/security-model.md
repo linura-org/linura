@@ -206,6 +206,22 @@ handoff. These are historical preimages, not policy, approval or executable
 recovery authority. Replacement continuity, restoration and independent terminal
 verification remain incomplete; public display mutations remain unavailable.
 
+The executor starts a read-only kernel subscription before native sampling and
+binds it to that sample's actual DRM tuples. Real sysfs/kernfs descriptors and the
+same kernel multicast socket remain outside compositor memory. Every later check
+consumes a bounded stream and compares the kernel sequence watermark; gaps,
+overflows, truncation, bad source/data, DRM changes, changes to a bound bus/driver
+ancestor and failed or changed retained attributes irreversibly poison it. It
+never reopens an attribute after loss to discover a replacement. Original
+continuation checks this witness before and after native dispatch. Service
+restart loses continuity and cannot reconstruct it from historical records.
+The service adds AF_NETLINK reception while retaining PrivateDevices, read-only
+kernel protections, no capabilities, no privilege acquisition and no IP socket
+families. There are no DRM device opens, ioctls, master acquisition, sysfs writes
+or privileged commands. This witness supplies comparison evidence only; it does
+not authorize replacement startup/restoration or supply protected frame proof.
+Real kernel hotplug/reset and modeset acceptance remain required.
+
 Before lock/power review or native-sleep coverage coordination, Control's private
 safety preparation cancels display continuation in the exact current owner/lock
 generation. It polls restoration readiness within one two-second BOOTTIME budget,
