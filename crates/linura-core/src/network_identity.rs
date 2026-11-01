@@ -71,7 +71,9 @@ fn nonzero_decimal(value: &str) -> Option<u64> {
 
 fn canonical_hex(value: &str, len: usize) -> bool {
     value.len() == len
-        && value.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         && value.bytes().any(|byte| byte != b'0')
 }
 
@@ -209,12 +211,11 @@ pub struct NetworkObjectId {
 }
 
 impl NetworkObjectId {
-    pub fn from_path(
-        kind: NetworkObjectKind,
-        path: &str,
-    ) -> Result<Self, NetworkIdentityError> {
+    pub fn from_path(kind: NetworkObjectKind, path: &str) -> Result<Self, NetworkIdentityError> {
         let prefix = format!("{NM_OBJECT_ROOT}{}/", kind.path_component());
-        let suffix = path.strip_prefix(&prefix).ok_or(NetworkIdentityError::InvalidObjectPath)?;
+        let suffix = path
+            .strip_prefix(&prefix)
+            .ok_or(NetworkIdentityError::InvalidObjectPath)?;
         if suffix.len() > 20 {
             return Err(NetworkIdentityError::InvalidObjectPath);
         }
@@ -235,7 +236,11 @@ impl NetworkObjectId {
     /// This reconstructs correlation data, NOT a native authority target.
     #[must_use]
     pub fn native_path(&self) -> String {
-        format!("{NM_OBJECT_ROOT}{}/{}", self.kind.path_component(), self.sequence)
+        format!(
+            "{NM_OBJECT_ROOT}{}/{}",
+            self.kind.path_component(),
+            self.sequence
+        )
     }
 }
 
@@ -614,9 +619,7 @@ impl NetworkObservationId {
         if now_monotonic_us < self.observed_monotonic_us {
             return Err(NetworkIdentityError::ClockMismatch);
         }
-        if max_age_us == 0
-            || now_monotonic_us - self.observed_monotonic_us > max_age_us
-        {
+        if max_age_us == 0 || now_monotonic_us - self.observed_monotonic_us > max_age_us {
             return Err(NetworkIdentityError::StaleObservation);
         }
         Ok(())
@@ -719,7 +722,10 @@ mod tests {
             ok(NetworkManagerOwner::new(":1.48")),
         );
         for changed in [&changed_boot, &changed_bus, &changed_owner] {
-            assert_eq!(original.require_same(changed), Err(NetworkIdentityError::MixedEpoch));
+            assert_eq!(
+                original.require_same(changed),
+                Err(NetworkIdentityError::MixedEpoch)
+            );
             assert_ne!(&original, changed);
         }
         assert!(original.require_same(&original).is_ok());
@@ -747,13 +753,26 @@ mod tests {
             "/org/freedesktop/NetworkManager/ActiveConnection/1",
             "/org/freedesktop/NetworkManager/Devices/1\n",
         ] {
-            assert!(NetworkObjectId::from_path(NetworkObjectKind::Device, path).is_err(), "{path}");
+            assert!(
+                NetworkObjectId::from_path(NetworkObjectKind::Device, path).is_err(),
+                "{path}"
+            );
         }
     }
 
     #[test]
     fn interface_names_are_ascii_kernel_scoped_not_free_form() {
-        for name in ["", ".", "..", "enp0 s1", "wlán0", "eth0/0", "eth0:1", "eth0\n", "0123456789abcdef"] {
+        for name in [
+            "",
+            ".",
+            "..",
+            "enp0 s1",
+            "wlán0",
+            "eth0/0",
+            "eth0:1",
+            "eth0\n",
+            "0123456789abcdef",
+        ] {
             assert!(NetworkInterfaceName::new(name).is_err(), "{name:?}");
         }
         for name in ["lo", "eth0", "wlan0", "enp0s31f6", "veth-a.b"] {
@@ -768,45 +787,96 @@ mod tests {
         assert_eq!(d.namespace_inode(), 4026531840);
         assert_eq!(d.ifindex(), 3);
         assert_eq!(d.generation(), 11);
-        let mk = |ns, ifindex, generation, obj| NetworkDeviceId::new(
-            epoch(), obj, ns, ifindex, ok(NetworkInterfaceName::new("wlp2s0")), generation,
+        let mk = |ns, ifindex, generation, obj| {
+            NetworkDeviceId::new(
+                epoch(),
+                obj,
+                ns,
+                ifindex,
+                ok(NetworkInterfaceName::new("wlp2s0")),
+                generation,
+            )
+        };
+        assert_eq!(
+            mk(0, 3, 1, object(NetworkObjectKind::Device, 1)).unwrap_err(),
+            NetworkIdentityError::InvalidNamespace
         );
-        assert_eq!(mk(0, 3, 1, object(NetworkObjectKind::Device, 1)).unwrap_err(), NetworkIdentityError::InvalidNamespace);
-        assert_eq!(mk(1, 0, 1, object(NetworkObjectKind::Device, 1)).unwrap_err(), NetworkIdentityError::InvalidIfindex);
-        assert_eq!(mk(1, 3, 0, object(NetworkObjectKind::Device, 1)).unwrap_err(), NetworkIdentityError::InvalidGeneration);
-        assert_eq!(mk(1, 3, 1, object(NetworkObjectKind::AccessPoint, 1)).unwrap_err(), NetworkIdentityError::InvalidObjectPath);
+        assert_eq!(
+            mk(1, 0, 1, object(NetworkObjectKind::Device, 1)).unwrap_err(),
+            NetworkIdentityError::InvalidIfindex
+        );
+        assert_eq!(
+            mk(1, 3, 0, object(NetworkObjectKind::Device, 1)).unwrap_err(),
+            NetworkIdentityError::InvalidGeneration
+        );
+        assert_eq!(
+            mk(1, 3, 1, object(NetworkObjectKind::AccessPoint, 1)).unwrap_err(),
+            NetworkIdentityError::InvalidObjectPath
+        );
     }
 
     #[test]
     fn device_inventory_rejects_duplicate_path_interface_ifindex_and_mixed_epoch() {
         let d = device();
-        assert_eq!(ok(NetworkDeviceInventory::new(epoch(), vec![d.clone()])).devices(), &[d.clone()]);
+        assert_eq!(
+            ok(NetworkDeviceInventory::new(epoch(), vec![d.clone()])).devices(),
+            &[d.clone()]
+        );
         let duplicate_path = ok(NetworkDeviceId::new(
-            epoch(), d.object.clone(), d.namespace_inode, d.ifindex + 1,
-            ok(NetworkInterfaceName::new("wlan1")), d.generation + 1,
+            epoch(),
+            d.object.clone(),
+            d.namespace_inode,
+            d.ifindex + 1,
+            ok(NetworkInterfaceName::new("wlan1")),
+            d.generation + 1,
         ));
         let duplicate_ifname = ok(NetworkDeviceId::new(
-            epoch(), object(NetworkObjectKind::Device, 9), d.namespace_inode, d.ifindex + 1,
-            d.interface.clone(), d.generation + 1,
+            epoch(),
+            object(NetworkObjectKind::Device, 9),
+            d.namespace_inode,
+            d.ifindex + 1,
+            d.interface.clone(),
+            d.generation + 1,
         ));
         let duplicate_ifindex = ok(NetworkDeviceId::new(
-            epoch(), object(NetworkObjectKind::Device, 9), d.namespace_inode, d.ifindex,
-            ok(NetworkInterfaceName::new("wlan1")), d.generation + 1,
+            epoch(),
+            object(NetworkObjectKind::Device, 9),
+            d.namespace_inode,
+            d.ifindex,
+            ok(NetworkInterfaceName::new("wlan1")),
+            d.generation + 1,
         ));
-        for other in [d.clone(), duplicate_path, duplicate_ifname, duplicate_ifindex] {
-            assert_eq!(NetworkDeviceInventory::new(epoch(), vec![d.clone(), other]).unwrap_err(),
-                NetworkIdentityError::AmbiguousDevice);
+        for other in [
+            d.clone(),
+            duplicate_path,
+            duplicate_ifname,
+            duplicate_ifindex,
+        ] {
+            assert_eq!(
+                NetworkDeviceInventory::new(epoch(), vec![d.clone(), other]).unwrap_err(),
+                NetworkIdentityError::AmbiguousDevice
+            );
         }
         let swapped = ok(NetworkDeviceId::new(
             NetworkManagerEpoch::new(
-                d.epoch.boot.clone(), d.epoch.bus.clone(),
+                d.epoch.boot.clone(),
+                d.epoch.bus.clone(),
                 ok(NetworkManagerOwner::new(":1.48")),
             ),
-            d.object.clone(), d.namespace_inode, d.ifindex,
-            d.interface.clone(), d.generation,
+            d.object.clone(),
+            d.namespace_inode,
+            d.ifindex,
+            d.interface.clone(),
+            d.generation,
         ));
-        assert_eq!(NetworkDeviceInventory::new(epoch(), vec![swapped]).unwrap_err(), NetworkIdentityError::MixedEpoch);
-        assert_eq!(NetworkDeviceInventory::new(epoch(), vec![d; 129]).unwrap_err(), NetworkIdentityError::TooManyDevices);
+        assert_eq!(
+            NetworkDeviceInventory::new(epoch(), vec![swapped]).unwrap_err(),
+            NetworkIdentityError::MixedEpoch
+        );
+        assert_eq!(
+            NetworkDeviceInventory::new(epoch(), vec![d; 129]).unwrap_err(),
+            NetworkIdentityError::TooManyDevices
+        );
         assert!(NetworkDeviceInventory::new(epoch(), vec![]).is_ok());
     }
 
@@ -814,8 +884,12 @@ mod tests {
     fn same_ifindex_in_distinct_namespace_is_not_ambiguity() {
         let d = device();
         let another = ok(NetworkDeviceId::new(
-            epoch(), object(NetworkObjectKind::Device, 8), d.namespace_inode+1,
-            d.ifindex, d.interface.clone(), d.generation,
+            epoch(),
+            object(NetworkObjectKind::Device, 8),
+            d.namespace_inode + 1,
+            d.ifindex,
+            d.interface.clone(),
+            d.generation,
         ));
         assert!(NetworkDeviceInventory::new(epoch(), vec![d, another]).is_ok());
     }
@@ -824,43 +898,81 @@ mod tests {
     fn ap_generation_path_and_device_are_all_part_of_identity() {
         let d = device();
         let ap = ok(NetworkAccessPointId::new(
-            d.clone(), object(NetworkObjectKind::AccessPoint, 2), 11,
+            d.clone(),
+            object(NetworkObjectKind::AccessPoint, 2),
+            11,
         ));
         let next = ok(NetworkAccessPointId::new(d.clone(), ap.object.clone(), 12));
         assert_ne!(ap, next);
         let replaced = ok(NetworkAccessPointId::new(
-            d, object(NetworkObjectKind::AccessPoint, 3), 11,
+            d,
+            object(NetworkObjectKind::AccessPoint, 3),
+            11,
         ));
         assert_ne!(ap, replaced);
-        assert_eq!(NetworkAccessPointId::new(device(), object(NetworkObjectKind::Device, 2), 11).unwrap_err(), NetworkIdentityError::InvalidObjectPath);
-        assert_eq!(NetworkAccessPointId::new(device(), object(NetworkObjectKind::AccessPoint, 2), 0).unwrap_err(), NetworkIdentityError::InvalidGeneration);
+        assert_eq!(
+            NetworkAccessPointId::new(device(), object(NetworkObjectKind::Device, 2), 11)
+                .unwrap_err(),
+            NetworkIdentityError::InvalidObjectPath
+        );
+        assert_eq!(
+            NetworkAccessPointId::new(device(), object(NetworkObjectKind::AccessPoint, 2), 0)
+                .unwrap_err(),
+            NetworkIdentityError::InvalidGeneration
+        );
     }
 
     #[test]
     fn saved_profile_revision_depends_on_object_uuid_fingerprint_and_owner() {
         let p = profile();
         let next = ok(NetworkProfileRevision::new(
-            epoch(), p.object.clone(), UUID, 7,
+            epoch(),
+            p.object.clone(),
+            UUID,
+            7,
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdee",
         ));
         assert_ne!(p, next);
         let same_content_different_revision = ok(NetworkProfileRevision::new(
-            epoch(), p.object.clone(), UUID, 8, DIGEST,
+            epoch(),
+            p.object.clone(),
+            UUID,
+            8,
+            DIGEST,
         ));
         assert_ne!(p, same_content_different_revision);
         assert_eq!(p.revision_generation(), 7);
-        assert_eq!(NetworkProfileRevision::new(
-            epoch(), p.object.clone(), UUID, 0, DIGEST,
-        ).unwrap_err(), NetworkIdentityError::InvalidGeneration);
+        assert_eq!(
+            NetworkProfileRevision::new(epoch(), p.object.clone(), UUID, 0, DIGEST,).unwrap_err(),
+            NetworkIdentityError::InvalidGeneration
+        );
         let other_object = ok(NetworkProfileRevision::new(
-            epoch(), object(NetworkObjectKind::SettingsConnection, 8), UUID, 7, DIGEST,
+            epoch(),
+            object(NetworkObjectKind::SettingsConnection, 8),
+            UUID,
+            7,
+            DIGEST,
         ));
         assert_ne!(p, other_object);
-        for uuid in ["", "00000000-0000-0000-0000-000000000000", "10203040-5060-7080-90AB-cdef12345678", "102030405060708090abcdef12345678"] {
-            assert!(NetworkProfileRevision::new(epoch(), p.object.clone(), uuid, 7, DIGEST).is_err());
+        for uuid in [
+            "",
+            "00000000-0000-0000-0000-000000000000",
+            "10203040-5060-7080-90AB-cdef12345678",
+            "102030405060708090abcdef12345678",
+        ] {
+            assert!(
+                NetworkProfileRevision::new(epoch(), p.object.clone(), uuid, 7, DIGEST).is_err()
+            );
         }
-        for digest in ["".to_string(), "0".repeat(64), "z".repeat(64), "A".repeat(64)] {
-            assert!(NetworkProfileRevision::new(epoch(), p.object.clone(), UUID, 7, digest).is_err());
+        for digest in [
+            "".to_string(),
+            "0".repeat(64),
+            "z".repeat(64),
+            "A".repeat(64),
+        ] {
+            assert!(
+                NetworkProfileRevision::new(epoch(), p.object.clone(), UUID, 7, digest).is_err()
+            );
         }
     }
 
@@ -868,31 +980,48 @@ mod tests {
     fn active_connection_rejects_cross_epoch_profile_and_generation_replay() {
         let d = device();
         let active = ok(NetworkActiveConnectionId::new(
-            d.clone(), object(NetworkObjectKind::ActiveConnection, 10),
-            Some(profile()), 9,
+            d.clone(),
+            object(NetworkObjectKind::ActiveConnection, 10),
+            Some(profile()),
+            9,
         ));
         assert_eq!(active.profile(), Some(&profile()));
         let next = ok(NetworkActiveConnectionId::new(
-            d.clone(), active.object.clone(), Some(profile()), 10,
+            d.clone(),
+            active.object.clone(),
+            Some(profile()),
+            10,
         ));
         assert_ne!(active, next);
-        assert!(NetworkActiveConnectionId::new(
-            d.clone(), object(NetworkObjectKind::ActiveConnection, 10), None, 9,
-        ).is_ok());
-        assert_eq!(NetworkActiveConnectionId::new(
-            d.clone(), active.object.clone(), None, 0,
-        ).unwrap_err(), NetworkIdentityError::InvalidGeneration);
+        assert!(
+            NetworkActiveConnectionId::new(
+                d.clone(),
+                object(NetworkObjectKind::ActiveConnection, 10),
+                None,
+                9,
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            NetworkActiveConnectionId::new(d.clone(), active.object.clone(), None, 0,).unwrap_err(),
+            NetworkIdentityError::InvalidGeneration
+        );
         let other_profile = ok(NetworkProfileRevision::new(
             NetworkManagerEpoch::new(
                 ok(BootId::new(BOOT)),
                 ok(SystemBusInstanceId::new(BUS)),
                 ok(NetworkManagerOwner::new(":1.48")),
             ),
-            object(NetworkObjectKind::SettingsConnection, 7), UUID, 7, DIGEST,
+            object(NetworkObjectKind::SettingsConnection, 7),
+            UUID,
+            7,
+            DIGEST,
         ));
-        assert_eq!(NetworkActiveConnectionId::new(
-            d, active.object.clone(), Some(other_profile), 10,
-        ).unwrap_err(), NetworkIdentityError::MixedEpoch);
+        assert_eq!(
+            NetworkActiveConnectionId::new(d, active.object.clone(), Some(other_profile), 10,)
+                .unwrap_err(),
+            NetworkIdentityError::MixedEpoch
+        );
     }
 
     #[test]
@@ -901,14 +1030,27 @@ mod tests {
         assert_eq!(seen.generation(), 8);
         assert!(seen.require_fresh(&epoch(), 100, 50).is_ok());
         assert!(seen.require_fresh(&epoch(), 150, 50).is_ok());
-        assert_eq!(seen.require_fresh(&epoch(), 151, 50), Err(NetworkIdentityError::StaleObservation));
-        assert_eq!(seen.require_fresh(&epoch(), 99, 50), Err(NetworkIdentityError::ClockMismatch));
-        assert_eq!(seen.require_fresh(&epoch(), 100, 0), Err(NetworkIdentityError::StaleObservation));
+        assert_eq!(
+            seen.require_fresh(&epoch(), 151, 50),
+            Err(NetworkIdentityError::StaleObservation)
+        );
+        assert_eq!(
+            seen.require_fresh(&epoch(), 99, 50),
+            Err(NetworkIdentityError::ClockMismatch)
+        );
+        assert_eq!(
+            seen.require_fresh(&epoch(), 100, 0),
+            Err(NetworkIdentityError::StaleObservation)
+        );
         let owner_changed = NetworkManagerEpoch::new(
-            ok(BootId::new(BOOT)), ok(SystemBusInstanceId::new(BUS)),
+            ok(BootId::new(BOOT)),
+            ok(SystemBusInstanceId::new(BUS)),
             ok(NetworkManagerOwner::new(":1.48")),
         );
-        assert_eq!(seen.require_fresh(&owner_changed, 120, 50), Err(NetworkIdentityError::MixedEpoch));
+        assert_eq!(
+            seen.require_fresh(&owner_changed, 120, 50),
+            Err(NetworkIdentityError::MixedEpoch)
+        );
         assert_ne!(seen, ok(NetworkObservationId::new(epoch(), 9, 100)));
         assert!(NetworkObservationId::new(epoch(), 0, 100).is_err());
         assert!(NetworkObservationId::new(epoch(), 8, 0).is_err());
