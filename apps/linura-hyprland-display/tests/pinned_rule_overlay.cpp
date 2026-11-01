@@ -229,6 +229,17 @@ TEST(LinuraDisplayPinnedRule, RecoveryWitnessPreservesAutomaticSemanticsAndExclu
     const auto before = originalRule();
     const auto encoded = RecoveryWitness::rule(before);
     ASSERT_TRUE(encoded);
+    const auto recovered = RecoveryRule::decode(*encoded);
+    ASSERT_TRUE(recovered);
+    auto live = before;
+    live.m_name = "new live selector";
+    live.m_iccFile = "new live profile";
+    live.m_vrr = 1;
+    live.m_scale = 1.F;
+    const auto merged = recovered->mergeOwnedFields(live);
+    EXPECT_TRUE(sameOwnedDisplayFields(merged, before));
+    unmanagedFieldsEqual(merged, live);
+    EXPECT_EQ(RecoveryWitness::rule(merged), encoded);
     EXPECT_EQ(encoded, RecoveryWitness::rule(before));
     EXPECT_TRUE(encoded->starts_with("LNDR:1;"));
     auto changed = before;

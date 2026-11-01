@@ -471,7 +471,7 @@ void overlayCheckpointCannotBeReplacedOrRetargeted()
     Checkpoint::Overlay previous{{10, native.baseline()[0]}};
     const Checkpoint::Rules rules{{10, 100}, {20, 200}};
     const Checkpoint::Identities identities{{10, native.baseline()[0].output},
-                                           {20, native.baseline()[1].output}};
+                                            {20, native.baseline()[1].output}};
     const auto same = [](int a, int b) { return a == b; };
     auto swapped = identities;
     std::swap(swapped[10], swapped[20]);

@@ -81,6 +81,12 @@ target_compile_options(linura-hyprland-display-owner PRIVATE
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(linura-hyprland-recovery-rule-tests tests/recovery_rule.cpp)
+    target_include_directories(linura-hyprland-recovery-rule-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_options(linura-hyprland-recovery-rule-tests PRIVATE
+        -UNDEBUG -Wall -Wextra -Wpedantic -Werror -Wconversion -Wsign-conversion)
+    add_test(NAME hyprland-recovery-rule-preimage COMMAND linura-hyprland-recovery-rule-tests)
+    set_tests_properties(hyprland-recovery-rule-preimage PROPERTIES TIMEOUT 5)
     # Mandatory in the real pinned compositor build. Portable mechanism suites
     # alone do not exercise GLES or qualify actual rendered scanout storage.
     if(TARGET hyprland_lib)

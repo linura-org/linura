@@ -2,6 +2,7 @@
 
 #include "native_output_identity.h"
 #include "display_transaction.h"
+#include "recovery_rule.h"
 
 #include <bit>
 #include <cmath>
@@ -13,7 +14,7 @@
 
 namespace Linura::HyprlandDisplay {
 namespace RecoveryWitness {
-inline constexpr std::size_t MaxRuleBytes = 12 * 1024, MaxIdentityBytes = 16 * 1024;
+inline constexpr std::size_t MaxRuleBytes = RecoveryRule::MaxBytes, MaxIdentityBytes = 16 * 1024;
 inline void hex(std::string &out, std::string_view bytes)
 {
     constexpr char digits[] = "0123456789abcdef";
@@ -50,31 +51,8 @@ inline void integer(std::string &out, std::uint64_t value)
 // scaling and custom modelines; omit all unrelated live monitor settings.
 template <typename Rule> [[nodiscard]] std::optional<std::string> rule(const Rule &rule)
 {
-    if (rule.m_mirrorOf.size() > 4096)
-        return std::nullopt;
-    std::string out = "LNDR:1;";
-    integer(out, rule.m_disabled ? 1U : 0U);
-    for (const double value :
-         {static_cast<double>(rule.m_resolution.x), static_cast<double>(rule.m_resolution.y),
-          static_cast<double>(rule.m_refreshRate), static_cast<double>(rule.m_offset.x),
-          static_cast<double>(rule.m_offset.y), static_cast<double>(rule.m_scale)})
-        if (!real(out, value))
-            return std::nullopt;
-    integer(out, static_cast<std::uint64_t>(rule.m_autoDir));
-    integer(out, static_cast<std::uint64_t>(rule.m_transform));
-    hex(out, rule.m_mirrorOf);
-    const auto &mode = rule.m_drmMode;
-    for (const std::uint64_t value :
-         {static_cast<std::uint64_t>(mode.clock), static_cast<std::uint64_t>(mode.hdisplay),
-          static_cast<std::uint64_t>(mode.hsync_start), static_cast<std::uint64_t>(mode.hsync_end),
-          static_cast<std::uint64_t>(mode.htotal), static_cast<std::uint64_t>(mode.hskew),
-          static_cast<std::uint64_t>(mode.vdisplay), static_cast<std::uint64_t>(mode.vsync_start),
-          static_cast<std::uint64_t>(mode.vsync_end), static_cast<std::uint64_t>(mode.vtotal),
-          static_cast<std::uint64_t>(mode.vscan), static_cast<std::uint64_t>(mode.vrefresh),
-          static_cast<std::uint64_t>(mode.flags), static_cast<std::uint64_t>(mode.type)})
-        integer(out, value);
-    hex(out, std::string_view(std::begin(mode.name), std::size(mode.name)));
-    return out.size() <= MaxRuleBytes ? std::optional{std::move(out)} : std::nullopt;
+    const auto saved = RecoveryRule::capture(rule);
+    return saved ? std::optional{saved->encode()} : std::nullopt;
 }
 
 [[nodiscard]] inline std::string target(const Target &target)

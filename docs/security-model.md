@@ -183,6 +183,15 @@ remain observable without mutation checkpoint qualification. These point-in-time
 facts do not prove continuity after replacement or grant a restoration effect.
 Independent retained kernel observation and durable restoration remain required.
 
+The owner accepts a native rule digest only after bounded canonical `LNDR:1`
+decoding. The preimage must reconstruct all owned display fields exactly,
+including automatic placement/scaling and the full custom modeline, without
+float rounding, integer truncation or alternate encodings. Reconstruction copies
+those fields into the current native rule and preserves its selector/precedence
+and unrelated settings. This codec is not a store or an execution boundary:
+durable preimage retention, authenticated continuity and independently verified
+restoration are still required before any replacement compositor may use it.
+
 Before lock/power review or native-sleep coverage coordination, Control's private
 safety preparation cancels display continuation in the exact current owner/lock
 generation. It polls restoration readiness within one two-second BOOTTIME budget,

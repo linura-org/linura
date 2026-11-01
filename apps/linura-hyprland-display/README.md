@@ -188,3 +188,13 @@ and projecting metadata. Duplicate or malformed bindings fail closed; explicit
 non-DRM outputs remain read-only without mutation checkpoint qualification.
 These facts are required comparison material for recovery, not proof of kernel
 lifetime across compositor replacement. No new restoration write is enabled.
+
+Native rule witnesses now use a bounded, bidirectional `LNDR:1` codec. The
+protected receiver validates the complete canonical preimage before hashing it;
+truncated, nonfinite, rounded, out-of-range or noncanonical data cannot become a
+baseline checkpoint. Reconstruction copies only owned display fields into the
+current rule, preserving its selector, precedence and unrelated live settings.
+The native encoder retains its existing byte representation. Component tests
+exercise both malformed bytes and the actual pinned upstream rule projection.
+This codec does not persist a checkpoint, establish kernel continuity or admit
+restoration; the compositor-loss recovery and native acceptance gaps remain.

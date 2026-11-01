@@ -2,6 +2,7 @@
 #include "native_wayland_readiness.h"
 #include "linura-display-management-v1-client-protocol.h"
 #include "linura-display-integration-build.h"
+#include "recovery_rule.h"
 
 #include <QUuid>
 #include <QCryptographicHash>
@@ -294,7 +295,10 @@ class NativeDisplayConnection::Impl final
             const auto kernel = native ? kernelBinding(*native) : std::nullopt;
             const auto overlay = owned == 1 ? witness(target, "LNOT:1;", 512)
                                             : std::optional<QByteArray>{QByteArray{}};
-            if (head.done || head.recoveryReceived || !head.currentReceived || owned > 1 || !base ||
+            const auto rule = base ? HyprlandDisplay::RecoveryRule::decode(std::string_view(
+                                         base->constData(), static_cast<std::size_t>(base->size())))
+                                   : std::nullopt;
+            if (head.done || head.recoveryReceived || !head.currentReceived || owned > 1 || !rule ||
                 !native || !kernel || !overlay || !target || (owned == 0 && target[0] != '\0')) {
                 head.owner->invalid = true;
                 return;

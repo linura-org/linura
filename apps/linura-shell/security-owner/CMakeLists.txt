@@ -143,6 +143,7 @@ add_library(linura-security-owner-wayland STATIC
     "${OUTPUT_HEADER}" "${OUTPUT_CODE}"
     "${PINNED_DISPLAY_HEADER}" "${PINNED_DISPLAY_CODE}"
 )
+target_include_directories(linura-security-owner-wayland PRIVATE "${PINNED_DISPLAY_SOURCE}")
 set(compose_source "${CMAKE_CURRENT_SOURCE_DIR}/compose/en_US.UTF-8")
 set_source_files_properties("${compose_source}" PROPERTIES
     QT_RESOURCE_ALIAS "compose/en_US.UTF-8"

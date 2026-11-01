@@ -9,6 +9,7 @@
 #include "native_display_watchdog.h"
 #include "protected_wire.h"
 #include "linura-display-integration-build.h"
+#include "tests/recovery_rule_fixture.h"
 #include "wlr-output-management-unstable-v1-server-protocol.h"
 #include "ext-session-lock-v1-server-protocol.h"
 #include "xdg-shell-server-protocol.h"
@@ -158,7 +159,7 @@ class DisplayFacts final : public Linura::HyprlandDisplay::Backend
                           true,
                           locked,
                           false,
-                          "LNDR:1;0;",
+                          Linura::HyprlandDisplay::Test::RulePreimage,
                           "LNDF:2;0;0;0;0;",
                           ""}},
                         locked ? Coverage::Secure : Coverage::Unlocked};

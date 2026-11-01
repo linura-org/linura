@@ -1135,6 +1135,16 @@ native recovery checkpoint. Recycled device numbers or matching connector IDs
 after restart remain insufficient: no kernel lifetime, recovery permission or
 cross-compositor restoration is inferred from this point-in-time sample.
 
+Malformed native rule comparison data cannot become a recovery checkpoint just
+by carrying the `LNDR:1` prefix. The protected receiver requires its complete
+bounded canonical decode before hashing. Nonfinite or non-reconstructable float
+fields, unsupported enums, overflowing modelines, wrong fixed name length,
+truncation and extra data fail closed before mutation. The decoder preserves
+automatic rule semantics and merges only owned fields into a copy of the live
+rule; it cannot restore an old selector, color/ICC/VRR setting or unrelated rule.
+Successful parsing is not current evidence, durable retention, kernel continuity
+or permission to restore, and cannot enable the public mutation path.
+
 Control's separate display safety preparation cancels only human continuation
 in the current owner/lock generation and lets the compositor perform the
 original baseline compensation. It cannot accept a new target, acquire/release

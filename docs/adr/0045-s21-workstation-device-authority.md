@@ -313,6 +313,17 @@ settings are preserved. Fresh numeric baseline geometry and native ownership
 must both match before retiring the inhibitor/checkpoint. This volatile
 checkpoint does not satisfy durable compositor-death recovery requirements.
 
+The native `LNDR:1` preimage has a bounded bidirectional codec. The protected
+receiver requires a complete canonical decode before retaining its digest.
+Native float fields must reconstruct exactly without rounding or overflow;
+nonfinite values, alternate integer/hex encodings, unsupported enums, modeline
+field overflow, wrong name length and trailing data fail closed. Decoding keeps
+automatic placement/scale and custom modelines, and can merge only the owned
+display fields into a copy of the live rule. It cannot overwrite the selector,
+precedence, ICC, VRR, reservations or other unrelated fields. Existing canonical
+witness bytes remain unchanged. This establishes reconstructable comparison
+data, not durable retention, a restoration permit or cross-compositor proof.
+
 The exact upstream hook transformations live in the native integration source
 tree as `source_integration.py`. The shared owner/compositor CMake identity hashes
 that recipe alongside the native implementation and protocol. Changing only a

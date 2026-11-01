@@ -1,6 +1,7 @@
 #include "protected_wire.h"
 #include "linura-protected-display-v1-client-protocol.h"
 #include "tests/wire_scene_fixture.h"
+#include "tests/recovery_rule_fixture.h"
 // Real private protocol client/server component fixture. No native session,
 // root peer, prepared authority, actual compositor or qualification is simulated
 // into a support claim by this test.
@@ -45,7 +46,7 @@ class Fixture final : public Backend
                      true,
                      false,
                      false,
-                     "LNDR:1;0;",
+                     Test::RulePreimage,
                      "LNDF:2;0;0;0;0;",
                      ""}},
                    Coverage::Unlocked};
@@ -463,7 +464,7 @@ void compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage()
                                                false,
                                                true,
                                                false,
-                                               "LNDR:1;1;",
+                                               Test::DisabledRulePreimage,
                                                "LNDF:2;0;0;0;1;",
                                                ""});
     }
@@ -498,12 +499,27 @@ void compositorFenceCoverageCannotBecomeOwnerSurfaceCoverage()
 
 void recoveryMetadataIsBoundedAndNeverPublishesNativeIdentityPreimages()
 {
+    for (const std::string &bad :
+         {std::string{}, std::string("LNDR:1;0;"), std::string("LNDR:2;0;"),
+          std::string(Test::RulePreimage) + "0;",
+          std::string(Test::RulePreimage).replace(7, 1, "2"),
+          std::string(Test::RulePreimage).replace(9, 16, "7ff8000000000000"),
+          std::string(12 * 1024 + 1, '0')}) {
+        Harness invalid;
+        {
+            const std::lock_guard lock(invalid.backend.mutex);
+            invalid.backend.facts.heads[0].baseRuleWitness = bad;
+        }
+        Client rejected(invalid.descriptors[0]);
+        assert(!rejected.connection->sample());
+        assert(invalid.backend.writes == 0);
+    }
     Harness harness;
     Client observer(harness.descriptors[0]);
     const auto initial = observer.connection->sample();
     assert(initial);
     const auto base = QString::fromLatin1(
-        QCryptographicHash::hash("LNDR:1;0;", QCryptographicHash::Sha256).toHex());
+        QCryptographicHash::hash(Test::RulePreimage, QCryptographicHash::Sha256).toHex());
     assert(initial->topology.heads[0].baseRuleDigest == base);
     {
         const std::lock_guard lock(harness.backend.mutex);
